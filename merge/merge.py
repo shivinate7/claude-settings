@@ -822,14 +822,14 @@ class Host:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def review_comments(self, since):
-        """-> {PR number: [(created_at, RecordBody), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts when the
+        """-> {PR number: [(created_at, comment id, body), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts when the
         review record marker is its whole first line, or when it opens with the record's first fields and has no marker (review_unmarked), so a cut-off record
         is flagged, not dropped. Each body carries its comment id and whether it is marked. The number comes from the comment's issue_url. A failed read is a Stop."""
         found = {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
             if m and (review_marked(body) or review_unmarked(body)):
-                found.setdefault(int(m.group(1)), []).append((c.get("created_at"), RecordBody(body, c.get("id"))))
+                found.setdefault(int(m.group(1)), []).append((c.get("created_at"), c.get("id"), body))
         return found
 
     def open_heads(self):
@@ -2443,25 +2443,24 @@ def ci_job_run(wt, *args):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def review_record_failure(h, root, n, info):
-    """-> the one FAIL line of the lane lint's `Review record` step for pull request n, or None when it holds. It makes one comment-list read, since the PR opened.
-    FAIL: the newest marked record does not parse (the line `review_bad_text` names, and the remedy when it applies), or no parsed record names the
-    live head. A PR with no comment that is or looks like a record is not a FAIL: a lane lints before it posts its record. A host with no comment
-    read, as a scripted host may be, skips the step."""
-    read = getattr(h, "review_comments", None)
-    if read is None:
-        return None
-    found = read(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
+def review_record_step(h, root, n, info):
+    """-> (fail, note) of the lane lint's `Review record` step for pull request n; each is a line or None. It makes one comment-list read, since the PR opened.
+    FAIL only when the newest comment that is or looks like a record does not parse: the line `review_bad_text` names, the remedy when it applies, and a
+    body with no marker line says so. A missing record, or a parsed newest record that does not name the live head, is a note: `--review-record` needs a
+    passing lint before it prints a done record, so a FAIL there would deadlock."""
+    found = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
+    live = info["head"][:9]
     if not found:
-        return None
-    cutover = review_stamp_since(root, info["base"])
-    parsed = [(*review_parse(b, created, cutover), b) for created, b in found if b.marked]
-    if parsed and parsed[-1][1]:
-        _, bad, body = parsed[-1]
-        return "FAIL Review record: the newest record does not parse: " + " ".join(x for x in (review_bad_text(bad, body.cid) + ".", review_remedy(body, bad)) if x)
-    if not any(rec and rec["n"] == n and rec["head"] == info["head"] for rec, _, _ in parsed):
-        return f"FAIL Review record: no record names the live head {info['head'][:9]}. Post the output of `merge {n} --review-record --head {info['head']} ...`."
-    return None
+        return None, f"Review record: note, no record on this pull request yet. Post one for the live head {live}, from `merge {n} --review-record`."
+    created, cid, body = found[-1]
+    rec, bad = review_parse(body, created, review_stamp_since(root, info["base"]))
+    if bad:
+        if not review_marked(body):
+            return f"FAIL Review record: the newest comment has record fields but no marker line, so no record names the live head {live}: {review_bad_text(bad, cid)}.", None
+        return "FAIL Review record: the newest record does not parse: " + " ".join(x for x in (review_bad_text(bad, cid) + ".", review_remedy(body, bad)) if x), None
+    if rec["n"] != n or rec["head"] != info["head"]:
+        return None, f"Review record: note, the newest record is for head {rec['head'][:9]}, not the live head {live}. Post one for the live head."
+    return None, None
 
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
@@ -2482,7 +2481,9 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
-    review = review_record_failure(h, root, int(target), info) if target.isdigit() else None
+    review, note = review_record_step(h, root, int(target), info) if target.isdigit() else (None, None)
+    if note:
+        say(note)
     if review:  # a FAIL of the record step stands whatever the lint says: no flag lifts it
         lines, log = ([*lines, review], log) if state == "fail" else ([review], [])
         state = "fail"
@@ -3108,14 +3109,6 @@ def review_unmarked(text):
     first = [line.rstrip() for line in text.splitlines()[:2]]
     return len(first) == 2 and not review_marked(text) and re.fullmatch(r"PR: #\d+", first[0], re.ASCII) is not None and first[1].startswith("Head: ")
 
-class RecordBody(str):
-    """The text of a comment that is, or looks like, a review record. `cid` is the comment's id and `marked` says whether the marker opens it. It is a str,
-    so a caller that reads the text alone is unchanged."""
-    def __new__(cls, text, cid=None):
-        self = super().__new__(cls, text)
-        self.cid, self.marked = cid, review_marked(text)
-        return self
-
 
 _stamp_since = {}
 
@@ -3283,14 +3276,14 @@ def reviewed_lines(h, cutover=None):
         if not bodies:
             bare.append(f"#{n}")
             continue
-        created, body = bodies[-1]
+        created, cid, body = bodies[-1]
         rec, bad = review_parse(body, created, cutover)
-        if not body.marked:  # a cut-off record: flagged by its comment id, with no check read
-            lines.append(f"#{n} {d['head']['ref']} {sha[:9]} bad: the newest comment with record fields has no marker line: {review_bad_text(bad, body.cid)}")
+        if not review_marked(body):  # a cut-off record: flagged by its comment id, with no check read
+            lines.append(f"#{n} {d['head']['ref']} {sha[:9]} bad: the newest comment with record fields has no marker line: {review_bad_text(bad, cid)}")
             continue
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
         if bad:
-            why += ": " + review_bad_text(bad, body.cid)
+            why += ": " + review_bad_text(bad, cid)
             if review_remedy(body, bad):
                 why += ". " + review_remedy(body, bad)
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
@@ -3492,10 +3485,10 @@ def main(argv, host=None, lock=None):
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 cutover = review_stamp_since(root, info["base"])
-                earlier = [(*review_parse(b, created, cutover), b) for created, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, []) if b.marked]
-                last, bad, body = earlier[-1] if earlier else (None, None, None)
+                earlier = [(*review_parse(b, created, cutover), cid, b) for created, cid, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, []) if review_marked(b)]
+                last, bad, cid, body = earlier[-1] if earlier else (None, None, None, None)
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
-                    why = f"the newest earlier review record on this pull request does not parse: {review_bad_text(bad, body.cid)}. " if bad else ""
+                    why = f"the newest earlier review record on this pull request does not parse: {review_bad_text(bad, cid)}. " if bad else ""
                     why += review_remedy(body, bad) + " " if bad and review_remedy(body, bad) else ""
                     print("merge: --fix-check: " + why + "the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
