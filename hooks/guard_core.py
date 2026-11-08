@@ -393,6 +393,7 @@ WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
 # command word sees the command inside the block, never the keyword that opens it.
 LOOP_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "{", "(", "$("}
 
+
 # What a PowerShell backtick escape stands for, outside quotes and inside `"..."` (parser, 2026-10-15).
 BACKTICK_CHARS = {"n": "\n", "r": "\r", "t": "\t", "0": "\0", "a": "\a", "b": "\b", "e": "\x1b",
                   "f": "\f", "v": "\v"}

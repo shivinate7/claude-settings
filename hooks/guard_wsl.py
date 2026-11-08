@@ -11,7 +11,8 @@ from guard_core import QUOTE_MARKS, basename, command_indexes, nested_script, se
 WSL_REASON = (
     "WSL runs only a fixed list of Linux test commands. Allowed forms, each with -e or --exec, "
     "alone on the line, and optionally behind `python bin/verdict`: "
-    "`wsl -e node --test <file>.test.mjs ...`, `wsl -e node <file>.test.mjs` (one file, no glob), "
+    "`wsl -e node --test <file>.test.mjs ...` (a glob is allowed), and three forms that take one literal "
+    "path with no `*?[]`: `wsl -e node <file>.test.mjs`, "
     "`wsl -e pwsh -NoProfile -File <file>.test.ps1`, and `wsl -e python3 <dir>/test_<name>.py`. "
     "Not allowed: a shell program, -u, -d, --cd, --system, --shell-type, a management verb, a "
     "WSLENV prefix, or a pipe, redirect, `;`, `&` or newline after the wsl part."
