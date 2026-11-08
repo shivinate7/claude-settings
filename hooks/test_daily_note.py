@@ -648,7 +648,7 @@ class DropRowTests(NoteCase):
 
     def test_an_unreadable_drops_file_prints_one_unknown_line_and_still_writes_the_stamp(self):
         """A directory at the drops path cannot be read as a log. The note prints one unknown line that ends with
-        the drops path, and the start still writes its stamp. Green on the old code: the OSError branch covers it."""
+        the drops path, and the start still writes its stamp. The OSError branch covers it."""
         os.makedirs(self.drops_path())
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)

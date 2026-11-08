@@ -4313,7 +4313,7 @@ class AgentEndLogReadTests(unittest.TestCase):
         self.assertIsNone(raised, "log() raised %r when the drops file could not be appended to" % (raised,))
 
     def test_two_drops_in_a_row_leave_two_rows_in_the_drops_file(self):
-        """The drops file is appended to, not rewritten: the second drop keeps the first row. Green on the old code."""
+        """The drops file is appended to, not rewritten: the second drop keeps the first row."""
         path = self.scoped_log_path()
         with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
             self.reap.log({"raw": "{}", "run": "first-run", "state": "done"})
