@@ -395,6 +395,54 @@ class CostPinTests(unittest.TestCase):
                            "#1851 wraps here, and it reads `state/h6.json` once.\n")
         self.assert_found([row("hash.md", text, "state/h%d.json" % n, "state/h%d.json" % n) for n in range(1, 7)])
 
+    def test_cost_inside_a_code_span_mid_line_starts_nothing(self):
+        # A Cost: in a code span starts no paragraph. The second line holds a stop inside the span, then Cost:.
+        self.decide("code-span.md",
+                    "Fields `Cost:` and `Proof:` are read.\n"
+                    "Fields `Landed. Cost:` and `Proof:` are read.\n")
+        self.assert_clean()
+
+    def test_e_g_before_cost_colon_mid_sentence_starts_nothing(self):
+        self.decide("eg-cost.md", "Fields, e.g. Cost: and Proof:, read `x/y.json` once.\n")
+        self.assert_clean()
+
+    def test_mid_line_sentence_start_takes_the_line_start_forms(self):
+        text = self.decide("mid-forms.md",
+                           "Landed. **Cost**: reads `state/a.json` once.\n"
+                           "\n"
+                           "Landed. Cost. reads `state/b.json` once.\n"
+                           "\n"
+                           "Landed. Cost of a run: reads `state/c.json` once.\n")
+        self.assert_found([row("mid-forms.md", text, "state/%s.json" % n, "state/%s.json" % n) for n in "abc"])
+
+    def test_pin_candidates_include_spec_and_test_variants(self):
+        # Each variant pins the tokens in its sentence when it holds the name. None is a file token itself.
+        text = self.decide("candidates.md",
+                           "- **Cost:** Reads `state/k1.json`; `web/foo.spec.js` proves it.\n"
+                           "- **Cost:** Reads `state/k2.json`; `web/foo.spec.tsx` proves it.\n"
+                           "- **Cost:** Reads `state/k3.json`; `web/foo.spec.jsx` proves it.\n"
+                           "- **Cost:** Reads `state/k4.json`; `web/foo.spec.mjs` proves it.\n"
+                           "- **Cost:** Reads `state/k5.json`; `web/foo.test.tsx` proves it.\n"
+                           "- **Cost:** Each run names `web/foo.spec.tsx` and `web/foo.spec.mjs` once. "
+                           "It also reads `state/real.json` once.\n")
+        for path, name in (("web/foo.spec.js", "k1"), ("web/foo.spec.tsx", "k2"), ("web/foo.spec.jsx", "k3"),
+                           ("web/foo.spec.mjs", "k4"), ("web/foo.test.tsx", "k5")):
+            self.put(path, "// cases\n%s.json is read\n" % name)
+        self.assert_found([row("candidates.md", text, "state/real.json", "state/real.json")])
+
+    def test_padded_double_backtick_span_strips_one_space(self):
+        text = self.decide("padded.md", "- **Cost:** It reads `` state/x.json `` once.\n")
+        self.assert_found([row("padded.md", text, "state/x.json", "state/x.json")])
+
+    def test_bare_hash_line_does_not_end_a_cost_paragraph(self):
+        # A heading needs text after its hashes, so a line of one # is text.
+        text = self.decide("bare-hash.md",
+                           "- **Cost:** It reads `state/g1.json` once.\n"
+                           "#\n"
+                           "It also reads `state/g2.json` once.\n")
+        self.assert_found([row("bare-hash.md", text, "state/g1.json", "state/g1.json"),
+                           row("bare-hash.md", text, "state/g2.json", "state/g2.json")])
+
 
 class CorpusTests(unittest.TestCase):
     """The corpus case: this repo's own records, with no --root. It may stay red until the records that name
