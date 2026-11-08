@@ -8,6 +8,7 @@ The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+LintParallel: --lint runs its lint steps at once, prints each line in workflow order, and keeps each step's output apart.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -913,6 +914,106 @@ class NotRunLines(Job):
                                       step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
         self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
                                                     "Python lint": "FAIL"}), out)
+
+
+OVERLAP_STEP = r'''"""Fixture lint step for LintParallel. usage: overlap.py ME WAIT OUTCOME [--best]
+
+Writes started-ME, waits for the file WAIT (`-` for none), prints OUTCOME's output, and writes done-ME on every exit.
+OUTCOME is clean, fail, skip, or missing; missing exits 127, the code ci-job reads as a missing tool.
+The wait polls every 50 ms, at most 200 times (10 s), or 100 times with --best. That bound only stops a hang: no assert
+reads it. Without --best a missed wait fails the step; with --best the wait only asks for overlap.
+"""
+import os
+import sys
+import time
+
+best = "--best" in sys.argv
+me, wait_for, outcome = [a for a in sys.argv[1:] if a != "--best"]
+
+
+def wait(name, polls):
+    for _ in range(polls):
+        if os.path.exists(name):
+            return True
+        time.sleep(0.05)
+    return os.path.exists(name)
+
+
+try:
+    open("started-" + me, "w").close()
+    if wait_for != "-" and not wait(wait_for, 100 if best else 200) and not best:
+        print("%s: %s did not appear in time" % (me, wait_for))
+        sys.exit(1)
+    if outcome == "fail":
+        print("** TEST FAILED **")
+    elif outcome == "skip":
+        print("Ran 1 test in 0.000s\n\nOK (skipped=1)")
+    elif outcome == "missing":
+        sys.exit(127)
+    else:
+        print("clean")
+finally:
+    open("done-" + me, "w").close()
+'''
+PIN_CPUS = ("import os, runpy, sys\n"
+            "os.cpu_count = lambda: 4  # a pool two or more wide on any host, so the result never turns on the host\n"
+            "sys.argv = sys.argv[1:]\n"
+            "sys.path[0] = os.path.dirname(os.path.abspath(sys.argv[0]))\n"
+            "runpy.run_path(sys.argv[0], run_name='__main__')")
+
+
+class LintParallel(Job):
+    """`--lint` runs the lint CI steps at once in a pool of os.cpu_count() workers, each with its own log, and prints
+    each line in workflow order. The steps are lint steps (lint/overlap.py), so they reach the pool. PIN_CPUS pins
+    os.cpu_count to 4, so the first two cases test overlap on any host. The controls wait for overlap only as a best
+    effort: a missed wait still passes, so each control is green on the old code too."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.root, "lint"))
+        with open(os.path.join(self.root, "lint", "overlap.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(OVERLAP_STEP)
+
+    def job_call(self, *steps, args=(), env=None, script=CI_JOB):
+        argv, env = super().job_call(*steps, args=args, env=env, script=script)
+        return [sys.executable, "-c", PIN_CPUS, *argv[1:]], env
+
+    def test_lint_steps_run_at_once(self):
+        rc, lines, out = self.run_job(step("Meet one", "python3 lint/overlap.py one started-two clean"),
+                                      step("Meet two", "python3 lint/overlap.py two started-one clean"),
+                                      args=("--lint",))
+        self.assertEqual((rc, by_step(lines)), (0, {"Meet one": "PASS", "Meet two": "PASS"}),
+                         "no two CI steps ran at once\n" + out)
+
+    def test_lines_keep_workflow_order(self):
+        rc, lines, out = self.run_job(step("Slow first", "python3 lint/overlap.py first done-second clean"),
+                                      step("Quick second", "python3 lint/overlap.py second - clean"),
+                                      args=("--lint",))
+        self.assertEqual((rc, by_step(lines)), (0, {"Slow first": "PASS", "Quick second": "PASS"}),
+                         "no two CI steps ran at once: the slow first step never saw the later one finish\n" + out)
+        self.assertEqual(list(by_step(lines)), ["Slow first", "Quick second"],
+                         "lines print in completion order, not workflow order\n" + out)
+
+    def test_fail_marker_stays_in_its_step(self):
+        rc, lines, out = self.run_job(step("Fail marker", "python3 lint/overlap.py fail started-clean fail --best"),
+                                      step("Clean", "python3 lint/overlap.py clean done-fail clean --best"),
+                                      args=("--lint",))
+        self.assertEqual((rc, by_step(lines)), (1, {"Fail marker": "FAIL", "Clean": "PASS"}),
+                         "a FAIL marker in one CI step marked another CI step\n" + out)
+
+    def test_missing_tool_stays_in_its_step(self):
+        rc, lines, out = self.run_job(
+            step("Missing tool", "python3 lint/overlap.py missing started-clean missing --best"),
+            step("Clean", "python3 lint/overlap.py clean done-missing clean --best"), args=("--lint",))
+        self.assertEqual((rc, by_step(lines)), (2, {"Missing tool": "unknown", "Clean": "PASS"}),
+                         "a missing tool in one CI step marked another CI step\n" + out)
+
+    def test_skip_count_stays_in_its_step(self):
+        rc, lines, out = self.run_job(step("Skip count", "python3 lint/overlap.py skip started-clean skip --best"),
+                                      step("Clean", "python3 lint/overlap.py clean done-skip clean --best"),
+                                      args=("--lint",))
+        self.assertEqual((rc, by_step(lines)), (0, {"Skip count": "SKIP", "Clean": "PASS"}),
+                         "a skip count in one CI step marked another CI step\n" + out)
 
 
 class Progress(Job):
