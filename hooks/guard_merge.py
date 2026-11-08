@@ -12,7 +12,8 @@ import re
 import sys
 
 from guard_core import (
-    GIT_WORK_TREE_RE, _absolute, _git, _git_subcommand_index, _segment_git_c_target, _walk_wrappers, basename, cap_safe,
+    GIT_WORK_TREE_RE, _absolute, _git, _git_subcommand_index, _segment_cd_move, _segment_git_c_target, _walk_wrappers,
+    basename, cap_safe,
     command_root, dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base,
     segment_tokens, shell_abs, split_segments,
 )
@@ -582,6 +583,20 @@ def _commit_page_id(top, working):
     return "" if not rows else (rows[0].split()[1] if len(rows) == 1 else None)
 
 
+def _cd_maybe_skipped(segments, ends, number):
+    """True when an earlier `cd` may not have run by the time `segments[number]` does. A `cd` after `&&` or
+    `||` runs only if the part before it allows; the segment is sure to have it run only when it sits in the
+    same all-`&&` chain, so a `;`, a newline, `||` or a pipe between them leaves the move unknown."""
+    for at in range(min(number, len(segments))):
+        tokens = segment_tokens(segments[at])
+        if not tokens or _segment_cd_move(tokens) is None:
+            continue
+        if at and ends[at - 1] in ("&&", "||") and (
+                ends[at - 1] == "||" or any(end != "&&" for end in ends[at:number])):
+            return True
+    return False
+
+
 def records_page_hit(stripped: str, cwd: str) -> str:
     """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
     and origin/<base>'s, else ''. Each segment is judged from its own command word."""
@@ -626,7 +641,9 @@ def records_page_hit(stripped: str, cwd: str) -> str:
         opens = _git(top, "cat-file", "-p", base_id)   # a hand-written page is no generated page: no hit
         if opens is None or opens.returncode != 0 or not opens.stdout.startswith(RECORDS_HEADER):
             continue
-        if working and any(_root_is_repo(named, ran_in, top) for named, ran_in in generated):
+        # A `cd` that may have been skipped leaves the commit's folder unknown: any earlier run counts.
+        if working and generated and (_cd_maybe_skipped(segments, ends, number) or any(
+                _root_is_repo(named, ran_in, top) for named, ran_in in generated)):
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
