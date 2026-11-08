@@ -967,14 +967,22 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
 
 def hooks_copy(shared):
     """A scratch copy of hooks/*.py. shared None leaves out shared_names.py; "stale" writes one with no
-    TASK_NOTIFICATION_TAG; "real" keeps the real one. Returns the copy's stall_watch.py."""
+    TASK_NOTIFICATION_TAG; "no-statuses" keeps the real one less its TASK_TERMINAL_STATUSES line, so the tag
+    stays; "real" keeps the real one. Returns the copy's stall_watch.py."""
     lone = new_dir()
     for name in os.listdir(HERE):
-        if name.endswith(".py") and not (name == "shared_names.py" and shared != "real"):
+        if name.endswith(".py") and not (name == "shared_names.py" and shared not in ("real", "no-statuses")):
             shutil.copy(os.path.join(HERE, name), os.path.join(lone, name))
     if shared == "stale":
         with open(os.path.join(lone, "shared_names.py"), "w", encoding="utf-8") as f:
             f.write("PROJECT_FROZEN_FILES = ()\n")
+    if shared == "no-statuses":
+        # A mid-pull copy: every name of the real file but the status tuple, so the sibling modules still import.
+        path = os.path.join(lone, "shared_names.py")
+        with open(path, encoding="utf-8") as f:
+            kept = [line for line in f if not line.startswith("TASK_TERMINAL_STATUSES")]
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(kept)
     return os.path.join(lone, os.path.basename(MODULE))
 
 
@@ -1007,6 +1015,39 @@ def finished_job_is_silent_with_shared_names_missing():
 def finished_job_is_silent_with_shared_names_stale():
     """N4b. shared_names.py without TASK_NOTIFICATION_TAG: a finished job idle 2 h prints nothing, exit 0"""
     return finished_job_is_silent_without_the_notice_tag("stale", "shared_names stale")
+
+
+@case
+def finished_job_closes_and_running_job_lists_with_shared_names_lacking_statuses():
+    """N4c. shared_names.py has TASK_NOTIFICATION_TAG and no TASK_TERMINAL_STATUSES (a mid-pull copy): the check
+    keeps its own four statuses, so a job its killed notice closes is not listed. A running job beside it is
+    listed, which pins the tag: without the tag Stop prints nothing. A control with no notice lists the killed
+    job, so the notice is what closes it. The real module gives the same answer on the same transcript"""
+    base = new_dir()
+    output_file(base, "bkill7200", 7200)
+    output_file(base, "brun7200", 7200)
+    stand_in = hooks_copy("no-statuses")
+    with open(os.path.join(os.path.dirname(stand_in), "shared_names.py"), encoding="utf-8") as f:
+        text = f.read()
+    problems = expect(re.search(r"^TASK_NOTIFICATION_TAG\s*=", text, re.M) is not None
+                      and re.search(r"^TASK_TERMINAL_STATUSES\b", text, re.M) is None,
+                      "scope: the stand-in is not the tag-only copy (the tag is missing, or the statuses are present)")
+    mixed = transcript(flagged("bkill7200") + [notice("bkill7200", "killed")] + flagged("brun7200"))
+    rc, out, err = run_stop(mixed, base, module=stand_in)
+    problems += expect(rc == 0, f"stand-in: exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    n = msg.count("brun7200.output")
+    problems += expect(n == 1, f"stand-in (tag, no TASK_TERMINAL_STATUSES): the running job is listed {n} times, "
+                               f"want 1; the stale module lost the tag, so Stop printed nothing: {msg!r}")
+    problems += expect("bkill7200" not in msg, f"stand-in: the job its killed notice closed is listed: {msg!r}")
+    rc, out, err = run_stop(transcript(flagged("bkill7200") + flagged("brun7200")), base, module=stand_in)
+    problems += expect(rc == 0, f"control: stand-in, no notice: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += listed_once(system_message(out, problems), "bkill7200")
+    rc, out, err = run_stop(mixed, base)
+    real_msg = system_message(out, problems)
+    problems += expect(rc == 0 and real_msg.count("brun7200.output") == 1 and "bkill7200" not in real_msg,
+                       f"control: real shared_names, same transcript: rc {rc}, {out[:200]!r}")
+    return problems
 
 
 # Row tables. Each row is one case body from above, and keeps its S-label.
