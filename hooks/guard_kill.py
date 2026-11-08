@@ -8,7 +8,7 @@ import os
 import re
 import subprocess
 try:
-    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, also a guard-set member (the install lists name it)
+    import _nowindow  # the one home of a no-window child start; a flat hooks/ file, not a guard-set member
 except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
     _nowindow = subprocess
 import sys

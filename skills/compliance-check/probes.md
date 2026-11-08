@@ -153,7 +153,7 @@ code block is never read. A file reached twice, by a symlink, is read once. It r
 edits or pushes to the child.
 
 The probe holds no rule list. On each run it reads the live anchors through `rule_audit.claude_md_anchors`
-in the parent clone. A root that holds all the rule files, with at least 90% of the live anchors in them, is
+in the parent clone. A root that holds all the rule files, with at least 90% (`lint/compliance_probes.py: NA_SHARE = 0.9`) of the live anchors in them, is
 a claude-settings checkout: `n/a`.
 
 Departure wording, in one sentence, in any case:
