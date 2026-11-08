@@ -1,8 +1,0 @@
-where	slug	verdict	size	reason
-jobs-over-80pct-of-cap.md	jobs-over-80pct-of-cap	fix	small	checks.yml caps unchanged (windows-guard 20); raise caps or split per ci-job-caps.
-lane-lint-misses-nested-landed.md	lane-lint-misses-nested-landed	fix	small	check_landed_dirs has no subfolder refusal; a dropped batch already happened.
-linked-nm-prefix-workspace.md	linked-nm-prefix-workspace	fix	small	npm_prefix ignores --prefix/-w/--workspace; install() skips those flags unread.
-ready-checks-skipped-by-mcp	ready-checks-skipped-by-mcp	fix	small	READY_ROUTES in merge.py still omits ready checks; MCP ready bypasses them
-replay-big-file-unknown	replay-big-file-unknown	fix	small	mutate_shared.py row['skipped'] set but status stays OK with a rate
-report-guard-gh-api-merge	report-guard-gh-api-merge	fix	small	report_guard.py GH_LANDING_PR_VERBS reads gh pr verbs only, not gh api
-workflow-wrapped-test-run	workflow-wrapped-test-run	fix	small	workflow_command_tests skips only VAR=, npx, sudo, time; wrappers still hide tests
