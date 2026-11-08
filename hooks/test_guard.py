@@ -13537,6 +13537,24 @@ lazy_fixture([WFGIT], _build_wfgit)
 sh("builder-test: workflow shell write, cd into .github/workflows, then sed -i on checks.yml, is refused",
    "cd .github/workflows && sed -i s/a/b/ checks.yml", "deny", rule=BT, carries="Edit tool",
    **dict(B, cwd=WFGIT))
+# A folder form writes a workflow file too: find -exec, grep piped to xargs, and cp into the folder. Each is
+# judged by the same workflow refusal as the direct forms above.
+WORKFLOW_FOLDER_REFUSED = (
+    ("find -exec sed -i over .github/workflows", "find .github/workflows -name '*.yml' -exec sed -i s/a/b/ {} +"),
+    ("grep -rl piped to xargs sed -i over .github/workflows",
+     "grep -rl pytest .github/workflows | xargs sed -i s/a/b/"),
+    ("cp from /tmp into .github/workflows/", "cp /tmp/x.yml .github/workflows/"),
+)
+for _name, _command in WORKFLOW_FOLDER_REFUSED:
+    sh("builder-test: workflow shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries="Edit tool", **dict(B, cwd=WFGIT))
+WORKFLOW_FOLDER_ALLOWED = (
+    ("cp from checks.yml out to /tmp", "cp .github/workflows/checks.yml /tmp/x.yml"),
+    ("find over .github/workflows with no writer", "find .github/workflows -name '*.yml'"),
+    ("ls of .github/workflows", "ls .github/workflows"),
+)
+for _name, _command in WORKFLOW_FOLDER_ALLOWED:
+    sh("builder-test: workflow shell control, %s, is allowed" % _name, _command, "allow", **dict(B, cwd=WFGIT))
 WORKFLOW_SHELL_ALLOWED = (
     ("grep reads pytest from checks.yml", "grep pytest .github/workflows/checks.yml"),
     ("cat reads checks.yml", "cat .github/workflows/checks.yml"),
