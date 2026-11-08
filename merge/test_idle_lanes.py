@@ -309,6 +309,13 @@ class IdleLanesFromRawFiles(unittest.TestCase):
     def write_sessions(self, payload):
         pathlib.Path(self.sessions).write_text(json.dumps(payload), encoding="utf-8")
 
+    def write_items(self, payload):
+        pathlib.Path(self.items).write_text(json.dumps(payload), encoding="utf-8")
+
+    def item_rows(self):
+        """The item rows setUp wrote, read back so a paged form of the same rows can be written."""
+        return json.loads(pathlib.Path(self.items).read_text(encoding="utf-8"))
+
     def run_merge(self, *argv):
         """(exit code, stdout, stderr) of `merge.py <argv>` in the fixture checkout, with the fake gh first on PATH."""
         path = self.bin + os.pathsep + os.environ.get("PATH", os.defpath)
@@ -399,6 +406,51 @@ class IdleLanesFromRawFiles(unittest.TestCase):
         code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
         self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
                          "a fresh pair did not list session_a (exit %d): stderr %r" % (code, err))
+
+    def test_an_items_file_whose_last_page_says_has_more_reads_unknown(self):
+        # Lane ruling 2 (11:25 CST, process-only): the items file is read as the sessions file is. A last page that says more
+        # pages follow is a partial read, so the list reads unknown. The sessions file is complete here. The same items with
+        # has_more false list session_a, so the items file alone decides.
+        rows = self.item_rows()
+        self.write_sessions(raw_page(self.rows, more=False))
+        self.write_items(raw_page(rows, more=True))
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(code, 1, "a partial items file exited %d, so a caller reads the list as whole: out %r" % (code, out))
+        self.assertEqual(out, "", "a partial items file printed entries: %r" % (out,))
+        self.assertIn("unknown (", err, "a partial items file gave no unknown reason: %r" % (err,))
+        self.write_items(raw_page(rows, more=False))
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
+                         "a complete items file did not list session_a (exit %d): stderr %r" % (code, err))
+
+    def test_an_items_file_whose_last_page_has_a_next_cursor_reads_unknown(self):
+        # Lane ruling 2 (11:25 CST, process-only): next_cursor is a continuation key on the items file too. A last page that
+        # holds one is a partial read, whatever its has_more says. The sessions file is complete.
+        page = raw_page(self.item_rows(), more=False)
+        page["ccr"]["next_cursor"] = "cursor_2"
+        self.write_sessions(raw_page(self.rows, more=False))
+        self.write_items(page)
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(code, 1, "an items last page with a next_cursor exited %d, so a caller reads the list as whole: out %r" % (code, out))
+        self.assertEqual(out, "", "an items last page with a next_cursor printed entries: %r" % (out,))
+        self.assertIn("unknown (", err, "an items last page with a next_cursor gave no unknown reason: %r" % (err,))
+
+    def test_a_fresh_sessions_file_does_not_rescue_an_items_file_older_than_an_hour(self):
+        # Lane ruling 4 (11:25 CST, process-only): readAt is the older of the two files' mtimes. A sessions file written now
+        # does not make a stale items file fresh, so the read is unknown. Restoring the items mtime lists session_a again.
+        old = 1700000000  # 2023-11-14 UTC, far past the 60-minute bound at any run date
+        self.write_sessions(raw_page(self.rows, more=False))
+        os.utime(self.items, (old, old))
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        lines = out.splitlines()
+        self.assertEqual(code, 1, "a stale items file exited %d, so a caller reads the list as read: out %r" % (code, out))
+        self.assertTrue(lines and all(line.startswith("unknown (") for line in lines),
+                        "a fresh sessions file rescued a stale items file: out %r, err %r" % (out, err))
+        self.assertNotRegex(out, SUMMARY_LINE)
+        os.utime(self.items, None)
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
+                         "a fresh items file did not list session_a (exit %d): stderr %r" % (code, err))
 
 
 if __name__ == "__main__":
