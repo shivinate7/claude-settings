@@ -177,7 +177,7 @@ def post_stop_peer_wake(task_id="ad2d560f6a8ff8331"):
                  "origin": {"kind": "peer", "from": task_id, "senderTaskId": task_id, "name": "test-author",
                             "body": "stub", "handback": True, "handbackReportText": "stub"},
                  "message": {"role": "user", "content": "Another Claude session sent a message:\n"
-                             '<agent-message from="%s">\n[Subagent hand-back] stub\n</agent-message>' % task_id}}
+                             '<agent-message from="%s">\n[Agent hand-back] stub\n</agent-message>' % task_id}}
     return [reminder, hand_back]
 
 
@@ -188,7 +188,7 @@ def mid_turn_hand_back(task_id="a8c18267fa7d7dcb9"):
             "attachment": {"type": "queued_command", "commandMode": "prompt", "isMeta": True,
                            "origin": {"kind": "peer", "from": task_id, "senderTaskId": task_id, "name": "reviewer",
                                       "body": "stub", "handback": True, "handbackReportText": "stub"},
-                           "prompt": '<agent-message from="%s">\n[Subagent hand-back] stub\n</agent-message>' % task_id}}
+                           "prompt": '<agent-message from="%s">\n[Agent hand-back] stub\n</agent-message>' % task_id}}
 
 
 def tool_use_msg(name, input_=None):
@@ -969,6 +969,7 @@ class DoneNamesModelsTests(unittest.TestCase):
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
     FIX_CHECK = {"subagent_type": "reviewer", "prompt": "Fix check of round 2"}  # no model: haiku
     REVIEWER_OPUS = {"subagent_type": "reviewer", "model": "opus", "prompt": "Round 1 of 3"}
+    BUILDER_OPUS = {"subagent_type": "builder", "model": "opus", "prompt": "build it"}
     TEST_AUTHOR = {"subagent_type": "test-author", "model": "haiku", "prompt": "Add the red cases"}
 
     def test_dm_red_builder_unnamed_blocks(self):
@@ -1152,9 +1153,13 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIn("no model named for reviewer", out["reason"])
 
     @classmethod
-    def turn_one_then_wake(cls, spawn):
-        """Turn 1 ran `spawn`, landed a commit and reported (a reviewer on sonnet). Then the Stop hook wrote its
-        summary and a peer hand-back wake arrived, starting turn 2."""
+    def turn_one_then_wake(cls, spawn, landed=True):
+        """Turn 1 ran `spawn`. With `landed`, it committed and reported (a reviewer on sonnet). Without it, turn 1
+        ended with no commit, so no Done line checked its spawn. Then the Stop hook wrote its summary and a peer
+        hand-back wake arrived, starting turn 2."""
+        if not landed:
+            return [human("do the task"), *cls.run_of(spawn), assistant_text("The builder is running."),
+                    stop_summary(), *post_stop_peer_wake()]
         return [human("do the task"), *cls.run_of(spawn), tool_use_msg("Bash", {"command": "git commit -m x"}),
                 tool_result_msg(), assistant_text("> **Done** BUILT x, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none"),
                 stop_summary(), *post_stop_peer_wake()]
@@ -1175,6 +1180,32 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "the report passed: a builder spawned after the post-Stop peer wake went unnamed")
         self.assertEqual(out["decision"], "block")
         self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_unlanded_turn_builder_before_a_post_stop_peer_wake_unnamed_blocks(self):
+        # Catches: turn 1 spawned a builder and landed nothing, so no Done line checked that spawn. A peer wake after
+        # its Stop starts turn 2 at the wake, which leaves the builder out of the window, so a turn-2 report that
+        # names no builder passes. A wake starts a window only when the turn before it landed.
+        out = self.verdict("> **Done** BUILT x, PR #6\n> **Next** Unstarted: none", [],
+                           lead=self.turn_one_then_wake(self.BUILDER_OPUS, landed=False))
+        self.assertIsNotNone(out, "the report passed: a builder spawned in an unlanded turn went unnamed past a peer wake")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_unlanded_turn_builder_before_a_post_stop_peer_wake_no_unstarted_blocks(self):
+        # Catches: the same transcript with the builder named in Done. A window that misses the unlanded turn's builder
+        # spawn skips the Unstarted guard, so a report with no Unstarted line passes.
+        out = self.verdict("> **Done** BUILT x, PR #6 (builder opus)\n> **Next** merge the batch", [],
+                           lead=self.turn_one_then_wake(self.BUILDER_OPUS, landed=False))
+        self.assertIsNotNone(out, "the report passed: an unlanded turn's builder spawn was not checked for an Unstarted line")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Unstarted guard", out["reason"])
+
+    def test_dm_false_alarm_unlanded_turn_builder_named_with_unstarted_line_passes(self):
+        # Catches: the control for the two cases above. The same transcript with the builder named and an Unstarted
+        # line passes, so a fix that blocks every report after an unlanded turn is caught here.
+        out = self.verdict("> **Done** BUILT x, PR #6 (builder opus)\n> **Next** Unstarted: none", [],
+                           lead=self.turn_one_then_wake(self.BUILDER_OPUS, landed=False))
+        self.assertIsNone(out, (out or {}).get("reason"))
 
     def test_dm_red_mid_turn_peer_hand_back_starts_no_window_blocks(self):
         # Catches: a peer hand-back that lands mid-turn, as an attachment with no Stop before it, must start no
