@@ -15589,11 +15589,11 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit that carries 
 # pinned by the bd-m-test-left row above, so these rows stage the markers before the commit.
 _bd_m_markers_chain = diff_repo("bd-m-markers-chain", _f2_conflict_open)
 sh("builder-refuse: a builder's open merge that leaves git's markers in a conflicted test file, staged and committed in "
-   "one call, is denied by conflict-markers", VCS + " add -A && " + COMMIT, "deny", rule=CMK_RULE,
+   "one call, is denied by builder-diff", VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
    cwd=_bd_m_markers_chain, agent_id="bld1", agent_type="builder")
 _bd_m_markers_staged = diff_repo("bd-m-markers-staged", _f2_conflict_staged)
 sh("builder-refuse: a builder's open merge that stages git's markers in a conflicted test file, then commits, is denied "
-   "by conflict-markers", COMMIT, "deny", rule=CMK_RULE, cwd=_bd_m_markers_staged, agent_id="bld1",
+   "by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_markers_staged, agent_id="bld1",
    agent_type="builder")
 # The same staged markers behind a leading `echo ok;`: builder-diff refuses the test file at commit by itself.
 sh("builder-refuse: a builder's open merge, with a test file still holding git's markers, staged and committed after "
