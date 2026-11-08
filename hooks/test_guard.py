@@ -1263,6 +1263,7 @@ def build_fixtures():
                    os.path.join(CLONE, ".git"), os.path.join(CHECK, ".git"),
                    os.path.join(CHECK, "hooks"), os.path.join(EXPORT, "hooks"),
                    os.path.join(MIXED, ".git"), os.path.join(MIXED, "sub", "hooks"),
+                   os.path.join(MIXED, "nested", ".git"), os.path.join(MIXED, "nested", "hooks"),
                    os.path.join(NESTINST, "inner", "hooks")):
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
@@ -12564,18 +12565,19 @@ EXPORT_HOOKS = slash(os.path.join(EXPORT, "hooks"))
 add("cap: a Write of ../settings.json from an export with install.ps1 and no .git asks", "ask",
     "agent-model-cap", tool="Write", cwd=EXPORT_HOOKS, file_path="../settings.json",
     content=cap_settings(), carries=(OPUS,))
-# THE NESTED SETTINGS PLACE. `mixed` is a checkout, marked by `.git`, and `sub` in it holds the install script and no
-# `.git`. `sub` is a settings place of its own, so a cap write to `sub/settings.json` from its hooks folder asks. A
-# walk that reads only `.git` markers finds `mixed` and allows it.
+# AN INSTALL FOLDER INSIDE A CHECKOUT IS A PLACE OF ITS OWN. `mixed` is a checkout, marked by `.git`, and `sub` in it
+# holds the install script and no `.git`. From `sub`'s hooks folder, `../settings.json` is `sub`'s own file. The working
+# folder's checkout root is `mixed`, which is not `sub`, so the write asks only by the install.ps1 half of the
+# target-folder clause in `_settings_place`.
 MIXED_HOOKS = slash(os.path.join(MIXED, "sub", "hooks"))
 add("cap: a Write of ../settings.json from a hooks folder under an install.ps1 folder inside a checkout asks", "ask",
     "agent-model-cap", tool="Write", cwd=MIXED_HOOKS, file_path="../settings.json",
     content=cap_settings(), carries=(OPUS,))
-# THE NEAREST INSTALL FOLDER IS NOT THE ONLY ONE. `nestinst` and `nestinst/inner` each hold an install script and no
-# `.git`. A local install from `nestinst` links ~/.claude/settings.json to ITS settings.json, so a cap write to
-# `../../settings.json` from `inner`'s hooks folder reaches that file and asks. A walk that stops at the nearest
-# install folder (`inner`) never reaches `nestinst` and allows it. The write to `inner`'s own file still asks, and a
-# write that sets no model variable stays allowed.
+# A TARGET IN AN OUTER INSTALL FOLDER IS A PLACE TOO. `nestinst` and `nestinst/inner` each hold an install script and no
+# `.git`. From `inner`'s hooks folder, `../../settings.json` is `nestinst`'s file. No working-folder clause names
+# `nestinst`, so only its install.ps1 makes it a place, and the cap write asks. The same half makes `inner`'s own file
+# a place, so the write to that file asks too. The write that sets no model variable stays allowed: it pins the cap
+# test, not the place.
 NEST_HOOKS = slash(os.path.join(NESTINST, "inner", "hooks"))
 add("cap: an Edit of ../../settings.json, the outer install folder's file, from inner's hooks folder asks", "ask",
     "agent-model-cap", tool="Edit", cwd=NEST_HOOKS, file_path="../../settings.json",
@@ -12605,12 +12607,18 @@ add("cap: a Write of an install folder's settings.json from a folder outside it 
 add("cap: an Edit of an install folder's settings.json from a folder outside it asks", "ask",
     "agent-model-cap", tool="Edit", cwd=NOGIT, file_path=EXPORT_SETTINGS,
     old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"', carries=(OPUS,))
-# A FARTHER ROOT IS A PLACE TOO. `MIXED` is a checkout (`.git`), and `sub` in it holds the install script. From `sub`'s
-# hooks folder the nearest marker is `sub`, but `MIXED/settings.json` sits one folder above `sub`, at the checkout's
-# root. A walk that stops at the nearest marker of either kind never reaches `MIXED`, so it allows this write.
-add("cap: a Write of a checkout's root settings.json from a hooks folder under an install.ps1 folder asks", "ask",
-    "agent-model-cap", tool="Write", cwd=MIXED_HOOKS, file_path=slash(os.path.join(MIXED, "settings.json")),
+# A CHECKOUT ROOT ABOVE A NESTED CHECKOUT IS A PLACE TOO. `MIXED` is a checkout (`.git`), and
+# `MIXED/nested` is a checkout inside it, with no install script. From `nested`'s hooks folder the working folder's checkout root is `nested`, so
+# no working-folder clause names `MIXED/settings.json`'s folder. It asks only by the checkout-root half of the
+# target-folder clause in `_settings_place`, which `MIXED` meets by its `.git`. The write that sets no model variable
+# stays allowed.
+NESTED_HOOKS = slash(os.path.join(MIXED, "nested", "hooks"))
+add("cap: a Write of a checkout's root settings.json from a hooks folder of a checkout nested inside it asks", "ask",
+    "agent-model-cap", tool="Write", cwd=NESTED_HOOKS, file_path=slash(os.path.join(MIXED, "settings.json")),
     content=cap_settings(), carries=(OPUS,))
+add("cap: a Write of a checkout's root settings.json that sets no model variable, from a nested checkout, stays allowed",
+    "allow", tool="Write", cwd=NESTED_HOOKS, file_path=slash(os.path.join(MIXED, "settings.json")),
+    content=json.dumps({"theme": "dark"}))
 
 sh("cap: a heredoc writing a project settings file asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
