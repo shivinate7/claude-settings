@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL29GcaaeoS7a1SJYA2",
   "why": "A builder in lane notes-fix-large-1 ran probe2.py, which another agent had left in the shared scratchpad; no guard stopped it (lane report, 06:57 CST Nov 8).",
-  "note": "Done check: a red test where the guard asks before an agent runs a scratchpad script it did not write, or a record says why per-agent scratch folders replace the check. A fix for a found gap (item 410 a). Slug from the lane; title by triage. Doing in lane session_013NEJL29GcaaeoS7a1SJYA2 (07:02 CST Nov 8).",
-  "updatedAt": "2026-11-08T07:05:00-06:00"
+  "note": "Done check: a red test where the guard asks before an agent runs a scratchpad script it did not write, or a record says why per-agent scratch folders replace the check. A fix for a found gap (item 410 a). Slug from the lane; title by triage. Doing in lane session_013NEJL29GcaaeoS7a1SJYA2 (07:02 CST Nov 8). Second sighting (lane bg-tail-loses-verdict, 07:24 CST Nov 8; proposed step agent-scratch-per-agent, folded here): a #1931 test-author took its commit message from a shared scratchpad file another agent had overwritten, and amended before the push. Harm stopped: a commit with another lane's message or trailers. The lane's fix: each spawned agent gets its own scratch sub-folder, or the guard refuses an agent's scratchpad write outside it.",
+  "updatedAt": "2026-11-08T07:27:00-06:00"
 }
