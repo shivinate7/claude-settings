@@ -47,15 +47,35 @@ class DatedText:
 class ReviewRound:
     """The pattern group for round numbers, kept as a class for its exemption. A round number is narration whatever
     follows "in", "after" or "from", and a bare one is narration unless a numeric unit follows it, as in "2 decimals",
-    which is arithmetic. A comment that quotes a rule cites an id holding `round-N` (hold-unsafe-after-round-N).
-    A bare "round N" with the same N on that line is the rule's wording, so it passes. An "in", "after" or "from"
-    form passes only inside the same parentheses as such an id, as in a quoted "(decision <id>, net-value hold
-    after round N)". Anything else stays flagged, and so does an id holding another number."""
+    which is arithmetic. A comment that quotes a rule glosses a decision id holding `round-N`, such as
+    hold-unsafe-after-round-N. A round number with the same N passes only inside that gloss, and only when
+    docs/decisions/<id>.md exists at the git top level. The gloss is the parentheses that open with the id, as in
+    "(decision <id>, ...)" or "(`<id>`, ...)", or the parentheses right after the id, as in "Decision <id> (...)".
+    Anything else stays flagged: the same words outside the gloss, an id with no decision file, an id holding
+    another number, and parentheses that hold the id later on."""
     ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
                        r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
                        r"|\breview\s+(?:round|finding|points?)\b", re.I)
-    CITED = re.compile(r"[\w-]*\bround-(\d+)(?!\d)", re.I)
-    FORM = re.compile(r"(?:in|after|from)\s", re.I)
+    ID = r"(`?)([a-z0-9][a-z0-9-]*)\1"
+    OPENS = re.compile(r"\s*(?:decision\s+)?" + ID + r"\s*,", re.I)
+    BEFORE = re.compile(r"(?<![\w`-])" + ID + r"\s*$", re.I)
+
+    def __init__(self):
+        self.top, self.known = None, {}
+
+    def real(self, ident, n):
+        """True when ident holds `round-n` and names a decision file in the repo being checked."""
+        if not re.search(r"(?:^|-)round-%s(?:-|$)" % n, ident, re.I):
+            return False
+        if ident not in self.known:
+            if self.top is None:
+                try:
+                    self.top = git("rev-parse", "--show-toplevel").strip()
+                except Unread:
+                    self.top = ""
+            self.known[ident] = bool(self.top) and os.path.isfile(
+                os.path.join(self.top, "docs", "decisions", ident + ".md"))
+        return self.known[ident]
 
     @staticmethod
     def paren_spans(text):
@@ -67,16 +87,18 @@ class ReviewRound:
                 spans.append((stack.pop(), k))
         return spans
 
+    def gloss_ids(self, text, lo):
+        """The ids the parentheses at lo gloss: the one they open with, and the one right before them."""
+        for m in (self.OPENS.match(text, lo + 1), self.BEFORE.search(text[:lo])):
+            if m:
+                yield m.group(2)
+
     def finditer(self, text):
-        cited = [(m.start(), m.group(1)) for m in self.CITED.finditer(text)]
         spans = self.paren_spans(text)
         for m in self.ROUND.finditer(text):
             n = re.search(r"round\s*(\d+)", m.group(0), re.I)
-            same = [at for at, num in cited if n and num == n.group(1)]
-            if self.FORM.match(m.group(0)):
-                if any(lo < m.start() < hi and lo < at < hi for lo, hi in spans for at in same):
-                    continue
-            elif same:
+            if n and any(lo < m.start() < hi and self.real(ident, n.group(1))
+                         for lo, hi in spans for ident in self.gloss_ids(text, lo)):
                 continue
             yield m
 
@@ -119,8 +141,7 @@ class HistoryPhrase:
 
 
 PATTERNS = {
-    # "in", "after" or "from" before a round number is narration whatever follows. A bare round number is
-    # narration unless a numeric unit follows it, as in "2 decimals", which is arithmetic.
+    # A round number is narration, except as a unit ("2 decimals") or inside a decision id's gloss (ReviewRound).
     "review round": ReviewRound(),
     "pr number": re.compile(r"\bPR\s*#?\s*\d{3,}"),
     "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
@@ -533,7 +554,7 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             if pending:
                 i = sh_heredoc_bodies(src, i, pending)
-            ws, sub = True, 0
+            ws, sub, dbl = True, 0, False  # a line continuation is read by the backslash branch, so [[ ]] goes on
         elif src.startswith("<<<", i):
             i += 3  # a here-string, not a heredoc
             ws = True
