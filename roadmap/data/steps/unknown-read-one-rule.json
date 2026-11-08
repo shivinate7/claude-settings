@@ -4,6 +4,7 @@
   "status": "doing",
   "order": 103.3555,
   "why": "Owner on item 275 (12:19 CST Nov 6): the options circle \"a more uniform issue\". Decision ci-unknown-is-red and stale-cites-at-merge line 18 disagree on an unknown read.",
-  "note": "Owner granted a on item 276, 12:39 CST. Lane session_013NEJL43txwp8ioromcR8yF (coordinator 12:44 CST). Coordinator 12:31 CST. WAITS on owner grant, page item 276 (stale-decision protocol). First job: sweep every check that passes on an unknown read, starting from lint/check_unknown_reads_contract.py (not yet measured). Fix: rewrite stale-cites-at-merge line 18 in place to point at ci-unknown-is-red, and make each swept check fail closed in CI. Lane ste-lint-diff-fail-closed's merge waits on this grant.",
-  "updatedAt": "2026-11-06T18:45:00Z"
+  "note": "Owner granted a on item 276, 12:39 CST. Lane session_013NEJL43txwp8ioromcR8yF (coordinator 12:44 CST). Coordinator 12:31 CST. WAITS on owner grant, page item 276 (stale-decision protocol). First job: sweep every check that passes on an unknown read, starting from lint/check_unknown_reads_contract.py (not yet measured). Fix: rewrite stale-cites-at-merge line 18 in place to point at ci-unknown-is-red, and make each swept check fail closed in CI. Lane ste-lint-diff-fail-closed's merge waits on this grant. Record clash (coordinator 14:08 CST Nov 8, found by lane ste-lint-run-exit-codes, #2262): the branch record ci-unknown-is-red says a check that lacks history or a ref fetches it first, and is UNKNOWN only when the fetch fails too. Main's stale-cites-at-merge says a base that does not resolve on a shallow clone is unknown, not a finding, and exits 0. ste-lint's run.sh fetch fills only FETCH_HEAD, so it cannot give a depth-1 clone its history. The branch record must reconcile with main before it merges.",
+  "updatedAt": "2026-11-08T14:09:00-06:00",
+  "lane": "session_013NEJL43txwp8ioromcR8yF"
 }
