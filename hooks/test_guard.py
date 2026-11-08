@@ -19429,6 +19429,21 @@ repo_case("a -C naming another checkout inside bash -c is denied", "deny",
           f"bash -c '{MERGE_SHIM} -C {REPO_B} 5 --confirm'", LANE_REPO, TX_RUNNER)
 repo_case("a merge in a subshell inside the tagged checkout is allowed", "allow",
           f"({MERGE_SHIM} 5 --confirm)", LANE_REPO, TX_RUNNER)
+# Debt: merge-reason-paren-cuts-args. The merge's arguments end at the first token that ends in `)` or `&`, read after shlex has
+# dropped the quotes. A quoted reason that ends in one of them is text, so the flags after it are read and judged: a -C or
+# --confirm after the reason is not hidden. A real subshell close, unquoted, still ends the merge's arguments.
+repo_case("a reason ending in ) before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "flaky (x)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("--confirm after a reason ending in ) beside -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} -C {REPO_B} 5 --base-red-ok "flaky (x)" --confirm', REPO_A, TX_A)
+repo_case("a --session name ending in ) before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --session "batch (main)" -C {REPO_B}', REPO_A, TX_A)
+repo_case("a reason ending in & before -C naming another checkout is denied", "deny",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "R&" -C {REPO_B}', REPO_A, TX_A)
+repo_case("a reason ending in ) in its quotes is allowed when it names this checkout", "allow",
+          f'{MERGE_SHIM} 5 --confirm --base-red-ok "owner, 06:11 CST)"', REPO_A, TX_A)
+repo_case("a real subshell close after a reason is allowed when the own record names this checkout", "allow",
+          f"({MERGE_SHIM} 5 --confirm --base-red-ok fixlane)", LANE_REPO, TX_RUNNER)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {REPO_B} 5", REPO_A, TX_NONE)
