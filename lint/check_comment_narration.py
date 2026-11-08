@@ -47,8 +47,10 @@ class DatedText:
     after history wording still passes, as in "Changed from None to 0 (owner, 2026-11-01 16:30 CST)"."""
     ZONES = ("CST", "CDT", "CT", "EST", "EDT", "ET", "MST", "MDT", "MT", "PST", "PDT", "PT", "UTC", "GMT")
     DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
-    EXEMPT = re.compile(r"\b(?:effective|valid|until|expires?)(?:\s+(?:date|on|from|through))?\s*:?\s*$", re.I)
-    CITE_BEFORE = re.compile(r"(?:^(?:\s|#|///|//!|//|/\*|\*|<!--|\"\"\"|''')*|\()\s*owner\s*,\s*$", re.I)
+    EXEMPT = re.compile(r"\b(?:effective|valid|until|expires?)(?:\s+(?:date|on|from|through))?(?:\s*:)?\s*$", re.I)
+    # Each opener run matches one way only: `//+(?!/)!?` takes a whole slash run, and no space is left for a
+    # second `\s*` to share. Overlapping alternatives here backtrack exponentially on a long slash run.
+    CITE_BEFORE = re.compile(r"(?:^(?:\s|#|//+(?!/)!?|/\*|\*|<!--|\"\"\"|''')*|\(\s*)owner\s*,\s*$", re.I)
     CITE_AFTER = re.compile(r"\s+(?:2[0-3]|[01]?\d):[0-5]\d\s+(?:%s)\b" % "|".join(ZONES), re.I)
 
     def finditer(self, text):
