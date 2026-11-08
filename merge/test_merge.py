@@ -13747,10 +13747,15 @@ class ReviewFixBase(ReviewEnv):
                 self.assert_refused(rc, out, err)
 
     def test_an_older_fix_line_does_not_block_a_base_on_a_newer_record_without_one(self):
-        # only the newest earlier record decides, so a fix line on an older record does not refuse a base the newest record names
+        # only the newest earlier record decides, so a fix line on an older record does not refuse a base the newest record names. The older record's
+        # fix base is no earlier Head, so the older record is a stand-in: its fix base and its Head hold different trees, so it counts one link and
+        # the base is written
         older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.OTHER_HEAD),)))
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
-        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, newest))
+        host = self.record_host(older, newest, trees={self.OTHER_HEAD: "aa" * 20, self.EARLIER_HEAD: "bb" * 20})
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        # two reads: the stand-in's fix base and its Head, read once each
+        self.assertEqual(sorted(host.tree_reads), sorted([self.OTHER_HEAD, self.EARLIER_HEAD]), "scope: the stand-in check did not read its two trees once each")
         self.assertEqual(rc, 0, "a base on the newest record, which has no fix line, was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
 
@@ -14919,9 +14924,10 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
         self.assert_source_cap_refused(rc, out, err)
 
     def test_a_pass_fix_check_cut_off_by_a_record_with_no_fix_line_does_not_count_toward_the_source_chain(self):
-        # the source chain is the trailing run of PASS fix checks. A record with no Fix check line between the older PASS and the source cuts the run,
-        # so the source chain holds one and the carry is written
-        cut = review_comment(4, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=self.NOFIX_HEAD, rounds=REVIEW_PASS))
+        # the source chain is the trailing run of PASS fix checks. A plain record with no Fix check line cuts the run when its Round lines differ from the
+        # record before it: a copy of those lines keeps the count, and other lines start it again. The cut record's FAIL line differs from the older
+        # record's PASS, so the source chain holds one and the carry is written
+        cut = review_comment(4, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=self.NOFIX_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
         host = self.carry_host(self.older_pass(), cut, self.fix_source(), source_state="closed")
         rc, out, err = self.carried(host, url=self.link())
         self.assertEqual(rc, 0, "a carry was refused for an older PASS fix check that a record with no Fix check line cuts off, so the chain was not trailing:\n"
