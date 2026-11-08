@@ -455,8 +455,10 @@ def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
     `main` or `master`; a source at the tip of the remote's `main` or `master` or of the branch
     `<remote>/HEAD` names, the batch runner's first push of an integration branch. Reads local
     `refs/remotes/<remote>/*` only, never the network: the ref files with no spawn (`for-each-ref` only for a
-    layout the file read does not know), plus one `rev-parse` per judged refspec, plus the default-branch
-    read only when a judged sha sits at a remote tip. A colon-less push stays allowed (plain-push-asks). So
+    layout the file read does not know), plus one `rev-parse` only for a judged refspec whose destination is
+    a new branch name (a tag, `main`, `master`, a branch the remote holds and `archive/*` exit first), plus
+    the default-branch read only when a judged sha sits at a remote tip. A push that names no remote first
+    reads the current branch and its remote (`symbolic-ref -q HEAD`, `config --get branch.<cur>.remote`). A colon-less push stays allowed (plain-push-asks). So
     do `--force` and a lease, a mirror, `--all`, `--delete`, tags, a glob, a remote named by URL and any
     read that fails: this judges only what it can read.
     """
