@@ -7551,10 +7551,10 @@ push_case("stacked lane, the local name without -u asks", "origin lane/fix", "as
           rule=PUSH_STRAY_RULE)
 push_case("stray branch, HEAD with an output tail is one clean ask", "origin HEAD 2>&1 | tail -1", "ask",
           cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE, lacks=(CHAIN_ASK,))
-# Two refspecs. HEAD is judged like a sha (coordinator pick A, 09:20 CST), so the explicit refspec is refused
-# first. The second, implied refspec still asks when the explicit one is not judged: its source names no branch.
-sh("push-new-branch: a judged HEAD refspec beside a second refspec naming the current branch denies",
-   VCS + " push origin HEAD:push-guard-asks mylocal", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSTRAY)
+# Two refspecs. HEAD is not judged (coordinator ruling 14:45 CST), so the explicit refspec passes and the second,
+# implied refspec asks alone: its source names no branch.
+sh("push-new-branch: a HEAD refspec is not judged, so the second refspec naming the current branch asks",
+   VCS + " push origin HEAD:push-guard-asks mylocal", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 sh("push-new-branch: a second refspec naming the current branch still asks past an unjudged refspec",
    VCS + " push origin push-guard-asks:push-guard-asks mylocal", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 sh("push: stray branch, a bare push under push.default current asks",
@@ -7569,15 +7569,15 @@ sh("push: a new branch at another branch's tip denies, the stray-branch incident
 sh("push: a new branch on top of another branch, a stacked lane, allows",
    VCS + " push origin HEAD:refs/heads/skc-stacked", "allow", cwd=PUSHNEWBR)
 # ALLOW, the exceptions to the new-branch refusal. Each one is judged by its own arm: an existing target,
-# an archive/ name, a source that is not at a remote tip, and a lease. HEAD and a local branch named as the
-# source are judged like a sha (coordinator pick A, 09:20 CST). A plain forced push is refused by the force
-# rule instead, so its case names that rule and not this one.
+# an archive/ name, a source that is not at a remote tip, and a lease. Only a sha or a remote-ref source is
+# judged; HEAD, @ and a local branch named as the source are not (coordinator ruling 14:45 CST). A plain forced
+# push is refused by the force rule instead, so its case names that rule and not this one.
 sh("push: a push to an existing branch at its own tip, allows",
    VCS + " push origin HEAD~1:refs/heads/lane/base", "allow", cwd=PUSHNEWBR)
 sh("push: a new archive/ branch at another branch's tip, allows",
    VCS + " push origin HEAD~1:refs/heads/archive/skc-ste", "allow", cwd=PUSHNEWBR)
-sh("push-new-branch: a local branch at another branch's tip, named as the source, is judged like a sha",
-   VCS + " push origin main:refs/heads/skc-localsrc", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
+sh("push-new-branch: a local branch named as the source is not judged, allows",
+   VCS + " push origin main:refs/heads/skc-localsrc", "allow", cwd=PUSHNEWBR)
 sh("push: a stacked commit named by a sha, not HEAD, allows",
    VCS + " push origin HEAD~0:refs/heads/skc-stacked-sha", "allow", cwd=PUSHNEWBR)
 sh("push: a lease at another branch's tip, leased, allows",
@@ -7585,7 +7585,7 @@ sh("push: a lease at another branch's tip, leased, allows",
 push_case("a forced push at another branch's tip is refused by the force rule, not the new-branch rule",
           "--force origin HEAD~1:refs/heads/skc-ste", "deny", cwd=PUSHNEWBR)
 
-# PUSH-NEW-BRANCH JUDGEMENT, each refspec alone, and the reason's claim (coordinator pick A, 09:20 CST).
+# PUSH-NEW-BRANCH JUDGEMENT, each refspec alone (coordinator ruling 14:45 CST: a sha or a remote-ref source only).
 # Filter: MUTATE_ONLY="push-new-branch:".
 # A delete beside a new-branch refspec hides it: the delete reaches the guard with no force verdict.
 sh("push-new-branch: a delete beside a new-branch refspec denies the new-branch refspec",
@@ -7602,11 +7602,11 @@ sh("push-new-branch: a refusal of a sha ahead of main names the archive/ form",
 sh("push-new-branch: a refusal of a sha ahead of main names the pull request's own branch",
    VCS + " push origin origin/lane/join:refs/heads/skc-ahead", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHBATCH,
    carries="pull request")
-# A HEAD or a local branch named as the source is judged like a sha. Its own name and an archive/ name are exempt.
-sh("push-new-branch: HEAD as the source is judged like a sha",
-   VCS + " push origin HEAD:refs/heads/skc-head-src", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSELF)
-sh("push-new-branch: a local branch named as the source is judged like a sha",
-   VCS + " push origin mylocal:refs/heads/skc-local-src", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSTRAY)
+# HEAD and a local branch named as the source are not judged (coordinator ruling 14:45 CST): main's verdict stands.
+sh("push-new-branch: HEAD as the source is not judged, allows",
+   VCS + " push origin HEAD:refs/heads/skc-head-src", "allow", cwd=PUSHSELF)
+sh("push-new-branch: a local branch named as the source is not judged, allows",
+   VCS + " push origin mylocal:refs/heads/skc-local-src", "allow", cwd=PUSHSTRAY)
 sh("push-new-branch: a local branch pushed to its own name is exempt",
    VCS + " push origin mylocal:mylocal", "allow", cwd=PUSHSTRAY)
 sh("push-new-branch: HEAD pushed to an archive/ name is exempt",
@@ -7661,8 +7661,8 @@ push_case("own upstream, HEAD is silent", "origin HEAD", "allow", cwd=PUSHSELF, 
 push_case("first push with no upstream, -u HEAD is silent", "-u origin HEAD", "allow", silent=True)
 push_case("first push with no upstream, HEAD is silent", "origin HEAD", "allow", silent=True)
 # Explicit destinations, the form agents push by, from a branch whose upstream differs.
-sh("push-new-branch: HEAD to a new name from a mismatched upstream is judged like a sha",
-   VCS + " push origin HEAD:push-guard-asks", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSTRAY)
+push_case("explicit destination from a mismatched upstream is silent", "origin HEAD:push-guard-asks", "allow",
+          cwd=PUSHSTRAY, silent=True)
 push_case("archive, feat named to archive/feat is silent", "origin feat:archive/feat", "allow", silent=True)
 push_case("archive, HEAD to archive/x from a mismatched upstream is silent", "origin HEAD:archive/x", "allow",
           cwd=PUSHSTRAY, silent=True)

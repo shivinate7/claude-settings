@@ -412,9 +412,10 @@ MUTATIONS = [
      'return "stray" if merge != current() and not upstream else ""',
      'return "stray" if merge != current() else ""', "guard", 'stacked lane, -u HEAD is silent'),
     # push-new-branch (the stray-branch refusal of a push at another branch's tip). Each mutant undoes one
-    # arm of the judgement, and its required case is the allow or deny that arm alone decides. The HEAD
-    # exclusion in the tips read has no mutant: git writes origin/HEAD only as a symref to one of the remote's
-    # branches, so its sha is already a tip. Only a hand-made origin/HEAD, detached or off the remote, reaches it.
+    # arm of the judgement, and its required case is the allow or deny that arm alone decides. Only a sha or a
+    # remote-ref source is judged (coordinator ruling 14:45 CST), so HEAD, @ and a local-branch source have no arm
+    # here. The HEAD exclusion in the tips read has no mutant: git writes origin/HEAD only as a symref to one of
+    # the remote's branches, so its sha is already a tip. Only a hand-made origin/HEAD, detached or off the remote, reaches it.
     ("push-new-branch: the call site is never taken",
      'if push_new_branch_hit(args, where, overrides):',
      'if False:', "guard", "push: a new branch at another branch's tip denies, the stray-branch incident"),
@@ -426,12 +427,6 @@ MUTATIONS = [
      'if not target or target in tips or target.startswith("archive/"):',
      'if not target or target in tips:', "guard",
      "push: a new archive/ branch at another branch's tip, allows"),
-    ("push-new-branch: HEAD or a local branch named as the source is exempt as its own name",
-     'own = _push_current_branch(cwd) if source in ("HEAD", "@") else source.removeprefix("refs/heads/")',
-     'own = target', "guard", "push-new-branch: a local branch at another branch's tip, named as the source, is judged like a sha"),
-    ("push-new-branch: a push to the source's own name is judged as a new branch",
-     'if own != target:',
-     'if True:', "guard", "push-new-branch: a local branch pushed to its own name is exempt"),
     ("push-new-branch: main's tip is judged as any other tip",
      'if sha not in tips.values() or sha in main_tips:',
      'if sha not in tips.values():', "guard", "push-new-branch: a new branch at main's tip passes"),
