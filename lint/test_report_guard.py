@@ -1262,6 +1262,14 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict(reply, [REVIEWER_HAIKU], earlier=[REVIEWER_SONNET], compacted=True)
         assert_no_model_block(self, out)
 
+    # Roadmap step `report-model-across-compact`: a wrong model named after a compaction still blocks.
+    def test_dm_red_wrong_model_after_compaction_blocks(self):
+        reply = ("> **Done** BUILT the guard, PR #5 (reviewer opus, reviewer haiku)\n"
+                 "> **Deviations**\n> - Recovered: none\n> - Handoff gave: none\n"
+                 "> **Next** Unstarted: none")
+        out = self.verdict(reply, [REVIEWER_HAIKU], earlier=[REVIEWER_SONNET], compacted=True)
+        assert_blocks(self, out, "matches no reviewer spawn")
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
