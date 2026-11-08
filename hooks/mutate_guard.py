@@ -2865,33 +2865,61 @@ def _loads_module(source: str, stem: str) -> bool:
     return profile is not None and (stem in profile[0] or stem + ".py" in profile[1])
 
 
-# Whole-tree scan suites: lane lint picks each for a diff that touches a file it scans (debt lane-lint-tree-scans-unpicked).
+# Suites that scan a kind of file: lane lint picks each for a diff that touches a file it scans.
 # These three read every tracked file (grep, ls-files, the added lines of any file), so any changed path picks them.
 # They expose no scan scope to read, so this table is the one home of that fact.
 TREE_SCAN_SUITES = ("lint/test_retired_names.py", "lint/test_retired_repos.py", "lint/test_check_glossary.py")
 # This one reads .py and .js under named folders. It exposes its scope as `product_kind`, which is called, never copied.
 SPAWN_SCAN_SUITE = "lint/test_no_window_spawn.py"
+# This one walks every test file (`TEST_FILE`, read from the suite) and checks the workflow files in the workflows folder.
+SPLIT_SCAN_SUITE = "lint/test_windows_split.py"
+WORKFLOW_FOLDER = ".github/workflows/"
+
+
+def _load_suite(suite: str):
+    """The suite file `suite` loaded as a module by its path, or None when it cannot be loaded."""
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location("_scan_scope_" + os.path.basename(suite)[:-3], suite)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:  # noqa: BLE001  a suite that fails to load must not hide itself from lane lint
+        return None
 
 
 def _scans_any_file(suite: str, paths) -> bool:
     """True when the suite `suite` (test_no_window_spawn.py) scans any of `paths`, by its own `product_kind` (PY_DIRS,
     JS_DIRS, test files apart). It loads the suite once. A suite that cannot be loaded reads True: an over-pick costs a
     run, a miss costs a batch cycle."""
-    import importlib.util
-    try:
-        spec = importlib.util.spec_from_file_location("_spawn_scan_scope", suite)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        def head(rel):
-            try:
-                with open(rel, "rb") as handle:
-                    return handle.read(200)
-            except OSError:
-                return b""
-        return any(module.product_kind(path, head) is not None for path in paths)
-    except Exception:  # noqa: BLE001  a suite that fails to load must not hide itself from lane lint
+    module = _load_suite(suite)
+    if module is None:
         return True
+
+    def head(rel):
+        try:
+            with open(rel, "rb") as handle:
+                return handle.read(200)
+        except OSError:
+            return b""
+    try:
+        return any(module.product_kind(path, head) is not None for path in paths)
+    except Exception:  # noqa: BLE001  same fail-safe as a suite that does not load
+        return True
+
+
+def _walks_any_file(suite: str, paths) -> bool:
+    """True when the suite `suite` (test_windows_split.py) walks any of `paths`: a test file by its own `TEST_FILE` outside
+    a hidden folder, or a file in the workflows folder. A suite that cannot be loaded reads True."""
+    module = _load_suite(suite)
+    pattern = getattr(module, "TEST_FILE", None)
+    if pattern is None:
+        return True
+    for path in paths:
+        parts = path.split("/")
+        if path.startswith(WORKFLOW_FOLDER) or (pattern.match(parts[-1]) and not any(p.startswith(".") for p in parts[:-1])):
+            return True
+    return False
 
 
 def _tracked_files():
@@ -2912,7 +2940,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     imports (`import`, `from`, a literal `import_module`) to tracked `.py` files, each file once, so a cycle ends. A stem or
     basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
     whatever the number of paths or suites. With `chain` True it also picks each whole-tree scan suite for a diff of a file
-    it scans (TREE_SCAN_SUITES, SPAWN_SCAN_SUITE)."""
+    it scans (TREE_SCAN_SUITES, SPAWN_SCAN_SUITE, SPLIT_SCAN_SUITE)."""
     import re
     listed = dict(REPORT_TARGETS)
     names = set()
@@ -2970,6 +2998,8 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
         names.update(suite for suite in TREE_SCAN_SUITES if suite in on_disk)
         if SPAWN_SCAN_SUITE in on_disk and _scans_any_file(SPAWN_SCAN_SUITE, scan):
             names.add(SPAWN_SCAN_SUITE)
+        if SPLIT_SCAN_SUITE in on_disk and _walks_any_file(SPLIT_SCAN_SUITE, scan):
+            names.add(SPLIT_SCAN_SUITE)
     return names
 
 
