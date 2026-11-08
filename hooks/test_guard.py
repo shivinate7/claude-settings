@@ -25818,7 +25818,7 @@ def cs_override_call(config, session, seconds, tool="Edit", tool_input=None, cwd
 # not a coordinator's, and on a coordinator's call that names no repo path. It never opens lint/layout.json or the config
 # folder's CLAUDE.md there: those are read to judge a repo path, so they are not read to find that there is none. The
 # probe's `opens` seam counts the opens (LB_PROBE). The rule's own opens are the call's less those of the same call with
-# CLAUDE_CODE_REMOTE "false", where the rule leaves at its first gate and no other rule reads that variable; other rules'
+# CLAUDE_CODE_REMOTE "false", where the rule leaves at its first condition and no other rule reads that variable; other rules'
 # own opens (the session record, say) cancel out. The layout and the config CLAUDE.md are also asserted unopened among
 # the call's whole opens, so a rule that read them before its gates cannot hide in the difference. The control row
 # shows the spy sees a read, so a pass is no blind spy's.
@@ -25909,7 +25909,7 @@ for _cs_timed in (False, True):
         "a one-act override lets through an Edit of product code once, then it is refused again"),
         ov_act_check(CS_OVERRIDE_ACT, _cs_timed)))
 CS_COST_CODE = {"file_path": CS_CODE, "content": "x"}
-for _who, _role, _call in (   # a call that is not a coordinator's: the same Write of product code, one gate shut each time
+for _who, _role, _call in (   # a call that is not a coordinator's: the same Write of product code, one condition unmet each time
         ("no role file", "none", {}),
         ("another session's role file", "other-session", {}),
         ("a lane role file", "lane", {}),
