@@ -223,10 +223,15 @@ args = sys.argv[1:]
 with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(args) + "\n")
 text = " ".join(args)
-route = next((a.split("?", 1)[0] for a in args if re.match(r"repos/[^/?]+/[^/?]+/pulls(\?|$)", a)), None)
-if args[:1] != ["api"] or route is None:
-    sys.stderr.write("fake gh: only `gh api repos/<owner>/<repo>/pulls` is answered; got %r\n" % (args,))
+path = next((a.split("?", 1)[0] for a in args if re.match(r"repos/[^/?]+/[^/?]+(/pulls)?(\?|$)", a)), None)
+if args[:1] != ["api"] or path is None:
+    sys.stderr.write("fake gh: only `gh api repos/<owner>/<repo>[/pulls]` is answered; got %r\n" % (args,))
     sys.exit(1)
+if not path.endswith("/pulls"):
+    # The repo read (`gh api repos/{owner}/{repo}`): the default branch, as GitHub answers it.
+    sys.stdout.write(json.dumps({"full_name": "owner/fixture", "default_branch": "main"}))
+    sys.exit(0)
+route = path
 
 
 def param(name, default):
@@ -253,11 +258,12 @@ else:
 '''
 
 
-def rest_pull(number, branch, head, base="main", merged=False, closed=False, draft=False):
-    """A pull as GitHub's list route returns it: state, merged_at (the list has no merged flag), head and base refs, draft."""
+def rest_pull(number, branch, head, base="main", merged=False, closed=False, draft=False, body=None):
+    """A pull as GitHub's list route returns it: state, merged_at (the list has no merged flag), head and base refs, draft,
+    and the body, which GitHub sends as null when the description is empty."""
     done = merged or closed
     return {"number": number, "title": "lane " + branch, "state": "closed" if done else "open", "draft": draft,
-            "merged_at": "2026-11-07T12:00:00Z" if merged else None,
+            "merged_at": "2026-11-07T12:00:00Z" if merged else None, "body": body,
             "head": {"ref": branch, "sha": head}, "base": {"ref": base}}
 
 
@@ -279,7 +285,7 @@ class IdleLanesFromRawFiles(unittest.TestCase):
                                                             "c4": dict(roadmap.STEP, order=4, status="done"),
                                                             "c5": dict(roadmap.STEP, order=5, status="done")})
         roadmap.git(self.repo, "remote", "add", "origin", "git@github.com:owner/fixture.git")
-        off_main = roadmap.git(self.repo, "rev-parse", "HEAD").strip()  # the record branch: its commits never reach main
+        self.off = roadmap.git(self.repo, "rev-parse", "HEAD").strip()  # the record branch: its commits never reach main
         self.bin = os.path.join(self.tmp.name, "bin")
         os.makedirs(self.bin)
         gh = os.path.join(self.bin, "gh")
@@ -287,8 +293,8 @@ class IdleLanesFromRawFiles(unittest.TestCase):
         os.chmod(gh, 0o755)
         self.gh_log = os.path.join(self.tmp.name, "gh.log")
         self.gh_pulls = os.path.join(self.tmp.name, "pulls.json")
-        pathlib.Path(self.gh_pulls).write_text(json.dumps([rest_pull(91, "lane/c3", off_main, merged=True),
-                                                           rest_pull(92, "lane/c4", off_main, draft=False)]), encoding="utf-8")
+        pathlib.Path(self.gh_pulls).write_text(json.dumps([rest_pull(91, "lane/c3", self.off, merged=True),
+                                                           rest_pull(92, "lane/c4", self.off, draft=False)]), encoding="utf-8")
         self.items = os.path.join(self.tmp.name, "items.json")
         pathlib.Path(self.items).write_text(json.dumps([{"id": "item-c5", "data": {
             "n": 1, "status": "open", "home": "step c5", "lane": "c5"}}]), encoding="utf-8")
@@ -322,9 +328,20 @@ class IdleLanesFromRawFiles(unittest.TestCase):
         code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
         self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
                          "not listed from --sessions and --items (exit %d): stderr %r" % (code, err))
-        calls = self.gh_calls()
-        self.assertTrue(calls, "gh was never called, so the pulls did not come from the fetch")
-        self.assertLessEqual(len(calls), 2, "the pull read made %d gh calls: one per state, one page each, is the cost to hold" % len(calls))
+        pulls_calls = [call for call in self.gh_calls() if any("/pulls" in arg for arg in call)]
+        self.assertTrue(pulls_calls, "gh was never asked for the pulls, so they did not come from the fetch")
+        self.assertLessEqual(len(pulls_calls), 2, "the pull read made %d gh calls for the pulls: one per state, one page each, is the cost to hold" % len(pulls_calls))
+
+    def test_sessions_and_items_files_list_a_lane_whose_only_pull_is_on_an_r2_head_that_names_it(self):
+        # The lane's only pull is on c3-r2, outside lane_head_refs. Its body names the session, so the pull is in the lane's
+        # PR set, and the merge into main lands the doing step. session_b stays held by its open pull.
+        pathlib.Path(self.gh_pulls).write_text(json.dumps([
+            rest_pull(92, "lane/c4", self.off, draft=False),
+            rest_pull(93, "c3-r2", self.off, merged=True, body="Follow-up of https://claude.ai/code/session_a")]), encoding="utf-8")
+        self.write_sessions(raw_page(self.rows, more=False))
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
+                         "a pull on an -r2 head whose body names the session is not read through --sessions (exit %d): stderr %r" % (code, err))
 
     def test_sessions_as_a_list_of_pages_lists_a_lane_found_on_the_later_page(self):
         first, later = self.rows[1:], self.rows[:1]  # session_a, the listed lane, is on the second page
