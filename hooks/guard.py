@@ -2565,9 +2565,8 @@ def message_unchecked_note(unchecked: list) -> None:
     """The allow that names each ref no answer was read for. It carries no git or gh error text, and no log is written."""
     note = ("message-ref-missing: could not check " + ", ".join(unchecked)
             + " (no clear answer from the remote); the message was sent unchecked.")
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse", "permissionDecision": "allow",
-        "permissionDecisionReason": note, "additionalContext": note}}))
+    # No permissionDecision: an explicit allow would skip a permission prompt the main session shows.
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": note}}))
 
 
 def judge_stop(payload) -> None:
