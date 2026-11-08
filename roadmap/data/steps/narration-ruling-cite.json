@@ -1,0 +1,11 @@
+{
+  "title": "The comment-narration check passes a ruling cite with its time",
+  "phase": "guards",
+  "status": "todo",
+  "order": 669,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "lint/check_comment_narration.py fails an added docstring line that holds a ruling's time, such as \"Owner, 2026-11-01 16:30 CST\". Rule outcomes-grant-covers-named-act asks a re-pointed test to cite its ruling with its time, so no form passes both (lane record-claim-cites-code (session_013NEJL33wvLc6xtDnBTJDAw, #1893), relayed by the coordinator 08:17 CST Nov 8).",
+  "note": "Sibling false alarm of step narration-check-rule-quotes (a \"round N\" that names a rule; ready, lane session_013NEJL37UFXTQuAcox7s8fD); same check, one home. Done check: a red test where a ruling cite with its time passes, and a history narration with a date still fails. A check's verdict changes, so this is a build lane. Filed by triage 08:17 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:17:00-06:00"
+}
