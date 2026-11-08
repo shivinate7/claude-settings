@@ -21958,11 +21958,12 @@ _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x 
 
 # Replays of three calls the live guard refused with other-checkout (guard log, 2026-11-08 12:25:41,
 # 12:26:07 and 12:26:18 UTC, this session). Each is the command as it was typed, judged for this
-# fixture's agent from its home. The first and third hold `cd ..` and `> ../f` only as heredoc body text.
-# The second holds them as quoted arguments after a heredoc. A heredoc body is text, so a refusal that
-# comes from that text is a false alarm, and each replay expects allow. The controls isolate the trigger:
-# the second call's quoted arguments with no heredoc before them, a heredoc with no file redirect before
-# its marker, and the same file-redirected heredoc with its target outside the clone.
+# fixture's agent from its home. The second holds `cd ..` and `> ../f` as quoted arguments after a heredoc,
+# and expects allow. The first writes a python script with a heredoc and runs it as the script, so python
+# executes the body and main's scan of it holds: it expects deny. The third writes a file that python
+# reads as a data argument (judge.py's listing), not as its script, and expects allow. The controls isolate
+# the trigger: the second call's quoted arguments with no heredoc before them, a heredoc with no file redirect
+# before its marker, and the same file-redirected heredoc with its target outside the clone.
 RELESC_REPLAY_1 = r"""SP=/tmp/claude-0/-home-user-claude-settings/788c10d3-3c3c-55c6-b5bc-31af1756bcc3/scratchpad && rm -rf "$SP/probe" && mkdir -p "$SP/probe/P" && cd "$SP/probe/P" && git init -q && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m init && git worktree add -q "$SP/probe/P/.claude/worktrees/agent-zz" -b wt-zz && cat > "$SP/probe/run.py" <<'EOF'
 import json, subprocess, sys
 sp, guard = sys.argv[1], sys.argv[2]
@@ -22007,8 +22008,9 @@ mkdir ../tmp
 EOF
 python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581/hooks/guard.py /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581 ab8bdbda8fd686581 "$SP/probe/cmds.txt"
 """
-_relesc_add("other-checkout: heredoc replay: the first refused call, a heredoc body that holds cd .. and > ../f, is allowed",
-            "allow", RELESC_REPLAY_1, "home")
+_relesc_add("other-checkout: heredoc replay: the first refused call, a python script that a heredoc writes and "
+            "python runs as its script, holds cd .. and > ../f, is refused",
+            "deny", RELESC_REPLAY_1, "home", rule="other-checkout")
 _relesc_add("other-checkout: heredoc replay: the second refused call, its quoted arguments after a heredoc, are allowed",
             "allow", RELESC_REPLAY_2, "home")
 _relesc_add("other-checkout: heredoc replay: the third refused call, a file-redirected heredoc of cd .. and > ../f, is allowed",
@@ -22040,6 +22042,32 @@ _relesc_add("other-checkout: heredoc replay bisect3: python3 judge.py with a quo
             "allow", 'python3 judge.py "echo x > ../f"', "home")
 _relesc_add("other-checkout: heredoc replay bisect3: python3 judge.py with a real redirect to ../f is refused",
             "deny", "python3 judge.py x > ../f", "home", rule="other-checkout")
+# A Python program that runs `cd ..` or `> ../f` in its code is scanned, however python reaches it: a glued
+# -c argument, a heredoc fed to python, or a heredoc written to a file that python runs as its script. A file
+# that python only reads as data is not scanned. The split pair holds that line: the same heredoc is data for
+# judge.py, and code for `python3 cmds.txt`. The spaced -c row is a control that main already refuses.
+_relesc_add("other-checkout: heredoc replay F1: python3 -c with its code glued to the flag, echo x > ../f "
+            "in the code, is refused", "deny", r'''python3 -c"import os; os.system('echo x > ../f')"''',
+            "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay F1: node -e with its code glued to the flag, echo x > ../f "
+            "in the code, is refused", "deny", r'''node -e"require('child_process').execSync('echo x > ../f')"''',
+            "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay control: python3 -c with its code in a spaced quoted argument, "
+            "echo x > ../f in the code, is refused", "deny", r'''python3 -c "import os; os.system('echo x > ../f')"''',
+            "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay F2: a heredoc fed to python3, its body os.system('echo x > ../f'), "
+            "is refused", "deny", "python3 <<'EOF'\nimport os\nos.system('echo x > ../f')\nEOF",
+            "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay F2: a heredoc written to run.py, then python3 run.py, whose body "
+            "is os.system('echo x > ../f'), is refused",
+            "deny", "cat > run.py <<'EOF'\nimport os\nos.system('echo x > ../f')\nEOF\npython3 run.py",
+            "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay split: a heredoc written to cmds.txt, body echo x > ../f, then "
+            "python3 judge.py cmds.txt, is allowed",
+            "allow", "cat > cmds.txt <<'EOF'\necho x > ../f\nEOF\npython3 judge.py cmds.txt", "home")
+_relesc_add("other-checkout: heredoc replay split: the same heredoc written to cmds.txt, then python3 cmds.txt, "
+            "which runs it as the script, is refused",
+            "deny", "cat > cmds.txt <<'EOF'\necho x > ../f\nEOF\npython3 cmds.txt", "home", rule="other-checkout")
 
 
 # The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes
