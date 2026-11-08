@@ -229,6 +229,10 @@ Other tools, in `judge` order:
                        the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
                        passes. The deny reason names the tag to add.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
+  lane-start-settings  deny. A `create_session` call with a lane tag (as for lane-effort-pin) whose input has no
+                       `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
+                       stripped, counts as missing. A call with no lane tag passes. The deny reason names both
+                       fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -2560,6 +2564,12 @@ LANE_REPO_TAG_REASON = (
     "A lane session carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
     "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
 )
+# A lane start names the model and the repo it works in. The reason names both fields and says why.
+LANE_START_SETTINGS_REASON = (
+    "A lane session's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
+    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
+    "`model` (the model that row names) and `source_url` (the repo) on create_session."
+)
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
@@ -2724,6 +2734,22 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
         if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
             return "", None
     return ", ".join(str(t) for t in tags), repo
+
+
+def lane_start_settings_hit(tool: str, tool_input) -> str:
+    """The settings a lane `create_session` call leaves out, as "model", "source_url" or "model, source_url", or "".
+    A lane tag is judged as in lane_effort_hit. A value counts as missing when it is not text or is empty once
+    stripped. A call with no lane tag is not judged."""
+    tags = tool_input.get("tags")
+    if tool != CREATE_SESSION_TOOL:
+        return ""
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+        return ""
+    missing = [k for k in ("model", "source_url")
+               if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
+    return ", ".join(missing)
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -5323,6 +5349,12 @@ def judge(payload) -> None:
     lane_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
     if lane_tags:
         refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), lane_tags)
+
+    # 9b2c. The lane start settings: a lane session names its model and its source_url. After the repo tag. An
+    # override lifts it.
+    lane_missing = lane_start_settings_hit(tool, tool_input)
+    if lane_missing:
+        refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
