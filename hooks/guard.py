@@ -854,7 +854,9 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is not True:
         return target
     status, home, _ = agent_worktree_home(payload, drive_form_cwd(cwd))
-    if status == "unknown":   # a gone cwd reads unknown: ask again from the readable repo
+    if status == "unknown" and (os.path.normcase(os.path.normpath(where))
+                                != os.path.normcase(os.path.normpath(drive_form_cwd(cwd)))):
+        # a gone cwd reads unknown: ask again from the readable repo, unless it is the same folder
         status, home, _ = agent_worktree_home(payload, where)
     if status == "none" and isinstance(payload, dict) and payload.get("agent_type"):
         status = "no-record"   # an agent_type with no agent_id is an agent with no record

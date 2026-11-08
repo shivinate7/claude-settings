@@ -20,12 +20,13 @@ Named limits, each a form Claude rarely writes:
 - A `git worktree add` inside `bash -c`, `sh -c`, `eval` or `powershell -c` passes: the guard leaves those strings unparsed, a known gap.
 - A repo named only by `--git-dir`, and a target that holds a variable (`$HOME/wt`), read as unknown and pass.
 - A hand-typed read-only checkout (a review or a "before" image) is refused. EnterWorktree serves that need too.
+- A payload with `agent_type` and no `agent_id` is read as an agent with no record, as `guard.py` `judge` and decision `a-kill-by-pid-needs-an-owned-pid` do. Whether a main session started with `--agent` carries `agent_type` is unmeasured (hooks/guard_core.py). If it does, such a session's hand-made add inside the folder is refused, and EnterWorktree is the remedy.
 
 Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only an agent's call. The Agent prompt hook in `settings.json` judges brief contents, and its refusal names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded. The next refusal's layer and message are still owed: the refusal text asks the session to report both.
 
 Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two agents wrote into the main clone. Landed 2026-10-26.
 
-Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call. Files written: none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads.
+Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call. A call from an agent adds at most two home-record reads, the second only when the first reads unknown and the folder the shell stands in differs from the cwd. Files written: none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads.
 
 ### A fix round
 
