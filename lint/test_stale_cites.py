@@ -3913,21 +3913,57 @@ def window_holds(source, first, last, name):
     return any(holds_word(lines[n - 1], name) for n in range(max(1, first - 3), min(len(lines), last + 3) + 1))
 
 
+def name_stores(source, name):
+    """Lines where `name` is stored as a plain name at any depth, a local variable included. Read with ast, never run."""
+    return sorted(node.lineno for node in ast.walk(ast.parse(source))
+                  if isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Store))
+
+
+def attr_stores(source, attr):
+    """Lines where `attr` is stored as an attribute, `obj.attr = ...`, at any depth. Read with ast, never run."""
+    return sorted(node.lineno for node in ast.walk(ast.parse(source))
+                  if isinstance(node, ast.Attribute) and node.attr == attr and isinstance(node.ctx, ast.Store))
+
+
+def assign_spans(source, name):
+    """(first, last) line of each module-level assignment that stores `name`, the whole statement. Read with ast, never run."""
+    return [(node.lineno, node.end_lineno) for node in ast.parse(source).body
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)]
+
+
 FAR = "lint/far.py"  # the .py the anchor cases cite
 FAR_TEXT = numbered_source(44, {1: "def check_it(lane):", 2: "    return lane", 33: "def other(lane):", 34: "    return lane"})
-TARGET_TEXT = numbered_source(60, {1: "def target(rng):", 2: "    return rng", 9: "def walker(rng):",
+TARGET_TEXT = numbered_source(60, {1: "def find_target(rng):", 2: "    return rng", 9: "def walker(rng):",
                                    10: "    for node in ast.walk(rng):", 11: "        yield node",
-                                   33: "def other(lane):", 34: "    return lane"})  # target's def at the top, a walk at 10
+                                   33: "def other(lane):", 34: "    return lane"})  # find_target's def at the top, a walk at 10
+# The fixtures of the rule cases: a name that looks like code is judged, a plain word is not, a dotted name is judged by its last part.
+CACHE_TEXT = numbered_source(44, {1: "def read_head(lane):", 2: "    return lane", 20: "class Cache:",
+                                  21: "    def fill(self):", 22: "        self.head_texts = {}",
+                                  40: "def build(lane):", 41: "    rng = lane", 42: "    return rng"})  # rng a local, far from 22
+LOCAL_TEXT = numbered_source(44, {1: "def read_it(lane):", 2: "    return lane", 40: "def build(lane):",
+                                  41: "    tmp_value = lane * 2", 42: "    return tmp_value"})  # tmp_value a local, far from 2
+ROWS_TEXT = numbered_source(60, {1: "ROWS_TABLE = [", **{n: "    ('row', %d)," % n for n in range(2, 30)}, 30: "]"})
+PLAIN_TEXT = numbered_source(44, {1: "def main(lane):", 2: "    return lane", 30: "base = 'root'", 35: "rng = make_rng()",
+                                  36: "md = Markdown()", 40: "def run_checks(lane):", 41: "    return lane"})
+FILE_TEXT = numbered_source(44, {1: "def read_it(lane):", 2: "    return lane", 30: "CLAUDE = 'root'", 31: "md = 'markdown'",
+                                 32: "settings = 'json'", 33: "x = 'yaml'"})
+DOTTED_TEXT = numbered_source(60, {1: "def read_it(lane):", 2: "    return lane", 40: "class Cls:",
+                                   41: "    def do_thing(self):", **{n: "        step = %d" % n for n in range(42, 50)},
+                                   50: "        return 1"})  # do_thing's span is 41 to 50, so line 48 is past its window
+JUDGE_TEXT = numbered_source(44, {1: "def read_it(lane):", 2: "    return lane", 40: "def judge(lane):", 41: "    return lane"})
 
 
 class AnchorNameTests(StaleCase):
     """STALE011, a finding. An ADDED line of governed Markdown that cites a line anchor (`file.py:N` or `file.py:N-M`, the
-    colon glued to the path) and names a symbol in the same sentence is flagged when a cite fails. A backticked `name(args)`
-    names `name`. A name is PLACED when it holds at some anchored cite of its sentence: a def or class span of the name
-    overlaps N-3..M+3, or a line of N-3..M+3 holds it as a whole word. A cite fails when some name in its sentence is bound
-    by the cite's .py at head, no such name holds at this cite, and at least one such name is placed at no cite of the
-    sentence. A cite whose names all hold at other cites is not judged. `--tree` judges every line, and an anchor past the
-    file's end is STALE004 only."""
+    colon glued to the path) and names a symbol in the same sentence is flagged when a cite fails. A name is judged only when
+    it looks like code: it holds an underscore, or has an uppercase letter after its first character, or is written as a call
+    (`name()`, `name(args)`). A plain lowercase word is no name, backticked or not. A dotted `a.b.c` is judged by its last part
+    only. A span that is a file with a non-code extension (`CLAUDE.md`, `settings.json`) offers no name. A name is bound only
+    by a def or class at any depth, or a module-level assignment, whose span is the whole statement; a local is no binding.
+    A name is PLACED when it holds at some anchored cite of its sentence: a binding span of it overlaps N-3..M+3, or a line of
+    N-3..M+3 holds it as a whole word. A cite fails when some judged name in its sentence is bound by the cite's .py at head,
+    no such name holds at this cite, and at least one such name is placed at no cite of the sentence. A cite whose names all
+    hold at other cites is not judged. `--tree` judges every line, and an anchor past the file's end is STALE004 only."""
 
     def test_a_name_defined_far_from_its_anchor_is_flagged_and_the_finding_names_the_cite_and_the_definition(self):
         src = numbered_source(41, {40: "def check_it(lane):", 41: "    return lane"})
@@ -4078,35 +4114,35 @@ class AnchorNameTests(StaleCase):
         self.assertEqual(len(unknown_lines(out)), 1, out)
 
     def test_a_name_cited_in_an_empty_py_is_not_judged_and_one_cited_in_a_full_size_py_is_judged_by_its_def(self):
-        big = "".join("def f%d():\n    return %d\n\n\n" % (i, i) for i in range(300))
+        big = "".join("def step_%d():\n    return %d\n\n\n" % (i, i) for i in range(300))
         rows = [
-            ("- `f299` holds at `lint/empty.py:1`.", False),  # an empty file binds no name
-            ("- `f299` holds at `lint/big.py:1100`.", True),
-            ("- `f299` holds at `lint/big.py:1198`.", False),  # inside the def's span
+            ("- `step_299` holds at `lint/empty.py:1`.", False),  # an empty file binds no name
+            ("- `step_299` holds at `lint/big.py:1100`.", True),
+            ("- `step_299` holds at `lint/big.py:1198`.", False),  # inside the def's span
         ]
         rng, _ = self.route_range(rows, extra={"lint/empty.py": "", "lint/big.py": big})
         self.assertGreater(len(big), 8192)  # scope: the full-size file
-        self.assertEqual(def_spans(big, "f299"), [(1197, 1198)])  # scope: the def sits near the end of the file
-        self.assertIsNone(binding_kind("", "f299"))  # scope: the empty file binds nothing
-        self.assertFalse(window_holds(big, 1100, 1100, "f299"))  # scope: the cited window holds another def
+        self.assertEqual(def_spans(big, "step_299"), [(1197, 1198)])  # scope: the def sits near the end of the file
+        self.assertIsNone(binding_kind("", "step_299"))  # scope: the empty file binds nothing
+        self.assertFalse(window_holds(big, 1100, 1100, "step_299"))  # scope: the cited window holds another def
         self.assert_flags(rng, [(NOTES, 2, "STALE011")])
 
     def test_a_name_bound_as_a_method_at_depth_an_assignment_or_a_class_is_judged_by_its_own_span_or_line(self):
-        src = numbered_source(40, {1: "class Holder:", 2: "    def run_all(self):", 3: "        return 1", 30: "LIMIT_STEPS = 4"})
+        src = numbered_source(40, {1: "class RunHolder:", 2: "    def run_all(self):", 3: "        return 1", 30: "LIMIT_STEPS = 4"})
         rows = [
             ("- `run_all()` holds at `lint/far.py:20`.", True),  # a method at depth two, far from the cite
             ("- `run_all()` holds at `lint/far.py:3`.", False),  # inside the method's span
             ("- `LIMIT_STEPS` is set at `lint/far.py:20`.", True),  # an assigned name, far from the cite
             ("- `LIMIT_STEPS` is set at `lint/far.py:30`.", False),  # on the assignment's own line
-            ("- `Holder` holds at `lint/far.py:20`.", True),  # a class, far from the cite
-            ("- `Holder` holds at `lint/far.py:5`.", False),  # inside the class span
+            ("- `RunHolder` holds at `lint/far.py:20`.", True),  # a class, far from the cite
+            ("- `RunHolder` holds at `lint/far.py:5`.", False),  # inside the class span
         ]
         rng, _ = self.route_range(rows, extra={FAR: src})
         self.assertEqual(def_spans(src, "run_all"), [(2, 3)])  # scope: the method at depth two
         self.assertIsNone(binding_kind(src, "run_all"))  # scope: no module-level binding, so only a walk finds it
-        self.assertEqual(def_spans(src, "Holder"), [(1, 3)])  # scope: the class spans lines 1 to 3
+        self.assertEqual(def_spans(src, "RunHolder"), [(1, 3)])  # scope: the class spans lines 1 to 3
         self.assertEqual(module_value(src, "LIMIT_STEPS"), 4)  # scope: the module assigns the name
-        for name in ("run_all", "LIMIT_STEPS", "Holder"):
+        for name in ("run_all", "LIMIT_STEPS", "RunHolder"):
             self.assertFalse(window_holds(src, 20, 20, name))  # scope: the far cites hold no name in their windows
         self.assert_flags(rng, [(NOTES, 1, "STALE011"), (NOTES, 3, "STALE011"), (NOTES, 5, "STALE011")])
 
@@ -4133,39 +4169,39 @@ class AnchorNameTests(StaleCase):
         self.assert_tree_flags(rng, [(NOTES, 3, "STALE011"), (NOTES, 4, "STALE004")])
 
     def test_a_name_placed_at_another_cite_of_its_sentence_does_not_flag_the_walk_cite_beside_it(self):
-        line = "The walk `ast.walk` runs at `lint/far.py:10`, and `target` is at `lint/far.py:2`."
+        line = "The walk `ast.walk` runs at `lint/far.py:10`, and `find_target` is at `lint/far.py:2`."
         rng, _ = self.route_range([(line, False)], extra={FAR: TARGET_TEXT})
-        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
-        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "target"))  # scope: the second cite holds the name
-        self.assertFalse(window_holds(TARGET_TEXT, 10, 10, "target"))  # scope: the walk cite holds no target
+        self.assertEqual(def_spans(TARGET_TEXT, "find_target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "find_target"))  # scope: the second cite holds the name
+        self.assertFalse(window_holds(TARGET_TEXT, 10, 10, "find_target"))  # scope: the walk cite holds no find_target
         self.assertTrue(holds_word(TARGET_TEXT.split("\n")[9], "walk"))  # scope: line 10 holds the walk
         self.assertIsNone(binding_kind(TARGET_TEXT, "walk"))  # scope: the file binds no name walk
         self.assert_passes(rng)
 
     def test_a_name_placed_at_no_cite_of_its_sentence_still_flags_a_cite_beside_a_walk_cite(self):
-        line = "The walk `ast.walk` runs at `lint/far.py:10`, and `target` is at `lint/far.py:20`."
+        line = "The walk `ast.walk` runs at `lint/far.py:10`, and `find_target` is at `lint/far.py:20`."
         rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
-        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
-        self.assertFalse(window_holds(TARGET_TEXT, 10, 10, "target"))  # scope: the walk cite holds no target
-        self.assertFalse(window_holds(TARGET_TEXT, 20, 20, "target"))  # scope: the other cite holds no target
+        self.assertEqual(def_spans(TARGET_TEXT, "find_target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertFalse(window_holds(TARGET_TEXT, 10, 10, "find_target"))  # scope: the walk cite holds no find_target
+        self.assertFalse(window_holds(TARGET_TEXT, 20, 20, "find_target"))  # scope: the other cite holds no find_target
         self.assert_flags(rng, [(NOTES, 1, "STALE011")])
 
     def test_a_name_between_two_cites_that_holds_at_neither_flags_both_cites_in_one_finding(self):
-        line = "The `target` step sits between `lint/far.py:20` and `lint/far.py:50`."
+        line = "The `find_target` step sits between `lint/far.py:20` and `lint/far.py:50`."
         rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
-        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
-        self.assertFalse(window_holds(TARGET_TEXT, 20, 20, "target"))  # scope: the first cite holds no target
-        self.assertFalse(window_holds(TARGET_TEXT, 50, 50, "target"))  # scope: the second cite holds no target
+        self.assertEqual(def_spans(TARGET_TEXT, "find_target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertFalse(window_holds(TARGET_TEXT, 20, 20, "find_target"))  # scope: the first cite holds no find_target
+        self.assertFalse(window_holds(TARGET_TEXT, 50, 50, "find_target"))  # scope: the second cite holds no find_target
         found = self.assert_flags(rng, [(NOTES, 1, "STALE011")])
         self.assertIn("lint/far.py:20", found[0][3])  # the finding names the first cite
         self.assertIn("lint/far.py:50", found[0][3])  # and the second
 
     def test_a_name_between_two_cites_that_holds_at_the_first_passes_for_both(self):
-        line = "The `target` step sits between `lint/far.py:2` and `lint/far.py:50`."
+        line = "The `find_target` step sits between `lint/far.py:2` and `lint/far.py:50`."
         rng, _ = self.route_range([(line, False)], extra={FAR: TARGET_TEXT})
-        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
-        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "target"))  # scope: the first cite holds the name
-        self.assertFalse(window_holds(TARGET_TEXT, 50, 50, "target"))  # scope: the second cite holds no target
+        self.assertEqual(def_spans(TARGET_TEXT, "find_target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "find_target"))  # scope: the first cite holds the name
+        self.assertFalse(window_holds(TARGET_TEXT, 50, 50, "find_target"))  # scope: the second cite holds no find_target
         self.assert_passes(rng)
 
     def test_a_lone_drifted_cite_of_a_name_that_no_cite_places_is_flagged(self):
@@ -4177,38 +4213,136 @@ class AnchorNameTests(StaleCase):
 
     def test_a_call_with_arguments_names_the_function_so_its_drifted_cite_is_flagged_and_a_correct_one_passes(self):
         rows = [
-            ("The call `target(rng)` runs at `lint/far.py:30`.", True),
-            ("The call `target(a, b)` runs at `lint/far.py:30`.", True),
-            ("The call `target(rng)` runs at `lint/far.py:2`.", False),
-            ("The call `target(a, b)` runs at `lint/far.py:2`.", False),
+            ("The call `find_target(rng)` runs at `lint/far.py:30`.", True),
+            ("The call `find_target(a, b)` runs at `lint/far.py:30`.", True),
+            ("The call `find_target(rng)` runs at `lint/far.py:2`.", False),
+            ("The call `find_target(a, b)` runs at `lint/far.py:2`.", False),
         ]
         rng, _ = self.route_range(rows, extra={FAR: TARGET_TEXT})
-        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
-        self.assertIsNone(binding_kind(TARGET_TEXT, "rng"))  # scope: the file binds no name rng, so only target can count
-        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "target"))  # scope: the drifted cite holds no target
-        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "target"))  # scope: the correct cite holds it
+        self.assertEqual(def_spans(TARGET_TEXT, "find_target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertIsNone(binding_kind(TARGET_TEXT, "rng"))  # scope: the file binds no name rng, so only find_target can count
+        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "find_target"))  # scope: the drifted cite holds no find_target
+        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "find_target"))  # scope: the correct cite holds it
         self.assert_flags(rng, [(NOTES, 1, "STALE011"), (NOTES, 2, "STALE011")])
 
     def test_a_backticked_name_with_no_arguments_is_flagged_at_a_drifted_cite(self):
-        line = "The call `target` runs at `lint/far.py:30`."
+        line = "The call `find_target` runs at `lint/far.py:30`."
         rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
-        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
-        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "target"))  # scope: the cite is drifted
+        self.assertEqual(def_spans(TARGET_TEXT, "find_target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "find_target"))  # scope: the cite is drifted
         self.assert_flags(rng, [(NOTES, 1, "STALE011")])
 
     def test_a_comment_opener_inside_a_code_span_hides_neither_the_cite_nor_the_name_on_its_line(self):
-        line = "The mark `<!--` and `target` at `lint/far.py:30` and `-->` end it."
+        line = "The mark `<!--` and `find_target` at `lint/far.py:30` and `-->` end it."
         rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
-        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
-        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "target"))  # scope: the cite is drifted
+        self.assertEqual(def_spans(TARGET_TEXT, "find_target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "find_target"))  # scope: the cite is drifted
         self.assertIsNotNone(re.search(r"<!--.*?-->", line))  # scope: a comment pattern runs from the opener to the closer
         self.assert_flags(rng, [(NOTES, 1, "STALE011")])
 
     def test_a_look_alike_of_a_comment_opener_in_a_code_span_leaves_the_cite_judged(self):
-        line = "The mark `<--` and `target` at `lint/far.py:30` and `-->` end it."
+        line = "The mark `<--` and `find_target` at `lint/far.py:30` and `-->` end it."
         rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
         self.assertIsNone(re.search(r"<!--.*?-->", line))  # scope: no comment pattern in the line
-        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "target"))  # scope: the cite is drifted
+        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "find_target"))  # scope: the cite is drifted
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+
+    def test_a_local_variable_of_the_cited_file_is_no_name_so_a_dotted_cite_whose_last_part_is_an_attribute_passes(self):
+        rng, _ = self.route_range([("The cache `rng.head_texts` is set (lint/far.py:22).", False)], extra={FAR: CACHE_TEXT})
+        self.assertIsNone(binding_kind(CACHE_TEXT, "rng"))  # scope: no module-level binding of rng
+        self.assertEqual(name_stores(CACHE_TEXT, "rng"), [41])  # scope: rng is stored only as a local, in build
+        self.assertEqual(attr_stores(CACHE_TEXT, "head_texts"), [22])  # scope: head_texts is an attribute store at line 22
+        self.assertEqual(def_spans(CACHE_TEXT, "head_texts"), [])  # scope: no def or class binds head_texts
+        self.assertFalse(window_holds(CACHE_TEXT, 22, 22, "rng"))  # scope: the cited window holds no rng
+        self.assert_passes(rng)
+
+    def test_a_name_stored_only_as_a_local_variable_is_not_judged_at_a_cite_far_from_it(self):
+        rng, _ = self.route_range([("The value `tmp_value` is set at lint/far.py:2.", False)], extra={FAR: LOCAL_TEXT})
+        self.assertIsNone(binding_kind(LOCAL_TEXT, "tmp_value"))  # scope: no module-level binding of tmp_value
+        self.assertEqual(name_stores(LOCAL_TEXT, "tmp_value"), [41])  # scope: tmp_value is a local of build, at line 41
+        self.assertEqual(def_spans(LOCAL_TEXT, "build"), [(40, 42)])  # scope: build spans lines 40 to 42
+        self.assertFalse(window_holds(LOCAL_TEXT, 2, 2, "tmp_value"))  # scope: the cite at line 2 holds no tmp_value
+        self.assert_passes(rng)
+
+    def test_a_module_level_assignment_is_bound_by_its_whole_statement_so_a_cite_inside_it_passes(self):
+        rng, _ = self.route_range([("`ROWS_TABLE` is at lint/far.py:22.", False)], extra={FAR: ROWS_TEXT})
+        self.assertEqual(assign_spans(ROWS_TEXT, "ROWS_TABLE"), [(1, 30)])  # scope: the assignment spans lines 1 to 30
+        self.assertEqual(binding_kind(ROWS_TEXT, "ROWS_TABLE"), "assign")  # scope: a module-level assignment
+        self.assertFalse(window_holds(ROWS_TEXT, 22, 22, "ROWS_TABLE"))  # scope: the cite at 22 holds the name nowhere
+        self.assert_passes(rng)
+
+    def test_a_module_level_assignment_cited_past_its_whole_statement_is_still_flagged(self):
+        rng, _ = self.route_range([("`ROWS_TABLE` is at lint/far.py:50.", True)], extra={FAR: ROWS_TEXT})
+        self.assertEqual(assign_spans(ROWS_TEXT, "ROWS_TABLE"), [(1, 30)])  # scope: the assignment spans lines 1 to 30
+        self.assertFalse(window_holds(ROWS_TEXT, 50, 50, "ROWS_TABLE"))  # scope: the cite at 50 is past the statement
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+
+    def test_a_plain_lowercase_word_is_not_judged_backticked_or_not_though_a_def_or_assignment_binds_it_far_away(self):
+        rows = [
+            ("`main` runs the checks (lint/far.py:20).", False),
+            ("`base` is the root (lint/far.py:20).", False),
+            ("`rng` is made (lint/far.py:20).", False),
+            ("`md` is the renderer (lint/far.py:20).", False),
+            ("The base is the root (lint/far.py:20).", False),  # bare, with no underscore: no name
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: PLAIN_TEXT})
+        self.assertEqual(def_spans(PLAIN_TEXT, "main"), [(1, 2)])  # scope: main is a def at line 1
+        self.assertEqual([binding_kind(PLAIN_TEXT, name) for name in ("base", "rng", "md")], ["assign"] * 3)  # scope: module assignments
+        for name in ("main", "base", "rng", "md"):
+            self.assertFalse(window_holds(PLAIN_TEXT, 20, 20, name))  # scope: the cited window holds no such name
+        self.assert_passes(rng)
+
+    def test_a_code_looking_name_bound_far_from_its_cite_is_still_flagged_as_the_control(self):
+        rng, _ = self.route_range([("`run_checks` runs the checks (lint/far.py:20).", True)], extra={FAR: PLAIN_TEXT})
+        self.assertEqual(def_spans(PLAIN_TEXT, "run_checks"), [(40, 41)])  # scope: the def is at lines 40 and 41
+        self.assertFalse(window_holds(PLAIN_TEXT, 20, 20, "run_checks"))  # scope: the cited window holds no run_checks
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+
+    def test_a_file_name_with_a_non_code_extension_offers_no_name_though_its_parts_are_bound(self):
+        rows = [
+            ("The file `CLAUDE.md` is read at lint/far.py:2.", False),
+            ("The file `settings.json` is read at lint/far.py:2.", False),
+            ("The file `x.yml` is read at lint/far.py:2.", False),
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: FILE_TEXT})
+        self.assertEqual([binding_kind(FILE_TEXT, name) for name in ("CLAUDE", "md", "settings", "x")], ["assign"] * 4)  # scope
+        self.assertIsNotNone(re.search("[A-Z]", "CLAUDE"[1:]))  # scope: CLAUDE has an uppercase letter after its first
+        for name in ("CLAUDE", "md", "settings", "x"):
+            self.assertFalse(window_holds(FILE_TEXT, 2, 2, name))  # scope: the cited window holds none of them
+        self.assert_passes(rng)
+
+    def test_a_dotted_name_is_judged_by_its_last_part_only_so_an_unbound_last_part_passes(self):
+        rows = [
+            ("`Cls.step_it` is at `lint/far.py:20`.", False),  # Cls is bound far away, step_it is bound nowhere
+            ("`Cls.run` is at `lint/far.py:20`.", False),  # a plain last part is no name
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: DOTTED_TEXT})
+        self.assertEqual(binding_kind(DOTTED_TEXT, "Cls"), "def")  # scope: Cls is a class, far from line 20
+        self.assertIsNone(binding_kind(DOTTED_TEXT, "step_it"))  # scope: nothing binds step_it
+        self.assertIsNone(binding_kind(DOTTED_TEXT, "run"))  # scope: nothing binds run
+        self.assertFalse(window_holds(DOTTED_TEXT, 20, 20, "Cls"))  # scope: the cited window holds no Cls
+        self.assert_passes(rng)
+
+    def test_a_dotted_name_whose_last_part_is_bound_far_from_its_cite_is_flagged_and_at_its_def_passes(self):
+        rows = [
+            ("`Cls.do_thing` is at `lint/far.py:20`.", True),  # do_thing is far from line 20
+            ("`Cls.do_thing` is at `lint/far.py:48`.", False),  # inside do_thing's def, past its window
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: DOTTED_TEXT})
+        self.assertEqual(def_spans(DOTTED_TEXT, "do_thing"), [(41, 50)])  # scope: the def spans lines 41 to 50
+        self.assertFalse(window_holds(DOTTED_TEXT, 20, 20, "do_thing"))  # scope: the far cite holds no do_thing
+        self.assertFalse(window_holds(DOTTED_TEXT, 48, 48, "do_thing"))  # scope: line 48 holds the name only through its def span
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+
+    def test_a_call_form_is_judged_even_for_a_plain_word_so_its_drifted_cite_is_flagged(self):
+        rows = [
+            ("The call `judge()` is at `lint/far.py:20`.", True),
+            ("The call `judge()` is at `lint/far.py:41`.", False),
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: JUDGE_TEXT})
+        self.assertIsNotNone(re.fullmatch("[a-z]+", "judge"))  # scope: judge is a plain lowercase word
+        self.assertEqual(def_spans(JUDGE_TEXT, "judge"), [(40, 41)])  # scope: the def is at lines 40 and 41
+        self.assertFalse(window_holds(JUDGE_TEXT, 20, 20, "judge"))  # scope: the drifted cite holds no judge
         self.assert_flags(rng, [(NOTES, 1, "STALE011")])
 
 
