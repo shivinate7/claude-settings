@@ -5016,14 +5016,15 @@ def judge(payload) -> None:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
     # A review record posted through the MCP comment tool (rule pr-review-record). One pull request read per marked post.
+    # record_hit and edit_hit stay apart from the walrus `hit` below: the rule audit reads a name bound at run time as no reason.
     if tool == REVIEW_COMMENT_TOOL:
         owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "issue_number"))
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
         number = str(number) if isinstance(number, (int, str)) and not isinstance(number, bool) else ""
         if number.isdigit():
-            hit = review_record_hit([tool_input.get("body")], repo, number, cwd)
-            if hit:
-                refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+            record_hit = review_record_hit([tool_input.get("body")], repo, number, cwd)
+            if record_hit:
+                refuse(tool, "deny", "pr-review-record", record_hit[1], record_hit[0])
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
 
@@ -5032,9 +5033,9 @@ def judge(payload) -> None:
         owner, name, comment_id = (tool_input.get(k) for k in ("owner", "repo", "comment_id"))
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
         if isinstance(comment_id, int) and not isinstance(comment_id, bool):
-            hit = review_record_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
-            if hit:
-                refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+            edit_hit = review_record_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
+            if edit_hit:
+                refuse(tool, "deny", "pr-review-record", edit_hit[1], edit_hit[0])
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no comment id")
 
