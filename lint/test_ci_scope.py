@@ -580,6 +580,14 @@ class UnresolvedLoads(unittest.TestCase):
                                'SPEC = importlib.util.spec_from_file_location("deep", "hooks/{}.py".format(os.environ["X"]))\n',
                                "spec_from_file_location")
 
+    # A readable by-path load whose path names no file in the repo's load set, here a typo. The reader read the path, then dropped it
+    # when it kept only the files in the set. Named failure: a by-path load to hooks/nope.py passes with no file, so the file the
+    # author meant gets no merge flag.
+    def test_a_by_path_load_to_a_missing_file_fails_loud(self):
+        self.assert_fails_loud('import importlib.util\n'
+                               'SPEC = importlib.util.spec_from_file_location("nope", "hooks/nope.py")\n',
+                               "spec_from_file_location")
+
     # An allow-listed constant that reads to nothing. The allow list names the constant that holds the path, so the reader must
     # fail on an empty read of it, not pass the load with no file. Named failure: an allow-listed load passes with no file added.
     def test_an_allow_listed_constant_that_reads_to_nothing_fails_loud(self):
