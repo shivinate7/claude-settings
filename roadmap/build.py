@@ -136,35 +136,52 @@ class Staged:
     Only files directly in STEPS_PATH count, as in load(). Bases are HEAD, plus each MERGE_HEAD while a
     merge is committed. Blobs are read through one `git cat-file --batch` per call to blobs(), and a blob
     is read once per commit.
+
+    With merged=True it reads what the branch holds instead: the entries are what HEAD changed since
+    the merge base with origin/roadmap, the only base is that merge base, and the "index" is the HEAD
+    tree. A merge or rebase brings steps in without staging them, so the pre-commit never sees them.
+    `bases` is empty when there is no HEAD or no origin/roadmap to compare against.
     """
 
-    def __init__(self, repo):
+    def __init__(self, repo, merged=False):
         self.repo = repo
+        self.merged = merged
         self.cache = {}  # blob -> parsed JSON value, or NOT_JSON
         self.bases = ["HEAD"] if self.git("rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
+        self.entries = []  # (mode, blob, path) of each staged add, change or type change
+        if merged:
+            base = self.git("merge-base", "HEAD", "refs/remotes/origin/roadmap").stdout.strip() if self.bases else ""
+            self.bases = [base] if base else []
+            if self.bases:
+                self.read_diff("diff", "--raw", "-z", "--no-renames", "--diff-filter=AMT", base, "HEAD", "--", STEPS_PATH)
+            return
         merge_head = pathlib.Path(repo, self.git("rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
         if merge_head.is_file():
             self.bases += merge_head.read_text().split()
-        self.entries = []  # (mode, blob, path) of each staged add, change or type change
         if self.bases:
-            fields = self.git("diff", "--cached", "--raw", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
-                              STEPS_PATH).stdout.split("\0")
-            for meta, path in zip(fields[0::2], fields[1::2]):
-                _, mode, _, blob, _ = meta.split(" ", 4)
-                self.entries.append((mode, blob, path))
+            self.read_diff("diff", "--cached", "--raw", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
+                           STEPS_PATH)
         else:
             self.entries = self.listing()
+
+    def read_diff(self, *args):
+        fields = self.git(*args).stdout.split("\0")
+        for meta, path in zip(fields[0::2], fields[1::2]):
+            _, mode, _, blob, _ = meta.split(" ", 4)
+            self.entries.append((mode, blob, path))
 
     def git(self, *args):
         return subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True,
                               encoding="utf-8", errors="surrogateescape")
 
     def listing(self):
-        """(mode, blob, path) of every file in the index under STEPS_PATH."""
+        """(mode, blob, path) of every file under STEPS_PATH in the index, or in the HEAD tree when merged."""
         out = []
-        for line in filter(None, self.git("ls-files", "-s", "-z", "--", STEPS_PATH).stdout.split("\0")):
+        cmd = ("ls-tree", "-r", "-z", "HEAD") if self.merged else ("ls-files", "-s", "-z")
+        for line in filter(None, self.git(*cmd, "--", STEPS_PATH).stdout.split("\0")):
             meta, path = line.split("\t", 1)
-            mode, blob, _ = meta.split(" ")
+            fields = meta.split(" ")  # ls-files: mode blob stage; ls-tree: mode type blob
+            mode, blob = fields[0], fields[2 if self.merged else 1]
             out.append((mode, blob, path))
         return out
 
@@ -284,11 +301,14 @@ def staged_gap_refusals(staged):
     return refused
 
 
-def check_staged():
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+def repo_root():
+    top = subprocess.run(["git", "-C", str(ROOT.parent), "rev-parse", "--show-toplevel"], capture_output=True,
                          encoding="utf-8", errors="surrogateescape")
-    repo = top.stdout.strip() if top.returncode == 0 else str(ROOT.parent)
-    staged = Staged(repo)
+    return top.stdout.strip() if top.returncode == 0 else str(ROOT.parent)
+
+
+def check_staged():
+    staged = Staged(repo_root())
     hits, refused = staged_notes_over_cap(staged)
     refused += staged_gap_refusals(staged)
     if hits:
@@ -306,6 +326,14 @@ def main():
     if hits:
         print("Conflict markers, so no page was written. Resolve them, then build again:")
         print("\n".join("  " + h for h in hits))
+        raise SystemExit(1)
+    merged = Staged(repo_root(), merged=True)
+    if not merged.bases:
+        print("gap check did not run: no HEAD or no origin/roadmap ref to compare against, "
+              "so steps a merge or rebase brought in were not checked.")
+    elif refused := staged_gap_refusals(merged):
+        print("Gap check failed, so no page was written. Fix the steps, then build again:")
+        print("\n".join("  " + r for r in refused))
         raise SystemExit(1)
     data = {"steps": load("steps"), "topics": load("topics"), "meta": load("meta")}
     page = (ROOT / "page" / "index.html").read_text(encoding="utf-8")

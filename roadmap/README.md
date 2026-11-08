@@ -18,3 +18,11 @@ If the rebase stops on a conflict, stop. Never commit during a rebase. Resolve e
 again (build.py refuses a tree with conflict markers and writes no page), then `git rebase --continue`,
 then run the chain again from the second build to the push.
 `python roadmap/test_build.py` proves the refusal.
+
+The gap-key check (an open step needs its own `gap`, shared by no other open step) runs twice. The
+pre-commit hook runs it on the staged files. Every plain `python roadmap/build.py` also runs it on what
+the branch added since `origin/roadmap`, read from the HEAD tree, because a `git pull --rebase` or a merge
+brings steps in without staging them. A refusal writes no page and exits 1, so the chain above stops before
+the amend and the push. With no HEAD or no `origin/roadmap` ref, the build prints one "gap check did not
+run" line and goes on. Cost per build: one `merge-base`, one `diff`, one `ls-tree`, one `cat-file --batch`,
+and one `git show` per base for each changed open step. It writes no file and starts no process that outlives the build.
