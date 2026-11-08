@@ -28040,6 +28040,11 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 (`son
            "Re-check the floor fix.\nRound 1 (`sonnet`) verdict: FAIL\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict: FAIL, PASS on round 2 line",
            "Re-check the floor fix.\nRound 1 verdict: FAIL, PASS on round 2\nFiles: hooks/guard.py.")
+# A verdict label after a choice list that ends its sentence, on the same line, is still a verdict line.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict: FAIL after a choice list on the same line",
+           "Re-check the floor fix.\nGive a verdict: PASS or FAIL. Prior verdict: FAIL.\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict: FAIL, PASS on round 2 after a choice list on the same line",
+           "Re-check the floor fix.\nVerdict: PASS or FAIL. Round 1 verdict: FAIL, PASS on round 2.\nFiles: hooks/guard.py.")
 
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
@@ -28078,8 +28083,8 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a line that open
           "Re-check the floor fix.\nPASS: the diff fixes the finding.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a pasted test line, FAIL: test_x",
           "Re-check the floor fix.\nFAIL: test_x\nFiles: hooks/guard.py.")
-# An instruction that asks for a verdict names the verdict words after its own words, not after a label at line
-# start, so it is the task and passes. A finding that quotes a verdict in backticks mid-line is a quote, not a verdict.
+# A verdict-word choice list that ends its sentence is a format line, so an instruction that asks for a verdict
+# passes, even at line start. A finding that quotes a verdict in backticks mid-line is a quote, not a verdict.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, End your report with a verdict: PASS, FAIL or PARTIAL",
           "Check the floor fix in hooks/guard.py.\nEnd your report with a verdict: PASS, FAIL or PARTIAL.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Give a verdict: PASS or FAIL",
