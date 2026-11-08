@@ -213,11 +213,14 @@ def compact_boundary():
             "preTokens": 37179, "postTokens": 6250, "cumulativeDroppedTokens": 30929}
 
 
-def compact_summary():
+def compact_summary(turn_origin=None):
     """The user record Claude Code writes after a boundary. Its string content makes is_last_human read
-    it as a human message."""
-    return {"type": "user", "isSidechain": False, "isCompactSummary": True,
-            "message": {"role": "user", "content": "This session is being continued from a previous conversation."}}
+    it as a human message. `turn_origin` sets the record's turnOrigin, as a peer wake's record holds it."""
+    rec = {"type": "user", "isSidechain": False, "isCompactSummary": True,
+           "message": {"role": "user", "content": "This session is being continued from a previous conversation."}}
+    if turn_origin:
+        rec["turnOrigin"] = turn_origin
+    return rec
 
 
 def write_transcript(records, tmpdir, name="transcript.jsonl"):
@@ -1206,6 +1209,28 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict("> **Done** BUILT x, PR #6 (builder opus)\n> **Next** Unstarted: none", [],
                            lead=self.turn_one_then_wake(self.BUILDER_OPUS, landed=False))
         self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_builder_in_unlanded_turn_between_two_peer_wakes_unnamed_blocks(self):
+        # Catches: last_owner_index handing wake_starts the whole transcript before wake 2 (records[:i]). The landed
+        # turn 1 then reads as the turn before wake 2, so wake 2 starts a window and the builder of unlanded turn 2
+        # leaves it. The window must stay at wake 1, so a report that names no builder blocks.
+        lead = [*self.turn_one_then_wake(self.REVIEWER_R2),
+                *self.turn_one_then_wake(self.BUILDER_OPUS, landed=False)[1:]]  # [1:] drops turn 2's owner prompt
+        out = self.verdict("> **Done** BUILT x, PR #6\n> **Next** Unstarted: none", [], lead=lead)
+        self.assertIsNotNone(out, "the report passed: a builder spawned in an unlanded turn between two peer wakes went unnamed")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_compact_summary_peer_record_after_unlanded_builder_turn_unnamed_blocks(self):
+        # Catches: a peer-origin compact summary after an unlanded turn starting a window, as a summary that always
+        # starts one would. The builder spawn before it was never checked by a Done line, so it must stay in the
+        # window, and a report that names no builder blocks.
+        lead = [human("do the task"), *self.run_of(self.BUILDER_OPUS), assistant_text("The builder is running."),
+                compact_summary(turn_origin="peer")]
+        out = self.verdict("> **Done** BUILT x, PR #6\n> **Next** Unstarted: none", [], lead=lead)
+        self.assertIsNotNone(out, "the report passed: a compact summary after an unlanded turn cleared the builder spawn")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
 
     def test_dm_red_mid_turn_peer_hand_back_starts_no_window_blocks(self):
         # Catches: a peer hand-back that lands mid-turn, as an attachment with no Stop before it, must start no
