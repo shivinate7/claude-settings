@@ -14,9 +14,12 @@ that lane lint picks such a suite for a new file in its folder. They call the se
   lint/test_check_landed_dirs.py (its glob is hooks/guard*.py) and lint/test_guard_log_report.py (it reads each non-test
   .py file in hooks/ and lint/).
 - An added lint/*.py file picks lint/test_guard_log_report.py.
+- An added hooks/*.py file, guard or not, picks lint/test_rule_audit.py, whose _hooks_world reads every non-test
+  hooks/*.py.
+- An added skills/*/SKILL.md file picks lint/test_check_agent_models.py (its fixtures run the check's skill-file rule)
+  and lint/test_check_landed_dirs.py (its fixture copies the skills folder, and repo_skills reads skills/*/SKILL.md).
 - A control: a product file outside those folders, merge/launch.py, picks none of the five folder-scan suites.
-- A control: an added hooks/*.py file that is no guard module picks neither lint/test_rule_audit.py nor
-  lint/test_check_landed_dirs.py.
+- A control: an added hooks/*.py file that is no guard module picks not lint/test_check_landed_dirs.py.
 
 The probe reads are `picks_for` and `tracked_paths`, imported from hooks/test_mutate_guard_tree_scans.py, the one home
 of the selector probe. The probes read the full-size tree and copy nothing.
@@ -36,7 +39,6 @@ RULE_AUDIT_SUITE = "lint/test_rule_audit.py"
 LANDED_DIRS_SUITE = "lint/test_check_landed_dirs.py"
 GUARD_LOG_SUITE = "lint/test_guard_log_report.py"
 FOLDER_SUITES = (CI_JOB_SUITE, AGENT_SUITE, RULE_AUDIT_SUITE, LANDED_DIRS_SUITE, GUARD_LOG_SUITE)
-GUARD_ONLY_SUITES = (RULE_AUDIT_SUITE, LANDED_DIRS_SUITE)
 
 CHANGED_WORKFLOW_PROBE = ".github/workflows/impeccable-sync.yml"  # tracked: a changed workflow file, not checks.yml
 ADDED_WORKFLOW_PROBE = ".github/workflows/new-job.yml"  # not tracked: a workflow file that a diff adds
@@ -44,6 +46,8 @@ ADDED_AGENT_PROBE = "agents/new-role.md"  # not tracked: an agent file that a di
 ADDED_GUARD_PROBE = "hooks/guard_probe_family.py"  # not tracked: a guard module that a diff adds
 ADDED_LINT_PROBE = "lint/check_probe_family.py"  # not tracked: a lint module that a diff adds
 ADDED_HOOK_PROBE = "hooks/plain_probe_family.py"  # not tracked: a hook module that no guard glob matches
+ADDED_JUDGE_PROBE = "hooks/judge_probe.py"  # not tracked: a hook module that is no guard
+ADDED_SKILL_PROBE = "skills/new/SKILL.md"  # not tracked: a skill file that a diff adds
 PRODUCT_PROBE = "merge/launch.py"  # tracked: a product file outside every folder above
 
 
@@ -128,16 +132,45 @@ class FolderScanPickTests(unittest.TestCase):
                                  "suites_for_paths must not pick %s for a diff of %s: it reads no file in that folder"
                                  % (suite, PRODUCT_PROBE))
 
-    def test_an_added_hook_module_that_is_no_guard_picks_neither_guard_only_suite(self):  # the control
+    def test_an_added_hook_module_that_is_no_guard_picks_the_rule_audit_suite(self):
         self.assertNotIn(ADDED_HOOK_PROBE, self.tracked,
                          "the scope: %s is not tracked, so the probe is a file that the diff adds" % ADDED_HOOK_PROBE)
-        self.assertSuitesTracked(GUARD_ONLY_SUITES)
-        picked = picks_for(ADDED_HOOK_PROBE)
-        for suite in GUARD_ONLY_SUITES:
-            with self.subTest(suite=suite):
-                self.assertNotIn(suite, picked,
-                                 "suites_for_paths must not pick %s for a diff that adds %s: it matches no hooks/guard*.py"
-                                 % (suite, ADDED_HOOK_PROBE))
+        self.assertSuitesTracked((RULE_AUDIT_SUITE,))
+        self.assertIn(RULE_AUDIT_SUITE, picks_for(ADDED_HOOK_PROBE),
+                      "suites_for_paths must pick %s for a diff that adds %s: its _hooks_world reads every non-test hooks/*.py"
+                      % (RULE_AUDIT_SUITE, ADDED_HOOK_PROBE))
+
+    def test_an_added_judge_hook_picks_the_rule_audit_suite(self):
+        self.assertNotIn(ADDED_JUDGE_PROBE, self.tracked,
+                         "the scope: %s is not tracked, so the probe is a file that the diff adds" % ADDED_JUDGE_PROBE)
+        self.assertSuitesTracked((RULE_AUDIT_SUITE,))
+        self.assertIn(RULE_AUDIT_SUITE, picks_for(ADDED_JUDGE_PROBE),
+                      "suites_for_paths must pick %s for a diff that adds %s: its _hooks_world reads every non-test hooks/*.py"
+                      % (RULE_AUDIT_SUITE, ADDED_JUDGE_PROBE))
+
+    def test_an_added_skill_file_picks_the_agent_models_suite(self):
+        self.assertNotIn(ADDED_SKILL_PROBE, self.tracked,
+                         "the scope: %s is not tracked, so the probe is a file that the diff adds" % ADDED_SKILL_PROBE)
+        self.assertSuitesTracked((AGENT_SUITE,))
+        self.assertIn(AGENT_SUITE, picks_for(ADDED_SKILL_PROBE),
+                      "suites_for_paths must pick %s for a diff that adds %s: its fixtures run the check's skill-file rule"
+                      % (AGENT_SUITE, ADDED_SKILL_PROBE))
+
+    def test_an_added_skill_file_picks_the_landed_dirs_suite(self):
+        self.assertNotIn(ADDED_SKILL_PROBE, self.tracked,
+                         "the scope: %s is not tracked, so the probe is a file that the diff adds" % ADDED_SKILL_PROBE)
+        self.assertSuitesTracked((LANDED_DIRS_SUITE,))
+        self.assertIn(LANDED_DIRS_SUITE, picks_for(ADDED_SKILL_PROBE),
+                      "suites_for_paths must pick %s for a diff that adds %s: its fixture copies the skills folder, and repo_skills reads skills/*/SKILL.md"
+                      % (LANDED_DIRS_SUITE, ADDED_SKILL_PROBE))
+
+    def test_an_added_hook_module_that_is_no_guard_picks_no_landed_dirs_suite(self):  # the control
+        self.assertNotIn(ADDED_HOOK_PROBE, self.tracked,
+                         "the scope: %s is not tracked, so the probe is a file that the diff adds" % ADDED_HOOK_PROBE)
+        self.assertSuitesTracked((LANDED_DIRS_SUITE,))
+        self.assertNotIn(LANDED_DIRS_SUITE, picks_for(ADDED_HOOK_PROBE),
+                         "suites_for_paths must not pick %s for a diff that adds %s: it matches no hooks/guard*.py"
+                         % (LANDED_DIRS_SUITE, ADDED_HOOK_PROBE))
 
 
 if __name__ == "__main__":
