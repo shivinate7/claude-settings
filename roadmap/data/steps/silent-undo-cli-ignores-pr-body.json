@@ -1,0 +1,11 @@
+{
+  "title": "The silent-undo check's CLI reads the PR body, so a `Drops-lines:` line in the body clears it",
+  "why": "lint/check_silent_undo.py's CLI never reads the PR body, so a `Drops-lines:` line in the body false-fails the lane lint (seen on #1785).",
+  "note": "Fix: the CLI reads the body through merge's reader. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 04:33 CST Nov 8; lane notes-fix-page builds it (coordinator, 04:31 CST Nov 8).",
+  "phase": "now",
+  "status": "doing",
+  "order": 601,
+  "owner": "triage",
+  "lane": "session_013NEJKzjkypcToggneCjJN8",
+  "updatedAt": "2026-11-08T04:32:00-06:00"
+}
