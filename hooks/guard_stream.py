@@ -68,7 +68,8 @@ LIVE_STREAM_REASON = (
     "this command follows a stream and never ends on its own, so it outlives the turn "
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
-    "wait for its completion notice. To wait on a pid, use `wait-pid PID [--timeout SECS]`."
+    "wait for its completion notice. To wait on a pid, use `wait-pid PID [--timeout SECS]`. "
+    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`."
 )
 
 
@@ -207,24 +208,47 @@ def watch_flag(args) -> bool:
     return False
 
 
+# A loop test that reads the clock: a `$(date ...)` word and a literal time (an ISO date or time of day, or a
+# whole-number epoch). Such a loop ends at that time, so it is a deadline, not a wait with no end.
+CLOCK_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}|\d{9,}$")
+
+
+def clock_loop(token_rows) -> bool:
+    """True when the command's one loop is bounded by a clock test: a single `while`/`until` whose
+    own test (no `&&` or `||` clause after it) compares `date` output with a literal time, and no
+    other loop. A quoted word is one token, so `grep -q "date"` names no clock."""
+    words = [re.match(r"[\w%-]*", row[0]).group().lower() for row in token_rows]
+    heads = [i for i, word in enumerate(words) if word in ("while", "until")]
+    if len(heads) != 1 or any(w in LOOP_WORDS and w not in ("while", "until", "do") for w in words):
+        return False
+    head, after = token_rows[heads[0]], words[heads[0] + 1:heads[0] + 2]
+    return (after == ["do"]
+            and any(t.startswith(("$(date", "`date")) for t in head)
+            and any(CLOCK_LITERAL.match(t) for t in head[1:]))
+
+
 def waiter_verdict(segments, background: bool) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
-    `gh pr checks --watch`. Allowed: one short sleep, and `gh pr checks --watch` with
-    run_in_background."""
-    sleeps, loop, watcher, run_watch = [], False, "", ""
+    `gh pr checks --watch`. Allowed: one short sleep, `gh pr checks --watch` with
+    run_in_background, and, with run_in_background, one sleep of any length followed by a command
+    and a loop whose test compares `date` output with a literal time."""
+    sleeps, loop, watcher, run_watch, followed = [], False, "", "", False
+    token_rows = []
     for segment in segments:
         # Braces get their own token, so a compact `while(1){Start-Sleep 1}` reads like a spaced one.
         tokens = segment_tokens(re.sub(r"([{}])", r" \1 ", segment))
         if not tokens:
             continue
+        token_rows.append(tokens)
         loop = loop or re.match(r"[\w%-]*", tokens[0]).group().lower() in LOOP_WORDS
         index = resolve_command(tokens)
         if index is None:
             continue
         word = basename(tokens[index]).lower()
+        followed = followed or bool(sleeps) and word not in WAITER_COMMANDS
         # A PowerShell loop keeps its sleep in a `{ ... }` block inside the same segment.
         for at in sorted({index, *(i + 1 for i, t in enumerate(tokens[:-1]) if t == "{")}):
             if basename(tokens[at]).lower() in WAITER_COMMANDS:
@@ -238,9 +262,12 @@ def waiter_verdict(segments, background: bool) -> str:
                 run_watch = run_watch or found
         elif waiter_hit(segment):
             return waiter_hit(segment)
+    if background and clock_loop(token_rows):
+        loop = False  # a loop with a clock bound ends at its time, so only its pauses are judged
     if sleeps and loop:
         return sleeps[0][0]
-    if len(sleeps) > 1 or any(seconds >= SLEEP_LIMIT for _, seconds in sleeps):
+    long_ok = background and followed
+    if len(sleeps) > 1 or (any(seconds >= SLEEP_LIMIT for _, seconds in sleeps) and not long_ok):
         return sleeps[0][0]
     return run_watch or ("" if background else watcher)
 
@@ -248,11 +275,13 @@ def waiter_verdict(segments, background: bool) -> str:
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: wait for the CI-wake notice that follows gh pr ready. "
-    "To wait for another condition, use the Monitor tool once, or run the long command in the background and wait for its completion notice. "
-    "To wait on one pid, use `wait-pid PID [--timeout SECS]`. "
-    "A single pause under 25 seconds is allowed. Avoid "
-    "gh pr checks --watch in the foreground, which serves a cached status. For a server warm-up, use a "
-    "readiness check such as curl --retry."
+    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
+    "that has a zone. To wait on one pid, use `wait-pid PID [--timeout SECS]`. "
+    "To wait for another condition, run the long command in the background and wait for its completion "
+    "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
+    "loop whose test compares the date output with a literal time. "
+    "A single pause under 25 seconds is allowed in the foreground. For a server warm-up, use a "
+    "readiness check such as `curl --retry 5 --retry-connrefused http://localhost:3000`."
 )
 
 
@@ -415,7 +444,8 @@ PATTERN_POLLER_REASON = (
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
     "Remedy: wait on one pid with `wait-pid PID [--timeout SECS]`, which also takes a job a stall "
-    "left behind. To wait for CI, wait for the CI-wake notice that follows gh pr ready."
+    "left behind. To wait until a clock time, use `wait-until TIME [--timeout SECS]`. "
+    "To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 
 
