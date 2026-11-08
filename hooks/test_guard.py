@@ -7108,6 +7108,13 @@ for _tool, _fields in PUSH_MAIN_TOOLS:
             owner="y", repo="x", branch=_branch, **_fields)
     add("push-main: %s to a feature branch is silent" % _tool, "allow", silent=True, tool=_tool, cwd=NOGIT,
         owner="y", repo="x", branch="feat", **_fields)
+# A full ref names the same branch as the bare name: the shell form strips refs/heads/ before it reads main or master.
+for _tool in ("mcp__github__push_files", "mcp__github__create_or_update_file"):
+    for _branch in ("refs/heads/main", "refs/heads/master"):
+        add("push-main: %s to %s asks" % (_tool, _branch), "ask", PUSH_MAIN_RULE, tool=_tool, cwd=NOGIT,
+            owner="y", repo="x", branch=_branch, **dict(PUSH_MAIN_TOOLS)[_tool])
+    add("push-main: %s to refs/heads/feat is silent" % _tool, "allow", silent=True, tool=_tool, cwd=NOGIT,
+        owner="y", repo="x", branch="refs/heads/feat", **dict(PUSH_MAIN_TOOLS)[_tool])
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.

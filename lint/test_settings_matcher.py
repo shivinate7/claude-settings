@@ -93,11 +93,14 @@ class Matcher(unittest.TestCase):
 
     def test_guard_matcher_covers_mcp_file_writes(self):
         # Rule push-main asks on a file write to main or master, and rule pr-review-record judges an update of a review record,
-        # so a guard matcher must see each of these calls by its full name.
+        # so a guard matcher must see each of these calls by its full name. The names are read from guard_merge, their one home.
+        sys.path.insert(0, GUARD_DIR)
+        import guard_merge
+        tools = tuple(guard_merge.FILE_WRITE_TOOLS) + (guard_merge.UPDATE_COMMENT_TOOL,)
         matchers = guard_matchers()
         self.assertTrue(matchers, "settings.json has no guard matcher")
-        for tool in ("mcp__github__push_files", "mcp__github__create_or_update_file", "mcp__github__delete_file",
-                     "mcp__github__update_issue_comment"):
+        self.assertTrue(tools, "guard_merge names no file-write or comment-update tool")
+        for tool in tools:
             with self.subTest(tool=tool):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                                 "no guard matcher covers %s: %r" % (tool, matchers))
