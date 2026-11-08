@@ -3049,6 +3049,7 @@ def default_lock(root):
 # The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
 REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state
+REVIEW_RULE_REMEDY = "Put free text, such as a footer, below a line exactly `---` after the CI line."  # the one home of this sentence; the guard's refusal reads it too
 REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "no")
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
@@ -3112,6 +3113,16 @@ def parse_review(text):
         rounds.append((i, *m.group(2, 3, 4)))
         last = i
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix}
+
+def review_unparsed_why(text):
+    """-> None when `text` parses or is not a review record (no marker), else why it does not, with the remedy. Text that follows the CI line is
+    diagnosed by parsing the body cut at the first CI line, so the form rules stay in parse_review alone."""
+    if not review_marked(text) or parse_review(text) is not None:
+        return None
+    lines = text.splitlines()
+    if REVIEW_CI_LINE in lines and parse_review("\n".join(lines[:lines.index(REVIEW_CI_LINE) + 1])) is not None:
+        return f"text follows the CI line, so the record does not parse. {REVIEW_RULE_REMEDY}"
+    return "the record does not parse. Render it with `merge <pr> --review-record ...` and post the output as it is"
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
@@ -3178,6 +3189,8 @@ def reviewed_lines(h):
             continue
         rec = parse_review(bodies[-1])
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
+        if rec is None:
+            why = review_unparsed_why(bodies[-1]) or why  # a body with no marker has no remedy to name
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
@@ -3374,10 +3387,11 @@ def main(argv, host=None, lock=None):
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
-                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
-                last = earlier[-1] if earlier else None
+                bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                last = parse_review(bodies[-1]) if bodies else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
+                    why = (bodies and review_unparsed_why(bodies[-1])) or "the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line"
+                    print(f"merge: --fix-check: {why}. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)

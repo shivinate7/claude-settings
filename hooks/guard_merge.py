@@ -347,8 +347,7 @@ REVIEW_REASON = (
 REVIEW_FORM_REASON = (
     "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record. "
     "`merge --reviewed` cannot read a body that does not parse. "
-    "Remedy: run `%s` and post its output as it is. If you add a footer, put a line exactly `---` before it, "
-    "with nothing between the CI line and `---`. "
+    "Remedy: run `%s` and post its output as it is. %s "
     "(decision pr-review-record, a review record must parse)"
 )
 
@@ -413,8 +412,8 @@ def _form_refusal(module, marked, selector):
     named = str(selector).strip()
     for body in marked:
         if module.parse_review(body) is None:
-            return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
-                module, named if named.isdigit() else "<pr>", "<live head>")
+            return "review record that does not parse", REVIEW_FORM_REASON % (
+                _review_render(module, named if named.isdigit() else "<pr>", "<live head>"), module.REVIEW_RULE_REMEDY)
     return None
 
 
