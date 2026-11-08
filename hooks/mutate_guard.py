@@ -682,7 +682,7 @@ MUTATIONS = [
     ("waiter: a clock loop with no date read is let through under run_in_background",
      '    if not cut:\n        return False\n',
      '    if not cut:\n        cut = 1\n', "guard",
-     'a loop on a variable with no date read'),
+     'a loop on a read of another command with a +%s format'),
     ("waiter: a clock loop with no literal time is let through under run_in_background",
      'bool(CLOCK_LITERAL.match(rest[1]))',
      'True', "guard",
@@ -728,6 +728,14 @@ MUTATIONS = [
      'TEST_CLOSER = {"[": "]", "[[": "]]", "test": None}',
      'TEST_CLOSER = {"[": "]", "[[": "]]", "test": None, "((": "))"}', "guard",
      'a loop written as an arithmetic test'),
+    ("waiter: a numeric order on a +%s read takes an ISO literal, so it is let through under run_in_background",
+     '        return form == "+%s" and ":" not in rest[1]\n',
+     '        return form == "+%s"\n', "guard",
+     'a numeric order on a +%s read against an ISO date-time'),
+    ("waiter: a text order on an ISO read takes an epoch literal, so it is let through under run_in_background",
+     '    return form is not None and "%s" not in form and not rest[1].isdigit()\n',
+     '    return form is not None and "%s" not in form\n', "guard",
+     'a text order on an ISO read against an epoch'),
     # A `for` loop beside the clock loop makes it two loops, so the clock rule does not judge the command. Without
     # the word check, the clock loop would count as the command's one loop and the pause loop would go unjudged.
     ("waiter: a loop word other than while or until is ignored, so a clock loop beside a pause loop is let through",
