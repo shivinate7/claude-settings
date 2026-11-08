@@ -4,13 +4,15 @@
 A reply that holds notification markup as an opening tag, such as `<task-notification`, reads to the session
 and its reader as a finished agent, a result or an owner event that never happened. The check refuses it
 outside a fenced block and an inline code span, in plain text and in a blockquote, on landed and unlanded
-turns, with or without a human record. The red cases fail until the check exists. The controls, and the cost
-case for a clean reply, pass on the old code too and must stay green. Every case runs the guard as the Stop
-hook would, so a missing check fails an assert and never a NameError. The transcript helpers and the run
-isolation come from lint/test_report_guard.py.
+turns, with or without a human record. A red case fails on code that lacks its behaviour. A control passes
+there too and must stay green. Every case runs the guard as the Stop hook would, so a missing check fails an
+assert and never a NameError. The transcript helpers and the run isolation come from lint/test_report_guard.py.
 
     python3 lint/test_report_guard_notification.py -v
 """
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -23,6 +25,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the Stop runner, the transcript helpers, the run folder and the guard path (one home)
+import local_time  # noqa: E402  the marker paths (one home, hooks/local_time.py; trg put hooks on sys.path)
 
 NAME = "Notification-markup guard (rule no-self-written-notification)"
 TAG = "<task-notification>x</task-notification>"
@@ -106,7 +109,7 @@ class NotificationMarkupTests(unittest.TestCase):
         """Scope before subject: the same markup in plain text must be refused here, or a pass below proves nothing."""
         self.assert_refused(PLAIN, TAG)
 
-    # Red: each case below fails until the check exists.
+    # Red: each case below fails on code that lacks its behaviour.
 
     def test_nt_red_each_opening_tag_in_plain_text_is_refused(self):
         for line in TAG_LINES:
@@ -182,6 +185,56 @@ class NotificationMarkupTests(unittest.TestCase):
         reply = "\n".join("Line %d of the run." % i for i in range(400)) + "\n" + TAG
         self.assert_refused(reply, TAG)
 
+    def test_nt_red_an_info_string_line_does_not_close_a_fence(self):
+        # Catches: a line with an info string read as a closer, so the fence ends early and the markup after it passes.
+        self.assert_refused("```\nexample:\n```python\nx = 1\n```\n" + TAG, TAG)
+
+    def test_nt_red_a_shorter_run_does_not_close_a_longer_fence(self):
+        # Catches: a shorter run closes a longer fence early, and the real closer then opens a fence that hides the markup.
+        self.assert_refused("````\nnote\n```\ntext\n````\n" + TAG, TAG)
+        self.assert_refused("~~~~\nnote\n~~~\ntext\n~~~~\n" + TAG, TAG)
+
+    def test_nt_red_a_four_tick_fence_holding_a_three_tick_line_and_the_markup_passes(self):
+        # Catches: a three-tick line inside a four-tick fence closes it, so the markup inside the fence is refused.
+        self.assert_scope()
+        self.assert_allowed("````\n```\n" + TAG + "\n````")
+        self.assert_allowed("~~~~\n~~~\n" + TAG + "\n~~~~")
+
+    def test_nt_red_a_backtick_opener_with_a_backtick_in_its_info_string_is_no_fence(self):
+        # Catches: a backtick opener whose info string holds a backtick is read as a fence, which hides the lines after it.
+        self.assert_refused("```x``` then\n" + TAG, TAG)
+
+    def test_nt_red_escaped_backticks_open_no_code_span(self):
+        # Catches: an escaped backtick read as a code span opener, which hides the markup up to the next backtick.
+        self.assert_refused("Use \\`%s\\` here." % TAG, TAG)
+        self.assert_refused("Typed \\` then %s and later `y` ok." % TAG, TAG)
+
+    def test_nt_red_the_rewrite_after_a_refusal_is_checked_once_then_quiet(self):
+        # Catches: the rewrite after a refusal skips the re-check, or the re-check repeats and never lets a rewrite through.
+        sid = "nt-" + uuid.uuid4().hex
+        self.assertIsNotNone(self.verdict(PLAIN, sid=sid), "no refusal, so nothing arms the rewrite")
+        self.assert_refused("Fixed it.\n" + TAG, TAG, active=True, sid=sid)
+        self.assert_allowed("Fixed it.\n" + TAG, active=True, sid=sid)
+
+    def test_nt_red_a_refusal_with_no_human_record_arms_the_rewrite(self):
+        # Catches: a refusal on a turn with no human record does not arm the re-check of the rewrite.
+        sid = "nt-" + uuid.uuid4().hex
+        self.assertIsNotNone(self.verdict(PLAIN, with_human=False, sid=sid))
+        self.assert_refused(PLAIN, TAG, with_human=False, active=True, sid=sid)
+
+    def test_nt_red_a_refusal_on_a_landed_turn_arms_the_rewrite(self):
+        # Catches: a refusal on a landed turn does not arm the re-check of the rewrite.
+        sid = "nt-" + uuid.uuid4().hex
+        report = "> **Done** BUILT abc123\n> **Next** ship it\n> " + TAG
+        self.assertIsNotNone(self.verdict(report, landed=True, sid=sid))
+        self.assert_refused(report, TAG, landed=True, active=True, sid=sid)
+
+    def test_nt_red_a_failed_check_says_unknown(self):
+        # Catches: a check that raises is silent, so a check that did not run reads as a clean reply.
+        out, escaped = self.guard_probe_broken("Nothing landed.")
+        self.assertIsNone(escaped, "the check's error left main(), so the Stop crashed instead of noting UNKNOWN: %r" % escaped)
+        self.assertIn("Notification-markup guard: UNKNOWN, the check did not run", out)
+
     # Green controls: each passes on the old code, and each guards against a false alarm.
 
     def test_nt_green_prose_the_word_and_the_empty_reply_pass(self):
@@ -204,6 +257,76 @@ class NotificationMarkupTests(unittest.TestCase):
         self.assertIsNotNone(first, "no answered block, so the rewrite has no earlier refusal")
         self.assertIn("Answered guard", first["reason"])
         self.assert_allowed("Item 143 answered in chat.\n" + TAG, active=True, sid=sid)
+
+    def test_nt_green_an_escaped_backslash_leaves_the_next_span_real(self):
+        # Catches: an escaped backslash read as an escaped backtick, so the code span after it is missed.
+        self.assert_scope()
+        self.assert_allowed("A path \\\\`%s` is quoted." % TAG)
+
+    def test_nt_green_a_longer_or_equal_closer_and_info_string_openers_pass(self):
+        # Catches: a longer closer, trailing spaces or an info-string opener refused as a false alarm.
+        self.assert_scope()
+        for reply in ("````\n" + TAG + "\n````", "`````\n" + TAG + "\n`````\n", "```\n" + TAG + "\n``````",
+                      "```python title=x\n" + TAG + "\n```", "~~~~\n" + TAG + "\n~~~~~",
+                      "```\n" + TAG + "\n```   "):
+            with self.subTest(reply=reply):
+                self.assert_allowed(reply)
+
+    def test_nt_green_markup_after_each_closer_is_refused(self):
+        # Catches: a closer the fence walk misses, so the fence runs on and hides the markup after it.
+        for fence in ("```\r\nx\r\n```\r\n", "```\nx\n``````\n", "```\nx\n```   \n", "~~~~\nx\n~~~~~\n"):
+            with self.subTest(fence=fence):
+                self.assert_refused(fence + TAG, TAG)
+
+    def test_nt_green_crlf_lines_are_read_as_lines(self):
+        # Catches: CRLF line ends read as one line, so the markup line after them is missed.
+        self.assert_scope()
+        self.assert_allowed("```\r\n" + TAG + "\r\n```\r\n")
+        self.assert_refused("Status line.\r\n" + TAG + "\r\nDone.", TAG)
+
+    def test_nt_green_the_rewrite_check_is_this_check_only(self):
+        # Catches: a rewrite after this refusal judged by another check, which then blocks a reply it has no reason to.
+        sid = "nt-" + uuid.uuid4().hex
+        self.assertIsNotNone(self.verdict(PLAIN, sid=sid))
+        out = self.verdict("Answered: no permission rule can lift it.", active=True, sid=sid)
+        self.assertIsNone(out, "the rewrite was judged by another check: %r" % out)
+
+    def test_nt_green_a_stale_marker_does_not_reach_a_later_turn(self):
+        # Catches: a marker left by one turn that reaches a later turn and refuses its rewrite.
+        sid = "nt-" + uuid.uuid4().hex
+        self.assertIsNotNone(self.verdict(PLAIN, sid=sid))
+        self.assertIsNone(self.verdict("A later turn, no markup.", sid=sid))
+        self.assert_allowed("Rewrite.\n" + TAG, active=True, sid=sid)
+
+    def test_nt_green_a_missing_report_rewrite_names_the_markup_once(self):
+        # Catches: the rewrite after a missing-report block names the markup twice, or skips it.
+        sid = "nt-" + uuid.uuid4().hex
+        first = self.verdict(TAG + "\n\nAll done.", landed=True, sid=sid)
+        self.assertIn("does not end with the report", first["reason"])
+        reply = "Answered: no permission rule can lift it.\n> **Done** BUILT abc123\n> **Next** ship it\n> " + TAG
+        reason = self.assert_refused(reply, TAG, "Answered: no permission rule can lift it.", landed=True,
+                                     active=True, sid=sid)
+        self.assertEqual(reason.count(NAME), 1, reason)
+        self.assert_allowed(reply, landed=True, active=True, sid=sid)
+
+    def test_nt_green_a_rewrite_with_no_marker_stays_quiet(self):
+        # Catches: a rewrite with no marker refused as a false alarm.
+        self.assert_scope()
+        self.assert_allowed("Rewrite.\n" + TAG, active=True, sid="nt-" + uuid.uuid4().hex)
+
+    def test_nt_green_a_clean_rewrite_after_a_refusal_passes_and_clears_the_marker(self):
+        # Catches: a marker that a clean rewrite leaves behind, which then refuses a later rewrite that holds markup.
+        sid = "nt-" + uuid.uuid4().hex
+        self.assertIsNotNone(self.verdict(PLAIN, sid=sid))
+        self.assertIsNone(self.verdict("Fixed it. No markup now.", active=True, sid=sid))
+        self.assert_allowed("Fixed it.\n" + TAG, active=True, sid=sid)
+
+    def test_nt_green_a_working_check_says_no_unknown(self):
+        # Catches: an UNKNOWN note on a clean reply, which reads as a broken check.
+        out, _o, _t, _s = self.guard_probe(PLAIN)
+        self.assertIn(NAME, out, "the probe did not refuse, so the check's silence below proves nothing")
+        out, _o, _t, _s = self.guard_probe("Nothing landed. The state is unchanged.")
+        self.assertNotIn("UNKNOWN", out)
 
     # Exemptions: each runs the bare markup first as its scope witness, so a pass means the check ran.
 
@@ -259,6 +382,22 @@ class NotificationMarkupTests(unittest.TestCase):
             out, opened, transcript = trg.AnsweredNeedsSourceTests.guard_opens(self, reply)
         return out, opened, transcript, starts
 
+    def guard_probe_broken(self, reply):
+        """Run main() in this process with the check raising: (stdout, the error that left main() or None)."""
+        spec = importlib.util.spec_from_file_location("report_guard_probe", trg.REPORT_GUARD)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        hook = self.hook(reply)
+        out = io.StringIO()
+        escaped = None
+        with mock.patch.object(mod, "notification_markup_problem", side_effect=RuntimeError("boom")), \
+                mock.patch("sys.stdin", io.StringIO(json.dumps(hook))), contextlib.redirect_stdout(out):
+            try:
+                mod.main()
+            except Exception as err:  # kept, so the case asserts on it instead of erroring
+                escaped = err
+        return out.getvalue().strip(), escaped
+
     def test_nt_cost_the_probe_sees_a_process_start(self):
         # Scope of the probe: a start made inside the patch is recorded, so an empty list below means no start.
         starts, patch = self.refused_starts()
@@ -279,6 +418,29 @@ class NotificationMarkupTests(unittest.TestCase):
         self.assertNotIn(NAME, out)
         self.assertEqual(set(opened), {transcript}, "the guard opened a file beyond the transcript")
         self.assertEqual(starts, [], "the guard tried to start a process")
+
+    # Cost of the markers: one empty file per refusal of this check, and a clean reply writes none.
+
+    def marker_files(self, sid):
+        """The marker files of one session, found in the folder the report marker lives in (one home)."""
+        folder = os.path.dirname(local_time.report_marker_path(sid))
+        return sorted(n for n in (os.listdir(folder) if os.path.isdir(folder) else []) if n.startswith(sid))
+
+    def test_nt_cost_a_refusal_writes_one_marker_the_rewrite_deletes_it(self):
+        sid = "nt-" + uuid.uuid4().hex
+        self.verdict("Nothing landed.", sid=sid)
+        self.assertEqual(self.marker_files(sid), [], "a clean reply wrote a file")
+        self.assertIsNotNone(self.verdict(PLAIN, sid=sid))
+        self.assertEqual(self.marker_files(sid), [sid + ".notification-block"])
+        self.verdict("Fixed.", active=True, sid=sid)
+        self.assertEqual(self.marker_files(sid), [], "the rewrite left the marker")
+
+    def test_nt_cost_a_missing_report_refusal_with_markup_leaves_both_markers_the_rewrite_deletes_them(self):
+        sid = "nt-" + uuid.uuid4().hex
+        self.assertIsNotNone(self.verdict(TAG + "\n\nAll done.", landed=True, sid=sid))
+        self.assertEqual(self.marker_files(sid), [sid + ".notification-block", sid + ".report-block"])
+        self.verdict("Fixed.", landed=True, active=True, sid=sid)
+        self.assertEqual(self.marker_files(sid), [])
 
 
 if __name__ == "__main__":
