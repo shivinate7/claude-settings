@@ -20217,6 +20217,39 @@ add("lane-start-settings: triage call with no model and no source_url is allowed
 add("lane-start-settings: batch-runner call with no model and no source_url is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:batch-runner"], prompt="do the task")
 
+# ---- The floor's remedy for a lane start. A lane create_session below the floor is refused, and its reason must not
+# tell the caller to name no model: with no model, rule lane-start-settings refuses the lane again. The reason names
+# `model sonnet` and `source_url`, the lane's two required inputs. An Agent or Task spawn, a start_session, and a
+# create_session with no lane tag keep the no-model remedy, so a builder cannot drop it for everyone.
+LANE_FLOOR_LACKS = ("name no model", "let the default apply")
+add("floor lane: a lane create_session on haiku is denied with the lane remedy, not the no-model one", "deny",
+    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
+add("floor lane: a lane refused below the floor names source_url in its reason", "deny",
+    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="haiku", source_url=LANE_SOURCE_URL, carries="source_url")
+add("floor lane: an upper-case lane tag on haiku gets the lane remedy", "deny", "agent-model-floor",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"],
+    model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
+add("floor lane: a lane tag given as one string on haiku gets the lane remedy", "deny", "agent-model-floor",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags="cs-build:lane",
+    model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
+add("floor lane: a lane start on the remedy's inputs, model sonnet, source_url, the repo tag and /effort medium, "
+    "is allowed", "allow", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+# Controls: the no-model remedy holds wherever no lane is. These pass on the old code and must keep passing.
+for _name, _call in (
+        ("Agent", dict(tool="Agent", prompt="do it", model="haiku")),
+        ("Task", dict(tool="Task", prompt="do it", model="haiku")),
+        ("start_session", dict(tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x",
+                               model="haiku")),
+        ("create_session with no tags", dict(tool=CREATE_SESSION_CALL, prompt="x", model="haiku")),
+        ("create_session with a triage tag", dict(tool=CREATE_SESSION_CALL, prompt="x", model="haiku",
+                                                  tags=["cs-build:triage"]))):
+    add("floor remedy: %s on haiku keeps the no-model remedy" % _name, "deny", "agent-model-floor",
+        carries="let the default apply", **_call)
+
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
 add("floor: Workflow role spoofed in the prompt string is denied", "deny", "agent-model-floor",
