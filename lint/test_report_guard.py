@@ -4833,6 +4833,47 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_allowed(line)
 
 
+    def test_pe_red_pre_existing_failure_in_a_status_or_count_is_refused(self):
+        rows = [
+            # Catches: a red status with "because of a pre-existing issue" passes as a cause.
+            "CI is red, because of a pre-existing issue.",
+            # Catches: "pre-existing red tests" blocking a merge passes.
+            "Two pre-existing red tests block the merge.",
+            # Catches: a count of "pre-existing red suites" with no verb passes.
+            "Three pre-existing red suites.",
+            # Catches: "already red against main" with no run passes.
+            "The test is already red against main.",
+            # Catches: "already red vs main" with no run passes.
+            "Already red vs main.",
+            # Catches: "main already red" with no run passes.
+            "Main already red.",
+            # Catches: a pre-existing issue in a named part that breaks CI passes.
+            "A pre-existing issue in the parser breaks CI.",
+            # Catches: a pre-existing issue that is breaking CI passes.
+            "The pre-existing issue is breaking CI.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_green_pre_existing_bug_and_none_observed_pass(self):
+        rows = [
+            # Catches: a regression test for a pre-existing bug (a noun, not a failure claim) is read as a claim.
+            "Added a regression test for a pre-existing bug in the parser.",
+            # Catches: a pre-existing bug that is now fixed is read as a claim.
+            "The error handler had a pre-existing bug, now fixed.",
+            # Catches: a failing test that covers a pre-existing bug is read as a claim.
+            "The failing test covers a pre-existing bug.",
+            # Catches: "Pre-existing failures: none observed." is read as a claim.
+            "Pre-existing failures: none observed.",
+            # Catches: "Pre-existing failures: none in this run." is read as a claim.
+            "Pre-existing failures: none in this run.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
     Input Needed. The refusals file is written here by hand, so these cases do not depend on
