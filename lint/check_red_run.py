@@ -19,21 +19,20 @@ start, in any case (`Red-Run:`, `red-run:`, `Red-run :`); a key that is not exac
 mentions red-run mid-line is not judged. The failed form judges the lead word of its command in two layers, so a
 typo is not read as a failed form. The lead word is the text after `Red-run:` with leading wrappers dropped (an
 open bracket, a quote, a backtick, `*`, `-` and spaces: `(mutant A)`, `"mutant A"`, `- mutant:`), then its first word.
-This reads the label region of the line, not every word: a scan of the whole line flips 26 accepted main commits, such as
-457071b62 with `(mutant: code_check.py:266 returns [])`. A mutant mention after a real first word still passes. The
-normalized word is the lead word without its trailing closers and colons, in lower case. First, it refuses a
+The check reads the label region of the line, not every word: a scan of the whole line would flip 26 accepted main
+commits, such as one with `(mutant: code_check.py:266 returns [])`. A mutant mention after a real first word passes.
+The normalized word is the lead word without its trailing closers and colons, in lower case. First, it refuses a
 normalized word that starts with `mutant` or `mutation` (`mutants:`, `mutant(A)`, `mutant-A`, `mutant=x`, a no-colon
-`mutant A (...)`, `(mutant A)`), or is exactly `none` or `non` (`(none)`). Second, unless the lead word is an upper-case
-environment assignment (`NAME=value`, quoted or not, such as `MUTATE_ONLY=x` or main commit 049f8d8c0's
-`MUTATE_ONLY="worktree-home: ..."`), it refuses a normalized word that starts with `mutat` or `mutan` (`mutate`,
-`mutate=x`, `mutan:`), or whose leading letters are one edit or one adjacent swap from `mutant` or `mutation` (`mutnat`,
-`mtuant`, `mutnt`, `mutaiton`). Any `NAME=` word, lower case too, stays exempt from the colon refusal: a lead word that
-ends in a colon (`runner:`, `nonee:`) is refused otherwise. The valid `mutant:` and `none:` forms are routed to their
-own patterns before the failed form, so neither layer reads them. Real commands pass (`mutmut run`,
-`./mutation_probe.sh`, `NONE=1 python3 ...`, `env X=1 python3 ...`, `nonstop ...`, `(cd lint && python3 ...)`). Three
-main commits (408340997, 1762ec79f, b2f0fb754) wrote the no-colon mutant form. Limits: a typo two edits away
-(`mtunat`), a mutant label after an env or assignment prefix, a mutant mention after a real first word and prose first
-words pass.
+`mutant A (...)`, `(mutant A)`), or is exactly `none` or `non` (`(none)`). Second, it refuses a normalized word that
+starts with `mutat` or `mutan` (`mutate`, `mutate=x`, `mutan:`), or whose leading letters are one edit or one adjacent
+swap from `mutant` or `mutation` (`mutnat`, `mtuant`, `mutnt`, `mutaiton`). An upper-case environment assignment
+(`NAME=value`, quoted or not, such as `MUTATE_ONLY=x` or `MUTATE_ONLY="worktree-home: ..."`) skips this second layer.
+Any `NAME=` word, lower case too, is also exempt from the colon refusal: any other lead word that ends in a colon
+(`runner:`, `nonee:`) is refused. The valid `mutant:` and `none:` forms are routed to their own patterns before the
+failed form, so neither layer reads them. Real commands pass (`mutmut run`, `./mutation_probe.sh`, `NONE=1 python3 ...`,
+`env X=1 python3 ...`, `nonstop ...`, `(cd lint && python3 ...)`). Three older main commits wrote the no-colon mutant
+form. Limits: a typo two edits away (`mtunat`), a mutant label after an env or assignment prefix, a mutant mention
+after a real first word and prose first words all pass.
 
 A line whose keyword reads `mutant` is judged by the mutant form alone, never by the command form. The mutant
 pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case,
