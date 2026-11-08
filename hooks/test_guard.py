@@ -13915,6 +13915,47 @@ sh("heredoc-keep: reader, a body in run.sh that no command in this call runs, de
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 
 
+# CLASS 6. A run that reaches a file a body writes: a builtin that sources it, or a pipe into ssh or sudo. Each body
+# holds `gh pr create --title x`, so each run denies on main.
+sh("heredoc-keep: a written file holding gh pr create --title x, run by builtin dot, denies",
+   "cat > f <<'EOF'\ngh pr create --title x\nEOF\nbuiltin . f",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: a written file holding gh pr create --title x, piped to ssh, denies",
+   "cat > f <<'EOF'\ngh pr create --title x\nEOF\ncat f | ssh host",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: a written file holding gh pr create --title x, piped to sudo, denies",
+   "cat > f <<'EOF'\ngh pr create --title x\nEOF\ncat f | sudo -s",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Shell names that `_SHELL_SCRIPT` does not keep (it keeps .sh, .bash and .zsh). A body written to one, with no run,
+# denies on main.
+sh("heredoc-keep: a ksh script holding gh pr create --title x, with no run, denies",
+   "cat > run.ksh <<'EOF'\ngh pr create --title x\nEOF",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: a dash script holding gh pr create --title x, with no run, denies",
+   "cat > run.dash <<'EOF'\ngh pr create --title x\nEOF",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A `source` on the same line as a read of the written file. The read does not run it, so main allows the call.
+sh("heredoc-keep: a brief holding gh pr create --title x, then env.sh sourced and the brief read, allows",
+   "cat > brief.md <<'EOF'\ngh pr create --title x\nEOF\nsource ./env.sh && cat brief.md",
+   "allow", cwd=NOGIT)
+# A file named `sh`, written with no run, denies on main.
+sh("heredoc-keep: a file named sh holding gh pr create --title x, with no run, denies",
+   "cat > sh <<'EOF'\ngh pr create --title x\nEOF",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Each form above with a plain body beside it (P2): the same call with `hello` allows on both trees.
+HK_FORM_CONTROLS = (
+    ("builtin . f", "cat > f <<'EOF'\n%s\nEOF\nbuiltin . f"),
+    ("a pipe into ssh", "cat > f <<'EOF'\n%s\nEOF\ncat f | ssh host"),
+    ("a pipe into sudo", "cat > f <<'EOF'\n%s\nEOF\ncat f | sudo -s"),
+    ("a ksh file with no run", "cat > run.ksh <<'EOF'\n%s\nEOF"),
+    ("a dash file with no run", "cat > run.dash <<'EOF'\n%s\nEOF"),
+    ("a file named sh with no run", "cat > sh <<'EOF'\n%s\nEOF"),
+    ("a brief sourced and read", "cat > brief.md <<'EOF'\n%s\nEOF\nsource ./env.sh && cat brief.md"),
+)
+for _label, _form in HK_FORM_CONTROLS:
+    sh("heredoc-keep: control, a plain body in %s, allowed" % _label, _form % "hello", "allow", cwd=NOGIT)
+
+
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
 # impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.
