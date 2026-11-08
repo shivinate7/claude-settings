@@ -1,0 +1,11 @@
+{
+  "title": "An agent's commit touches only the files its brief names",
+  "why": "Coordinator 16:08 CST Nov 8. Incidents: (1) 14:51 CST, PR #2041: a record-writer's brief named notes by the prefix `verdict-`, and its commit added Fix lines to 12 notes of another tool; restored in f9d09b9bf (step notes-scope-own-lines covers notes lines only, shipping in #2289). (2) Lane past-ruling-on-send's test-author commit 795c76f33 rewrote lint/test_retired_repos.py, which its brief did not name; restored in f05601afb. Harm: a commit silently rewrites files outside its task, and only a hand diff catches it. Red case: an agent commit that touches a file its brief does not name is refused.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 835,
+  "updatedAt": "2026-11-08T16:08:00-06:00"
+}
