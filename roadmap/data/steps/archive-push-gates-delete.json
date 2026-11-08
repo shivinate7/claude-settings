@@ -1,0 +1,10 @@
+{
+  "title": "A remote branch delete runs only when the archive push before it succeeded",
+  "phase": "now",
+  "status": "todo",
+  "order": 266.95,
+  "owner": "coordinator",
+  "why": "Degen incident, 2026-11-07: zsh read `$b:r` as a filename modifier, so the archive pushes failed; `| tail` hid the failure, and six branches were deleted on GitHub with no archive copy. They were restored from the local clone, so nothing was lost.",
+  "note": "Refuse a command that runs `git push --delete <branch>` (or `push origin :<branch>`) after its archive push unless that push's own exit status gates the delete: no `| tail` or `;` between them. Rule shared-trees-archive-then-delete. From the owner's ask ask-mw79tt4bwr (relayed from a Degen session), 21:26 CST Nov 7. Filed 21:30 CST Nov 7.",
+  "updatedAt": "2026-11-07T21:30:00-06:00"
+}

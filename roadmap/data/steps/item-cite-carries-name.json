@@ -1,0 +1,10 @@
+{
+  "title": "A handoff or report that cites a page item number also gives its short name",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.69,
+  "owner": "coordinator",
+  "why": "A repo's triage handoff named items 46 and 47 by number only, so the next session could not tell which was the search pill clear button and which the stale head-vocabulary record (owner's ask ask-mw79tmz6x2, 21:26 CST Nov 7). Rule speak-cite-id-plus-gloss covers it, but no check holds it for item numbers.",
+  "note": "Check for the handoff writer and the report guard: an `item <n>` cite carries the item's short name or slug. Related: page-item-id-check. Filed 21:30 CST Nov 7.",
+  "updatedAt": "2026-11-07T21:30:00-06:00"
+}
