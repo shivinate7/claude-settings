@@ -10672,6 +10672,12 @@ old_mcp("review-record: a withdrawal note over a stamped record is refused, MCP 
 VARIABLE_EDIT_ROUTES = (
     ("command substitution", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/12/comments --jq '.[-1].id')"),
     ("command substitution in double quotes", "\"repos/y/x/issues/comments/$(gh api repos/y/x/issues/12/comments --jq '.[-1].id')\""),
+    ("command substitution with a pipe", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/12/comments | jq '.[-1].id')"),
+    ("command substitution with a pipe in double quotes",
+     "\"repos/y/x/issues/comments/$(gh api repos/y/x/issues/12/comments | jq '.[-1].id')\""),
+    ("command substitution with a semicolon", "repos/y/x/issues/comments/$(true; gh api repos/y/x/issues/12/comments --jq '.[-1].id')"),
+    ("command substitution with and", "repos/y/x/issues/comments/$(true && gh api repos/y/x/issues/12/comments --jq '.[-1].id')"),
+    ("backticks with a literal route inside", "repos/y/x/issues/comments/`gh api repos/y/x/issues/12/comments --jq '.[-1].id'`"),
     ("arithmetic", "repos/y/x/issues/comments/$((ID+1))"),
     ("default expansion", "repos/y/x/issues/comments/${ID:-4417}"),
     ("variable repo", "repos/$REPO/issues/comments/77"),
@@ -10690,6 +10696,11 @@ VARIABLE_POST_ROUTES = (
     ("command substitution as the repo", "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/12/comments"),
     ("command substitution as the repo in double quotes",
      "\"repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/12/comments\""),
+    ("command substitution with a pipe", "repos/y/x/issues/$(echo 12 | tr a b)/comments"),
+    ("command substitution with a pipe in double quotes", "\"repos/y/x/issues/$(echo 12 | tr a b)/comments\""),
+    ("command substitution with a semicolon", "repos/y/x/issues/$(true; echo 12)/comments"),
+    ("command substitution with and", "repos/y/x/issues/$(true && echo 12)/comments"),
+    ("backticks", "repos/y/x/issues/`echo 12`/comments"),
 )
 VARIABLE_FORMS = (
     ("gh api -X PATCH, $ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
@@ -10752,6 +10763,78 @@ for _label, _target in VARIABLE_TARGET_ROUTES:
     REVIEW_LOG_CHECKS.append(("review-record:a marked post whose endpoint is a substitution is refused with no gh read, %s" % _label,
                              review_reads("Bash", {"command": "gh api %s -f 'body=%s'" % (_target, review_record())}, "deny", 0,
                                           carries=(REVIEW_RULE,))))
+
+# THE SPLIT SUBSTITUTIONS. Decision pr-review-record, the variable forms. The segment splitter cuts at an unquoted `|`, `;` or `&&`, even
+# inside a `$(...)`. The route and the body of one call can then land in two segments: the route is judged alone, and the body is judged in
+# another segment, so the post or edit goes unread. Each form below is one call, so the guard must join the substitution and judge it whole.
+
+# THE #2063 ACT. Decision pr-review-record, the edit-read cost. An edit that withdraws a stamped record through a substitution with a pipe in
+# its comment id. The old body is a record and the new body holds no marker. It is refused as a read that could not run, since the comment
+# id cannot be read.
+bash_post("review-record: a withdrawal through a substitution with a pipe is refused as a read that could not run, gh api -X PATCH",
+          "gh api -X PATCH repos/y/x/issues/comments/$(gh api repos/y/x/issues/12/comments | jq '.[-1].id') -f body=\"Withdrawn\"",
+          "deny", rule=REVIEW_RULE, carries=("could not run",))
+
+# THE METHOD SPELLINGS. Decision pr-review-record, the variable forms. `--method=PATCH` and `-XPATCH` name the PATCH method as `-X PATCH` does, so an unmarked body under a substitution
+# endpoint is an edit, refused as a read that could not run. `--method PATCH` is judged today and stays pinned. A marked body is refused
+# with no read under each spelling.
+for _flag in ("--method=PATCH", "-XPATCH", "--method PATCH"):
+    for _label, _target in VARIABLE_TARGET_ROUTES:
+        bash_post("review-record: an unmarked edit whose endpoint is a substitution is refused as a read that could not run, %s, %s"
+                  % (_flag, _label), "gh api %s %s -f 'body=%s'" % (_flag, _target, UNMARKED_BODY), "deny", rule=REVIEW_RULE,
+                  carries=("could not run",))
+        REVIEW_LOG_CHECKS.append(("review-record:a marked edit whose endpoint is a substitution is refused with no gh read, %s, %s"
+                                 % (_flag, _label),
+                                 review_reads("Bash", {"command": "gh api %s %s -f 'body=%s'" % (_flag, _target, review_record())},
+                                              "deny", 0, carries=(REVIEW_RULE,))))
+
+# THE WHOLE ENDPOINT IS A VARIABLE. Decision pr-review-record, the variable forms. The endpoint word is a shell expansion with no substitution in it, so the guard reads no comment id.
+# An unmarked edit under it is refused as a read that could not run. A marked edit or post is refused with no read, since its pull request
+# cannot be checked. An unmarked post makes no read.
+VARIABLE_WHOLE_ENDPOINTS = (
+    ("variable", "$URL"),
+    ("variable in double quotes", "\"$URL\""),
+    ("braced variable", "${URL}"),
+)
+for _label, _target in VARIABLE_WHOLE_ENDPOINTS:
+    bash_post("review-record: an unmarked edit whose whole endpoint is a variable is refused as a read that could not run, -X PATCH, %s"
+              % _label, "gh api -X PATCH %s -f body=x" % _target, "deny", rule=REVIEW_RULE, carries=("could not run",))
+    REVIEW_LOG_CHECKS.append(("review-record:a marked edit whose whole endpoint is a variable is refused with no gh read, -X PATCH, %s" % _label,
+                             review_reads("Bash", {"command": "gh api -X PATCH %s -f 'body=%s'" % (_target, review_record())}, "deny", 0,
+                                          carries=(REVIEW_RULE,))))
+    REVIEW_LOG_CHECKS.append(("review-record:a marked post whose whole endpoint is a variable is refused with no gh read, %s" % _label,
+                             review_reads("Bash", {"command": "gh api %s -f 'body=%s'" % (_target, review_record())}, "deny", 0,
+                                          carries=(REVIEW_RULE,))))
+    REVIEW_LOG_CHECKS.append(("review-record:an unmarked post whose whole endpoint is a variable is allowed with no gh read, %s" % _label,
+                             review_reads("Bash", {"command": "gh api %s -f body=x" % _target}, "allow", 0)))
+
+# THE VARIABLE REPO OR NUMBER OF A PULL REQUEST COMMENT. Decision pr-review-record, the variable forms. `gh pr comment` takes its repo from `-R` and its pull request from its first word.
+# A shell expansion in either is a variable target: a marked body is refused with no read. An unmarked body makes no read.
+REVIEW_LOG_CHECKS.append(("review-record:a marked pr comment with a variable repo is refused with no gh read, gh pr comment \"$PR\" -R \"$REPO\"",
+                         review_reads("Bash", {"command": "gh pr comment \"$PR\" -R \"$REPO\" --body '%s'" % review_record()}, "deny", 0,
+                                      carries=(REVIEW_RULE,))))
+REVIEW_LOG_CHECKS.append(("review-record:a marked pr comment on a literal number in a variable repo is refused with no gh read, gh pr comment 12 -R \"$REPO\"",
+                         review_reads("Bash", {"command": "gh pr comment 12 -R \"$REPO\" --body '%s'" % review_record()}, "deny", 0,
+                                      carries=(REVIEW_RULE,))))
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked pr comment with a variable repo is allowed with no gh read, gh pr comment \"$PR\" -R \"$REPO\"",
+                         review_reads("Bash", {"command": "gh pr comment \"$PR\" -R \"$REPO\" --body '%s'" % UNMARKED_BODY}, "allow", 0)))
+
+# CONTROLS THAT STAY ALLOWED. Decision pr-review-record, the variable forms. Each is a call the route judge must not take for a comment post or edit, so each makes no read.
+for _label, _command in (
+        ("a variable repo in a pull request listing", "gh api repos/$REPO/pulls"),
+        ("a variable repo in a workflow run listing", "gh api repos/$REPO/actions/runs"),
+        ("a variable repo on a label post", "gh api repos/$REPO/issues/12/labels -f labels[]=x"),
+        ("a variable comment id on a reaction", "gh api repos/y/x/issues/comments/$CID/reactions -f content=+1"),
+        ("a paginated comment listing", "gh api repos/y/x/issues/12/comments --paginate --jq '.[].id'"),
+        ("a comment delete by a literal id", "gh api -X DELETE repos/y/x/issues/comments/55"),
+        ("a graphql query", "gh api graphql -f query='{ viewer { login } }'")):
+    REVIEW_LOG_CHECKS.append(("review-record:%s is allowed with no gh read, %s" % (_label, _command),
+                             review_reads("Bash", {"command": _command}, "allow", 0)))
+
+# A QUOTED PARENTHESIS IN A SUBSTITUTION IS TEXT. Decision pr-review-record, the variable forms. A joiner that counts the parentheses of a substitution must skip the quoted one, or the
+# call after `&&` joins the substitution and is never judged on its own. The `rm` after it is still refused under its own rule.
+bash_post("review-record: a quoted parenthesis in a substitution does not hide a call after && from its own rule, gh api post then rm",
+          "gh api repos/y/x/issues/$(echo '(' 12)/comments -f 'body=%s' && rm -rf $HOME" % UNMARKED_BODY, "deny", rule="destructive-delete")
 
 # THE REMEDY NAMES WHAT IS A VARIABLE. A post to a literal number in a variable repo is told to name the repo, not to write the PR number
 # literally, which is the remedy for a variable number. A variable number keeps its remedy: write the number literally.
