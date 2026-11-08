@@ -1,0 +1,11 @@
+{
+  "title": "The wrapper reader sees the command word behind every parallel flag form, and keeps walking past parallel",
+  "why": "Lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 16:58 CST Nov 8; from round 3 of #2291 (wrapper-runner-list, net value positive). It may wait on the same batch as step wrapper-subst-assign (#2113, #2208, #2241). (1) Misses in hooks/guard_core.py about lines 412-470 (the parallel table) and _wrapper_flags (about 753-785): `parallel -l 2 rm F`, `--maxlines 2`, `-i -j 2 rm F`, `-e -j 2 rm F`, and unique-prefix flags (`--memsus 2G rm F`, `--max-proc 4 rm F`) hide the command word. Head and base allow each one and main denies, so the miss comes from the base. Fix: the `:s` flags (-i, -e, --eof, --replace) skip a word that starts with a dash; -l takes only a number; expand unique-prefix long flags. (2) Coverage in _walk_wrappers (about 803-815): stopping at parallel hides CMD from the command-word rules (kill, merge) in `parallel CMD {} ::: x`. Fix: keep walking, and let only guard_frozen use _parallel_scripts. (3) Test gap: 32497f974 added value flags --replace -i --eof -e with no row. Add `parallel --eof XX rm F` want deny, and `parallel --eof rm F` want allow.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 843,
+  "updatedAt": "2026-11-08T16:59:00-06:00"
+}
