@@ -867,8 +867,11 @@ def _plain_words(words):
 
 
 # What a node, perl or ruby script names when it can hand text to a shell: a call that runs a command, an
-# eval, a backtick, `%x`, `qx`, a pipe-open, or the `child_process` module. A source that holds none is text.
-_SCRIPT_SHELL = re.compile(r"\b(?:system|exec|spawn|eval|popen|qx)|child_process|`|%x", re.IGNORECASE).search
+# eval, a backtick, `%x`, `qx`, `popen`, ruby's `Open3`, the `child_process` module, or a pipe-open: an `open`
+# whose string starts with a pipe bar (ruby `"|cmd"`, perl `"-|"`, `"|-"`, `"| cmd"`) or ends with one (perl
+# `"cmd |"`). A source that holds none is text.
+_SCRIPT_SHELL = re.compile(r"\b(?:system|exec|spawn|eval|popen|qx|open3)|child_process|`|%x"
+                           r"""|\bopen\b[^;\n]*?["'](?:\s*-?\||[^"'\n]*\|-?\s*["'])""", re.IGNORECASE).search
 SCRIPT_READ_CAP = 65536   # a script source larger than this is not read: it counts as not visible
 
 

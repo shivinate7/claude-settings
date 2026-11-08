@@ -5,6 +5,7 @@ Other files reach these names through `guard`.
 """
 import os
 import re
+import stat
 
 import guard_core
 from guard_core import (
@@ -482,31 +483,140 @@ def _writes_a_file(words) -> bool:
     return False
 
 
-def _script_is_text(words, at, written) -> bool:
+# A token in a quoted argument that looks like a write: a redirect, `tee`, `sed -i`, or a mutating command word.
+# Only such an argument makes the script's source worth reading: any other is judged the same either way.
+_WRITE_LOOKING = re.compile(r">|\btee\b|\bsed\b[^\n]*?(?:\s-[A-Za-z]*i|--in-place)|" + MUTATING_COMMAND)
+# The commands whose last operand, or `-t` value, is the file they write.
+_DEST_WRITERS = frozenset(("cp", "mv", "install", "ln"))
+_REDIRECT_WORD = re.compile(r"(?:\d*|&)>>?\|?(.*)")
+_UNKNOWN_NAME = re.compile(r"[$`~*?\[{]")   # a name built from a variable, a glob or a home dir: any file
+# {(path, mtime_ns, size, inode): source, or None when it is not visible}. One guard call reads a script file
+# once, though each rule that calls `_shell_write_hit` asks again. The stat keys it, so a changed file reads anew.
+_SCRIPT_SOURCES = {}
+
+
+def _asks_for_script(words) -> bool:
+    """True when a quoted argument of the interpreter segment WORDS holds a write-looking token
+    (`_WRITE_LOOKING`), so its script's source decides whether that argument is data."""
+    return any(_WRITE_LOOKING.search(_unquoted(words[index])) for index in _data_words("interpreter", words))
+
+
+def _script_source(path: str):
+    """The text of the plain file PATH when it is no larger than `SCRIPT_READ_CAP` and reads as utf-8, else
+    None. Read at most once per guard call (`_SCRIPT_SOURCES`): one open of one small file, no process."""
+    try:
+        status = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    if not stat.S_ISREG(status.st_mode) or status.st_size > guard_core.SCRIPT_READ_CAP:
+        return None
+    key = (path, status.st_mtime_ns, status.st_size, status.st_ino)
+    if key not in _SCRIPT_SOURCES:
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read(guard_core.SCRIPT_READ_CAP + 1)
+            _SCRIPT_SOURCES[key] = raw.decode("utf-8") if len(raw) <= guard_core.SCRIPT_READ_CAP else None
+        except (OSError, ValueError):   # unreadable, or no utf-8
+            _SCRIPT_SOURCES[key] = None
+    return _SCRIPT_SOURCES[key]
+
+
+def _rewritten_files(cmd: str, cwd: str, written):
+    """[(folder or None, name)] for each file a segment of CMD writes by a redirect, `tee`, or the destination of
+    a `cp`, `mv`, `install` or `ln`, read with the heredoc bodies dropped. A heredoc header's own write of a file
+    in WRITTEN (`guard_core.heredoc_sources`) is left out: its body is the source. The folder is the one the
+    segment runs in (`dir_before_segment`), None when that cannot be told."""
+    view = cmd
+    if "<<" in cmd:
+        _, _bodies, unclosed = _walk_heredocs(cmd)
+        view = cmd if unclosed else guard_core._drop_heredoc_bodies(cmd)
+    ends = []
+    segments = split_segments(view, ends)
+    found = []
+    for number, segment in enumerate(segments):
+        raw = _quoted_words(segment)
+        words = [_unquoted(word) for word in raw]
+        header = "<<" in _scan(segment)[1]
+        names = []
+        redirects = set()   # the indexes of redirect words and of the file each names
+        for index, word in enumerate(raw):
+            match = None if word[:1] in "'\"" else _REDIRECT_WORD.fullmatch(word)
+            if _is_redirect(word) or match:
+                redirects.add(index)
+            if _is_redirect(word) and "<" in word:
+                redirects.add(index + 1)   # the file an input redirect reads
+            if not match:
+                continue
+            name, after = _unquoted(match.group(1)), index + 1
+            if not name and after < len(words):
+                if words[after] == "|" and after + 1 < len(words):   # `>|` splits as `>` `|`
+                    redirects.add(after)
+                    after += 1
+                name = words[after]
+                redirects.add(after)
+            name = name.lstrip("|")
+            if name and not name.startswith(("&", "<")) and name.lower() not in _NULL_TARGETS:
+                names.append(name)
+        start = resolve_command(tuple(raw))
+        command = _name(raw[start]) if start is not None and start < len(raw) else ""
+        if command == "tee" or command in _DEST_WRITERS:
+            operands = [word for at, word in enumerate(words) if at > start and at not in redirects
+                        and not word.startswith("-")]
+            target = None   # the `-t` forms, as `_copy_reads` reads them
+            for at, word in enumerate(words[start + 1:], start + 1):
+                if _CP_TARGET.fullmatch(word) and at + 1 < len(words):
+                    target = words[at + 1]
+                elif word.startswith("--target-directory="):
+                    target = word.split("=", 1)[1]
+                elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
+                    target = word[2:]
+            names.extend(operands if command == "tee" else [target] if target else operands[-1:])
+        at = dir_before_segment(segments, number, cwd, ends)
+        for name in names:
+            plain = name[2:] if name.startswith("./") else name
+            if not (header and plain in written):
+                found.append((at, name))
+    return found
+
+
+def _is_rewritten(name: str, path, rewritten) -> bool:
+    """True when a write of REWRITTEN (`_rewritten_files`) may land on the script NAME at PATH (None when its
+    folder cannot be told). A write whose own name or folder cannot be told may land on any file."""
+    for at, target in rewritten:
+        if _UNKNOWN_NAME.search(target):
+            return True
+        if os.path.isabs(target) or at:
+            full = os.path.normpath(target if os.path.isabs(target) else os.path.join(at, target))
+            if path is None or full == os.path.normpath(path) or (
+                    (target.endswith(("/", "\\")) or os.path.isdir(full))
+                    and full == os.path.dirname(os.path.normpath(path))):
+                return True
+        elif path is None or os.path.normpath(target) == os.path.normpath(name):
+            return True
+    return False
+
+
+def _script_is_text(words, at, written, rewritten) -> bool:
     """True when the script FILE of the interpreter segment WORDS has a visible source that runs no shell
-    (`guard_core.script_source_is_text`), so its quoted arguments are data. The source is visible when a
+    (`guard_core.script_source_is_text`), so its quoted arguments are data. A script that a write of this
+    command may land on (REWRITTEN, from `_rewritten_files`) is not visible. Else the source is visible when a
     heredoc of this command writes it (WRITTEN, from `guard_core.heredoc_sources`), or it is a plain readable
     file under AT, the folder the segment runs in (None when that cannot be told), no larger than
     `SCRIPT_READ_CAP`. A source that is not visible, or cannot be read, is not text: the segment keeps main's
-    verdict. One read of one small file, no process."""
+    verdict."""
     unquoted = [_unquoted(word) for word in words]
     name = unquoted[guard_core.interpreter_script(unquoted)]
     plain = name[2:] if name.startswith("./") else name
+    path = None
+    if not _UNKNOWN_NAME.search(name) and (at or os.path.isabs(name)):
+        path = name if os.path.isabs(name) else os.path.join(at, name)
+    if _is_rewritten(name, path, rewritten):
+        return False
     if plain in written:
         source = written[plain]
         return source is not None and guard_core.script_source_is_text(unquoted[0], source)
-    if not at or re.search(r"[$`~*?\[{]", name):
-        return False
-    path = name if os.path.isabs(name) else os.path.join(at, name)
-    try:
-        if not os.path.isfile(path):
-            return False
-        with open(path, "rb") as handle:
-            raw = handle.read(guard_core.SCRIPT_READ_CAP + 1)
-        return len(raw) <= guard_core.SCRIPT_READ_CAP and guard_core.script_source_is_text(
-            unquoted[0], raw.decode("utf-8"))
-    except (OSError, ValueError):   # unreadable, or no utf-8
-        return False
+    source = _script_source(path) if path else None
+    return source is not None and guard_core.script_source_is_text(unquoted[0], source)
 
 
 def _data_words(kind: str, words):
@@ -730,15 +840,20 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(*closing))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
-    written = None   # the files this command's heredocs write, read once for the first interpreter that needs it
+    written = rewritten = None   # read once, for the first interpreter that needs them
     for number, kind in enumerate(kinds):
-        if kind != "interpreter" or not _data_words(kind, parsed[number]):
+        if kind != "interpreter":
+            continue
+        if not _asks_for_script(parsed[number]):
+            kinds[number] = ""   # no quoted argument looks like a write: main's verdict, and no script is read
             continue
         if written is None:
             _, bodies, unclosed = _walk_heredocs(cmd) if "<<" in cmd else (0, [], False)
             written = {} if unclosed else guard_core.heredoc_sources(bodies)
-        at = (dir_before_segment(segments, number, cwd, ends) if follow_cd else cwd)
-        if not _script_is_text(parsed[number], at, written):
+            rewritten = _rewritten_files(cmd, cwd, written)
+        # The script resolves in the folder its segment runs in, for every caller: a rule that judges paths from
+        # `cwd` (no `follow_cd`) still runs the script that a `cd` reaches.
+        if not _script_is_text(parsed[number], dir_before_segment(segments, number, cwd, ends), written, rewritten):
             kinds[number] = ""   # the script's source is not visible text: its quoted arguments are shell words
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
