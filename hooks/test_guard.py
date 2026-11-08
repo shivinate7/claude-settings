@@ -7847,6 +7847,7 @@ sh("push: stacked lane, a bare -u under push.default current writes the local na
    VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
 push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
           cwd=PUSHSTRAY, silent=True)
+# Decision plain-push-asks, item 432 a.
 # A destination already on origin (refs/remotes/origin/<name>) is no stray. PUSHOWNREF is
 # `lane-x`, tracking origin/batch-1, with origin/lane-x present: each implied push to its own name is silent.
 push_case("own ref on origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHOWNREF, silent=True)
