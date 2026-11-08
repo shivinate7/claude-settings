@@ -3798,60 +3798,43 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
 
     ON_NT = os.name == "nt"
 
-    # POSIX hosts only: the Windows branch of _log_lock, forced, because POSIX has no msvcrt. A Windows host
-    # runs its real msvcrt (LOCK_MARK_PRELUDE_NT). The stand-in models msvcrt.locking: LK_LOCK waits on its own
-    # and then raises (the real one gives up after about ten seconds), here three tries 0.2 s apart, so code
-    # that waits through LK_LOCK gives up inside the holder's hold and drops a row. LK_NBLCK fails at once, one
-    # try per call, so code that polls it to a deadline keeps waiting. It takes the real flock, so the holder's
-    # lock is the one it waits on. Only the module's own `sys` reference reports win32.
+    # POSIX hosts only: each try that finds the lock held raises an OSError, not False, so _log_lock's
+    # other-error path runs: it retries until its deadline. A Windows host forces nothing and runs the real
+    # try (LOCK_MARK_PRELUDE_NT). The stand-in wraps guard_core.try_lock_fd, the one home of the lock, and adds
+    # only the mark and the raise. The real try takes the real flock, so the holder's lock is the one it waits on.
     LOCK_GIVE_UP_PRELUDE = (
-        "import fcntl as _fcntl\n"
-        "import time as _time\n"
-        "import types as _types\n"
-        "class _WinSys:\n"
-        "    platform = 'win32'\n"
-        "    def __getattr__(self, name):\n"
-        "        return getattr(sys, name)\n"
-        "agent_end_reap.sys = _WinSys()\n"
+        "import guard_core as _guard_core\n"
+        "_real_try_lock_fd = _guard_core.try_lock_fd\n"
         "_marked = []\n"
-        "def _locking(fd, mode, nbytes):\n"
+        "def _try_lock_fd(fd):\n"
         "    if not _marked:\n"
         "        open(os.environ['WRITER_ATTEMPT_MARK'], 'w').close()\n"
         "        _marked.append(True)\n"
-        "    if mode == 0:\n"
-        "        _fcntl.flock(fd, _fcntl.LOCK_UN)\n"
-        "        return\n"
-        "    tries = 3 if mode == 1 else 1\n"
-        "    for attempt in range(tries):\n"
-        "        try:\n"
-        "            _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)\n"
-        "            return\n"
-        "        except BlockingIOError:\n"
-        "            if attempt + 1 < tries:\n"
-        "                _time.sleep(0.2)\n"
+        "    if _real_try_lock_fd(fd):\n"
+        "        return True\n"
         "    raise OSError(36, 'lock wait gave up (forced)')\n"
-        "sys.modules['msvcrt'] = _types.SimpleNamespace(locking=_locking, LK_LOCK=1, LK_NBLCK=2, LK_UNLCK=0)\n"
+        "_guard_core.try_lock_fd = _try_lock_fd\n"
     )
 
-    # Windows hosts: nothing is forced. The writer runs the real msvcrt and meets the holder's real byte lock.
-    # The wrapper only says, on the first locking call, that the writer has asked for the lock (the holder
-    # starts its hold on that mark), then delegates every call, errors included. _log_lock imports msvcrt at
-    # call time and so gets this same module object with its patched `locking`.
+    # Windows hosts: nothing is forced. The writer runs the real try_lock_fd and meets the holder's real lock at
+    # the same byte. The wrapper only says, on the first try, that the writer has asked for the lock (the holder
+    # starts its hold on that mark), then delegates every call, errors included. _log_lock reads
+    # guard_core.try_lock_fd at call time, so it gets the patched name.
     LOCK_MARK_PRELUDE_NT = (
-        "import msvcrt as _msvcrt\n"
-        "_real_locking = _msvcrt.locking\n"
+        "import guard_core as _guard_core\n"
+        "_real_try_lock_fd = _guard_core.try_lock_fd\n"
         "_marked = []\n"
-        "def _locking(fd, mode, nbytes):\n"
+        "def _try_lock_fd(fd):\n"
         "    if not _marked:\n"
         "        open(os.environ['WRITER_ATTEMPT_MARK'], 'w').close()\n"
         "        _marked.append(True)\n"
-        "    return _real_locking(fd, mode, nbytes)\n"
-        "_msvcrt.locking = _locking\n"
+        "    return _real_try_lock_fd(fd)\n"
+        "_guard_core.try_lock_fd = _try_lock_fd\n"
     )
 
     @classmethod
     def lock_prelude(cls, nt=None):
-        """The writer prelude for NT (default: this host): the real msvcrt on Windows, the flock stand-in on POSIX."""
+        """The writer prelude for NT (default: this host): the mark over the real try_lock_fd on Windows, the forced give-up on POSIX."""
         return cls.LOCK_MARK_PRELUDE_NT if (cls.ON_NT if nt is None else nt) else cls.LOCK_GIVE_UP_PRELUDE
 
     # The second drop path on Windows: os.replace refuses the temp file while a reader holds the
@@ -3872,19 +3855,17 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
     # until that file appears (60 s at most). Without one it holds 5 s after `attempt` appears, so a writer
     # that asks for the lock meets it held. It unlocks by hand before it exits: Windows frees a dead process's
     # byte lock after a delay it does not state. Its own pid is the only one it touches. The lock is the one
-    # agent_end_reap._log_lock takes: byte 0 of the `.lock` file through msvcrt on nt, flock elsewhere.
+    # agent_end_reap._log_lock takes, because both call guard_core.try_lock_fd: the byte at LOG_LOCK_OFFSET
+    # through msvcrt on nt, flock elsewhere.
     HOLDER = (
         "import os, sys, time\n"
+        "sys.path.insert(0, __HOOKS__)\n"
+        "import guard_core\n"
         "lock, ready, attempt = sys.argv[1], sys.argv[2], sys.argv[3]\n"
         "release = sys.argv[4] if len(sys.argv) > 4 else ''\n"
         "handle = open(lock, 'a+')\n"
-        "if os.name == 'nt':\n"
-        "    import msvcrt\n"
-        "    handle.seek(0)\n"
-        "    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)\n"
-        "else:\n"
-        "    import fcntl\n"
-        "    fcntl.flock(handle, fcntl.LOCK_EX)\n"
+        "if not guard_core.try_lock_fd(handle.fileno()):\n"
+        "    sys.exit(3)\n"
         "open(ready, 'w').close()\n"
         "end = time.time() + 60\n"
         "if release:\n"
@@ -3894,12 +3875,8 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         "    while not os.path.exists(attempt) and time.time() < end:\n"
         "        time.sleep(0.02)\n"
         "    time.sleep(5)\n"
-        "if os.name == 'nt':\n"
-        "    handle.seek(0)\n"
-        "    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)\n"
-        "else:\n"
-        "    fcntl.flock(handle, fcntl.LOCK_UN)\n"
-    )
+        "guard_core.unlock_fd(handle.fileno())\n"
+    ).replace("__HOOKS__", repr(os.path.join(REPO_ROOT, "hooks")))  # repr: Windows backslashes
 
     def start_holder(self, folder, attempt, release=None):
         """Start a process that holds the payload log's real lock in `folder`, and return it once it holds
@@ -3927,10 +3904,10 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         holder.wait(timeout=30)
 
     def test_a_lock_wait_that_gives_up_loses_no_row(self):
-        """The Windows lock wait: a give-up must not drop a row. The holder keeps the real lock for 5 s after
-        the first writer asks for it. On Windows the writers meet the real byte lock. On POSIX the stand-in
-        forces the Windows branch and fails each LK_NBLCK try at once. Either way the writer must keep
-        retrying and land its row once the holder lets go."""
+        """A lock wait that gives up must not drop a row. The holder keeps the real lock for 5 s after the first
+        writer asks for it. On Windows the writers meet the holder's real byte lock. On POSIX the stand-in makes
+        each try raise instead of reporting the lock held. Either way the writer must keep retrying and land its
+        row once the holder lets go."""
         folder = tempfile.mkdtemp(prefix="reap_lock_", dir=ROOT)
         self.addCleanup(shutil.rmtree, folder, True)
         attempt = os.path.join(folder, "writer-attempted")
@@ -3959,37 +3936,37 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
                 compile(source, "<%s child, nt>" % name, "exec")
 
     def test_the_windows_mark_wrapper_marks_once_and_delegates(self):
-        """LOCK_MARK_PRELUDE_NT against a stand-in msvcrt (the real one exists only on Windows): the first
-        locking call writes the mark and later calls do not, and every call reaches the wrapped function with
-        its own arguments, a raised error included."""
+        """LOCK_MARK_PRELUDE_NT against a stand-in guard_core (the real try_lock_fd needs msvcrt, which exists
+        only on Windows): the first try writes the mark and later tries do not, and every call reaches the
+        wrapped function with its own argument, a raised error included."""
         folder = tempfile.mkdtemp(prefix="reap_mark_", dir=ROOT)
         self.addCleanup(shutil.rmtree, folder, True)
         mark = os.path.join(folder, "writer-attempted")
         calls = []
 
-        def real_locking(fd, mode, nbytes):
-            calls.append((fd, mode, nbytes))
-            if mode == 2:
+        def real_try_lock_fd(fd):
+            calls.append(fd)
+            if fd == 8:
                 raise OSError(13, "held (stand-in)")
-            return "done"
+            return True
 
-        msvcrt = types.SimpleNamespace(locking=real_locking, LK_NBLCK=2, LK_UNLCK=0)
-        with mock.patch.dict(sys.modules, {"msvcrt": msvcrt}), \
+        guard_core = types.SimpleNamespace(try_lock_fd=real_try_lock_fd)
+        with mock.patch.dict(sys.modules, {"guard_core": guard_core}), \
                 mock.patch.dict(os.environ, {"WRITER_ATTEMPT_MARK": mark}):
             exec(self.LOCK_MARK_PRELUDE_NT, {"os": os})
-            self.assertFalse(os.path.exists(mark), "the mark exists before any locking call")
+            self.assertFalse(os.path.exists(mark), "the mark exists before any try")
             with self.assertRaises(OSError):
-                msvcrt.locking(7, 2, 1)
-            self.assertTrue(os.path.exists(mark), "the first locking call wrote no mark")
+                guard_core.try_lock_fd(8)
+            self.assertTrue(os.path.exists(mark), "the first try wrote no mark")
             os.remove(mark)
-            self.assertEqual(msvcrt.locking(7, 0, 1), "done")
-            self.assertFalse(os.path.exists(mark), "a later locking call wrote the mark again")
-        self.assertEqual(calls, [(7, 2, 1), (7, 0, 1)])
+            self.assertTrue(guard_core.try_lock_fd(7))
+            self.assertFalse(os.path.exists(mark), "a later try wrote the mark again")
+        self.assertEqual(calls, [8, 7])
 
     # The hook, run as its own process with the three waits set small. main() times itself, so interpreter
-    # start-up and host load stay out of the number. A POSIX host forces the Windows branch of _log_lock, so
-    # the msvcrt polling path a Windows host runs is the one measured; a Windows host runs it for real, with
-    # no prelude. The names are assigned, not patched: a build with no such name gets an unused one, so its
+    # start-up and host load stay out of the number. A POSIX host forces each try to raise, so the retry path
+    # _log_lock runs on a held lock is the one measured; a Windows host runs its real lock, with no prelude.
+    # The names are assigned, not patched: a build with no such name gets an unused one, so its
     # waits run at full length and the case goes red.
     HOOK_BOUND_CHILD = (
         "import os, sys, time\n"
@@ -4035,7 +4012,7 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
 
     def test_a_held_log_lock_keeps_the_hook_inside_its_bound(self):
         """The hook's bound with the payload log lock held for the whole run, where the per-call waits live:
-        the Windows branch of _log_lock. Both log calls share the hook's clock, so the hook ends at its done
+        the retry loop in _log_lock. Both log calls share the hook's clock, so the hook ends at its done
         deadline (LOG_DONE_BY, scaled to BOUND_DONE_BY). A done row timed from its own call, after the start
         row's wait (HOOK_BUDGET, BOUND_BUDGET), ends at BOUND_BUDGET + BOUND_DONE_BY at the earliest. A call
         that waits its own full LOG_WAIT_SECONDS (BOUND_WAIT) takes at least that. The hook must end before
