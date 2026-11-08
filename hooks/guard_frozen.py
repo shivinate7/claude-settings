@@ -184,6 +184,10 @@ def is_frozen(path: str, cwd: str) -> bool:
             return True
         if any(rel.startswith(d + os.sep) for d in CONFIG_FROZEN_DIRS):
             return True
+        # The folder itself: `rm -rf ~/.claude/hooks` names no file under it. Every caller judges a
+        # write target, and a read (`ls`, `cd`, `grep -r`, `find`) never reaches this test.
+        if rel in CONFIG_FROZEN_DIRS:
+            return True
         if len(parts) > 1 and parts[0] == os.path.normcase("skills") and parts[1] in CONFIG_FROZEN_SKILLS:
             return True
     return False
