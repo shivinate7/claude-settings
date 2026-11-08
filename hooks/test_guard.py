@@ -5299,11 +5299,17 @@ sh("git-after-cd: an if ! check whose body exits, over newlines, then a git push
    "if ! pytest -q; then\n  exit 1\nfi\n%s push -u origin b" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a push in the then branch of an if on the check, on one line, passes",
    "if pytest -q; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
-# AN EXIT IN A SUBSHELL, AND AN ELSE BODY. An exit inside a subshell leaves only the subshell, so the push after the `)`
-# is refused. An else body is no guarded body: the push there runs whatever the check before it did. The last case is
-# its control: the same else body with no check before it passes.
+# A SUBSTITUTION, A SUBSHELL'S EXIT, AND AN ELSE BODY. A check inside `$( )` does not stop the shell, so the push
+# after it is refused. An exit inside a subshell leaves only the subshell, so the push after the `)` is refused. An
+# else body is no guarded body: the push there runs whatever the check before it did. The last case is its control:
+# the same else body with no check before it passes.
+sh("git-after-cd: a check in a command substitution, then ; a git push -u, is refused",
+   "echo $(pytest -q); %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: a check protected by || a braced exit inside a subshell, then ; a git push -u, is refused",
    "( pytest -q || { echo bad; exit 1; } ); %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: an if ! check that exits inside a subshell, then ; a git push -u, is refused",
+   "( if ! pytest -q; then exit 1; fi ); %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
 sh("git-after-cd: a check, then ; an if whose else body holds a git push, is refused",
    'pytest -q; if [ -n "$X" ]; then :; else %s push -u origin b; fi' % VCS, "deny", "git-after-cd", cwd=NOGIT,
