@@ -20,6 +20,8 @@ This rule saves a wasted round. It does not stop an unseen test change. `role_wr
 
 The verdict is per clause. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write, make (`make the fix in X`). Each edit verb governs one object:
 
+- `only` or `just` may sit between the verb and its object (`Edit only X`).
+- A path followed by `is not your job`, `is not yours`, `isn't your job` or `isn't yours` is not an object (`Fix X is not your job`).
 - The object is the first path after the verb in its clause, and a path joined to it by `and`, `or` or a comma. A later path is a spec or a target: `Make guard.py handle the case in tests/x.py` and `Fix guard.py for/as/to satisfy ... tests/x.py` edit guard.py only.
 - With no path right after the verb (a determiner or `file` may sit between), a noun phrase then `in`, `at`, `of`, `to` or `into` and the path governs that path (`Fix the failing case in X`, `Make the fix in X`, `Add a case to X`). After another preposition (`for`, `as`, `with`) the path is a spec.
 - A noun phrase whose head is note, report or summary governs nothing (`Make a note of the failures in X`).
