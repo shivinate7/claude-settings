@@ -1604,7 +1604,7 @@ CANNOT_WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADVERB, re.I)
 CANNOT_WINDOW = 6  # words after the phrase, in its clause, that may name the act
 CANNOT_ADVERB_RE = re.compile(r"^(?:%s\s+)+" % _ADVERB, re.I)
 # Emphasis marks (**cannot**, _push_, a lone ** after a word) are no part of a word; a mark between two word characters
-# (snake_case) stays. _claim reads the words around the phrase with the marks removed.
+# (snake_case) stays. cannot_lines reads each line with the marks removed (_strip_emphasis).
 CANNOT_EMPHASIS_RE = re.compile(r"(?<!\w)(?:\*\*|__|\*|_)|(?:\*\*|__|\*|_)(?!\w)")
 # A code span of one act verb (`push`) names the act like the bare word.
 CANNOT_VERB_SPAN_RE = re.compile(r"^`(open|create|make|raise|file|submit|merge|push|close|comment|mark|edit|update)`", re.I)
@@ -1668,18 +1668,25 @@ CANNOT_TARGET_FIELDS = ("pullNumber", "pull_number", "branch", "head")
 CANNOT_FAIL_RE = re.compile(r"^Exit code [1-9]|\bHTTP(?:/[\d.]+)?\s+[45]\d\d\b")
 CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
 CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push|merge)\b")
+# Before the phrase, a bare check word with the writer as subject names no call: "I tried; I cannot push." names no check,
+# while "the push failed, so I could not push" does.
+CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _ADVERB, re.I)
+_CHECK_WORD = r"(?:tried|ran|returned|refused|denied|failed|errored|returns|refuses|denies|rejects|fails|errors)"
+CANNOT_CHECK_WORD_RE = re.compile(_CHECK_WORD, re.I)
 CANNOT_CHECK_RE = re.compile(
-    r"`[^`\n]+`|\bmcp__\w+|\b(?:tried|ran|returned|refused|denied|failed|errored"
-    r"|returns|refuses|denies|rejects|fails|errors)\b|\bexit(?: code)? [1-9]"
-    r"|(?:\b(?:HTTP(?:/[\d.]+)?|status|returned|code|error|got|with|gave|hit|a)\s+(?:a\s+)?|[(:]\s*)[45]\d\d\b(?![-\w])"
+    r"`[^`\n]+`|\bmcp__\w+|\b" + _CHECK_WORD + r"\b|\bexit(?: code)? [1-9]"
+    r"|(?:\b(?:HTTP(?:/[\d.]+)?|status|returned|answered|code|error|got|with|gave|hit|a)\s+(?:a\s+)?"
+    r"|(?:[(:,;—–]|\s-{1,2})\s*)[45]\d\d\b(?![-\w])"
     r"(?!\s+(?:lines?|files?|words?|chars?|commits?|bytes?|[km]b|ms)\b)",
     re.I)
 # With a failed try of the act in the turn, the line may name its check as a reason instead. A reason is a clause of three
-# words or more with a verb (is, was, not, rejected ...): in parentheses, after a colon, a semicolon, a comma or a dash, after
-# because, or the sentence next to the claim. A bare claim has none of these, and neither has a noun phrase such as
-# "the 450-line diff".
+# words or more with a verb (is, was, not, rejected ...), read only after the phrase: in parentheses, after a colon, a
+# semicolon, a comma or a dash, after because, or the sentence next to the claim. A bare claim has none of these, and
+# neither has a noun phrase such as "the 450-line diff" or a lead-in before the phrase ("Sorry, I could not push."). A clause
+# that a conjunction opens ("..., but I can open a PR") is another clause, not a reason.
 CANNOT_REASON_RE = re.compile(
     r"\(([^()]+)\)|[:;,—–]\s+([^.;:!?]+)|\s-{1,2}\s+([^.;:!?]+)|\bbecause\s+([^.;:!?]+)", re.I)
+CANNOT_CONJ_OPEN_RE = re.compile(r"^\s*(?:and|but|or|so|yet|then)\b", re.I)
 CANNOT_VERB_RE = re.compile(
     r"^(?:is|are|was|were|has|have|had|does|do|did|can|cannot|isn['’]t|aren['’]t|wasn['’]t|doesn['’]t|didn['’]t|won['’]t"
     r"|not|no|needs|requires|\w+ed)$", re.I)
@@ -1697,9 +1704,11 @@ def _is_reason(clause):
                                    for k, w in enumerate(words))
 
 
-def _gives_reason(sentence, following):
-    """True when `sentence` carries a reason (CANNOT_REASON_RE), or the sentence that `following` names is one."""
-    return any(_is_reason(g) for m in CANNOT_REASON_RE.finditer(sentence) for g in m.groups() if g) or _is_reason(following)
+def _gives_reason(tail, following):
+    """True when `tail`, the sentence after the phrase, carries a reason (CANNOT_REASON_RE) that no conjunction opens, or
+    the sentence that `following` names is one."""
+    return any(_is_reason(g) and not CANNOT_CONJ_OPEN_RE.match(g)
+               for m in CANNOT_REASON_RE.finditer(tail) for g in m.groups() if g) or _is_reason(following)
 CANNOT_HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
 CANNOT_NO_TRY = (
     CANNOT_HEAD + "this turn shows no failed try of it. A notice is no try. Remedy: run the act on one route; if it "
@@ -1746,7 +1755,7 @@ def _claim(body, mask, hit, floor):
     start = max((m.end() for m in CANNOT_BEFORE_BREAK_RE.finditer(mask, floor, hit.start())), default=floor)
     brk = CANNOT_BREAK_RE.search(mask, hit.end())
     end = brk.start() if brk else len(mask)
-    before, after = (CANNOT_EMPHASIS_RE.sub("", part) for part in (body[start:hit.start()], body[hit.end():end]))
+    before, after = body[start:hit.start()], body[hit.end():end]
     near = " ".join(before.split()[-CANNOT_NEGATOR_GAP:])
     if CANNOT_COND_RE.search(before) or CANNOT_NEGATOR_RE.search(near):
         return None
@@ -1849,37 +1858,56 @@ def _report_label_end(body):
     return m.end() if m and m.group(1).strip().rstrip(":").strip() in LABEL_ORDER else 0
 
 
+def _strip_emphasis(text):
+    """(`text` with each emphasis mark (CANNOT_EMPHASIS_RE) removed, `keep`), where keep[i] is the index in `text` of
+    character i of the stripped text and keep[-1] is len(text). The one home of the emphasis strip."""
+    out, keep, last = [], [], 0
+    for mark in CANNOT_EMPHASIS_RE.finditer(text):
+        out.append(text[last:mark.start()])
+        keep.extend(range(last, mark.start()))
+        last = mark.end()
+    out.append(text[last:])
+    keep.extend(range(last, len(text) + 1))
+    return "".join(out), keep
+
+
 def cannot_lines(text):
-    """(sentence, act, window, past, prior, following) for each phrase of the reply's prose that claims a table act cannot be done. The text is
-    read a sentence at a time: a sentence that ends in `?` asks and claims nothing, one that starts with Unvetted: (the
-    past-ruling guard's form) is not read, and neither is a line that starts with it or a Why yours line (the hand-off
-    guard's). Every phrase of a sentence is judged."""
-    if not CANNOT_RE.search(text):
+    """(sentence, act, window, past, prior, following, tail) for each phrase of the reply's prose that claims a table act
+    cannot be done; `tail` is the sentence after the phrase. The text is read a sentence at a time, with emphasis marks
+    removed (_strip_emphasis); the sentences returned keep them. A sentence that ends in `?` asks and claims nothing, one
+    that starts with Unvetted: (the past-ruling guard's form) is not read, and neither is a line that starts with it or a
+    Why yours line (the hand-off guard's). Every phrase of a sentence is judged."""
+    if not CANNOT_RE.search(CANNOT_EMPHASIS_RE.sub("", text)):
         return []
     found, hand_off = [], None
-    for body in _prose_lines(text, questions=True):
-        if CANNOT_UNVETTED_RE.match(body) or not CANNOT_RE.search(_mask(body)):
+    for raw in _prose_lines(text, questions=True):
+        body, keep = _strip_emphasis(raw)
+        if CANNOT_UNVETTED_RE.match(raw) or not CANNOT_RE.search(_mask(body)):
             continue
         if hand_off is None:
             hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_RE.search(line)}
-        if body in hand_off:
+        if raw in hand_off:
             continue
         mask = _mask(body)
         bounds = [0] + [m.end() for m in CANNOT_SENTENCE_RE.finditer(mask)] + [len(body)]
         spans = list(zip(bounds, bounds[1:]))
+        label = _report_label_end(raw)
+        at = lambda i: keep[i - 1] + 1 if i else 0  # noqa: E731  where stripped index i starts in `raw`, marks before it kept
         for k, (begin, stop) in enumerate(spans):
             piece, shadow = body[begin:stop], mask[begin:stop]
-            sentence = piece.strip()
+            sentence = raw[at(begin):keep[stop]].strip()
             if sentence.rstrip("*_)\"' ").endswith("?") or CANNOT_UNVETTED_RE.match(sentence):
                 continue
-            floor = _report_label_end(body) if begin == 0 else 0  # a report label opens the clause after it
+            # a report label opens the clause after it
+            floor = next((i for i, at in enumerate(keep) if at >= label), 0) if begin == 0 and label else 0
             for hit in CANNOT_RE.finditer(shadow):
                 claim = _claim(piece, shadow, hit, floor)
                 floor = hit.end()
                 if claim:
-                    prior = body[spans[k - 1][0]:spans[k - 1][1]].strip() if k else ""
-                    following = body[spans[k + 1][0]:spans[k + 1][1]].strip() if k + 1 < len(spans) else ""
-                    found.append((sentence, claim[0], claim[1], claim[2], prior, following))
+                    prior = raw[at(spans[k - 1][0]):keep[spans[k - 1][1]]].strip() if k else ""
+                    following = raw[at(spans[k + 1][0]):keep[spans[k + 1][1]]].strip() if k + 1 < len(spans) else ""
+                    tail = raw[keep[begin + hit.end()]:keep[stop]]
+                    found.append((sentence, claim[0], claim[1], claim[2], prior, following, tail))
     return found
 
 
@@ -2086,18 +2114,32 @@ def _backed(tries, act, sentence):
     return False
 
 
+def _names_check(sentence, tail):
+    """True when `sentence` names its check (CANNOT_CHECK_RE). In `tail`, the text after the phrase, any form counts.
+    Before the phrase, a bare check word (CANNOT_CHECK_WORD_RE) counts only when the writer is not its subject
+    (CANNOT_WRITER_RE): "I tried" names no call."""
+    head = sentence[:len(sentence) - len(tail.rstrip())]
+    return bool(CANNOT_CHECK_RE.search(tail)) or any(
+        not (CANNOT_CHECK_WORD_RE.fullmatch(m.group()) and CANNOT_WRITER_RE.search(head[:m.start()]))
+        for m in CANNOT_CHECK_RE.finditer(head))
+
+
 def _prior_names_check(prior, act):
-    """True when the sentence before a claim of `act` names a check of that act: a check word (CANNOT_CHECK_RE) in a
-    sentence that names no route, or a route of `act`. A route of another act ("`gh pr create` returned 403") is the
-    check of that act."""
+    """True when the sentence before a claim of `act` names a check of that act: a check word (CANNOT_CHECK_RE) outside
+    code spans, or a code span that names a route of `act`, in a sentence that names no route of another act. A route of
+    another act ("`gh pr create` returned 403") is the check of that act, and a span of another command ("`ls` printed a
+    list") names no check."""
     acts = _text_acts(prior)
-    return bool(CANNOT_CHECK_RE.search(prior)) and (not acts or act in acts)
+    if acts and act not in acts:
+        return False
+    return bool(CANNOT_CHECK_RE.search(CODE_SPAN.sub(" ", prior))) or any(
+        act in _text_acts(span.group(2)) for span in CODE_SPAN.finditer(prior))
 
 
 def cannot_problem(records, text, refused=()):
     """The refusal for reply sentences that claim a table act cannot be done, else ''. `records` are those after the last
     human message. A sentence passes when a failed try of its act sits in them (failed_tries) or it carries a cite
-    (_cited), and it names its check (CANNOT_CHECK_RE, or a reason when a failed try sits in the turn: CANNOT_REASON_RE). A
+    (_cited), and it names its check (_names_check, or a reason when a failed try sits in the turn: CANNOT_REASON_RE). A
     sentence in the past tense (could not) whose failed try a later call of the same act and target cancelled reports a past
     failure and is let pass; a present claim (cannot) after that later success still blocks.
     A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target)."""
@@ -2113,15 +2155,15 @@ def cannot_problem(records, text, refused=()):
     recovered = set()
     tries = failed_tries(records, refused, recovered)
     no_try, no_check = [], []
-    for sentence, act, _, past, prior, following in claims:
+    for sentence, act, _, past, prior, following, tail in claims:
         backed = _backed(tries, act, sentence)
         if past and not tries.get(act) and act in recovered:  # every failed try of the act was later cancelled
             continue
         if not backed and not _cited(sentence, refused, act):
             if sentence not in no_try:
                 no_try.append(sentence)
-        elif not (CANNOT_CHECK_RE.search(sentence) or backed and (_prior_names_check(prior, act)
-                                                                  or _gives_reason(sentence, following))) \
+        elif not (_names_check(sentence, tail) or backed and (_prior_names_check(prior, act)
+                                                                  or _gives_reason(tail, following))) \
                 and sentence not in no_check:
             no_check.append(sentence)
     return " ".join(head + "".join("\n- " + line for line in lines)
