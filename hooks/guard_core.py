@@ -375,6 +375,14 @@ WRAPPER_VALUE_FLAGS = {
 # Every option of `uv run` that takes a value as the NEXT word, global and run options both, read from
 # `uv run --help` (the lines that show `<VALUE>`) on uv 0.11.32. `uv [flags] run [flags] cmd` reads one table for both
 # flag runs. Refresh it when `uv --version` moves: a missing flag reads its value as the command word.
+# The last line holds the names `--help` hides, each probed on uv 0.11.32 as `uv run <flag>` with no value, which
+# answers "a value is required for ...": `--trusted-host` (clap names `--allow-insecure-host`), `--config-settings`
+# (names `--config-setting`), `--preview-feature` and `--preview-features`, `--python-preference`, `--python-fetch`.
+# Probing every other long flag in the help of uv, run, sync, lock, add, tool run, pip, build, export and venv, every
+# `--flag` string in the binary, every short letter, and each singular or plural of a listed flag found no more.
+# `--torch-backend` is no `uv run` flag on 0.11.32 (`uv run --torch-backend cpu true` errors, only `uv pip` has it):
+# it is listed so a later uv that adds it to `run` does not turn its value into the command word.
+# An unknown `--long` flag before the command is NOT read as "command unknown": a bare flag would then deny a read.
 UV_RUN_VALUE_FLAGS = {
     "--allow-insecure-host", "--cache-dir", "--color", "--config-file", "--config-setting",
     "--config-settings-package", "--default-index", "--directory", "--env-file", "--exclude-newer",
@@ -385,6 +393,8 @@ UV_RUN_VALUE_FLAGS = {
     "--python-platform", "--refresh-package", "--reinstall-package", "--resolution", "--upgrade-group",
     "--upgrade-package", "--with", "--with-editable", "--with-requirements",
     "-C", "-P", "-f", "-i", "-p", "-w",
+    "--trusted-host", "--config-settings", "--preview-feature", "--preview-features", "--python-preference",
+    "--python-fetch", "--torch-backend",
 }
 # Runners that `wrapped_commands` reads, and the value flags of `stdbuf` (also a wrapper above) and of
 # the runners that are no `COMMAND_WRAPPERS` entry. They sit here so `_wrapper_flags` skips the same way.
@@ -551,8 +561,6 @@ POWERSHELL_CALL = [False]   # set per call by judge_shell: the tool being judged
 
 # A redirect ahead of the command (`2>/dev/null cp`, `>f cp`, `<f cat`, `&>log cp`), glued to its target or
 # not. `>(` and `<(` open a process substitution, which holds a command, so they are no redirect.
-# The word after a spaced `>&`: a descriptor to dup (`1`, `2-`) or `-` to close. Any other word is a file.
-DESCRIPTOR_WORD = re.compile(r"\d+-?|-")
 LEADING_REDIRECT = re.compile(r"^(?:\d*|&)(?:>>?\|?|<)(?!\()(.*)$")
 # A function header ahead of its body: `f()` or `f(){` as one word, and `function f`.
 FUNCTION_HEADER = re.compile(r"^[A-Za-z_][\w.:-]*\(\)(\{?)$")
@@ -603,9 +611,10 @@ def _skip_assignments_and_keywords(tokens, index=0):
             continue
         if redirect:
             # `2>` and `>` alone take the next word as their target; `2>&` takes the descriptor after it.
-            # The tokenizer splits `2>& 1` into `2>` `&` `1`: bash reads that as one dup, so all three go.
+            # The tokenizer splits `2>& 1` into `2>` `&` `1`, and `>& file` into `>` `&` `file`: bash reads
+            # each as one redirect with its target word, so all three go, a descriptor or a file name alike.
             spaced_dup = (redirect.group(1) == "" and tuple(tokens[index + 1:index + 2]) == ("&",)
-                          and index + 2 < end and DESCRIPTOR_WORD.fullmatch(tokens[index + 2]))
+                          and index + 2 < end)
             index += 3 if spaced_dup else 2 if redirect.group(1) in ("", "&") else 1
             continue
         header = FUNCTION_HEADER.match(token)
@@ -672,8 +681,9 @@ def _wrapper_flags(word: str, tokens, index: int):
 
 @functools.lru_cache(maxsize=4096)   # every rule asks again for each segment of a long command
 def _walk_wrappers(tokens):
-    """Return (the command word's index or None, ((wrapper, its flags), ...)): the one walk
-    `resolve_command` and `_env_split_string` both read."""
+    """Return (the command word's index or None, ((wrapper, its flags), ...), waiting): the one walk
+    `resolve_command` and `_env_split_string` both read. `waiting` is True when the tokens end where a wrapper
+    flag still wants its value, so `wrapper_awaits_value` can tell the next word is that value."""
     end = len(tokens)
     index = _skip_assignments_and_keywords(tokens)
     chain = []
@@ -682,22 +692,44 @@ def _walk_wrappers(tokens):
         index, flags = _wrapper_flags(word, tokens, index + 1)
         chain.append((word, tuple(flags)))
         if word == "timeout" and not (index < end and DURATION.match(tokens[index])):
-            return start, tuple(chain)
+            return start, tuple(chain), index > end
         if word == "timeout":
             index += 1
         if word in ("python", "python3"):
             if not (index < end and basename(tokens[index]) == "verdict"):
-                return start, tuple(chain)
+                return start, tuple(chain), index > end
             index += 1
         if word in ("taskset", "chrt"):
             index += index < end   # the CPU mask or the priority
         if word == "uv":
             if not (index < end and tokens[index] == "run"):
-                return start, tuple(chain)   # `uv pip install` runs no program
+                return start, tuple(chain), index > end   # `uv pip install` runs no program
             index, _ = _wrapper_flags(word, tokens, index + 1)
         while index < end and ASSIGNMENT.match(tokens[index]):
             index += 1
-    return (index if index < end else None), tuple(chain)
+    return (index if index < end else None), tuple(chain), index > end
+
+
+def wrapper_awaits_value(tokens) -> bool:
+    """True when `tokens` end on a wrapper flag that takes the NEXT word as its value (`sudo -u`,
+    `uv run --with`, `docker exec -u`). The caller then keeps that next word whole, as the shell reads it,
+    and never splits a quoted value (`--with "requests>=2"`) into pieces that would read as more words."""
+    tokens = tuple(tokens)
+    if _walk_wrappers(tokens)[2]:
+        return True
+    at = resolve_command(tokens)
+    if at is None:
+        return False
+    runner = basename(tokens[at])
+    if runner not in WRAPPER_VALUE_FLAGS or runner in COMMAND_WRAPPERS:
+        return False   # the walk above read every COMMAND_WRAPPERS entry
+    start = at + 1
+    if runner in ("docker", "podman"):   # `docker [container] exec [flags] CONTAINER cmd`
+        start += tokens[start:start + 1] in (("container",), ("compose",))
+        if tokens[start:start + 1] != ("exec",):
+            return False
+        start += 1
+    return _wrapper_flags(runner, tokens, start)[0] > len(tokens)
 
 
 # ------------------------------------------------------------------ heredoc bodies

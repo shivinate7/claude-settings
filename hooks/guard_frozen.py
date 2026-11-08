@@ -491,6 +491,15 @@ def _is_redirect(word: str) -> bool:
     return bool(word) and set(word) <= _REDIRECT_CHARS
 
 
+def _redirect_target_follows(words, index: int) -> bool:
+    """True when `words[index]` is the target of a redirect before it: `> "a b"`, `>& "a b"`, `2> "a b"`.
+    The tokenizer splits `>&` into `>` and `&`, so the target can stand two words after the `>`."""
+    def opens(word):
+        return _is_redirect(word) and ("<" in word or ">" in word)
+    return bool(index) and (opens(words[index - 1])
+                            or (words[index - 1] == "&" and index > 1 and opens(words[index - 2])))
+
+
 def _kind(words, plain: str) -> str:
     """'printer', 'message', 'cd' or '' for one segment."""
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
@@ -772,11 +781,14 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
-                heads.extend([_unquoted(word)] if held_whole else pieces)
+                # A wrapper flag's value is one shell word: `--with "requests>=2"` and `-u "a b"` never split
+                # into pieces, or the resolver would read a piece as the command word.
+                value = _redirect_target_follows(raw, index) or guard_core.wrapper_awaits_value(heads)
+                heads.extend([_unquoted(word)] if held_whole or value else pieces)
                 if "'" in word or '"' in word:
                     held.extend(_quoted_commands(word))
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
-                head_script.extend([_unquoted(kept)] if held_whole else
+                head_script.extend([_unquoted(kept)] if held_whole or value else
                                    _words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
