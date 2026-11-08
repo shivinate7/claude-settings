@@ -1512,7 +1512,11 @@
 - check-tail-pipe-at-line-end: a pipe at a line end with `tail` on the next line passes, and `narrated_tail_hit` has the same limit (hooks/guard_stream.py). Decision: background-check-through-verdict
 - check-tail-no-nested-read: no nested read, so `bash -c '... | tail'`, and `{ ...; } | tail` both pass (hooks/guard_stream.py). `python3 bin/ci-job ... | tail` is now refused in the background. Decision: background-check-through-verdict
 - check-tail-powershell-select: PowerShell `Select-Object -Last` and `-First` are not read as tail and head (hooks/guard_stream.py). Decision: background-check-through-verdict
-- verdict-pipe-if: `if verdict ... | tail; then` is not read by `verdict-pipe-exit`, and the `then` branch runs after a red check (hooks/guard_stream.py). Decision: background-check-through-verdict
+- verdict-pipe-if: `if verdict ... | tail` with `then` on the next line is not read by `verdict-pipe-exit`, and the `then` branch runs after a red check (hooks/guard_stream.py). Decision: background-check-through-verdict
+- verdict-pipe-newline: after `set -e` with no pipefail, a verdict pipe and then a commit on the next line passes; the same on one line with `;` is refused (hooks/guard_stream.py). Decision: background-check-through-verdict
+- verdict-pipe-semicolon-wolf: `verdict a | tail -3; verdict b | tail -3` is refused, though `;` gates nothing and each verdict prints its own line (hooks/guard_stream.py). Decision: background-check-through-verdict
+- verdict-pipe-grep-q: `verdict a | grep -q PASS && git push` is refused, though grep's exit does gate the push (hooks/guard_stream.py). Decision: background-check-through-verdict
+- check-tail-uv-script: `uv run merge/merge.py --lane-lint 7 | tail` passes, because uv runs a `.py` operand as a script (hooks/guard_stream.py). Decision: background-check-through-verdict
 - verdict-pipe-substitution: `$(verdict ... | tail)` is not read by `verdict-pipe-exit` (hooks/guard_stream.py). Decision: background-check-through-verdict
 - narrated-tail-no-uv: `uv run merge --confirm | tail` passes, because the narrated rule (`live-stream`, `narrated_tail_hit`) does not read through `uv run` (hooks/guard_stream.py). Decision: background-check-through-verdict
 - check-tail-trailing-amp: a trailing `& echo $!` passes, while a plain `... | tail &` is already caught by `detached-launch` (hooks/guard_stream.py). Decision: background-check-through-verdict
