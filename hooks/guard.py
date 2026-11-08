@@ -215,6 +215,14 @@ Other tools, in `judge` order:
                        `Add a case:` or `Must deny:` is case data. A sentence with no input is not judged. A lone
                        backtick reads to the line's end. Other roles pass. An override lifts it.
                        (brief-claim-has-probe)
+  brief-destructive-git
+                       deny. An Agent, Task or Workflow brief that holds a command the shell guard reads as a
+                       discard of a working tree (`shared_tree_match`): a backtick span, a fenced line or a line led
+                       by `$ `. Each is cut with `split_segments`, so the verb list has one home. Passes: a span
+                       whose `git -C` or `cd` target is under a session scratchpad; a line with `Must deny:` or
+                       `Add a case:` before the span; a span with never, do not, don't or no in its own clause
+                       (no `;`, `.` or `,` between) within 4 words before it. Prose with no span is not read. Any
+                       role. An override lifts it. (brief-destructive-git)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
                        not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
@@ -2846,6 +2854,85 @@ def brief_claim_hit(tool: str, tool_input) -> list:
     return brief_claim_gaps(tool_input.get("prompt"))
 
 
+# A BRIEF MUST NOT ORDER A DISCARD (rule brief-destructive-git, rule shared-trees-no-destructive-git). A brief that tells a
+# builder to run a command the shell guard refuses starts a lane that hits the refusal, or one that works around it. The
+# scan reads only the command-shaped parts of a brief: a backtick span, a line inside a fence, and a line led by `$ `.
+# Each part is cut by the shell guard's own `split_segments` and judged by its own `shared_tree_match`, so this rule holds
+# no verb list. A brief has no tree, so no subject is read and the match alone decides. Four passes mirror the shell
+# guard or keep the brief honest: a part whose `git -C` or `cd` target is under a session scratchpad (a private repo);
+# a line with `Must deny:` or `Add a case:` before the part (case data for a test-author); a part with never, do not,
+# don't or no in its own clause, within 4 words before it (a prohibition); and every part that is no discard. A Workflow
+# script is read through `spawn_inputs`, as the role and Opus checks read it. Cost: pure text work inside the one guard
+# call. No process, no file.
+BRIEF_DESTRUCTIVE_SPAN = re.compile(r"(`+)(.+?)\1(?!`)")
+BRIEF_DESTRUCTIVE_CASE_DATA = re.compile(r"must deny:|add a case:", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "don’t", "do-not")
+BRIEF_DESTRUCTIVE_REASON = (
+    "The brief orders a command that throws away work in a checkout other sessions share, and no step puts it back. "
+    "Drop the order from the brief, or move that work to a scratch repo under the session's scratchpad. "
+    "(rule shared-trees-no-destructive-git; decision guard-guards-mistakes-only, a guard stops Claude's mistakes)"
+)
+
+
+def _brief_commands(prompt: str):
+    """Yield (command text, line text before it) for each command-shaped part of a brief: a backtick span, a line
+    in a fence, and a line led by `$ `. A lone backtick opens nothing."""
+    fenced = False
+    for line in prompt.replace("\x00", " ").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            yield stripped, ""
+            continue
+        if stripped.startswith("$ "):
+            yield stripped[2:], ""
+        for span in BRIEF_DESTRUCTIVE_SPAN.finditer(line):
+            yield span.group(2).strip(), line[:span.start()]
+
+
+def _brief_prohibits(before: str) -> bool:
+    """True when never, do not, don't or no sits in the same clause as the command, within 4 words before it."""
+    # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
+    clause = re.split(r"[;.,]", BRIEF_DESTRUCTIVE_SPAN.sub("X", before))[-1]
+    clause = re.sub(r"\bdo\s+not\b", "do-not", clause, flags=re.IGNORECASE)
+    words = [w.strip("\"'()[]*_:").lower() for w in clause.split()]
+    return any(w in BRIEF_DESTRUCTIVE_NEGATORS for w in words[-4:])
+
+
+def _brief_in_scratchpad(segments) -> bool:
+    """True when the command's `git -C` target, else the `cd` before it, is under a session scratchpad."""
+    moved = None
+    for segment in segments:
+        words = segment_tokens(segment) if segment.strip() else None
+        if not words:
+            continue
+        target = _segment_git_c_target(words)
+        if target is None:
+            moved = _segment_cd_target(words) or moved
+            target = moved
+        if target is not None and in_any_session_scratchpad(shell_abs(target, None) or target):
+            return True
+    return False
+
+
+def brief_destructive_hit(tool: str, tool_input) -> str:
+    """The first command an Agent, Task or Workflow brief orders that discards a working tree, or ""."""
+    for spawn in spawn_inputs(tool, tool_input):
+        prompt = spawn.get("prompt")
+        if not isinstance(prompt, str):
+            continue
+        for command, before in _brief_commands(prompt):
+            if BRIEF_DESTRUCTIVE_CASE_DATA.search(before) or _brief_prohibits(before):
+                continue
+            segments = split_segments(command)
+            for segment in segments:
+                if segment.strip() and shared_tree_match(segment) and not _brief_in_scratchpad(segments):
+                    return command
+    return ""
+
+
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
@@ -5153,6 +5240,12 @@ def judge(payload) -> None:
     if claimed:
         named = ", ".join("`" + item[:120].replace("`", "'") + "`" for item in claimed)
         refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % named, named[:120])
+
+    # 9e2. A brief that orders a discard of a working tree (rule brief-destructive-git). Any role; an override lifts it,
+    # because the owner may mean the brief as it stands.
+    ordered = brief_destructive_hit(tool, tool_input)
+    if ordered:
+        refuse(tool, "deny", "brief-destructive-git", BRIEF_DESTRUCTIVE_REASON, ordered[:120])
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:

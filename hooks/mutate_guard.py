@@ -2471,6 +2471,11 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # Rule brief-destructive-git: the check reads no brief, so an ordered discard passes.
+    ("brief-destructive-git: the check finds no ordered discard, so a brief that orders a reset passes",
+     "            segments = split_segments(command)\n            for segment in segments:\n                if segment.strip() and shared_tree_match(segment)",
+     "            segments = split_segments(command)\n            for segment in segments:\n                if False and segment.strip() and shared_tree_match(segment)",
+     "guard", "brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied"),
     # Rule brief-claim-has-probe: one mutant per edge the cases pin.
     ("brief-claim: the check never fires, so an unprobed claim about main passes",
      '    return brief_claim_gaps(tool_input.get("prompt"))',
