@@ -101,6 +101,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "brief-pr-head": "a brief that pairs PR #N with a branch that is not that PR's head ref is refused, with one gh read of the head per pairing; a pairing that names the head, a base word before the branch, an unread Workflow prompt and a prose mention pass with no read",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -1007,6 +1008,8 @@ if path:
 while "-R" in args:
     i = args.index("-R")
     del args[i:i + 2]
+if path and any(path == s or (s.endswith("/") and path.startswith(s)) for s in state["not_found"]):
+    api_error(404, "Not Found")  # a path listed in not_found, or a repo prefix ending in "/", answers as the API does
 if state["broken"]:
     print("boom")
     sys.exit(1)
@@ -1069,11 +1072,16 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, head_ref="feat", not_found=()):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `head_ref` is the head ref the pull request read (`pulls/<n>`) answers with, "feat" when unset.
+
+    `not_found` lists paths that answer 404 Not Found, as the API does for a repo or a number that is not there:
+    a full path (`repos/o/r/pulls/12`) or a prefix ending in "/" (`repos/o/x/`). A 404 wins over a `need` break.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -1120,7 +1128,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     # what _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
     state = {
         "pr": {"state": "open", "merged": False, "draft": False, "body": None, "mergeable": True, "mergeable_state": "clean",
-               "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234"}, "base": {"ref": base}},
+               "merge_commit_sha": "e" * 40, "head": {"ref": head_ref, "sha": "abc1234"}, "base": {"ref": base}},
         "number": 12,
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
         "statuses": statuses if statuses is not None else [],
@@ -1136,6 +1144,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
+        "not_found": list(not_found),  # the paths that answer 404 (see the docstring)
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -15095,6 +15104,391 @@ for _label, _check in (
         ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, reads no record",
          own_read_case("body-int", [None]))):
     LOG_CHECKS_EXTRA.append((_label, _check))
+# ---- brief-pr-head: a brief that pairs PR #N with a branch that is not #N's head ref is refused (rule brief-pr-head).
+# A pairing is read off adjacent words only: `PR #N, branch X`, `PR #N branch X`, `#N (branch X)`, `#N on branch X`,
+# `#N, head X`, `branch X (#N)`, `branch X, PR #N`. A base word right before the branch (base, base branch, based on,
+# onto, stacked on, into) makes no pairing. The head is one `gh api repos/<o>/<r>/pulls/<N>`, so one pairing costs one gh
+# call, and the same pairing twice costs one. Incident: a brief paired #1687 with its base, and the reviewers read the
+# wrong code. A refusal names the rule, #N and the read command, and neither the briefed branch nor the head.
+FAMILY = "brief-pr-head"
+PRHEAD_RULE = "brief-pr-head"
+PRHEAD_REPO = "o/briefrepo"                   # the origin of PRHEAD_CWD: a fixture owner, so no read passes as the runner's repo
+PRHEAD_OTHER = "o/q_max"                      # the repo a short name or an owner/name pairing reads
+PRHEAD_HEAD = "mcp-safety-gaps"               # the head ref of #1687 and #7 in their stand-ins
+PRHEAD_BASE = "mcp-tools-in-guard-matcher"    # #1687's base: the wrong branch the incident named
+PRHEAD_LANE = "lane/fix-x"                    # a head in the lane/<slug> form
+PRHEAD_CWD = os.path.join(ROOT, "prheadcwd")  # built with LANE_ORIGINS, so its origin is PRHEAD_REPO
+PRHEAD_1687 = os.path.join(ROOT, "prhead1687")
+PRHEAD_7 = os.path.join(ROOT, "prhead7")
+PRHEAD_LANE_FAKE = os.path.join(ROOT, "prheadlane")
+PRHEAD_Q = os.path.join(ROOT, "prheadq")
+PRHEAD_BROKEN = os.path.join(ROOT, "prheadbroken")
+PRHEAD_SHORT = os.path.join(ROOT, "prheadshort")          # answers 404 for the guessed repos and for #12 and #2
+PRHEAD_NOORIGIN = os.path.join(ROOT, "prheadnoorigin")    # a git checkout with no origin
+PRHEAD_INCIDENT = ("Incident: its briefs paired #1687 with branch mcp-tools-in-guard-matcher. "
+                   "That branch is #1665's head, and #1687's base.")
+PRHEAD_FIX = "Fix the finding on #1707 and push to branch fix-x."
+
+
+def prhead_cmd(repo, number):
+    """The read a refusal names, as the guard prints it."""
+    return "gh api repos/%s/pulls/%d --jq .head.ref" % (repo, number)
+
+
+def prhead_path(repo, number):
+    """The path of that read, as the stand-in logs it. The argv holds the path, and its --jq filter is not pinned."""
+    return "repos/%s/pulls/%d" % (repo, number)
+
+
+def _build_prhead_stand_ins():
+    """The stand-ins of the brief cases. Each counts its gh calls in the file gh_calls_taken reads, so a case names its calls."""
+    def counted(folder):
+        return os.path.join(folder, ARCHIVE_CALLS)
+    make_fake_gh(PRHEAD_1687, "main", need=[PRHEAD_REPO, "1687"], head_ref=PRHEAD_HEAD, count_file=counted(PRHEAD_1687))
+    make_fake_gh(PRHEAD_7, "main", need=[PRHEAD_REPO, "7"], head_ref=PRHEAD_HEAD, count_file=counted(PRHEAD_7))
+    make_fake_gh(PRHEAD_LANE_FAKE, "main", need=[PRHEAD_REPO, "1687"], head_ref=PRHEAD_LANE,
+                 count_file=counted(PRHEAD_LANE_FAKE))
+    make_fake_gh(PRHEAD_Q, "main", need=[PRHEAD_OTHER, "12"], head_ref="good-head", count_file=counted(PRHEAD_Q))
+    make_fake_gh(PRHEAD_BROKEN, "main", broken=True)
+    # The checkout's own repo answers every number with the head ref; a guessed short-name repo and #12 and #2 answer 404.
+    make_fake_gh(PRHEAD_SHORT, "main", need=[PRHEAD_REPO], head_ref=PRHEAD_HEAD, count_file=counted(PRHEAD_SHORT),
+                 not_found=["repos/%s/pulls/12" % PRHEAD_REPO, "repos/%s/pulls/2" % PRHEAD_REPO,
+                            "repos/o/Re-review/", "repos/o/follow-up/", "repos/o/e.g./"])
+
+
+def _build_prhead_noorigin():
+    """A git checkout with no origin: a bare #N pairing in it has no repo to read."""
+    os.makedirs(PRHEAD_NOORIGIN, exist_ok=True)
+    run_vcs(PRHEAD_NOORIGIN, "init", "-q", "-b", "main", ".")
+
+
+lazy_fixture([PRHEAD_1687, PRHEAD_7, PRHEAD_LANE_FAKE, PRHEAD_Q, PRHEAD_BROKEN, PRHEAD_SHORT], _build_prhead_stand_ins)
+lazy_fixture([PRHEAD_NOORIGIN], _build_prhead_noorigin)
+
+
+def prhead_judged(tool, tool_input, folder, cwd=PRHEAD_CWD):
+    """The verdict on one call of `tool` from the checkout `cwd`, with the stand-in at `folder` first on PATH: the verdict,
+    its reason, and the gh calls the stand-in logged. The log is read and cleared, so each judged call starts from none."""
+    gh_calls_taken(folder)
+    got, reason = decide({
+        "raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": fake_gh_path(folder),
+        "config": None, "agent_id": None, "agent_type": None, "temp": None, "load": None, "env": None,
+        "tool_input": tool_input, "transcript": None,
+    })
+    return got, reason, gh_calls_taken(folder)
+
+
+def prhead_check(tool, tool_input, folder, want, scope=None, calls=None, max_calls=None, cwd=PRHEAD_CWD,
+                 carries=(), lacks=(), expect_unknown=False):
+    """One judged call, checked in this order: the read reached `scope` (the repo and number), the gh calls number
+    `calls` (or at most `max_calls`), then the verdict. An allow prints nothing. A refusal names the rule, reads as
+    unknown only when `expect_unknown`, carries what `carries` names and lacks what `lacks` names, and names no
+    forbidden target."""
+    got, reason, seen = prhead_judged(tool, tool_input, folder, cwd)
+    if scope and not any(scope in line for line in seen):
+        return False, "no gh read of %s: %r" % (scope, seen)
+    if calls is not None and len(seen) != calls:
+        return False, "%d gh calls, want %d: %r" % (len(seen), calls, seen)
+    if max_calls is not None and len(seen) > max_calls:
+        return False, "%d gh calls, want at most %d: %r" % (len(seen), max_calls, seen)
+    if got != want:
+        return False, "%s, want %s: %s" % (got, want, reason[:90])
+    if want == "allow" and reason:
+        return False, "the allow printed %r, want nothing" % reason[:90]
+    if want == "deny":
+        if PRHEAD_RULE not in reason:
+            return False, "the refusal does not name rule %r: %s" % (PRHEAD_RULE, reason[:90])
+        if ("unknown" in reason) != expect_unknown:
+            return False, "the refusal reads unknown=%s, want %s: %s" % ("unknown" in reason, expect_unknown, reason[:90])
+        if names_the_target(reason, PRHEAD_RULE):
+            return False, "the refusal names the forbidden target %r" % names_the_target(reason, PRHEAD_RULE)
+    missing = [f for f in carries if not carried(f, reason)]
+    if missing:
+        return False, "the reason does not carry %r: %s" % (missing[0], reason[:90])
+    held = [f for f in lacks if f in reason]
+    if held:
+        return False, "the reason carries %r, which it must not: %s" % (held[0], reason[:90])
+    return True, "%s, with %d gh call(s)" % (want, len(seen))
+
+
+def prhead_log(label, tool, tool_input, folder, want, **kw):
+    """Register one judged call as a log check: prhead_check, with the scope, the call count and the verdict it takes."""
+    LOG_CHECKS_EXTRA.append((label, lambda: prhead_check(tool, tool_input, folder, want, **kw)))
+
+
+def prhead_answer(folder, repo, number):
+    """The head ref the stand-in at `folder` answers for `repos/<repo>/pulls/<number>`, or None when it answers as broken."""
+    gh = shutil.which("gh", path=fake_gh_path(folder))
+    if not gh:
+        return None
+    run = subprocess.run([gh, "api", prhead_path(repo, number)], capture_output=True, text=True,
+                         env=dict(os.environ, PATH=fake_gh_path(folder)), timeout=60)
+    try:
+        return json.loads(run.stdout)["head"]["ref"] if run.returncode == 0 else None
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def prhead_stand_in_check():
+    """Each stand-in answers the read the guard makes with the head ref it was given. A wrong repo and a wrong number each
+    answer as broken, so every case above that passes or refuses on a head rests on a read of the pull request it names."""
+    for folder, repo, number, head in ((PRHEAD_1687, PRHEAD_REPO, 1687, PRHEAD_HEAD),
+                                        (PRHEAD_7, PRHEAD_REPO, 7, PRHEAD_HEAD),
+                                        (PRHEAD_LANE_FAKE, PRHEAD_REPO, 1687, PRHEAD_LANE),
+                                        (PRHEAD_Q, PRHEAD_OTHER, 12, "good-head")):
+        materialize(folder)
+        if prhead_answer(folder, repo, number) != head:
+            return False, "the stand-in for %s #%d does not answer its head ref %r" % (repo, number, head)
+        other = PRHEAD_OTHER if repo == PRHEAD_REPO else PRHEAD_REPO
+        if prhead_answer(folder, other, number) is not None:
+            return False, "the stand-in for %s #%d answers a read of %s" % (repo, number, other)
+        if prhead_answer(folder, repo, number + 1) is not None:
+            return False, "the stand-in for %s #%d answers a read of #%d" % (repo, number, number + 1)
+    return True, "four stand-ins answer their head ref, and break on a wrong repo or number"
+
+
+LOG_CHECKS_EXTRA.append(("brief-pr-head: the stand-ins answer their head ref, and break on a wrong repo or number",
+                         prhead_stand_in_check))
+
+
+def prhead_case(name, want, folder=PRHEAD_1687, tool="Agent", carries=(), lacks=(), **tool_input):
+    """A brief the guard refuses under the rule (want deny), or lets through silently (want allow)."""
+    deny = want == "deny"
+    add("brief-pr-head: " + name, want, rule=PRHEAD_RULE if deny else None, tool=tool, cwd=PRHEAD_CWD,
+        env_path=fake_gh_path(folder), carries=carries, lacks=lacks, silent=not deny, **tool_input)
+
+
+def prhead_deny(name, repo, number, folder, lacks, tool="Agent", **tool_input):
+    """A mismatch refusal. The reason names the rule, #N and the read command, holds neither the briefed branch nor the
+    head (`lacks`), and never reads as unknown: a broken read is a different refusal, and the cases below pin it."""
+    prhead_case(name, "deny", folder=folder, tool=tool,
+                carries=(("branch", "head"), "#%d" % number, prhead_cmd(repo, number)),
+                lacks=tuple(lacks) + ("unknown",), **tool_input)
+
+
+# Refusals: a pairing whose branch is not the head. Shapes a to g are the grammar's; each refuses on Agent, with the
+# incident's wrong branch, and each refusal names #N and the read.
+prhead_deny("shape a: PR #N, branch X, is refused (the incident's brief)", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review PR #1687, branch mcp-tools-in-guard-matcher.")
+prhead_deny("shape b: PR #N branch X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review PR #1687 branch mcp-tools-in-guard-matcher.")
+prhead_deny("shape c: #N (branch X) is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review #1687 (branch mcp-tools-in-guard-matcher).")
+prhead_deny("shape d: #N on branch X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review #1687 on branch mcp-tools-in-guard-matcher.")
+prhead_deny("shape e: #N, head X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review #1687, head mcp-tools-in-guard-matcher.")
+prhead_deny("shape f: branch X (#N) is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review branch mcp-tools-in-guard-matcher (#1687).")
+prhead_deny("shape g: branch X, PR #N is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review branch mcp-tools-in-guard-matcher, PR #1687.")
+prhead_deny("shape f: a backticked branch `x-wrong` (#7) is refused", PRHEAD_REPO, 7, PRHEAD_7,
+            ("x-wrong", PRHEAD_HEAD), prompt="Review branch `x-wrong` (#7).")
+prhead_deny("Agent: a wrong pairing in the third paragraph of a brief is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD),
+            prompt="Scope: the matcher only.\n\nRead the diff before you judge it.\n\nReview PR #1687, branch mcp-tools-in-guard-matcher.")
+prhead_deny("Agent: two pairings, the second wrong, are refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD),
+            prompt="Review PR #1687, branch mcp-safety-gaps. Then review PR #1687, branch mcp-tools-in-guard-matcher.")
+prhead_deny("Task: PR #N, branch X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), tool="Task", prompt="Review PR #1687, branch mcp-tools-in-guard-matcher.")
+prhead_deny("send_message: PR #N, branch X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), tool=SEND_MESSAGE, message="Review PR #1687, branch mcp-tools-in-guard-matcher.")
+prhead_deny("send_message: a wrong pairing in the third paragraph is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), tool=SEND_MESSAGE,
+            message="Scope: the matcher only.\n\nRead the diff before you judge it.\n\nReview PR #1687, branch mcp-tools-in-guard-matcher.")
+prhead_deny("Workflow: a literal agent() prompt with a wrong pairing is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), tool="Workflow",
+            script="const r = await agent('Review PR #1687, branch mcp-tools-in-guard-matcher.', {agentType: 'reviewer', model: 'sonnet'});\nreturn r;")
+prhead_deny("Workflow: a comment opener inside the prompt's string does not hide the wrong pairing", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), tool="Workflow",
+            script="const r = await agent('See https://example.test/a and /* keep going. Review PR #1687, branch mcp-tools-in-guard-matcher.', {agentType: 'reviewer', model: 'sonnet'});\nreturn r;")
+prhead_deny("Workflow: a wrong pairing on line three of a multi-line template literal is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), tool="Workflow",
+            script="const r = await agent(`Fix the failing case.\n// keep the old API\nReview PR #1687, branch mcp-tools-in-guard-matcher.`, {agentType: 'reviewer', model: 'sonnet'});\nreturn r;")
+prhead_deny("Workflow: a lone quote in the prompt's text does not hide the wrong pairing", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), tool="Workflow",
+            script="const r = await agent(\"Don't touch the tests. Review PR #1687, branch mcp-tools-in-guard-matcher.\", {agentType: 'reviewer', model: 'sonnet'});\nreturn r;")
+prhead_deny("owner/name#N: a wrong branch on o/q_max#12 is refused, and read from o/q_max", PRHEAD_OTHER, 12, PRHEAD_Q,
+            ("wrong-head", "good-head"), prompt="Review o/q_max#12, branch wrong-head.")
+prhead_deny("short name: a wrong branch on q_max #12 is refused, and read from o/q_max", PRHEAD_OTHER, 12, PRHEAD_Q,
+            ("wrong-head", "good-head"), prompt="Review q_max #12, branch wrong-head.")
+
+# A read that cannot run refuses too, and says unknown. The branch briefed is the head, so only the read can refuse it.
+add("brief-pr-head: a broken read of the pull request is refused, and the reason says unknown", "deny", rule=PRHEAD_RULE,
+    tool="Agent", cwd=PRHEAD_CWD, env_path=fake_gh_path(PRHEAD_BROKEN), carries="unknown", lacks=(PRHEAD_HEAD,),
+    prompt="Review PR #1687, branch mcp-safety-gaps.")
+add("brief-pr-head: no gh on the path refuses the pairing, and the reason says unknown", "deny", rule=PRHEAD_RULE,
+    tool="Agent", cwd=PRHEAD_CWD, env_path=GHNONE_PATH, carries="unknown", lacks=(PRHEAD_HEAD,),
+    prompt="Review PR #1687, branch mcp-safety-gaps.")
+
+# Passes: each shape with X the head, and the head's forms. The green controls beside the refusals above.
+prhead_case("shape a: PR #N, branch X, with X the head passes", "allow", prompt="Review PR #1687, branch mcp-safety-gaps.")
+prhead_case("shape b: PR #N branch X, with X the head passes", "allow", prompt="Review PR #1687 branch mcp-safety-gaps.")
+prhead_case("shape c: #N (branch X), with X the head passes", "allow", prompt="Review #1687 (branch mcp-safety-gaps).")
+prhead_case("shape d: #N on branch X, with X the head passes", "allow", prompt="Review #1687 on branch mcp-safety-gaps.")
+prhead_case("shape e: #N, head X, with X the head passes", "allow", prompt="Review #1687, head mcp-safety-gaps.")
+prhead_case("shape f: branch X (#N), with X the head passes", "allow", prompt="Review branch mcp-safety-gaps (#1687).")
+prhead_case("shape g: branch X, PR #N, with X the head passes", "allow", prompt="Review branch mcp-safety-gaps, PR #1687.")
+prhead_case("a backticked head passes", "allow", prompt="Review PR #1687, branch `mcp-safety-gaps`.")
+prhead_case("origin/<head> passes", "allow", prompt="Review PR #1687, branch origin/mcp-safety-gaps.")
+prhead_case("refs/heads/<head> passes", "allow", prompt="Review PR #1687, branch refs/heads/mcp-safety-gaps.")
+prhead_case("a lane/<slug> head passes", "allow", folder=PRHEAD_LANE_FAKE, prompt="Review PR #1687, branch lane/fix-x.")
+prhead_case("origin/lane/<slug> passes", "allow", folder=PRHEAD_LANE_FAKE, prompt="Review PR #1687, branch origin/lane/fix-x.")
+prhead_case("send_message with the head passes", "allow", tool=SEND_MESSAGE, message="Review PR #1687, branch mcp-safety-gaps.")
+prhead_case("Workflow literal with the head passes", "allow", tool="Workflow",
+            script="const r = await agent('Review PR #1687, branch mcp-safety-gaps.', {agentType: 'reviewer', model: 'sonnet'});\nreturn r;")
+
+# Cost and scope: a pairing reads the one pull request it names, once. A checker, so the read is named before the verdict.
+prhead_log("brief-pr-head: one pairing makes one gh call, and the read is of #1687 in the checkout's repo", "Agent",
+           {"prompt": "Review PR #1687, branch mcp-safety-gaps."}, PRHEAD_1687, "allow",
+           scope=prhead_path(PRHEAD_REPO, 1687), calls=1)
+prhead_log("brief-pr-head: the same pairing twice in one brief makes one gh call", "Agent",
+           {"prompt": "Review PR #1687, branch mcp-safety-gaps. Recheck PR #1687, branch mcp-safety-gaps."}, PRHEAD_1687,
+           "allow", scope=prhead_path(PRHEAD_REPO, 1687), calls=1)
+prhead_log("brief-pr-head: a refused pairing makes one gh call as well", "Agent",
+           {"prompt": "Review PR #1687, branch mcp-tools-in-guard-matcher."}, PRHEAD_1687, "deny",
+           scope=prhead_path(PRHEAD_REPO, 1687), calls=1)
+prhead_log("brief-pr-head: q_max #12 reads o/q_max, not the checkout's repo, and a head that matches passes", "Agent",
+           {"prompt": "Review q_max #12, branch good-head."}, PRHEAD_Q, "allow",
+           scope=prhead_path(PRHEAD_OTHER, 12), calls=1)
+prhead_log("brief-pr-head: o/q_max#12 reads o/q_max, and a head that matches passes", "Agent",
+           {"prompt": "Review o/q_max#12, branch good-head."}, PRHEAD_Q, "allow",
+           scope=prhead_path(PRHEAD_OTHER, 12), calls=1)
+prhead_log("brief-pr-head: branch `x-wrong` (#7) reads #7 in the checkout's repo, and is refused", "Agent",
+           {"prompt": "Review branch `x-wrong` (#7)."}, PRHEAD_7, "deny",
+           scope=prhead_path(PRHEAD_REPO, 7), calls=1)
+prhead_log("brief-pr-head: a matching pairing after a // line of a template literal is read, and passes", "Workflow",
+           {"script": "const r = await agent(`Fix the failing case.\n// keep the old API\nReview PR #1687, branch mcp-safety-gaps.`, {agentType: 'reviewer', model: 'sonnet'});\nreturn r;"},
+           PRHEAD_1687, "allow", scope=prhead_path(PRHEAD_REPO, 1687), calls=1)
+
+# No pairing, no read: a base word, a prose mention, an empty brief. Each makes zero gh calls and passes.
+for _label, _prompt in (
+        ("a based-on pairing makes no read: PR #N, based on X", "Review PR #1687, based on mcp-tools-in-guard-matcher."),
+        ("a base branch pairing makes no read: PR #N, base branch X", "Review PR #1687, base branch mcp-tools-in-guard-matcher."),
+        ("a base word before a branch makes no read: onto branch X (#N)", "Rebase onto branch mcp-tools-in-guard-matcher (#1687)."),
+        ("a base word before a branch makes no read: stacked on branch X, PR #N",
+         "Review stacked on branch mcp-tools-in-guard-matcher, PR #1687."),
+        ("a base word before a branch makes no read: into branch X (#7)", "Review into branch mcp-tools-in-guard-matcher (#7)."),
+        ("the incident retelling makes no read", PRHEAD_INCIDENT),
+        ("the fix-lane brief makes no read", PRHEAD_FIX),
+        ("a PR number with no branch makes no read", "Review PR #1687 for the guard matcher change."),
+        ("a PR and a branch named in one sentence make no read",
+         "Compare PR #1687 with the work on branch mcp-tools-in-guard-matcher before you review it."),
+        ("an empty brief makes no read", "")):
+    prhead_log("brief-pr-head: " + _label, "Agent", {"prompt": _prompt}, PRHEAD_1687, "allow", calls=0)
+
+# A Workflow prompt the scanner does not read as a literal is unread, so it makes no read. The brief names this shape.
+prhead_log("brief-pr-head: a Workflow prompt held in a variable is unread, so it makes no read", "Workflow",
+           {"script": "const b = 'Review PR #1687, branch mcp-tools-in-guard-matcher.';\nconst r = await agent(b, {agentType: 'reviewer', model: 'sonnet'});\nreturn r;"},
+           PRHEAD_1687, "allow", calls=0)
+prhead_log("brief-pr-head: a pairing in a string outside any agent() call makes no read", "Workflow",
+           {"script": "const note = 'Review PR #1687, branch mcp-tools-in-guard-matcher.';\nreturn note;"},
+           PRHEAD_1687, "allow", calls=0)
+prhead_log("brief-pr-head: a commented-out agent() call makes no read", "Workflow",
+           {"script": "// await agent('Review PR #1687, branch mcp-tools-in-guard-matcher.', {agentType: 'reviewer', model: 'sonnet'});\nconst r = await agent('Review the diff.', {agentType: 'reviewer', model: 'sonnet'});\nreturn r;"},
+           PRHEAD_1687, "allow", calls=0)
+
+# ---- round 2, by the coordinator's rulings (each numbered as the ruling). A bare-#N pairing whose repo a short name guessed
+# reads that guess first; a 404 there means the guess is no repo, so the checkout's repo is read: at most two reads. A
+# 404 on the PR read means the number is no pull request: no pairing. Any other failed read still refuses as unknown.
+# `head branch X`, `head ref X`, `from branch X`, `with branch X` and `branch X for PR #N` pair with X. Base context
+# (`on branch main`, `against branch main`) pairs nothing. A branch paired on its left is not paired again on its right.
+
+# Ruling 1: a guessed short-name repo that answers 404 falls back to the checkout's repo, and the head is judged there.
+prhead_log("brief-pr-head: Re-review #1687, branch X, is refused on o/briefrepo #1687 after the guessed repo 404s", "Agent",
+           {"prompt": "Re-review #1687, branch mcp-tools-in-guard-matcher."}, PRHEAD_SHORT, "deny",
+           scope=prhead_path(PRHEAD_REPO, 1687), max_calls=2,
+           carries=(("branch", "head"), "#1687", prhead_cmd(PRHEAD_REPO, 1687)), lacks=(PRHEAD_BASE, PRHEAD_HEAD))
+prhead_log("brief-pr-head: the follow-up #1707, branch X, is refused on o/briefrepo #1707 after the guessed repo 404s", "Agent",
+           {"prompt": "the follow-up #1707, branch mcp-tools-in-guard-matcher."}, PRHEAD_SHORT, "deny",
+           scope=prhead_path(PRHEAD_REPO, 1707), max_calls=2,
+           carries=(("branch", "head"), "#1707", prhead_cmd(PRHEAD_REPO, 1707)), lacks=(PRHEAD_BASE, PRHEAD_HEAD))
+prhead_log("brief-pr-head: e.g. #1687, branch X, is refused on o/briefrepo #1687 after the guessed repo 404s", "Agent",
+           {"prompt": "e.g. #1687, branch mcp-tools-in-guard-matcher."}, PRHEAD_SHORT, "deny",
+           scope=prhead_path(PRHEAD_REPO, 1687), max_calls=2,
+           carries=(("branch", "head"), "#1687", prhead_cmd(PRHEAD_REPO, 1687)), lacks=(PRHEAD_BASE, PRHEAD_HEAD))
+prhead_case("Re-review #1687, branch X, passes when X is the head after the guessed repo 404s", "allow",
+            folder=PRHEAD_SHORT, prompt="Re-review #1687, branch mcp-safety-gaps.")
+
+# Ruling 2: a 404 on the PR read means the number is no pull request, so the sentence is allowed. Any other failure refuses.
+prhead_log("brief-pr-head: Work on issue #12 on branch fix-12 is allowed: the read of #12 answers 404", "Agent",
+           {"prompt": "Work on issue #12 on branch fix-12."}, PRHEAD_SHORT, "allow", scope=prhead_path(PRHEAD_REPO, 12), calls=1)
+prhead_log("brief-pr-head: Step #2 on branch fix-x is allowed: the read of #2 answers 404", "Agent",
+           {"prompt": "Step #2 on branch fix-x."}, PRHEAD_SHORT, "allow", scope=prhead_path(PRHEAD_REPO, 2), calls=1)
+add("brief-pr-head: Work on issue #12 on branch fix-12 is still refused as unknown when the read breaks", "deny", rule=PRHEAD_RULE,
+    tool="Agent", cwd=PRHEAD_CWD, env_path=fake_gh_path(PRHEAD_BROKEN), carries="unknown",
+    prompt="Work on issue #12 on branch fix-12.")
+
+# Ruling 3: `head branch X` and `head ref X` are pairings.
+prhead_deny("PR #N, head branch X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review PR #1687, head branch mcp-tools-in-guard-matcher.")
+prhead_deny("PR #N, head ref X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review PR #1687, head ref mcp-tools-in-guard-matcher.")
+prhead_case("PR #N, head branch X passes when X is the head", "allow",
+            prompt="Review PR #1687, head branch mcp-safety-gaps.")
+
+# Ruling 4: an Opus spawn that `opus 2h` lifts still meets the brief check. The lift exits at refuse(), so the brief check
+# must not be skipped by it. Set up as the Opus explore lift is (role_opus_explore_lift_check): no override, then the owner's
+# typed `opus 2h`.
+def prhead_opus_lift_check():
+    """An Opus spawn with a wrong pairing: refused by the Opus ceiling with no override, and under `opus 2h` refused by
+    brief-pr-head, not allowed by the lift."""
+    config, session = ov_config("prhead-opus-lift"), "prhead-opus-lift"
+    spawn = {"prompt": "Review PR #1687, branch mcp-tools-in-guard-matcher.", "model": "opus", "subagent_type": "Explore"}
+
+    def call(seconds):
+        return ov_call("Agent", dict(spawn), PRHEAD_CWD, config, session, seconds, env_path=fake_gh_path(PRHEAD_1687))
+
+    ok, why = ov_story([("no override", lambda: call(0), "deny", "agent-model-cap")])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "opus 2h")
+    ok, why = ov_story([("under opus 2h, the wrong pairing", lambda: call(60), "deny", PRHEAD_RULE)], note)
+    if not ok:
+        return False, why
+    return True, "refused by the Opus ceiling with no override, and under opus 2h refused by brief-pr-head"
+
+
+LOG_CHECKS_EXTRA.append(("brief-pr-head: an opus 2h lift of an Opus spawn still meets the brief check", prhead_opus_lift_check))
+
+# Ruling 5: a bare #N pairing with no readable origin is refused as unknown, and the reason names the owner/name#N form.
+add("brief-pr-head: a bare #N pairing in a folder that is no checkout is refused as unknown, naming owner/name#N", "deny",
+    rule=PRHEAD_RULE, tool="Agent", cwd=NOGIT, env_path=fake_gh_path(PRHEAD_1687), carries=("unknown", "owner/name#N"),
+    lacks=(PRHEAD_BASE,), prompt="Review #1687, branch mcp-tools-in-guard-matcher.")
+add("brief-pr-head: a bare #N pairing in a checkout with no origin is refused as unknown, naming owner/name#N", "deny",
+    rule=PRHEAD_RULE, tool="Agent", cwd=PRHEAD_NOORIGIN, env_path=fake_gh_path(PRHEAD_1687),
+    carries=("unknown", "owner/name#N"), lacks=(PRHEAD_BASE,), prompt="Review #1687, branch mcp-tools-in-guard-matcher.")
+
+# Ruling 6: `from branch X`, `with branch X` and `branch X for PR #N` pair with X.
+prhead_deny("PR #N from branch X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review PR #1687 from branch mcp-tools-in-guard-matcher.")
+prhead_deny("PR #N with branch X is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review PR #1687 with branch mcp-tools-in-guard-matcher.")
+prhead_deny("branch X for PR #N is refused", PRHEAD_REPO, 1687, PRHEAD_1687,
+            (PRHEAD_BASE, PRHEAD_HEAD), prompt="Review branch mcp-tools-in-guard-matcher for PR #1687.")
+prhead_case("PR #N from branch X passes when X is the head", "allow",
+            prompt="Review PR #1687 from branch mcp-safety-gaps.")
+prhead_case("PR #N with branch X passes when X is the head", "allow",
+            prompt="Review PR #1687 with branch mcp-safety-gaps.")
+prhead_case("branch X for PR #N passes when X is the head", "allow",
+            prompt="Review branch mcp-safety-gaps for PR #1687.")
+
+# Ruling 7: base context makes no pairing and no read. `on branch main` after a rebase is base context, not a head pairing.
+prhead_log("brief-pr-head: Rebase PR #N on branch main makes no pairing and no read", "Agent",
+           {"prompt": "Rebase PR #1687 on branch main."}, PRHEAD_1687, "allow", calls=0)
+prhead_log("brief-pr-head: Diff PR #N against branch main makes no pairing and no read", "Agent",
+           {"prompt": "Diff PR #1687 against branch main."}, PRHEAD_1687, "allow", calls=0)
+
+# Ruling 8: a branch paired on its left is not paired again to its right. Exactly one read, for #N.
+prhead_log("brief-pr-head: PR #N, branch X (#M) with X the head passes, and only #N is read", "Agent",
+           {"prompt": "Review PR #1687, branch mcp-safety-gaps (#1707)."}, PRHEAD_1687, "allow",
+           scope=prhead_path(PRHEAD_REPO, 1687), calls=1)
+prhead_log("brief-pr-head: PR #N, branch X (#M) with X wrong is refused on #N, and #M is not read", "Agent",
+           {"prompt": "Review PR #1687, branch mcp-tools-in-guard-matcher (#1707)."}, PRHEAD_1687, "deny",
+           scope=prhead_path(PRHEAD_REPO, 1687), calls=1,
+           carries=(("branch", "head"), "#1687", prhead_cmd(PRHEAD_REPO, 1687)), lacks=(PRHEAD_BASE, PRHEAD_HEAD))
+
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
@@ -20022,6 +20416,7 @@ LANE_ORIGINS = {
     LANE_LOCAL: "/srv/repos/shivinate7/claude-settings.git",
     LANE_SCP: "git@github.com:shivinate7/claude-settings.git",
     LANE_SSH: "ssh://git@github.com:22/shivinate7/claude-settings",
+    PRHEAD_CWD: "https://github.com/o/briefrepo.git",  # the brief-pr-head cases' checkout: a fixture owner, not the runner's own origin
 }
 # The container's global git config rewrites an scp origin to https, through GIT_CONFIG_* in the environment.
 # A case that pins the scp parse arm clears those variables for its own guard run, so the raw origin is read.
