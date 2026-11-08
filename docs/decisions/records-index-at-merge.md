@@ -36,7 +36,7 @@ it judges Claude's own Bash commands, and the tool's commit runs inside the tool
 The guard runs before the generator, so it cannot tell whether a chained `generator && git add && git commit`
 will change the page. It refuses such a chain even when the page ends unchanged. The refusal is exact for what
 it can see.
-Cost of the guard: three page reads per commit. A fourth read, of MERGE_HEAD's page, runs only when the page differs from all three. A failed read leaves the refusal.
+Cost of the guard: five git reads per commit that touches the page. Three read the HEAD, base and origin pages, one reads the commit's page, and one opens the base page. One more read, of MERGE_HEAD's page, runs only when the page differs from all three. A failed read leaves the refusal. The allowance takes the page of any branch being merged in, not only the PR's base. A hook makes no network read to learn the base, and the merge tool rebuilds the page at merge.
 
 The heal stops when the generator writes no page for a conflicted page. The merge runs only the records
 mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop
