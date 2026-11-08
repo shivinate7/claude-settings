@@ -70,12 +70,22 @@ class IdleLanesCli(unittest.TestCase):
         value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": [], "items": [], "sessions": list(sessions)}
         self.live.write_text(json.dumps(value), encoding="utf-8")
 
-    def run_merge(self, *argv, extra_env=None):
-        """(exit code, stdout, stderr) of `merge.py <argv>`, run in the fixture checkout."""
+    def run_merge(self, *argv, extra_env=None, cwd=None):
+        """(exit code, stdout, stderr) of `merge.py <argv>`, run in the fixture checkout (or `cwd`)."""
         env = _test_git.apply({**os.environ, **roadmap.GIT_ENV, **(extra_env or {})})
-        done = subprocess.run([sys.executable, str(MERGE), *argv], cwd=str(self.repo), capture_output=True,
+        done = subprocess.run([sys.executable, str(MERGE), *argv], cwd=str(cwd or self.repo), capture_output=True,
                               text=True, env=env)
         return done.returncode, done.stdout, done.stderr
+
+    def single_branch_clone(self):
+        """(origin, clone): a bare origin holding main and roadmap, and a --single-branch clone of its main. The clone
+        has no local record branch, and origin does hold one."""
+        origin = pathlib.Path(self.tmp.name) / "origin.git"
+        roadmap.git(self.tmp.name, "init", "-q", "--bare", str(origin))
+        roadmap.git(self.repo, "push", str(origin), "main", "roadmap")
+        clone = pathlib.Path(self.tmp.name) / "clone"
+        subprocess.run(["git", "clone", "-q", "--single-branch", "--branch", "main", origin.as_uri(), str(clone)], check=True)
+        return origin, clone
 
     def test_prints_each_idle_lane_then_the_summary_line(self):
         self.publish([lane("session_a", "c1"),
@@ -145,6 +155,21 @@ class IdleLanesCli(unittest.TestCase):
                                         extra_env={"CLAUDE_CODE_REMOTE": "true"})
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines()[-1:], [SUMMARY_ONE], out)
+
+    def test_idle_lanes_starts_no_fetch_or_ls_remote_when_origin_holds_the_record_branch(self):
+        # The read is local. GIT_TRACE logs every git command this run starts, so a fetch or ls-remote shows up in it.
+        origin, clone = self.single_branch_clone()
+        self.publish([lane("session_a", "c1")])
+        trace = pathlib.Path(self.tmp.name) / "git-trace.log"
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live), cwd=clone,
+                                        extra_env={"GIT_TRACE": str(trace)})
+        ran = trace.read_text(encoding="utf-8") if trace.exists() else ""
+        self.assertRegex(ran, r"\brev-parse\b", "the trace logs no git call, so it proves nothing:\n" + err)
+        network = r"\bgit (?:-C \S+ )?(?:fetch|ls-remote)\b"
+        self.assertNotRegex(ran, network, "merge --idle-lanes started a git fetch or ls-remote:\n"
+                            + "\n".join(line for line in ran.splitlines() if re.search(network, line)))
+        self.assertEqual(code, 1, err)
+        self.assertTrue(any(line.startswith("unknown (") for line in out.splitlines()), "out: %r, err: %r" % (out, err))
 
 
 if __name__ == "__main__":
