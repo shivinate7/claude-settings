@@ -102,6 +102,11 @@ def codes(faults):
     return {f[0] for f in faults}
 
 
+def count_lines(text):
+    """The lines of a brief that name the count header, in text order. A probe asserts them before its verdict."""
+    return [line for line in text.splitlines() if "Blind designers:" in line]
+
+
 class BriefFaults(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -638,6 +643,34 @@ class Hook(unittest.TestCase):
         # A non-breaking space leads both lines. The kind line reads it through LEADING_MARKS, so the count line must too.
         out = self.spawn(" - Designer kind: informed\n - Blind designers: 2\n\n" + DUO_BRIEF)
         self.assertEqual(out, "", "a count line led by a non-breaking space must be read as the count, not refused")
+
+    def test_plain_zero_count_after_a_bulleted_two_is_refused(self):
+        # Bypass probe. The plain column-0 line is the count, so `Blind designers: 0` decides and the brief is refused.
+        # The bulleted `- Blind designers: 2` above it is a marked line, read only when no plain line exists.
+        prompt = "Designer kind: informed\n- Blind designers: 2\nBlind designers: 0\n\n" + DUO_BRIEF
+        self.assertEqual(count_lines(prompt), ["- Blind designers: 2", "Blind designers: 0"],
+                         "scope: the probe brief must hold a bulleted count line, then a plain one")
+        self.assertEqual(load().kind_of(prompt), "informed", "scope: the probe brief must read as informed")
+        out = self.spawn(prompt)
+        self.assertTrue(out, "a plain `Blind designers: 0` must win over an earlier bulleted `Blind designers: 2`, but the spawn passed")
+        self.assertRefused(out)
+        self.assertIn("Blind designers", reason_of(out), "the refusal must be the count refusal")
+
+    def test_plain_two_count_after_a_bulleted_template_line_passes(self):
+        # False-alarm probe. The plain `Blind designers: 2` is the count, so the template line `- Blind designers: <n>` is no count.
+        prompt = "Designer kind: informed\n- Blind designers: <n>\nBlind designers: 2\n\n" + DUO_BRIEF
+        self.assertEqual(count_lines(prompt), ["- Blind designers: <n>", "Blind designers: 2"],
+                         "scope: the probe brief must hold a bulleted template line, then a plain count line")
+        self.assertEqual(load().kind_of(prompt), "informed", "scope: the probe brief must read as informed")
+        out = self.spawn(prompt)
+        self.assertEqual(out, "", "a plain `Blind designers: 2` must win over a bulleted template line `- Blind designers: <n>`, but the spawn was refused")
+
+    def test_marked_only_count_line_keeps_its_verdict(self):
+        # Green control. With no plain count line, the one marked line is the count, as on the head: a template
+        # placeholder is no count and is refused.
+        prompt = "Designer kind: informed\n- Blind designers: <n>\n\n" + DUO_BRIEF
+        self.assertEqual(count_lines(prompt), ["- Blind designers: <n>"], "scope: the control brief holds only the marked line")
+        self.assertRefused(self.spawn(prompt))
 
     def test_informed_spawn_with_owner_none_passes(self):
         self.assertEqual(self.spawn('Designer kind: informed\nBlind designers: none, owner: "informed only"\n\nDraw it.'), "")
