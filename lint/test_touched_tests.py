@@ -12,6 +12,8 @@ constants runs nothing.
 Output names pinned (the selector writes them to $GITHUB_OUTPUT):
   files  a JSON list of the test files to run
   any    true when files is non-empty, else false
+  files_windows  a JSON list of the test files the Windows job runs
+  files_macos    a JSON list of the test files the macOS job runs
 
 Run with:  python3 lint/test_touched_tests.py -v
 """
@@ -35,6 +37,9 @@ SCRIPT = os.environ.get("TOUCHED_TESTS") or os.path.join(HERE, "..", ".github", 
 # The reason keys a skipped line carries: a word from each bucket's reason, never a whole sentence.
 HEAVY_KEY = re.compile(r"heavy|shard", re.IGNORECASE)
 NEEDS_SETUP_KEY = re.compile(r"needs", re.IGNORECASE)
+WINDOWS_KEY = re.compile(r"windows", re.IGNORECASE)
+# The per-OS output names: one JSON list for the Windows job and one for the macOS job.
+OS_KEYS = ("files_windows", "files_macos")
 
 
 def git(cwd, *args):
@@ -138,6 +143,27 @@ class Selector(unittest.TestCase):
         self.assertIsNotNone(value, f"the selector has no {name} constant")
         return list(value)
 
+    def json_list(self, text, key):
+        """The JSON list one output line holds. A value that is not a JSON list fails the case by name."""
+        try:
+            value = json.loads(text)
+        except ValueError:
+            self.fail(f"{key}= is not JSON: {text!r}")
+        self.assertIsInstance(value, list, f"{key}= is not a JSON list: {text!r}")
+        return value
+
+    def per_os(self, base, change=None, delete=()):
+        """Run the selector on a fixture with a readable diff. -> (sorted files_windows, sorted files_macos, stdout).
+        The scope is checked first: the run exited 0 and wrote both per-OS outputs."""
+        repo, sha, out = self.fixture(base, change, delete)
+        r, outputs = self.select(repo, sha, out)
+        self.assertEqual(r.returncode, 0, f"the selector exited {r.returncode} on a readable diff:\n{r.stdout}{r.stderr}")
+        lists = {}
+        for key in OS_KEYS:
+            self.assertIn(key, outputs, f"the selector writes no {key}= line, so the per-OS lists are not built: {outputs}")
+            lists[key] = self.json_list(outputs[key], key)
+        return sorted(lists["files_windows"]), sorted(lists["files_macos"]), r.stdout
+
     def test_control_the_fixture_diff_names_the_changed_path(self):
         """Green control: with no selector, the fixture's own diff still holds the path it changed, so each red case
         is the selector's failure and not the fixture's. It asserts nothing about the selector."""
@@ -227,6 +253,33 @@ class Selector(unittest.TestCase):
         r, outputs = self.select(repo, "0" * 40, out)
         self.assertNotEqual(r.returncode, 0, f"an unreadable BASE_SHA exited 0:\n{r.stdout}{r.stderr}")
         self.assertNotEqual(outputs.get("any"), "false", "an unreadable BASE_SHA wrote any=false: an unknown diff reads as nothing to run")
+
+    def test_powershell_test_is_listed_for_windows_only(self):
+        """A touched *.test.ps1 runs on Windows only: it is in files_windows and not in files_macos."""
+        path = "install.test.ps1"
+        windows, macos, stdout = self.per_os({path: "old\n"}, {path: "new\n"})
+        self.assertIn(path, windows, "a touched *.test.ps1 is not in files_windows")
+        self.assertNotIn(path, macos, "a touched *.test.ps1 is in files_macos, where it cannot run")
+        self.assertIn(path, stdout, "the log does not name the touched *.test.ps1")
+
+    def test_mjs_source_lists_its_sibling_test_stem_mjs(self):
+        test = "actions/stamp/test_stamp.mjs"
+        files, _ = self.listed({test: "old\n", "actions/stamp/stamp.mjs": "old\n"}, {"actions/stamp/stamp.mjs": "new\n"})
+        self.assertEqual(files, [test], "a touched stamp.mjs did not list its sibling test_stamp.mjs")
+
+    def test_sh_source_lists_its_sibling_test_stem_sh(self):
+        test = "merge/test_install_from_main.sh"
+        files, _ = self.listed({test: "old\n", "merge/install_from_main.sh": "old\n"}, {"merge/install_from_main.sh": "new\n"})
+        self.assertEqual(files, [test], "a touched install_from_main.sh did not list its sibling test_install_from_main.sh")
+
+    def test_a_test_no_windows_job_runs_is_left_out_of_files_windows_with_a_reason(self):
+        paths = ["merge/test_install_from_main.sh", "hooks/test_cloud_setup.sh"]
+        windows, _, stdout = self.per_os({p: "old\n" for p in paths}, {p: "new\n" for p in paths})
+        not_on_windows = self.constant("NOT_ON_WINDOWS")
+        for path in paths:
+            self.assertTrue(covers(not_on_windows, path), f"the selector's NOT_ON_WINDOWS constant does not cover {path}")
+            self.assertNotIn(path, windows, f"{path} is in files_windows, though no Windows job runs it")
+            self.assertTrue(named(stdout, path, WINDOWS_KEY), f"the log does not name {path} with a Windows reason")
 
 
 if __name__ == "__main__":
