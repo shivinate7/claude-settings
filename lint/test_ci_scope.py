@@ -387,7 +387,7 @@ class Scope(unittest.TestCase):
                          ("lint/_test_temp.py", ["code"])):
             with self.subTest(path=p):
                 self.assertFlags(run([p], existing=[p]), want_true=flags)
-        for p in ("hooks/guard.py", "hooks/config_watch.py"):
+        for p in ("hooks/mutate_shared.py", "hooks/config_watch.py"):
             with self.subTest(path=p):
                 self.assertFlags(run([p], existing=[p]), want_false=["shoot"])
 
