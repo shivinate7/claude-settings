@@ -428,7 +428,7 @@ MUTATIONS = [
      "push: a new archive/ branch at another branch's tip, allows"),
     ("push-new-branch: a local branch named as the source is refused like a sha",
      'if own is not None and own.returncode != 0:',
-     'if True:', "guard", "push: a local branch at another branch's tip, named as the source, allows"),
+     'if True:', "guard", "push-new-branch: a local branch at another branch's tip, named as the source, is judged like a sha"),
     ("push-new-branch: a source off every tip is refused and a source on one is allowed",
      'found.stdout.strip() not in tips.values():',
      'found.stdout.strip() in tips.values():', "guard",

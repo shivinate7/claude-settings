@@ -641,7 +641,7 @@ PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
 PUSHNEWBR = os.path.join(ROOT, "pushnewbr")    # origin/lane/base at commit A; lane/fix one commit on it, at B
-PUSHBATCH = os.path.join(ROOT, "pushbatch")    # origin/main and origin/batch-01 at commit A; lane/join one commit on it, at B
+PUSHBATCH = os.path.join(ROOT, "pushbatch")    # origin/main and origin/batch-01 at A; origin/lane/join one commit on A, at B
 # The rule ids the two new asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -1971,8 +1971,9 @@ def _build_push():
         sys.exit("fixture setup failed in build_fixtures: PUSHNEWBR needs HEAD~1 at origin/lane/base")
 
     # The batch runner's shape: origin/main and the integration branch batch-01 both hold commit A, and a lane
-    # joins it. lane/join sits one commit on A, at B, and is never pushed. A new batch name at A is the batch
-    # runner's first push; a push of B into batch-01 is the join.
+    # joins it. lane/join sits one commit on A, at B. origin/lane/join holds B, a lane ahead of main that is no
+    # branch's tip at main. A new batch name at A is the batch runner's first push; a push of B into batch-01
+    # is the join.
     make_repo(PUSHBATCH, {"base.txt": "base\n"})
     run_vcs(PUSHBATCH, "remote", "add", "origin", slash(BRANCHREMOTE))
     run_vcs(PUSHBATCH, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -1984,6 +1985,7 @@ def _build_push():
     if (run_vcs(PUSHBATCH, "rev-parse", "HEAD~1").stdout.strip()
             != run_vcs(PUSHBATCH, "rev-parse", "origin/main").stdout.strip()):
         sys.exit("fixture setup failed in build_fixtures: PUSHBATCH needs HEAD~1 at origin/main")
+    run_vcs(PUSHBATCH, "update-ref", "refs/remotes/origin/lane/join", "HEAD")
 
     make_repo(PUSHMAINUP, {"base.txt": "base\n"})
     run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
@@ -7549,9 +7551,12 @@ push_case("stacked lane, the local name without -u asks", "origin lane/fix", "as
           rule=PUSH_STRAY_RULE)
 push_case("stray branch, HEAD with an output tail is one clean ask", "origin HEAD 2>&1 | tail -1", "ask",
           cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE, lacks=(CHAIN_ASK,))
-# Two refspecs: the explicit one is fine, the second is implied, so the call still asks.
-push_case("stray branch, a second refspec that names the current branch asks",
-          "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+# Two refspecs. HEAD is judged like a sha (coordinator pick A, 09:20 CST), so the explicit refspec is refused
+# first. The second, implied refspec still asks when the explicit one is not judged: its source names no branch.
+sh("push-new-branch: a judged HEAD refspec beside a second refspec naming the current branch denies",
+   VCS + " push origin HEAD:push-guard-asks mylocal", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSTRAY)
+sh("push-new-branch: a second refspec naming the current branch still asks past an unjudged refspec",
+   VCS + " push origin push-guard-asks:push-guard-asks mylocal", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 
@@ -7564,15 +7569,15 @@ sh("push: a new branch at another branch's tip denies, the stray-branch incident
 sh("push: a new branch on top of another branch, a stacked lane, allows",
    VCS + " push origin HEAD:refs/heads/skc-stacked", "allow", cwd=PUSHNEWBR)
 # ALLOW, the exceptions to the new-branch refusal. Each one is judged by its own arm: an existing target,
-# an archive/ name, a source that is a local branch, a source that is not HEAD, and a lease. A source that
-# is HEAD is never judged, so the stacked case above cannot pin the tip test: HEAD~0 can. A plain forced
-# push is refused by the force rule instead, so its case names that rule and not this one.
+# an archive/ name, a source that is not at a remote tip, and a lease. HEAD and a local branch named as the
+# source are judged like a sha (coordinator pick A, 09:20 CST). A plain forced push is refused by the force
+# rule instead, so its case names that rule and not this one.
 sh("push: a push to an existing branch at its own tip, allows",
    VCS + " push origin HEAD~1:refs/heads/lane/base", "allow", cwd=PUSHNEWBR)
 sh("push: a new archive/ branch at another branch's tip, allows",
    VCS + " push origin HEAD~1:refs/heads/archive/skc-ste", "allow", cwd=PUSHNEWBR)
-sh("push: a local branch at another branch's tip, named as the source, allows",
-   VCS + " push origin main:refs/heads/skc-localsrc", "allow", cwd=PUSHNEWBR)
+sh("push-new-branch: a local branch at another branch's tip, named as the source, is judged like a sha",
+   VCS + " push origin main:refs/heads/skc-localsrc", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
 sh("push: a stacked commit named by a sha, not HEAD, allows",
    VCS + " push origin HEAD~0:refs/heads/skc-stacked-sha", "allow", cwd=PUSHNEWBR)
 sh("push: a lease at another branch's tip, leased, allows",
@@ -7587,14 +7592,16 @@ sh("push-new-branch: a delete beside a new-branch refspec denies the new-branch 
    VCS + " push origin :lane/old HEAD~1:refs/heads/skc-del-ste", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
 sh("push-new-branch: a delete beside a refspec to an existing branch allows",
    VCS + " push origin :lane/old HEAD~1:refs/heads/lane/base", "allow", cwd=PUSHNEWBR)
-# A main tip has no pull request branch, so the refusal must not send the agent to one. Its remedy names the
-# archive/ form, which the rule exempts. A stacked sha is not pinned here: the guard cannot tell it from a PR head.
-sh("push-new-branch: a main-tip refusal names the archive/ form",
-   VCS + " push origin origin/main:refs/heads/skc-main-tip", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHMAINUP,
+# A new branch at main's tip holds no work, so the rule does not refuse it (coordinator, 09:20 CST). The remedy
+# text is pinned on a sha ahead of main, which a pull request may own.
+sh("push-new-branch: a new branch at main's tip passes",
+   VCS + " push origin origin/main:refs/heads/skc-main-tip-new", "allow", cwd=PUSHMAINUP)
+sh("push-new-branch: a refusal of a sha ahead of main names the archive/ form",
+   VCS + " push origin origin/lane/join:refs/heads/skc-ahead", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHBATCH,
    carries="archive/")
-sh("push-new-branch: a main-tip refusal does not name a pull request",
-   VCS + " push origin origin/main:refs/heads/skc-main-tip", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHMAINUP,
-   lacks="pull request")
+sh("push-new-branch: a refusal of a sha ahead of main names the pull request's own branch",
+   VCS + " push origin origin/lane/join:refs/heads/skc-ahead", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHBATCH,
+   carries="pull request")
 # A HEAD or a local branch named as the source is judged like a sha. Its own name and an archive/ name are exempt.
 sh("push-new-branch: HEAD as the source is judged like a sha",
    VCS + " push origin HEAD:refs/heads/skc-head-src", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSELF)
@@ -7615,6 +7622,10 @@ sh("push-new-branch: a lane's HEAD joined into the existing integration branch i
    VCS + " push origin HEAD:refs/heads/batch-01", "allow", cwd=PUSHBATCH)
 sh("push-new-branch: a lane's local branch joined into the existing integration branch is allowed",
    VCS + " push origin lane/join:refs/heads/batch-01", "allow", cwd=PUSHBATCH)
+# The new-branch check runs even when the force verdict passes (coordinator, 13:35 CST): a forced refspec that
+# creates a branch at another branch's tip is refused by the new-branch rule, not the force rule.
+sh("push-new-branch: a forced refspec to a new branch at another branch's tip is refused by the new-branch rule",
+   VCS + " push origin +HEAD~1:refs/heads/skc-forced-new", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
@@ -7650,8 +7661,8 @@ push_case("own upstream, HEAD is silent", "origin HEAD", "allow", cwd=PUSHSELF, 
 push_case("first push with no upstream, -u HEAD is silent", "-u origin HEAD", "allow", silent=True)
 push_case("first push with no upstream, HEAD is silent", "origin HEAD", "allow", silent=True)
 # Explicit destinations, the form agents push by, from a branch whose upstream differs.
-push_case("explicit destination from a mismatched upstream is silent", "origin HEAD:push-guard-asks", "allow",
-          cwd=PUSHSTRAY, silent=True)
+sh("push-new-branch: HEAD to a new name from a mismatched upstream is judged like a sha",
+   VCS + " push origin HEAD:push-guard-asks", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSTRAY)
 push_case("archive, feat named to archive/feat is silent", "origin feat:archive/feat", "allow", silent=True)
 push_case("archive, HEAD to archive/x from a mismatched upstream is silent", "origin HEAD:archive/x", "allow",
           cwd=PUSHSTRAY, silent=True)
