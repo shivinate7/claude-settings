@@ -11480,6 +11480,92 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
           VCS + " push", R2_NET)
 
 
+# An unreadable git read. The commit check reads git through `_git`, which three modules bind by name: guard_merge
+# takes it from guard_core, which takes it from git_reads. A patch on git_reads alone reaches no reader, so each
+# case answers None on all three names. A read that times out or fails is None, and the commit check reads None as
+# no hit, so the commit is allowed. These judge in-process: every other row runs the guard as a subprocess.
+CMK_READ_MODULES = ("git_reads", "guard_core", "guard_merge")
+CMK_STAGED_COMMIT = VCS + " add -A && " + VCS + " commit -m x"
+
+
+def _cmk_verdict(guard, command, cwd, unread=None):
+    """`conflict_markers_hit` on COMMAND in CWD. With UNREAD, each git call whose args it matches is answered None
+    on every module that binds `_git`. Returns the verdict and the args of each call answered None."""
+    if unread is None:
+        return guard.conflict_markers_hit(command, cwd), []
+    real = sys.modules["git_reads"]._git
+    nulled = []
+
+    def answering(where, *args):
+        if unread(args):
+            nulled.append(args)
+            return None
+        return real(where, *args)
+
+    with mock.patch.object(sys.modules["git_reads"], "_git", answering), \
+            mock.patch.object(sys.modules["guard_core"], "_git", answering), \
+            mock.patch.object(sys.modules["guard_merge"], "_git", answering):
+        verdict = guard.conflict_markers_hit(command, cwd)
+    return verdict, nulled
+
+
+def _cmk_unread_case(what, unread):
+    """The staged triplet is a hit unpatched, and it is still a hit with the one git read UNREAD answers None."""
+    def check():
+        materialize(CMK_STAGED)
+        guard = _load_guard_module()
+        missing = [name for name in CMK_READ_MODULES if name not in sys.modules]
+        if missing:
+            return False, "the guard no longer loads %s under those names: the reader moved" % ", ".join(missing)
+        plain, _nulled = _cmk_verdict(guard, CMK_STAGED_COMMIT, CMK_STAGED)
+        if not plain[1]:
+            return False, "the staged triplet is no hit before the patch (%r): the fixture changed" % (plain,)
+        got, nulled = _cmk_verdict(guard, CMK_STAGED_COMMIT, CMK_STAGED, unread)
+        if not nulled:
+            return False, "the patch never reached the reader: no call that %s names was made" % what
+        if not got[1]:
+            return False, ("allowed (%r) with %s answering None, %d calls: an unreadable read counts as no hit"
+                           % (got, what, len(nulled)))
+        return True, "refused with %s answering None, %d calls: %r" % (what, len(nulled), got)
+    return check
+
+
+def _cmk_allow_case(what, cwd):
+    """The same command in CWD is allowed with git unpatched: a folder that is no repository, or a clean tree."""
+    def check():
+        materialize(cwd)
+        guard = _load_guard_module()
+        got, _nulled = _cmk_verdict(guard, CMK_STAGED_COMMIT, cwd)
+        if got[1]:
+            return False, "refused (%r) %s with git unpatched: want allow" % (got, what)
+        return True, "allowed %s with git unpatched" % what
+    return check
+
+
+cmk_unread_show_top_case = _cmk_unread_case(
+    "rev-parse --show-toplevel", lambda args: "--show-toplevel" in args)
+cmk_unread_verify_head_case = _cmk_unread_case(
+    "rev-parse --verify -q HEAD", lambda args: "--verify" in args and "HEAD" in args)
+cmk_unread_marker_case = _cmk_unread_case(
+    "the marker read, git diff --check", lambda args: "--check" in args)
+cmk_nogit_allow_case = _cmk_allow_case("in a folder that is no repository", NOGIT)
+cmk_clean_allow_case = _cmk_allow_case("in a clean repository", SUBJCLEAN)
+
+CMK_IN_PROCESS = (
+    ("conflict-markers: a staged triplet, add -A and commit, with rev-parse --show-toplevel unreadable is not allowed",
+     cmk_unread_show_top_case),
+    ("conflict-markers: a staged triplet, add -A and commit, with rev-parse --verify HEAD unreadable is not allowed",
+     cmk_unread_verify_head_case),
+    ("conflict-markers: a staged triplet, add -A and commit, with the marker read unreadable is not allowed",
+     cmk_unread_marker_case),
+    ("conflict-markers: add -A and commit in a folder that is no repository is allowed, with git unpatched",
+     cmk_nogit_allow_case),
+    ("conflict-markers: add -A and commit in a clean repository is allowed, with git unpatched",
+     cmk_clean_allow_case),
+)
+FIXTURELESS_CHECKS.update(check for _label, check in CMK_IN_PROCESS)  # each materializes only the fixture it names
+
+
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
 #
@@ -13909,6 +13995,11 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The conflict-markers in-process checks are defined beside their rows and register here, once LOG_CHECKS_EXTRA
+# exists. _TaggedLogs.append would take the family in force at this line, which belongs to another section.
+for _label, _check in CMK_IN_PROCESS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "conflict-markers"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
