@@ -3277,9 +3277,13 @@ class IdleLanes(UpkeepFixture):
 
     # The landed-by-pull rule: a step counts landed when one pull on its lane_head_refs is landed (merged into the default
     # branch, or its head sha an ancestor of it) and no open pull on them is unlanded. Pulls arrive as closedPulls rows.
-    def closed(self, number, branch, head, base="main", merged=True):
-        """A closedPulls row of the live file: a closed pull with its head sha, base branch and whether it was merged."""
-        return {"number": number, "branch": branch, "head": head, "base": base, "merged": merged}
+    def closed(self, number, branch, head, base="main", merged=True, body=None):
+        """A closedPulls row of the live file: a closed pull with its head sha, base branch and whether it was merged. The
+        body key is optional, so it is left out when a case names none."""
+        row = {"number": number, "branch": branch, "head": head, "base": base, "merged": merged}
+        if body is not None:
+            row["body"] = body
+        return row
 
     def main_sha(self):
         return git(self.repo, "rev-parse", "main").strip()
@@ -3515,6 +3519,85 @@ class IdleLanes(UpkeepFixture):
                      closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=True)])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    # The PR set of a lane: the pulls on its steps' head refs, plus any pull, open or closed, whose body names the
+    # session id as a whole token (the URL form and the bare id both count). A closed pull that did not merge neither
+    # lands nor holds. An open pull holds unless it is a draft whose head is in main.
+
+    def test_a_pull_on_an_r2_head_whose_body_names_the_session_joins_its_lane(self):
+        # A follow-up lane's pull is on <slug>-r2, outside lane_head_refs. Its body names the session by URL, so the pull
+        # joins the lane's PR set, and its merge into main lands the doing step. session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(91, "c1-r2", self.off_main_sha(), merged=True,
+                                               body="Follow-up of https://claude.ai/code/session_a")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
+                         "a pull on an -r2 head whose body names the session did not join its lane: %r" % (entries,))
+
+    def test_a_pull_whose_body_names_the_session_by_its_bare_id_joins_its_lane(self):
+        # The bare session id in a body counts the same as the session URL. session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_c", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(92, "claude/c1-follow", self.off_main_sha(), merged=True,
+                                               body="Continues session_c.")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_b", "session_c"]),
+                         "a pull whose body names the session by its bare id did not join its lane: %r" % (entries,))
+
+    def test_a_body_naming_a_longer_session_id_does_not_join_another_lane(self):
+        # Green on the old code. The body names session_ab, another session, so session_a's PR set stays empty and its
+        # doing step is not landed. session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(93, "claude/c1-other", self.off_main_sha(), merged=True,
+                                               body="Continues session_ab.")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_an_open_ready_pull_that_names_the_session_keeps_its_lane_off(self):
+        # Green on the old code. The lane's merged pull is on lane/c1. An open ready pull on a head off the refs names
+        # session_a, so it joins the PR set and holds the lane. session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        off = self.off_main_sha()
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 65, "title": "follow-up", "branch": "c1-open", "head": off, "draft": False,
+                             "body": "Open follow-up of https://claude.ai/code/session_a"}],
+                     closed_pulls=[self.closed(81, "lane/c1", off, merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_a_closed_unmerged_pull_beside_a_merged_one_neither_holds_nor_blocks_its_lane(self):
+        # The merged pull lands the doing step. The closed pull on the same head neither lands nor holds, so session_a
+        # lists. session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        off = self.off_main_sha()
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(81, "lane/c1", off, merged=True),
+                                   self.closed(82, "lane/c1", off, merged=False)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
+                         "a closed unmerged pull beside a merged one held its lane: %r" % (entries,))
+
+    def test_an_open_draft_whose_head_is_in_main_does_not_hold_its_lane(self):
+        # The merged pull lands the doing step, and the open draft's head is already in main, so the draft does not hold.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 66, "title": "lane c1", "branch": "lane/c1", "head": self.main_sha(), "draft": True}],
+                     closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
+                         "an open draft whose head is in main held its lane: %r" % (entries,))
+
+    def test_a_done_lane_whose_only_pull_closed_unmerged_still_lists(self):
+        # Green on the old code. The closed pull neither lands nor holds, so the done step decides. Interpretation pinned
+        # here: an empty or closed-only PR set does not hold a lane whose steps are all done by status.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")],
+                     closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=False)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
 
 
 class SharedTagNames(unittest.TestCase):
