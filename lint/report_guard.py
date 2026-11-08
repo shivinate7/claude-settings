@@ -45,8 +45,8 @@ does not wait for a git write: the reply's labels are what it reads. Cost: no fi
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
 own-record import (hooks/own_session.py) and one more transcript read, in a session with a remote id. A lane
 reads no layout; an owner-facing turn with no counted send reads it once (`decisions-reach-a-clickable-pick`).
-A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call of 15 s, or
-two on a timeout, 15 s + 10 s; rule `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
+A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call of 25 s, or
+two on a timeout, 25 s + 15 s, inside the 50 s Stop hook; rule `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 On landed turns it also refuses a reply sentence that says a decision was rewritten (rewritten, rewrote,
@@ -1675,9 +1675,10 @@ def past_ruling_problem(asked, cwd):
               "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
               "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
               + question_form.candidates_block(candidates, unknown))
-    # Cost: one git process and one Sonnet call (15 s), or two on a timeout (15 s + 10 s), on a Stop whose reply asks
-    # something; none on any other Stop. The caps leave out this script's python start, the reads in past_rulings
-    # (10 s timeouts) and decision_watch._judge_isolation: unmeasured.
+    # Cost: one git process and one Sonnet call (25 s), or two on a timeout (25 s + 15 s),
+    # inside the 50 s Stop hook, on a Stop whose reply asks something; none on any other Stop. The caps leave out up
+    # to 4 s of guard.log lock wait (2 s per timeout line), this script's python start, the reads in past_rulings (its
+    # readline has no timeout: unbounded) and decision_watch._judge_isolation: unmeasured.
     verdict, error = call_judge.judge_question(prompt, call_judge.PAST_RULING_MODEL, call_judge.PAST_RULING_TIMEOUT,
                                                True, tool="Stop", retry_timeout=call_judge.PAST_RULING_RETRY_TIMEOUT)
     if error:
