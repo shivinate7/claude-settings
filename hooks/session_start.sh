@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, the repo's waiting page was last published from a version other than main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, the repo's waiting page was last published from a version other than main's, a standing grant file (CLAUDE.md, .claude/CLAUDE.md) differs from origin/main's or neither origin ref can be read, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Outside a git tree or when git is missing, prints only the tier line (cloud or own id). Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -299,6 +299,56 @@ if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && c
       wp_line=$(python3 "$wp_script" --session-line "$toplevel" 2>/dev/null)
     fi
     [ -n "$wp_line" ] && printf '%s\n' "$wp_line"
+  fi
+fi
+
+# Rule grants-read-from-main: a session cites the standing grants from origin/main, never from its own checkout,
+# because a stale checkout once led a coordinator to cite acts the owner never gave. This compares the HEAD blob of
+# each grant file (CLAUDE.md, .claude/CLAUDE.md) in the session's toplevel with the blob at origin/main, or at
+# origin/HEAD's target ($default_branch above) when origin/main is absent. A file that differs, or sits on one side
+# only, prints one line with the ref tip's short sha and the git show command that reads the ref's copy. When
+# neither ref reads and a grant file exists at HEAD, one unknown line prints. Otherwise silent. Only committed blobs
+# are compared, so an uncommitted edit prints nothing. Cost: once per session start, one git cat-file --batch-check
+# process that reads the local object store (no fetch, no network); no file written, no timer. The refs are as
+# fresh as this checkout's last fetch.
+gm_out=$( {
+  printf '%s\n' 'HEAD:CLAUDE.md' 'HEAD:.claude/CLAUDE.md' 'origin/main' 'origin/main:CLAUDE.md' 'origin/main:.claude/CLAUDE.md'
+  if [ -n "$default_branch" ] && [ "$default_branch" != "main" ]; then
+    printf '%s\n' "origin/$default_branch" "origin/$default_branch:CLAUDE.md" "origin/$default_branch:.claude/CLAUDE.md"
+  fi
+} | { cd "$toplevel" 2>/dev/null && git cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null; } )
+# gm_pick <n> <type>: the object name on line n of the answer when that line names an object of <type>, else nothing.
+gm_pick() {
+  printf '%s\n' "$gm_out" | sed -n "${1}p" | awk -v t="$2" 'NF == 2 && $2 == t { print $1 }'
+}
+if [ -n "$gm_out" ]; then
+  gm_head1=$(gm_pick 1 blob)
+  gm_head2=$(gm_pick 2 blob)
+  gm_ref=""
+  gm_tip=$(gm_pick 3 commit)
+  if [ -n "$gm_tip" ]; then
+    gm_ref="origin/main"
+    gm_ref1=$(gm_pick 4 blob)
+    gm_ref2=$(gm_pick 5 blob)
+  elif [ -n "$default_branch" ] && [ "$default_branch" != "main" ]; then
+    gm_tip=$(gm_pick 6 commit)
+    if [ -n "$gm_tip" ]; then
+      gm_ref="origin/$default_branch"
+      gm_ref1=$(gm_pick 7 blob)
+      gm_ref2=$(gm_pick 8 blob)
+    fi
+  fi
+  if [ -n "$gm_ref" ]; then
+    if [ "$gm_head1" != "$gm_ref1" ]; then
+      printf 'checkout %s: CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:CLAUDE.md\n' \
+        "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref"
+    fi
+    if [ "$gm_head2" != "$gm_ref2" ]; then
+      printf 'checkout %s: .claude/CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:.claude/CLAUDE.md\n' \
+        "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref"
+    fi
+  elif [ -n "$gm_head1" ] || [ -n "$gm_head2" ]; then
+    printf 'checkout %s: standing grant check unknown, neither origin/main nor origin/HEAD could be read\n' "$toplevel"
   fi
 fi
 
