@@ -46,6 +46,8 @@ Not read:
 - A glob spelling of a command word.
 - A backtick pair after a backtick that never closes. Bash runs no part of that call.
 - A PowerShell call.
+- A decoded variable piped to a shell or to `source`: `s=$(base64 -d f); echo "$s" | sh`, `printf %s "$s" | bash`, `echo "$s" | source /dev/stdin`.
+- A decode run in a container or remote shell: `docker exec c sh -c "$(base64 -d f)"`, `ssh host "$(base64 -d f)"`.
 
 Kind: process
 Home: hooks/guard_encoded.py
