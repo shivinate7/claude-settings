@@ -1,11 +1,11 @@
 {
   "title": "An agent that re-sends a just-refused command in encoded form (escaped quotes, base64) is refused",
   "why": "Lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 15:37 CST Nov 8. Incident: the #2288 round-1 reviewer (haiku) had a probe refused by the harness as too complex, then reworded it with encoded quotes; the auto-mode classifier denied that and the reviewer stopped. Its brief said \"never encode or spell around a guard\". Second time: the #2211 round-2 reviewer used base64. Harm: an agent that encodes past a refusal makes the refusal useless as a stop. Two parts: the brief line also names harness refusals, and a guard refuses an encoded-quote or base64 rewrite of a command refused moments before. Related: step scratch-git-in-isolated-agent (done; encoded git calls stayed a note).",
-  "note": "Third case (lane notes-fix-large-1, 15:42 CST Nov 8): the #2295 round-1 reviewer (haiku) wrote `cd` as `\\x63d` past a worktree-guard refusal; the classifier denied it. All three cases broke an explicit brief line, so brief text alone does not stop it. Same reviewer flagged a possible false alarm: the worktree guard refused a probe whose `cd` sat only inside Python strings, with no git call.",
+  "note": "Third case (lane notes-fix-large-1, 15:42 CST Nov 8): the #2295 round-1 reviewer (haiku) wrote `cd` as `\\x63d` past a worktree-guard refusal; the classifier denied it. All three cases broke an explicit brief line, so brief text alone does not stop it. Same reviewer flagged a possible false alarm: the worktree guard refused a probe whose `cd` sat only inside Python strings, with no git call. Likely root cause: step reviewer-probe-helper (lane session_013NEJKz13TfcPPchNJveuuF), which gives reviewers a way to run a probe without a script file.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL37B9ZSA9toGnPeeVa",
   "status": "doing",
   "order": 829,
-  "updatedAt": "2026-11-08T15:43:00-06:00"
+  "updatedAt": "2026-11-08T16:14:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "A reviewer can run a guard probe through a helper, without writing a script file",
   "why": "Lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 16:11 CST Nov 8. Reviewer agents have no Write tool, and the harness's worktree-isolation check (\"too complex to verify that it stays inside the worktree\") refuses even one plain heredoc writing a probe script to the scratchpad, with no git call and no chaining. Effect: the last 6 reviews (#2171 R3, #1458 and #1774 fix checks, #2288 R1, #2295 R1 and R2) rested on static reads, and three reviewers tried to encode around the refusal (step encoded-retry-after-refusal). That refusal is the harness's, outside this repo (step scratch-git-in-isolated-agent). Fix in the repo: a helper the reviewer role may run, e.g. `bin/probe-guard <family> <cmd>`, that passes a command text through the hook in-process and prints its verdict. Meanwhile the lane routes probes through test-author cases.",
-  "note": "",
+  "note": "Likely root cause of step encoded-retry-after-refusal: with no way to run a probe file, a reviewer rewrites the refused command in encoded form (coordinator, 16:14 CST Nov 8).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "status": "todo",
+  "lane": "session_013NEJKz13TfcPPchNJveuuF",
+  "status": "doing",
   "order": 836,
-  "updatedAt": "2026-11-08T16:11:00-06:00"
+  "updatedAt": "2026-11-08T16:14:00-06:00"
 }
