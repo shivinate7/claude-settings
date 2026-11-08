@@ -25,6 +25,11 @@ Interface the module must match (the lane's form contract):
   not a restatement of main (none, nothing, n/a, no change, unchanged, stays, keeps, as today, as on main,
   same as, already; word match) before the change side's first ";", or anywhere when it has none. The chat
   box judges it in `question`; a page decision in `context`.
+- A waiting page's `meta/page` write (ArtifactData, `set`; `update` only when it carries `parked`) is refused as
+  parked-line-id when `parked` is not a list, a line is not an object or has no id, an id is not a string or does not
+  fullmatch the pattern in the page's parkId block, or an id repeats. The block is read from the page that
+  PARK_ID_SEAM names, else skills/waiting-page/page.html. A missing or bad block passes. Other docs, other urls and
+  a batch's item writes are judged as before; a batch's meta write is refused, and its item writes alone are returned.
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo changes to
   fit a shared tool, never the tool to fit a repo` in its label or description, and never `(Recommended)` in
   its label (rule uniform-pick).
@@ -1434,8 +1439,263 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ parked lines: a line's id is a unique slug
+#
+# The page takes a parked line live only with a string id that matches the pattern in its parkId block and is
+# unique in the list (skills/waiting-page/page.html, symbol parkItems). The guard reads that block and holds no
+# copy of the pattern. A line that fails the test has both its acts off, so the write that carries it is refused.
+PARK_RULE = "parked-line-id"
+PARK_ID_SEAM = "PARK_ID_SEAM"
+PARK_PAGE = os.path.join(REPO, "skills", "waiting-page", "page.html")
+PARK_BLOCK = '<script type="application/json" id="parkId">%s</script>'
+PARK_PATTERN = "^[a-z0-9-]{1,32}$"
+META, META_DOC = "meta", "page"
+
+
+def park_page(slug, block=None, body=""):
+    """A page of its own in this run's folder: `body` as markup, then the parkId block holding the JSON text
+    `block`. A block of None writes no block."""
+    folder = os.path.join(RUN_FOLDER, "parked")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, slug + ".html")
+    text = "<!doctype html>\n<html><head><title>Waiting</title></head><body>\n" + body
+    if block is not None:
+        text += "\n" + PARK_BLOCK % block
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text + "\n</body></html>\n")
+    return path
+
+
+@contextlib.contextmanager
+def park_seam(path=None):
+    """PARK_ID_SEAM names `path` for the block, or no seam when `path` is None. The old value is put back after."""
+    old = os.environ.pop(PARK_ID_SEAM, None)
+    if path is not None:
+        os.environ[PARK_ID_SEAM] = path
+    try:
+        yield
+    finally:
+        os.environ.pop(PARK_ID_SEAM, None)
+        if old is not None:
+            os.environ[PARK_ID_SEAM] = old
+
+
+def meta_write(parked_value=None, doc_id=META_DOC, collection=META, file_path=None):
+    """An ArtifactData set of the waiting page's meta doc whose data holds `parked_value`. With `file_path` the write
+    carries no data: the hook reads that file, which the case writes under the call's cwd (write_parked_file)."""
+    write = {"url": PAGE_URL, "action": "set", "collection": collection, "doc_id": doc_id}
+    if file_path is None:
+        write["data"] = {"parked": parked_value}
+    else:
+        write["file_path"] = file_path
+    return write
+
+
+def write_parked_file(path, parked_value):
+    """The JSON file a meta write names by file_path: its data is {"parked": parked_value}."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"parked": parked_value}, f)
+
+
+def parked_judge(tool_input, cwd=PAGE_REPO):
+    """(hit, writes) of question_form.page_item_hit for one call. A crash is a wrong verdict, shown by name."""
+    try:
+        hit, writes = question_form.page_item_hit(tool_input, cwd)
+    except Exception as exc:  # a crash is a wrong verdict, shown by name
+        return ("RAISED", "%s: %s" % (type(exc).__name__, exc)), []
+    return hit, writes
+
+
+def parked(name, tool_input, want, in_scope=True):
+    """One ArtifactData call, judged by page_item_hit and by guard.data_tool_hit. The scope is checked first: the call
+    names this repo's waiting page, or with in_scope False it names another url. `want` None is a pass; otherwise it is
+    the rule that refuses the call."""
+    label = PARK_RULE + ": " + name
+    check(label + ", the call is in scope", question_form.is_waiting_page(tool_input, PAGE_REPO) == in_scope,
+          "is_waiting_page is not %r" % in_scope)
+    hit = parked_judge(tool_input)[0]
+    rule = guard.data_tool_hit(tool_input, PAGE_REPO)[0]
+    if want is None:
+        check(label + ", page_item_hit passes", hit == ("", ""), "got %r" % (hit,))
+        check(label + ", the guard passes", rule == "", "got %r" % (rule,))
+    else:
+        check(label + ", page_item_hit refuses as " + want, hit[0] == want, "got %r" % (hit,))
+        check(label + ", the guard refuses as " + want, rule == want, "got %r" % (rule,))
+
+
+def case_parked_refused_forms():
+    """Each form the page's live-line test turns off is refused: a parked that is not a list, a line that is not an
+    object or has no id, an id that is not a string or does not match the block, and an id that repeats."""
+    full = [{"id": "p%03d" % i} for i in range(300)]
+    for name, parked_value in (
+            ("parked is a string", "abc"),
+            ("parked is an object, not a list", {"id": "a"}),
+            ("a line is a string, not an object", ["a"]),
+            ("a line is a number", [7]),
+            ("a line with no id", [{"label": "a line with no id"}]),
+            ("a valid line beside a line with no id", [{"id": "a"}, {"label": "a line with no id"}]),
+            ("an id that is a number", [{"id": 7}]),
+            ("an id that is null", [{"id": None}]),
+            ("an id that is a list", [{"id": ["a"]}]),
+            ("an id with an uppercase letter", [{"id": "Abc"}]),
+            ("an id with an underscore", [{"id": "a_b"}]),
+            ("an id of 33 characters", [{"id": "a" * 33}]),
+            ("an id with a trailing newline", [{"id": "abc\n"}]),
+            ("an empty id", [{"id": ""}]),
+            ("two lines with the same id", [{"id": "a"}, {"id": "a"}]),
+            ("a list of 300 lines whose last id repeats the first", full + [{"id": "p000"}])):
+        parked("%s is refused" % name, meta_write(parked_value), PARK_RULE)
+    parked("an update that sets a parked with no id is refused",
+           dict(meta_write([{"label": "a line with no id"}]), action="update"), PARK_RULE)
+
+
+def case_parked_valid_lists_pass():
+    """A list the page draws passes: ids that match the block and are unique, an empty list, the longest id the
+    pattern takes, and a full list of 300 lines."""
+    for name, parked_value in (
+            ("a list of two lines with ids", [{"id": "a1", "ref": "The first"}, {"id": "b-2"}]),
+            ("an empty list", []),
+            ("the longest id the pattern takes, 32 characters", [{"id": "a" * 32}]),
+            ("a full list of 300 lines with unique ids", [{"id": "p%03d" % i} for i in range(300)])):
+        parked("%s passes" % name, meta_write(parked_value), None)
+
+
+def case_parked_writes_outside_the_rule_pass():
+    """A write the rule does not judge passes: an update with no parked, an update that deletes parked, a set with no
+    parked, another doc of meta, and a bad parked on another url, which is out of scope."""
+    bad = [{"label": "a line with no id"}]
+    parked("an update with no parked passes",
+           {"url": PAGE_URL, "action": "update", "collection": META, "doc_id": META_DOC, "data": {"writer": "a"}}, None)
+    parked("an update that deletes parked passes",
+           {"url": PAGE_URL, "action": "update", "collection": META, "doc_id": META_DOC,
+            "data": {"parked": {"__delete__": True}}}, None)
+    parked("a set of meta with no parked passes",
+           {"url": PAGE_URL, "action": "set", "collection": META, "doc_id": META_DOC, "data": {"writer": "a"}}, None)
+    parked("meta/other with a bad parked passes", meta_write(bad, doc_id="other"), None)
+    parked("a bad parked on another url passes", dict(meta_write(bad), url="https://claude.ai/artifact/elsewhere"),
+           None, in_scope=False)
+
+
+def case_parked_in_a_batch():
+    """A batch is judged write by write. The meta write is refused whether it comes first or last, and the item write
+    beside it is returned alone, since a meta write is not an item write. A lone meta write returns no item writes."""
+    item = {"op": "set", "collection": "items", "doc_id": DOC, "data": page_item()}
+    meta = {"op": "set", "collection": META, "doc_id": META_DOC, "data": {"parked": [{"label": "a line with no id"}]}}
+    for name, writes in (("the meta write first", [meta, item]), ("the meta write last", [item, meta])):
+        tool_input = {"url": PAGE_URL, "action": "batch", "writes": writes}
+        parked("a batch with %s is refused" % name, tool_input, PARK_RULE)
+        judged = parked_judge(tool_input)[1]
+        check("parked-line-id: a batch with %s returns only the item write" % name, judged == [("set", item)],
+              "writes %r" % (judged,))
+    lone = parked_judge(meta_write([{"label": "a line with no id"}]))[1]
+    check("parked-line-id: a lone meta write returns no item writes", lone == [], "writes %r" % (lone,))
+
+
+def case_parked_relative_file_is_read_against_the_call_cwd():
+    """A meta write whose data is a relative file_path is judged on the file under the call's cwd, as inline data is.
+    The call's cwd is PAGE_REPO, a folder under the run folder and not the test process's cwd, so a file that exists
+    only there is found only when the path is joined to the call's cwd. The same write by an absolute file_path is the
+    green control: it is refused on main, so the relative read is the cause of the red."""
+    relative, absolute = "parked-relative-line.json", "parked-absolute-line.json"
+    check("parked-line-id: the relative file is absent from the test process cwd",
+          not os.path.exists(os.path.join(os.getcwd(), relative)), "%s is in the process cwd" % relative)
+    no_id = [{"label": "a line with no id"}]
+    write_parked_file(os.path.join(PAGE_REPO, relative), no_id)
+    parked("a relative file_path, read against the call's cwd, with a line that has no id is refused",
+           meta_write(file_path=relative), PARK_RULE)
+    write_parked_file(os.path.join(PAGE_REPO, absolute), no_id)
+    parked("control: an absolute file_path with a line that has no id is refused",
+           meta_write(file_path=os.path.join(PAGE_REPO, absolute)), PARK_RULE)
+
+
+def case_parked_reason_names_park_id():
+    """The rule's reason is in PAGE_REASONS and names the parkId block, and the guard prints that text for a refused
+    meta write, so a refusal reads the table, not a copy."""
+    table = getattr(question_form, "PAGE_REASONS", {})
+    original = table.get(PARK_RULE)
+    check("parked-line-id: PAGE_REASONS holds a reason for the rule", original is not None,
+          "no PAGE_REASONS entry for parked-line-id")
+    if original is None:
+        original = ""
+    check("parked-line-id: the reason names parkId, the block the guard reads", "parkId" in original, original[:120])
+    tool_input = meta_write([{"label": "a line with no id"}])
+    printed = printed_reason(tool_input)
+    check("parked-line-id: the guard prints the table's reason for a refused meta write",
+          bool(original) and original in printed, printed[:200] or "no refusal printed")
+    if not original:
+        return
+    table[PARK_RULE] = "TABLEMARK " + original
+    try:
+        marked = printed_reason(tool_input)
+    finally:
+        table[PARK_RULE] = original
+    check("parked-line-id: the refusal reads its text from the table", "TABLEMARK" in marked, marked[:200])
+
+
+def case_parked_seam_sets_the_pattern():
+    """The guard reads the pattern from the page the seam names. A page whose block is narrower refuses an id the real
+    page takes: the verdict flips on abcd, and the real page passes it."""
+    narrow = park_page("narrow", block=json.dumps("^[a-z]{1,3}$"))
+    with park_seam(narrow):
+        parked("under a page whose block is ^[a-z]{1,3}$, id abcd is refused", meta_write([{"id": "abcd"}]), PARK_RULE)
+        parked("under that page, id abc passes", meta_write([{"id": "abc"}]), None)
+    with park_seam(None):
+        parked("on the real page, id abcd passes", meta_write([{"id": "abcd"}]), None)
+
+
+def case_parked_seam_without_a_block_passes():
+    """A page with no parkId block, a block that is not JSON, or a block that is not a JSON string reads as unknown:
+    the write passes whatever its ids are."""
+    for slug, block, label in (("no-block", None, "a page with no parkId block"),
+                               ("not-json", "not json", "a parkId block that is not JSON"),
+                               ("not-a-string", "7", "a parkId block that is not a JSON string")):
+        with park_seam(park_page(slug, block=block)):
+            parked("%s reads as unknown, so id UPPER passes" % label, meta_write([{"id": "UPPER"}]), None)
+
+
+def case_parked_block_read_respects_strings():
+    """The block is read from the page's markup, never from text that only looks like it. Before the real block come a
+    comment opener inside strings, a lone quote in text, and a multi-line template literal that repeats the block."""
+    body = (
+        "<p>Don't stop here.</p>\n"
+        "<script>\n"
+        'const open = "<!--", star = "/* not a comment", site = "https://example.invalid/x"; // a comment\n'
+        'const hash = "#not-a-comment";\n'
+        "const decoy = `a template that repeats the block\n"
+        '  id="parkId">"^[a-z]{1,8}$"\n'
+        "  // inside the template, not a comment\n"
+        "`;\n"
+        "</script>\n"
+    )
+    with park_seam(park_page("strings", block=json.dumps("^[a-z]{1,3}$"), body=body)):
+        parked("past a decoy in strings, the real block ^[a-z]{1,3}$ refuses id abcd", meta_write([{"id": "abcd"}]),
+               PARK_RULE)
+        parked("past a decoy in strings, the real block passes id abc", meta_write([{"id": "abc"}]), None)
+
+
+def case_page_holds_the_park_id_block():
+    """The real page holds one parkId block whose value is the pattern: the copy the page and the guard both read."""
+    with open(PARK_PAGE, encoding="utf-8") as f:
+        found = re.search(r'<script type="application/json" id="parkId">(.*?)</script>', f.read(), re.S)
+    check("parked-line-id: skills/waiting-page/page.html has a parkId block", found is not None,
+          "no parkId block in the page")
+    if found is None:
+        return
+    try:
+        value = json.loads(found.group(1))
+    except ValueError:
+        value = found.group(1)
+    check("parked-line-id: the parkId block is the JSON string " + PARK_PATTERN, value == PARK_PATTERN,
+          "the block reads %r" % (value,))
+
+
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
+    for case in (case_item_92, case_item_51_stray_field, case_parked_refused_forms, case_parked_valid_lists_pass,
+                 case_parked_writes_outside_the_rule_pass, case_parked_in_a_batch,
+                 case_parked_relative_file_is_read_against_the_call_cwd, case_parked_reason_names_park_id,
+                 case_parked_seam_sets_the_pattern, case_parked_seam_without_a_block_passes,
+                 case_parked_block_read_respects_strings, case_page_holds_the_park_id_block,
+                 case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
