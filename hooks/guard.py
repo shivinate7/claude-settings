@@ -319,7 +319,7 @@ if sys.path[:1] != [_HERE]:
 
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
-                   "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
+                   "guard_push_delete", "guard_env", "guard_merge", "guard_frozen",
                    "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
@@ -391,6 +391,11 @@ while True:
             parent_delete_hit, push_ask_hit, push_delete_names, push_target, push_text, push_verdict,
             rm_delete_hit,
         )
+        _loading = "guard_env"
+        from guard_env import (
+            ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
+            substitution_commands,
+        )
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
@@ -405,15 +410,10 @@ while True:
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
-        _loading = "guard_env"
-        from guard_env import (
-            ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
-            substitution_commands,
-        )
         _loading = "guard_kill"
         from guard_kill import (
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
-            PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
+            PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, _SUBSTITUTION_OPEN, detached_launch_hit, foreign_pid_kill,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
             lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
@@ -3360,11 +3360,21 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "git-env-set", GIT_ENV_REASON, matched)
 
     # 1. Shared trees. The shell runs a command inside `$( )` or backticks, so each such text is
-    # read as a command of its own, after the command (rules 1, 2 and 4 read `texts` the same way).
+    # read as a command of its own, after the command (the wsl, live-stream, linked-node_modules, delete and
+    # rm-after-cd rules read `texts` the same way).
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
-    texts = [stripped, *substitution_commands(raw, stripped)]
-    whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    # The rule reads each text in the folder its own `cd` names, starting from the folder the outer command's
+    # `cd` names, and reads the command itself with each substitution as `x`: a `git` call inside `$( )` is
+    # judged once, in its own text. A segment of `stripped` that holds a substitution is read as well: the
+    # paths a checkout or restore takes from `$( )` are unknown, and as `x` they would pass as a clean word.
+    shared_texts = substitution_commands(raw, stripped, outer=True)
+    texts = [stripped, *shared_texts[:-1]]
+    outer_root = command_root(shared_texts[-1], cwd)   # an inner `cd` does not move the outer command
+    text_roots = {}   # command_root reads the whole text: once per text, never per segment
+    judged = [(text, part) for text in shared_texts for part in split_segments(text)]
+    if shared_texts[-1] != stripped:
+        judged += [(stripped, part) for part in split_segments(stripped) if _SUBSTITUTION_OPEN.search(part)]
+    for text, segment in judged:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -3373,8 +3383,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
         else:
-            whole_root = whole_root or [command_root(stripped, cwd)]
-            root = whole_root[0]
+            if text not in text_roots:
+                text_roots[text] = outer_root if text is shared_texts[-1] or text is stripped \
+                    else command_root(text, outer_root)
+            root = text_roots[text]
         match = shared_tree_match(segment, root)
         if match is None:
             continue
@@ -3533,7 +3545,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "detached-launch", DETACHED_LAUNCH_REASON, matched)
 
     # 2c. WSL: only the fixed list of test commands (owner ruling 2026-10-13).
-    matched = wsl_hit(stripped)
+    matched = next((hit for text in texts if (hit := wsl_hit(text))), "")
     if matched:
         refuse(tool, "deny", "wsl-allow-list", WSL_REASON, matched)
 
@@ -3542,10 +3554,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # own command line and never go false.
     poller = ""
     for segment in split_segments(stripped):
+        poller = loop_condition_polls_a_pattern(segment) or poller
+    for segment in (part for text in texts for part in split_segments(text)):
         matched = live_stream_hit(segment)
         if matched:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
-        poller = loop_condition_polls_a_pattern(segment) or poller
     matched = waiter_verdict(split_segments(stripped), background)
     if matched:
         if poller:
@@ -3579,16 +3592,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # already there. It reads the segment's own command word, never a substring, and reads the
     # filesystem rather than the text.
     run_in = _run_dir(stripped, cwd)
-    ends = []
-    nm_segments = split_segments(stripped, ends)
-    for number, segment in enumerate(nm_segments):
-        matched = ln_descends_hit(segment, run_in)
-        if matched:
-            refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
-        folder = dir_before_segment(nm_segments, number, cwd, ends)
-        matched = folder and linked_nm_hit(segment, folder)
-        if matched:
-            refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
+    for text in texts:
+        ends = []
+        nm_segments = split_segments(text, ends)
+        for number, segment in enumerate(nm_segments):
+            matched = ln_descends_hit(segment, run_in) if text is stripped else ""
+            if matched:
+                refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
+            folder = dir_before_segment(nm_segments, number, cwd, ends)
+            matched = folder and linked_nm_hit(segment, folder)
+            if matched:
+                refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
@@ -3608,7 +3622,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
     # 4b. After the wide-delete rules, so a delete of `.` or `..` keeps its own refusal.
     # A recursive delete of a relative target after a cd (decision rm-after-cd-names-absolute-path).
-    hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
+    hits = [] if POWERSHELL_CALL[0] else list(dict.fromkeys(hit for text in texts for hit in rm_after_cd_hits(text)))
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
     for segment in (part for text in texts for part in split_segments(text)):

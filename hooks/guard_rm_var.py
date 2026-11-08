@@ -13,6 +13,7 @@ from guard_core import (
     PLAYWRIGHT_PS_SHELLS, _pwsh_script, basename, inline_script, resolve_command, segment_tokens,
     split_segments,
 )
+from guard_env import substitution_commands
 
 
 # THE UNGUARDED VARIABLE DELETE. Decision rm-on-a-variable-needs-a-guard: a recursive `rm` whose
@@ -330,16 +331,20 @@ def _cd_remedy(flags, target: str, cd_word: str) -> str:
     return " ".join(["rm"] + flags + [base + "/" + target])
 
 
-def rm_after_cd_hits(text: str) -> list:
-    """Return each flagged `rm` as `rm FLAGS <dir>/<target>`, in the absolute form."""
+def rm_after_cd_hits(text: str, moved=None) -> list:
+    """Return each flagged `rm` as `rm FLAGS <dir>/<target>`, in the absolute form. `moved` is the folder
+    an outer `cd` named, for a text a substitution runs inside it: each segment's substitution texts are
+    read after the segment, in the folder a `cd` before them named."""
     ends = []
     found = []
-    moved = None
     for segment, end in zip(split_segments(text, ends), ends):
         word = _cd_word(segment)
         if word is not None:
             moved = word if end in _CD_JOINS else None   # `cd X || rm …` is no landed cd
             continue
+        if moved is not None:
+            for inner in substitution_commands(segment, segment):
+                found += rm_after_cd_hits(inner, moved)
         call = rm_call(segment) if moved is not None else None
         if not call:
             continue
