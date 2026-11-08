@@ -2583,6 +2583,14 @@ ROUND3_ALLOWED = (
     ("a question split over two sentences", "Which check will fail. Do you know?", ()),
     ("a yes-no question, do you think, the guard as the subject", "Do you think the guard will refuse it?", ()),
     ("a yes-no question, would you say, the guard as the subject", "Would you say the guard will refuse it?", ()),
+    # An ask word after an earlier article, before an actor with no article: the ask word asks, and CI or this check is
+    # the actor. Each is a false alarm if refused, so each is red on the old code.
+    ("an ask word after an article, verify, CI as the actor, no run", "Read the diff and verify CI will fail it.", ()),
+    ("an ask word after an article, if, CI as the actor, no run", "Ask the owner if CI will fail it.", ()),
+    ("an ask word after an article, verify, this check as the actor, no run", "Read the diff and verify this check will refuse it.", ()),
+    # The re- prefix on an ask word is still the ask word: "Re-verify" and "re-confirm" ask for the verdict.
+    ("the re- prefix on verify, the guard as the subject, no run", "Re-verify the guard will refuse it.", ()),
+    ("the re- prefix on confirm, the guard as the subject, no run", "Please re-confirm that the guard will refuse it.", ()),
     # Passes on the old code too: a modal that opens the sentence has no actor before it. It guards the fix against
     # refusing a yes-no question that opens with its modal.
     ("a yes-no question, will opens it, the guard as the subject", "Will the guard refuse it?", ()),
@@ -2608,6 +2616,11 @@ ROUND3_REFUSED = (
     ("don't know before which, no run", "I don't know which check will fail."),
     ("an ask word in the subject, verify, no run", "The verify hook will refuse it."),
     ("an ask word in the subject, unknown, no run", "The unknown-reads check will refuse it."),
+    # An opener that asks a question does not reach a forecast in a later clause: the question asks, the clause claims.
+    # Each is a miss if it passes, so each is red on the old code.
+    ("a question opener, Should, a later clause holds the guard, no run", "Should I merge, given the guard will refuse it?"),
+    ("a question opener, Can, a later clause holds the guard, no run", "Can I merge now, given the guard will refuse it?"),
+    ("a question opener, Will, a later clause holds the check, no run", "Will the guard refuse it, and the check will fail it?"),
     # The last two are pins: each is a plain claim with no run, refused on the old code too.
     ("a plain claim, the guard, no run", "The guard will refuse it."),
     ("a plain claim, the read check, no run", "The read check will refuse it."),
