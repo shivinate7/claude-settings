@@ -372,6 +372,16 @@ class RetireRun(Case):
         self.assertEqual(runs.urls, [], "a cite above the attribution was read when another URL closes the body")
         self.assertEqual(pairs(found), [("d-prose", "prose")], "a cite above the attribution cleared the prose debt under another URL")
 
+    def test_r1e_an_indented_first_line_cite_clears_the_prose_debt(self):  # the cite reader strips a leading indent, as the body reader does
+        self.closed_prose()
+        runs = Runs(("success", self.head))
+        self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)  # control: the unindented first line is read
+        self.assertEqual(runs.urls, [RUN_URL], "premise: the unindented first-line cite was not read")
+        runs = Runs(("success", self.head))
+        found = self.findings(pr_body="  Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "an indented first-line Retire-run cite was not read: the cite reader no longer strips the leading whitespace")
+        self.assertEqual(pairs(found), [], "a green run cited on an indented first line did not clear the prose debt")
+
     def test_r2_a_cite_of_a_failing_run_is_red(self):
         self.closed_prose()
         runs = Runs(("failure", self.head))

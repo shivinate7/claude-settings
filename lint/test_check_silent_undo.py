@@ -272,6 +272,18 @@ class PrBodyEscape(unittest.TestCase):
         self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
         self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
 
+    def test_an_indented_first_line_still_excuses_its_path(self):
+        """The body reader strips the body's leading whitespace before it splits the paragraphs. A Drops-lines line that is the
+        body's first line, indented, still excuses its path."""
+        L = self.LINE
+        ok, why = self.excused("%s\n" % L)  # control: the same line, unindented, excuses
+        self.assertTrue(ok, why)
+        for body in ("  %s\n" % L, "\n  %s\n" % L):
+            with self.subTest(body=body):
+                got, notes = self.verdict_for(body)
+                self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"],
+                                 "an indented first line of the PR body lost its Drops-lines excuse: the body reader no longer strips the leading whitespace")
+
     def test_a_commit_trailer_still_excuses_with_no_pr_body(self):  # control
         r = self.r
         r.sh("commit", "-q", "--amend", "-m", "Bring Card back\n\nDrops-lines: app.txt -- the owner wants Card back")
@@ -462,6 +474,18 @@ class PrBodyEscape(unittest.TestCase):
                 bodies.append("Summary.\n\n%s\n\n%s\n" % (block, tail))  # the last prose paragraph is "Summary."
                 bodies.append("Summary.\n\n%s\n\nClosing prose.\n\n%s\n\n%s\n" % (L, block, tail))  # and here it is "Closing prose."
         self.assert_nothing_excused(bodies)
+
+    def test_a_blank_paragraph_between_the_posting_rule_and_the_footer_excuses_nothing(self):
+        """The footer is the `---` rule and the Generated-by line, in one paragraph or two, next to each other. A blank paragraph
+        between them is not part of the footer: the footer is not skipped, so the trailer above the rule is not the last paragraph."""
+        L, F = self.LINE, self.FOOT
+        ok, why = self.excused("Summary.\n\n%s\n\n---\n\n%s\n" % (L, F))  # control: with the rule and the footer adjacent, the trailer excuses
+        self.assertTrue(ok, why)
+        for block in self.BLOCKS:
+            with self.subTest(block=block):
+                got, notes = self.verdict_for("Summary.\n\n%s\n\n---\n\n%s\n\n%s\n" % (L, block, F))
+                self.assertEqual(notes, [], "a blank paragraph between the posting rule and the footer let the footer skip, "
+                                            "so the Drops-lines line above the rule excused app.txt")
 
     # The CLI reads the PR body from `--pr-body <text>`, or from env PR_BODY, which CI sets from the pull request body
     # the way it sets BASE_REF and HEAD_SHA. Each positive case first shows the drop is a finding with no body.
