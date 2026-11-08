@@ -9,9 +9,13 @@ sentences(text, mask) -> [(start, end)]: the spans tile the text and each keeps 
 character, True inside a code span or a quote: the parser reads those characters as blanks and reads no quote itself.
 clauses(sentence, mask) -> [Clause]: a clause ends at ; : ! ? a dash, a comma, or a but or because, and the word that
 opens it (and, but, or, so, yet, then, because) is its `join`. `lead` and `term` are the separators before and after it;
-`hard_end` is where the nearest hard stop (. ; : ! ? a dash) at or after the clause sits, and `sent_end` the nearest of
-. ; : ! ?; both are offsets into the sentence. A clause's other fields are read from its words alone.
+`lead_at` and `lead_end` are where the separator before it starts and ends; `hard_end` is where the nearest hard stop (. ; : ! ? a dash) at or
+after its start sits, and `sent_end` the nearest of . ; : ! ? (a dot inside a token counts); all are offsets into the
+sentence. A clause's other fields are read from its words alone. The helpers below the clauses (conditional,
+negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, is_reason, form_pattern) read the grammar of the cannot-claim
+check from the same lexicons.
 """
+import bisect
 import re
 from typing import NamedTuple, Optional
 
@@ -23,6 +27,8 @@ REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")
 JOINERS = ("and", "but", "or", "so", "yet", "then")
 PREPOSITIONS = ("for", "of", "in", "on", "to", "from", "with", "about", "against", "at", "by", "per")
+VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", "can", "cannot", "isn't", "aren't",
+         "wasn't", "doesn't", "didn't", "won't", "not", "no", "needs", "requires")
 # The phrases that say a session cannot do an act. A form reads the same with n't or not and with a curly apostrophe.
 CANNOT_FORMS = ("can't", "cannot", "can not", "unable to", "could not", "couldn't", "no way to", "no way I can",
                 "no way we can", "not able to", "wasn't able to", "won't be able to", "will not be able to",
@@ -96,6 +102,8 @@ class Clause(NamedTuple):
     term: str
     hard_end: int
     sent_end: int
+    lead_at: int
+    lead_end: int
 
 
 def words(text):
@@ -114,14 +122,29 @@ def sentences(text, mask):
     return [(a, b) for a, b in zip(bounds, bounds[1:]) if b > a]
 
 
+_ADV = "(?:%s)" % "|".join(ADVERBS)
+_COND_RE = re.compile(r"\b(?:%s)\b" % "|".join(CONDITIONALS), re.I)
+_NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS if w.isalpha()), re.I)
+_LEAD_RE = re.compile(r"^\W*(?:(?:and|but|so|then)\b\W*)?", re.I)
+_OWN_RE = re.compile(
+    r"(?:^|\b(?:I|we)(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re|\bthe\s+cloud(?:\s+session)?"
+    r"|\bthis\s+session|\bhere|\bthere(?:\s+(?:is|was)|['’]s))(?:\s+" + _ADV + r")*\s*$", re.I)
+_PAST_RE = re.compile(r"^(?:could|wasn['’]t)", re.I)
+_WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADV, re.I)
+_ADV_LEAD_RE = re.compile(r"^(?:%s\s+)+" % _ADV, re.I)
+_FIRST_WORD = re.compile(r"\s*(\w+)")
+_PAREN_RE = re.compile(r"\(([^()]+)\)")
+_REASON_LEADS = (":", ";", ",", "—", "–", "-", "--")
+
+
 def conditional(text):
     """True when `text` holds a word of CONDITIONALS."""
-    return any(w in CONDITIONALS for w in words(text))
+    return bool(_COND_RE.search(text))
 
 
 def negated_near(text, gap=NEGATOR_GAP):
     """True when a negator (NEGATORS) sits in the last `gap` words of `text`."""
-    return any(w in NEGATORS or w.endswith("n't") for w in words(" ".join(text.split()[-gap:])))
+    return bool(_NEGATOR_RE.search(" ".join(text.split()[-gap:])))
 
 
 def first_words(text, count=WINDOW):
@@ -129,30 +152,81 @@ def first_words(text, count=WINDOW):
     return " ".join(text.split()[:count])
 
 
-def own_subject(before, own):
-    """True when the words just before a phrase end in a subject of `own` (a set of lowercase word tuples), or hold no
-    subject at all: the phrase opens its clause. A trailing adverb (ADVERBS) is skipped, and so is the auxiliary
-    (am, are, was, were, have, has, had) after I or we."""
-    tokens = words(before)
-    while tokens and tokens[-1] in ADVERBS:
-        tokens.pop()
-    if not tokens:
-        return True
-    for k in (3, 2, 1):
-        if tuple(tokens[-k:]) in own:
-            return True
-    if len(tokens) > 1 and tokens[-1] in ("am", "are", "was", "were", "have", "has", "had") and tokens[-2] in ("i", "we"):
-        return True
-    return False
+def own_subject(before):
+    """True when the words just before a phrase end in the writer's own subject (I, we, the cloud, this session, here,
+    there is), with the auxiliary after I or we and an adverb (ADVERBS) allowed, or hold no subject: the phrase opens
+    its clause. A joining word (and, but, so, then) before the subject is skipped."""
+    return bool(_OWN_RE.search(_LEAD_RE.sub("", before)))
 
 
-def past_phrase(phrase, before):
+def past(phrase, before):
     """True when a phrase reports a failure: could not, wasn't able, or any phrase right after was or were."""
-    lowered = phrase.lower().replace("’", "'")
-    tokens = words(before)
-    while tokens and tokens[-1] in ADVERBS:
-        tokens.pop()
-    return lowered.startswith(("could", "wasn't")) or bool(tokens) and tokens[-1] in ("was", "were") and bool(before.split())
+    return bool(_PAST_RE.match(phrase) or _WAS_RE.search(before))
+
+
+def opens_with(text, word):
+    """True when the first word of `text` is `word`."""
+    hit = _FIRST_WORD.match(text)
+    return bool(hit) and hit.group(1).lower() == word
+
+
+def opens_with_joiner(text):
+    """True when the first word of `text` is a joiner (JOINERS): and, but, or, so, yet, then."""
+    hit = _FIRST_WORD.match(text)
+    return bool(hit) and hit.group(1).lower() in JOINERS
+
+
+def strip_adverbs(text):
+    """`text` without the adverbs (ADVERBS) that open it."""
+    return _ADV_LEAD_RE.sub("", text)
+
+
+def is_reason(text):
+    """True when `text` is a clause of three words or more with a verb (VERBS, or a word in -ed) that no determiner
+    just before it makes an adjective: "a protected branch" holds no verb."""
+    tokens = [w.strip(".,;:()\"'").lower().replace("’", "'") for w in text.split()]
+    return len(tokens) >= 3 and any(
+        (w in VERBS or re.fullmatch(r"\w+ed", w)) and not (k and tokens[k - 1] in DETERMINERS)
+        for k, w in enumerate(tokens))
+
+
+def reasons(text):
+    """The clauses of `text` that a reason link opens, in order: the text after a : ; , or dash that whitespace follows,
+    the text after because, and the words in parentheses. Each runs to the next . ; : ! ? and a link inside one is part of
+    it."""
+    events = []
+    for c in clauses(text, [False] * len(text)):
+        if c.lead in _REASON_LEADS:
+            after = c.lead_at + len(c.lead) + (1 if c.lead in ("-", "--") else 0)
+            if text[after:after + 1].isspace():
+                events.append((c.lead_at, after + len(text[after:]) - len(text[after:].lstrip()), None))
+        elif c.join in REASON_LINKS and text[c.start + len(c.join):][:1].isspace():
+            after = c.start + len(c.join)
+            events.append((c.start, after + len(text[after:]) - len(text[after:].lstrip()), None))
+    events.extend((m.start(), m.start(1), m.end(1)) for m in _PAREN_RE.finditer(text))
+    found, done = [], 0
+    for at, begin, stop in sorted(events, key=lambda e: e[:2]):
+        if at < done:
+            continue
+        if stop is None:
+            hit = _STOP_ANY.search(text, begin)
+            stop = hit.start() if hit else len(text)
+        if stop > begin:
+            found.append(text[begin:stop])
+            done = stop
+    return found
+
+
+def form_pattern(form):
+    """The regex of a CANNOT_FORMS phrase: its words joined by whitespace, either apostrophe, and a gap for adverbs
+    (ADVERBS) after not or a word in n't when able, allowed, permitted or been follows."""
+    parts = form.split()
+    out = re.escape(parts[0]).replace("'", "['’]")
+    for k in range(1, len(parts)):
+        gapped = (parts[k - 1] == "not" or parts[k - 1].endswith("n't")) and parts[k] in (
+            "able", "allowed", "permitted", "been")
+        out += (r"\s+(?:%s\s+)*" % _ADV if gapped else r"\s+") + re.escape(parts[k]).replace("'", "['’]")
+    return out
 
 
 def head_objects(tokens, start):
@@ -280,38 +354,31 @@ def clauses(sentence, mask):
     shadow = _shadow(sentence, mask)
     stops = [m.start() for m in _BOUND.finditer(shadow) if m.group(1) or m.group(2)]
     softs = [m.start() for m in _STOP_ANY.finditer(shadow)]
-    found, cur, lead = [], 0, ""
+    found, cur, lead, lead_at, lead_end = [], 0, "", 0, 0
     cuts = [(m.start(), m.end(), m.group(4) is not None, "" if m.group(4) else m.group().strip() or m.group())
             for m in _BOUND.finditer(shadow)]
     cuts.append((len(shadow), len(shadow), False, ""))
     for begin, stop, is_word, sep in cuts:
-        if is_word:
-            if not shadow[cur:begin].strip():
-                continue
-            sep = ""
-            nxt = begin
-        else:
-            nxt = stop
+        if is_word and not shadow[cur:begin].strip():
+            continue
         text = shadow[cur:begin]
         lo = cur + (len(text) - len(text.lstrip()))
         hi = cur + len(text.rstrip())
         if hi > lo:
-            found.append([lo, hi, lead, sep, shadow[lo:hi]])
-            lead = sep
-        elif sep:
-            lead = sep
-        cur = nxt
-    out, hard, soft = [], 0, 0
-    for lo, hi, before, after, text in found:
-        while hard < len(stops) and stops[hard] < hi:
-            hard += 1
-        while soft < len(softs) and softs[soft] < hi:
-            soft += 1
-        tokens = words(text)
+            found.append((lo, hi, lead, lead_at, lead_end, sep))
+            lead, lead_at, lead_end = sep, begin, stop
+        elif sep and not lead:
+            lead, lead_at, lead_end = sep, begin, stop
+        cur = begin if is_word else stop
+    out = []
+    for lo, hi, before, before_at, before_end, after in found:
+        tokens = words(shadow[lo:hi])
         join = tokens[0] if tokens and tokens[0] in JOINERS + REASON_LINKS else None
         subject, verb, aux, modal, negated, cond, tense, passive, obj, complement = _analyse(tokens)
         reason_for = next((w for w in tokens if w in REASON_LINKS), None)
+        hard = bisect.bisect_left(stops, lo)
+        soft = bisect.bisect_left(softs, lo)
         out.append(Clause(lo, hi, join, subject, verb, aux, modal, negated, cond, tense, passive, obj, complement,
                           reason_for, before, after, stops[hard] if hard < len(stops) else len(shadow),
-                          softs[soft] if soft < len(softs) else len(shadow)))
+                          softs[soft] if soft < len(softs) else len(shadow), before_at, before_end))
     return out

@@ -135,6 +135,7 @@ block, then the rewrite runs unchecked. A check that cannot run prints an UNKNOW
 Cost: a regex over the reply; on a claim, one pass over the transcript this hook already holds and one refusals file read;
 on a claim with a slug in parentheses, one read of the rule files per run; no file written, no timer, no log.
 """
+import bisect
 import datetime
 import json
 import os
@@ -147,6 +148,7 @@ from _transcript import (  # noqa: E402
     ARTIFACT_DATA, SEND_TOOLS, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
+import _clause  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -1523,25 +1525,15 @@ def hand_off_problem(hook, text):
 # Why: a notice alone can make a reply hand the owner an act the session can do, such as a PR that the GitHub MCP
 # create-PR tool opens on its first call. Record: decision claims-carry-backing.
 _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
-_ADVERB = r"(?:even|yet|currently|actually|really|still|also|just|now|directly|simply|unfortunately)"  # one home of the adverbs
+_ADVERB = "(?:%s)" % "|".join(_clause.ADVERBS)  # the adverbs have one home, lint/_clause.py
+# The phrases are _clause.CANNOT_FORMS; the permission forms vary in their words, so they stay a pattern of their own.
+_PERMISSION_FORM = r"do(?:es)?(?:n['’]t| not)\s+have\s+(?:the\s+)?(?:permission|authori[sz]ation|authority|ability) to"
 CANNOT_RE = re.compile(
-    _NOT_NAME + r"(?:%(c)s|can not|could(?:n['’]t| not)|no way (?:to|I can|we can)"
-    r"|not\s+(?:%(a)s\s+)*(?:able|allowed|permitted) to|not\s+going\s+to\s+be\s+able to"
-    r"|do(?:es)?(?:n['’]t| not)\s+have\s+(?:the\s+)?(?:permission|authori[sz]ation|authority|ability) to"
-    r"|wasn['’]t\s+(?:%(a)s\s+)*able to|(?:won['’]t|will not) be able to"
-    r"|ha(?:ve|s)(?:n['’]t| not)\s+(?:%(a)s\s+)*been able to)(?![\w-])" % {"c": _CANT, "a": _ADVERB}, re.I)
-CANNOT_BREAK_RE = re.compile(r"\.(?!\w)|[;:!?—–]|\s-{1,2}\s")  # a clause ends here; a dot inside a token (api.github.com) does not
-CANNOT_BEFORE_BREAK_RE = re.compile(r"[.;:!?,—–]|\s-{1,2}\s|\bbut\b", re.I)  # and before it, a comma or but too
-CANNOT_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
-CANNOT_COND_RE = re.compile(r"\b(?:if|unless|whether|would)\b", re.I)
-CANNOT_NEGATOR_RE = re.compile(r"\bnot\b|n['’]t\b|\bnever\b|\bno\b", re.I)
-CANNOT_NEGATOR_GAP = 3  # words before the phrase a negator may sit in and still negate it
-# The subject just before the phrase must be the writer's own, or the phrase opens its clause. Any other subject (it, the
-# guard, the lane, the session, a draft PR) is another party, so the sentence is no claim about this session.
-CANNOT_SUBJECT_RE = re.compile(
-    r"(?:^|\b(?:I|we)(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re|\bthe\s+cloud(?:\s+session)?"
-    r"|\bthis\s+session|\bhere|\bthere(?:\s+(?:is|was)|['’]s))(?:\s+" + _ADVERB + r")*\s*$", re.I)
-CANNOT_LEAD_RE = re.compile(r"^\W*(?:(?:and|but|so|then)\b\W*)?", re.I)  # a joining word before the subject
+    _NOT_NAME + "(?:%s|%s)(?![\\w-])" % ("|".join(_clause.form_pattern(form) for form in _clause.CANNOT_FORMS),
+                                         _PERMISSION_FORM), re.I)
+# The words just before the phrase must hold the writer's own subject (_clause.own_subject), or the phrase opens its clause.
+# Any other subject (it, the guard, the lane, the session, a draft PR) is another party, so the sentence is no claim about
+# this session. A conditional or a negator just before the phrase (_clause.conditional, _clause.negated_near) is no claim.
 # A passive act whose clause says where it runs ("can't be merged from here") is a claim whatever its subject.
 CANNOT_FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|the\s+cloud|this\s+session)\b", re.I)
 # After the phrase: a doubt, a promise or a wait is no claim. "be" skips only before these words: "can't be merged" claims.
@@ -1569,8 +1561,6 @@ _BLOCKER_STATES = (
     (("push", "pr-merge"), r"(?<![\w.])main\s+is\s+protected"),
     (None, r"\bno\s+grant\b"),
 )
-CANNOT_SO_RE = re.compile(r"^\s*so\b", re.I)  # a comma joins a blocker before the claim only with so
-CANNOT_CONJ_RE = re.compile(r"[,]\s+(?:and|but|or)\b", re.I)  # a comma and a conjunction start another clause
 _BLOCKER_RES = {}
 
 
@@ -1598,11 +1588,7 @@ CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
 # The past-ruling guard's own remedy says why its check could not run. A line or a sentence that starts with its label is
 # that form; the guard lets the label follow a question on the same line.
 CANNOT_UNVETTED_RE = re.compile(r"^(?:[-*+]|\d+[.)])?\s*(?:\*\*)?Unvetted:", re.I)
-# A phrase in the past tense reports a failure: could not, wasn't able, or any phrase right after was or were ("was unable to").
-CANNOT_PAST_RE = re.compile(r"^(?:could|wasn['’]t)", re.I)
-CANNOT_WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADVERB, re.I)
-CANNOT_WINDOW = 6  # words after the phrase, in its clause, that may name the act
-CANNOT_ADVERB_RE = re.compile(r"^(?:%s\s+)+" % _ADVERB, re.I)
+# A phrase in the past tense reports a failure (_clause.past): could not, wasn't able, or any phrase right after was or were.
 # Emphasis marks (**cannot**, _push_, a lone ** after a word) are no part of a word; a mark between two word characters
 # (snake_case) stays. cannot_lines reads each line with the marks removed (_strip_emphasis).
 CANNOT_EMPHASIS_RE = re.compile(r"(?<!\w)(?:\*\*|__|\*|_)|(?:\*\*|__|\*|_)(?!\w)")
@@ -1681,34 +1667,18 @@ CANNOT_CHECK_RE = re.compile(
     re.I)
 # With a failed try of the act in the turn, the line may name its check as a reason instead. A reason is a clause of three
 # words or more with a verb (is, was, not, rejected ...), read only after the phrase: in parentheses, after a colon, a
-# semicolon, a comma or a dash, after because, or the sentence next to the claim. A bare claim has none of these, and
-# neither has a noun phrase such as "the 450-line diff" or a lead-in before the phrase ("Sorry, I could not push."). A clause
-# that a conjunction opens ("..., but I can open a PR") is another clause, not a reason.
-CANNOT_REASON_RE = re.compile(
-    r"\(([^()]+)\)|[:;,—–]\s+([^.;:!?]+)|\s-{1,2}\s+([^.;:!?]+)|\bbecause\s+([^.;:!?]+)", re.I)
-CANNOT_CONJ_OPEN_RE = re.compile(r"^\s*(?:and|but|or|so|yet|then)\b", re.I)
-CANNOT_VERB_RE = re.compile(
-    r"^(?:is|are|was|were|has|have|had|does|do|did|can|cannot|isn['’]t|aren['’]t|wasn['’]t|doesn['’]t|didn['’]t|won['’]t"
-    r"|not|no|needs|requires|\w+ed)$", re.I)
-
-
-# A word in -ed right after one of these is an adjective ("a protected branch"), not a verb.
-CANNOT_DETERMINER_RE = re.compile(r"^(?:a|an|the|this|that|these|those|its|their|his|her|our|my|your)$", re.I)
-
-
-def _is_reason(clause):
-    """True when `clause` is a reason: three words or more, one of them a verb (CANNOT_VERB_RE) that no determiner
-    just before it makes an adjective."""
-    words = [w.strip(".,;:()\"'") for w in clause.split()]
-    return len(words) >= 3 and any(CANNOT_VERB_RE.match(w) and not (k and CANNOT_DETERMINER_RE.match(words[k - 1]))
-                                   for k, w in enumerate(words))
+# semicolon, a comma or a dash, after because, or the sentence next to the claim (_clause.reasons, _clause.is_reason). A
+# bare claim has none of these, and neither has a noun phrase such as "the 450-line diff" or a lead-in before the phrase
+# ("Sorry, I could not push."). A clause that a conjunction opens ("..., but I can open a PR") is another clause, not a reason.
 
 
 def _gives_reason(tail, following):
-    """True when `tail`, the sentence after the phrase, carries a reason (CANNOT_REASON_RE) that no conjunction opens, or
-    the sentence that `following` names is one."""
-    return any(_is_reason(g) and not CANNOT_CONJ_OPEN_RE.match(g)
-               for m in CANNOT_REASON_RE.finditer(tail) for g in m.groups() if g) or _is_reason(following)
+    """True when `tail`, the sentence after the phrase, carries a reason that no conjunction opens, or the sentence that
+    `following` names is one."""
+    return any(_clause.is_reason(g) and not _clause.opens_with_joiner(g) for g in _clause.reasons(tail)) \
+        or _clause.is_reason(following)
+
+
 CANNOT_HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
 CANNOT_NO_TRY = (
     CANNOT_HEAD + "this turn shows no failed try of it. A notice is no try. Remedy: run the act on one route; if it "
@@ -1728,7 +1698,7 @@ def _mask(text):
 def _window_act(window, clause):
     """The table act the verb at the start of `window` names, else None. `clause` is the phrase's whole clause, where a
     passive form looks for the PR. A code span at the start is read as a route: `gh pr create` is pr-open."""
-    window = CANNOT_ADVERB_RE.sub("", window)
+    window = _clause.strip_adverbs(window)
     span = CANNOT_VERB_SPAN_RE.match(window)
     window = span.group(1) + window[span.end():] if span else window
     if window.startswith("`"):
@@ -1743,26 +1713,38 @@ def _window_act(window, clause):
     return None
 
 
-def _claim(body, mask, hit, floor):
+def _scan(parts):
+    """(parts, starts, conjs) of one sentence's clauses (_clause.clauses): where each starts, and the clauses that a comma
+    and an and, but or or open."""
+    return parts, [c.start for c in parts], [c for c in parts if c.lead == "," and c.join in ("and", "but", "or")]
+
+
+def _claim(body, mask, hit, floor, scan):
     """(act, window, past) when the phrase `hit` claims this session cannot do a table act, else None. `body` and `mask` are one
-    sentence; `floor` is where the previous phrase of the sentence ended, so words that condition it do not condition this
-    one. Not a claim: a conditional or a negator just before the phrase (since the last comma, but or clause break), a
-    subject that is not the writer's own (CANNOT_SUBJECT_RE), a verb of telling or waiting after it, a dependency (until,
-    before, without your) in its clause, a verb that names no table act, a blocker of that act (_blocker_res) in its own
-    clause (a comma and, but or or starts another) or in the part after the next semicolon or joined to the clause
-    (_joined_blocker), a sentence that names a rule, or a real rule or decision id in parentheses in its clause
-    (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read)."""
-    start = max((m.end() for m in CANNOT_BEFORE_BREAK_RE.finditer(mask, floor, hit.start())), default=floor)
-    brk = CANNOT_BREAK_RE.search(mask, hit.end())
-    end = brk.start() if brk else len(mask)
+    sentence and `scan` its clauses (_scan); `floor` is where the previous phrase of the sentence ended, so words that
+    condition it do not condition this one. The phrase's clause starts after the last separator (a comma, a dash, but, a
+    stop) before it and ends at the first stop after it (a comma does not end it). Not a claim: a conditional or a negator
+    just before the phrase, a subject that is not the writer's own (_clause.own_subject), a verb of telling or waiting
+    after it, a dependency (until, before, without your) in its clause, a verb that names no table act, a blocker of that
+    act (_blocker_res) in its own clause (a comma and, but or or starts another) or in the part after the next semicolon
+    or joined to the clause (_joined_blocker), a sentence that names a rule, or a real rule or decision id in parentheses
+    in its clause (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read)."""
+    parts, starts, conjs = scan
+    at = max(bisect.bisect_right(starts, hit.start()) - 1, 0)
+    first = at
+    while first and parts[first].join in _clause.REASON_LINKS and not parts[first].lead:  # because ends no scope
+        first -= 1
+    opener = parts[first]
+    start = max(opener.start + len(opener.join) if opener.join == "but" else opener.lead_end if opener.lead else opener.start,
+                floor)
+    end = parts[at].hard_end
     before, after = body[start:hit.start()], body[hit.end():end]
-    near = " ".join(before.split()[-CANNOT_NEGATOR_GAP:])
-    if CANNOT_COND_RE.search(before) or CANNOT_NEGATOR_RE.search(near):
+    if _clause.conditional(before) or _clause.negated_near(before):
         return None
     words = after.split()
     if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after):
         return None
-    if not CANNOT_SUBJECT_RE.search(CANNOT_LEAD_RE.sub("", before)) and not (
+    if not _clause.own_subject(before) and not (
             after.lstrip().lower().startswith("be ") and CANNOT_FROM_HERE_RE.search(after)):
         return None
     left = mask.rfind(";", 0, hit.start()) + 1  # the sentence part between the semicolons around the phrase
@@ -1770,32 +1752,34 @@ def _claim(body, mask, hit, floor):
     right = len(mask) if right < 0 else right
     if CANNOT_RULE_RE.search(body[left:right]):
         return None
-    window = " ".join(words[:CANNOT_WINDOW])
+    window = _clause.first_words(after)
     act = _window_act(window, before + " " + after)
     if not act:
         return None
     state_re, reason_re = _blocker_res(act)[:2]
-    clause_left = max((m.end() for m in CANNOT_CONJ_RE.finditer(mask, left, hit.start())), default=left)
-    conj = CANNOT_CONJ_RE.search(mask, hit.end(), right)
-    if reason_re.search(body[clause_left:conj.start() if conj else right]):
+    clause_left = max((c.start + len(c.join) for c in conjs if c.lead_at >= left and c.start + len(c.join) <= hit.start()),
+                      default=left)
+    conj = next((c.lead_at for c in conjs if c.lead_at >= hit.end() and c.start + len(c.join) <= right), None)
+    if reason_re.search(body[clause_left:right if conj is None else conj]):
         return None
     if right < len(mask):
         reach = mask.find(";", right + 1)
         if state_re.search(body[right + 1:len(mask) if reach < 0 else reach]):
             return None
-    if _joined_blocker(act, body[floor:start], before, after, body[end:]) or _names_rule_id(after):
+    so = _clause.opens_with(before, "so")
+    if _joined_blocker(act, body[floor:start], so, after, body[end:]) or _names_rule_id(after):
         return None
-    return act, window, bool(CANNOT_PAST_RE.match(hit.group()) or CANNOT_WAS_RE.search(before))
+    return act, window, _clause.past(hit.group(), before)
 
 
-def _joined_blocker(act, lead, before, after, tail):
+def _joined_blocker(act, lead, so, after, tail):
     """True when a bare blocker state of `act` is joined to the claim clause. `lead` is the sentence up to the clause start,
-    `before` the words from there to the phrase, `after` the clause after it, and `tail` the sentence from the clause
+    `so` whether the clause opens with so, `after` the clause after it, and `tail` the sentence from the clause
     break on. Before: the state ends at a semicolon, colon or dash, or at a comma that so follows. After: a semicolon,
     colon or dash, then the state, or the state in parentheses in the clause."""
     _, _, before_re, after_re, paren_re = _blocker_res(act)
     hit = before_re.search(lead)
-    if hit and (hit.group(1) != "," or CANNOT_SO_RE.match(before)):
+    if hit and (hit.group(1) != "," or so):
         return True
     return bool(after_re.match(tail) or paren_re.search(after))
 
@@ -1889,8 +1873,8 @@ def cannot_lines(text):
         if raw in hand_off:
             continue
         mask = _mask(body)
-        bounds = [0] + [m.end() for m in CANNOT_SENTENCE_RE.finditer(mask)] + [len(body)]
-        spans = list(zip(bounds, bounds[1:]))
+        flags = [char != blank for char, blank in zip(body, mask)]  # True where the mask hides a character
+        spans = _clause.sentences(body, flags)
         label = _report_label_end(raw)
         at = lambda i: keep[i - 1] + 1 if i else 0  # noqa: E731  where stripped index i starts in `raw`, marks before it kept
         for k, (begin, stop) in enumerate(spans):
@@ -1900,8 +1884,9 @@ def cannot_lines(text):
                 continue
             # a report label opens the clause after it
             floor = next((i for i, at in enumerate(keep) if at >= label), 0) if begin == 0 and label else 0
+            scan = _scan(_clause.clauses(piece, flags[begin:stop]))
             for hit in CANNOT_RE.finditer(shadow):
-                claim = _claim(piece, shadow, hit, floor)
+                claim = _claim(piece, shadow, hit, floor, scan)
                 floor = hit.end()
                 if claim:
                     prior = raw[at(spans[k - 1][0]):keep[spans[k - 1][1]]].strip() if k else ""
@@ -2139,7 +2124,7 @@ def _prior_names_check(prior, act):
 def cannot_problem(records, text, refused=()):
     """The refusal for reply sentences that claim a table act cannot be done, else ''. `records` are those after the last
     human message. A sentence passes when a failed try of its act sits in them (failed_tries) or it carries a cite
-    (_cited), and it names its check (_names_check, or a reason when a failed try sits in the turn: CANNOT_REASON_RE). A
+    (_cited), and it names its check (_names_check, or a reason when a failed try sits in the turn: _gives_reason). A
     sentence in the past tense (could not) whose failed try a later call of the same act and target cancelled reports a past
     failure and is let pass; a present claim (cannot) after that later success still blocks.
     A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target)."""
