@@ -886,8 +886,9 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
         for path in _py_paths(expression, env_at(call)):
             if predicate(path, cwd):
                 return path
-    for node in ast.walk(tree):   # a node `-e` script held in a list argv runs as node code
-        if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], (ast.List, ast.Tuple)):
+    for node in ast.walk(tree):   # a node `-e` script in the list argv of a subprocess call runs as node code
+        if isinstance(node, ast.Call) and _py_runs_argv(node) and node.args \
+                and isinstance(node.args[0], (ast.List, ast.Tuple)):
             words = [item.value if isinstance(item, ast.Constant) and isinstance(item.value, str) else ""
                      for item in node.args[0].elts]
             if words and _NODE_COMMAND.match(basename(words[0])):
@@ -916,11 +917,58 @@ _PY_SHELL_NAMES = frozenset((
 _PY_INTERPRETER = re.compile(r"python[\d.]*|py")
 
 
-def _py_list_argv_call(node) -> bool:
+def _py_runs_argv(node) -> bool:
+    """True when the call NODE is named like a subprocess call (`_PY_ARGV_CALLS`), as `run(...)` or as
+    `<owner>.run(...)`, whatever the owner is. A list passed to `print` or `json.dumps` is data."""
+    import ast
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+    return name in _PY_ARGV_CALLS
+
+
+def _py_named_scripts(tree) -> frozenset:
+    """The names in TREE that count as a literal `.py` path: bound once in the whole tree, by a plain
+    top-level `NAME = '<string ending in .py, not starting with ->'`. Every other binding of the name
+    (a second assignment, an augmented or annotated one, a `for`, `with`, `except`, import, def, class,
+    argument or `match` target, a walrus, a `del`, `global` or `nonlocal`) keeps it out."""
+    import ast
+    counts = {}
+
+    def bind(name):
+        if isinstance(name, str):
+            counts[name] = counts.get(name, 0) + 1
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            bind(node.id)
+        elif isinstance(node, ast.arg):
+            bind(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.ExceptHandler)):
+            bind(node.name)
+        elif isinstance(node, ast.alias):
+            bind(node.asname or node.name.split(".")[0])
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                counts[name] = counts.get(name, 0) + 2   # a declaration alone disqualifies the name
+        elif type(node).__name__.startswith("Match"):   # capture patterns: MatchAs, MatchStar, MatchMapping
+            bind(getattr(node, "name", None))
+            bind(getattr(node, "rest", None))
+    named = set()
+    for stmt in tree.body:
+        if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name)
+                and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str)
+                and stmt.value.value.endswith(".py") and not stmt.value.value.startswith("-")
+                and counts.get(stmt.targets[0].id) == 1):
+            named.add(stmt.targets[0].id)
+    return frozenset(named)
+
+
+def _py_list_argv_call(node, named=frozenset()) -> bool:
     """True when NODE is `subprocess.<run|call|check_call|check_output|Popen>(...)` that runs a python
     script file with no shell: the first argument is a list or tuple literal; its first element is
     `sys.executable` or a python interpreter's name, not a shell name; its second element is a literal
-    script path ending in `.py`; no element is starred, `-`, or a `-c` flag (`_PY_C_FLAG`); `shell=` is
+    script path ending in `.py`, or a Name in NAMED (`_py_named_scripts`); no element is starred, `-`,
+    or a `-c` flag (`_PY_C_FLAG`); `shell=` is
     absent or the literal False; and there is no `**kwargs` and no `executable=`, which would swap the
     program the argv names. Python that the child reads from stdin or `-c` runs code the body's text
     does not show, as does any other program, such as `cp`."""
@@ -940,8 +988,9 @@ def _py_list_argv_call(node) -> bool:
     elif not (isinstance(first, ast.Attribute) and first.attr == "executable"
               and isinstance(first.value, ast.Name) and first.value.id == "sys"):
         return False
-    if not (isinstance(script, ast.Constant) and isinstance(script.value, str)
-            and script.value.endswith(".py") and not script.value.startswith("-")):
+    if not ((isinstance(script, ast.Constant) and isinstance(script.value, str)
+             and script.value.endswith(".py") and not script.value.startswith("-"))
+            or (isinstance(script, ast.Name) and script.id in named)):
         return False
     for item in elements:
         if isinstance(item, ast.Starred):
@@ -974,8 +1023,9 @@ def python_body_is_text(body: str) -> bool:
     except Exception:   # a syntax error, a null byte, a tree too deep to parse
         return False
     cleared = set()   # ids of the `subprocess` Name nodes, and of the plain `import subprocess` aliases
+    named = _py_named_scripts(tree)
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and _py_list_argv_call(node):
+        if isinstance(node, ast.Call) and _py_list_argv_call(node, named):
             cleared.add(id(node.func.value))
         elif isinstance(node, ast.Import):
             cleared.update(id(alias) for alias in node.names if alias.name == "subprocess" and not alias.asname)
