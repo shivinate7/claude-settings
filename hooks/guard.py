@@ -72,6 +72,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
+  verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
+                       stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
@@ -386,7 +388,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _QUIET, _resolve_vars, _shell_write_hit, frozen_shell_hit,
             interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -404,9 +406,10 @@ while True:
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
+            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_REASON,
+            background_end_hit,
             live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
-            narrated_tail_hit, waiter_verdict,
+            narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
@@ -811,6 +814,30 @@ def worktree_add_target(args):
     return words[0] if words else None
 
 
+OWN_FOLDER_SUBSTITUTION = re.compile(
+    r"(?P<pwd>\$\(\s*pwd\s*\)|`\s*pwd\s*`)"
+    r"|(?P<top>\$\(\s*(?:\S*/)?git(?:\.exe)?\s+rev-parse\s+--show-toplevel\s*\))")
+
+
+def _own_folder_substituted(segments, number: int, cwd: str, ends=()) -> str:
+    """`segments[number]` with `$(pwd)` and the backtick `pwd` read as the folder the call runs in,
+    and `$(git rev-parse --show-toplevel)` read as that folder's checkout top, as `$PWD` is read.
+    A folder that holds a space or a quote is left alone: it would split the word."""
+    segment = segments[number]
+    if "$(" not in segment and "`" not in segment:
+        return segment
+    shell_pwd = dir_before_segment(segments, number, cwd, ends)
+    if not shell_pwd:
+        return segment
+    top = _checkout_root_by_stat(os.path.realpath(shell_pwd))
+
+    def read(match) -> str:
+        folder = shell_pwd if match.group("pwd") else top
+        return folder if folder and not re.search(r"[\s\"'`$]", folder) else match.group(0)
+
+    return OWN_FOLDER_SUBSTITUTION.sub(read, segment)
+
+
 def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
@@ -818,12 +845,13 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     and passes, so the repo is judged, never the target. A variable an earlier
     segment assigned reads as its value. One with no readable value is judged by the folder before
     it. Any other unreadable part allows."""
-    tokens = segment_tokens(segments[number])
+    segment = _own_folder_substituted(segments, number, cwd, ends)
+    tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
         return ""
     target = None
-    for subcommand, args in git_calls(segments[number]):
+    for subcommand, args in git_calls(segment):
         if subcommand == "worktree" and args and args[0] == "add":
             target = worktree_add_target(args[1:])
             break
@@ -838,9 +866,17 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     primary = primary_checkout(where)
     if not primary:
         return ""
+    if re.search(r"\$\{?PWD\}?", target):
+        # `$PWD` is the call's folder (after any `cd`), not the `-C` folder.
+        shell_pwd = dir_before_segment(segments, number, cwd, ends)
+        if shell_pwd:
+            target = re.sub(r"\$\{PWD\}|\$PWD\b", lambda _m: shell_pwd, target)
     import tempfile   # lazy: only a real worktree add reaches here
     if path_is_inside(primary, tempfile.gettempdir()):
         return ""
+    if (re.match(r"\$\{?HOME\}?(?:/|$)", target)
+            and not re.search(r"\bHOME=", "; ".join(segments[:number]))):
+        return ""   # main's verdict: a path through the home variable is unreadable, so it allows
     if _unexpanded(target):
         # A variable an earlier segment assigned is read as its value (`_resolve_vars`), so a tree
         # path through it is judged as the literal path is.
@@ -3473,6 +3509,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+    matched = verdict_pipe_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
@@ -4253,6 +4292,10 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
 SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
 SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
+# A lane's own `touch` or `make` writes files with no `>` and no word of MUTATING_COMMAND, so a lane
+# call that holds either, even inside `$(...)` or `<(...)`, may write. MUTATING_COMMAND stays as is,
+# since it also decides frozen-file verdicts.
+SESSION_LIVED_WRITE_HINT = re.compile(SHELL_WRITE_HINT.pattern + r"|\b(?:touch|make)\b")
 
 
 def _owning_checkout(path: str, roots) -> str:
@@ -4501,8 +4544,21 @@ def _homeless_write_hit(targets, command: str, where: str, session_id: str, has_
         except OSError:
             own_home = ""
 
+    def in_config_folder(target, at) -> bool:
+        """True when TARGET, as written, sits under the config folder. install.sh links the clone's
+        hooks, settings and skills into that folder, so the path is judged before any link resolves.
+        A `..` step is left to the resolved path: a lexical collapse could cross a link."""
+        expanded = guard_core._expanded(target, at)
+        if ".." in re.split(r"[\\/]", expanded):
+            return False
+        path = os.path.normcase(os.path.normpath(expanded))
+        root = os.path.normcase(os.path.normpath(guard_core.config_dir()))
+        return (path + os.sep).startswith(root + os.sep)
+
     def in_home_clone(target, at, verb=""):
         try:
+            if in_config_folder(target, at):
+                return False
             resolved = _resolved(target, at)
             if not has_agent and under_session_scratchpad(resolved, session_id):
                 return False
@@ -4687,12 +4743,24 @@ def session_home_record(payload, primary: str):
     return os.path.join(primary, ".git", SESSION_HOME_DIR, sid)
 
 
+def _only_quiet_commands(command: str) -> bool:
+    """True when each segment of COMMAND runs a printer or a `cd` (guard_frozen's `_QUIET`)."""
+    for segment in split_segments(command):
+        if not segment.strip():
+            continue   # a trailing newline or `;` leaves an empty segment, which runs nothing
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None or basename(tokens[index]).lower().removesuffix(".exe") not in _QUIET:
+            return False
+    return True
+
+
 def _session_lived(payload, tool: str, where: str, folder: str) -> bool:
-    """True when this call is a write or a mutating call that acts inside FOLDER: the session worked
-    there, so the folder was its home and no mere visit. A write tool counts by its cwd or a target
-    inside FOLDER. A shell call counts by a git verb of SESSION_HOME_GIT_VERBS that runs inside
-    FOLDER, by a shell write whose target resolves inside it from any cwd, or by a shell write whose
-    cwd or `cd` move is inside it."""
+    """True when this call acts inside FOLDER: the session worked there, so the folder was its home and
+    no mere visit. A write tool counts by its cwd or a target inside FOLDER. An allowed shell call counts
+    when it runs a git verb of SESSION_HOME_GIT_VERBS inside FOLDER, its cwd or `cd` move is inside it,
+    or it writes a target resolving inside it from any cwd. The one exception is a call of printers
+    and `cd` alone with no write: that is a look."""
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         return False
@@ -4709,8 +4777,9 @@ def _session_lived(payload, tool: str, where: str, folder: str) -> bool:
             stripped = strip_heredoc_bodies(command)
             if "git" in stripped and session_home_git_hit(stripped, where, lambda at, _from: inside(at)):
                 return True
-            if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)):
-                return False
+            if (_only_quiet_commands(stripped)
+                    and not SESSION_LIVED_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped))):
+                return False   # a call that only prints or moves about is a look, so the lane stays a visit
             return (inside(os.path.realpath(where))
                     or any(inside(move) for move in _cd_targets(tool, command, where))
                     or bool(_shell_write_hit(stripped, where, lambda target, at: inside(_resolved(target, at)),

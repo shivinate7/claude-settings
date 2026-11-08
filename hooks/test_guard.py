@@ -1242,10 +1242,11 @@ def materialize_for(case):
 
 
 def materialize_all():
-    """Build every lazy fixture except the diff repos. A log check builds its own diff repos (see
-    diff_repo), so the run loop need not build all ~170 of them for any log check."""
+    """Build every lazy fixture except the diff repos and the conflict-markers repos. A log check builds
+    its own diff repos (see diff_repo), so the run loop need not build all ~170 of them for any log check.
+    No log check reads a conflict-markers repo: a case builds one through materialize_for, when it names it."""
     for key, once in list(LAZY.items()):
-        if slash(DIFFROOT) not in key:
+        if slash(DIFFROOT) not in key and not key.startswith(slash(CMKROOT) + "/"):
             once()
 
 
@@ -3884,6 +3885,31 @@ hm_allow("a for loop that builds its trees under the home folder passes",
 # control: a variable that resolves outside the home folder stays refused.
 hm_allow("a tree path through a variable that resolves to the lanes folder passes",
          "P=" + HMIN + "/.claude/worktrees; " + HMADD + '-q "$P/hmvar" -b hmvar')
+# A TREE PATH THAT NAMES THE CALL'S OWN FOLDER THROUGH `$PWD`. In the shell `$PWD` is the folder the call
+# runs in, which is the primary here, so a tree under the lanes folder is the home folder's tree and passes.
+# The climbing path is the control: it leaves the lanes folder, so it stays refused.
+hm_allow("a tree path through $PWD into the lanes folder passes", HMADD + "$PWD/.claude/worktrees/hmpwd")
+hm_refuse("a tree path through $PWD that climbs out of the lanes folder is refused",
+          HMADD + "$PWD/../lane-x")
+# A TREE PATH THAT A COMMAND SUBSTITUTION RESOLVES TO THE CALL'S OWN FOLDER. Run from the primary, `$(pwd)`,
+# the backtick form and `$(git rev-parse --show-toplevel)` name the folder `$PWD` names, so each passes like
+# `$PWD`. The climbing forms of each are controls and stay refused.
+hm_allow("a tree path through $(pwd) into the lanes folder passes", HMADD + "$(pwd)/.claude/worktrees/hmcwd")
+hm_allow("a tree path through backtick pwd into the lanes folder passes",
+         HMADD + "`pwd`/.claude/worktrees/hmbtick")
+hm_allow("a tree path through $(git rev-parse --show-toplevel) into the lanes folder passes",
+         HMADD + "$(" + VCS + " rev-parse --show-toplevel)/.claude/worktrees/hmtop")
+hm_refuse("a tree path through $(pwd) that climbs out of the lanes folder is refused",
+          HMADD + "$(pwd)/../lane-x")
+hm_refuse("a tree path through backtick pwd that climbs out of the lanes folder is refused",
+          HMADD + "`pwd`/../lane-x")
+hm_refuse("a tree path through $(git rev-parse --show-toplevel) that climbs out of the lanes folder is refused",
+          HMADD + "$(" + VCS + " rev-parse --show-toplevel)/../lane-x")
+# A TREE PATH THROUGH `$HOME`. The case sets HOME to a fixture folder, so the verdict never reads the home of
+# the machine that runs the suite. The guard reads HOME from its own environment (decide's `env`).
+HMFAKEHOME = os.path.join(ROOT, "hmfakehome")
+hm_allow("a tree path through $HOME/.claude/worktrees is judged as main judges it",
+         HMADD + "$HOME/.claude/worktrees/hmhome-x", env={"HOME": HMFAKEHOME})
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
@@ -3914,6 +3940,9 @@ def hand_made_refusal_text_case():
     return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree, its shape and the layer"
 
 
+POINTER_OWN_WORKTREE_HINT = "If you already have a worktree, run `git -C <that worktree> ...`"
+
+
 def pointer_remedy_names_enter_worktree_case():
     """The pointer refusal sends Claude to EnterWorktree, so it never contradicts the rule above."""
     got, reason = decide({
@@ -3927,7 +3956,11 @@ def pointer_remedy_names_enter_worktree_case():
         return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
     if ENTER_WORKTREE_SHAPE not in reason:
         return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
-    return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
+    # An agent with no readable home record, whose shell directory reset out of its worktree, hits
+    # this rule rather than rule 0, so the remedy also aims git at the worktree it already has.
+    if POINTER_OWN_WORKTREE_HINT not in reason:
+        return False, "the pointer remedy does not say %r: %s" % (POINTER_OWN_WORKTREE_HINT, reason[-120:])
+    return True, "the pointer remedy names EnterWorktree, its call shape, the git -C hint, and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills
@@ -5477,6 +5510,60 @@ sh("narrate: an ordinary command piped to tail", "make check 2>&1 | tail -40", "
 sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT)
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
+
+# --- a pipe out of a verdict stage (extends the live-stream rule)
+#
+# verdict prints its FAIL line first, and a pipe cuts it off. A pipeline's exit is its last stage's,
+# so `verdict CMD | tail` reads tail's exit and a red run reads 0. Any pipe out of verdict is refused,
+# whatever the filter. A verdict that is the last stage has no pipe out of it, so it is allowed.
+VERDICT_PIPE = "verdict-pipe"
+
+
+def verdict_pipe(name, command, expected):
+    """One case of the verdict-pipe rule. A deny names the rule; an allow has no reason to name it."""
+    sh("verdict-pipe: " + name, command, expected, VERDICT_PIPE if expected == "deny" else None,
+       cwd=NOGIT)
+
+
+for _name, _command in (
+    ("a bare verdict piped to tail", "verdict false | tail"),
+    ("stderr piped to grep", "verdict false 2>&1 | grep x"),
+    ("a pipe into tee", "verdict false | tee out"),
+    ("the script run by path, piped to tail", "~/.claude/bin/verdict pytest | tail -5"),
+    ("a variable ahead of verdict, piped to head", "VERDICT_LOG=/tmp/x verdict false | head"),
+    ("a cd ahead of verdict, piped to tail", "cd x && verdict false | tail"),
+    ("a pipe that takes stderr too, |&", "verdict false |& tail"),
+    ("the repo's runner form, piped to tail", "python bin/verdict pytest | tail -5"),
+    ("a timeout ahead of verdict, piped to tail", "timeout 600 verdict pytest | tail -5"),
+    ("a lone apostrophe ahead of it", "echo don't; verdict false | tail"),
+    ("a # inside quotes ahead of it", 'echo "a # b"; verdict false | tail'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nverdict false | tail'),
+    ("a pipe at a line end, then tail", "verdict x |\ntail -5"),
+    ("a pipe in a command substitution, to tail", "x=$(verdict pytest | tail -5)"),
+    ("a pipe in a double-quoted substitution, to tail", 'echo "$(verdict x | tail)"'),
+    ("a pipe in bash -c, to tail", "bash -c 'verdict x | tail'"),
+    ("a pipe in sh -c, to head", 'sh -c "verdict x | head"'),
+    ("the .cmd runner, piped to tail", "verdict.cmd pytest | tail -5"),
+):
+    verdict_pipe(_name, _command, "deny")
+for _name, _command in (
+    ("a bare verdict", "verdict false"),
+    ("verdict then a second command, &&", "verdict x && y"),
+    ("verdict then echo, ||", "verdict x || echo red"),
+    ("output redirected to a file", "verdict x > out"),
+    ("a quoted pipe in verdict's own argument", "verdict grep 'a|b' f"),
+    ("a quoted script in verdict's own argument", "verdict bash -c 'a | b'"),
+    ("grep names verdict, pipe out of grep", "grep verdict f | tail"),
+    ("echo names verdict, pipe out of echo", "echo verdict | cat"),
+    ("verdict last in a pipeline", "cat f | verdict pytest"),
+    ("the whole pipe quoted as text", 'echo "verdict false | tail"'),
+    ("a pipe inside a comment", "verdict false # don't | tail"),
+    ("command -v names verdict, piped to head", "command -v verdict | head -1"),
+    ("type names verdict, piped to head", "type verdict | head -1"),
+    ("a substitution that runs verdict, no pipe", "x=$(verdict pytest)"),
+    ("bash -c runs verdict, no pipe", "bash -c 'verdict x'"),
+):
+    verdict_pipe(_name, _command, "allow")
 
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
@@ -7786,6 +7873,34 @@ nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the p
         "cd " + slash(NMREAL) + " && npm ci", "allow", NMLINKED)
 nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
+
+# THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
+# not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
+# and a linked prefix from a real folder is refused.
+nm_case("linked-nm: npm ci --prefix a real folder, run from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix a linked folder, run from a real folder, is refused",
+        "npm ci --prefix " + slash(NMLINKED), "deny", NMREAL)
+
+# THE PREFIX FLAG, UNRESOLVED AND REPEATED. A prefix the guard cannot name (a shell variable, a command substitution,
+# a home path) must not hide the working folder: the walk from it still decides, so a linked folder stays refused.
+# The other forms of the flag (`--prefix=dir`, a relative dir, a repeated flag) name the folder npm installs into.
+nm_case('linked-nm: npm ci --prefix "$PWD" from a linked folder is refused',
+        'npm ci --prefix "$PWD"', "deny", NMLINKED)
+nm_case('linked-nm: npm ci --prefix "$(git rev-parse --show-toplevel)" from a linked folder is refused',
+        'npm ci --prefix "$(git rev-parse --show-toplevel)"', "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ~/linked from a linked folder is refused",
+        "npm ci --prefix ~/linked", "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix=<linked folder>, run from a real folder, is refused",
+        "npm ci --prefix=" + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci --prefix=<real folder>, run from a linked folder, is allowed",
+        "npm ci --prefix=" + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ../nmlinked, relative, run from a real folder, is refused",
+        "npm ci --prefix ../nmlinked", "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is linked, from a real folder, is refused",
+        "npm ci --prefix " + slash(NMREAL) + " --prefix " + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
 
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
 for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
@@ -11125,6 +11240,7 @@ CMK_SEQ = os.path.join(CMKPUSH, "seqclean")    # a.txt and b.txt edited, not sta
 CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holding a triplet
 CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet unpushed in sub/f.txt
 CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
+CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -11220,6 +11336,10 @@ def _build_conflict_markers_push():
     commit(CMK_PAREN, "a.txt", CM_TRIPLET, "triplet on fix(x), unpushed")
     run(CMK_PAREN, "checkout", "-q", "topic")
     run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
+    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
+        if os.path.exists(gone):
+            sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
+                     % gone)
 
 
 lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB, CMK_REL, CMK_PAREN],
@@ -11260,6 +11380,43 @@ cmk_allow("a cd into a repo with a clean change, then add -A, commit and push",
           "cd " + slash(CMK_CL) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
 cmk_refuse("a cd into a repo with a triplet in a tracked file, then add -A, commit and push",
            "cd " + slash(CMK_CLT) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+
+# A failed cd leaves the shell in its cwd. After `;` the commit runs there, so a missing folder does not stop a
+# commit of the triplet in the cwd repository. After `&&` the failed cd ends the chain, so nothing runs.
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, with a triplet tracked in the cwd repo",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with a triplet tracked in the cwd repo",
+           "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
+          "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_allow("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+
+# A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
+# `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
+# the `&&` stops the commit, and the same call with a real work tree holding the triplet is refused.
+cmk_allow("a missing --work-tree, then && commit, with a triplet tracked in the cwd repo",
+          VCS + " --work-tree=" + slash(CMK_GONE) + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("an existing --work-tree holding the triplet, then add -A and commit",
+           VCS + " --work-tree=" + slash(CMK_CLT) + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then && git status, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " && " + VCS + " status ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then && true, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " && true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, then a cd to a clean repo after the commit",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x ; cd " + slash(CMK_CL), CMK_CLT)
+cmk_refuse("a cd into a missing folder, then || true, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " || true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then a newline, then add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + "\n" + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+
+# `cd -` goes back to the folder before the last cd that worked. A failed cd leaves that folder alone, so the
+# commit lands in the triplet repo. The NOGIT form has no triplet to refuse, so this case starts in CMK_CLT.
+cmk_refuse("a cd into a clean repo, then a cd into a missing folder, then cd -, then add -A and commit",
+           "cd " + slash(CMK_CL) + " ; cd " + slash(CMK_GONE) + " ; cd - ; "
+           + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a clean repo, then cd -, then add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_CL) + " ; cd - ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 
 # An earlier commit is a safe segment too, so each commit is judged and the push sees both.
 cmk_allow("two clean commits, each after an add, then a push",
@@ -11434,6 +11591,10 @@ sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_ST
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
    "frozen-path", cwd=NOGIT)
+# A real newline inside a quoted argument does not split the command: the sed -i and the frozen path it names
+# stay one write.
+sh("frozen: sed -i with a newline in its quoted script, onto the frozen settings",
+   "sed -i '1i\\\ntext' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -11812,6 +11973,11 @@ sh("frozen data: a quoted cat-write onto the config settings, piped to python, d
    "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a real cat-write onto the config settings stays denied",
    "cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The PowerShell reading of a `\"` stays fail-closed: the quote may open a string, so the write is
+# still judged and denied. The bash reading of the same text is a plain echo and is allowed.
+sh("frozen: a PowerShell call with a backslash-quote before a config write stays denied",
+   'echo "C:\\" ; Set-Content ' + CFG_SETTINGS + ' x ; echo \\"D"', "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
 
 # VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
 # target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
@@ -13028,7 +13194,7 @@ for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit
     add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
         carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
 add("builder-test: the refusal routes a test-file merge conflict", "deny", rule=BT, tool="Edit",
-    file_path="src/test_app.py", carries=("merge conflict",), **B)
+    file_path="src/test_app.py", carries=("merge conflict", "test-author"), **B)
 for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
               "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
               "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
@@ -13412,6 +13578,39 @@ sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allow
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
    "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+# A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
+# argument of a test run inside it reads as a read. A write to a test inside the script stays refused, whether
+# the write is the script's first command or a later one after `;`.
+sh("builder-test: bash -c pytest -k with a mutating word on a test is allowed",
+   'bash -c "pytest -k install tests/test_x.py"', "allow", **BR)
+sh("builder-test: timeout around bash -c pytest -k with a mutating word on a test is allowed",
+   'timeout 300 bash -c "pytest -k move tests/x.py"', "allow", **BR)
+sh("builder-test: bash -c echo redirect onto a test is refused",
+   'bash -c "echo x > tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c cp onto a test is refused",
+   'bash -c "cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c install onto a test is refused",
+   'bash -c "install -m 644 /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c pytest read, then a cp onto a test after the semicolon, is refused",
+   'bash -c "pytest -k install tests/test_x.py; cp /tmp/a tests/test_x.py"', "deny", rule=BT,
+   carries=("test-author",), **BR)
+# A real newline inside the bash -c string starts a new command, so a write after it is judged the same way.
+sh("builder-test: bash -c with a newline before a cp onto a test is refused",
+   'bash -c "set -e\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with a newline before a sed -i on a test is refused",
+   'bash -c "echo hi\nsed -i s/a/b/ tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# A quoted argument with a real newline in it, and an escaped quote in a bash -c string, do not hide the write
+# that follows: each is read at its command position, as the shell reads it.
+sh("builder-test: sed -i with a newline in its quoted script, onto a test, is refused",
+   "sed -i '1i\\\ntext' tests/test_x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: cp of a quoted argument with a newline onto a test is refused",
+   'cp "a\nb" tests/x.py', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then ; and a cp onto a test, is refused",
+   r'bash -c "echo \"x\"; cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a pipe into a cp onto a test, is refused",
+   r'bash -c "echo \"x\"|cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a newline and a cp onto a test, is refused",
+   'bash -c "echo \\"x\\"\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
@@ -21690,6 +21889,43 @@ sh("other-checkout: a git -C commit into a clone of a different repo is allowed"
 sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
    VCS + " commit -m x", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
 
+# A commit message is text. From a lane's own worktree, `../docs` resolves into the primary's
+# `.claude/worktrees` folder, a folder that holds no `docs` checkout. The write scan reads the message's
+# words as paths only when the scan fails closed on the text (an escaped quote, a curly quote, a line break
+# or a hash inside the quotes) and the text also holds a `->` or a move-type word. The rows below are red
+# on a guard that refuses that text as another checkout. A plain message and a quoted heredoc body pass
+# already, so they are green controls for the same path.
+UP_SEP = slash(os.path.relpath(XCL_SEP, XCL_LANE))   # the separate clone, as a path from the lane
+BACKTICK = chr(96)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and a move word, is allowed",
+   VCS + ' commit -m "move \\"pins\\" to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with a curly apostrophe and an arrow, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs don’t"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a multi-line commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs\n\nsee \\"walk\\""', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote, an arrow and a hash, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs # not a comment"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with no write word, is allowed",
+   VCS + ' commit -m "re-point pins to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc commit body naming ../docs is allowed",
+   VCS + " commit -F - <<'EOF'\nre-point \"pins\" -> ../docs\nEOF", "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc in a substitution, naming ../docs in a commit message, is allowed",
+   VCS + " commit -m \"$(cat <<'EOF'\nfix: walk ../docs\nEOF\n)\"", "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message with a lone apostrophe, naming ../docs, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs, don\'t"', "allow", cwd=XCL_LANE)
+
+# Still refused: a real move into a separate clone, from the lane. A relative path to a clone is judged too,
+# and so is a backtick in a message, which the shell runs as a command.
+sh("other-checkout: a cd into a separate clone by a relative path, chained to a commit, is refused",
+   "cd " + UP_SEP + " && " + VCS + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a git -C commit into a separate clone by a relative path is refused",
+   VCS + " -C " + UP_SEP + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a backtick copy into a separate clone, inside a commit message, is refused",
+   VCS + ' commit -m "' + BACKTICK + "cp note.txt " + UP_SEP + "/note.txt" + BACKTICK + '"',
+   "deny", "other-checkout", cwd=XCL_LANE)
+
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
 XCL_REMOTE = os.path.join(ROOT, "xcl_remote.git")  # the bare repository both clones name as origin
@@ -21809,6 +22045,81 @@ def homeless_write_into_own_home_case():
 LOG_CHECKS_EXTRA.append(("other-checkout: a Write from a cwd in no checkout passes into the session's own "
                          "recorded home, and is refused into the primary's own files",
                          homeless_write_into_own_home_case))
+
+
+def homeless_config_symlink_case():
+    """Rule other-checkout, a cwd in no checkout: the config folder passes. install.sh links hooks, settings
+    and skills from the clone into the config folder, so a write through such a link names a file the config
+    folder holds, and the link's target is the clone only by where it points. Scope first: the link must
+    resolve into the clone, or refusing it proves nothing. Controls: a plain write under the config folder
+    passes, and the same file reached by its clone path is refused."""
+    if not LINKS_MADE:
+        return SKIP, "no symlink privilege here, so the config folder's link cannot be made"
+    primary = os.path.join(ROOT, "homeless_cfg_primary")
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    cfg = os.path.join(ROOT, "homeless_cfg_config")
+    nowhere = os.path.join(ROOT, "homeless_cfg_nowhere")   # a folder in no checkout
+    tmp = os.path.join(ROOT, "tmp")
+    os.makedirs(cfg, exist_ok=True)
+    os.makedirs(nowhere, exist_ok=True)
+    link = os.path.join(cfg, "linked")   # a plain name: no rule that guards the config folder's own files names it
+    os.symlink(os.path.join(primary, "src"), link, target_is_directory=True)
+    through = os.path.join(link, "new-link.py")
+    through_sh = os.path.join(link, "new-link-sh.py")
+    direct = os.path.join(primary, "src", "new-link.py")
+    direct_sh = os.path.join(primary, "src", "new-link-sh.py")
+    home = os.path.normcase(os.path.realpath(primary))
+    if os.path.commonpath([os.path.normcase(os.path.realpath(through)), home]) != home:
+        return False, ("scope: the config folder's link does not resolve into the clone, so the refusal "
+                       "proves nothing")
+    # A `..` step after the link. The link's target is the clone's src folder, so `linked/..` is the clone's
+    # root and the file lands there, not in the config folder. Scope first: the climbed folder must be that root.
+    climb = os.path.join(cfg, "linked", "..", "n-climb.py")
+    climb_sh = os.path.join(cfg, "linked", "..", "n-climb-sh.py")
+    if os.path.normcase(os.path.realpath(os.path.dirname(climb))) != home:
+        return False, ("scope: a `..` step after the config folder's link does not land in the clone's root, "
+                       "so the refusal proves nothing")
+    session = sh_session()
+
+    def judge(tool, tool_input):
+        return decide({
+            "raw": None, "tool": tool, "cwd": nowhere, "session": session, "env_path": None,
+            "config": cfg, "agent_id": None, "process_cwd": None, "temp": tmp,
+            "env": {"CLAUDE_PROJECT_DIR": primary}, "tool_input": tool_input})
+
+    rows = (
+        ("a Write through the config folder's link", "allow", "Write",
+         {"file_path": through, "content": "x"}),
+        ("a shell redirect through the config folder's link", "allow", "Bash",
+         {"command": "echo x > " + slash(through_sh)}),
+        ("a plain Write under the config folder (control)", "allow", "Write",
+         {"file_path": os.path.join(cfg, "r-note.md"), "content": "x"}),
+        ("a Write by the clone path (control)", "deny", "Write",
+         {"file_path": direct, "content": "x"}),
+        ("a shell redirect by the clone path (control)", "deny", "Bash",
+         {"command": "echo x > " + slash(direct_sh)}),
+        ("a Write through the config folder's link and a .. step back into the clone", "deny", "Write",
+         {"file_path": climb, "content": "x"}),
+        ("a shell redirect through the config folder's link and a .. step back into the clone", "deny", "Bash",
+         {"command": "echo x > " + slash(climb_sh)}),
+    )
+    problems = []
+    for label, want, tool, tool_input in rows:
+        got, reason = judge(tool, tool_input)
+        if got != want:
+            problems.append("%s: want %s, got %s (%s)" % (label, want, got, reason[:120]))
+        elif want == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s"
+                            % (label, reason[:160]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("a write through a config-folder link into the clone passes from a cwd in no checkout; "
+                  "the same file by its clone path is refused; a `..` step after the link is refused")
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: a write through a config-folder symlink into the clone, from a cwd in "
+                         "no checkout, passes; the same file by its clone path is refused",
+                         homeless_config_symlink_case))
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
@@ -22851,6 +23162,43 @@ def session_home_lane_write_control_case():
     return sh_lane_then_visit_case("write", "echo x > f.txt")
 
 
+# A shell write that is no redirect marks the lane too: the allowed call's cwd is the lane, so the lane is
+# the home the session worked in. `touch` and `make` write no `>` and name no word of MUTATING_COMMAND, so
+# they are the case that SHELL_WRITE_HINT misses. (`npm install` matches `install` there, so it marks.)
+def session_home_lane_touch_case():
+    return sh_lane_then_visit_case("touch", "touch f.txt")
+
+
+def session_home_lane_make_case():
+    return sh_lane_then_visit_case("make", "make")
+
+
+# ANY ALLOWED SHELL CALL IN THE LANE MARKS IT LIVED. The rule takes no list of commands: a call that makes a
+# folder, builds, runs a script, unpacks an archive or stages a file is the session's own act in the lane.
+def session_home_lane_mkdir_case():
+    return sh_lane_then_visit_case("mkdir", "mkdir d")
+
+
+def session_home_lane_cargo_build_case():
+    return sh_lane_then_visit_case("cargo-build", "cargo build")
+
+
+def session_home_lane_npm_run_case():
+    return sh_lane_then_visit_case("npm-run", "npm run build")
+
+
+def session_home_lane_python_script_case():
+    return sh_lane_then_visit_case("python-script", "python3 script.py")
+
+
+def session_home_lane_tar_extract_case():
+    return sh_lane_then_visit_case("tar-extract", "tar xf a.tar")
+
+
+def session_home_lane_git_add_case():
+    return sh_lane_then_visit_case("git-add", VCS + " add f")
+
+
 def session_home_primary_shell_lived_case():
     """Rule session-home: a shell write from the primary checkout whose target sits inside the recorded
     lane marks the lane lived, once the write is allowed. other-checkout refuses that write unless the
@@ -22950,25 +23298,34 @@ def session_home_lived_file_count_case():
     return True, "one lived lane leaves exactly one .lived file beside its record, and ExitWorktree removes both"
 
 
-def session_home_visit_no_lived_file_case():
-    """The empty state: a lane that is only visited, with no act that marks it lived, leaves no `.lived`
-    file. A primary call drops the record, so the session holds no file in the folder."""
-    primary = sh_new_primary("visitnone")
-    lane, branch = sh_add_lane(primary, "lane-visitnone")
+def sh_visit_case(tag, make_command):
+    """The visit step: a lane call with no act that marks it lived leaves no `.lived` file, and a primary
+    call drops the record, so the session holds no file in the folder. `tag` names the fixture (a word).
+    `make_command(lane)` builds the lane call, which runs in the lane. Scope first: the call is allowed and
+    the record names the lane. Subject: no `.lived` file beside the record."""
+    primary = sh_new_primary("visit" + tag)
+    lane, _ = sh_add_lane(primary, "lane-visit" + tag)
     session = sh_session()
     problems = []
-    got, reason = _decide_full("Bash", lane, session=session, command="echo hi")
+    got, reason = _decide_full("Bash", lane, session=session, command=make_command(lane))
     if got != "allow":
         problems.append("the lane call: want allow, got %s (%s)" % (got, reason[:120]))
     if not sh_holds(primary, session, lane):
         problems.append("the lane call wrote no session record naming the lane")
+    if problems:
+        return False, "; ".join(problems)
+    if os.path.exists(sh_record(primary, session) + ".lived"):
+        return False, "the lane call marked the lane lived: a .lived file exists"
     _decide_full("Bash", primary, session=session, command="echo hi")
     left = _sh_folder_names(primary, session)
     if left:
-        problems.append("a visit with no lived act left %s in the session-homes folder" % left)
-    if problems:
-        return False, "; ".join(problems)
+        return False, "a visit with no lived act left %s in the session-homes folder" % left
     return True, "a visit with no lived act leaves no .lived file and no record"
+
+
+def session_home_visit_no_lived_file_case():
+    """The empty state: a lane that is only visited, with no act that marks it lived, leaves no `.lived` file."""
+    return sh_visit_case("none", lambda lane: "echo hi")
 
 
 def session_home_lived_folder_stands_case():
@@ -23002,6 +23359,22 @@ LOG_CHECKS_EXTRA.append(("session-home: a lane merge makes the lane home, so a p
                          "the lane is removed", session_home_lane_merge_case))
 LOG_CHECKS_EXTRA.append(("session-home: a lane shell write makes the lane home, so a primary Write is refused "
                          "once the lane is removed (control)", session_home_lane_write_control_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane touch makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_touch_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane make makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_make_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane mkdir makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_mkdir_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane cargo build makes the lane home, so a primary Write is refused "
+                         "once the lane is removed", session_home_lane_cargo_build_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane npm run makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_npm_run_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane python script makes the lane home, so a primary Write is refused "
+                         "once the lane is removed", session_home_lane_python_script_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane tar extract makes the lane home, so a primary Write is refused "
+                         "once the lane is removed", session_home_lane_tar_extract_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane git add makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_git_add_case))
 LOG_CHECKS_EXTRA.append(("session-home: an allowed shell write from the primary whose target is inside the "
                          "recorded lane marks the lane lived", session_home_primary_shell_lived_case))
 LOG_CHECKS_EXTRA.append(("session-home: a Write from the primary into the recorded lane, refused by "
@@ -23014,6 +23387,49 @@ LOG_CHECKS_EXTRA.append(("session-home: a visit with no lived act leaves no .liv
                          session_home_visit_no_lived_file_case))
 LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree folder stands, with its lane lived, writes into "
                          "the primary checkout", session_home_lived_folder_stands_case))
+
+
+# A CALL OF PRINTERS AND `cd` ALONE IS A VISIT. A shell call that may write marks its lane lived. A trailing
+# newline, a trailing `;` or a heredoc's closing line leaves an empty segment, which is no printer, so the call is
+# read as a write. A printer with a write hidden in its words, inside `$(...)` or `<(...)`, is a write.
+def session_home_visit_trailing_newline_case():
+    return sh_visit_case("newline", lambda lane: "echo hi\n")
+
+
+def session_home_visit_trailing_semicolon_case():
+    return sh_visit_case("semicolon", lambda lane: "echo hi;")
+
+
+def session_home_visit_cd_semicolon_case():
+    return sh_visit_case("cdsemi", lambda lane: "cd " + slash(lane) + ";")
+
+
+def session_home_visit_heredoc_case():
+    return sh_visit_case("heredoc", lambda lane: "cat <<'EOF'\nhi\nEOF\n")
+
+
+def session_home_lane_command_substitution_case():
+    return sh_lane_then_visit_case("cmdsub", 'echo "$(make)"')
+
+
+def session_home_lane_process_substitution_case():
+    return sh_lane_then_visit_case("procsub", "cat <(make)")
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of echo with a trailing newline is a visit, so no .lived file "
+                         "is written", session_home_visit_trailing_newline_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of echo with a trailing semicolon is a visit, so no .lived "
+                         "file is written", session_home_visit_trailing_semicolon_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of cd into the lane with a trailing semicolon is a visit, so no "
+                         ".lived file is written", session_home_visit_cd_semicolon_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of a quoted heredoc that only prints is a visit, so no .lived "
+                         "file is written", session_home_visit_heredoc_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of echo with a command substitution makes the lane home, so a "
+                         "primary Write is refused once the lane is removed",
+                         session_home_lane_command_substitution_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of cat with a process substitution makes the lane home, so a "
+                         "primary Write is refused once the lane is removed",
+                         session_home_lane_process_substitution_case))
 
 
 # =========================================================================== mask_script lexemes
