@@ -216,7 +216,7 @@ def is_project_config(path: str, cwd: str) -> bool:
 MUTATING_COMMAND = (
     r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
-    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
+    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren|sc|ac|cpi)\b"
 )
 
 
@@ -546,6 +546,22 @@ _PS_CONTENT = frozenset(("add-content", "set-content", "ac", "sc"))
 _PS_SWITCH = re.compile(r"-(?i:recurse|force|container|passthru|verbose|confirm|whatif|nonewline)")
 
 
+def _only_read(operands, words, target, predicate, cwd, is_folder=False):
+    """The copy operands (indexes into `words`) that are only read. A copy into a folder (`is_folder`, a
+    trailing slash, or a folder that exists) writes `FOLDER/<each source's name>`, so a source whose
+    name that folder path makes a hit is written, not read."""
+    if not is_folder:
+        try:
+            is_folder = target.endswith(("/", "\\")) or os.path.isdir(_expanded(target, cwd))
+        except (OSError, ValueError):
+            is_folder = False
+    if not is_folder:
+        return set(operands)
+    head = target.rstrip("/\\")
+    return {i for i in operands
+            if not predicate(head + "/" + re.split(r"[/\\]", words[i].rstrip("/\\"))[-1], cwd)}
+
+
 def _ps_reads(name, raw, words, start, predicate, cwd, plain):
     """`_copy_reads` for a PowerShell `Copy-Item` (its sources) or `Add-Content` / `Set-Content` (the
     quoted text after the path): the indexes of the words that are only read or only text."""
@@ -565,7 +581,7 @@ def _ps_reads(name, raw, words, start, predicate, cwd, plain):
     target = words[operands[-1]]
     if _CP_DEST_UNSAFE.search(target) or predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
-    return set(operands[:-1])
+    return _only_read(operands[:-1], words, target, predicate, cwd)
 
 
 def _copy_reads(raw, predicate, cwd, plain=""):
@@ -578,7 +594,7 @@ def _copy_reads(raw, predicate, cwd, plain=""):
         return _ps_reads(name, raw, words, start, predicate, cwd, plain)
     if name != "cp":
         return set()
-    operands, target, index = [], None, start + 1
+    operands, target, index, is_folder = [], None, start + 1, False
     while index < len(words):
         word = words[index]
         if _NULL_REDIRECT.fullmatch(word):
@@ -592,14 +608,14 @@ def _copy_reads(raw, predicate, cwd, plain=""):
                 name.startswith(word[2:].split("=")[0]) for name in _CP_LINK_LONG):
             return set()
         if _CP_TARGET.fullmatch(word):
-            target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
+            target, index, is_folder = (words[index + 1] if index + 1 < len(words) else None), index + 2, True
             if target is None:
                 return set()
             continue
         if word.startswith("--target-directory="):
-            target = word.split("=", 1)[1]
+            target, is_folder = word.split("=", 1)[1], True
         elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
-            target = word[2:]
+            target, is_folder = word[2:], True
         elif _CP_FLAGS.fullmatch(word):
             pass
         elif word.startswith("-") or ">" in word or "<" in word:
@@ -615,7 +631,7 @@ def _copy_reads(raw, predicate, cwd, plain=""):
         return set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
-    return set(operands)
+    return _only_read(operands, words, target, predicate, cwd, is_folder)
 
 
 def _cp_link_source(raw, holds, cwd) -> str:
@@ -698,13 +714,23 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     straight = [_scan(_straight(segment)) for segment in segments]
     reading_closed = any(unsafe or _runs_stored_text(segment, words, plain)
                          for segment, words, (unsafe, plain) in zip(segments, parsed, straight))
+    # The reads come from the same straightened text, so a copy or a written text is cut where PowerShell cuts it.
+    # An index into those words is an index into the segment's words only when they are the ones judged below.
+    read_words = [[_typed(word, segment) for word in _quoted_words(_straight(segment))]
+                  if is_powershell(segment) else words for segment, words in zip(segments, parsed)]
+    read_scripts = ([[_typed(word, segment) for word in _quoted_words(_straight(segment), True)]
+                     if is_powershell(segment) else words for segment, words in zip(segments, scripts)]
+                    if command_position else read_words)
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
-        data = set() if reading_closed else _copy_reads(raw, predicate, cwd, straight[number][1])
+        data = set() if reading_closed else _copy_reads(read_words[number], predicate, cwd, straight[number][1])
+        from_reads = bool(data)
+        if from_reads:
+            raw = read_words[number]
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -728,7 +754,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = _words_of(word) if _has_quote(word) else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
-                kept = scripts[number][index]
+                kept = (read_scripts if from_reads else scripts)[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
@@ -774,7 +800,12 @@ def _powershell_scripts_of(segment: str) -> list:
 
 
 def _segment_command(words):
-    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
+    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position.
+    `env -S STRING` runs STRING, with the words after it appended: that command is the one read."""
+    inner = guard_core._env_split_string(tuple(words))
+    tokens = segment_tokens(inner) if inner else None
+    if tokens:
+        return _segment_command(tokens)
     index = resolve_command(tuple(words))
     if index is None:
         index = next((i for i, word in enumerate(words) if not _ASSIGNMENT.match(word)), len(words))
