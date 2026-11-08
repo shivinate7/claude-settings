@@ -947,24 +947,25 @@ class SessionEndFetchThrottle(unittest.TestCase):
             ("garbage", "not a time"),
             ("nan", "nan"),
             ("inf", "inf"),
-            ("future", repr(time.time() + 3600)),
+            ("future", repr(self.PINNED_WALL_CLOCK + 3600)),
         )
-        for label, text in rows:
-            with self.subTest(record=label):
-                repo = self.repo("throttle_damaged_" + label)
-                self.session_end(repo)
-                self.assertEqual(len(self.records()), 1, "fixture: the first fetch left a record")
-                if text is None:
+        with self.pinned_clock():  # the future row is future to the same clock that judges it
+            for label, text in rows:
+                with self.subTest(record=label):
+                    repo = self.repo("throttle_damaged_" + label)
+                    self.session_end(repo)
+                    self.assertEqual(len(self.records()), 1, "fixture: the first fetch left a record")
+                    if text is None:
+                        for path in self.records():
+                            os.remove(path)
+                    else:
+                        self.set_records(text)
+                    before = self.counts(repo)[0]
+                    self.session_end(repo)
+                    self.assertEqual(self.counts(repo)[0], before + 1,
+                                     "a %s record must fail toward fetching" % label)
                     for path in self.records():
                         os.remove(path)
-                else:
-                    self.set_records(text)
-                before = self.counts(repo)[0]
-                self.session_end(repo)
-                self.assertEqual(self.counts(repo)[0], before + 1,
-                                 "a %s record must fail toward fetching" % label)
-                for path in self.records():
-                    os.remove(path)
 
     def test_an_unwritable_record_folder_still_fetches_and_still_exits(self):
         repo = self.repo("throttle_unwritable")
@@ -1018,24 +1019,25 @@ class SessionEndFetchThrottle(unittest.TestCase):
         # a throttled run cannot know that from a ref up to 10 minutes old: it is kept too.
         repo = self.repo("throttle_stale_remote")
         remote = repo + "_remote.git"
-        self.session_end(repo)  # fetches, records the time
-        self.pushed_branch(repo, "gone-upstream")
-        self.pushed_branch(repo, "still-pushed")
-        require(run_vcs(remote, "branch", "-D", "gone-upstream").returncode == 0, "delete on remote")
-        first = self.counts(repo)
-        self.session_end(repo)
-        self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
-        self.assertIn("gone-upstream", local_branches(repo),
-                      "a throttled call reaped a branch holding the only copy, on a stale ref")
-        self.assertIn("still-pushed", local_branches(repo),
-                      "a throttled call reaped a branch on the strength of an on-remote read")
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
-        self.session_end(repo)
-        self.assertEqual(self.counts(repo)[0], first[0] + 1, "fixture: the third call fetched")
-        self.assertIn("gone-upstream", local_branches(repo),
-                      "a fetching run must keep the only copy once the stale ref is pruned")
-        self.assertNotIn("still-pushed", local_branches(repo),
-                         "a fetching run must still reap a branch the fresh remote holds")
+        with self.pinned_clock():  # every record and every judge in this case reads one clock
+            self.session_end(repo)  # fetches, records the time
+            self.pushed_branch(repo, "gone-upstream")
+            self.pushed_branch(repo, "still-pushed")
+            require(run_vcs(remote, "branch", "-D", "gone-upstream").returncode == 0, "delete on remote")
+            first = self.counts(repo)
+            self.session_end(repo)
+            self.assertEqual(self.counts(repo), first, "fixture: the second call was throttled")
+            self.assertIn("gone-upstream", local_branches(repo),
+                          "a throttled call reaped a branch holding the only copy, on a stale ref")
+            self.assertIn("still-pushed", local_branches(repo),
+                          "a throttled call reaped a branch on the strength of an on-remote read")
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS + 60)))
+            self.session_end(repo)
+            self.assertEqual(self.counts(repo)[0], first[0] + 1, "fixture: the third call fetched")
+            self.assertIn("gone-upstream", local_branches(repo),
+                          "a fetching run must keep the only copy once the stale ref is pruned")
+            self.assertNotIn("still-pushed", local_branches(repo),
+                             "a fetching run must still reap a branch the fresh remote holds")
 
 
 class HookLoadsNoGuardModule(unittest.TestCase):
