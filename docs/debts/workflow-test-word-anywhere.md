@@ -6,4 +6,4 @@
 
 **Decision.** `builders-cannot-edit-tests`, builders cannot edit tests (the workflow test-step rule).
 
-**Retire.** Count a runner word only as the command word of a segment, after the wrapper skip, and split a line at `||` only outside `${{ }}`. Closed when a red case in `hooks/test_guard.py` shows that `pip install pytest || true`, `npx playwright install || true`, `rm -rf playwright-report || true` and `pytest --version || true` pass, since no test runs in them, and that `pytest tests/test_a.py ${{ inputs.x || true }}` is not read as a `|| true` tail.
+**Retire.** Count a runner word only as the command word of a segment, after the wrapper skip. Split a line at `||` only outside `${{ }}`. When a red case in `hooks/test_guard.py` shows that `pip install pytest || true`, `npx playwright install || true` and `rm -rf playwright-report || true` pass, the debt closes. The same case shows that `pytest --version || true` passes, since no test runs in it. It also shows that `pytest tests/test_a.py ${{ inputs.x || true }}` is not read as a `|| true` tail.
