@@ -9419,6 +9419,7 @@ STRAND_FULL_MIDDLE = "e9b0d6a3f5c71482d"
 STRAND_QUEUED = "7f1d3a9c6e0b25d48"
 STRAND_QUOTED = "2b8e5c0f4a71d936c"
 STRAND_HANDBACK = "5d2a9f0c7e13b68a4"  # the agent whose hand-back quotes STRAND_QUOTED's notice
+STRAND_RENOTIFIED = "1e8c4b7f2d0a93c65"  # the agent resumed after its completed notice, then that notice queued again
 STRAND_SESSION = "5f1e0c3a-8b7d-4e2a-9c60-d4b3a1f07e28"  # the session id a queue-operation line carries
 STRAND_QUEUE_TIME = "2026-11-08T03:31:02.114Z"
 STRAND_QUOTED_BODY = ("[Subagent hand-back] The text below is the final report of a subagent this session spawned. "
@@ -9464,6 +9465,19 @@ def strand_resume(tool_id, agent):
             answer]
 
 
+def strand_queued_attachment(text):
+    """A queued notice delivered as the queued_command attachment a real transcript writes for it, with its origin."""
+    return json.dumps({"type": "attachment", "timestamp": STRAND_QUEUE_TIME, "sessionId": STRAND_SESSION,
+                       "attachment": {"type": "queued_command", "prompt": text, "commandMode": "task-notification",
+                                      "origin": STRAND_ORIGIN, "timestamp": STRAND_QUEUE_TIME}})
+
+
+def strand_queue_remove(text):
+    """The queue-operation remove that a real transcript writes when a queued notice is absorbed mid-turn."""
+    return json.dumps({"type": "queue-operation", "operation": "remove", "timestamp": STRAND_QUEUE_TIME,
+                       "sessionId": STRAND_SESSION, "content": text, "reason": "absorbed_mid_turn"})
+
+
 def strand_stop(tool_id, agent):
     """A TaskStop call on `agent`. UNMEASURED: the input is the tool's schema field, `task_id`, and the result is a plain
     success line."""
@@ -9481,6 +9495,16 @@ def strand_full_lines():
         if n == 149:
             lines += spawn_call("fm", STRAND_FULL_MIDDLE, "reviewer")
     return lines
+
+
+def strand_renotified_lines():
+    """One agent completes, its completed notice is queued, and a SendMessage resumes it. Then the same notice text
+    arrives again: as a queued attachment, then as a queue-operation remove. The resumed agent still runs, so that
+    replay must not close it."""
+    notice = strand_notice(STRAND_RENOTIFIED, "s1", "completed", queued=True)
+    text = json.loads(notice)["content"]
+    return (spawn_call("s1", STRAND_RENOTIFIED, "builder") + [notice] + strand_resume("r1", STRAND_RENOTIFIED)
+            + [strand_queued_attachment(text), strand_queue_remove(text)])
 
 
 ROLE_LINES = {
@@ -9608,6 +9632,8 @@ ROLE_LINES = {
     # One agent still running, and a hand-back from another agent that quotes this agent's completed notice mid-text.
     "strand-quoted": spawn_call("s1", STRAND_QUOTED, "builder") + [strand_handback(
         STRAND_HANDBACK, STRAND_QUOTED_BODY % STRAND_QUOTED)],
+    # One agent resumed after its completed notice, then that same notice queued again after the resume.
+    "strand-renotified": strand_renotified_lines(),
 }
 
 
@@ -9742,6 +9768,7 @@ T_STRAND_FAILED = role_path("strand-failed")
 T_STRAND_FULL = role_path("strand-full")
 T_STRAND_QUEUED = role_path("strand-queued")
 T_STRAND_QUOTED = role_path("strand-quoted")
+T_STRAND_RENOTIFIED = role_path("strand-renotified")
 
 
 def strand_refuse(name, transcript, carries, **kw):
@@ -9774,6 +9801,8 @@ strand_allow("ExitWorktree with an agent open: the rule covers EnterWorktree onl
 strand_allow("a notice queued as a queue-operation line, before any user record, closes its agent", T_STRAND_QUEUED)
 strand_refuse("a hand-back that quotes another agent's completed notice mid-text leaves that agent open",
               T_STRAND_QUOTED, STRAND_QUOTED)
+strand_refuse("a resumed agent whose old completed notice is queued again after the resume is still running",
+              T_STRAND_RENOTIFIED, STRAND_RENOTIFIED)
 FAMILY = PRIOR_FAMILY
 
 
