@@ -1,0 +1,11 @@
+{
+  "title": "lane_lint fails a skipped required lint step",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.61,
+  "owner": "coordinator",
+  "lane": "session_013NEJL2Xmid8Pt8sh5sDtSw",
+  "why": "A required lint step that is skipped must fail the lane lint, not pass it silently.",
+  "note": "Stacked on #1741 (batch-local-checks-cmd). Title and lane from the coordinator, 20:35 and 20:37 CST Nov 7; filed 20:37 CST Nov 7.",
+  "updatedAt": "2026-11-07T20:37:00-06:00"
+}

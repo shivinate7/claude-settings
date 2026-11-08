@@ -1,10 +1,11 @@
 {
   "title": "A lane finds triage's session without searching recent sessions",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.6,
   "owner": "coordinator",
   "why": "Lane lane-lint-no-silent-pass could not find triage: no session tagged cs-build:triage for claude-settings showed in its 140 most recent sessions (coordinator, 20:35 CST Nov 7). A lane that cannot find triage cannot hand it a step change.",
-  "note": "Measured by triage at 20:36 CST Nov 7: triage 6 (session_013NEJL42Sv3tJkjpzY7bExj) already carries the tags cs-build:triage and cs-repo:shivinate7/claude-settings. It was made on Nov 3, so it falls outside a search of the 140 most recent sessions. The tag is present, so the fix is the other half of the coordinator's pair: the lane brief carries triage's session id, or the search filters by tag rather than reading recent sessions. Coordinator starts a lane on the slug.",
-  "updatedAt": "2026-11-07T20:36:00-06:00"
+  "note": "Measured by triage at 20:36 CST Nov 7: triage 6 (session_013NEJL42Sv3tJkjpzY7bExj) already carries the tags cs-build:triage and cs-repo:shivinate7/claude-settings. It was made on Nov 3, so it falls outside a search of the 140 most recent sessions. The tag is present, so the fix is the other half of the coordinator's pair: the lane brief carries triage's session id, or the search filters by tag rather than reading recent sessions. Coordinator starts a lane on the slug. Started by the coordinator, 20:37 CST Nov 7, in lane session_013NEJL3ixw3qjVWMvVLFtg5. Scope: the brief template names the coordinator, runner and triage ids, and the brief guard refuses a Lane brief with no `Triage: session_<id>` line. Updated 20:37 CST.",
+  "updatedAt": "2026-11-07T20:37:00-06:00",
+  "lane": "session_013NEJL3ixw3qjVWMvVLFtg5"
 }
