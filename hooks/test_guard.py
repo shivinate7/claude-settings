@@ -5713,9 +5713,9 @@ WAIT_UNTIL_TIME = "2026-11-06T22:48:00Z"
 WAIT_UNTIL_CLOCK_LOOP = (r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; '
                          r'do sleep 15; done; node tool.mjs')
 
-# ALLOW under run_in_background. A pause of 25 s or more is refused on main, and so is a loop around a pause.
-# A loop whose test compares the clock is a deadline, so it is allowed. A quote, a `#` or a line break ahead
-# of the loop is text, and does not hide the loop from the scan.
+# Allowed under run_in_background: a pause of 25 s or more when a command follows it, and a loop whose test
+# orders the clock against a literal in the direction that ends it. A quote, a `#` or a line break ahead of a
+# loop is text, so the scan still finds the loop.
 add("wait-until: a pause of 600 s, then one command, is allowed under run_in_background", "allow",
     cwd=NOGIT, command="sleep 600; node tool.mjs", run_in_background=True)
 add("wait-until: a clock loop, then one command, is allowed under run_in_background", "allow",
@@ -5726,8 +5726,8 @@ add("wait-until: the same clock loop split over lines is allowed under run_in_ba
 add("wait-until: a quote and a # ahead of the clock loop are text, and the loop is allowed under run_in_background",
     "allow", cwd=NOGIT, command='echo "it\'s # fine"; ' + WAIT_UNTIL_CLOCK_LOOP, run_in_background=True)
 
-# DENY, kept. Each one is refused on main, and each stays refused: the clock loop in the foreground, a
-# pause in the foreground, two pauses, a loop with no clock bound, a loop that names the date only inside a
+# Refused in these shapes, so a change to the clock rule cannot widen them: the clock loop in the foreground,
+# a pause in the foreground, two pauses, a loop with no clock bound, a loop that names the date only inside a
 # string, and gh run watch.
 sh("wait-until: the clock loop in the foreground stays refused", WAIT_UNTIL_CLOCK_LOOP, "deny", "waiter",
    cwd=NOGIT)
@@ -5743,9 +5743,10 @@ for _bg in (False, True):
     add("wait-until: gh run watch 7 stays refused%s" % (" under run_in_background" if _bg else ""),
         "deny", "waiter", cwd=NOGIT, command="gh run watch 7", **({"run_in_background": True} if _bg else {}))
 
-# DENY under run_in_background. Each shape looks like a clock wait and is not one: its test never reaches the
-# time (the other direction, equality, a poll of a file, an extra test), a second loop follows, or a long pause
-# has no command after it. Each case aims at one branch of clock_loop or waiter_verdict.
+# Refused under run_in_background. Each shape looks like a clock wait and is not one. Its test does not end the
+# loop at the named time: the other direction ends it at once, equality rarely holds, a poll of a file names no
+# time, and an extra test adds a condition. Or a second loop follows, or a long pause has no command after it.
+# Each case covers one check in clock_loop or waiter_verdict.
 add("wait-until: a loop on a literal time with no date stays refused under run_in_background", "deny",
     "waiter", cwd=NOGIT, command="until [ -s 2026-11-06T22:48:00 ]; do sleep 15; done; cmd", run_in_background=True)
 add("wait-until: a loop on date with no literal time stays refused under run_in_background", "deny",
@@ -5788,7 +5789,36 @@ add("wait-until: a loop that tests the clock for equality with a full ISO time s
 add("wait-until: a loop written as an arithmetic test stays refused under run_in_background", "deny",
     "waiter", cwd=NOGIT, command='until (( $(date +%s) > 1762470000 )); do sleep 15; done; cmd',
     run_in_background=True)
-# ALLOW, kept: a numeric epoch and a while loop that waits while the clock is earlier than a literal.
+# Each read and literal disagree in kind, so the test never turns and the loop never ends: `-gt` and `-ge` on a
+# text read are an error, not an order; a text order of epoch digits against an ISO time puts the digits first,
+# so `\>` never holds and `\<` always does.
+add("wait-until: a numeric order on an ISO date-time read stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -gt "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a numeric order with -ge on an ISO date-time read stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -ge "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: an ISO date-time read ordered numerically against an epoch stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -ge 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a text order of an epoch read against an ISO time stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date +%s)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a [[ ]] text order of an epoch read against an ISO time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [[ "$(date +%s)" > "2026-11-06T22:48:00" ]]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a while text order of an epoch read below an ISO time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command=r'while [ "$(date +%s)" \< "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+# A `for` loop is a loop of its own, so the command has two loops and the clock loop is not its one loop.
+add("wait-until: a clock loop with a command body, then a for loop with pauses, stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date +%s)" -gt 1762470000 ]; do cmd; done; for i in 1 2; do sleep 15; done',
+    run_in_background=True)
+# Allowed under run_in_background: a numeric order of an epoch read, and a while loop that waits while the clock is
+# earlier than a literal. The order and the read agree in kind, so the test turns at the time it names.
 add("wait-until: a clock loop on an epoch that is reached is allowed under run_in_background", "allow",
     cwd=NOGIT, command='until [ "$(date +%s)" -ge 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
 add("wait-until: a while loop that waits while the clock is earlier than a literal is allowed under "
