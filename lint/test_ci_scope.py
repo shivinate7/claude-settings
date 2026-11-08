@@ -693,11 +693,17 @@ class Scope(unittest.TestCase):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
     # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship. The suite runs the real bin/sim-lease
-    # beside the script, so an edit to bin/sim-lease turns the same job on.
+    # beside the script. bin/sim-lease has its own case below, since merge.py loads it.
     def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
-        for p in ("bin/sim-test", "lint/test_sim_test.sh", "bin/sim-lease"):
+        for p in ("bin/sim-test", "lint/test_sim_test.sh"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
+    # bin/sim-lease is in merge.py's load closure (ruling ci-scope-merge-closure, coordinator 2026-11-07 21:03 CST: the
+    # merge flag covers that closure), so an edit to it also sets checks_windows_merge.
+    def test_sim_lease_edit_turns_on_the_macos_shell_job_and_the_merge_check(self):
+        p = "bin/sim-lease"
+        self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code", "checks_windows_merge"})
 
     # bin/shoot's suite installs a browser, so its own paths and the browser installers turn `shoot` on. An edit sets
     # `code` and `shoot` and no other flag in true_set (checks_guard is outside ALL; the cases below pin it).
