@@ -250,6 +250,29 @@ class MutantAnchorTests(unittest.TestCase):
         self.assertTrue(names(out, label, "stale"),
                         "no FAIL line names both 'stale' and the label: %s" % out)
 
+    def plant_sweep_row(self, label, required):
+        """Put one sweep row first in the fixture's MUTATIONS table, anchored on the stale-case anchor."""
+        _label, old, _target = SWEEP_STALE
+        row = '    (%r, "sweep", %r, %r, %r),\n' % (label, old, old + " # planted", required)
+        self.plant("janitor/mutate_sweep.py", "MUTATIONS = [\n", "MUTATIONS = [\n" + row)
+
+    def test_sweep_row_with_no_required_case_name_fails_by_name(self):
+        label = "sentinel: no required case name"
+        self.plant_sweep_row(label, "")
+        rc, out = run_check(self.root)
+        self.assertEqual(rc, 1, "check passed a sweep row with no required case name: exit %d, expected 1" % rc)
+        self.assertNotIn("Traceback", out,
+                         "check crashed on a sweep row with no required case name instead of naming it")
+        self.assertTrue(names(out, label, "no required case name"),
+                        "no FAIL line names both 'no required case name' and the label: %s" % out)
+
+    def test_sweep_row_with_a_required_case_name_passes(self):
+        # The control for the case above: the same planted row, with a required case name, is sound.
+        self.plant_sweep_row("sentinel: with a required case name", "test_sentinel_case")
+        rc, out = run_check(self.root)
+        self.assertNotIn("Traceback", out, "check crashed on a sound sweep row: %s" % out)
+        self.assertEqual(rc, 0, "check failed a sound sweep row: exit %d: %s" % (rc, out))
+
     def test_unchanged_tree_exits_zero(self):
         before = counts(self.root)
         self.assertEqual([name for name, n in before if n != 1], [],
