@@ -26,7 +26,9 @@ The same check refuses a commit that adds or changes an open step whose "gap" ke
 held by another open step in the index, unless one base held both open with that key, or that has no key
 when no base holds its file. Done steps never block. Cost, on top of the note check: when the commit stages
 an open step file, one `git ls-files -s -z` and one more `git cat-file --batch` for the index files not yet
-read, plus one `git show` per base per staged open step; no file written, and it runs only inside the pre-commit hook.
+read, plus one `git show` per base per staged open step; no file written. Every plain build also runs it on the
+commits since merge-base(HEAD, origin/roadmap), read from the HEAD tree, so a merge or rebase cannot bring in a
+shared key unchecked (roadmap/README.md).
 """
 import datetime
 import json
