@@ -12386,6 +12386,87 @@ sh("frozen form gap: python -c that runs sh -c with a redirect onto a frozen hoo
 sh("frozen form gap: a plain cat redirect onto a frozen hook through ~ is denied",
    "cat x > ~/.claude/hooks/x.py", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 
+# A REBIND INSIDE A BLOCK. An if, a try or a with body may not run, so the name it rebinds may still hold the
+# frozen path when the write after it runs. The read before each write is of the frozen path, so each is denied.
+sh("frozen form gap: python -c that rebinds a frozen read's name inside an if, then writes it, is denied",
+   "python3 -c 'import json, os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "p = h + \"/.claude/settings.json\"\n"
+   "json.load(open(p))\n"
+   "if h: p = \"/tmp/o\"\n"
+   "open(p, \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that rebinds a frozen read's name inside a try, then writes it, is denied",
+   "python3 -c 'import json, os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "p = h + \"/.claude/settings.json\"\n"
+   "json.load(open(p))\n"
+   "try:\n"
+   "    p = \"/tmp/o\"\n"
+   "except OSError:\n"
+   "    pass\n"
+   "open(p, \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that rebinds a frozen read's name inside a with block, then writes it, is denied",
+   "python3 -c 'import contextlib, json, os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "p = h + \"/.claude/settings.json\"\n"
+   "json.load(open(p))\n"
+   "with contextlib.suppress(OSError): p = \"/tmp/o\"\n"
+   "open(p, \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A NAME BOUND TO A LIST. A star argument unpacks the list, so the frozen folder is joined from its parts in a form
+# the scanner did not read as a join. Each write is to a new file in the frozen hooks folder, so each is denied.
+sh("frozen form gap: python -c that opens a frozen hook joined by format with a list name in star args is denied",
+   "python3 -c 'import os; cfg = os.path.expanduser(\"~/.claude\"); hs = [cfg]; "
+   "open(\"{}/hooks/x.py\".format(*hs), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that opens a frozen hook joined by str.join with a list name is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); parts = [h, \".claude\", \"hooks\", \"x.py\"]; "
+   "open(\"/\".join(parts), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that opens a frozen hook joined by os.path.join with a list name in star args is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); parts = [h, \".claude\", \"hooks\", \"x.py\"]; "
+   "open(os.path.join(*parts), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A COMPOSED SHELL STRING. The frozen path is joined into a string that a name holds, and a shell runs that
+# string. Each run is a cp into the frozen hooks folder, so each is denied.
+sh("frozen form gap: python -c that runs a composed cp into a frozen hook through subprocess shell=True is denied",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); p_cmd = \"cp x \" + h + \"/.claude/hooks/x.py\"; "
+   "subprocess.run(p_cmd, shell=True)'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs a composed cp into a frozen hook through os.system is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); p_cmd = \"cp x \" + h + \"/.claude/hooks/x.py\"; "
+   "os.system(p_cmd)'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs a composed cp into a frozen hook through zsh -c is denied",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); p_cmd = \"cp x \" + h + \"/.claude/hooks/x.py\"; "
+   "subprocess.run([\"zsh\", \"-c\", p_cmd])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs a composed cp into a frozen hook through dash -c is denied",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); p_cmd = \"cp x \" + h + \"/.claude/hooks/x.py\"; "
+   "subprocess.run([\"dash\", \"-c\", p_cmd])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs a composed cp into a frozen hook through bash -ce is denied",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); p_cmd = \"cp x \" + h + \"/.claude/hooks/x.py\"; "
+   "subprocess.run([\"bash\", \"-ce\", p_cmd])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A FORMAT CALL THAT RAISES ON ITS FIELD NAME. The field name is not a number, so str.format raises when it is
+# called. The write on the same line must still be judged.
+sh("frozen form gap: python -c that opens a frozen hook after a one-line format with a bad field name is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); a = \"x\"; \"{²}\".format(a); "
+   "open(h + \"/.claude/hooks/x.py\", \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A FLAG GLUED TO THE PATH. less -o takes its file from the text after -o, so a frozen hook glued to the flag is a write.
+sh("frozen form gap: python -c that runs less -o with a frozen hook glued to the flag through subprocess is denied",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); src = \"src\"; "
+   "subprocess.run([\"less\", \"-o\" + h + \"/.claude/hooks/x\", src])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
 # FALSE ALARMS. A frozen guard path that a script prints, names, runs as a subprocess argument, loads as a
 # module spec, compares, splits or relates is a read of that path, so each is allowed.
 sh("frozen form: python -c that prints the parent of a Path.home() join under .claude is allowed",
@@ -12429,6 +12510,16 @@ sh("frozen form gap: python -c that runs less on a frozen hook through subproces
 sh("frozen form gap: python -c that runs file on a frozen hook through subprocess is allowed",
    "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); "
    "subprocess.run([\"file\", h + \"/.claude/hooks/x.py\"])'", "allow", cwd=NOGIT, env=TILDE_ENV)
+
+# KEEP GREEN. A rebind in a straight line after a frozen read, with the path built from expanduser, writes only
+# /tmp. A shell string that lists the frozen hooks folder reads it. Each is allowed.
+sh("frozen form gap: python -c that rebinds a frozen read's name in a straight line, path from expanduser, is allowed",
+   "python3 -c 'import json, os; h = os.path.expanduser(\"~\"); p = h + \"/.claude/settings.json\"; "
+   "json.load(open(p)); p = \"/tmp/o\"; open(p, \"w\")'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs ls on a frozen hooks folder through a shell string is allowed",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); "
+   "subprocess.run(\"ls \" + h + \"/.claude/hooks\", shell=True)'", "allow", cwd=NOGIT, env=TILDE_ENV)
 
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
