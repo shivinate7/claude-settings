@@ -81,7 +81,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
-from workflow_steps import COMMIT_SHA, SETTINGS_ACTION, job_block, run_body, settings_pins, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import COMMIT_SHA, SETTINGS_ACTION, job_block, run_body, settings_pins, step_blocks, step_env, step_key, step_with, yaml_scalar  # noqa: E402  the one home of the step parser
 
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -249,8 +249,7 @@ def code_check(top, step, pinned=None):
 
 
 def uses(step):
-    value = (step_key(step, "uses") or "").split(" #")[0].strip()
-    return value[1:-1] if len(value) > 1 and value[0] == value[-1] and value[0] in "'\"" else value  # YAML quotes are no part of the value
+    return yaml_scalar(step_key(step, "uses"))
 
 
 def known_action(step):

@@ -119,6 +119,13 @@ def drop_comment(value):
     return value
 
 
+def yaml_scalar(text):
+    """A YAML scalar's value: the inline comment cut (drop_comment) and one pair of matching outer quotes removed, so a `#`
+    inside quotes stays text."""
+    value = drop_comment((text or "").strip())
+    return value[1:-1] if len(value) > 1 and value[0] == value[-1] and value[0] in "'\"" else value
+
+
 def step_map(step, key):
     """A step's own `key:` block (`env:` or `with:`) as {name: value}, or {} when it has none. A `|` or `>` value reads
     as its lines (block_scalar, indented past the 10-space keys); other values lose an inline comment."""
