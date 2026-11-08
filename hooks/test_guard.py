@@ -14083,9 +14083,8 @@ for _name, _command in NAME_FILTER_ALLOWS:
     sh("builder-test: shell write, %s, in a checkout that holds tests, is allowed" % _name, _command, "allow",
        **dict(BR, cwd=FINDTESTS))
     sh("builder-test: shell write, %s, in a checkout with no test, is allowed" % _name, _command, "allow", **BR)
-# A narrowing primary the name filter does not read (`-mtime`, `-prune`, `-o`) leaves the walk plain, so every
-# test under the root is judged. Each command below lists only files that no test is. The `*.o` alone is the same
-# write with a filter the walk reads: it is allowed.
+# Each find below lists only files that are not tests, though its narrowing primary (`-mtime`, `-prune`, `-o`) is
+# one the name filter does not read. Each write is allowed. `*.o` alone is the twin with a plain name filter.
 NARROWED_ALLOWS = (
     ("find . -name *.pyc -mtime +7 piped to xargs, rm -f", "find . -name '*.pyc' -mtime +7 | xargs rm -f"),
     ("find . -name __pycache__ -type d -prune, -exec rm -rf",
@@ -14097,9 +14096,9 @@ for _name, _command in NARROWED_ALLOWS:
        **dict(BR, cwd=FINDTESTS))
 sh("builder-test: shell write, find . -name *.o piped to xargs, rm -f, in a checkout that holds tests, is allowed",
    "find . -name '*.o' | xargs rm -f", "allow", **dict(BR, cwd=FINDTESTS))
-# With colocated tests, src/a.test.ts is the test of src/a.ts. The deny pins that the walk judges it: the find
-# with the plain name filter lists it. The allows are the same find narrowed by `-not -name` and by its `!` form,
-# which the walk does not read, so the test is judged and the write to the source is refused.
+# With colocated tests, src/a.test.ts is the test of src/a.ts. The deny pins that the plain name filter lists the
+# test, so the write is refused. The allows pin that `-not -name` and its `!` form drop src/a.test.ts from the
+# find's list, so the write to the source is allowed.
 sh("builder-test: shell write, find src -name *.ts piped to xargs, sed -i, with colocated tests, is refused",
    "find src -name '*.ts' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=COLOCATED))
 for _name, _command in (
@@ -14110,10 +14109,9 @@ for _name, _command in (
 ):
     sh("builder-test: shell write, %s, in a checkout with colocated tests, is allowed" % _name, _command, "allow",
        **dict(BR, cwd=COLOCATED))
-# find's glob and Python's fnmatch read a bracket differently. find's `[^x]` negates, as POSIX `[!x]` does, so it
-# lists test_top.py. fnmatch reads `^` as a member of the set, and it has no `[[:alpha:]]` class, so neither pattern
-# matches test_top.py: the write is allowed. The denies pin the test the pattern names. `[!x]` and `[a-z]` read alike
-# in both dialects, so they stay denied.
+# find's glob lists test_top.py under `[^x]*.py` and under `[[:alpha:]]*.py`, so each write is refused. fnmatch
+# reads a bracket differently: `[^x]` is a set with no negation, and it has no `[[:alpha:]]` class. `[!x]` and
+# `[a-z]` read alike in both dialects, so they are the controls, refused too.
 for _name, _command in (
     ("find . -name [^x]*.py piped to xargs, sed -i", "find . -name '[^x]*.py' | xargs sed -i s/a/b/"),
     ("find . -name [[:alpha:]]*.py piped to xargs, sed -i", "find . -name '[[:alpha:]]*.py' | xargs sed -i s/a/b/"),
