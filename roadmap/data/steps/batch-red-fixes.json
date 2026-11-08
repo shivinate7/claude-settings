@@ -1,11 +1,11 @@
 {
   "title": "Fixes for #1894's 8 notes and debt drop-red-hits-every-suite (a per-job hit map)",
   "why": "#1894 (step merge-batch-split-and-pipeline) filed debt drop-red-hits-every-suite and 8 notes (lane session_013NEJL3NAnujQ8Pbt5dXkwP, 04:25 CST Nov 8).",
-  "note": "Fix: a per-job hit_suites filter for the debt, red first on an over-drop, and a fix for each of the 8 notes. Follow-up from #1894's head, Merge after: #1894. Doing (lane, 04:27 CST Nov 8). Queue fix. Filed 04:31 CST Nov 8.",
+  "note": "Fix: a per-job hit_suites filter for the debt, red first on an over-drop, and a fix for each of the 8 notes. Follow-up from #1894's head, Merge after: #1894. Doing (lane, 04:27 CST Nov 8). Queue fix. Filed 04:31 CST Nov 8. Built: draft PR #2027 (head 504cfd75f) with runner 8, Merge after #1894; fixes all 8 #1894 notes and retires debt drop-red-hits-every-suite. New notes with Fix: none, Until 2026-11-21: batch-red-marked-ledger-untested, batch-red-unmarked-int-line, batch-red-test-msg-batch-head (lane, 08:03 CST Nov 8). Done when #2027 merges.",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 598,
   "owner": "triage",
   "lane": "session_013NEJL3NAnujQ8Pbt5dXkwP",
-  "updatedAt": "2026-11-08T04:28:00-06:00"
+  "updatedAt": "2026-11-08T08:03:00-06:00"
 }
