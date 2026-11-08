@@ -8343,9 +8343,10 @@ sh("env-child: allow, uv --verbose takes no value, so vitest runs with the filte
 sh("env-child: allow, npm exec --yes takes no value, so jest -c env is jest's option",
    "npm --env-file=" + ENV + " exec --yes jest -c env", "allow", cwd=NOGIT)
 
-# Two unlisted value flags in a row. The scan takes the first flag's word as its value, then the
-# second flag ends the scan, so the image's child (env) is never read. The --label deny is no such
-# shape: --label is a listed flag, so the scan reads it, and that case pins the listed flag green.
+# Two unlisted value flags in a row. The scan takes each unlisted flag's next word as a possible
+# value, and runs past every unlisted option, so it reaches the image and its child (env). The
+# --label deny is no such shape: --label is a listed flag, so the scan reads it, and that case
+# pins the listed flag green.
 # Each allow is the same runner with a child that prints nothing, so the flags alone are not denied.
 sh("env-child: deny, docker --cap-add X --cap-add Y, two unlisted value flags, so env runs in img",
    "docker run --env-file " + ENV + " --cap-add X --cap-add Y img env", "deny", "env-file", cwd=NOGIT)
@@ -8392,6 +8393,18 @@ sh("env-child: allow, uv -vv takes no value, so vitest runs with the filter env"
 sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
    "uv run --env-file " + ENV + " -v vitest env", "allow", cwd=NOGIT)
 
+# Flags the list does not name that take no value, given the file. uv's --exact and --all-groups and
+# npx's --silent are bools, so the word after each is the program, and env after it is the program's
+# argument. A bun ./x is a script path, not bun's x alias, so env is its argument.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: allow, bun ./x runs the script ./x, not bun's x alias, so env is its argument",
+   "bun --env-file=" + ENV + " ./x env", "allow", cwd=NOGIT)
+
 # Bool flags that take no value, given the file. `--sig-proxy` is docker's bool, so img is the image
 # and env after it is the child. `--active` is uv's bool, so env is the child of the uv run. `bun x`
 # is the exec alias of bunx, so its first word is the child. Each allow runs the program's own
@@ -8399,6 +8412,8 @@ sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
 sh("env-child: deny, docker --sig-proxy takes no value, so env after img is the child",
    "docker run --env-file " + ENV + " --pull always --sig-proxy img env", "deny", "env-file",
    cwd=NOGIT)
+sh("env-child: deny, docker --rm takes no value after --pull always, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --rm img env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: deny, uv --active takes no value, so env is the child of the uv run",
    "uv run --env-file " + ENV + " --extra dev --active env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: deny, bun x is the exec alias, so env is the child",
