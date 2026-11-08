@@ -3845,11 +3845,11 @@ def pr_acts(root, h, pulls, holds=True):
 
 def _reviewed_lines(h, root):
     """-> (lines, red) of `merge --reviewed`, built before any is printed so a failed read prints none (a Stop). Every open pull request gets one next
-    act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch` (`lane lint red: <steps>` instead, when
-    the newest `Lint: red <live head> <steps>` comment of the pull request names the live head); a done record whose Findings line is not met (see
-    `findings_read`: `none` is met with no read) is `lane: <cause>` (the filing is owed, no round is: `findings not filed: this PR`, `follow-up #N does not exist`,
+    act, read from GitHub alone, first match wins: its newest review record is done for the live head: `lane lint red: <steps>` when
+    the newest `Lint: red <live head> <steps>` comment of the pull request names the live head; else, when its Findings line is not met (see
+    `findings_read`: `none` is met with no read), `lane: <cause>` (the filing is owed, no round is: `findings not filed: this PR`, `follow-up #N does not exist`,
     `follow-up #N closed unmerged` or `follow-up #N is this PR`; the lane round age limit holds), or `findings unknown: <why>`
-    when the read could not run, which holds like any unknown and counts against the batch limit; the record is open or for another
+    when the read could not run, which holds like any unknown and counts against the batch limit; else `batch`; the record is open or for another
     head, `lane round n` (n the next round owed, at most 3; 1 when its fix check failed); a label of held, parked or replaced and a
     `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line, `waits on <id>`; the BATCH_LABEL, `batch run` (the batch limit); its base
     is the head branch of another open pull request of the same repo, `blocked on #N` (a fork's head never counts); a draft, the first `lane round`;
