@@ -1515,3 +1515,5 @@
 - reviewed-head-push-multi-source: a push of several refspecs asks unless every source equals the PR head, so `git push origin feat other` asks about feat's PR even when feat sends nothing (hooks/guard_merge.py `_sends_nothing`). Decision: pr-review-record.
 - reviewed-head-push-cases-thin: no case sets `branch.<b>.pushRemote`, `remote.pushDefault` against an origin branch remote, several refspecs or a detached HEAD, so a mutant of the remote order may live (hooks/test_guard.py). Decision: pr-review-record.
 - push-target-last-cd: `push_target` takes the last `cd` of the whole command, even one after the push, so push-main, force-push and reviewed-head-push may judge the wrong repo (hooks/guard_push_delete.py:101). Inherited; found in review of PR #1725.
+- brief-id-markdown-backtrack: a lane brief id label followed by about 1000 `*` or `_` and no colon costs about 2 s to match; a run of 100 costs under 3 ms (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
+- brief-id-placeholder-digit: a placeholder id that holds a digit, such as `session_x1`, passes the lane brief id check (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
