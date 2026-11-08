@@ -8,7 +8,10 @@ so its start-up never loads the guard. guard_core.py imports it by name, and a t
 that patches one of these names patches it here, on the module object that import returns.
 The merge tool (merge/merge.py) is a consumer too. It loads its own private copy by path, for
 `lists_refs`, `listing_text` and `branch_is_ancestor`. A stale module of this name in sys.modules
-cannot answer for merge, and a patch to this module does not reach merge. Standard library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
+cannot answer for those three, and a patch to this module does not reach them.
+The merge lane cleanup (cut_lanes) also imports hooks/guard_core.py, which binds the names of this module
+at import, so `branch_cherry_empty` there reads the module in sys.modules, not the private copy.
+Standard library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
 """
 import calendar
 import json
