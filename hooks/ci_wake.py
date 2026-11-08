@@ -394,9 +394,9 @@ NO_PUSH_EVENTS = ("workflow_dispatch", "schedule")   # events that start no run 
 
 def _glob_regex(pattern):
     """A workflow path-filter pattern as a regex, per GitHub's filter pattern cheat sheet: `*` is zero or more
-    characters but `/`, `**` is zero or more of any character (`**/` also matches no folder, but only at the pattern start or after a `/`),`?` and `+` are zero or
-    one and one or more of the character before them, `[...]` is one listed letter, digit or range, and `\\` escapes
-    the next character. Raises _Unparsed for a form whose meaning is unsure (a `?` or `+` after no plain character, an
+    characters but `/`, `**` is zero or more of any character (`**/` also matches no folder, but only at the pattern
+    start or after a `/`), `?` and `+` are zero or one and one or more of the character before them, `[...]` is one
+    listed letter, digit or range, and `\\` escapes the next character. Raises _Unparsed for a form whose meaning is unsure (a `?` or `+` after no plain character, an
     open or odd bracket, a trailing `\\`), so the run stays due rather than a guessed reading dropping it."""
     parts, quantifiable, i = [], False, 0
     while i < len(pattern):
@@ -489,12 +489,18 @@ def _split_flow(text):
 
 def _scalar(word):
     """One filter pattern as written, quoted or plain. Raises _Unparsed for a plain scalar this reader cannot read
-    exactly: a block scalar (`|`, `>`), an anchor (`&a`) or an alias (`*a`), which YAML resolves elsewhere. A plain
-    scalar cannot start with `*` in YAML, so any such start is read as an alias."""
+    exactly: a block scalar (`|`, `>`), an anchor (`&a`) or an alias (`*a`), which YAML resolves elsewhere, a tag
+    (`!x`), and a null spelling (`null`, `Null`, `NULL`, `~`). A plain scalar cannot start with `*` in YAML, so any such
+    start is read as an alias. A quoted empty string raises too: an empty pattern matches no file, so a filter of it
+    would read as "no run" where GitHub reads no filter or an unsure one. A quoted tag-like or null-like word is a
+    string, so it is read as written."""
     word = word.strip()
     if word[:1] in ("'", '"'):
-        return _unquote(word)
-    if word[:1] in ("|", ">", "&", "*"):
+        text = _unquote(word)
+        if not text:
+            raise _Unparsed(word)
+        return text
+    if word[:1] in ("|", ">", "&", "*", "!") or word in ("null", "Null", "NULL", "~"):
         raise _Unparsed(word)
     return word
 
@@ -517,8 +523,8 @@ def _filter_list(block, key):
     """The patterns of `key:` in a push block's lines ([(indent, content)]), or None when the key is absent. Reads a
     flow list (`[a, b]`, on one line or spread over lines), a lone scalar and a block list (`- a`). Raises _Unparsed
     for a flow list that never closes, a block list item with its value on the next line, a line under the key that
-    is no list item, a key that yields no item (its items all commented out, or the next key follows it), and a
-    scalar `_scalar` does not read. A list item is `-` then a space or a tab."""
+    is no list item, a key that yields no item (its items all commented out, an empty flow list, or the next key follows it),
+    and a scalar `_scalar` does not read. A list item is `-` then a space or a tab."""
     for n, (indent, content) in enumerate(block):
         head, colon, rest = content.partition(":")
         if head.strip() != key or not colon:
@@ -531,7 +537,10 @@ def _filter_list(block, key):
                 if nxt is None:
                     raise _Unparsed(key)
                 text += " " + nxt[1]
-            return [_scalar(w) for w in _split_flow(text[1:-1])]
+            flow = [_scalar(w) for w in _split_flow(text[1:-1])]
+            if not flow:
+                raise _Unparsed(key)
+            return flow
         if rest:
             return [_scalar(rest)]
         items = []
