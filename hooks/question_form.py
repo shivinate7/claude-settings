@@ -488,7 +488,8 @@ ABS_CMDLET_PATH = re.compile(r"(?:[A-Za-z]:|~|\$HOME|\$\{HOME\})?[\\/](?:[^\s\\/
 PS_NONSTANDARD_VERBS = ("ForEach",)
 SHELL_CMDLET = re.compile(r"(?:[A-Z][a-z]+|" + "|".join(PS_VERBS + PS_NONSTANDARD_VERBS) + r")-[A-Z][A-Za-z]+")
 # What may come before a cmdlet path in a segment: `&`, then any `VAR=value` or command-wrapper word. The wrapper
-# words come from guard_core's COMMAND_WRAPPERS, the list its token reader unwraps, so the two readers agree.
+# words come from guard_core's COMMAND_WRAPPERS, the list its token reader unwraps. This reader matches the wrapper
+# words only, not their flags or values (`sudo -u bob`, `nice -n 5`), so it is narrower than the token reader.
 @functools.lru_cache(maxsize=1)
 def _cmdlet_prefix():
     import guard_core
