@@ -12651,8 +12651,9 @@ class StandingGrantSwitch(CloudSession):
 
 class BatchRunnerHead(CloudSession):
     """A batch runner's `merge <pr> --confirm` names the head its CI ran on (decision auto-mode-owner-acts). With no
-    --head the confirm is refused before the lock, any claim or any write, and the refusal names no retry target (git-remedy-never-names-target).
-    With --head set to the live head it proceeds. A session with no batch-runner role is not checked here: MergeRoleCheck and Flow pin those paths."""
+    --head the confirm is refused before the lock, any claim or any write. The refusal names the --head flag, the way
+    through, and never the live head (git-remedy-never-names-target). With --head set to the live head it proceeds.
+    A session with no batch-runner role is not checked here: MergeRoleCheck and Flow pin those paths."""
 
     def setUp(self):
         super().setUp()
@@ -12691,11 +12692,11 @@ class BatchRunnerHead(CloudSession):
         err = self.refused_without_head()
         self.assertRegex(err, r"(?i)needs the head the CI ran on", "the refusal does not say the merge needs the head the CI ran on")
 
-    def test_the_refusal_names_no_retry_target(self):
+    def test_the_refusal_names_the_head_flag_and_no_live_head(self):
         err = self.refused_without_head()
         head = self.head()
+        self.assertIn("--head", err, "the refusal does not name the --head flag, the way through")
         self.assertNotIn("--confirm", err, "the refusal names the refused command's flag --confirm")
-        self.assertNotIn("--head", err, "the refusal names the flag to retry with")
         self.assertNotRegex(err, r"\bmerge\s+[<\d]", "the refusal names the refused command, merge <pr>")
         self.assertNotIn(head[:7], err, "the refusal names the live head")
         self.assertNotRegex(err, r"[0-9a-f]{40}", "the refusal names a full sha")
