@@ -972,6 +972,51 @@ def case_main_prints_the_config_report():
           and dw.UNKNOWN_PREFIX not in message, result.stdout)
 
 
+# A PowerShell call that writes a project config file, its text holding `\"` before the write. The
+# PowerShell reading finds the write, and the bash reading takes `\"` as an escaped quote and hides
+# it. main() must name the config file, as it does for an Edit above.
+def case_main_powershell_config_report():
+    repo = make_repo("main_powershell_config_report")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    command = 'echo "C:\\" ; Set-Content .claude/settings.json x ; echo \\"D"'
+    call = {"type": "tool_use", "name": "PowerShell", "input": {"command": command}}
+    records = [
+        human_record("tune the project settings", T0),
+        assistant_record(tool_use=call),
+        assistant_record(text="done"),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_powershell_config_report: exit 0", result.returncode == 0, result.returncode)
+    try:
+        message = json.loads(result.stdout.strip()).get("systemMessage", "")
+    except Exception:
+        message = ""
+    check("main_powershell_config_report: names the config file",
+          "Config files changed this turn" in message and "settings.json" in message, result.stdout)
+
+
+# The same shape writing a file that is not project config: no config line. A reading that calls
+# every PowerShell write a config write fails here.
+def case_main_powershell_unrelated_write_names_no_config():
+    repo = make_repo("main_powershell_unrelated_write")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    command = 'echo "C:\\" ; Set-Content notes.txt x ; echo \\"D"'
+    call = {"type": "tool_use", "name": "PowerShell", "input": {"command": command}}
+    records = [
+        human_record("note the result", T0),
+        assistant_record(tool_use=call),
+        assistant_record(text="done"),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_powershell_unrelated_write: exit 0", result.returncode == 0, result.returncode)
+    check("main_powershell_unrelated_write: no config line",
+          "Config files changed" not in result.stdout, result.stdout)
+
+
 def case_main_missing_transcript():
     repo = make_repo("main_missing_transcript")
     result = _run_main({"transcript_path": os.path.join(repo, "nope.jsonl"), "cwd": repo})
@@ -1134,6 +1179,22 @@ def case_token_t5_failure_error_omits_token():
           "token found in error string")
 
 
+# T5, prose. A reply with no JSON reads as an error that keeps its first 120 characters. The token starts at character 110, so
+# its first 10 characters fall inside that cut. The reply must pass the same scrub as stderr before the cut, so no part of the
+# token reaches the error, and the scrub marker stands where the token was.
+def case_token_t5_prose_reply_error_is_scrubbed():
+    reply = "x" * 110 + FAKE_TOKEN + " prose with no verdict object"
+    with scratch_config("t5-prose") as cfg:
+        _token_file(cfg, FAKE_TOKEN + "\n")
+        verdict, error = _invoke_with(_envelope(reply))
+    check("token_t5(prose): no-JSON reply gives no verdict", verdict is None and bool(error), "verdict=%s" % (verdict,))
+    check("token_t5(prose): error omits the token", FAKE_TOKEN not in (error or ""), "token found in error string")
+    check("token_t5(prose): error omits the token's first 8 characters", FAKE_TOKEN[:8] not in (error or ""),
+          "part of the token found in error string")
+    check("token_t5(prose): error keeps the scrub marker where the token was", "[token]" in (error or ""),
+          "no [token] marker in error string")
+
+
 # Token file encodings, as Windows PowerShell 5.1 writes them. The reader must return the bare
 # token whatever the BOM, line ending or NUL characters. The file's bytes are written as given.
 def _token_file_bytes(cfg, data):
@@ -1292,6 +1353,19 @@ def case_parse_verdict_is_the_one_home():
             want = dw.parse_verdict(text, shape)
             check("parse_verdict is the one home: invoke_model matches it for %r" % text[:24],
                   got == want, (got, want))
+
+
+def case_parse_verdict_no_json_error_names_the_reply_head():
+    # A reply with no JSON reads as an error that keeps the first 120 characters of the reply, so the report's UNKNOWN line
+    # says what came back. Nothing past the first 120 characters is kept.
+    reply = ("This is prose and not the verdict object the judge asked for. The first one hundred and twenty characters of it "
+             "reach the report, and this tail must not. TAIL-MARK-7731")
+    v, e = dw.parse_verdict(reply)
+    check("parse_verdict no JSON: gives no verdict and an error", v is None and bool(e), (v, e))
+    check("parse_verdict no JSON: the error names the first 120 characters of the reply",
+          isinstance(e, str) and reply[:120] in e, e)
+    check("parse_verdict no JSON: the error holds nothing past the first 120 characters",
+          isinstance(e, str) and "TAIL-MARK-7731" not in e, e)
 
 
 def case_invoke_model_custom_shape_end_to_end():
@@ -1927,10 +2001,13 @@ def main():
     case_token_t3_parent_env_not_passed_through()
     case_token_t4_no_usable_token_file_is_no_token()
     case_token_t5_failure_error_omits_token()
+    case_token_t5_prose_reply_error_is_scrubbed()
     case_token_encodings_read_as_the_bare_token()
     case_token_t10_undecodable_file_is_an_error()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
+    case_main_powershell_config_report()
+    case_main_powershell_unrelated_write_names_no_config()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
 
@@ -1941,6 +2018,7 @@ def main():
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,
         case_parse_verdict_is_the_one_home,
+        case_parse_verdict_no_json_error_names_the_reply_head,
         case_invoke_model_custom_shape_end_to_end,
         case_argv_bad_combinations_fall_back_to_invoke_model,
         case_bad_flag_runs_the_default_model_call,

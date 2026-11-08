@@ -7,6 +7,9 @@ None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each st
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
+StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
+unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -295,6 +298,47 @@ class Usage(Job):
         self.assertIn("no job", done.stdout)
 
 
+class StepSelect(Job):
+    """`--step NAME` (repeatable) runs only the named steps of the job, of any kind. A name no step has is one unknown
+    line and exit 2. The merge's ready checks run its declared names this way (merge.readyChecks)."""
+    PR = Conditions.PR  # the one home of the pull-request condition
+
+    def test_only_the_named_steps_run_and_the_others_do_not(self):
+        rc, lines, out = self.run_job(step("first", "echo first > first.txt"),
+                                      step("second", "echo second > second.txt\nexit 1"),
+                                      step("third", "echo third > third.txt"),
+                                      args=("--step", "first", "--step", "third"))
+        self.assertTrue(os.path.exists(os.path.join(self.root, "first.txt")), out)
+        self.assertTrue(os.path.exists(os.path.join(self.root, "third.txt")), out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "second.txt")), out)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+
+    def test_a_name_no_step_has_is_one_unknown_line_and_exit_two(self):
+        rc, lines, out = self.run_job(step("ok", "echo ran > ran.txt"), args=("--step", "nope"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertIn("nope", lines[0], out)
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ran.txt")), out)
+
+    def test_a_named_uses_step_is_one_unknown_line_and_exit_two(self):
+        rc, lines, out = self.run_job(step("ok", "echo ran > ran.txt"), step("act", uses="actions/checkout@v4"),
+                                      args=("--step", "act"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertIn("act", lines[0], out)
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ran.txt")), out)
+
+    def test_a_named_pull_request_step_with_no_base_is_one_unknown_line_and_exit_two(self):
+        rc, lines, out = self.run_job(step("pr", "echo pr > pr.txt", **{"if": self.PR}), args=("--step", "pr"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "pr.txt")), out)
+
+    def test_a_run_with_no_step_runs_every_step(self):  # the control
+        rc, lines, out = self.run_job(step("one", "true"), step("two", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+
+
 class SteAction(Job):
     """The checks STE step is a `uses:` action. ci-job runs bin/ste-changed in its place (one home: run.sh)."""
 
@@ -381,6 +425,14 @@ class LintBase(Job):
         rc, lines, out = self.run_job(self.NARRATION, args=("--lint", "--base", "origin/other"))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
         self.assertNotIn("default", out)
+
+    def test_a_pull_request_lint_step_with_no_base_and_no_origin_main_reads_unknown_not_skipped(self):
+        self.lane_adds_narration(origin=False)
+        _, lines, out = plan_lint(self.root, workflow(self.NARRATION), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), ["Comment narration check"], out)  # the scope: a pull-request run would run this lint step
+        rc, lines, out = self.run_job(self.NARRATION, args=("--lint",))
+        self.assertEqual(by_step(lines).get("Comment narration check"), "unknown", out)  # the exit code is no proof: the no-base line gives 2 too
+        self.assertEqual(rc, 2, out)
 
 
 class GithubBaseRef(Job):
@@ -545,6 +597,46 @@ def run_as_yaml_reads_it(step):
             body.pop()
         return "literal", "\n".join(body) + "\n"
     return None, None
+
+
+class RunHeaderComments(Job):
+    """A comment after a run: block header (`run: | # why`) is no part of the script. run_body reads the body, and
+    bin/ci-job runs that body, so the step passes or fails on its own lines. A `#` inside a body is script text."""
+
+    def raw_step(self, header, *body):
+        return "      - name: hdr\n        run: %s\n" % header + "".join("          %s\n" % ln for ln in body) + "\n"
+
+    def test_run_body_drops_the_comment_after_a_literal_header(self):
+        self.assertEqual(run_body(self.raw_step("| # why", "true")), "true\n",
+                         "run: | # why: the comment after the header was read as the script")
+
+    def test_a_literal_header_comment_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # why: the step's body is a passing command, but the header comment failed it\n" + out)
+
+    def test_a_folded_header_comment_does_not_pass_a_failing_body(self):
+        # On main the comment makes the shell read `>- # why` as a redirect: no body runs, and the step PASSes.
+        rc, lines, out = self.run_job(self.raw_step(">- # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: >- # why: the header comment hid a body that exits 3, so the step did not FAIL\n" + out)
+
+    def test_a_lone_quote_in_a_header_comment_is_text_and_the_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # don't stop", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # don't stop: a lone quote in the header comment failed the step\n" + out)
+
+    # Controls: each passes on main and must still hold.
+    def test_a_failing_body_under_a_header_comment_still_fails(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: | # why: a body that exits 3 must still FAIL under a header comment\n" + out)
+
+    def test_a_hash_inside_a_block_body_is_script_text(self):
+        rc, lines, out = self.run_job(self.raw_step("|", "echo '# kept' > kept.txt",
+                                                    "test \"$(cat kept.txt)\" = '# kept'"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: |: a # inside a body line was cut as a comment\n" + out)
 
 
 class RunBodiesOfWorkflows(unittest.TestCase):
@@ -782,7 +874,7 @@ class InstallSteps(Job):
             step("Install deps", "npm ci"),
             step("Lint check", self.LINT, **{"if": "${{ github.event_name == 'pull_request' }}"}),
             args=("--lint",), env=env)
-        self.assertEqual(by_step(lines).get("Lint check"), "skipped", out)
+        self.assertEqual(by_step(lines).get("Lint check"), "unknown", out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "installed.marker")),
                          "the install ran though no lint step after it runs\n" + out)
 
@@ -831,6 +923,21 @@ class NotRunLines(Job):
                                       step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
         self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
                                                     "Python lint": "FAIL"}), out)
+
+    NO_LINT = (DEGEN[0], DEGEN[1], DEGEN[3], DEGEN[4])  # DEGEN without its one lint step
+
+    def test_a_lint_run_that_picks_no_lint_step_is_unknown_and_exits_two(self):
+        _, lines, out = plan_lint(self.root, workflow(*self.NO_LINT), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), [], out)  # the scope: the job holds no lint step for --lint to pick
+        rc, lines, out = self.run_job(*self.NO_LINT, args=("--lint", "--base", "origin/main"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertEqual(rc, 2, out)
+
+    def test_a_lint_step_that_runs_only_off_a_pull_request_reads_skipped_and_the_run_exits_zero(self):  # the control
+        push_only = step("Push-only lint", "python3 lint/check_clean.py", **{"if": "${{ github.event_name != 'pull_request' }}"})
+        rc, lines, out = self.run_job(push_only, step("Python lint", "python3 lint/check_clean.py"),
+                                      args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, by_step(lines)), (0, {"Push-only lint": "skipped", "Python lint": "PASS"}), out)
 
 
 class Progress(Job):
@@ -1241,6 +1348,92 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertEqual((done.returncode, self.verdicts(lines)), (0, ["PASS"]), done.stdout + done.stderr)
         self.assertNotIn("still running", done.stdout)
         self.assertIn("still running", done.stderr, done.stdout + done.stderr)
+
+
+def load_ci_job():
+    """bin/ci-job as a fresh module, so a case can call or patch its functions."""
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader("ci_job_under_test", CI_JOB)
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+class WindowsShell(unittest.TestCase):
+    """On Windows a step's bash is Git Bash by full path, never the System32 WSL launcher that PATH finds
+    first (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub). Built as a fake Windows tree on any host."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="winsh_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.system32 = os.path.join(self.root, "Windows", "System32")
+        self.git_bin = os.path.join(self.root, "Program Files", "Git", "bin")
+        for folder in (self.system32, self.git_bin):
+            os.makedirs(folder)
+        open(os.path.join(self.system32, "bash.exe"), "w").close()
+        self.environ = {"SystemRoot": os.path.join(self.root, "Windows"), "PATH": self.system32}
+        self.ci_job = load_ci_job()
+
+    def git_bash(self):
+        path = os.path.join(self.git_bin, "bash.exe")
+        open(path, "w").close()
+        open(os.path.join(self.git_bin, "sh.exe"), "w").close()
+        return path
+
+    def test_the_wsl_launcher_alone_is_no_shell(self):
+        self.assertIsNone(self.ci_job.shell_argv(None, nt=True, environ=self.environ))
+
+    def test_git_bash_under_program_files_runs_the_step(self):
+        bash = self.git_bash()
+        environ = dict(self.environ, ProgramFiles=os.path.join(self.root, "Program Files"))
+        self.assertEqual(self.ci_job.shell_argv(None, nt=True, environ=environ), [bash, "-e"])
+        self.assertEqual(self.ci_job.shell_argv("bash", nt=True, environ=environ)[0], bash)
+        self.assertEqual(self.ci_job.shell_argv("sh", nt=True, environ=environ),
+                         [os.path.join(self.git_bin, "sh.exe"), "-e"])
+
+    def test_git_bash_on_path_after_system32_is_found(self):
+        bash = self.git_bash()
+        environ = dict(self.environ, PATH=self.system32 + ";" + self.git_bin)
+        self.assertEqual(self.ci_job.shell_argv(None, nt=True, environ=environ)[0], bash)
+
+    def test_a_step_with_no_git_bash_is_unknown_and_names_it(self):
+        self.ci_job.shell_argv = lambda shell, nt=None, environ=None: None
+        state, detail = self.ci_job.plan("      - name: lint\n        run: true\n", False, {}, self.root)[:2]
+        self.assertEqual((state, detail), ("unknown", self.ci_job.no_shell("bash")))
+        self.assertIn("Git Bash", self.ci_job.no_shell("bash", nt=True))
+
+    def test_git_bash_beside_git_is_found(self):
+        git_cmd = os.path.join(self.root, "Git", "cmd")
+        git_bin = os.path.join(self.root, "Git", "bin")
+        os.makedirs(git_cmd)
+        os.makedirs(git_bin)
+        for name in ("git", "git.exe"):  # which() finds `git` on POSIX and only a PATHEXT name on Windows
+            with open(os.path.join(git_cmd, name), "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod(os.path.join(git_cmd, name), 0o755)
+        open(os.path.join(git_bin, "bash.exe"), "w").close()
+        environ = dict(self.environ, PATH=git_cmd)  # one folder: the host's which() splits PATH its own way
+        self.assertEqual(self.ci_job.find_git_bash(nt=True, environ=environ), os.path.join(git_bin, "bash.exe"))
+
+    def test_the_ste_lint_body_names_its_tool_with_forward_slashes(self):
+        self.ci_job.BIN = "C:\\cs\\bin"
+        state, body = self.ci_job.plan(step("ste", uses="./actions/ste-lint"), True, {"base": "origin/main"},
+                                       self.root)[:2]
+        self.assertEqual((state, body), ("run", '"C:/cs/bin/ste-changed" "origin/main"'))
+
+    def test_the_zizmor_body_runs_run_sh_in_the_bash_running_it(self):
+        os.makedirs(os.path.join(self.root, "actions", "zizmor"))
+        open(os.path.join(self.root, "actions", "zizmor", "run.sh"), "w").close()
+        from unittest import mock
+        with mock.patch.object(shutil, "which", lambda name, path=None: "/x/" + name):  # bash and pipx present
+            state, body = self.ci_job.plan(step("zizmor", uses="./actions/zizmor"), False, {}, self.root)[:2]
+        self.assertEqual(state, "run")
+        self.assertIn('\n"$BASH" "%s"\n' % os.path.join(self.root, "actions", "zizmor", "run.sh").replace("\\", "/"), body)
+
+    def test_off_windows_the_shell_is_path_bash(self):
+        self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
+        self.assertEqual(self.ci_job.shell_argv("python", nt=False), ["python3"])
 
 
 if __name__ == "__main__":

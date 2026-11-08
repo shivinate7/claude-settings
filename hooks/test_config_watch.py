@@ -24,44 +24,14 @@ from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
+sys.path.insert(0, HERE)
+from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup
 
 
-def _find_git_bash():
-    """Resolve the real Git-for-Windows bash by full path. Never hand subprocess a bare "bash".
-
-    Both this machine and the CI runner list `C:\\Windows\\System32` ahead of Git's
-    own `bin` folder on PATH. `System32\\bash.exe` is a WSL launcher stub, not Git
-    Bash. It mounts drives at "/mnt/c", never at "/c". `to_bash_path` below builds
-    the "/c" form. A path handed to that stub never resolves. `shutil.which("bash")`
-    does not help. It is a plain PATH scan. On this PATH order it returns the same
-    stub.
-
-    A bare "bash" prints "/mnt/c/Users/..." (the WSL stub). The full path to
-    Git's own bash.exe prints "C:/Users/..." (the real MINGW64 mount). The
-    `shell: bash` steps of `.github\\workflows\\checks.yml` already use that path.
-    """
-    if os.name != "nt":
-        return shutil.which("bash") or "bash"
-    for var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
-        base = os.environ.get(var)
-        if base:
-            candidate = os.path.join(base, "Git", "bin", "bash.exe")
-            if os.path.isfile(candidate):
-                return candidate
-    # Fall back to a PATH scan that skips the System32 stub, in case Git sits
-    # somewhere else. Whatever PATH still finds beats a bare "bash".
-    system_root = os.path.normcase(os.path.join(
-        os.environ.get("SystemRoot", r"C:\Windows"), "System32"))
-    for folder in os.environ.get("PATH", "").split(os.pathsep):
-        if os.path.normcase(folder).startswith(system_root):
-            continue
-        candidate = os.path.join(folder, "bash.exe")
-        if os.path.isfile(candidate):
-            return candidate
-    return shutil.which("bash") or "bash"
-
-
-BASH = _find_git_bash()
+# Git Bash by full path, never a bare "bash" (hooks/git_bash.py says why). `to_bash_path` below builds the
+# "/c" form Git Bash mounts; the WSL launcher mounts "/mnt/c" instead. With no Git Bash found, PATH's
+# bash still beats a bare name.
+BASH = find_git_bash() or shutil.which("bash") or "bash"
 
 # FIXTURE_TMP is where the indirection fixtures below live: `tempfile.gettempdir()`, never a
 # literal "/tmp". On Windows, Python resolves "/tmp" to "C:\tmp". Bash (MSYS) resolves the
@@ -373,6 +343,31 @@ def approved_heredoc(project):
     shell(project, command)
     message = project.post("Bash", {"command": command})
     return {"pre": decision, "lifted": project.lifted(), "message": message}
+
+
+# A PowerShell call whose text holds `\"` before its write. PowerShell reads `\` as a path character,
+# so `"C:\"` closes at its quote and the write is a plain Set-Content. The bash reading takes `\"` as
+# an escaped quote, so the text is one open string and the write is hidden. The watch must read a
+# PowerShell call the way PowerShell does, so an approved lift in such a call is explained and kept.
+PS_QUOTED_WRITE = ('echo "C:\\" ; Set-Content .claude/settings.local.json \'' + LIFT
+                   + '\' ; echo \\"D"')
+PS_QUOTED_NO_WRITE = 'echo "C:\\" ; Get-Date ; echo \\"D"'
+
+
+@case("a PowerShell call that writes an approved cap lift is NOT reverted", "pass")
+def approved_powershell_write(project):
+    project.settle()
+    write(project.settings, LIFT)  # the write the approved call made
+    message = project.post("PowerShell", {"command": PS_QUOTED_WRITE})
+    return {"pre": "n/a", "lifted": project.lifted(), "message": message}
+
+
+@case("a PowerShell call that writes no cap lift leaves an unexplained lift reverted", "bypass")
+def unexplained_powershell_lift(project):
+    project.settle()
+    write(project.settings, LIFT)  # a lift that no part of the call writes
+    message = project.post("PowerShell", {"command": PS_QUOTED_NO_WRITE})
+    return {"pre": "n/a", "lifted": project.lifted(), "message": message}
 
 
 @case("a write to an unrelated file triggers nothing", "pass")
