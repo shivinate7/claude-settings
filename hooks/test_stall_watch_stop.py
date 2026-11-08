@@ -35,12 +35,14 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
   beside the session file. It is listed when that transcript has not changed for the quiet age and
   its last assistant record holds a tool_use with no result (one long call is not a stall). A
   completed notice or a TaskStop result closes it, as for a shell, until a resume reopens it (below).
-  A missing transcript is listed as unknown, once.
+  A later record that names the id (a second tool result) does not reopen it. A missing transcript is
+  listed as unknown, once.
 - A resume by name is a SendMessage result whose toolUseResult has resumedAgentId. It makes the
   agent running again: a quiet agent after a resume is listed once per stall crossing, and an earlier
   listing before the close does not silence it. A resume also makes a job of an agent whose launch is
   not in this transcript. A queued SendMessage result (no resumedAgentId) is no resume, and neither is
-  resumedAgentId text quoted in a tool result.
+  resumedAgentId text quoted in a tool result. A resume with no readable timestamp keeps the agent's
+  launch time.
 - When guard_stream cannot be imported, --stop still lists each stale job, with no note.
 - Any error prints nothing and exits 0.
 
@@ -1973,6 +1975,55 @@ def R8_full_size_each_resumed_agent_is_listed_once():
     msg = system_message(out, problems)
     for aid in ids:
         problems += resumed_row(msg, aid, "resumed after its completed notice and quiet")
+    return problems
+
+
+@case
+def R9_closed_shell_stays_closed_when_a_later_record_names_its_id():
+    """R9. a background shell closed by its completed notice, then a later record (a second tool result) that
+    carries the same backgroundTaskId: the shell stays closed and is not listed. Control: a quiet shell with no
+    notice is listed, so the check ran"""
+    base, folder = new_dir(), new_dir()
+    output_file(base, "bclose9", 600)
+    output_file(base, "bctl9", 600)
+    recs = (stamped(moved("bclose9") + moved("bctl9"), 900)
+            + [at(attachment_notice("bclose9", "completed"), 800)]
+            + stamped([call("toolu_bclose9_2", "tail -1 log", desc="read the log"),
+                       started("toolu_bclose9_2", "bclose9", win_path("bclose9"), False)], 700))
+    rc, out, err = run_stop(transcript(recs, folder=folder), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bctl9")
+    problems += expect("bclose9.output" not in msg,
+                       f"shell bclose9 has a completed notice, then a later record naming its id, but is listed: {msg!r}")
+    return problems
+
+
+@case
+def R10_resume_without_a_readable_time_keeps_the_launch_time():
+    """R10. an agent launched at a readable time, with no transcript: listed unknown at the first Stop after its
+    launch. Its resume record then has no timestamp, or an unreadable one. The start time stays the launch time,
+    so the unknown row is not repeated at the next Stop. Control: an agent launched after the first Stop is
+    listed unknown at the next one"""
+    folder = new_dir()
+    first = [at(prompt("start"), 1200)] + stamped(agent_launch(agent_id(214), win_path(agent_id(214))), 1000)
+    rc1, out1, err1 = run_stop(transcript(first, folder=folder), now=NOW - 600)
+    problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
+    msg1 = system_message(out1, problems)
+    problems += expect(rows(msg1, agent_id(214)) == 1 and "unknown" in line_of(msg1, agent_id(214)),
+                       f"the first Stop does not list agent {agent_id(214)} as unknown, so there is no row to repeat: {msg1!r}")
+    for label, ts in (("missing", None), ("unreadable", "not a time")):
+        res = resume(agent_id(214))
+        if ts is not None:
+            res = [dict(r, timestamp=ts) for r in res]
+        later = first + [stop_summary(600)] + res + stamped(agent_launch(agent_id(215), win_path(agent_id(215))), 500)
+        rc2, out2, err2 = run_stop(transcript(later, folder=folder))
+        problems += expect(rc2 == 0, f"second Stop ({label} resume time) exit {rc2}, want 0: {err2.strip()[:200]}")
+        msg2 = system_message(out2, problems)
+        problems += expect(rows(msg2, agent_id(215)) == 1 and "unknown" in line_of(msg2, agent_id(215)),
+                           f"control agent {agent_id(215)} is not listed as unknown at the second Stop ({label} resume time): {msg2!r}")
+        problems += expect(rows(msg2, agent_id(214)) == 0,
+                           f"agent {agent_id(214)} is listed unknown again at the second Stop after a {label} resume time: {msg2!r}")
     return problems
 
 
