@@ -346,6 +346,81 @@ def case_recommended_a_with_widening_pick_b_stays_refused():
                    decision_with(pick="b", recommended="a"))
 
 
+# ------------------------------------------------------------------ 1c. a reply that asks two questions, cite and options
+
+def case_wire_grouped_with_question_lines_reads_below():
+    """Control, green on the old code: a reply that asks two items, each cite above its question line and then its
+    options, reads each item's own options below its cite. y2 with a) Wait a day is allowed, and so is x1 with a)
+    Keep it as is: the text between them looks like a footer reply's middle, but the reply opens with a cite."""
+    chat = "\n".join(("Page item: %s" % GROUP_X, "Which path?", CHAT_A, CHAT_B,
+                      "Page item: %s" % GROUP_Y, "Which day?", WAIT_A, CHAT_B))
+    transcript = write_transcript("grouped-qline", chat)
+    wire_allows("control: y2 with a) Wait a day, its cite above its question line, is allowed",
+                set_write(GROUP_Y, options_with_a("Wait a day")), transcript)
+    wire_allows("control: x1 with a) Keep it as is, its cite above its question line, is allowed",
+                set_write(GROUP_X, options_with_a("Keep it as is")), transcript)
+
+
+# ------------------------------------------------------------------ 1d. a cite written below its options (footer)
+
+FOOT_ONE, FOOT_TWO = "f1-keep", "f2-wait"  # two items asked in one reply, each cite under its options
+
+
+def footer_chat():
+    """One reply that asks two items, each cite under its own options: f1 writes a) Keep it as is, f2 writes a) Wait a
+    day. f2's question line and options sit under f1's cite."""
+    return "\n".join(("Which path?", CHAT_A, CHAT_B, "Page item: %s" % FOOT_ONE,
+                      "Which day?", WAIT_A, CHAT_B, "Page item: %s" % FOOT_TWO))
+
+
+def case_fn_footer_cite_reads_the_options_above():
+    """A cite under its options reads those options: a differing b is refused. On the old code the lines under the cite
+    are read, there are none, and the write passes."""
+    text = "\n".join(("Which path?", CHAT_A, CHAT_B_MISMATCH, "Page item: %s" % ITEM))
+    fn_refuse("fn: a cite under its options reads them, and a differing b is refused",
+              fn_label(ITEM, OPTIONS, text), "b")
+
+
+def case_fn_footer_cite_reads_past_gain_and_lose_lines():
+    """A footer cite reads every option line of its question, with Gain and Lose lines between them (rule
+    style-question-form): a differing a, three lines above the cite's nearest option line, is refused."""
+    text = "\n".join(("Which path?", "a) Hold the batch", "   Gain: g", "   Lose: l",
+                      CHAT_B, "   Gain: g", "   Lose: l", "Page item: %s" % ITEM))
+    fn_refuse("fn: a footer cite reads its a) line past Gain and Lose lines, and a differing a is refused",
+              fn_label(ITEM, OPTIONS, text), "a")
+
+
+def case_wire_footer_first_item_reads_its_own_lines():
+    """f1 with a) Keep it as is is allowed: its options sit above its cite. On the old code f1 reads f2's a) Wait a
+    day, under its cite, and the write is refused."""
+    transcript = write_transcript("footer-f1", footer_chat())
+    wire_allows("wire: f1 with a) Keep it as is, its cite under its options, is allowed",
+                set_write(FOOT_ONE, options_with_a("Keep it as is")), transcript)
+
+
+def case_wire_footer_first_item_refuses_the_next_label():
+    """f1 with a) Wait a day is refused against f1's own a) line, above its cite. On the old code the lines under f1's
+    cite are read as f1's, f2's a) Wait a day matches, and the write is allowed."""
+    transcript = write_transcript("footer-f1-wait", footer_chat())
+    wire_refuses("wire: f1 with a) Wait a day, f2's line under f1's cite, is refused",
+                 set_write(FOOT_ONE, options_with_a("Wait a day")), transcript)
+
+
+def case_wire_footer_second_item_reads_its_own_lines():
+    """f2 with a) Keep it as is is refused: its own a) is Wait a day, above its cite. On the old code nothing sits
+    under f2's cite, and the write is allowed."""
+    transcript = write_transcript("footer-f2-keep", footer_chat())
+    wire_refuses("wire: f2 with a) Keep it as is, f1's line, is refused",
+                 set_write(FOOT_TWO, options_with_a("Keep it as is")), transcript)
+
+
+def case_wire_footer_second_item_is_allowed():
+    """Control, green on the old code: f2 with a) Wait a day, its own line, is allowed."""
+    transcript = write_transcript("footer-f2", footer_chat())
+    wire_allows("control: f2 with a) Wait a day, its cite under its options, is allowed",
+                set_write(FOOT_TWO, options_with_a("Wait a day")), transcript)
+
+
 # ------------------------------------------------------------------ 2. the recommended field (uniform-pick)
 
 def decision_with(**over):
@@ -416,7 +491,11 @@ CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_prefix
          case_wire_later_note_does_not_hide_the_question, case_fn_cite_mid_line_counts,
          case_wire_grouped_first_question_is_allowed, case_wire_grouped_question_reads_its_own_lines,
          case_wire_grouped_question_refuses_the_other_label, case_wire_unreadable_transcript_is_allowed_and_noted,
-         case_recommended_a_with_widening_pick_b_stays_refused)
+         case_recommended_a_with_widening_pick_b_stays_refused,
+         case_wire_grouped_with_question_lines_reads_below, case_fn_footer_cite_reads_the_options_above,
+         case_fn_footer_cite_reads_past_gain_and_lose_lines, case_wire_footer_first_item_reads_its_own_lines,
+         case_wire_footer_first_item_refuses_the_next_label, case_wire_footer_second_item_reads_its_own_lines,
+         case_wire_footer_second_item_is_allowed)
 FN_CASES = tuple(c for c in CASES if c.__name__.startswith("case_fn_"))
 
 
