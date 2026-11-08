@@ -36,6 +36,9 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
+# The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
+# record holds both. Lower case, to match a lowered reason or record.
+CORRECTION_STEP = ("post only the corrected lines", "never send the report again")
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
 
 # Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
@@ -727,10 +730,10 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     # reports-done-format
     def test_df_red_done_without_kind_blocks(self):
-        self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED, or OTHER")
+        self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED or OTHER")
 
     def test_df_red_done_without_ref_blocks(self):
-        self.assert_blocked("> **Done** BUILT the guard\n> **Next** none", "BUILT, RECORDED, or OTHER")
+        self.assert_blocked("> **Done** BUILT the guard\n> **Next** none", "BUILT, RECORDED or OTHER")
 
     def test_df_red_one_bullet_lacks_ref_blocks(self):
         rows = [
@@ -833,7 +836,7 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     def test_cite_and_done_block_once_with_both_reasons(self):
         out = self.verdict("Per D12.\n\n> **Done** BUILT guard\n> **Next** none")
-        self.assertIn("BUILT, RECORDED, or OTHER", out["reason"])
+        self.assertIn("BUILT, RECORDED or OTHER", out["reason"])
         self.assertIn("'D12'", out["reason"])
 
     def test_df_cite_quiet_on_rewrite(self):
@@ -1017,42 +1020,43 @@ class NoResendTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def test_nr_red_each_report_block_asks_for_the_corrected_lines_only(self):
+    def test_nr_red_each_refusal_holds_no_correction_tail(self):
         rows = [
-            # Catches: the label-word block asks for the report again.
+            # Catches: the label-word refusal carries the correction tail.
             ("label words", "> **Done** fixed it in abc123\n> **Next** none", ()),
-            # Catches: the model-name block asks for the report again.
+            # Catches: the model-name refusal carries the correction tail.
             ("model names", "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
              (self.BUILDER,)),
-            # Catches: the Unstarted block asks for the report again.
+            # Catches: the Unstarted refusal carries the correction tail.
             ("Unstarted line", "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge",
              (self.BUILDER,)),
-            # Catches: the cite-gloss block asks for the report again.
+            # Catches: the cite-gloss refusal carries the correction tail.
             ("cite gloss", "Per D12.\n\n> **Done** BUILT guard, PR #5\n> **Next** none", ()),
-            # Catches: two joined reasons each carry the tail.
+            # Catches: a joined refusal carries the correction tail.
             ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
         ]
         for name, reply, spawns in rows:
-            with self.subTest(block=name):
+            with self.subTest(refusal=name):
                 out = self.verdict(reply, spawns)
                 self.assertEqual(out["decision"], "block")
                 reason = out["reason"].lower()
-                self.assertIn("post only the corrected lines", reason)
-                self.assertIn("never send the report again", reason)
+                self.assertIn("decision guard-remedy-not-to-owner", reason)
                 self.assertNotIn("send the report now", reason)
-                self.assertEqual(reason.count("post only the corrected lines"), 1)
+                for phrase in CORRECTION_STEP:
+                    self.assertNotIn(phrase, reason, "the refusal carries the correction tail: %r" % phrase)
+                self.assertEqual(reason.count("rule reports-order-of-labels"), 1)
                 self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
-        self.assertIn("Do not write it again.", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertNotIn("post only the corrected lines", out["reason"].lower())
 
     def test_nr_missing_report_with_bare_cite_never_forbids_the_report(self):
         # Catches: the block asks for the report and also says never send it.
         out = self.verdict("Per D12.\n\nAll done.")
         self.assertIn("'D12'", out["reason"])
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertNotIn("never send the report again", out["reason"].lower())
 
     def test_nr_correction_only_follow_up_passes(self):
@@ -1090,14 +1094,14 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
 
     def missing_report_block(self):
         out = self.stop("All done.", False)
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
 
     def test_rw_red_rewrite_without_unstarted_blocks(self):
         self.missing_report_block()
         out = self.stop("> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge", True)
         self.assertEqual(out["decision"], "block")
         self.assertIn("Unstarted guard", out["reason"])
-        self.assertIn("post only the corrected lines", out["reason"].lower())
+        self.assertIn("decision guard-remedy-not-to-owner", out["reason"])
         self.assertIn("rule reports-order-of-labels", out["reason"])
 
     def test_rw_red_rewrite_with_wrong_model_blocks(self):
@@ -1284,7 +1288,7 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: the rewrite after a missing-report block demands the line on a reply that is no report.
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         self.assertIsNone(self.stop(self.compacted_turn("Correction: the Done line needs a PR ref."), active=True))
 
     def test_cc_green_correction_line_satisfies_a_later_report(self):
@@ -1363,7 +1367,7 @@ class CompactionCarryTests(unittest.TestCase):
     def test_cc_red_rewrite_after_missing_report_block_names_the_line(self):
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         # The rewrite reads the marker the missing-report block left, and checks the Recovered line once.
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE), active=True))
 
@@ -1449,7 +1453,7 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: the rewrite after a missing-report block checks the Recovered line but not the Handoff gave line.
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none")), active=True),
                                 "Handoff gave")
 
@@ -1592,7 +1596,7 @@ class CompactionCarryCostTests(unittest.TestCase):
                    assistant_text("All done.")]
         out, new = self.run_hook(records)
         self.assertIsNotNone(out, "no missing-report block")
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertEqual([os.path.basename(path) for path in new], [self.sid + ".report-block"])
 
     def test_cc_cost_both_lines_pass_starts_no_process_and_writes_no_file(self):
@@ -2136,13 +2140,13 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
     def test_qm_red_unknown_writer_blocks_and_names_the_page_read(self):
         # Catches: a send to an id that no meta/page read named passing; the block says how to find the writer.
         out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
-        self.assert_blocked(out, "Pick guard", "meta/page", self.PAGE, "ArtifactData get")
+        self.assert_blocked(out, "Pick guard", "the page writer is not known to this session", self.PAGE)
 
     def test_qm_red_writer_from_another_item_does_not_count(self):
         # Catches: a writer id read from a get of another item taken as the page writer.
         out = self.stop([human("decide"), *self.writer_read(self.WRITER, collection="items", doc_id="q1"),
                          *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
-        self.assert_blocked(out, "Pick guard", "meta/page")
+        self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
 
     def test_qm_green_newest_writer_read_names_the_writer(self):
         # Catches: the oldest meta/page read taken as the writer when a newer one names another id.
@@ -2332,7 +2336,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         for body in (self.PROMISE, self.LINKED):
             with self.subTest(body=body[0]):
                 out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
-                self.assert_blocked(out, "Lane pick guard", "@parent")
+                self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_ln_red_box_or_items_write_blocks(self):
         # Catches: a lane's box or items write read as its send. Neither passes a lane.
@@ -2356,7 +2360,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         # Catches: a lane's send to a session that is neither its parent nor the writer.
         out = self.lane(peer_msg("pick?"), *self.send(session_id="session_other9"),
                         assistant_text(self.reply(self.PICK)))
-        self.assert_blocked(out, "Lane pick guard", "@parent")
+        self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_ln_red_send_in_an_earlier_turn_blocks(self):
         # Catches: a send before the lane's last incoming message passing as this turn's send.
@@ -2677,6 +2681,84 @@ class SentenceSplitBoldTests(unittest.TestCase):
         findings = self.lint(text)
         codes = [f.code for f in findings]
         self.assertIn("STE001", codes)
+
+
+class DoubleBacktickMaskTests(unittest.TestCase):
+    """A two-backtick code span is one span (MASK_PATTERNS in lint/ste_lint.py).
+
+    The tests guard that a double-backtick span is masked as code, so its text is not linted and a
+    backtick inside it does not hide the prose after it. They also guard that an unclosed
+    double-backtick run is literal text: it opens no span, so the prose before a later code span
+    is still linted, and that code span is still masked.
+    """
+
+    LONG_TAIL = ("The reviewer reads every changed line of the test file before the branch is pushed, "
+                 "then checks each new case against the old commit and records the failing run in the trailer")
+
+    def codes(self, text):
+        linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
+        return [f.code for f in linter.check_text("t.md", text)]
+
+    def test_backtick_inside_double_backtick_span_does_not_hide_the_next_sentence(self):
+        single = "Write the span as `a b` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
+        self.assertIn("STE001", self.codes(single), "fixture sentence is not over budget")
+        double = "Write the span as ``a ` b`` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
+        self.assertIn("STE001", self.codes(double),
+                      "a backtick inside a double-backtick span hides the sentence after it")
+
+    def test_double_backtick_span_content_is_not_linted(self):
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run ``" + words + "`` now.\n"),
+                         "text inside a double-backtick span is linted as prose")
+
+    def test_double_backtick_span_without_inner_backtick_adds_no_finding(self):
+        self.assertNotIn("STE001", self.codes("Set the flag ``a b`` and then stop the pump now.\n"),
+                         "a double-backtick span with no backtick inside adds a finding")
+
+    def test_unclosed_double_backtick_run_does_not_hide_prose_before_a_code_span(self):
+        # The `` run has no closing run of two, so it is literal text and opens no span.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run status and " + words + ", then `file`.\n"),
+                      "fixture sentence is not over budget")
+        self.assertIn("STE001", self.codes("Run ``status and " + words + ", then `file`.\n"),
+                      "an unclosed double-backtick run hides the words before a later code span")
+
+    def test_unclosed_double_backtick_run_does_not_lint_a_later_code_span_as_prose(self):
+        # The run is literal, so the single-backtick span after it is valid and its words stay masked.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run status then " + words + " now.\n"),
+                      "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run ``status then `" + words + "` now.\n"),
+                         "an unclosed double-backtick run makes a later code span read as prose")
+
+    def test_lone_backtick_before_a_double_span_does_not_hide_the_words_before_it(self):
+        # The lone backtick is an unclosed run, so it is literal and opens no span. The `` span after
+        # it is masked, and the 31 words before it stay prose.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Use " + words + " ``x`` now.\n"), "fixture sentence is not over budget")
+        self.assertIn("STE001", self.codes("Use ` then " + words + " ``x`` now.\n"),
+                      "a lone backtick before a double-backtick span hides the words before it")
+
+    def test_two_backtick_run_inside_a_three_backtick_run_does_not_close_the_span(self):
+        # The ``` run is not a closing run of two, so the span runs on to the `` after the words and
+        # the words stay inside it.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Use " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Use ``x ``` " + words + " `` now.\n"),
+                         "a two-backtick run inside a three-backtick run closes the span early")
+
+    def test_single_backtick_span_content_is_not_linted(self):
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run `" + words + "` now.\n"),
+                         "text inside a single-backtick span is linted as prose")
+
+    def test_single_backtick_span_budget_is_thirty_words(self):
+        base = ("Set the flag `a b` and then the reviewer checks every changed line in the test file "
+                "before the branch is pushed to the shared remote today for the crew now")
+        self.assertIn("STE001", self.codes(base + " again.\n"), "fixture: a 31-word sentence is not over budget")
+        self.assertNotIn("STE001", self.codes(base + ".\n"), "a 30-word sentence with one span is over budget")
 
 
 class DecisionGlossCollapseTests(unittest.TestCase):
@@ -4077,7 +4159,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
     def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
         # Each turn sends to the writer, so the question check stays quiet and only the relay's model error is tested.
         out, _ = self.stop(self.decided, RELAY, model_fail=True, to_writer=True)
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
         self.reset_calls()
         out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True, to_writer=True)
@@ -4101,7 +4183,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         # Index shape (spec, Nov 1 18:58 CST): a reason citing an id the index did not show is a model error.
         bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
 
     def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
@@ -4126,7 +4208,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         with mock.patch.dict(os.environ, {"CJ_ANSWER": tcj.ALLOW}):
             run = run_guard(REPORT_GUARD, hook)
         out = json.loads(run.stdout) if run.stdout.strip() else {}
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
         self.assertIn("past-ruling", run.stderr)
 
     def test_a_stop_hook_active_rewrite_that_keeps_the_ruled_question_is_refused_again(self):
@@ -4570,8 +4652,7 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(out.get("decision"), "block")
                 self.assertIn(self.ARCHIVE, out["reason"])
                 self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
-                self.assertIn("Input Needed", out["reason"])
-                self.assertIn("notes.md", out["reason"])
+                self.assertIn("does not raise it with the owner", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
     def test_e_allow_line_with_no_send_blocks_as_a_question(self):
