@@ -13315,6 +13315,45 @@ add("builder-test: continue-on-error added to a step running hooks/mutate_x.py i
     file_path=WF, old_string=LINT + MUTATE_X, new_string=LINT + MUTATE_X_CONTINUE, **B)
 add("builder-test: a timeout change on the mutate_guard step is allowed", "allow", tool="Edit",
     file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_TIMEOUT, **B)
+# A mutation test run through `cd hooks &&` or a `working-directory:` line names its script by the bare name, so the
+# step check must resolve the folder before it counts the run. A disabled step in either form reads green otherwise.
+# The pins hold what a test file already keeps: the same forms on a test file are refused, by basename.
+TEST_GUARD_CD = "      - name: Guard tests\n        run: cd hooks && python3 test_guard.py\n"
+TEST_GUARD_CD_CONTINUE = ("      - name: Guard tests\n        continue-on-error: true\n"
+                          "        run: cd hooks && python3 test_guard.py\n")
+TEST_GUARD_WD = "      - name: Guard tests\n        working-directory: hooks\n        run: python3 test_guard.py\n"
+TEST_GUARD_WD_IF_FALSE = ("      - name: Guard tests\n        if: false\n        working-directory: hooks\n"
+                          "        run: python3 test_guard.py\n")
+MUTATE_GUARD_CD = "      - name: Guard mutation test\n        run: cd hooks && python3 mutate_guard.py\n"
+MUTATE_GUARD_CD_CONTINUE = ("      - name: Guard mutation test\n        continue-on-error: true\n"
+                            "        run: cd hooks && python3 mutate_guard.py\n")
+MUTATE_GUARD_WD = ("      - name: Guard mutation test\n        working-directory: hooks\n"
+                   "        run: python3 mutate_guard.py\n")
+MUTATE_GUARD_WD_IF_FALSE = ("      - name: Guard mutation test\n        if: false\n        working-directory: hooks\n"
+                            "        run: python3 mutate_guard.py\n")
+MUTATE_SWEEP_WD = "      - name: Mutate sweep\n        working-directory: janitor\n        run: python3 mutate_sweep.py\n"
+MUTATE_SWEEP_WD_CONTINUE = ("      - name: Mutate sweep\n        continue-on-error: true\n"
+                            "        working-directory: janitor\n        run: python3 mutate_sweep.py\n")
+MUTATE_X_CD = "      - name: Mutate tool\n        run: cd hooks && python3 mutate_x.py\n"
+MUTATE_X_CD_CONTINUE = ("      - name: Mutate tool\n        continue-on-error: true\n"
+                        "        run: cd hooks && python3 mutate_x.py\n")
+add("builder-test: continue-on-error added under the cd hooks mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD_CD, new_string=LINT + MUTATE_GUARD_CD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the working-directory mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD_WD, new_string=LINT + MUTATE_GUARD_WD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the working-directory mutate_sweep step is refused", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_SWEEP_WD, new_string=LINT + MUTATE_SWEEP_WD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added to a cd hooks mutate_x.py step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_X_CD, new_string=LINT + MUTATE_X_CD_CONTINUE, **B)
+add("builder-test: continue-on-error added under the cd hooks test step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_CD, new_string=LINT + TEST_GUARD_CD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the working-directory test step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_WD, new_string=LINT + TEST_GUARD_WD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
