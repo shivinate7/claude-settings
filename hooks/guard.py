@@ -3984,18 +3984,19 @@ def _simctl_boot_args(word: str, rest: list):
     return None
 
 
-def _sim_commands(segment: str):
+def _sim_commands(segment: str, with_text: bool = False):
     """(command word as written, its arguments) at each command of SEGMENT and, through `inner_commands`, of each
     command a wrapper hands on (`bash -c`, `sh -lc`, `sudo`, `$(...)`). The one walk of the simulator rules.
-    A quoted or echoed text is not a command and is not read."""
+    A quoted or echoed text is not a command and is not read. WITH_TEXT adds a third item: the segment text the
+    command was read from, with its quotes, as the shell that runs it reads them."""
     tokens = segment_tokens(segment)
     if not tokens:
         return
     for start in command_indexes(tokens):
-        yield tokens[start], tokens[start + 1:]
+        yield (tokens[start], tokens[start + 1:]) + ((segment,) if with_text else ())
     for text in inner_commands(tokens):
         for part in split_segments(text):
-            yield from _sim_commands(part)
+            yield from _sim_commands(part, with_text)
 
 
 def _xcodebuild_boot_names(rest: list) -> list:
@@ -4150,7 +4151,8 @@ def _sim_read():
 # sets are never judged: MCP screenshot, describe and list; `hinge` get and posture; `simctl io`, `list`,
 # `get_app_container`, and `ui <device> <setting>` with no value. A boot is left to the boot rules. A shutdown and
 # an erase are drives: `all` names every booted device. Inside `sim-test --hold -- CMD` the lease does not exist
-# yet, so a drive there must target `$SIM_TEST_UDID`, which the hold exports once it has the lease.
+# yet, so a drive there must target `$SIM_TEST_UDID`, which the hold exports once it has the lease. It must sit in a
+# single-quoted `sh -c '...'` script: elsewhere the caller's shell expands it to empty before the hold runs.
 SIM_READ_ACTIONS = frozenset({"screenshot", "describe", "list"})
 SIM_DRIVE_SIMCTL = frozenset({"ui", "openurl", "install", "uninstall", "launch", "terminate", "push", "privacy",
                               "status_bar", "location", "addmedia", "keychain", "pbcopy", "spawn",
@@ -4169,16 +4171,28 @@ def _sim_hold_command(word: str, rest: list):
     return None
 
 
+def _sim_hold_quoted(text: str) -> bool:
+    """True when each `$SIM_TEST_UDID` (any SIM_HOLD_UDID spelling) in TEXT sits in single quotes, so the shell
+    that reads TEXT hands it on unexpanded. One pass of `walk_quotes`, which respects strings: an escaped `$` is
+    never read at its own index, so it counts as outside single quotes."""
+    quotes = {index: quote for index, _, quote in walk_quotes(text)}
+    return all(quotes.get(at) == "'" for spelling in SIM_HOLD_UDID
+               for at in (m.start() for m in re.finditer(re.escape(spelling), text)))
+
+
 def _sim_drive_targets(segment: str, hold: bool = False):
     """(names, held): the device names, UDIDs or `booted` that each drive command of SEGMENT names (`hinge -d X
     open|close|half|N`, `xcrun simctl <drive verb> X`), and, in HELD, those named inside `sim-test --hold -- CMD`.
-    HOLD says SEGMENT is such a CMD: its names leave out `$SIM_TEST_UDID`. Found by `_sim_commands`, so a quoted
-    text and a comment are no drive. A command that names no device is not judged."""
+    HOLD says SEGMENT is such a CMD whose `$SIM_TEST_UDID` reaches the hold: its names leave it out. It reaches the
+    hold only in the script of `sh -c '...'` (`inline_script`) when every one in the hold's text sits in single
+    quotes; the caller's shell expands any other to empty. Found by `_sim_commands`, so a quoted text and a
+    comment are no drive. A command that names no device is not judged."""
     found, held = [], []
-    for command, rest in _sim_commands(segment):
+    for command, rest, text in _sim_commands(segment, True):
         inside = _sim_hold_command(command, rest)
         if inside:
-            names, more = _sim_drive_targets(shlex.join(inside), True)
+            own = bool(inline_script(inside)) and _sim_hold_quoted(text)
+            names, more = _sim_drive_targets(shlex.join(inside), own)
             held.extend(names + more)
             continue
         word = basename(command)
@@ -4241,13 +4255,14 @@ HOLD_REMEDY = "sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'"
 
 
 def sim_hold_refusal(tool: str, names: list) -> None:
-    """Refuse a drive inside `sim-test --hold -- CMD` that targets NAMES, not `$SIM_TEST_UDID` (rule
-    simulator-drive-lease). The caller's shell expands `"$SIM_TEST_UDID"` before the hold exports it, so the
-    remedy runs the drive under `sh -c` with single quotes."""
+    """Refuse a drive inside `sim-test --hold -- CMD` that targets NAMES, not `$SIM_TEST_UDID` in a single-quoted
+    `sh -c '...'` (rule simulator-drive-lease). The caller's shell expands `"$SIM_TEST_UDID"` before the hold
+    exports it, so the remedy runs the drive under `sh -c` with single quotes."""
     if names:
         refuse(tool, "deny", "simulator-drive-lease",
                "A drive inside `sim-test --hold` names %s, but the hold takes its lease before it runs the "
-               "command, so only `$SIM_TEST_UDID` is covered. Drive `$SIM_TEST_UDID` from a shell the hold starts, "
+               "command, so only `$SIM_TEST_UDID` is covered, and only in single quotes: the caller's shell expands "
+               "any other to empty before the hold exports it. Drive `$SIM_TEST_UDID` from a shell the hold starts, "
                "so the hold expands it: `%s`. (decision sim-test-is-the-one-boot-path)"
                % (", ".join(names), HOLD_REMEDY), ", ".join(names))
 
