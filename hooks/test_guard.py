@@ -25654,9 +25654,9 @@ for _tool in CS_NAMED_WRITE:
     for _repo, _kind, _rel in CS_LEGACY_KEPT:   # RED: that repo's own checkout writes the same path for another repo: denied
         cs_named_call("named_repo_legacy_checkout_%s_%s_%s_other_repo_denied" % (_short, _repo.split("/")[1], _kind), "deny", _tool,
                       _rel, cwd=_cs_legacy_checkout(_repo))
-    # A legacy spelling is a home only for a repo that the layout lists under legacy-repos (decision one-layout-every-repo, the
-    # paragraph that begins "A repo that has not rolled out"). The named repo, acme/widgets, is not listed: a rolled-out
-    # checkout's write of the legacy decisions or plans spelling for it is refused.
+    # A legacy spelling is a home only for a repo that the layout lists under legacy-repos (decision uniform-over-variants, owner,
+    # 2026-10-27 12:51 CDT: a shared tool never grows a second accepted form to fit one repo). The named repo, acme/widgets, is not
+    # listed: a rolled-out checkout's write of the legacy decisions or plans spelling for it is refused.
     cs_named_call("named_repo_rolled_checkout_%s_legacy_decisions_unlisted_repo_denied" % _short, "deny", _tool,
                   CS_LEGACY_DECISIONS + "/x.md", cwd=CS_ROLLED)
     cs_named_call("named_repo_rolled_checkout_%s_legacy_plans_unlisted_repo_denied" % _short, "deny", _tool,
@@ -26344,16 +26344,23 @@ def cs_repo_git_files():
     return [dotgit, commondir, os.path.join(common, "config")]
 
 
-def cs_call_pins(config, checkout, remote, stamp):
+def cs_call_pins(config, checkout, remote, stamp, write=None):
     """The paths a GitHub MCP call opens in a session of `config`, in the checkout it runs in: the session's own record of that
-    checkout, the config folder's CLAUDE.md (the pointer to the settings clone), the checkout's git config, the role file of a
-    cloud session, and the checkout's stamp when `stamp` is true."""
-    pins = [os.path.join(checkout, ".git", "session-homes", CS_PAYLOAD_SID), os.path.join(config, "CLAUDE.md"),
-            os.path.join(checkout, ".git", "config")]
+    checkout, the role file of a cloud session, and the checkout's stamp when `stamp` is true. An arm or merge call (`write` is
+    None) also opens the config folder's CLAUDE.md (the pointer to the settings clone) and the checkout's git config, in every
+    session. A file-write call passes `write` as (coordinator, own): it opens those two only as a coordinator, and then also
+    lint/layout.json, and the checkout's extras file when `own` says the checkout is the repo the call names."""
+    pins = [os.path.join(checkout, ".git", "session-homes", CS_PAYLOAD_SID)]
+    if write is None or write[0]:
+        pins += [os.path.join(config, "CLAUDE.md"), os.path.join(checkout, ".git", "config")]
     if remote:
         pins.append(os.path.join(config, "state", "merge-role.json"))
     if stamp:
         pins.append(os.path.join(checkout, ".github", "stamp.json"))
+    if write is not None and write[0]:
+        pins.append(os.path.join(REPO, "lint", "layout.json"))
+        if write[1]:
+            pins.append(os.path.abspath(os.path.join(checkout, *cs_layout()["extras"].split("/"))))
     return pins
 
 
@@ -26444,6 +26451,28 @@ CS_CHECKS.append(("coordinator-scope cost: the merge tool by a local session in 
                   cs_open_set_check("allow", cs_call_pins(CS_CONFIG["coordinator"], GITMAIN, False, True) + cs_merge_repo_pins(),
                                     CS_CONFIG["coordinator"], CS_MCP_MERGE[0], CS_MCP_NUMBERED, GITMAIN, CS_LOCAL_ENV,
                                     env_path=cs_merge_gh_path)))
+# The open set of each GitHub MCP file-write call (rule coordinator-scope, decision session-tiers), path by path. A lane session
+# and a local one open their session's own record, and a cloud session also its role file. A coordinator also opens the config's
+# CLAUDE.md, the checkout's git config and lint/layout.json. For the repo the call names, it also opens the checkout's extras file
+# (cs_extras_open_check). A write that names another repo opens no extras file. Each row is the whole open set of its call.
+CS_WRITE_OPEN_SETS = (
+    ("a lane session, not a coordinator", CS_CONFIG["lane"], CS_REMOTE, GITMAIN, "widgets", True, (False, False)),
+    ("a local session", CS_CONFIG["coordinator"], CS_LOCAL_ENV, GITMAIN, "widgets", False, (False, False)),
+    ("a cloud coordinator writing its own repo", CS_CONFIG["coordinator"], CS_REMOTE, CS_ROLLED, "gizmo", True, (True, True)),
+    ("a cloud coordinator writing another named repo", CS_CONFIG["coordinator"], CS_REMOTE, CS_ROLLED, "widgets", True,
+     (True, False)),
+)
+for _tool in CS_NAMED_WRITE:
+    _short = _tool.replace("mcp__github__", "")
+    for _who, _config, _env, _checkout, _repo, _remote, _write in CS_WRITE_OPEN_SETS:
+        _input = dict(CS_MCP_REPO, repo=_repo)
+        if _tool == "mcp__github__push_files":
+            _input["files"] = [{"path": CS_MCP_RECORD, "content": "x"}]
+        else:
+            _input["path"] = CS_MCP_RECORD
+        CS_CHECKS.append(("coordinator-scope cost: write open set, %s by %s, the pinned paths" % (_short, _who),
+                          cs_open_set_check("allow", cs_call_pins(_config, _checkout, _remote, False, _write), _config, _tool,
+                                            _input, _checkout, _env)))
 for _label, _check in CS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)  # decide() builds the fixtures each call names
