@@ -12667,25 +12667,39 @@ sh("frozen shell: F4 control, the same subshell on notes.txt with a pid, allows 
 sh("frozen shell: F4 pin, the bare & form, (cd config folder; sed -i on settings.json) &, is refused by "
    "detached-launch first", "(cd " + slash(CFG) + "; sed -i s/a/b/ settings.json) &", "deny", "detached-launch",
    cwd=NOGIT)
-# F3, cost. A 400-segment command, 399 echo segments of 150 characters and a sed -i on the frozen settings.json, is
-# judged in process. The verdict is checked first, then the CPU seconds of frozen_shell_hit. dir_before_segment reads
-# the segments before each segment, so the cd-following cost grows with the square of the segment count. CPU time is
-# read as judge_in_process reads it. The guard is loaded through _load_guard_module, so a GUARD_UNDER_TEST copy is timed.
+# F4, a false alarm. From the config folder, the cd inside the parens moves to config/sub, so the sed -i writes
+# config/sub/settings.json, which is not frozen. The guard reads the cd as moving nothing and refuses the write. The
+# bare `&` form is refused by detached-launch first, so the row carries `& echo $!` to reach the frozen reader.
+sh("frozen shell: F4 false alarm, (cd sub; sed -i on settings.json) & echo $!, from the config folder, allows "
+   "[subshell false alarm]", "(cd sub; sed -i s/a/b/ settings.json) & echo $!", "allow", cwd=CFG)
+# F3, cost, counted. A 400-segment command, 399 echo segments of 150 characters and a sed -i on the frozen settings.json,
+# is judged in process. The verdict is checked first. Then dir_before_segment is wrapped, and the segments each call walks
+# are summed. A call walks every segment before its own, so the sum grows with the square of the segment count; a linear
+# reader walks about one segment per segment. Counting, not timing, keeps a real clock out of the assert (practice P5).
+# The wrapper replaces the name guard_frozen calls, and the real function is put back after the run.
 F3_SEGMENTS = 400
 F3_TEXT = "x" * 150
 F3_COMMAND = ('echo "%s"; ' % F3_TEXT) * (F3_SEGMENTS - 1) + "sed -i s/a/b/ settings.json"
-F3_LIMIT_S = 2.0
+F3_WALK_BOUND = 2 * F3_SEGMENTS
 
 
 def frozen_cost_case():
     guard = _load_guard_module()
+    frozen = sys.modules["guard_frozen"]
+    real = frozen.dir_before_segment
+    walked = [0]
+
+    def counting(segments, number, *args, **kwargs):
+        walked[0] += number + 1
+        return real(segments, number, *args, **kwargs)
+
     saved = os.environ.get("CLAUDE_CONFIG_DIR")
     os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    frozen.dir_before_segment = counting
     try:
-        started = time.process_time()
         hit = guard.frozen_shell_hit(F3_COMMAND, CFG)
-        took = time.process_time() - started
     finally:
+        frozen.dir_before_segment = real
         if saved is None:
             os.environ.pop("CLAUDE_CONFIG_DIR", None)
         else:
@@ -12693,9 +12707,11 @@ def frozen_cost_case():
     shape = "%d segments of %d characters" % (F3_SEGMENTS, len(F3_TEXT))
     if hit != "settings.json":
         return False, "frozen_shell_hit missed the frozen settings.json in the %s: got %r" % (shape, hit)
-    if took >= F3_LIMIT_S:
-        return False, "frozen_shell_hit took %.2f CPU s on the %s, not under %g s" % (took, shape, F3_LIMIT_S)
-    return True, "frozen_shell_hit took %.2f CPU s on the %s, under %g s" % (took, shape, F3_LIMIT_S)
+    if walked[0] > F3_WALK_BOUND:
+        return False, ("dir_before_segment walked %d segments on the %s, over the bound of %d (2 x %d)"
+                       % (walked[0], shape, F3_WALK_BOUND, F3_SEGMENTS))
+    return True, "dir_before_segment walked %d segments on the %s, within the bound of %d" % (
+        walked[0], shape, F3_WALK_BOUND)
 
 
 # An output flag writes its file wherever its command runs. A spaced subshell is already read. The subshell
@@ -14814,7 +14830,7 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 # The frozen cost check is appended here for the same reason. Its family is the frozen section's, set by hand.
-FROZEN_COST_LABEL = "frozen: a 400-segment command is judged in process within 2 s"
+FROZEN_COST_LABEL = "frozen: dir_before_segment walks at most 2 x 400 segments for a 400-segment command"
 LOG_CHECKS_EXTRA.append((FROZEN_COST_LABEL, frozen_cost_case))
 LOG_FAMILY[FROZEN_COST_LABEL] = "frozen"
 for _name, _change in BUILDER_GREEN:
