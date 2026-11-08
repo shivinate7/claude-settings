@@ -150,6 +150,18 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertFlags(run([p]), want_true=ALL + DERIVED_FLAGS)
 
+    def test_an_event_body_reader_change_turns_on_the_merge_job_and_code_only(self):
+        # test_merge and test_lane_lint import lint/_test_event_body.py, so the merge job runs; `code` runs the lints.
+        # The file is in the base: a new file under a landed dir also turns on the install and guard suites.
+        got = run(["lint/_test_event_body.py"], existing=["lint/_test_event_body.py"])
+        self.assertEqual(self.true_set(got, ALL + DERIVED_FLAGS), {"checks_windows_merge", "code"}, got)
+
+    def test_a_run_folder_helper_change_turns_on_every_flag(self):
+        # lint/_test_temp.py is imported by every suite, so each job and each suite flag turns on.
+        # The file is in the base, as in the case above.
+        got = run(["lint/_test_temp.py"], existing=["lint/_test_temp.py"])
+        self.assertEqual(self.true_set(got, ALL + DERIVED_FLAGS), set(ALL + DERIVED_FLAGS), got)
+
     def test_unmapped_path_runs_everything(self):
         self.assertFlags(run(["zz-unmapped/blob.bin"]), want_true=ALL)
 
@@ -231,8 +243,10 @@ class Scope(unittest.TestCase):
     # gives a new sibling no sweep flag, and an edited one no Windows or shell job.
     GUARD_SIBLINGS = ["hooks/guard_core.py", "hooks/guard_merge.py", "hooks/guard_rules.py"]
 
-    def true_set(self, got):
-        return {n for n in ALL if got[n] == "true"}
+    def true_set(self, got, names=ALL):
+        for n in names:
+            self.assertIn(n, got, f"output {n} missing: {got}")
+        return {n for n in names if got[n] == "true"}
 
     def test_guard_sibling_new_file_sets_the_same_flags_as_guard_py(self):
         want = run(["hooks/guard.py"])
