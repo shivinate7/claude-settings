@@ -1604,28 +1604,38 @@ def _build_pointer():
 
     make_blind_git(GITBLIND)
 
-def _conflict_repo(where, path, base, feature, main, resolved=None):
+def _conflict_repo(where, path, base, feature, main, resolved=None, linked=False):
     """A real checkout with one unresolved merge conflict in `path`. `feature` and `main` each change the
     file from `base`, and `feature` is merged into `main`. `resolved`, when given, replaces the conflicted
-    file and is staged, so a case reads a resolution that is ready to commit."""
+    file and is staged, so a case reads a resolution that is ready to commit.
+
+    `linked` builds the same conflict as a linked worktree, as a builder runs in (see diff_repo). The three
+    commits sit in a main checkout at `where` + "-main", and the merge runs in `where`, a worktree on a new
+    branch cut from main. own_changes reads the HEAD reflog of the checkout it judges, and a linked
+    worktree's reflog holds none of the setup commits, so only the resolution is the builder's change."""
     # A real checkout with a real, unresolved merge conflict, built with git itself rather than
     # mocked. Two branches each change the same file, and merging one into the other leaves
     # MERGE_HEAD set and the file in the conflicted "AA" state, which git will not let a commit
     # leave silently.
-    os.makedirs(where, exist_ok=True)
-    run_vcs(where, "init", "-q", "-b", "main", ".")
+    home = where + "-main" if linked else where
+    os.makedirs(home, exist_ok=True)
+    run_vcs(home, "init", "-q", "-b", "main", ".")
     ident = ["-c", "user.email=cases@example.invalid", "-c", "user.name=cases"]
-    write(os.path.join(where, path), base)
-    run_vcs(where, "add", path)
-    run_vcs(where, *ident, "commit", "-q", "-m", "base")
-    run_vcs(where, "checkout", "-q", "-b", "feature")
-    write(os.path.join(where, path), feature)
-    run_vcs(where, "add", path)
-    run_vcs(where, *ident, "commit", "-q", "-m", "feature change")
-    run_vcs(where, "checkout", "-q", "main")
-    write(os.path.join(where, path), main)
-    run_vcs(where, "add", path)
-    run_vcs(where, *ident, "commit", "-q", "-m", "main change")
+    write(os.path.join(home, path), base)
+    run_vcs(home, "add", path)
+    run_vcs(home, *ident, "commit", "-q", "-m", "base")
+    run_vcs(home, "checkout", "-q", "-b", "feature")
+    write(os.path.join(home, path), feature)
+    run_vcs(home, "add", path)
+    run_vcs(home, *ident, "commit", "-q", "-m", "feature change")
+    run_vcs(home, "checkout", "-q", "main")
+    write(os.path.join(home, path), main)
+    run_vcs(home, "add", path)
+    run_vcs(home, *ident, "commit", "-q", "-m", "main change")
+    if linked:
+        made = run_vcs(home, "worktree", "add", "-q", "-b", "work", where, "main")
+        if made.returncode != 0:
+            sys.exit("fixture setup failed: worktree in %r: %s" % (where, made.stderr.strip()))
     # MEASURED on CI (run 35182973995): this call ran with no `ident`, so on a runner with no
     # global git identity the merge refused before it ever touched the tree ("Committer identity
     # unknown", exit 128), MERGE_HEAD was never set, and the conflict-resolve fixtures below were
@@ -13866,7 +13876,8 @@ add("builder-test: Edit of jest.config.ts is refused", "deny", rule=BT, tool="Ed
 
 # ---- a merge conflict in package.json, built with git (see _conflict_repo). A conflict in `version` alone is
 # not owned, so a builder may resolve it, write the resolved file and commit the merge. A conflict in the
-# `jest` key is owned, so the same resolutions are refused.
+# `jest` key is owned, so the same resolutions are refused. The STAGED repos are linked worktrees, so the
+# setup commits are not the builder's and only the resolution is judged.
 def _manifest(version="1.0.0", env="node"):
     return ('{\n  "name": "x",\n  "version": "%s",\n  "scripts": {\n    "test": "jest"\n  },\n'
             '  "jest": {\n    "testEnvironment": "%s"\n  }\n}\n' % (version, env))
@@ -13880,12 +13891,12 @@ lazy_fixture([MCONF_VER], lambda: _conflict_repo(
     MCONF_VER, "package.json", _manifest(), _manifest("1.1.0"), _manifest("1.0.1")))
 lazy_fixture([MCONF_VER_STAGED], lambda: _conflict_repo(
     MCONF_VER_STAGED, "package.json", _manifest(), _manifest("1.1.0"), _manifest("1.0.1"),
-    resolved=_manifest("1.2.0")))
+    resolved=_manifest("1.2.0"), linked=True))
 lazy_fixture([MCONF_JEST], lambda: _conflict_repo(
     MCONF_JEST, "package.json", _manifest(), _manifest(env="jsdom"), _manifest(env="happy-dom")))
 lazy_fixture([MCONF_JEST_STAGED], lambda: _conflict_repo(
     MCONF_JEST_STAGED, "package.json", _manifest(), _manifest(env="jsdom"), _manifest(env="happy-dom"),
-    resolved=_manifest(env="jsdom")))
+    resolved=_manifest(env="jsdom"), linked=True))
 add("builder-test: Edit that resolves a version-only merge conflict in package.json is allowed", "allow",
     tool="Edit", file_path="package.json",
     old_string='<<<<<<< HEAD\n  "version": "1.0.1",\n=======\n  "version": "1.1.0",\n>>>>>>> feature',
