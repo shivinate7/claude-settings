@@ -14863,15 +14863,21 @@ def ors_remote(where):
     return run_vcs(where, "rev-parse", "refs/remotes/origin/" + ORS_LANE).stdout.strip()
 
 
+def ors_holds(where, head):
+    """True when origin's lane ref is `head` or a descendant of it: the branch holds the reviewed head."""
+    return run_vcs(where, "merge-base", "--is-ancestor", head, "refs/remotes/origin/" + ORS_LANE).returncode == 0
+
+
 def ors_commit(where, message, text, rel="src/app.py"):
     write(os.path.join(where, rel), text)
     _must(where, "add", "-A")
     _must(where, *IDENT, "commit", "-q", "-m", message)
 
 
-def ors_lane(label, merge=True):
+def ors_lane(label, merge=True, stamp=None):
     """A main checkout with a bare origin, and the lane as a linked worktree whose one commit is pushed, so the
-    lane's remote-tracking ref names that head. The main checkout carries a merge config when `merge` is set."""
+    lane's remote-tracking ref names that head. The main checkout carries a merge config when `merge` is set;
+    `stamp`, when given, is the text of its stamp file instead."""
     main = os.path.join(ROOT, "ors-" + label)
     bare = main + "-origin"
     lane = main + "-lane"
@@ -14882,7 +14888,9 @@ def ors_lane(label, merge=True):
     _must(main, "symbolic-ref", "HEAD", "refs/heads/main")
     _must(main, "init", "-q", "--bare", bare)
     _must(main, "remote", "add", "origin", bare)
-    if merge:
+    if stamp is not None:
+        write(os.path.join(main, ".github", "stamp.json"), stamp)
+    elif merge:
         write(os.path.join(main, ".github", "stamp.json"), json.dumps({"merge": {}}))
     ors_commit(main, "base", "x = 1\n")
     _must(main, "push", "-q", "origin", "HEAD:refs/heads/main")
@@ -14926,12 +14934,13 @@ def ors_record(head, rounds=(), fix=None, n=ORS_PR):
     return body
 
 
-def ors_new(label, merge=True):
-    """A case's context: its checkout, config folder and session, and the stops it runs as (role, decision, reason)."""
-    main, lane = ors_lane(label, merge)
+def ors_new(label, merge=True, stamp=None):
+    """A case's context: its checkout, config folder and session, and the stops it runs as (role, decision, reason).
+    `tool` and `tool_input` name the call judged when it is not a shell push (None: a push of `command`)."""
+    main, lane = ors_lane(label, merge, stamp)
     return {"label": label, "main": main, "lane": lane, "config": ors_config(label), "session": "ors-" + label,
             "head": ors_head(lane), "gh": None, "stops": [], "command": ORS_PUSH, "scope": None, "after": None,
-            "note": ""}
+            "note": "", "tool": "Bash", "tool_input": None}
 
 
 def ors_stop_into(ctx, role=ORS_REVIEWER):
@@ -14945,7 +14954,8 @@ def ors_stop_into(ctx, role=ORS_REVIEWER):
 
 def ors_push(ctx):
     """The lane's push, judged by the guard in the lane's checkout, in the case's session and config."""
-    return ov_call("Bash", {"command": ctx["command"]}, ctx["lane"], ctx["config"], ctx["session"], 0,
+    tool_input = ctx["tool_input"] or {"command": ctx["command"]}
+    return ov_call(ctx["tool"], tool_input, ctx["lane"], ctx["config"], ctx["session"], 0,
                    env_path=ors_path(ctx["gh"]))
 
 
@@ -14955,8 +14965,8 @@ def ors_scope_problem(ctx, red):
     problem = ""
     if any(decision != "allow" or reason for _role, decision, reason in ctx["stops"]):
         problem = "scope: a stop did not stay silent: %r" % (ctx["stops"],)
-    elif ors_remote(ctx["main"]) != ctx["head"]:
-        problem = "scope: origin's lane ref is not the head the case reviews"
+    elif not ors_holds(ctx["main"], ctx["head"]):
+        problem = "scope: origin's lane ref does not hold the head the case reviews"
     elif red and ors_head(ctx["lane"]) == ctx["head"]:
         problem = "scope: the push source is the reviewed head, so the push owes nothing"
     elif ctx["scope"]:
@@ -15008,15 +15018,29 @@ def ors_slug(label):
     return label.split(": ", 1)[1].split(" ", 1)[0].lower()
 
 
-def ors_red(label, build, unread=False):
-    """A red case: `build` makes the scenario, then the push must ask."""
+def ors_either(decision, reason, head):
+    """'' when the push asks and notes either the merge command for the head or owed-record-unread, else the cause."""
+    wanted = "merge %d --review-record --head %s" % (ORS_PR, head)
+    if decision == "ask" and ORS_RULE in reason and ("owed-record-unread" in reason or wanted in reason):
+        return ors_reason_problem(reason)
+    return ors_asks(decision, reason, head)
+
+
+def ors_red(label, build, unread=False, either=False):
+    """A red case: `build` makes the scenario, then the push must ask. `unread` wants the owed-record-unread note,
+    `either` accepts that note or the merge command."""
     def case():
         ctx = build(ors_slug(label))
         problem = ors_scope_problem(ctx, red=True)
         if problem:
             return False, problem
         decision, reason = ors_push(ctx)
-        problem = ors_unreadable(decision, reason) if unread else ors_asks(decision, reason, ctx["head"])
+        if unread:
+            problem = ors_unreadable(decision, reason)
+        elif either:
+            problem = ors_either(decision, reason, ctx["head"])
+        else:
+            problem = ors_asks(decision, reason, ctx["head"])
         if problem:
             return False, problem
         return True, "asks, and names the rule and the merge command for head %s" % ctx["head"][:12]
@@ -15301,6 +15325,153 @@ ors_allow("push-owes-review-record: C11 a full folder of 40 entries for other he
           ors_c11)
 ors_allow("push-owes-review-record: R7c a Fix check record with Head F posted before the push: allowed silently",
           ors_r7c)
+
+
+def ors_entries_scope(c):
+    """'' when an entry exists in the case's config folder."""
+    return "" if ors_entries(c["config"]) else "scope: no entry exists"
+
+
+def ors_f1a(label):
+    """F1a: the lane pushed past H, then the reviewer stopped at H, where the worktree is detached, with no record.
+    The lane then pushes another commit. The stop must record the remote branches that contain H."""
+    ctx = ors_new(label)
+    ors_commit(ctx["lane"], "work past the reviewed head", "x = 3\n")
+    _must(ctx["lane"], "push", "-q", "origin", "HEAD:refs/heads/" + ORS_LANE)
+    _must(ctx["lane"], "checkout", "-q", "--detach", ctx["head"])
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix after the stop", "x = 4\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ors_remote(ctx["main"]))])
+    return ctx
+
+
+def ors_f1b(label):
+    """F1b (control): a record at H is posted, a later round's record at R is the newest, and the lane pushes a
+    commit past R. Any parseable record with Head H satisfies the rule, so the push is allowed."""
+    ctx = ors_new(label)
+    head = ctx["head"]
+    ors_stop_into(ctx)
+    rec_h = ors_record(head, rounds=[(1, ORS_REVIEWER, PFR_MODEL, "FAIL")])
+    ors_commit(ctx["lane"], "round 1 fix", "x = 3\n")
+    _must(ctx["lane"], "push", "-q", "origin", "HEAD:refs/heads/" + ORS_LANE)
+    later = ors_head(ctx["lane"])
+    rec_r = ors_record(later, rounds=[(1, ORS_REVIEWER, PFR_MODEL, "FAIL"), (2, ORS_REVIEWER, PFR_MODEL, "PASS")])
+    ors_commit(ctx["lane"], "round 2 fix", "x = 4\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(later)], comments={ORS_PR: [rec_h, rec_r]})
+    ctx["note"] = "a record at H, then a newer record at R"
+    return ctx
+
+
+def ors_f1c(label):
+    """F1c: the reviewer stopped at H, the lane then pushed R past H, so the pull request's head sha is R and the
+    pull request is found by its head branch name. No record. The push must ask."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix pushed after the stop", "x = 3\n")
+    _must(ctx["lane"], "push", "-q", "origin", "HEAD:refs/heads/" + ORS_LANE)
+    ors_commit(ctx["lane"], "fix the finding", "x = 4\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ors_remote(ctx["main"]))])
+    return ctx
+
+
+def ors_f2(label):
+    """F2: an entry exists, and the push's destination cannot be read: the command carries a comment with an
+    apostrophe after it."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["command"] = ORS_PUSH + "  # don't"
+    ctx["scope"] = ors_entries_scope
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_f3(label):
+    """F3: an entry exists, and the stamp file is malformed, so the merge config cannot be read. A missing stamp file
+    is C8, which still allows."""
+    ctx = ors_new(label, stamp="{not json\n")
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+
+    def malformed(c):
+        problem = ors_entries_scope(c)
+        if problem:
+            return problem
+        try:
+            with open(os.path.join(c["main"], ".github", "stamp.json"), encoding="utf-8") as handle:
+                json.load(handle)
+        except ValueError:
+            return ""
+        return "scope: the stamp file parses, so it is not malformed"
+
+    ctx["scope"] = malformed
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_f4(label):
+    """F4: push.default is matching, and the lane pushes with a bare push. The entry is for the current branch, and no
+    record is posted."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    _must(ctx["main"], "config", "push.default", "matching")
+    ctx["command"] = VCS + " push"
+
+    def matching(c):
+        problem = ors_entries_scope(c)
+        if problem:
+            return problem
+        if run_vcs(c["lane"], "config", "--get", "push.default").stdout.strip() != "matching":
+            return "scope: push.default is not matching"
+        return ""
+
+    ctx["scope"] = matching
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_f6_base(label):
+    """The F6 scenario: the reviewer stopped at H, the lane holds a commit past H, and the pull request on the lane's
+    branch is at H. The call judged is update_pull_request_branch on that pull request."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["tool"] = "mcp__github__update_pull_request_branch"
+    ctx["tool_input"] = {"owner": "shivinate7", "repo": "claude-settings", "pullNumber": ORS_PR}
+    ctx["scope"] = ors_entries_scope
+    return ctx
+
+
+def ors_f6(label):
+    """F6: update_pull_request_branch on the pull request whose head branch has an unrecorded entry. It must ask."""
+    ctx = ors_f6_base(label)
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_f6c(label):
+    """F6c (control): the same call, with the record at H posted. It is allowed."""
+    ctx = ors_f6_base(label)
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])],
+                       comments={ORS_PR: [ors_record(ctx["head"], rounds=[(1, ORS_REVIEWER, PFR_MODEL, "PASS")])]})
+    ctx["note"] = "the record at H is posted"
+    return ctx
+
+
+ors_red("push-owes-review-record: F1a the lane pushed past H, the reviewer stopped at H, then another push, no record: asks",
+        ors_f1a)
+ors_allow("push-owes-review-record: F1b a record at H, then a newer record at R, then a push: allowed silently", ors_f1b)
+ors_red("push-owes-review-record: F1c the pull request's head moved past H and is found by its branch, no record: asks",
+        ors_f1c)
+ors_red("push-owes-review-record: F2 an entry exists and the push's destination cannot be read: asks, noting owed-record-unread",
+        ors_f2, unread=True)
+ors_red("push-owes-review-record: F3 an entry exists and the stamp file is malformed: asks", ors_f3, either=True)
+ors_red("push-owes-review-record: F4 push.default matching with a bare push and an entry for the branch, no record: asks",
+        ors_f4)
+ors_red("push-owes-review-record: F6 update_pull_request_branch on the pull request whose branch has an unrecorded entry: asks",
+        ors_f6)
+ors_allow("push-owes-review-record: F6c update_pull_request_branch with the record at H posted: allowed silently", ors_f6c)
 
 
 # =========================================================================== builder refusal
