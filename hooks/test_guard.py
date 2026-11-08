@@ -5774,6 +5774,18 @@ sh("check-tail: cmd 2>&1 | tail, the & of a redirect is no job, is allowed", "cm
    cwd=NOGIT)
 sh("check-tail: cmd >&2; echo x, the & of a redirect is no job, is allowed", "cmd >&2; echo x", "allow",
    cwd=NOGIT)
+# The quote and comment cases for the mid-line reading (building-scanner-respects-strings): a `#` or a lone
+# apostrophe inside quotes starts no comment and ends no quote, so the `&` after it is a job. A `&` after a
+# comment's `#`, or inside a multi-line quote, is no job. Each deny names the rule its spaced form is refused by.
+sh("check-tail: ci-job checks | grep '#x'& echo $!, a glued & after a quoted #, with the pid captured, is refused",
+   "ci-job checks | grep '#x'& echo $!", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: ci-job checks | grep \"don't\"&echo done, a glued & after a quoted lone apostrophe, is refused; "
+   "detached-launch refuses it first", 'ci-job checks | grep "don\'t"&echo done', "deny", "detached-launch",
+   cwd=NOGIT)
+sh("check-tail: ci-job checks | tail -3 # a& b, a glued & after a comment's #, is allowed",
+   "ci-job checks | tail -3 # a& b", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks | grep \"x& y\" over a newline \"z\", a glued & inside a multi-line quote, is allowed",
+   'ci-job checks | grep "x& y\nz"', "allow", cwd=NOGIT)
 
 # Controls, each held in the foreground and each allowed. A reading that takes any `&` in a word for a
 # background job would refuse every one: the `&` of `|&` (also glued to the next word), `&&`, a quoted
