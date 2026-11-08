@@ -13385,6 +13385,38 @@ add("builder-test: continue-on-error added under a test step is refused", "deny"
 add("builder-test: if: false added under a test step is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + IF_FALSE,
     carries=("test-author", "Report"), **B)
+# file-judge: a builder's workflow Edit is judged on the whole file, not on its fragments. An Edit whose old_string is a
+# test step's name line hides the run line below it, so the fragment never shows the test the step runs. Each fixture is
+# a real checkout whose workflow file holds the text uncommitted, as git leaves it.
+FILE_JUDGE_ONE = _workflow_file_repo("wf-file-judge-one", LINT + TEST_LINUX + CLEAN)
+FILE_JUDGE_TWICE = _workflow_file_repo("wf-file-judge-two-steps", LINT + TEST_LINUX + TEST_WINDOWS)
+TEST_NAME_LINE = "      - name: Guard tests\n"
+add("builder-test (file-judge): continue-on-error added under a test step's name line is refused, run line below it",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=TEST_NAME_LINE,
+    new_string=TEST_NAME_LINE + "        continue-on-error: true\n", carries=("test-author", "Report"),
+    **dict(B, cwd=FILE_JUDGE_ONE))
+add("builder-test (file-judge): if: false added under a test step's name line is refused, run line below it",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=TEST_NAME_LINE,
+    new_string=TEST_NAME_LINE + "        if: false\n", carries=("test-author", "Report"),
+    **dict(B, cwd=FILE_JUDGE_ONE))
+add("builder-test (file-judge): continue-on-error added by MultiEdit under a test step's name line is refused",
+    "deny", rule=BT, tool="MultiEdit", file_path=WF,
+    edits=[{"old_string": TEST_NAME_LINE, "new_string": TEST_NAME_LINE + "        continue-on-error: true\n"}],
+    carries=("test-author", "Report"), **dict(B, cwd=FILE_JUDGE_ONE))
+# The file runs one test path in two steps. Deleting one whole step still leaves the path in the file, so the
+# loosening that a set-based judge of the file would make is pinned here: the step's removal is refused.
+add("builder-test (file-judge): a test step deleted where a second step runs the same test path is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=TEST_WINDOWS, new_string="",
+    carries=("test-author", "Report"), **dict(B, cwd=FILE_JUDGE_TWICE))
+# Controls: edits that keep every test run. A rename of the lint step, a test step moved within the file, and a
+# continue-on-error under the lint step (no test run) are all allowed, judged on the file.
+add("builder-test (file-judge): a lint step renamed in checks.yml is allowed", "allow", tool="Edit", file_path=WF,
+    old_string="      - name: Lint\n", new_string="      - name: Lint (ste)\n", **dict(B, cwd=FILE_JUDGE_ONE))
+add("builder-test (file-judge): a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
+    old_string=TEST_LINUX + CLEAN, new_string=CLEAN + TEST_LINUX, **dict(B, cwd=FILE_JUDGE_ONE))
+add("builder-test (file-judge): continue-on-error added under the lint step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string="      - name: Lint\n", new_string="      - name: Lint\n        continue-on-error: true\n",
+    **dict(B, cwd=FILE_JUDGE_ONE))
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
