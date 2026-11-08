@@ -142,6 +142,8 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
+        self.events = []  # ("body", n, text) per set_body, ("ready", n) per ready call, in call order
+        self.lane_prs, self.lane_read_error = {}, None  # lane_prs: commit sha -> the rows commits/<sha>/pulls returns; lane_read_error: the Stop prs_of_commit raises
 
     def pr(self, n):
         self.pr_calls.append(n)
@@ -184,10 +186,20 @@ class FakeHost:
 
     def ready(self, n):  # the mark-ready call after a draft confirm's push -> (ok, why). On success the host clears the draft flag.
         self.readies.append(n)
+        self.events.append(("ready", n))
         if self.ready_refuse:
             return False, self.ready_refuse
         self.draft = False
         return True, ""
+
+    def prs_of_commit(self, sha):  # commits/<sha>/pulls: the lane's own PR, and any other PR that holds the commit, the integration PR too
+        if self.lane_read_error:
+            raise merge.Stop(self.lane_read_error)
+        return list(self.lane_prs.get(sha, []))
+
+    def set_body(self, n, body):  # PATCH pulls/<n>: the body the next pr() read returns
+        self.events.append(("body", n, body))
+        self.body = body
 
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
@@ -8474,6 +8486,114 @@ class RecordsRebuild(RecordsEnv):
         self.assertNotEqual(self.head(), before, "precondition: the page was pushed")
         self.assertEqual(self.host.readies, [7])
         self.assertNotIn("could not", out)
+
+class DraftLaneLines(RecordsEnv):
+    """`merge <pr> --confirm` on a draft copies the key lines of each lane PR into the integration PR's body, before the ready mark.
+    A key line is a `Retire-run:` or `Drops-lines:` line in a body's last counted paragraph, as check_silent_undo.last_paragraph reads it.
+    The contract for merge/merge.py:
+    - The lanes are merge.lane_tips(wt, base_ref, head). Host.prs_of_commit(sha) returns the REST rows of commits/<sha>/pulls.
+      A lane's own PR is the row whose head sha is its tip. The integration PR is a row too, since it holds every tip.
+    - A copied line goes into the integration body's last counted paragraph, above the attribution. A line the body already holds
+      is not copied again. A line in a lane's earlier paragraph or fenced block is not copied.
+    - Host.set_body(n, body) writes the body (PATCH pulls/<n>) before Host.ready. A failed lane PR read stops the step: no body
+      write, no ready mark. A batch whose lanes hold no key line writes no body.
+    """
+    OWN = "Drops-lines: debts/batch-own.md -- the batch's own line"
+    RETIRE = "Retire-run: gap-one -- https://github.com/o/r/actions/runs/4242"
+    DROPS = "Drops-lines: debts/gap-one.md -- retired by the lane"
+    EARLIER = "Retire-run: gap-two -- https://github.com/o/r/actions/runs/5151"
+    FENCED = "Retire-run: gap-three -- https://github.com/o/r/actions/runs/6161"
+    ATTRIB = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+    BATCH = f"Batch of lanes a and b.\n\n{OWN}\n\n{ATTRIB}"
+    LANE_A = f"Retire the gap.\n\n{RETIRE}\n{DROPS}\nLane A prose only.\n\n{ATTRIB}"
+    LANE_B = f"Lane B prose only.\n\n{ATTRIB}"
+    DECOY = "Decoy row.\n\nDrops-lines: debts/decoy.md -- the integration row, not a lane"  # the integration row's body: no lane holds this line
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+
+    def make_batch(self, lane_a, lane_b, body):
+        """Lanes lane-a and lane-b merged into feat. Each tip's rows are its lane's PR (21, 22) and the integration PR (7).
+        Sets self.tips and the integration body."""
+        self.tips = lane_batch(self, "lane-a", "lane-b")
+        integration = REST.pull(7, self.head(), "feat", "main", body=self.DECOY)
+        self.host.lane_prs = {
+            self.tips["lane-a"]: [REST.pull(21, self.tips["lane-a"], "lane-a", "main", body=lane_a), integration],
+            self.tips["lane-b"]: [REST.pull(22, self.tips["lane-b"], "lane-b", "main", body=lane_b), integration],
+        }
+        self.host.body = body
+
+    def counted(self, body):
+        """The non-blank lines of a body's last counted paragraph, read as the silent-undo check reads it."""
+        import check_silent_undo as undo
+        return [line.strip() for line in undo.last_paragraph(body).splitlines() if line.strip()]
+
+    def body_writes(self):
+        return [e for e in self.host.events if e[0] == "body"]
+
+    def test_the_lane_key_lines_are_copied_into_the_last_counted_paragraph_before_the_ready_mark(self):
+        self.make_batch(self.LANE_A, self.LANE_B, self.BATCH)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(set(merge.lane_tips(self.co, "origin/main", self.head())[0]), set(self.tips.values()),
+                         "the batch's lanes are not the two lane tips")  # the scope, before the subject
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7])
+        writes = self.body_writes()
+        self.assertEqual(len(writes), 1, f"the integration body was not written once: {self.host.events}")
+        self.assertLess(self.host.events.index(writes[0]), self.host.events.index(("ready", 7)), "the body was written after the ready mark")
+        final = self.host.body
+        self.assertIn(self.OWN, self.counted(final), "the integration's own key line left the last counted paragraph")
+        self.assertIn(self.RETIRE, self.counted(final), "lane-a's Retire-run line was not copied into the last counted paragraph")
+        self.assertIn(self.DROPS, self.counted(final), "lane-a's Drops-lines line was not copied into the last counted paragraph")
+        self.assertTrue(final.rstrip().endswith(self.ATTRIB), "the attribution is no longer the last paragraph")
+        self.assertNotIn("Lane A prose only.", final, "a line that is no key line was copied from lane-a")
+        self.assertNotIn("Lane B prose only.", final, "lane-b, which holds no key line, added its text")
+        self.assertNotIn("debts/decoy.md", final, "a line from the integration PR's own row, which no lane holds, was copied")
+        self.assertEqual(sorted(self.counted(final)), sorted([self.OWN, self.RETIRE, self.DROPS]),
+                         "the last counted paragraph holds a line beyond the batch's own key line and the lanes' key lines")
+
+    def test_a_key_line_the_integration_body_already_holds_is_not_copied_again(self):
+        body = f"Batch of lanes a and b.\n\n{self.RETIRE}\n{self.DROPS}\n{self.OWN}\n\n{self.ATTRIB}"
+        self.make_batch(self.LANE_A, self.LANE_B, body)
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        for line in (self.OWN, self.RETIRE, self.DROPS):
+            self.assertEqual(self.counted(self.host.body).count(line), 1, f"{line!r} is not held exactly once in the last counted paragraph")
+
+    def test_a_retire_run_line_in_a_lane_s_earlier_paragraph_is_not_copied(self):
+        lane_a = f"Earlier paragraph.\n\n{self.EARLIER}\n\n{self.DROPS}\n\n{self.ATTRIB}"
+        self.make_batch(lane_a, self.LANE_B, self.BATCH)
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(self.DROPS, self.counted(self.host.body), "lane-a's last-paragraph Drops-lines line was not copied")
+        self.assertNotIn(self.EARLIER, self.host.body, "a Retire-run line from lane-a's earlier paragraph was copied, though that paragraph never counted")
+
+    def test_a_retire_run_line_in_a_lane_s_fenced_block_is_not_copied(self):
+        lane_a = f"Fenced example.\n\n```\n{self.FENCED}\n```\n\n{self.DROPS}\n\n{self.ATTRIB}"
+        self.make_batch(lane_a, self.LANE_B, self.BATCH)
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(self.DROPS, self.counted(self.host.body), "lane-a's last-paragraph Drops-lines line was not copied")
+        self.assertNotIn(self.FENCED, self.host.body, "a Retire-run line from lane-a's fenced block was copied, though a fenced line never counted")
+
+    def test_a_failed_lane_pr_read_stops_before_any_body_write_or_ready_mark(self):
+        self.make_batch(self.LANE_A, self.LANE_B, self.BATCH)
+        self.host.lane_read_error = "reading the pull requests of a lane commit from GitHub failed: HTTP 502"
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 1, "a failed lane PR read did not stop the draft step\n" + out)
+        self.assertIn("HTTP 502", out, "the Stop does not print the failed lane PR read")
+        self.assertEqual(self.body_writes(), [], "the body was written after a failed lane PR read")
+        self.assertEqual(self.host.readies, [], "the ready mark was set after a failed lane PR read")
+        self.assertEqual(self.worktrees(), 1, "the worktree was not dropped on the Stop")
+
+    def test_a_batch_whose_lanes_hold_no_key_line_writes_no_body(self):
+        self.make_batch(self.LANE_B, self.LANE_B, self.BATCH)  # both lanes hold prose only
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.body_writes(), [], "the body was written with no lane key line to copy")
+        self.assertEqual(self.host.readies, [7])
 
 class RecordsRebuildReal(RecordsEnv):
     """The same seam with the real generator, lint/hook_catalog.py, as merge.RECORDS defaults to it."""
