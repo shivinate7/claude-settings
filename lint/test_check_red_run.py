@@ -201,6 +201,13 @@ LABEL_FORMS = (
     ("Red-run: _+none -> 1 failed on SHA", "refused", "list marker under underscore"),
     # A fixed point, not a fixed count of passes: forty wrappers each side still read as the word.
     ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "refused", "fixed point"),
+    # A colon on a token that strips to nothing still ends the label word, so the word after it is refused. A bare list
+    # marker with no colon is skipped, so the word after it reads and the line passes.
+    ("Red-run: : runner x -> 1 failed on SHA", "refused", "colon-only token keeps its colon"),
+    ("Red-run: -: x -> 1 failed on SHA", "refused", "colon-only token keeps its colon"),
+    ("Red-run: - python3 t.py -> 1 failed on SHA", "valid", "control: bare list marker"),
+    # A key with no colon is a Red-run line when it ends in the failed tail. Its FAIL line holds the mutant hint.
+    ("Red run mutant A (x) python3 t.py -> 1 failed on SHA", "refused", "no-colon key with a mutant word"),
     # Real commands pass as the failed form. These are the must-pass rows.
     ("Red-run: python3 -m pytest -k mutant_case -> 1 failed on SHA", "valid", "must-pass"),
     ("Red-run: lint/mutation/run.py -> 1 failed on SHA", "valid", "must-pass"),
