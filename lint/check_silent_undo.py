@@ -109,11 +109,15 @@ def last_paragraph(pr_body):
     """The paragraph of a PR body that counts for a key line. The body reads as git reads a message: fenced blocks and
     <!-- --> comments drop out, then only the last paragraph counts, skipping closing paragraphs that hold only the
     Claude Code attribution line, a bare session link right under it, or the posting footer (a --- rule, then the
-    Generated-by line, as one paragraph or two)."""
+    Generated-by line, as one paragraph or two, next to each other). A blank or emptied paragraph is skipped when it is
+    last, and it parts the rule from the Generated-by line."""
     prose = re.sub(r"^ {0,3}(```|~~~).*?(?:^ {0,3}\1[^\n]*|\Z)", "", pr_body, flags=re.M | re.S)  # an unclosed fence runs to the end
     prose = re.sub(r"<!--.*?(?:-->|\Z)", "", prose, flags=re.S)
-    paras = [p for p in re.split(r"\n[ \t]*\n", prose.replace("\r\n", "\n")) if norm(p)]  # a blank or emptied paragraph is no paragraph
+    paras = re.split(r"\n[ \t]*\n", prose.replace("\r\n", "\n").strip())  # the strip drops the body's leading indent, so an indented first line still reads
     while len(paras) > 1:
+        if not norm(paras[-1]):  # a blank or emptied paragraph is skipped, but it stays in the list: it parts the footer's lines
+            paras.pop()
+            continue
         lines = [n for n in map(norm, paras[-1].splitlines()) if n]
         if lines == ["---", lines[-1]] and POSTED_BY.fullmatch(lines[-1]):
             paras.pop()
