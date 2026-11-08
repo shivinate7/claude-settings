@@ -59,7 +59,7 @@
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a safety hole with no pinning case (hooks/guard_env.py)
 - env-interpreter-body-line-false-alarm: a quoted interpreter heredoc body line starting with echo, printf, ls, test, [, git check-ignore, grep, rg or a runner with --env-file denies if it names the env file. Main allowed it. A -c script holding `if [ -f .env ]` also denies, where main allowed (hooks/guard_env.py _plain_escaped_quotes, _handed_on_scripts)
-- env-node-env-file-prints: node --env-file=.env -e 'console.log(process.env)' prints the env file through the runner allow-list (hooks/guard_env.py)
+- env-bash-c-outer-stdin: stdin fed to `bash -c "node --env-file=.env"` from outside (`echo x | bash -c ...`, `<<<`) reaches the inner node, because the `-c` recursion starts with no pipe (hooks/guard_env.py). Fix: none — Claude is unlikely to feed stdin to a loader inside `bash -c`. Until: 2026-11-21.
 - env-split-string-wsl-only: the WSL and env-file rules read the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
