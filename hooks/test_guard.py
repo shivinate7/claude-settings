@@ -8343,9 +8343,10 @@ sh("env-child: allow, uv --verbose takes no value, so vitest runs with the filte
 sh("env-child: allow, npm exec --yes takes no value, so jest -c env is jest's option",
    "npm --env-file=" + ENV + " exec --yes jest -c env", "allow", cwd=NOGIT)
 
-# Two unlisted value flags in a row. The scan takes the first flag's word as its value, then the
-# second flag ends the scan, so the image's child (env) is never read. The --label deny is no such
-# shape: --label is a listed flag, so the scan reads it, and that case pins the listed flag green.
+# Two unlisted value flags in a row. The scan takes each unlisted flag's next word as a possible
+# value, and runs past every unlisted option, so it reaches the image and its child (env). The
+# --label deny is no such shape: --label is a listed flag, so the scan reads it, and that case
+# pins the listed flag green.
 # Each allow is the same runner with a child that prints nothing, so the flags alone are not denied.
 sh("env-child: deny, docker --cap-add X --cap-add Y, two unlisted value flags, so env runs in img",
    "docker run --env-file " + ENV + " --cap-add X --cap-add Y img env", "deny", "env-file", cwd=NOGIT)
@@ -8392,6 +8393,18 @@ sh("env-child: allow, uv -vv takes no value, so vitest runs with the filter env"
 sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
    "uv run --env-file " + ENV + " -v vitest env", "allow", cwd=NOGIT)
 
+# Flags the list does not name that take no value, given the file. uv's --exact and --all-groups and
+# npx's --silent are bools, so the word after each is the program, and env after it is the program's
+# argument. A bun ./x is a script path, not bun's x alias, so env is its argument.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: allow, bun ./x runs the script ./x, not bun's x alias, so env is its argument",
+   "bun --env-file=" + ENV + " ./x env", "allow", cwd=NOGIT)
+
 # Bool flags that take no value, given the file. `--sig-proxy` is docker's bool, so img is the image
 # and env after it is the child. `--active` is uv's bool, so env is the child of the uv run. `bun x`
 # is the exec alias of bunx, so its first word is the child. Each allow runs the program's own
@@ -8399,6 +8412,8 @@ sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
 sh("env-child: deny, docker --sig-proxy takes no value, so env after img is the child",
    "docker run --env-file " + ENV + " --pull always --sig-proxy img env", "deny", "env-file",
    cwd=NOGIT)
+sh("env-child: deny, docker --rm takes no value after --pull always, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --rm img env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: deny, uv --active takes no value, so env is the child of the uv run",
    "uv run --env-file " + ENV + " --extra dev --active env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: deny, bun x is the exec alias, so env is the child",
@@ -8517,6 +8532,44 @@ sh("env-child: allow, docker container run with serve as the child, the control 
    "docker container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
 sh("env-child: allow, podman container run with serve as the child, the control for the gap",
    "podman container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
+
+# A `$` in a shell string refuses only in a segment whose command prints (echo, printf, env, printenv).
+# A `$` in any other segment is an ordinary argument, so an app's own command may use it. The three
+# deny forms below each print a variable through echo or printf, so they stay denied.
+sh("env-child: allow, a $ in a cd segment is an argument, docker runs sh -c cd $APP_DIR && npm start",
+   "docker run --env-file " + ENV + " img sh -c \"cd $APP_DIR && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a pytest argument is an argument, uv runs sh -c pytest --basetemp=$TMPDIR",
+   "uv run --env-file " + ENV + " sh -c 'pytest --basetemp=$TMPDIR'", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a node script argument is an argument, npm exec -c node $SCRIPT",
+   "npm --env-file=" + ENV + " exec -c 'node $SCRIPT'", "allow", cwd=NOGIT)
+sh("env-child: deny, echo prints a $ variable in a shell string, uv runs sh -c echo $DB_URL",
+   "uv run --env-file " + ENV + " sh -c 'echo $DB_URL'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, printf prints a $ variable in a shell string, docker runs sh -c printf",
+   "docker run --env-file " + ENV + " img sh -c 'printf \"%s\" \"$KEY\"'", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c echo prints a $ variable, npm exec -c echo $X",
+   "npm --env-file=" + ENV + " exec -c 'echo $X'", "deny", "env-file", cwd=NOGIT)
+
+# A wrapper word before the printing program (timeout, nice, sudo), or a node inline program under npx,
+# is a child the scan must read. Each deny is one such child that prints the environment.
+sh("env-child: deny, timeout 5 wraps env, uv run --env-file runs timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, timeout 5 wraps printenv in an image, docker run runs timeout 5 printenv",
+   "docker run --env-file " + ENV + " img timeout 5 printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, nice wraps env in a shell string, uv run sh -c nice env",
+   "uv run --env-file " + ENV + " sh -c \"nice env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sudo wraps env in a shell string, uv run sh -c sudo env",
+   "uv run --env-file " + ENV + " sh -c \"sudo env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -e that prints process.env",
+   "npx --env-file=" + ENV + " node -e \"console.log(process.env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -p that prints process.env",
+   "npx --env-file=" + ENV + " node -p process.env", "deny", "env-file", cwd=NOGIT)
+
+# Controls for the wrapper and npx cases above: the same runners with an app as the child stay allowed.
+sh("env-child: allow, uv run --env-file runs timeout 5 pytest, the control for timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx runs node app.js, the control for npx node -e and node -p",
+   "npx --env-file=" + ENV + " node app.js", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
