@@ -840,15 +840,20 @@ class LaneLint(CiJobStub, tm.CloudSession):
         with unittest.mock.patch.object(merge, "sh", sh):
             yield bounds
 
-    def other_jobs_head(self, runs_on=None):
+    def other_jobs_head(self, runs_on=None, timeouts=None):
         """The lane's head with the workflow of the other jobs committed on feat. RecordsEnv.on is the one home of that push; it
         reads only self.other and sh, so this case calls it on itself. `runs_on` (the lines of the key, as the workflow writes
-        them) replaces checks-merge-install's runs-on; None keeps OTHER_JOBS_WORKFLOW as it is. -> feat's head."""
+        them) replaces checks-merge-install's runs-on; None keeps OTHER_JOBS_WORKFLOW as it is. `timeouts` ({job: minutes}) writes
+        each job's timeout-minutes under its runs-on line, as the workflow does. -> feat's head."""
         text = OTHER_JOBS_WORKFLOW
         if runs_on is not None:
             self.assertIn(OTHER_JOB_RUNS_ON, text, "OTHER_JOB_RUNS_ON is not in OTHER_JOBS_WORKFLOW, so the swap would change nothing")
             text = text.replace(OTHER_JOB_RUNS_ON, "  %s:\n" % OTHER_JOB + runs_on)
             self.assertNotIn(OTHER_JOB_RUNS_ON, text, "the runs-on swap left the workflow's own runs-on in place")
+        for job, minutes in (timeouts or {}).items():
+            key = "  %s:\n    runs-on: ubuntu-latest\n" % job
+            self.assertIn(key, text, "job %s has no runs-on line to cap" % job)
+            text = text.replace(key, key + "    timeout-minutes: %d\n" % minutes)
         tm.RecordsEnv.on(self, "feat", {".github/workflows/checks.yml": text}, "feat: the workflow of the other jobs")
         return self.head("feat")
 
@@ -887,6 +892,27 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertRegex(out, r"(?i)unknown")
         self.assertEqual(len([run for run in self.lint_calls() if run["argv"][:1] == ["checks"]]), 1, out)
         self.assertEqual(self.worktrees(), 1)
+
+    def test_a_picked_suite_runs_under_its_own_jobs_timeout_minutes(self):
+        """The other job's timeout-minutes, read from the lane head's workflow, bounds its picked suite's run: 2 minutes is 120 s."""
+        head = self.other_jobs_head(timeouts={OTHER_JOB: 2})
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)},
+                        verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
+        with self.stalled_other_job_run() as bounds:
+            rc, out = self.run_lane("--lane-lint", head)
+        self.assertIn("other", bounds, "the picked suite of %s never ran as a ci-job run of its own: %s" % (OTHER_JOB, out))
+        self.assertEqual(bounds["other"], 2 * 60, "the picked suite's run is not bounded by its job's timeout-minutes (2 is 120 s), got %r: %s"
+                         % (bounds["other"], out))
+
+    def test_control_a_job_without_timeout_minutes_keeps_other_job_seconds_when_another_job_sets_one(self):
+        """The control: checks-guard's cap must not reach checks-merge-install, which has none and keeps OTHER_JOB_SECONDS."""
+        head = self.other_jobs_head(timeouts={NODE_JOB: 27})
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)},
+                        verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
+        with self.stalled_other_job_run() as bounds:
+            rc, out = self.run_lane("--lane-lint", head)
+        self.assertIn("other", bounds, "the picked suite of %s never ran as a ci-job run of its own: %s" % (OTHER_JOB, out))
+        self.assertEqual(bounds["other"], merge.OTHER_JOB_SECONDS, "a job without timeout-minutes lost OTHER_JOB_SECONDS, or another job's cap set its bound: %s" % out)
 
     def test_a_picked_suite_only_in_a_macos_job_is_one_not_run_line_and_the_lane_lint_passes(self):
         head = self.other_jobs_head()
