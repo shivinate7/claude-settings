@@ -12753,6 +12753,19 @@ def named_by_file(cause, rows, names):
     return lines
 
 
+def named_rows(out):
+    """The (path, line) of each line the named UNKNOWN lines of `out` name, in print order."""
+    rows = []
+    for path, numbers in re.findall(r"^merge: #7 prose judge UNKNOWN \([^)]*\): (\S+):([\d,]+)$", out, re.M):
+        rows += [(path, int(n)) for n in numbers.split(",")]
+    return rows
+
+
+def finding_rows(out):
+    """The (path, line) of each printed prose-judge finding, in print order."""
+    return [(path, int(n)) for path, n in re.findall(r"^merge: #7 prose judge, (\S+):(\d+) ", out, re.M)]
+
+
 FAKE_TOOL_REPLY = ("I'll check the cited file before judging.\n\n\n<invoke name=\"Read\">\n"
                    "<parameter name=\"file_path\">/tmp/x/harness/a.mjs</parameter>\n</invoke>")  # the reply 7 of 20 real judge calls gave: tool-call text, no JSON
 
@@ -13373,14 +13386,14 @@ class ProseJudge(Env):
             raise RuntimeError(message)
         return calls
 
-    def failing_readable(self, message):
-        """A stand-in for merge.readable_verdicts: it raises RuntimeError(`message`) on its first call, the first job's answer, and reads the
-        real way after that."""
+    def failing_readable(self, message, at=0):
+        """A stand-in for merge.readable_verdicts: it raises RuntimeError(`message`) on call `at` (0: the first job's answer), and reads the
+        real way on every other call."""
         real, seen = merge.readable_verdicts, []
 
         def readable(verdict, keyed=False):
-            if not seen:
-                seen.append(verdict)
+            seen.append(verdict)
+            if len(seen) == at + 1:
                 raise RuntimeError(message)
             return real(verdict, keyed=keyed)
         return readable
@@ -13406,6 +13419,40 @@ class ProseJudge(Env):
         self.assert_named(out, named_by_file("model error", every, names))
         self.assert_count_line(out, len(every), [(len(every), "model error")])
         self.assertEqual(rc, 0, out)
+
+    def run_two_jobs(self, readable):
+        """prose_judge_run on a plan of two jobs, built by hand: job 1 holds a.md:3 and a.md:5, job 2 holds a.md:7 and b.md:3. The model
+        answers each row of a prompt, and only a.md:3 is stale. `readable` stands in for readable_verdicts. -> (model prompts, report lines)."""
+        plan = [(("a.md",), [("a.md", 3), ("a.md", 5)], "a.md:3 the first job\na.md:5 the first job\n"),
+                (("a.md", "b.md"), [("a.md", 7), ("b.md", 3)], "a.md:7 the later job\nb.md:3 the later job\n")]
+        stub = JudgeStub(answering(lambda path, number: ("stale", "the cited file says otherwise") if (path, number) == ("a.md", 3)
+                                   else ("holds", "the cited file agrees")))
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub), \
+                unittest.mock.patch.object(merge, "readable_verdicts", readable):
+            report = merge.prose_judge_run(plan, 7)
+        return stub.prompts, report
+
+    # An exception while the later job's answer is read: the first job's finding stays, the first job's lines are not named, and the later
+    # job's lines are named as a model error. The count line counts exactly those.
+    def test_an_exception_in_the_later_answer_keeps_the_finding_and_names_only_the_later_lines(self):
+        prompts, report = self.run_two_jobs(self.failing_readable("the reply reader broke", at=1))
+        out = "\n".join(report)
+        self.assertEqual(len(prompts), 2, "scope: model calls %d, want 2: one per job" % len(prompts))
+        self.assertEqual(finding_rows(out), [("a.md", 3)], "the first job's finding does not stand\n" + out)
+        self.assertIn("merge: #7 prose judge UNKNOWN: it could not run (RuntimeError: the reply reader broke).", report,
+                      "the plan-level line does not print\n" + out)
+        self.assert_named(out, [named_line("model error", "a.md", [7]), named_line("model error", "b.md", [3])])
+        self.assert_count_line(out, 2, [(2, "model error")])
+
+    # The double-name case: a line with a finding is never named as well. On a loop that drops the not-in-reported guard, a.md:3 would print
+    # as a finding and as a model error.
+    def test_a_line_with_a_finding_is_never_named_when_a_later_answer_fails(self):
+        prompts, report = self.run_two_jobs(self.failing_readable("the reply reader broke", at=1))
+        out = "\n".join(report)
+        self.assertEqual(len(prompts), 2, "scope: model calls %d, want 2: one per job" % len(prompts))
+        found = finding_rows(out)
+        self.assertEqual(found, [("a.md", 3)], "scope: the findings are not the first job's a.md:3, so no found line is checked\n" + out)
+        self.assertEqual([row for row in found if row in named_rows(out)], [], "a line with a finding is also named UNKNOWN\n" + out)
 
     def test_a_control_character_in_a_failed_call_pool_message_is_stripped(self):
         self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
