@@ -728,6 +728,12 @@ MUTATIONS = [
      'TEST_CLOSER = {"[": "]", "[[": "]]", "test": None}',
      'TEST_CLOSER = {"[": "]", "[[": "]]", "test": None, "((": "))"}', "guard",
      'a loop written as an arithmetic test'),
+    # A `for` loop beside the clock loop makes it two loops, so the clock rule does not judge the command. Without
+    # the word check, the clock loop would count as the command's one loop and the pause loop would go unjudged.
+    ("waiter: a loop word other than while or until is ignored, so a clock loop beside a pause loop is let through",
+     '    if len(heads) != 1 or any(w in LOOP_WORDS and w not in ("while", "until", "do") for w in words):\n',
+     '    if len(heads) != 1:\n', "guard",
+     'a clock loop with a command body, then a for loop with pauses'),
     ("waiter: a foreground watcher is let through",
      '    return run_watch or ("" if background else watcher)',
      '    return ""', "guard",
