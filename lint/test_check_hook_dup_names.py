@@ -54,8 +54,8 @@ class DupNameTests(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="dup_", dir=RUN_FOLDER)
 
-    def write(self, rel, text):
-        path = os.path.join(self.root, *rel.split("/"))
+    def write(self, rel, text, root=None):
+        path = os.path.join(root or self.root, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
@@ -276,6 +276,34 @@ class DupNameTests(unittest.TestCase):
         rc, out = self.check(root=ROOT)
         self.assertEqual(rc, 0, "today's hooks/ must pass\n" + out)
         self.assertEqual(out, "", "a clean run prints nothing\n" + out)
+
+    def test_22_empty_allowance_for_a_missing_file_is_stale(self):
+        self.write("hooks/x.py", "A = 1\n")
+        self.write(ALLOW, json.dumps({"hooks/gone.py": {}}))
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "an allowance with no names for a missing file passed the run\n" + out)
+        lines = self.fails(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertTrue("stale" in lines[0] and "hooks/gone.py" in lines[0],
+                        "the one FAIL line must call the hooks/gone.py allowance stale\n" + out)
+
+    def test_23_root_path_with_brackets_is_still_scanned(self):
+        # The root's path must reach the scan as a literal path, not as a glob pattern.
+        root = os.path.join(self.root, "r[x]")
+        self.write("hooks/m.py", "NAME = 1\nNAME = 2\n", root=root)
+        rc, out = self.check(root=root)
+        self.assertEqual(rc, 1, "a duplicate under a root named r[x] went unread\n" + out)
+        self.assertEqual(self.fails(out), [dup_line("hooks/m.py", "NAME", 1, 2)], out)
+
+    def test_24_empty_hooks_folder_is_unknown(self):
+        os.makedirs(os.path.join(self.root, "hooks"))
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "hooks")
+
+    def test_25_hooks_with_only_test_modules_is_unknown(self):
+        self.write("hooks/test_x.py", "NAME = 1\nNAME = 2\n")
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "hooks")
 
 
 if __name__ == "__main__":
