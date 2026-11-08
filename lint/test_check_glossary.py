@@ -652,6 +652,7 @@ STAYS = {  # path: the one old name it may still hold, and why
     "testing/skip-locally-fail-in-ci.test.mjs": "Red proof",  # header shared with copies in other repos
     "lint/test_find_copies.py": "Red proof",        # the fixture copy of that header
     "mods/plain-diff/docs/mockup.html": "red proof",  # sample diff text
+    "merge/fixtures/q_max/harness/tests/thousands-marker.test.mjs.txt": "red proof",  # a verbatim copy of a q_max test file, its own assert text
 }
 SKIP = ("skills/impeccable/", "lint/test_check_glossary.py", "GLOSSARY.md")  # GLOSSARY names them as "Not"
 
