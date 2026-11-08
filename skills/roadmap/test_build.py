@@ -4201,6 +4201,35 @@ class IdleLanes(UpkeepFixture):
         self.assertIn("; lane session_orphan)", detail, out)
         self.assertNotIn("unknown (", detail, out)
 
+    def test_empty_record_reads_one_whole_read_unknown_and_holds_no_lane(self):
+        # A record branch with no step files cannot judge any lane, so the whole list reads one unknown entry. The lane
+        # names cs-step:x, which the per-lane reading holds. The scope check runs first: the record has no step file.
+        git(self.repo, "rm", "-rq", "roadmap/data/steps")
+        git(self.repo, "commit", "-q", "-m", "drop every step")
+        self.assertEqual(list((self.data / "steps").glob("*.json")), [], "the record still has step files")
+        self.publish(sessions=[self.lane("session_x", "x")])
+        entries = self.reported()
+        self.assertEqual(entries, ["unknown (the record branch has no steps)"], entries)
+
+    def test_failed_second_trailer_read_reads_one_whole_read_unknown_and_no_hold(self):
+        # landed_marks reads the Step trailers once, and that read succeeds. The lane's absent step makes idle_lanes read
+        # them again, and that read fails. The list cannot be judged, so it is one whole-read unknown, not a hold on the lane.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_orphan", "ghost")])
+        real = build.step_trailers
+        reads = []
+
+        def second_read_fails(repo, ref):
+            reads.append(ref)
+            return real(repo, ref) if len(reads) == 1 else None
+
+        with mock.patch.object(build, "step_trailers", side_effect=second_read_fails):
+            entries = self.reported()
+        self.assertGreaterEqual(len(reads), 2, "the Step trailers were read %d time(s), so no second read ran" % len(reads))
+        self.assertEqual(len(entries), 1, entries)
+        self.assertTrue(entries[0].startswith("unknown (the Step trailers on"), entries)
+        self.assertEqual([e for e in entries if e.startswith("hold (")], [], entries)
+
     def test_only_a_closed_page_item_releases_its_lane(self):
         # The waiting page's statuses are open and closed (skill waiting-page, the item fields). An answered item is
         # not closed, so it still holds its lane. The closed item beside it releases its lane.
