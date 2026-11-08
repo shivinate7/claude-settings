@@ -9,14 +9,15 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 from datetime import datetime, timedelta, timezone
 import sys
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, strip_heredoc_bodies, strip_redirections,
+    dir_before_segment, inline_script, inner_commands, is_powershell, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    is_cloud, strip_heredoc_bodies, strip_redirections, walk_quotes,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -478,8 +479,8 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 # ---- a review record posted as a comment (rule pr-review-record)
 #
 # A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form).
-# That is the shape check, `review_shape_hit`: the render output, a line exactly `---`, then the footer, with nothing between the
-# CI line and `---`. A post, and an edit in place, are both judged for shape. A post must also name the pull request it is posted
+# That is the shape check, `review_shape_hit`: the render output as it is, or with a footer after a line exactly `---` and
+# nothing between the CI line and `---`. A post, and an edit in place, are both judged for shape. A post must also name the pull request it is posted
 # on and name that pull request's live head (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is
 # posted. The remedy is the render, which fills the live head itself.
 # Cost: the shape check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
@@ -498,11 +499,44 @@ REVIEW_REASON = (
 )
 REVIEW_SHAPE_REASON = (
     "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record. "
-    "A record is the render output, then a line exactly `---`, then the footer, with nothing between the CI line and `---`. "
-    "Prose after the CI line, or a body that does not open with the marker, does not parse, and `merge --reviewed` cannot read it. "
-    "Remedy: run `%s`, post its output unchanged, and put any note after the `---` line, in the footer. "
+    "`merge --reviewed` cannot read a body that does not parse. "
+    "Remedy: run `%s` and post its output as it is. If you add a footer, put a line exactly `---` before it, "
+    "with nothing between the CI line and `---`. "
     "(decision pr-review-record, a review record must parse)"
 )
+
+
+_ANSI_ESCAPE = re.compile(
+    r"\\(?:([abeEfnrtv\\'\"?])|x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3})|c(.))", re.DOTALL)
+_ANSI_SIMPLE = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v"}
+
+
+def _ansi_char(found) -> str:
+    simple, hex2, hex4, hex8, octal, control = found.groups()
+    if simple:
+        return _ANSI_SIMPLE.get(simple, simple)
+    if control:
+        return chr(ord(control) & 0x1f)
+    code = int(octal, 8) & 0xff if octal else int(hex2 or hex4 or hex8, 16)
+    return chr(code) if code <= 0x10FFFF else found.group(0)
+
+
+def ansi_c_decoded(segment: str) -> str:
+    """Return a bash segment with each `$'...'` word replaced by the single-quoted text bash would send: its escapes decoded
+    (`\\n`, `\\t`, `\\xHH`, `\\uHHHH`, octal, `\\\\`, `\\'`) and cut at a NUL, as bash cuts it. The review-record judge reads its
+    bodies from this text, so a record in that form holds its marker on its real first line. The shared tokenizer is left as
+    it is: every other guard reads `$'...'` as shlex does. A PowerShell segment and an unclosed `$'` are returned as they are."""
+    if "$'" not in segment or is_powershell(segment):
+        return segment
+    out, last, start = [], 0, None
+    for index, char, quote in walk_quotes(segment):
+        if start is None and quote == "" and char == "$" and segment[index + 1:index + 2] == "'":
+            start = index
+        elif start is not None and quote == "$'" and char == "'":
+            body = _ANSI_ESCAPE.sub(_ansi_char, segment[start + 2:index]).split("\0", 1)[0]
+            out += [segment[last:start], shlex.quote(body)]
+            last, start = index + 1, None
+    return type(segment)("".join(out) + segment[last:]) if out else segment
 
 
 def review_note(why: str) -> None:

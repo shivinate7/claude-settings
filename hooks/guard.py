@@ -591,7 +591,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_shape_hit, review_note, pr_call_target,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_shape_hit, review_note, pr_call_target, ansi_c_decoded,
             FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
         )
         _loading = "guard_frozen"
@@ -1929,16 +1929,16 @@ def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
 
 
 def review_post_hit(segment: str, raw: str, where: str, before: int, previous: str = ""):
-    """Return (matched, reason) when this segment posts a review record the guard must refuse, else None. Judges `gh pr comment`
+    """Return (matched, reason) when this segment posts a review record the guard must refuse, else None. Judges `gh pr comment` and `gh issue comment`
     (--body, -b, --body-file, -F) and `gh api repos/O/R/issues/<n>/comments` (-f, -F, --field, --raw-field `body=`, `body=@file`),
     each with the bodies of the heredocs its own header holds. A body of exactly `$(cat FILE)`, and a stdin body piped from
     `cat FILE` (`previous` is the segment piped in), are read from FILE. A file that cannot be read allows, with a note. No body
     whose first line is the marker: no read."""
-    rest = gh_call_of(segment)
+    rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
     shape_only = False
-    if rest[:2] == ["pr", "comment"]:
+    if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
         selector, repo = _comment_target(args)
         texts, files, stdin = message_sources(args, "comment")
