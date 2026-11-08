@@ -249,7 +249,9 @@ def _mutates_as_command(command: str, words) -> bool:
 _SED_NAMES = ("sed", "gsed")
 _SED_IN_PLACE_FLAG = r"(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)"
 _SED_IN_PLACE = r"\b(?:g?sed)\b[^\n;|&]*" + _SED_IN_PLACE_FLAG + r"[^\n;|&]*"
-_PERL_IN_PLACE = r"\bperl\b[^\n;|&]*\s-[0-9aCcFlnpsStTuUvwW]*i[^\n;|&]*"
+# `writes_to` reads one segment, whose quoted words the shell scan has already unquoted, so a `;`, `|` or `&`
+# left in it is script text (`-e 's/a/b/;s/c/d/'`) and must not end the match before the path.
+_PERL_IN_PLACE = r"\bperl\b[^\n]*\s-[0-9aCcFlnpsStTuUvwW]*i[^\n]*"
 
 
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
@@ -368,6 +370,36 @@ def _resolve_vars(cmd: str) -> str:
 # Main missed these too.
 _PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
 _QUIET = _PRINTERS | {"cd", "set-location"}
+# Read-only tools beside the printers, for a sed `e` command (`_sed_command_words`). Not part of `_PRINTERS`:
+# that set also makes a segment quiet (`_kind`), and `sort -o P` or `uniq in P` write. `_command_reads` drops
+# the forms of each tool that write.
+_READ_ONLY_TOOLS = frozenset(("head", "tail", "ls", "less", "sort", "uniq", "diff", "stat", "file", "find"))
+_FIND_WRITERS = frozenset(("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"))
+
+
+def _command_reads(command: str, args) -> bool:
+    """True when `command` with `args` only reads: a printer, or a read-only tool (`_READ_ONLY_TOOLS`) with no
+    form that writes or runs a program. `find` with `-exec` or `-delete`, `sort` with an output, compress or
+    temp-folder option (any short flag cluster that holds `o` or `T`), `uniq` with a second operand (its output
+    file), `less` with a log file, and `file -C` (writes a compiled magic file) are not reads."""
+    if command in _PRINTERS:
+        return True
+    if command not in _READ_ONLY_TOOLS:
+        return False
+    shorts = [word[1:] for word in args if re.fullmatch(r"-[^-].*", word)]
+    longs = [word for word in args if word.startswith("--")]
+    if command == "find":
+        return not _FIND_WRITERS.intersection(args)
+    if command == "sort":
+        return not any("o" in word or "T" in word for word in shorts) and not any(
+            word.startswith(("--o", "--c", "--t")) for word in longs)
+    if command == "uniq":
+        return sum(1 for word in args if not word.startswith("-")) <= 1
+    if command == "less":
+        return not any("o" in word.lower() for word in shorts) and not any("log" in word.lower() for word in longs)
+    if command == "file":
+        return not any("C" in word for word in shorts) and "--compile" not in longs
+    return True
 _MESSAGE_FLAGS = {"git": ("-m", "--message", "-F"), "gh": ("--title", "--body", "-t", "-b")}
 _GH_MESSAGE_CALLS = frozenset((
     ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
@@ -779,6 +811,14 @@ def _excluded_pathspec(word: str) -> str:
     return ""
 
 
+def _walks_from_git_folder(word: str) -> bool:
+    """True for an include pathspec that `_dot_roots` walks from the git folder, so a path it reaches is
+    spelled under that folder, as an exclusion pathspec is: `.` and a glob. A folder pathspec (`hooks`) is
+    walked from itself, where `:!tests` would drop `hooks/tests` that git still lists, so it is not."""
+    text = _unquoted(word)
+    return text in (".", "./") or bool(re.search(r"[*?\[]", text))
+
+
 def _git_listing_roots(args):
     """The roots of a `git ls-files` or `git grep -l` segment, which print tracked paths: its pathspecs
     (for `grep`, the words after the pattern), else `.`, the whole checkout, read as a `.` root is
@@ -977,7 +1017,8 @@ def _folder_root(root: str, cwd: str) -> str:
 _NAME_EXCLUDE = "\x05"   # marks an excluded glob in the tuple `_name_filters` returns
 _PATH_EXCLUDE = "\x06"   # marks a `find -not -path` glob: matched against the path find prints
 _SPEC_EXCLUDE = "\x07"   # marks a git exclusion pathspec: matched against the path under the git folder
-_EXCLUDES = (_NAME_EXCLUDE, _PATH_EXCLUDE, _SPEC_EXCLUDE)
+_DIR_EXCLUDE = "\x08"   # marks a `grep --exclude-dir` glob: matched against each folder name above the file
+_EXCLUDES = (_NAME_EXCLUDE, _PATH_EXCLUDE, _SPEC_EXCLUDE, _DIR_EXCLUDE)
 
 
 def _name_passes(name: str, filters, rel=None, top=None) -> bool:
@@ -997,6 +1038,9 @@ def _name_passes(name: str, filters, rel=None, top=None) -> bool:
         if mark == _PATH_EXCLUDE and rel is not None and top is not None and fnmatch.fnmatchcase(
                 top.rstrip("/") + "/" + rel, value):
             return False
+        if mark == _DIR_EXCLUDE and rel is not None and any(
+                fnmatch.fnmatchcase(part, value) for part in rel.split("/")[:-1]):
+            return False
         if mark == _SPEC_EXCLUDE and rel is not None and (
                 rel == value.rstrip("/") or rel.startswith(value.rstrip("/") + "/") or fnmatch.fnmatchcase(rel, value)):
             return False
@@ -1007,7 +1051,8 @@ def _name_filters(words) -> tuple:
     """The file-name globs that limit what a `find`, `grep` or git listing segment reads: the values of
     `-name` or `--include`, and the excluded ones, each marked: `-not -name`, `! -name` or `--exclude`
     (`_NAME_EXCLUDE`), `-not -path` or `! -path` (`_PATH_EXCLUDE`), and a git listing's exclusion pathspecs
-    when it has no other pathspec (`_SPEC_EXCLUDE`, `_excluded_pathspec`), so a walk of its folder roots
+    when each other pathspec is `.` or a glob (`_SPEC_EXCLUDE`, `_excluded_pathspec`,
+    `_walks_from_git_folder`), and a `grep --exclude-dir` (`_DIR_EXCLUDE`), so a walk of its folder roots
     counts only the files it reaches (`_name_passes`). () when there is none, and for a `find` that holds
     `-o`, a group, or a `-not` or `!` that does not lead straight into `-name VALUE` or `-path VALUE`,
     which can widen or invert what `-name` picks, and for a value that holds `$` or a backtick, a brace
@@ -1044,7 +1089,7 @@ def _name_filters(words) -> tuple:
         for at, word in enumerate(args):
             if word == "--":
                 break
-            for flag, mark in (("--include", ""), ("--exclude", _NAME_EXCLUDE)):
+            for flag, mark in (("--include", ""), ("--exclude", _NAME_EXCLUDE), ("--exclude-dir", _DIR_EXCLUDE)):
                 if word.startswith(flag + "="):
                     values.append((mark, word.partition("=")[2]))
                 elif word == flag and at + 1 < len(args):
@@ -1052,8 +1097,8 @@ def _name_filters(words) -> tuple:
     elif name == "git":
         listed = _git_listing_pathspecs(args)
         pathspecs = listed[1] if listed else []
-        if all(_excluded_pathspec(word) for word in pathspecs):   # an include pathspec walks unfiltered
-            values = [(_SPEC_EXCLUDE, _excluded_pathspec(word)) for word in pathspecs]
+        if all(_excluded_pathspec(word) or _walks_from_git_folder(word) for word in pathspecs):
+            values = [(_SPEC_EXCLUDE, _excluded_pathspec(word)) for word in pathspecs if _excluded_pathspec(word)]
     values = [(mark, _unquoted(value)) for mark, value in values]
     if any(re.search(r"[$`]", value) for _mark, value in values):
         return ()
@@ -1093,7 +1138,8 @@ def _dot_roots(roots, cwd: str, predicate, names=()) -> list:
             out.extend(_dot_roots(variants, cwd, predicate, names))
         elif root.startswith(_GLOB_MARK):
             folder, _mark, glob = root[len(_GLOB_MARK):].partition(_GLOB_MARK)
-            found = _first_test_under(os.path.join(cwd, folder), predicate, glob) if reading else ""
+            only = tuple(name for name in names if name.startswith(_SPEC_EXCLUDE))
+            found = _first_test_under(os.path.join(cwd, folder), predicate, glob, only) if reading else ""
             if found:
                 out.append(os.path.join(folder, found) if folder != "." else "./" + found)
         elif reading and root in (".", "./"):
@@ -1508,14 +1554,14 @@ def _sed_script_targets(script):
 
 
 def _sed_command_words(command):
-    """The words of a sed `e` command that count as written: none when each command in it is a printer
-    (`_PRINTERS`), else every word, since a printer can feed a writer (`e echo tests/x | xargs rm`). So
+    """The words of a sed `e` command that count as written: none when each command in it only reads
+    (`_command_reads`: a printer or a read-only tool), else every word, since a printer can feed a writer (`e echo tests/x | xargs rm`). So
     `e cat tests/x` reads and `e touch tests/x` writes. A command with text the segment split cannot see
     (`_SCRIPT_RUNS_HIDDEN`) counts every word. Its redirects are read apart, by the shell scan of the
     whole command (`_shell_write_scan`)."""
     if not _SCRIPT_RUNS_HIDDEN.search(command):
         commands = [[_unquoted(word) for word in _quoted_words(segment, True)] for segment in split_segments(command)]
-        if all(_segment_command(words)[0] in _PRINTERS for words in commands if words):
+        if all(_command_reads(*_segment_command(words)) for words in commands if words):
             return []
     return command.split()
 
