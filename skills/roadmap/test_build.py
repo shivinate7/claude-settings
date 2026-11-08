@@ -2,6 +2,7 @@
 
 Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` holds roadmap/data/.
 """
+import builtins
 import contextlib
 import datetime
 import hashlib
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -562,6 +564,7 @@ class UpkeepFixture(Fixture):
 
     SLUG = "owner/fixture"
     REPO = "cs-repo:" + SLUG
+    UNKNOWN = r"unknown \((?:[^()]|\([^()]*\))*\)"  # one entry, with at most one level of parentheses inside
 
     def setUp(self):
         super().setUp()
@@ -573,13 +576,15 @@ class UpkeepFixture(Fixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
-    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None):
-        """Write the --live file. The sessions and items keys appear only when given. readAt is five minutes old by default."""
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, answers=None):
+        """Write the --live file. The sessions, items and answers keys appear only when given. readAt is five minutes old by default."""
         value = {"readAt": read_at or iso_ago(5), "threads": list(threads), "pulls": list(pulls)}
         if sessions is not None:
             value["sessions"] = list(sessions)
         if items is not None:
             value["items"] = items
+        if answers is not None:
+            value["answers"] = answers
         self.write_live(value)
         return value
 
@@ -601,6 +606,20 @@ class UpkeepFixture(Fixture):
             self.fail("the upkeep output has no %r row:\n%s" % (label, out))
         detail = re.search(r"^  %s: (.*)$" % re.escape(label), out, re.M)
         return counts[label], (detail.group(1) if detail else "")
+
+    def row_or_none(self, out, label):
+        """(count, detail) of one upkeep row, or (None, None) when the output has no such row, so the failing assert
+        names its cause instead of raising."""
+        if label not in self.summary_counts(out):
+            return None, None
+        return self.row(out, label)
+
+    def assert_row_unknown(self, out, label):
+        """The row reads exactly one unknown entry: never a list, never an empty row. Returns the entry."""
+        count, entries = self.row_or_none(out, label)
+        self.assertEqual(count, 1, "the %r row must read one unknown entry, and it reads %r:\n%s" % (label, count, out))
+        self.assertIsNotNone(re.fullmatch(self.UNKNOWN, entries or ""), entries)
+        return entries
 
     def entries(self, detail):
         """The entries of a row's detail, sorted. The script orders them by step id, which no case relies on."""
@@ -1786,7 +1805,6 @@ class PageRulings(UpkeepFixture):
 
     ROW = "page rulings not on their step"
     CITE = "Ruling (page item 9): keep"
-    UNKNOWN = r"unknown \((?:[^()]|\([^()]*\))*\)"  # one entry, with at most one level of parentheses inside
 
     def rulings(self, out):
         return self.row(out, self.ROW)
@@ -1795,11 +1813,7 @@ class PageRulings(UpkeepFixture):
         return sorted(entries.split(", ")) if entries else []
 
     def assert_unknown(self, out):
-        """The row reads exactly one unknown entry: never a list, never an empty row. Returns the entry."""
-        count, entries = self.rulings(out)
-        self.assertEqual(count, 1, out)
-        self.assertIsNotNone(re.fullmatch(self.UNKNOWN, entries), entries)
-        return entries
+        return self.assert_row_unknown(out, self.ROW)
 
     def test_closed_item_whose_step_does_not_cite_it_is_listed(self):
         """The incident: item 9 closed, step c153 open, its note never cites item 9. The file has no
@@ -1963,6 +1977,195 @@ class PageRulings(UpkeepFixture):
         page, out = self.build_from_main("--live", str(self.live))
         self.assertIn("session 2", build_info(page)["live"]["skipped"])
         self.assertEqual(self.rulings(out), (1, "c153 (page item 9)"))
+
+
+class PickClaims(UpkeepFixture):
+    """The upkeep row for each open step whose note, why or ask states an owner pick that the page's recorded answers
+    do not match. A claim is `the owner picked <letter>`, `owner picked <letter>` or `item <n> <letter>` (`item #<n>
+    <letter>` too), any case, with the letter one whole word: "subitem 9 a", "items 9 a", "homeowner picked a" and
+    "item 9 ab" are not claims. A claim that names item n matches the answers row with n, when that row's choice is
+    the letter (any case). A claim with no item number matches no row. The row reads `<step id> (claim "<claim as
+    written>")` per unmatched claim, or one unknown entry when the live file cannot say. A missing answers list
+    reads unknown, never an empty row."""
+
+    ROW = "owner-pick claims with no matching answer"
+
+    def flagged(self, out):
+        """(count, sorted entries) of the claim row. (None, []) when the output has no such row."""
+        count, detail = self.row_or_none(out, self.ROW)
+        return count, self.entries(detail)
+
+    def answer(self, n, choice):
+        """One row of the --live file's answers list, as the publisher copies it from answers/<id>: n, choice and at."""
+        return {"n": n, "choice": choice, "at": "2026-11-08T10:00:00-06:00"}
+
+    def snapshot(self):
+        """{path: (mtime_ns, size)} of each file under the test's folder, so a write to any of them shows."""
+        found = {}
+        for p in pathlib.Path(self.tmp.name).rglob("*"):
+            if p.is_file():
+                st = p.stat()
+                found[str(p)] = (st.st_mtime_ns, st.st_size)
+        return found
+
+    def counted_build(self):
+        """One build from main, counting each git process start, thread start, file write and file read. Returns
+        {"processes", "threads" (counts), "writes" and "reads" (sets of paths), "out" and "code" (the build's)}.
+        The writes include git's own index refresh, which the build already causes; the cost check compares two
+        builds, so only what the claim row adds shows."""
+        self.on_main()
+        before = self.snapshot()
+        real_open, real_start = io.open, threading.Thread.start
+        reads = set()
+
+        def recording(file, mode="r", *args, **kwargs):
+            if isinstance(file, (str, os.PathLike)) and not set(mode) & set("wax+"):
+                reads.add(os.fspath(file))
+            return real_open(file, mode, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "Popen", wraps=subprocess.Popen) as popen, \
+                mock.patch.object(threading.Thread, "start", autospec=True, side_effect=real_start) as start, \
+                mock.patch.object(io, "open", recording), mock.patch.object(builtins, "open", recording):
+            code, out = run_build("--repo", str(self.repo), "--out", str(self.out), "--live", str(self.live))
+        after = self.snapshot()
+        writes = {p for p in after if before.get(p) != after[p]}
+        return {"processes": popen.call_count, "threads": start.call_count, "writes": writes, "reads": reads,
+                "out": out, "code": code}
+
+    def test_a_claim_matched_by_its_item_and_letter_reads_clean(self):
+        self.commit_step("c153", note="Ruling: item #9 A, kept.")  # the letter compares without case
+        self.commit_step("c154", note="Ruling: item 10 b.", order=2)  # control: a wrong letter is listed, so an empty row cannot pass
+        self.publish(items=[], answers=[self.answer(9, "a"), self.answer(10, "a")])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c154 (claim "item 10 b")']))
+
+    def test_a_claim_naming_an_item_with_no_answer_row_is_flagged_in_note_why_or_ask(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        self.commit_step("c154", note="Waiting.", why="Owner: item #9 a.", order=2)
+        self.commit_step("c155", note="Waiting.", ask="Confirm item 9 a?", order=3)
+        self.commit_step("c156", note="Waiting on the cull.", order=4)  # control: no claim, never listed
+        self.publish(items=[], answers=[self.answer(8, "a")])  # a row for item 8 only: none for item 9
+        self.assertEqual(self.flagged(self.out_with_live()), (3, sorted([
+            'c153 (claim "item 9 a")', 'c154 (claim "item #9 a")', 'c155 (claim "item 9 a")'])))
+
+    def test_a_claim_whose_letter_differs_from_the_recorded_choice_is_flagged(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        self.commit_step("c154", note="Ruling: item 9 b.", order=2)  # control: the recorded letter reads clean
+        self.publish(items=[], answers=[self.answer(9, "b")])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c153 (claim "item 9 a")']))
+
+    def test_a_claim_with_no_item_number_is_flagged_even_when_a_row_holds_its_letter(self):
+        self.commit_step("c153", note="The owner picked a for the cull.")
+        self.commit_step("c154", note="Owner picked b.", order=2)
+        self.publish(items=[], answers=[self.answer(9, "a")])  # a row holds letter a, but no item number names it
+        count, entries = self.flagged(self.out_with_live())
+        self.assertEqual(count, 2, "a claim with no item number was not flagged")
+        self.assertRegex(" | ".join(entries),
+                         r'^c153 \(claim "(?i:the )?owner picked a"\) \| c154 \(claim "Owner picked b"\)$')
+
+    def test_a_done_step_is_skipped(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")  # control: open, so it is listed
+        self.commit_step("c2", status="done", note="Ruling: item 9 a.", order=2)
+        self.publish(items=[], answers=[])
+        count, entries = self.flagged(self.out_with_live())
+        self.assertIn('c153 (claim "item 9 a")', entries, "the open step's claim is not flagged, so the done step proves nothing")
+        self.assertEqual(count, 1, "the done step's claim is flagged")
+
+    def test_a_claim_word_inside_a_longer_word_is_not_a_claim(self):
+        notes = {"c153": "The subitem 9 a is fine.", "c154": "The items 9 a are in.",
+                 "c155": "The homeowner picked a.", "c156": "Item 9 abc and owner picked ab."}
+        for i, (sid, note) in enumerate(notes.items(), start=2):
+            self.commit_step(sid, note=note, order=i)
+        self.commit_step("c157", note="Ruling: item 9 a.", order=9)  # control: the real claim is listed
+        self.publish(items=[], answers=[])
+        count, entries = self.flagged(self.out_with_live())
+        self.assertIn('c157 (claim "item 9 a")', entries, "the real claim is not flagged, so the near misses prove nothing")
+        self.assertEqual(count, 1, "a claim word inside a longer word counts as a claim")
+
+    def test_an_empty_answers_list_flags_each_claim_and_reads_no_unknown(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        self.commit_step("c154", note="Ruling: item 10 b.", order=2)
+        self.publish(items=[], answers=[])
+        self.assertEqual(self.flagged(self.out_with_live()),
+                         (2, sorted(['c153 (claim "item 9 a")', 'c154 (claim "item 10 b")'])))
+
+    def test_no_claims_reads_zero_with_answers_present(self):
+        self.commit_step("c153", note="Waiting on the cull.")
+        self.commit_step("c154", note="Item 9 is closed.", order=2)  # near miss: "is" is not a letter
+        self.commit_step("c155", note="Owner picked none of these.", order=3)  # near miss: "none" is not a letter
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged(self.out_with_live()), (0, []))
+
+    def test_an_answers_list_of_full_size_matches_a_claim_on_its_last_row(self):
+        self.commit_step("c153", note="Ruling: item 200 a.")  # control: the row for item 200 is the last of 200
+        self.commit_step("c154", note="Ruling: item 201 a.", order=2)
+        self.publish(items=[], answers=[self.answer(n, "a") for n in range(1, 201)])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c154 (claim "item 201 a")']))
+
+    def test_a_live_file_with_no_answers_list_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        value = self.publish(items=[])  # no answers key
+        for label, answers in (("missing", _ABSENT), ("null", None), ("an object", {}), ("a string", "item 9 a")):
+            with self.subTest(answers=label):
+                self.write_live(dict(value) if answers is _ABSENT else dict(value, answers=answers))
+                self.assert_row_unknown(self.out_with_live(), self.ROW)
+
+    def test_an_answers_row_of_the_wrong_shape_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Ruling: item 10 a.")  # the good row matches, so a script that skips the bad row reads clean
+        good = self.answer(10, "a")
+        bad_rows = [
+            "item 9 a",
+            {"choice": "a", "at": "2026-11-08T10:00:00-06:00"},
+            {"n": "9", "choice": "a"},
+            {"n": True, "choice": "a"},
+            {"n": 9.0, "choice": "a"},
+            {"n": 9, "choice": ["a"]},  # a multi-item list is not one letter, as the answers shape says
+            {"n": 9, "choice": 7},
+            {"n": 9, "choice": "a", "at": 1731000000},
+        ]
+        for bad in bad_rows:
+            with self.subTest(row=bad):
+                self.publish(items=[], answers=[good, bad])
+                self.assert_row_unknown(self.out_with_live(), self.ROW)
+
+    def test_a_skipped_session_row_does_not_make_the_row_unknown(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING"), "session_test03"],
+                     items=[], answers=[])
+        page, out = self.build_from_main("--live", str(self.live))
+        self.assertIn("session 2", build_info(page)["live"]["skipped"], "the session row was not skipped")
+        self.assertEqual(self.flagged(out), (1, ['c153 (claim "item 9 a")']))
+
+    def test_a_missing_or_unreadable_live_file_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        _, out = self.build_from_main()  # no --live
+        self.assertIn("--live", self.assert_row_unknown(out, self.ROW))
+        self.write_live("{not json")
+        self.assert_row_unknown(self.out_with_live(), self.ROW)
+
+    def test_a_read_at_that_is_bad_or_stale_reads_the_row_unknown_once(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        self.publish(items=[], answers=[])  # control: a fresh read lists the claim
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c153 (claim "item 9 a")']))
+        for read_at in ("yesterday", iso_ago(61), iso_ago(120), iso_ago(-6)):
+            with self.subTest(read_at=read_at):
+                self.publish(items=[], answers=[], read_at=read_at)
+                self.assert_row_unknown(self.out_with_live(), self.ROW)
+
+    def test_the_claim_row_starts_no_process_writes_no_file_and_reads_only_the_live_file(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        self.publish(items=[], answers=[self.answer(9, "b")])
+        with_row = self.counted_build()
+        self.assertEqual(self.flagged(with_row["out"]), (1, ['c153 (claim "item 9 a")']),
+                         "the row does not run on this file, so its cost is not measured")  # scope first
+        self.assertGreater(with_row["processes"], 0, "the counter saw no git process, so it counts nothing")
+        self.publish(items=[])  # no answers list: the same build, with the row reading unknown
+        without_row = self.counted_build()
+        self.assert_row_unknown(without_row["out"], self.ROW)
+        for key in ("processes", "threads", "writes", "reads"):
+            self.assertEqual(with_row[key], without_row[key], "the claim row changes the build's %s" % key)
+        self.assertEqual(with_row["threads"], 0, "the build starts a thread, which a timer would be")
+        self.assertIn(str(self.out), with_row["writes"], "the counter saw no page write, so it counts nothing")
+        self.assertIn(str(self.live), with_row["reads"], "the build does not read the live file")
 
 
 class DatedClaims(UpkeepFixture):
