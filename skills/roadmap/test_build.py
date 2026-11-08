@@ -2015,7 +2015,7 @@ class PickClaims(UpkeepFixture):
                 found[str(p)] = (st.st_mtime_ns, st.st_size)
         return found
 
-    BACKDATED = 946684800  # 2000-01-01 UTC: a fixed past time, older than anything this test writes
+    BACKDATED = 946684800  # a fixed time far in the past, so no index entry is racy with a file this test writes
 
     def settle_index(self):
         """Backdate the tracked files to BACKDATED, then refresh the index. Git rewrites .git/index when an entry's mtime
