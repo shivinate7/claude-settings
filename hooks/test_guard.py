@@ -4921,10 +4921,11 @@ sh("git-after-cd: a cd then ; then git branch -m is refused",
    "cd /tmp/w; %s branch -m old new" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd then ; then git branch -M is refused",
    "cd /tmp/w; %s branch -M main" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# shared-tree refuses a named branch delete in any folder, so these two cases use the nameless forms.
 sh("git-after-cd: a cd then ; then git branch -D is refused",
-   "cd /tmp/w; %s branch -D topic" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+   "cd /tmp/w; %s branch -D" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd then ; then git branch --delete is refused",
-   "cd /tmp/w; %s branch --delete topic" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   "cd /tmp/w; %s branch --delete" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&", "-C"))
 sh("git-after-cd: a cd then ; then a bare git fetch, a read, passes",
    "cd /tmp/w; %s fetch" % VCS, "allow", cwd=NOGIT)
