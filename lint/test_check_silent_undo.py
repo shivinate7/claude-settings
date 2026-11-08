@@ -2750,5 +2750,150 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(refused, [], "a reason that names retired-note with punctuation after it does not excuse it: %r" % refused)
 
 
+class LostSentence(unittest.TestCase):
+    """A commit that rewrites a notes line must keep every sentence of the old text that the new text still holds. A sentence
+    counts as held through a word changed, the punctuation changed, a split or a reflow. A fold deletes a note whose sentences
+    move into another note's new text, and the same rule holds for it. A `Drops-lines` trailer excuses a drop only when its
+    reason names the note as `- <slug>`. A plain retire, a deleted line that no new text holds, is no finding here. The
+    verdicts are read from check(), so a red case fails on its assert, never on a name the check does not have yet. The
+    base is FILLER plus the case's lines, at full notes-file length."""
+
+    NOTES = RevivedNote.NOTES
+    HEADING = RevivedNote.HEADING
+    text = RevivedNote.text
+    notes_at = RevivedNote.notes_at
+    body = RevivedNote.body
+    commit_notes = RevivedNote.commit_notes
+    FILLER = ["- filler-%03d: a finding the branch never touches (lint/check_filler_%03d.py)." % (i, i) for i in range(1, 301)]
+
+    DROP_OLD = "- drop-note: The finder lists each sleep call in the file. The sleep scan ignores fake timers. Decision: test-practices (P5)."
+    DROP_NEW = "- drop-note: The finder lists each sleep call in the file. Decision: test-practices (P5)."
+    REWORD_OLD = "- reword-note: The finder lists each sleep call in the file. The sleep scan ignores fake timers. Decision: test-practices (P5)."
+    REWORD_NEW = "- reword-note: The finder lists every sleep call in the file. The sleep scan ignores fake clocks. Ruling: test-practices (P5)."
+    SPLIT_OLD = "- split-note: The finder lists each sleep call in the file, and the sleep scan ignores fake timers. Decision: test-practices (P5)."
+    SPLIT_NEW = "- split-note: The finder lists each sleep call in the file. The sleep scan ignores fake timers. Decision: test-practices (P5)."
+    FOLD_SRC = ("- fold-source: The fake clock hides each calendar read. The sleep scan reads fake timers the same way. "
+                "The finder lists only for triage. Decision: test-practices (P5).")
+    FOLD_TARGET = "- fold-target: The finder lists calendar reads in the sweep. Decision: test-practices (P5)."
+    FOLD_KEEP = ("- fold-target: The finder lists calendar reads in the sweep. The fake clock hides each calendar read. "
+                 "The sleep scan reads fake timers the same way. The finder lists only for triage. Decision: test-practices (P5).")
+    FOLD_DROP = ("- fold-target: The finder lists calendar reads in the sweep. The fake clock hides each calendar read. "
+                 "The finder lists only for triage. Decision: test-practices (P5).")
+    RETIRE = "- retire-note: The old sweep no longer runs. Its folder is removed by hand. Decision: retired with the sweep (P9)."
+    # The notes lines of d4163eceb, copied from its old and new text (its parent is c5b82f0ac): the rewritten line and the added line.
+    TIME_OLD = ('- time-pinned-plan-stale: plan `time-pinned-tests` has no calendar column and its Total counts hang guards the finder no longer '
+                'counts; test-practices still calls the P5 lint "not built", though the finder lists those reads (ungated); the `joyous PR 68` '
+                'incident cited in P5 cannot be checked from this repo and may name the wrong PR. Decision: test-practices (P5).')
+    TIME_NEW = ('- time-pinned-plan-stale: plan `time-pinned-tests` has no calendar column. Its Total counts hang guards, which the finder no '
+                'longer counts. Test-practices still calls the P5 lint "not built", though the finder now lists those reads without a gate. '
+                'P5 cites the `joyous PR 68` incident, which this repo cannot confirm. Decision: test-practices (P5).')
+    # The same line as 3c9078248 wrote it, which keeps the clause d4163eceb dropped.
+    TIME_FIXED = ('- time-pinned-plan-stale: plan `time-pinned-tests` has no calendar column. Its Total counts hang guards, which the finder no '
+                  'longer counts. Test-practices still calls the P5 lint "not built", though the finder now lists those reads without a gate. '
+                  'P5 cites the `joyous PR 68` incident, which this repo cannot confirm and may name the wrong PR. Decision: test-practices (P5).')
+    LOCAL = ('- find-time-pinned-local-name: `lint/find_time_pinned.py` matches the raw dotted name, so a local `time = Fake(); time.timezone` '
+             'or a parameter `date.today()` is listed as calendar. A false listing; the finder only lists for triage. Decision: test-practices (P5).')
+    DROP_TRAILER = "Drops-lines: docs/debts/notes.md -- the fake-timer sentence is retired - drop-note"
+    FOLD_TRAILER = "Drops-lines: docs/debts/notes.md -- fold-source folded into fold-target"
+    PLAN_TRAILER = "Drops-lines: docs/debts/notes.md -- time-pinned-plan-stale reworded into short sentences"
+
+    def start(self, lines):
+        """The notes file holds the filler and `lines` on main, then an unrelated main commit, so the fork point is that commit and
+        the branch's rewrite is read against its own parent. -> nothing; the branch is checked out."""
+        r = self.r = Repo()
+        r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
+        r.commit("notes", docs__debts__notes_md=self.text(*(self.FILLER + lines)))
+        r.commit("unrelated main commit", other_txt="other v1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+
+    def rewrite(self, msg, lines):
+        """The branch's one commit: its notes file is the filler and `lines`. -> the sha."""
+        return self.commit_notes(msg, self.FILLER + lines)
+
+    def premises(self, head, old, slug, gone):
+        """The scope, read before the verdict (P7): the commit is no merge, main holds the old line, the head holds one line for
+        the slug, and the sentence the case drops is absent from the head."""
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 2, "premise: the commit is a merge")
+        self.assertIn(old, self.notes_at("main"), "premise: main does not hold the old line of %s" % slug)
+        self.assertEqual(sum(line.startswith("- %s:" % slug) for line in self.body(head)), 1,
+                         "premise: the head does not hold one line for %s" % slug)
+        self.assertNotIn(gone, "\n".join(self.body(head)), "premise: the head still holds %r" % gone)
+
+    def named(self, got, *parts):
+        """The problem lines that hold every part, whitespace collapsed."""
+        return [p for p in got if all(part in " ".join(p.split()) for part in parts)]
+
+    def test_a_rewrite_that_drops_one_sentence_is_refused_and_names_it(self):
+        self.start([self.DROP_OLD])
+        head = self.rewrite("Reword the drop note", [self.DROP_NEW])
+        self.premises(head, self.DROP_OLD, "drop-note", "ignores fake timers")
+        got = self.r.verdict()
+        self.assertTrue(self.named(got, "drop-note", "ignores fake timers"),
+                        "a rewrite that dropped one sentence of drop-note was not refused by a problem that names the note and that "
+                        "sentence: %r" % got)
+        line = " ".join(self.named(got, "drop-note", "ignores fake timers")[0].split())
+        for kept in ("lists each sleep call", "Decision: test-practices"):
+            self.assertNotIn(kept, line, "the refusal for drop-note quotes a sentence it kept, not only the dropped one: %r" % line)
+
+    def test_the_same_rewrite_under_a_slug_trailer_passes(self):
+        self.start([self.DROP_OLD])
+        head = self.rewrite("Reword the drop note\n\n%s" % self.DROP_TRAILER, [self.DROP_NEW])
+        self.premises(head, self.DROP_OLD, "drop-note", "ignores fake timers")
+        self.assertEqual(self.r.verdict(), [], "a drop that a notes-path trailer names as `- drop-note` was refused")
+
+    def test_a_rewrite_that_only_rewords_each_sentence_passes(self):
+        self.start([self.REWORD_OLD])
+        head = self.rewrite("Reword the reword note", [self.REWORD_NEW])
+        self.premises(head, self.REWORD_OLD, "reword-note", "ignores fake timers")
+        self.assertEqual(self.r.verdict(), [], "a rewrite that changed one word in each sentence was refused as a drop")
+
+    def test_a_rewrite_that_splits_one_sentence_in_two_passes(self):
+        self.start([self.SPLIT_OLD])
+        head = self.rewrite("Split the split note", [self.SPLIT_NEW])
+        self.premises(head, self.SPLIT_OLD, "split-note", "and the sleep scan")
+        self.assertEqual(self.r.verdict(), [], "a rewrite that split one sentence in two was refused as a drop")
+
+    def test_a_fold_that_keeps_every_sentence_passes(self):
+        self.start([self.FOLD_SRC, self.FOLD_TARGET])
+        head = self.rewrite("Fold the fake-clock note into the fold target", [self.FOLD_KEEP])
+        self.assertIn(self.FOLD_SRC, self.notes_at("main"), "premise: main does not hold the folded note")
+        self.assertEqual(sum(line.startswith("- fold-source:") for line in self.body(head)), 0, "premise: the fold left fold-source in the head")
+        self.assertIn("The sleep scan reads fake timers the same way.", "\n".join(self.body(head)), "premise: the head lost a sentence of the fold")
+        self.assertEqual(self.r.verdict(), [], "a fold that carried every sentence of the folded note was refused")
+
+    def test_a_fold_that_drops_one_sentence_is_refused_and_names_the_folded_note(self):
+        self.start([self.FOLD_SRC, self.FOLD_TARGET])
+        head = self.rewrite("Fold the fake-clock note into the fold target\n\n%s" % self.FOLD_TRAILER, [self.FOLD_DROP])
+        self.assertIn(self.FOLD_SRC, self.notes_at("main"), "premise: main does not hold the folded note")
+        self.assertEqual(sum(line.startswith("- fold-source:") for line in self.body(head)), 0, "premise: the fold left fold-source in the head")
+        self.assertNotIn("reads fake timers the same way", "\n".join(self.body(head)), "premise: the head still holds the dropped sentence")
+        self.assertTrue(self.named(self.r.verdict(), "fold-source", "reads fake timers the same way"),
+                        "a fold that dropped one sentence of fold-source was not refused by a problem that names that note and sentence")
+
+    def test_the_rewrite_from_d4163eceb_is_refused_and_names_the_dropped_clause(self):
+        self.start([self.TIME_OLD])
+        head = self.rewrite("Split the plan-stale sentence\n\n%s" % self.PLAN_TRAILER, [self.TIME_NEW, self.LOCAL])
+        self.premises(head, self.TIME_OLD, "time-pinned-plan-stale", "wrong PR")
+        self.assertTrue(self.named(self.r.verdict(), "time-pinned-plan-stale", "wrong PR"),
+                        "the rewrite that dropped `and may name the wrong PR` from time-pinned-plan-stale was not refused by a problem "
+                        "that names both")
+
+    def test_the_same_rewrite_with_the_clause_kept_passes(self):  # control: the 3c9078248 wording of the same line
+        self.start([self.TIME_OLD])
+        head = self.rewrite("Split the plan-stale sentence and keep the wrong-PR clause", [self.TIME_FIXED, self.LOCAL])
+        self.assertIn("and may name the wrong PR", "\n".join(self.body(head)), "premise: the head lost the wrong-PR clause")
+        self.assertIn(self.TIME_OLD, self.notes_at("main"), "premise: main does not hold the old line of time-pinned-plan-stale")
+        self.assertEqual(self.r.verdict(), [], "the split with the wrong-PR clause kept was refused")
+
+    def test_a_plain_retire_of_a_whole_note_adds_no_finding(self):
+        self.start([self.RETIRE])
+        head = self.rewrite("Retire the sweep note", [])
+        self.assertIn(self.RETIRE, self.notes_at("main"), "premise: main holds the retired note")
+        self.assertEqual(sum(line.startswith("- retire-note:") for line in self.body(head)), 0, "premise: the head holds retire-note")
+        self.assertNotIn("old sweep no longer runs", "\n".join(self.body(head)), "premise: the head holds a sentence of retire-note")
+        self.assertEqual(self.r.verdict(), [], "a plain retire of a whole note added a finding")
+
+
 if __name__ == "__main__":
     unittest.main()
