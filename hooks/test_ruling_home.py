@@ -11,15 +11,18 @@ home: value needs a git answer, a temp git repo (used as the hook's `cwd`). Most
 "print nothing"); a few run `main()` itself, as a real subprocess, to prove the fail-open
 contract end to end.
 """
+import builtins
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 
 from test_decision_watch import (_git, assistant_record, human_record, make_repo, write,
                                  write_transcript)
+import precompact_handoff  # the handoff path the Stop check reads (hooks/precompact_handoff.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODULE_PATH = os.environ.get("RULING_HOME_UNDER_TEST") or os.path.join(HERE, "ruling_home.py")
@@ -29,6 +32,8 @@ rh = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rh)
 
 ROOT = tempfile.mkdtemp(prefix="ruling_home_cases_")
+# Every handoff a case writes lands under ROOT, never in the real ~/.claude/handoffs.
+os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(ROOT, "claude-config")
 FAILED = []
 
 T0 = "2026-09-24T10:00:00.000Z"
@@ -799,6 +804,324 @@ def case_main_repo_git_cannot_read_stands_down():
           control.stdout)
 
 
+# ---------------------------------------------------------------------------
+# The handoff path. The Stop check reads this turn's session handoff, precompact_handoff.handoff_path
+# (sid). Its seven step-4 sections come in the order hooks/precompact_handoff_prompt.md step 4 gives.
+# A ruling premise in Working premises, or a list line under the NO HOME YET heading, must end with a
+# `Home:` token that resolves. A line with none blocks, and the reason names its label.
+
+DEFAULT_PREMISE = ("- P1 [measured] The Stop check reads one handoff per turn. Source: "
+                   "hooks/ruling_home.py run(). Checked 2026-11-07.")
+STATEMENT = "A guard or check change batches alone"
+KNOWN_HOME = "docs/decisions/x.md"  # a tracked ruling home in handoff_repo()
+REAL_BRANCH = "claude/rec-x"  # a branch handoff_repo() holds
+FAKE_BRANCH = "claude/no-such-branch"
+NO_HOME_HEADING = "Rulings with NO HOME YET"
+KINDS = ("measured", "read", "notes", "assumed")
+_HANDOFF_REPO = []
+
+
+def handoff_text(no_home=("- none",), premises=(),
+                 where=("- Branch claude/coord-pick-needs-record at 394ad48.",)):
+    """The handoff with all seven step-4 sections in order. An empty `premises` keeps one measured line."""
+    sections = (
+        (NO_HOME_HEADING, list(no_home)),
+        ("Goal", ["Fix the ruling-home check. Source: owner 2026-11-07."]),
+        ("Working premises", list(premises) or [DEFAULT_PREMISE]),
+        ("Where things stand", list(where)),
+        ("Work in flight", ["- none"]),
+        ("Next steps", ["- Write the cases."]),
+        ("Files and commands that matter", ["- hooks/ruling_home.py"]),
+    )
+    return "# Handoff\n\n" + "".join("## %s\n%s\n\n" % (head, "\n".join(body))
+                                    for head, body in sections)
+
+
+def ruling(pid, home=None, text=STATEMENT):
+    tail = "" if home is None else " Home: %s" % home
+    return "- %s [ruling] %s. Source: coordinator 2026-11-07. Checked never.%s" % (pid, text, tail)
+
+
+def assumed(pid):
+    return "- %s [assumed] The pick is the owner's default. Source: none. Checked never." % pid
+
+
+def no_home_line(home=None, text=STATEMENT):
+    tail = "" if home is None else " Home: %s" % home
+    return "- %s. Source: coordinator 2026-11-07.%s" % (text, tail)
+
+
+def handoff_repo():
+    """The repo the Stop check reads as cwd: docs/decisions/x.md and README.md tracked, REAL_BRANCH held."""
+    if not _HANDOFF_REPO:
+        repo = make_repo("ruling_handoff_repo")
+        write(os.path.join(repo, "docs", "decisions", "x.md"), "# x\n")
+        write(os.path.join(repo, "README.md"), "r\n")
+        commit_all(repo)
+        _git(repo, "branch", REAL_BRANCH)
+        _HANDOFF_REPO.append(repo)
+    return _HANDOFF_REPO[0]
+
+
+def handoff_turn(name, text, mtime=FRESH_MTIME, wrote=False, memory=True, stop_active=False, cwd=None):
+    """Write this session's handoff and its transcript. `wrote` adds a Write tool use that names the
+    handoff in this turn. `mtime` None leaves the file's own mtime. Returns (hook, handoff path)."""
+    session_dir = os.path.join(ROOT, name)
+    os.makedirs(session_dir, exist_ok=True)
+    if memory:
+        os.makedirs(os.path.join(session_dir, "memory"), exist_ok=True)
+    sid = "sid-" + name
+    hpath = precompact_handoff.handoff_path(sid)
+    write(hpath, text)
+    if mtime is not None:
+        os.utime(hpath, (mtime, mtime))
+    records = [human_record("finish the handoff", T0)]
+    if wrote:
+        records.append(assistant_record(tool_use=write_tool_use(hpath)))
+    hook = {"transcript_path": write_transcript(session_dir, records), "cwd": cwd or handoff_repo(),
+            "session_id": sid}
+    if stop_active:
+        hook["stop_hook_active"] = True
+    return hook, hpath
+
+
+def handoff_reason(name, text, **kwargs):
+    hook, _hpath = handoff_turn(name, text, **kwargs)
+    return rh.run(hook)
+
+
+def labels_in(reason):
+    return set(re.findall(r"\bP\d+\b", reason or ""))
+
+
+def opened_during(fn):
+    """Run fn; return (its result, the normalized paths builtins.open was asked to open)."""
+    real_open, seen = builtins.open, []
+
+    def spy(file, *args, **kwargs):
+        if isinstance(file, (str, bytes, os.PathLike)):
+            seen.append(os.path.normcase(os.path.normpath(os.fsdecode(file))))
+        return real_open(file, *args, **kwargs)
+
+    builtins.open = spy
+    try:
+        result = fn()
+    finally:
+        builtins.open = real_open
+    return result, seen
+
+
+def case_handoff_ruling_no_home_blocks():
+    """A ruling premise with no Home: token blocks, and the reason names that label only: P3, not the
+    assumed P5. Two triggers for "written this turn": a Write tool use naming the handoff (old mtime),
+    and a fresh mtime with no tool use (a peer's write)."""
+    bad = handoff_text(premises=[ruling("P3"), assumed("P5")])
+    for tag, mtime, wrote in (("write named", OLD_MTIME, True), ("fresh mtime", FRESH_MTIME, False)):
+        reason = handoff_reason("hand_ruling_" + tag.replace(" ", "_"), bad, mtime=mtime, wrote=wrote)
+        check("handoff ruling (%s): blocks" % tag, bool(reason), "reason is empty")
+        check("handoff ruling (%s): the reason names P3 only" % tag, labels_in(reason) == {"P3"}, reason)
+
+
+def case_no_home_yet_line_blocks():
+    """A list line under the NO HOME YET heading with no Home: token blocks, and the reason names the section."""
+    bad = handoff_text(no_home=[no_home_line()])
+    reason = handoff_reason("hand_noh_no_token", bad, wrote=True)
+    check("no home yet (no token): blocks", bool(reason), "reason is empty")
+    check("no home yet (no token): the reason names the NO HOME YET section", NO_HOME_HEADING in reason,
+          reason)
+
+
+def case_no_home_yet_branch_must_be_a_ref():
+    """`Home: NO HOME YET (branch <b>)` passes when some ref holds <b>, and blocks when none does."""
+    ok = handoff_text(no_home=[no_home_line("NO HOME YET (branch %s)" % REAL_BRANCH)])
+    bad = handoff_text(no_home=[no_home_line("NO HOME YET (branch %s)" % FAKE_BRANCH)])
+    reason = handoff_reason("hand_noh_real", ok, wrote=True)
+    check("no home yet (real branch): silent", reason == "", reason)
+    reason = handoff_reason("hand_noh_fake", bad, wrote=True)
+    check("no home yet (fake branch): blocks", bool(reason), "reason is empty")
+    check("no home yet (fake branch): the reason names the NO HOME YET section", NO_HOME_HEADING in reason,
+          reason)
+
+
+def case_ruling_home_must_resolve():
+    """A ruling's Home: passes when a branch tracks the file, and blocks when none does."""
+    ok = handoff_text(premises=[ruling("P3", KNOWN_HOME)])
+    bad = handoff_text(premises=[ruling("P3", "docs/decisions/missing.md")])
+    reason = handoff_reason("hand_resolve_ok", ok, wrote=True)
+    check("ruling home (tracked decision): silent", reason == "", reason)
+    reason = handoff_reason("hand_resolve_bad", bad, wrote=True)
+    check("ruling home (untracked decision): blocks", bool(reason), "reason is empty")
+    check("ruling home (untracked decision): the reason names P3 only", labels_in(reason) == {"P3"}, reason)
+
+
+def case_ruling_home_kind_refused():
+    """A ruling's home must be a ruling-kind path. A tracked README.md, or a step: slug, blocks."""
+    ok = handoff_text(premises=[ruling("P3", KNOWN_HOME)])
+    reason = handoff_reason("hand_kind_ok", ok, wrote=True)
+    check("ruling home kind (decisions path): silent", reason == "", reason)
+    for tag, home in (("README", "README.md"), ("step slug", "step:coord-pick-needs-record")):
+        bad = handoff_text(premises=[ruling("P3", home)])
+        reason = handoff_reason("hand_kind_" + tag.replace(" ", "_"), bad, wrote=True)
+        check("ruling home kind (%s): blocks" % tag, bool(reason), "reason is empty")
+        check("ruling home kind (%s): the reason names P3 only" % tag, labels_in(reason) == {"P3"}, reason)
+
+
+def case_assumed_pick_passes():
+    """An [assumed] premise needs no home. An unhomed assumed line alone is silent. The same handoff with
+    an unhomed ruling blocks, and names P3, not the assumed P5."""
+    reason = handoff_reason("hand_assumed_only", handoff_text(premises=[assumed("P5")]), wrote=True)
+    check("assumed pick: an unhomed assumed line alone is silent", reason == "", reason)
+    both = handoff_text(premises=[assumed("P5"), ruling("P3")])
+    reason = handoff_reason("hand_assumed_and_ruling", both, wrote=True)
+    check("assumed pick: a ruling beside it blocks", bool(reason), "reason is empty")
+    check("assumed pick: the reason names P3 only, not the assumed P5", labels_in(reason) == {"P3"}, reason)
+
+
+def case_none_line_passes():
+    """`- none` under NO HOME YET is an empty section, not a ruling line. An empty section with a homed ruling
+    is silent. The same empty section with an unhomed ruling blocks, and names P3 but not the heading."""
+    reason = handoff_reason("hand_none_ok", handoff_text(no_home=["- none"],
+                                                         premises=[ruling("P1", KNOWN_HOME)]), wrote=True)
+    check("none line: an empty NO HOME YET section with a homed ruling is silent", reason == "", reason)
+    reason = handoff_reason("hand_none_bad", handoff_text(no_home=["- none"], premises=[ruling("P3")]),
+                            wrote=True)
+    check("none line: an unhomed ruling beside it blocks", bool(reason), "reason is empty")
+    check("none line: the reason names P3, not the NO HOME YET heading",
+          labels_in(reason) == {"P3"} and NO_HOME_HEADING not in reason, reason)
+
+
+def case_handoff_not_written_this_turn_silent():
+    """A handoff nobody wrote this turn (old mtime, no tool use) is silent. The same file with a fresh
+    mtime blocks, so the silence is the rule for the turn and not a broken check."""
+    text = handoff_text(premises=[ruling("P3")])
+    reason = handoff_reason("hand_old_turn", text, mtime=OLD_MTIME)
+    check("handoff not written this turn: silent", reason == "", reason)
+    reason = handoff_reason("hand_fresh_turn", text, mtime=FRESH_MTIME)
+    check("handoff not written this turn: the same file, written now, names P3", labels_in(reason) == {"P3"},
+          reason)
+
+
+def case_handoff_stop_hook_active_silent():
+    """With stop_hook_active set, the Stop check stays silent. Without it, the same handoff blocks."""
+    text = handoff_text(premises=[ruling("P3")])
+    reason = handoff_reason("hand_stop_active", text, stop_active=True, wrote=True)
+    check("stop_hook_active: silent", reason == "", reason)
+    reason = handoff_reason("hand_stop_inactive", text, wrote=True)
+    check("stop_hook_active: the same handoff without the flag names P3", labels_in(reason) == {"P3"}, reason)
+
+
+def case_fenced_and_out_of_section_ignored():
+    """A ruling line inside a code fence, or outside Working premises and NO HOME YET, is prose. An unhomed
+    ruling in Working premises blocks, and names P1 only: the scope proof. A fenced P4 and a P9 under
+    Where things stand are not named."""
+    premises = [ruling("P1"), "```", ruling("P4"), "```"]
+    text = handoff_text(premises=premises, where=[ruling("P9"), "- Branch claude/coord-pick-needs-record."])
+    reason = handoff_reason("hand_fence_scope", text, wrote=True)
+    check("fence and section: the unhomed ruling in Working premises blocks", bool(reason), "reason is empty")
+    check("fence and section: names P1 only, not the fenced P4 or the P9 outside the sections",
+          labels_in(reason) == {"P1"}, reason)
+
+
+def case_reason_names_label_not_value():
+    """The reason names the label and never the Home: value. The value here is a branch no ref holds."""
+    secret = "zz-secret-branch-name"
+    text = handoff_text(premises=[ruling("P3", "NO HOME YET (branch %s)" % secret)])
+    reason = handoff_reason("hand_label_value", text, wrote=True)
+    check("label not value: blocks", bool(reason), "reason is empty")
+    check("label not value: names P3", labels_in(reason) == {"P3"}, reason)
+    check("label not value: the reason holds no Home: value", secret not in reason, reason)
+
+
+def case_handoff_git_failure_stands_down():
+    """A repo git cannot read stands the Stop check down, silently. The same handoff in a readable repo blocks."""
+    broken = os.path.join(ROOT, "hand_broken_git_repo")
+    os.makedirs(broken, exist_ok=True)
+    write(os.path.join(broken, ".git"), "gitdir: /this/does/not/exist\n")
+    text = handoff_text(premises=[ruling("P3", "docs/decisions/missing.md")])
+    hook, _hpath = handoff_turn("hand_git_broken", text, wrote=True, cwd=broken)
+    result = _run_main(hook)
+    check("handoff git failure: exit 0", result.returncode == 0, result.returncode)
+    check("handoff git failure: nothing printed", result.stdout.strip() == "", result.stdout)
+    hook, _hpath = handoff_turn("hand_git_sound", text, wrote=True)
+    control = _run_main(hook)
+    check("handoff git failure: the same handoff in a readable repo blocks", _blocks(control), control.stdout)
+
+
+def case_idle_turn_reads_no_handoff():
+    """Cost: a turn that writes no handoff opens none. One stat is allowed. Control: a turn that writes
+    it opens it and blocks, which shows the spy sees a real read."""
+    text = handoff_text(premises=[ruling("P3")])
+    hook, hpath = handoff_turn("hand_idle", text, mtime=OLD_MTIME, wrote=True)
+    session_dir = os.path.dirname(hook["transcript_path"])
+    hnorm = os.path.normcase(os.path.normpath(hpath))
+    # Scope first: a turn that writes the handoff opens it, so the spy below sees a real read.
+    write_transcript(session_dir, [human_record("finish the handoff", T0),
+                                   assistant_record(tool_use=write_tool_use(hpath))])
+    busy, opened = opened_during(lambda: rh.run(hook))
+    check("idle turn: control, a turn that writes the handoff opens it", hnorm in opened,
+          "opened %d paths, the handoff not among them" % len(opened))
+    check("idle turn: control, that turn names P3", labels_in(busy) == {"P3"}, busy)
+    # The handoff was written in an earlier turn; the last turn is an idle "thanks".
+    write_transcript(session_dir, [
+        human_record("write the handoff", T0), assistant_record(tool_use=write_tool_use(hpath)),
+        human_record("thanks", "2026-09-24T11:00:00.000Z"), assistant_record(text="You are welcome."),
+    ])
+    idle, opened = opened_during(lambda: rh.run(hook))
+    check("idle turn: silent", idle == "", idle)
+    check("idle turn: opens no handoff file", hnorm not in opened,
+          "opened %d paths, the handoff among them" % len(opened))
+
+
+def case_handoff_no_memory_folder_blocks():
+    """The early return for a missing memory folder sits below the handoff check. A session with no memory
+    folder still has its handoff checked. Not written this turn: silent. Written this turn: blocks, naming P3."""
+    text = handoff_text(premises=[ruling("P3")])
+    reason = handoff_reason("hand_nomem_old", text, mtime=OLD_MTIME, memory=False)
+    check("no memory folder: a handoff not written this turn is silent", reason == "", reason)
+    reason = handoff_reason("hand_nomem_fresh", text, memory=False)
+    check("no memory folder: this turn's handoff blocks, naming P3", labels_in(reason) == {"P3"}, reason)
+
+
+def case_handoff_scanner_odd_text():
+    """Comment openers and a lone quote in a ruling line do not hide its Home:, and do not swallow the next
+    line. A Home: in a fence, or mid-sentence in a backtick span, is not the line's home."""
+    odd = ruling("P3", KNOWN_HOME, text='Use // or /* or # here, a lone " quote, see the note')
+    reason = handoff_reason("hand_odd_ok", handoff_text(premises=[odd, assumed("P5")]), wrote=True)
+    check("odd text: a ruling with Home: at its end, odd text before it, is silent", reason == "", reason)
+    reason = handoff_reason("hand_odd_next", handoff_text(premises=[odd, ruling("P4")]), wrote=True)
+    check("odd text: the unhomed line after it blocks, naming P4 only", labels_in(reason) == {"P4"}, reason)
+    fenced = handoff_text(premises=[ruling("P6"), "```", "Home: %s" % KNOWN_HOME, "```"])
+    reason = handoff_reason("hand_odd_fence", fenced, wrote=True)
+    check("odd text: a Home: only inside a fence does not home P6", labels_in(reason) == {"P6"}, reason)
+    mid = handoff_text(premises=["- P7 [ruling] Write `Home: %s` in a backtick span. Source: none. "
+                                 "Checked never." % KNOWN_HOME])
+    reason = handoff_reason("hand_odd_mid", mid, wrote=True)
+    check("odd text: a Home: mid-sentence in a backtick span does not home P7", labels_in(reason) == {"P7"},
+          reason)
+
+
+def case_full_size_only_the_unhomed_label_named():
+    """Full size: fifteen premises, one ruling unhomed. Only that label is named. Empty state: with every
+    ruling homed and NO HOME YET set to `- none`, the handoff is silent."""
+    def premises(unhomed_p11):
+        rows = []
+        for i in range(1, 16):
+            pid = "P%d" % i
+            if i == 11:
+                rows.append(ruling(pid) if unhomed_p11 else ruling(pid, KNOWN_HOME))
+            elif i % 3 == 0:
+                rows.append(ruling(pid, KNOWN_HOME))
+            else:
+                rows.append("- %s [%s] Fact number %d. Source: notes. Checked never." % (pid, KINDS[i % 4], i))
+        return rows
+
+    reason = handoff_reason("hand_full_bad", handoff_text(premises=premises(True)), wrote=True)
+    check("full size: blocks", bool(reason), "reason is empty")
+    check("full size: names P11 only", labels_in(reason) == {"P11"}, reason)
+    reason = handoff_reason("hand_full_ok", handoff_text(no_home=["- none"], premises=premises(False)), wrote=True)
+    check("full size: all rulings homed and NO HOME YET empty is silent", reason == "", reason)
+
+
 def main():
     case_a_no_home_line()
     case_b_process_only_passes()
@@ -828,6 +1151,22 @@ def main():
     case_main_blocks()
     case_main_missing_git_binary_stands_down()
     case_main_repo_git_cannot_read_stands_down()
+    case_handoff_ruling_no_home_blocks()
+    case_no_home_yet_line_blocks()
+    case_no_home_yet_branch_must_be_a_ref()
+    case_ruling_home_must_resolve()
+    case_ruling_home_kind_refused()
+    case_assumed_pick_passes()
+    case_none_line_passes()
+    case_handoff_not_written_this_turn_silent()
+    case_handoff_stop_hook_active_silent()
+    case_fenced_and_out_of_section_ignored()
+    case_reason_names_label_not_value()
+    case_handoff_git_failure_stands_down()
+    case_idle_turn_reads_no_handoff()
+    case_handoff_no_memory_folder_blocks()
+    case_handoff_scanner_odd_text()
+    case_full_size_only_the_unhomed_label_named()
 
     if FAILED:
         print("test_ruling_home FAIL: %d failing check(s)" % len(FAILED))

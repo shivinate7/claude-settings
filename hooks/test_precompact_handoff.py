@@ -1179,6 +1179,20 @@ def case_prompt_names_list_home_not_copy():
           "no window of step 4 holds all four; the closest lacks: %s" % "; ".join(missing))
 
 
+def case_prompt_ruling_no_home_section():
+    """Step 4 names the fixed heading the handoff's first section uses, and the Home: token that
+    every ruling line ends with: the two forms hooks/ruling_home.py reads on the Stop check."""
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        text = f.read()
+    step4 = step_body(text, 4) or ""
+    check("prompt: step 4 has the fixed heading '## Rulings with NO HOME YET'",
+          re.search(r"^## Rulings with NO HOME YET[ \t]*$", step4, re.M) is not None,
+          "step 4 has no such heading line")
+    check("prompt: step 4 names the Home: token and its 'NO HOME YET (branch <name>)' form",
+          "Home:" in step4 and "NO HOME YET (branch" in step4,
+          "step 4 lacks the Home: token or the branch form")
+
+
 def write_compaction(c):
     tp = os.path.join(c.root, "transcript.jsonl")
     write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
@@ -2017,6 +2031,7 @@ def main() -> int:
     case_handoffs_dir_keeps_other_sessions()
     case_prompt_lists_working_premises()
     case_prompt_names_list_home_not_copy()
+    case_prompt_ruling_no_home_section()
     case_reorient_lists_weak_premises()
     case_reorient_premise_lines_survive_odd_text()
     case_reorient_flags_missing_premises()
