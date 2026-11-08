@@ -2721,6 +2721,8 @@ class CheckStepPins(unittest.TestCase):
 NO_BASE = {"GITHUB_BASE_REF": None}  # a PR run sets GITHUB_BASE_REF; the no-base reads pop it (None pops a name)
 STACK_BASE = "line 1\nadded by pr-base\n" + "".join("line %d\n" % i for i in range(2, 21)) + "function Card() {}\n"
 NO_LINE_1 = "".join("line %d\n" % i for i in range(2, 21)) + "function Card() {}\n"
+MAIN_WITHOUT_LINE_1 = "added by pr-base\n" + "".join("line %d\n" % i for i in range(2, 21)) + "function Card() {}\n"
+EMPTY_BASE = re.compile(r"origin/(?![\w.-])")  # a note naming origin/ with no branch name: an empty base read as a candidate
 
 
 class PrBase(unittest.TestCase):
@@ -2762,6 +2764,51 @@ class PrBase(unittest.TestCase):
         self.assertEqual(self.explicit("origin/main"), [], "scope: origin/main should be quiet on this lane")
         base_bad = self.explicit("origin/pr-base")
         self.assertTrue(any("added by pr-base" in p for p in base_bad), "scope: origin/pr-base should name the dropped line: %r" % base_bad)
+
+    def revert_of_main_line(self, how):
+        """pr-base adds a line after `line 1`, and main takes it in: how="merge" by a true merge commit, how="squash"
+        by one commit with the same change. Main then deletes `line 1`, and a lane branched from main reverts that
+        deletion. The lane's gh-merge-base names pr-base."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "pr-base")
+        r.commit("pr-base adds a line", app_txt=STACK_BASE)
+        r.sh("push", "-q", "origin", "pr-base")
+        r.sh("checkout", "-q", "main")
+        if how == "merge":
+            r.sh("merge", "-q", "--no-ff", "--no-edit", "pr-base")
+        else:
+            r.sh("merge", "-q", "--squash", "pr-base")
+            r.sh("commit", "-q", "-m", "squash pr-base")
+        r.commit("main deletes line 1", app_txt=MAIN_WITHOUT_LINE_1)
+        r.push()
+        r.sh("checkout", "-q", "-b", "lane")
+        r.sh("revert", "--no-edit", "HEAD")
+        r.sh("config", "branch.lane.gh-merge-base", "pr-base")
+
+    def test_merged_base_is_passed_over_and_the_run_fails_as_main_does(self):
+        self.revert_of_main_line("merge")
+        self.r.sh("merge-base", "--is-ancestor", "origin/pr-base", "origin/main")  # scope: pr-base is merged into main
+        main_fails = ["silent-undo: FAIL: " + p for p in self.explicit("origin/main")]
+        self.assertTrue(main_fails, "scope: origin/main should FAIL on the revert of main's deletion")
+        rc, text = self.run_default()
+        fails = [x for x in text.splitlines() if x.startswith("silent-undo: FAIL: ")]
+        self.assertEqual(fails, main_fails, "the default run read the merged base and printed no FAIL for the revert of main's line")
+        self.assertIn("origin/pr-base", text, "no note says the merged base origin/pr-base was passed over")
+        self.assertEqual(rc, 1, "the default run exited %d, not 1" % rc)
+
+    def test_squashed_base_is_named_in_the_run_output(self):
+        self.revert_of_main_line("squash")
+        self.assertIn("added by pr-base", self.r.sh("show", "origin/main:app.txt"), "scope: main should hold the squashed line")
+        rc, text = self.run_default()
+        self.assertTrue([x for x in text.splitlines() if "origin/pr-base" in x], "the run read the squashed base origin/pr-base and its output names no base: a silent pass")
+
+    def test_resolved_base_prints_a_note_naming_it_and_its_source(self):
+        self.stack("ours")
+        self.r.sh("config", "branch.lane.gh-merge-base", "pr-base")
+        self.r.sh("merge-base", "--is-ancestor", "origin/pr-base", "HEAD")  # scope: pr-base is the lane's base
+        rc, text = self.run_default()
+        notes = [x for x in text.splitlines() if "origin/pr-base" in x and "gh-merge-base" in x]
+        self.assertTrue(notes, "the run read origin/pr-base from gh-merge-base and printed no note naming it and its source: %r" % text)
 
     def test_config_names_the_base_and_the_dropped_base_line_is_read_against_it(self):
         self.stack("theirs")
