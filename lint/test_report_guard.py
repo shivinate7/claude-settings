@@ -1015,15 +1015,13 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("matches no reviewer spawn", out["reason"])
 
-    def test_dm_red_spawn_before_an_owner_message_does_not_back_a_name_blocks(self):
-        # Catches: a spawn from an earlier task must not back a name in this turn's report. An owner message
-        # (not a notice) ends the window, so the opus spawn before it is out of the count.
-        out = self.verdict(
-            "> **Done** BUILT the guard, PR #5 (reviewer opus)\n> **Next** Unstarted: none",
-            [self.REVIEWER_OPUS, self.REVIEWER_R2], between=[human("also check the docs")])
-        self.assertIsNotNone(out, "the report passed: an opus spawn from before the owner message backed the name")
-        self.assertEqual(out["decision"], "block")
-        self.assertIn("matches no reviewer spawn", out["reason"])
+    def test_dm_false_alarm_spawn_before_an_owner_message_needs_no_name_passes(self):
+        # Catches: an owner message ends the window, so the reviewer spawn before it is out of the count and the
+        # report that names only the builder does not block. The window still names each role spawned after it.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
+            [self.REVIEWER_OPUS, self.BUILDER], between=[human("also check the docs")]),
+            "the report blocked: the reviewer spawn before the owner message was required to be named")
 
     def test_dm_false_alarm_stop_hook_feedback_between_spawns_passes(self):
         # Catches: the Stop hook's feedback record, read as the owner's message, moves the window past the
@@ -1041,15 +1039,23 @@ class DoneNamesModelsTests(unittest.TestCase):
             [self.BUILDER, self.REVIEWER_R1, self.REVIEWER_R2], lead=[peer_brief()], between=task_notice())
         self.assertIsNone(out, "the report blocked: the finish sequence moved the window past the earlier reviewer spawns")
 
-    def test_dm_red_fired_wake_starts_the_window_blocks(self):
-        # Catches: a fired wake starts a turn, so the sonnet spawn before it is out of the window and the sonnet
-        # named in Done matches no reviewer spawn. The head reads the wake as no turn start and counts that spawn.
-        out = self.verdict("> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none",
-                           [self.REVIEWER_R2, self.REVIEWER_OPUS], between=[fired_wake()])
-        self.assertIsNotNone(out, "the report passed: the fired wake did not start the window, so the sonnet "
-                                  "spawn before it backed the name")
+    def test_dm_false_alarm_reviewer_before_a_fired_wake_is_not_required_passes(self):
+        # Catches: a fired wake starts a turn, so the reviewer spawn before it is out of the window and need not be
+        # named. Read as no turn start, the wake would keep that reviewer in the window and block this report.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
+            [self.REVIEWER_R2, self.BUILDER], between=[fired_wake()]),
+            "the report blocked: the reviewer spawn before the fired wake was required to be named")
+
+    def test_dm_red_reviewer_before_a_builder_with_no_wake_between_blocks(self):
+        # Catches: with no wake between them, the reviewer spawn is in the window and must be named, so a report
+        # that names only the builder blocks. The mirror of the fired-wake case: the same spawns, no wake.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
+            [self.REVIEWER_R2, self.BUILDER], between=())
+        self.assertIsNotNone(out, "the report passed: a reviewer spawn in the window went unnamed")
         self.assertEqual(out["decision"], "block")
-        self.assertIn("matches no reviewer spawn", out["reason"])
+        self.assertIn("no model named for reviewer", out["reason"])
 
     def test_dm_red_origin_peer_frame_starts_no_window_blocks(self):
         # Catches: a peer message that opens with the cross-session tag starts no window when its origin says peer,
