@@ -13,7 +13,7 @@ path is one that hooks/guard.py is_test_rel judges. When HEAD holds lint/check_r
 parent tree lacks it predates the check, so it is not judged. A repo without the file at HEAD gets no such
 exemption: every non-merge commit that is not a revert is judged.
 
-A commit message that cites a ruling (a phrase such as `owner ruling` or `per ruling`, outside backticks) names a
+A commit message that cites a ruling (a claim form of RULING_CITE_RE, outside backticks) names a
 home and a time in the claim's paragraph, or in a `Ruling:` trailer line. Those cases are in RulingCiteCase.
 
 Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit, then
@@ -47,7 +47,7 @@ ATTRIBUTION = ["Co-Authored-By: Claude <noreply@anthropic.com>",
                "Claude-Session: https://claude.ai/code/session_0000"]
 MARKER = "RULING_CITE_RE"  # the string a parent's check file holds once the ruling rule has landed
 MARKER_OFF = "RULING_CITE_OFF"  # the same file with the marker renamed out: a parent from before the rule
-# Commit 5568b42ac, verbatim: a claim with no home and no time, in the subject and in the trailer.
+# The incident commit's message, verbatim: a claim with no home and no time, in the subject and in the trailer.
 INCIDENT_SUBJECT = "Drop the span-flag and two-level red cases per the owner ruling"
 INCIDENT_MESSAGE = "\n".join([
     INCIDENT_SUBJECT,
@@ -471,7 +471,7 @@ class RulingCiteCase(CheckCase):
         return self.commit(subject, {self.new_test_path(): TEST_TEXT}, message=message)
 
     def test_incident_message_with_a_bare_claim_is_flagged(self):
-        """Commit 5568b42ac, verbatim: the subject and the trailer cite a ruling with no home and no time."""
+        """The incident message, verbatim: the subject and the trailer cite a ruling with no home and no time."""
         self.base()
         sha = self.ruling_commit(INCIDENT_SUBJECT, INCIDENT_MESSAGE)
         self.assertRulingFlagged(sha, INCIDENT_SUBJECT, "a claim with no home and no time is not flagged")
@@ -490,8 +490,7 @@ class RulingCiteCase(CheckCase):
 
     def test_full_cite_in_the_claim_paragraph_passes(self):
         """Each home form, with a full stamp. The claim and its cite share one paragraph."""
-        # A decision home names a file under docs/decisions. The round-1 review ruled that (received
-        # 2026-11-08 14:42 UTC).
+        # A decision home names a file under docs/decisions.
         cites = ("item 359 b", "step:ruling-cite-in-commit", "decision docs/decisions/ruling-cite-in-commit.md",
                  "decision `docs/decisions/ruling-cite-in-commit.md`", "rule:outcomes-grant-covers-named-act")
         for cite in cites:
