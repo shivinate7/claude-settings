@@ -32,15 +32,19 @@ actions/ste-lint/run.sh with the step's env. TMPDIR is the case folder, so temp 
 import ast
 import atexit
 import collections
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
@@ -283,11 +287,26 @@ class StaleCase(unittest.TestCase):
                               encoding="utf-8", errors="replace")
         return done.returncode, done.stdout + done.stderr
 
-    def run_traced_commands(self, rng):
-        """(rc, out, the git commands a run started), read from a GIT_TRACE file."""
+    def run_traced_commands(self, rng, spec=None):
+        """(rc, out, the git commands a run started), read from a GIT_TRACE file. `spec` is the range text, as run_check takes it."""
         trace = os.path.join(rng.case, "git-trace.txt")
-        rc, out = self.run_check(rng, extra_env={"GIT_TRACE": trace})
+        rc, out = self.run_check(rng, spec=spec, extra_env={"GIT_TRACE": trace})
         return rc, out, git_commands(trace)
+
+    def assert_starts_after_failed_read(self, rng, spec, failed_read, rc, expected):
+        """Pin the git commands a failing `spec` starts after its one `failed_read`, with its exit code `rc`. The
+        count and the order of `expected` are both checked, so a change shows which start moved."""
+        code, out, traced = self.run_traced_commands(rng, spec=spec)
+        self.assertEqual(code, rc, "%s exited %d, expected %d\n%s" % (spec, code, rc, out))
+        commands = [" ".join(shlex.split(command)) for command in traced]  # the trace quotes `^{...}` arguments
+        reads = [i for i, command in enumerate(commands) if command.split()[0] == failed_read]
+        self.assertEqual(len(reads), 1, "scope: %s ran the %s read %d times, not once\n%s"
+                         % (spec, failed_read, len(reads), commands))
+        after = commands[reads[0] + 1:]
+        self.assertEqual(len(after), len(expected), "%s starts %d git processes after its failed %s, expected %d\n%s"
+                         % (spec, len(after), failed_read, len(expected), after))
+        self.assertEqual(after, expected, "%s starts other git processes after its failed %s than the pinned list\n%s"
+                         % (spec, failed_read, after))
 
     def assert_flags(self, rng, expected):
         """Exit 1 and exactly the expected (path, line, code) findings. Returns the findings."""
@@ -814,8 +833,8 @@ class ReadAtHeadTests(StaleCase):
 class UnknownTests(StaleCase):
     """A base a shallow clone cannot resolve is unknown, not a finding: the check exits 0 and says so. A base that
     does not resolve in a full clone is a read that could not run (UnreadableReadTests), except a root commit's
-    HEAD~1: a first push to the default branch reads that range by design (actions/ste-lint/run.sh), so it exits 0
-    as on main. The root commit's cases sit here for that reason."""
+    parent (HEAD~1, HEAD^1): a first push to the default branch reads that range by design (actions/ste-lint/run.sh),
+    so it exits 0 as on main. The root commit's cases sit here for that reason."""
 
     def test_an_unresolvable_base_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         def change(repo):
@@ -842,13 +861,112 @@ class UnknownTests(StaleCase):
         self.assertEqual(done.returncode, 0, out)
         self.assertIn("stale-cites: unknown", out)
 
-    def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
-        rng = self.tree("# Notes\n")._replace(base="HEAD~1")  # the one commit is the root: HEAD~1 names nothing
+    def root_repo(self):
+        """A full clone whose one commit is the root. Its base, HEAD~1, names nothing."""
+        rng = self.tree("# Notes\n")._replace(base="HEAD~1")
         self.assertFalse(has_object(rng.repo, "HEAD~1"), "scope: the root commit has no parent")
         self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
-        rc, out = self.run_check(rng, spec="HEAD~1..HEAD")
+        return rng
+
+    def assert_root_range_exits_zero(self, rng, spec):
+        rc, out = self.run_check(rng, spec=spec)
         self.assertNotIn("stale-cites: UNKNOWN,", out, "a root commit's first push printed the exit-2 read failure\n" + out)
-        self.assertEqual(rc, 0, "a root commit's first push in a full clone did not exit 0 as on main\n" + out)
+        self.assertEqual(rc, 0, "a root commit's first push (%s) in a full clone did not exit 0 as on main\n%s" % (spec, out))
+        self.assertIn("stale-cites: unknown, the base of %s does not resolve" % spec, out,
+                      "a root commit's first push (%s) did not print its unknown line\n%s" % (spec, out))
+        self.assertNotIn("stale-cites: PASS", out, "a root commit's first push (%s) printed PASS\n%s" % (spec, out))
+
+    def assert_root_range_exits_two(self, rng, spec):
+        """A base past the root commit's first parent, such as its grandparent, stays unread: the range exits 2."""
+        rc, out = self.run_check(rng, spec=spec)
+        self.assertEqual(rc, 2, "a base past the root commit's first parent (%s) did not exit 2\n%s" % (spec, out))
+        self.assertNotIn("stale-cites: PASS", out,
+                         "a base past the root commit's first parent (%s) printed PASS\n%s" % (spec, out))
+        self.assertRegex(out, "(?i)unknown", out)
+
+    def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
+        self.assert_root_range_exits_zero(self.root_repo(), "HEAD~1..HEAD")
+
+    def test_a_failing_two_dot_root_range_starts_five_git_processes_after_its_failed_diff(self):
+        """The root form `HEAD~1..HEAD`, whose base is the first parent of a root commit: after its failed `diff`, five
+        git processes start, in this order, and it exits 0 as on main."""
+        self.assert_starts_after_failed_read(self.root_repo(), "HEAD~1..HEAD", "diff", 0, [
+            "rev-parse --verify --quiet HEAD^{commit}",
+            "rev-parse --verify --quiet HEAD~1^{commit}",
+            "rev-parse --is-shallow-repository",
+            "rev-list --parents -n 1 HEAD",
+            "rev-parse --verify --quiet HEAD^{commit}",
+        ])
+
+    def test_a_failing_three_dot_root_range_starts_six_git_processes_after_its_failed_merge_base(self):
+        """The root form `HEAD~1...HEAD`: after its failed `merge-base`, six git processes start, in this order, and it
+        exits 0 as on main."""
+        self.assert_starts_after_failed_read(self.root_repo(), "HEAD~1...HEAD", "merge-base", 0, [
+            "rev-parse --verify --quiet HEAD^{commit}",
+            "rev-parse --verify --quiet HEAD~1^{commit}",
+            "rev-parse --verify --quiet HEAD~1^{commit}",
+            "rev-parse --is-shallow-repository",
+            "rev-list --parents -n 1 HEAD",
+            "rev-parse --verify --quiet HEAD^{commit}",
+        ])
+
+    def test_a_root_commit_range_with_its_parent_spelled_caret_one_exits_zero_as_on_main(self):
+        rng = self.root_repo()
+        head = git(rng.repo, "rev-parse", "HEAD")
+        for spec in ("HEAD^1..HEAD", "%s^1..%s" % (head, head)):
+            with self.subTest(spec=spec):
+                self.assert_root_range_exits_zero(rng, spec)
+
+    def test_a_root_commit_range_with_its_parent_spelled_tilde_one_and_the_head_as_a_sha_exits_zero_as_on_main(self):
+        rng = self.root_repo()
+        self.assert_root_range_exits_zero(rng, "HEAD~1..%s" % rng.head)
+
+    def test_a_root_commit_three_dot_range_with_its_parent_spelled_tilde_one_exits_zero_as_on_main(self):
+        rng = self.root_repo()
+        self.assert_root_range_exits_zero(rng, "HEAD~1...%s" % rng.head)
+
+    def test_a_root_commit_range_with_the_head_spelled_at_sign_exits_zero_as_on_main(self):
+        self.assert_root_range_exits_zero(self.root_repo(), "@~1..HEAD")
+
+    def test_a_root_commit_range_with_its_parent_spelled_zero_padded_exits_zero_as_on_main(self):
+        self.assert_root_range_exits_zero(self.root_repo(), "HEAD~01..HEAD")
+
+    def test_a_root_commit_range_with_its_parent_spelled_bare_tilde_or_caret_exits_zero_as_on_main(self):
+        """A bare `~` or `^` is the first parent, as `~1` and `^1` are. A first-parent suffix that needs its digit
+        exits 2 here, while the digit forms above stay green."""
+        rng = self.root_repo()
+        for spec in ("HEAD~..HEAD", "HEAD^..HEAD"):
+            with self.subTest(spec=spec):
+                self.assertFalse(has_object(rng.repo, spec.split("..")[0]), "scope: the root commit has no parent")
+                self.assert_root_range_exits_zero(rng, spec)
+
+    def test_a_root_commit_range_whose_base_is_two_back_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD~2"), "scope: the root commit has no grandparent")
+        self.assert_root_range_exits_two(rng, "HEAD~2..HEAD")
+
+    def test_a_root_commit_range_whose_base_is_caret_caret_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD^^"), "scope: the root commit has no grandparent")
+        self.assert_root_range_exits_two(rng, "HEAD^^..HEAD")
+
+    def test_a_root_commit_range_whose_base_is_tilde_one_then_tilde_zero_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD~1~0"), "scope: the root commit has no parent")
+        self.assert_root_range_exits_two(rng, "HEAD~1~0..HEAD")
+
+    def test_the_first_parent_of_a_different_root_commit_exits_two_as_before(self):
+        """A control: a base that is the first parent of another root commit is not the first parent of HEAD, so
+        the range stays unread and exits 2."""
+        rng = self.root_repo()
+        other = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "a second root")
+        git(rng.repo, "update-ref", "refs/heads/orphan-root", other)
+        self.assertFalse(has_object(rng.repo, "orphan-root^1"), "scope: the orphan branch's root commit has no parent")
+        self.assertNotEqual(other, rng.head, "scope: the orphan root is not HEAD")
+        rc, out = self.run_check(rng, spec="orphan-root^1..HEAD")
+        self.assertEqual(rc, 2, "the first parent of a different root commit exited %d, not 2\n%s" % (rc, out))
+        self.assertNotIn("stale-cites: PASS", out, "the first parent of a different root commit printed PASS\n" + out)
+        self.assertRegex(out, "(?i)unknown", out)
 
     def test_a_root_commit_range_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         rng = self.tree("# Notes\n")._replace(base="HEAD~1")
@@ -857,6 +975,87 @@ class UnknownTests(StaleCase):
         self.assertEqual(rc, 0, "a depth-1 clone's root-commit range exited non-zero, the carve-out is lost\n" + out)
         self.assertTrue(unknown_lines(out), out)
         self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
+
+    def parent_gone_range(self):
+        """A full clone whose head is no root, and whose parent commit object is gone, so the base names nothing readable."""
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n- one more line\n")
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        drop_loose_object(rng.repo, rng.base)
+        self.assertFalse(has_object(rng.repo, rng.base), "scope: the parent commit is gone")
+        self.assertTrue(has_object(rng.repo, "HEAD"), "scope: the head resolves")
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
+        return rng
+
+    def test_a_non_root_range_whose_parent_object_is_gone_exits_two_in_both_spellings(self):
+        rng = self.parent_gone_range()
+        for spec in ("HEAD~1..HEAD", "HEAD^1..HEAD"):
+            with self.subTest(spec=spec):
+                rc, out = self.run_check(rng, spec=spec)
+                self.assertEqual(rc, 2, "a non-root head whose parent is gone did not exit 2 (%s)\n%s" % (spec, out))
+                self.assertNotIn("stale-cites: PASS", out, "a non-root head whose parent is gone printed PASS\n" + out)
+                self.assertRegex(out, "(?i)unknown", out)
+
+    def main_in_process(self, stale, rng, spec):
+        """(exit code, output) of the loaded module's main on `spec`, run in this process with the repo as cwd."""
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(rng.repo)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = stale.main(["--range", spec])
+        return rc, buf.getvalue()
+
+    def test_a_rev_list_that_prints_the_head_then_exits_nonzero_is_unknown_and_not_a_root(self):
+        rng = self.parent_gone_range()
+        stale = load_module_under_test()
+        real_run = stale._nowindow.run
+        starts = []
+
+        def rev_list_prints_head_then_fails(argv, *args, **kwargs):
+            if "rev-list" not in argv:
+                return real_run(argv, *args, **kwargs)
+            starts.append(argv)
+            text = "text" in kwargs or "encoding" in kwargs
+            shown = rng.head + "\n"
+            return subprocess.CompletedProcess(argv, 1, stdout=shown if text else shown.encode(), stderr="" if text else b"")
+
+        rc, out = self.main_in_process(stale, rng, "HEAD~1..HEAD")
+        self.assertEqual(rc, 2, "scope: the in-process run with the real rev-list does not exit 2\n" + out)
+        with mock.patch.object(stale._nowindow, "run", rev_list_prints_head_then_fails):
+            rc, out = self.main_in_process(stale, rng, "HEAD~1..HEAD")
+        self.assertTrue(starts, "the mocked rev-list never ran, so the case did not reach the rev-list it names\n" + out)
+        self.assertEqual(rc, 2, "a rev-list that printed the head then exited non-zero was read as a root commit "
+                         "(rev-list starts: %d)\n%s" % (len(starts), out))
+        self.assertNotIn("stale-cites: PASS", out, "a rev-list that failed printed PASS\n" + out)
+        self.assertRegex(out, "(?i)unknown", out)
+
+
+class ResolveTests(StaleCase):
+    """resolves reads whether a rev names a commit. Each pinned input states its answer here, so a change to what
+    resolves returns shows as the input that moved."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stale = load_module_under_test()
+
+    def test_resolves_names_a_commit_for_each_pinned_rev(self):
+        def topic_commit(repo):
+            write(repo, "topic.md", "topic\n")
+            commit(repo)
+        rng = self.make_range(base_files(), topic_commit)   # HEAD has a parent, so HEAD^1 and HEAD~1 name a commit
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(rng.repo)
+        branches = git(rng.repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
+        self.assertEqual(sorted(branches), ["main", "topic"],
+                         "scope: the case repo does not hold the two branches the pins name")
+        names_commit = {"HEAD": True, "main": True, "topic": True, "HEAD^1": True, "HEAD~1": True,
+                        "HEAD~5": False, "nope": False, "nope^1": False, EMPTY_TREE: False}
+        for rev, expected in names_commit.items():
+            with self.subTest(rev=rev):
+                self.assertEqual(self.stale.resolves(rev), expected, "%s does not resolve as pinned" % rev)
 
 
 class PinTests(unittest.TestCase):
@@ -1260,6 +1459,53 @@ class UnreadableReadTests(StaleCase):
 
     def test_an_unresolvable_base_in_a_full_clone_two_dot_range_exits_two_and_names_it(self):
         self.assert_base_missing_from_full_clone("nosuchbase..HEAD")
+
+    def test_a_failing_range_with_a_suffixed_base_starts_the_measured_git_processes_after_its_failed_read(self):
+        """A failing range whose base has a first-parent suffix (`nope^1`) starts one `rev-list` more than a plain base
+        does after its failed read: four git processes after `diff` for `..`, five after `merge-base` for `...`."""
+        cases = (
+            ("nope^1..HEAD", "diff", [
+                "rev-parse --verify --quiet HEAD^{commit}",
+                "rev-parse --verify --quiet nope^1^{commit}",
+                "rev-parse --is-shallow-repository",
+                "rev-list --parents -n 1 HEAD",
+            ]),
+            ("nope^1...HEAD", "merge-base", [
+                "rev-parse --verify --quiet HEAD^{commit}",
+                "rev-parse --verify --quiet nope^1^{commit}",
+                "rev-parse --verify --quiet nope^1^{commit}",
+                "rev-parse --is-shallow-repository",
+                "rev-list --parents -n 1 HEAD",
+            ]),
+        )
+        for spec, failed_read, expected in cases:
+            with self.subTest(spec=spec):
+                rng = self.moved_lib(cited=True)
+                self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is not shallow")
+                self.assertFalse(has_object(rng.repo, "nope^1"), "scope: the base names nothing")
+                self.assertTrue(has_object(rng.repo, "HEAD^1"), "scope: HEAD has a parent, so it is not a root")
+                self.assert_starts_after_failed_read(rng, spec, failed_read, 2, expected)
+
+    def test_a_failing_three_dot_range_with_a_plain_base_starts_four_git_processes_after_its_failed_merge_base(self):
+        """A plain base that names nothing: after its failed `merge-base`, four git processes start, in this order."""
+        rng = self.moved_lib(cited=True)
+        self.assertFalse(has_object(rng.repo, "nope"), "scope: the base names nothing")
+        self.assert_starts_after_failed_read(rng, "nope...HEAD", "merge-base", 2, [
+            "rev-parse --verify --quiet HEAD^{commit}",
+            "rev-parse --verify --quiet nope^{commit}",
+            "rev-parse --verify --quiet nope^{commit}",
+            "rev-parse --is-shallow-repository",
+        ])
+
+    def test_a_failing_two_dot_range_with_a_plain_base_starts_three_git_processes_after_its_failed_diff(self):
+        """A plain base that names nothing: after its failed `diff`, three git processes start, in this order."""
+        rng = self.moved_lib(cited=True)
+        self.assertFalse(has_object(rng.repo, "nope"), "scope: the base names nothing")
+        self.assert_starts_after_failed_read(rng, "nope..HEAD", "diff", 2, [
+            "rev-parse --verify --quiet HEAD^{commit}",
+            "rev-parse --verify --quiet nope^{commit}",
+            "rev-parse --is-shallow-repository",
+        ])
 
     def test_an_unresolvable_base_in_a_depth_one_clone_two_dot_range_prints_unknown_and_exits_zero(self):
         rng = self.moved_lib(cited=True)
