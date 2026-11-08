@@ -3784,6 +3784,12 @@ KP = os.path.join(STDIR, "kptree")          # the pair: b's f.txt is synced, and
 KP_B = os.path.join(KP, "b")
 PF = os.path.join(STDIR, "pftree")          # a clean clone: one pull changes n2.txt, then that file is staged
 PF_D = os.path.join(PF, "d")
+RH = os.path.join(STDIR, "rhtree")          # one checkout: reset --hard onto a newer commit, f.txt edited in the tree
+RHS = os.path.join(STDIR, "rhstree")        # the same, with the edit staged
+IC = os.path.join(STDIR, "ictree")          # the stale pair: f.txt edited in each tree
+IC_A, IC_B = os.path.join(IC, "a"), os.path.join(IC, "b")
+LK = os.path.join(STDIR, "lktree")          # the pair, with a tracked symlink the move changed
+LK_A, LK_B = os.path.join(LK, "a"), os.path.join(LK, "b")
 
 
 def _st_must(ok, what):
@@ -4137,6 +4143,66 @@ def _build_pftree():
     _st_require_entry(PF_D, "n2.txt", "pulled\nmine\n", "pulled\n", "pull")
 
 
+def _reset_hard_onto_newer(where):
+    """One checkout: `side` holds a newer commit that changes f.txt, and `main` is reset --hard onto it.
+    The index and the work tree hold the moved copy, and the newest HEAD entry is the reset."""
+    make_repo(where, {"f.txt": "base\n"})
+    _st_git(where, "checkout", "-q", "-b", "side")
+    write(os.path.join(where, "f.txt"), "moved\n")
+    _st_git(where, "add", "-A")
+    _st_commit(where, "newer")
+    newer = _st_head(where)
+    _st_git(where, "checkout", "-q", "main")
+    _st_git(where, "reset", "-q", "--hard", newer)
+    _st_must(_st_head(where) == newer, "%r: HEAD is not the newer commit after reset --hard" % where)
+    _st_require_entry(where, "f.txt", "moved\n", "moved\n", "reset:")
+
+
+def _build_rhtree():
+    _reset_hard_onto_newer(RH)
+    write(os.path.join(RH, "f.txt"), "moved\nmine\n")    # the edit reaches the work tree only
+    unstaged = _st_git(RH, "diff", "--name-only").split()
+    _st_must(unstaged == ["f.txt"], "%r: the unstaged paths are %r, want f.txt alone" % (RH, unstaged))
+
+
+def _build_rhstree():
+    _reset_hard_onto_newer(RHS)
+    write(os.path.join(RHS, "f.txt"), "moved\nmine\n")
+    _st_git(RHS, "add", "f.txt")
+    _st_require_entry(RHS, "f.txt", "moved\nmine\n", "moved\n", "reset:")
+
+
+def _build_ictree():
+    _st_pair(IC, ("f.txt",))
+    write(os.path.join(IC_B, "f.txt"), "base\nmine\n")   # the stale copy, edited in b's tree only
+    write(os.path.join(IC_A, "f.txt"), "moved\nmine\n")  # the same edit in the fresh checkout
+    for where in (IC_A, IC_B):
+        unstaged = _st_git(where, "diff", "--name-only").split()
+        _st_must(unstaged == ["f.txt"], "%r: the unstaged paths are %r, want f.txt alone" % (where, unstaged))
+    _st_require_entry(IC_B, "f.txt", "base\n", "moved\n", "")
+
+
+def _build_lktree():
+    make_repo(LK_A, {"f.txt": "base\n", "h.txt": "h\n"})
+    os.symlink("f.txt", os.path.join(LK_A, "link"))
+    _st_git(LK_A, "add", "-A")
+    _st_commit(LK_A, "link to f")
+    _st_git(LK_A, "branch", "feature")
+    _st_git(LK_A, "worktree", "add", "-q", LK_B, "feature")
+    _st_commit(LK_B, "lane 1")
+    lane_head = _st_head(LK_B)
+    _st_git(LK_A, "checkout", "-q", "--ignore-other-worktrees", "feature")
+    os.remove(os.path.join(LK_A, "link"))
+    os.symlink("h.txt", os.path.join(LK_A, "link"))
+    _st_git(LK_A, "add", "-A")
+    _st_commit(LK_A, "move feature")
+    _st_require_moved(LK_B, lane_head)
+    _st_require_entry(LK_B, "link", "f.txt", "h.txt", "commit")
+    # b's tree holds the moved link, as an agent that re-pointed it by hand would leave it; the index keeps the old one
+    os.remove(os.path.join(LK_B, "link"))
+    os.symlink("h.txt", os.path.join(LK_B, "link"))
+
+
 lazy_fixture([ST_A, ST_B], _build_sttree)
 lazy_fixture([NR_A, NR_B], _build_nrtree)
 lazy_fixture([SN_B], _build_sntree)
@@ -4160,6 +4226,11 @@ lazy_fixture([EU_A, EU_B], _build_eutree)
 lazy_fixture([DL_A, DL_B], _build_dltree)
 lazy_fixture([KP_B], _build_kptree)
 lazy_fixture([PF_D], _build_pftree)
+lazy_fixture([RH], _build_rhtree)
+lazy_fixture([RHS], _build_rhstree)
+lazy_fixture([IC_A, IC_B], _build_ictree)
+if LINKS_MADE:
+    lazy_fixture([LK_A, LK_B], _build_lktree)
 
 
 def _st_refuse(name, command, cwd, **kw):
@@ -4242,6 +4313,33 @@ _st_allow("a commit after git pull --ff-only, with a pulled file edited and stag
           VCS + " commit -m x", PF_D)
 _st_allow("a staged edit of a path the move did not touch is allowed once the moved path is synced",
           VCS + " commit -m x", KP_B)
+
+# A `reset:` entry alone counts only a copy equal to X's (decision stale-tree-commit, section The ruling).
+# A reset --hard onto the moved tip, then an edit of the moved file, is the normal way onto a new tip, so
+# it passes. A reset --soft leaves the old copy staged or in the tree, and that copy still refuses.
+_st_allow("a reset --hard onto the moved tip, then an edit in the tree, is allowed: commit -am", VCS + " commit -am x", RH)
+_st_allow("a reset --hard onto the moved tip, then a named-path commit of the edit, is allowed",
+          VCS + " commit -m x -- f.txt", RH)
+_st_allow("a reset --hard onto the moved tip, with the edit staged, is allowed", VCS + " commit -m x", RHS)
+_st_refuse("a reset --soft to a newer commit, then commit -a with the old copy in the tree, is refused",
+           VCS + " commit -a -m x", RS)
+
+# `-i` takes the index for every path and the work tree for each named one. `-i .` names every path.
+_st_refuse("commit -i -m x f.txt of a stale file edited in the work tree is refused",
+           VCS + " commit -i -m x f.txt", IC_B)
+_st_allow("control: commit -i -m x f.txt of the same edit, in the fresh checkout, is allowed",
+          VCS + " commit -i -m x f.txt", IC_A)
+_st_refuse("commit -i -m x . of a moved file edited in the work tree only is refused",
+           VCS + " commit -i -m x .", EU_B)
+_st_allow("control: commit -i -m x . in the fresh checkout is allowed", VCS + " commit -i -m x .", EU_A)
+
+# A dry run writes no commit. A symlink is the link itself, so the moved link is the copy to compare.
+_st_allow("git commit --dry-run in a stale tree is allowed", VCS + " commit --dry-run -m x", ST_B)
+if LINKS_MADE:
+    _st_allow("a tracked symlink the move changed is allowed under commit -a, with the moved link in the tree",
+              VCS + " commit -a -m x", LK_B)
+    _st_refuse("a tracked symlink the move changed is refused while the stale link stays staged",
+               VCS + " commit -m x", LK_B)
 
 
 # THE COST. A guard run's git processes are the `built-in: git` lines of its GIT_TRACE file. The rule's
