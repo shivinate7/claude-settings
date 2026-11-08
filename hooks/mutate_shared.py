@@ -93,6 +93,26 @@ def guard_tree(dest: str) -> None:
         shutil.copy(path, dest)
 
 
+# What a guard checkout holds beside its hooks/ folder: guard_merge loads merge/merge.py from one folder
+# above hooks/, merge.py imports lint/hook_catalog.py at import and reads the alarm events then, and
+# guard.py reads lint/layout.py. A copy without them reads the merge tool as unloadable, and the rules
+# that read it pass unjudged.
+GUARD_BESIDE_FILES = (("merge", "merge.py"), (os.path.join("actions", "ci-alarm"), "events.json"))
+GUARD_BESIDE_TREES = ("lint",)
+
+
+def guard_beside(root: str) -> None:
+    """Copy into `root` what a guard checkout needs beside its hooks/ folder (GUARD_BESIDE_FILES and
+    GUARD_BESIDE_TREES), read from the repo that holds HOOKS_DIR."""
+    repo = os.path.join(HOOKS_DIR, "..")
+    for folder, name in GUARD_BESIDE_FILES:
+        os.makedirs(os.path.join(root, folder), exist_ok=True)
+        shutil.copy(os.path.join(repo, folder, name), os.path.join(root, folder))
+    for folder in GUARD_BESIDE_TREES:
+        shutil.copytree(os.path.join(repo, folder), os.path.join(root, folder),
+                        ignore=shutil.ignore_patterns("__pycache__"), dirs_exist_ok=True)
+
+
 def find_anchor(folder: str, old: str, files=None):
     """Return (path, text) of the one guard module or git_reads.py in `folder` that holds `old`
     exactly once. Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all.
