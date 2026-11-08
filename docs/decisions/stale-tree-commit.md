@@ -13,6 +13,7 @@ The second way to find X covers an agent that moved onto a new tip inside its ow
 
 - Each git call in a chain is judged in its own tree: its `git -C <dir>`, else the cwd after earlier `cd` steps.
 - The read needs no fetch. A checkout that never fetched is judged the same.
+- Only the newest two entries of the HEAD log are read. A gap further back, behind a `reset --hard`, is not sought: that reset synced the tree, and an unbounded scan costs on every commit.
 - A detached HEAD passes: nothing else moves it.
 - A checkout with no HEAD reflog passes: there is no evidence either way, and a fresh clone or worktree may start with none.
 - A read that fails passes, with the same reason. Git errors on the commit itself in a broken tree.
