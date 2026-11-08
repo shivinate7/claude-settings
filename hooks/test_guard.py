@@ -18927,6 +18927,49 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
     model="sonnet")
 
 
+# ---- Brief-claim edges (rule brief-claim-has-probe). A claim can hide behind a backticked subject, a fence, a passive
+# form, another verb, a probe for a longer input, a plain-quoted input, a path locator, or a quoted red-case text. Each
+# deny is red on a guard that lets the claim through. Each allow is a false alarm the rule must not raise. Each text is
+# data: the prompt a brief carries, verbatim. Selector: MUTATE_ONLY=brief-claim: runs these with the cases above.
+BRIEF_CLAIM_EDGES = (
+    ("brief-claim: test-author brief with a backticked main subject and a refusal is denied",
+     "deny", "test-author", "`main` refuses `git push --force`, so keep that."),
+    ("brief-claim: builder brief with a backticked origin/main subject and a pass is denied",
+     "deny", "builder", "`origin/main` passes `user: root`."),
+    ("brief-claim: test-author brief with a claim inside a fence after Cases: is denied",
+     "deny", "test-author", "Cases:\n```\nmain refuses `git push --force`\n```"),
+    ("brief-claim: builder brief whose claim line is its own probe is denied",
+     "deny", "builder", "`git push --force` refused on main"),
+    ("brief-claim: test-author brief whose probe is for a longer input than the claim is denied",
+     "deny", "test-author",
+     "main refuses `git push`.\n$ python3 hooks/probe_main.py 'git push --force'\nrefused"),
+    ("brief-claim: builder brief with main rejects an input is denied",
+     "deny", "builder", "main rejects `git push --force`."),
+    ("brief-claim: test-author brief with main blocks an input is denied",
+     "deny", "test-author", "main blocks `git push --force`."),
+    ("brief-claim: builder brief with an input refused on main in passive form is denied",
+     "deny", "builder", "- `git push --force` is refused on main"),
+    ("brief-claim: test-author brief where main passes a plain-quoted input is denied",
+     "deny", "test-author", 'main passes "password: none for guests and visitors"'),
+    ("brief-claim: builder brief with main as an adjective before a refusal is allowed",
+     "allow", "builder", "The main session refuses `git push --force` on this checkout."),
+    ("brief-claim: builder brief with main as an adjective before a pass is allowed",
+     "allow", "builder", "The main checkout passes `verdict` for every lane."),
+    ("brief-claim: builder brief with today as a time word and the builder as subject is allowed",
+     "allow", "builder", "Today the builder passes `verdict` results to the lane."),
+    ("brief-claim: test-author brief with a path locator after a probed refusal is allowed",
+     "allow", "test-author",
+     "main refuses `git push --force` in `hooks/guard.py`.\n$ python3 hooks/probe_main.py 'git push --force'\nrefused"),
+    ("brief-claim: test-author brief quoting a claim after Add a case: is allowed",
+     "allow", "test-author", 'Add a case: "main refuses `git push --force`, so keep that."'),
+    ("brief-claim: test-author brief quoting a claim after Must deny: is allowed",
+     "allow", "test-author", 'Must deny: "main passes `user: root`."'),
+)
+for _name, _expected, _role, _prompt in BRIEF_CLAIM_EDGES:
+    add(_name, _expected, BRIEF_PROBE if _expected == "deny" else None, tool="Agent", prompt=_prompt,
+        subagent_type=_role, **({"model": "sonnet"} if _role == "builder" else {}))
+
+
 def _flow(model, role=None):
     spec = "model: '%s'" % model + (", agentType: '%s'" % role if role else "")
     return "const r = await agent({prompt: 'x', %s}); return r" % spec
