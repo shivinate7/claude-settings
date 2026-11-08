@@ -463,7 +463,7 @@ def _old_body(host, edit):
         if isinstance(ref, str) and ref.isdigit():
             ref = int(ref)
         if not isinstance(ref, int) or isinstance(ref, bool):
-            raise RuntimeError("the comment id is not a number the guard can read")
+            raise RuntimeError("the comment id or repo is a shell expansion the guard cannot read")
         code, out = host.api("issues/comments/%d" % ref)
         if code:
             raise RuntimeError("reading the comment failed")
@@ -493,10 +493,11 @@ def _old_body_hit(edit, repo: str, where: str):
 
 
 def _variable_reason(module):
-    """Return (matched, reason) for a record posted to an issue number held in a shell variable: its pull request cannot be
-    checked. The refusal sits one call below its caller, so the rule audit reads its reason within its depth limit."""
+    """Return (matched, reason) for a record posted to an issue number or repo held in a shell expansion (a variable, an arithmetic,
+    a command substitution): its pull request cannot be checked. The refusal sits one call below its caller, so the rule audit reads its reason within its depth limit."""
     return "review record posted to a variable issue number", REVIEW_REASON % (
-        "this record goes to an issue number the guard cannot read, held in a shell variable", _review_render(module, "<pr>", "<live head>"))
+        "this record goes to an issue number or repo the guard cannot read, held in a shell expansion; write the PR number literally "
+        "in the route (`issues/12/comments`)", _review_render(module, "<pr>", "<live head>"))
 
 
 def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variable: bool = False):
@@ -508,7 +509,7 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variab
     tool) it names the comment, ("comment", id) or ("last", selector). A marked new body is refused after the form check and
     before any read, because an edited record was rendered by no run. An unmarked new body makes one read of the old body
     (`_old_body`) and is refused when that holds a record, or when the read could not run. No new body known: None, no read.
-    `variable` is true when the number is a shell variable: a marked post is refused with no read, as its pull request cannot be checked."""
+    `variable` is true when the number or repo is a shell expansion: a marked post is refused with no read, as its pull request cannot be checked."""
     found = _marked_bodies(bodies)
     if edit and not found:
         if not any(isinstance(b, str) for b in bodies):
