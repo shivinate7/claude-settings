@@ -1255,9 +1255,9 @@ def git_calls(fn):
     """Run fn with the git helper wrapped. -> (fn's result, [argv tuple of each git call])."""
     calls, real = [], C.git
 
-    def counting(cwd, *a, ok=(0,)):
+    def counting(cwd, *a, **k):  # **k: a stdin read passes input=, the others pass ok=
         calls.append(a)
-        return real(cwd, *a, ok=ok)
+        return real(cwd, *a, **k)
     with unittest.mock.patch.object(C, "git", counting):
         return fn(), calls
 
@@ -2416,6 +2416,7 @@ class NotesUnionRevival(unittest.TestCase):
     DUP = "- note dup: keep two copies"
     ROWS = [ALPHA, BETA, GAMMA]
     ORDERS = (("A", "B"), ("B", "A"))
+    NO_UNION_RULES = (None, "* text=auto\n")  # main's .gitattributes: none at all, or one that holds no merge=union
 
     @staticmethod
     def text(rows):
@@ -2424,21 +2425,25 @@ class NotesUnionRevival(unittest.TestCase):
     def rows_at(self, r, rev, path):
         return r.sh("show", "%s:%s" % (rev, path)).splitlines()
 
-    def base(self, path, union, rows=None):
-        """origin/main holds `rows` (ROWS by default) at `path`; with union, main's .gitattributes gives `path` merge=union."""
+    def base(self, path, union, rows=None, attrs=None):
+        """origin/main holds `rows` (ROWS by default) at `path`; with union, main's .gitattributes gives `path` merge=union.
+        Without union, `attrs` (when given) is main's .gitattributes text."""
         r = Repo()
         if union:
-            r.put(".gitattributes", "%s merge=union\n" % path)
+            attrs = "%s merge=union\n" % path
+        if attrs is not None:
+            r.put(".gitattributes", attrs)
         r.put(path, self.text(self.ROWS if rows is None else rows))
         r.commit("base")
         r.push()
         return r
 
-    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False, extra_b=None):
+    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False, extra_b=None, attrs=None):
         """The batch shape: integ is origin/main with lane A and lane B merged in by local `git merge --no-ff`, one merge
         commit each, in `order`. ff_first fast-forwards integ to lane A instead. A conflict in a file without merge=union
-        is resolved by hand to `keep`. extra_b maps more paths lane B adds, path -> text. -> (repo, integ head)."""
-        r = self.base(path, union, rows)
+        is resolved by hand to `keep`. extra_b maps more paths lane B adds, path -> text. Without union, attrs is main's
+        .gitattributes text (see base). -> (repo, integ head)."""
+        r = self.base(path, union, rows, attrs)
         for lane, rows_ in (("A", a_rows), ("B", b_rows)):
             r.sh("checkout", "-q", "-b", "lane" + lane, "origin/main")
             r.put(path, self.text(rows_))
@@ -2672,6 +2677,57 @@ class NotesUnionRevival(unittest.TestCase):
         self.assertTrue(hits, "premise: the union read reached check-attr")
         self.assertNotIn("FAIL", text, "a union read that is UNKNOWN is printed as a FAIL")
         self.assertIn("UNKNOWN", text, "the printed verdict is not UNKNOWN")
+        self.assertIn("git 2.40", text, "the printed UNKNOWN does not name the git floor")
+        self.assertEqual(rc, 1, "an unreadable union read does not exit 1 under --strict")
+
+    def test_a_merge_with_no_union_rule_passes_on_a_git_without_check_attr_source(self):
+        """No parent's .gitattributes holds merge=union, so the union read never asks git for merge=union. A git below
+        2.40 refuses --source, and that must not turn a clean merge into an UNKNOWN in every repo: the check is clean and
+        --strict exits 0."""
+        for order in self.ORDERS:
+            for attrs in self.NO_UNION_RULES:
+                with self.subTest(order=order, attrs=attrs):
+                    r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], order, union=False, attrs=attrs,
+                                         keep=self.text(self.ROWS + [self.NEW]))
+                    self.assertIn("unspecified", r.sh("check-attr", "merge", "--", self.PATH), "premise: the file has no merge=union")
+                    self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the hand merge kept the deleted row")
+                    with self.git_below_240():
+                        try:
+                            problems, _ = C.check(r.dir, "origin/main", head)
+                        except C.Unknown as e:
+                            self.fail("a merge with no merge=union in either parent is UNKNOWN on a git below 2.40: %s" % e)
+                        rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+                    self.assertEqual(problems, [], "a file without merge=union is read as a finding: %s" % problems)
+                    self.assertNotIn("UNKNOWN", text, "the printed verdict is UNKNOWN")
+                    self.assertEqual(rc, 0, "a clean merge does not exit 0 under --strict")
+
+    def test_a_merge_with_no_union_rule_makes_no_check_attr_call(self):
+        """The union read checks the parents' .gitattributes before it asks git. With no merge=union text in either parent,
+        no check-attr call is recorded."""
+        for attrs in self.NO_UNION_RULES:
+            with self.subTest(attrs=attrs):
+                r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"), union=False, attrs=attrs,
+                                     keep=self.text(self.ROWS + [self.NEW]))
+                self.assertIn("unspecified", r.sh("check-attr", "merge", "--", self.PATH), "premise: the file has no merge=union")
+                try:
+                    _, calls = git_calls(lambda: C.check(r.dir, "origin/main", head))
+                except C.Unknown as e:
+                    self.fail("check() is UNKNOWN on a merge with no merge=union in either parent: %s" % e)
+                self.assertTrue(calls, "premise: check() ran git")
+                self.assertEqual([a for a in calls if a and a[0] == "check-attr"], [],
+                                 "the union read called check-attr for a merge with no merge=union in either parent")
+
+    def test_a_union_rule_on_the_second_parent_alone_is_unknown_on_a_git_below_240(self):
+        """A lane cut before the union rule has it only in main, the second parent. The union read must still ask git,
+        so a git below 2.40 gives an UNKNOWN that names the floor, not a pass."""
+        r, head, _ = self.cut_before_rule()
+        lane, main = [r.sh("rev-parse", "%s^%d" % (head, i)) for i in (1, 2)]
+        self.assertNotIn("merge=union", r.sh("show", "%s:.gitattributes" % lane, ok=False), "premise: the lane, the first parent, has no union rule")
+        self.assertIn("merge=union", r.sh("show", "%s:.gitattributes" % main, ok=False), "premise: main, the second parent, has the union rule")
+        with self.git_below_240() as hits:
+            rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+        self.assertTrue(hits, "premise: the union read reached check-attr")
+        self.assertIn("UNKNOWN", text, "a union rule on the second parent alone is not read: the verdict is not UNKNOWN")
         self.assertIn("git 2.40", text, "the printed UNKNOWN does not name the git floor")
         self.assertEqual(rc, 1, "an unreadable union read does not exit 1 under --strict")
 
