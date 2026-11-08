@@ -1,0 +1,11 @@
+{
+  "title": "Commit-message text such as \"../docs\" is not refused as another checkout",
+  "phase": "now",
+  "status": "doing",
+  "order": 45.02,
+  "owner": "coordinator",
+  "lane": "session_013NEJL4DPEKRiC91yHkQV7m",
+  "why": "A path in a commit message's prose is not a cd, so refusing it is a false alarm.",
+  "note": "From main. Topic guards. Lane notes-fix-large-1, filed from the coordinator 19:42 CST Nov 7.",
+  "updatedAt": "2026-11-07T19:42:00-06:00"
+}

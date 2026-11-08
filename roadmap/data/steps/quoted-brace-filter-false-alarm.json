@@ -1,0 +1,11 @@
+{
+  "title": "A quoted --include or -name filter that holds { or \\ is not refused as a test write",
+  "phase": "now",
+  "status": "doing",
+  "order": 45.01,
+  "owner": "coordinator",
+  "lane": "session_013NEJL4DPEKRiC91yHkQV7m",
+  "why": "A false alarm stops a read-only search and teaches the reader to route around the guard.",
+  "note": "Stacked on #1684. Topic guards. Lane notes-fix-large-1, filed from the coordinator 19:42 CST Nov 7.",
+  "updatedAt": "2026-11-07T19:42:00-06:00"
+}
