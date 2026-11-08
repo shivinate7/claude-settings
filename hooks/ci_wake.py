@@ -5,7 +5,7 @@ PostToolUse hook for the Bash and PowerShell tools, registered with `asyncRewake
 `gh pr ready <N>` starts a watch, and each one in a command gets its own, in this one process.
 A push starts none. Neither does MCP `update_pull_request`, the cloud's ready route: the hook's matcher
 sees only Bash and PowerShell, and `gh pr ready` gets 403 in cloud (route pr-ready-gh-cli-cloud; debt ci-wake-misses-mcp-ready). Per PR it reads the head once. It lists that head's runs until a run that
-ran has ended (a skipped draft run is no run), waits on it, and prints one line:
+ran shows (a skipped draft run is no run), waits on it, lists once more at once for a late run, and prints one line:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
     CI unknown on <sha7 or PR>: <reason>        (also "still running" at the deadline)
@@ -13,7 +13,8 @@ ran has ended (a skipped draft run is no run), waits on it, and prints one line:
 Then it exits 2 once, which wakes the session. It prints nothing and exits 0 when no watch starts,
 when the repo has no active workflow, or when another watcher already holds every PR it would watch. Any error exits 2 with an unknown
 line, never 1. It lists runs, and reads a run's status, 30 s apart for the first 4 minutes, then at
-gaps that grow to 120 s (`pauses`). It never loops on a red run.
+gaps that grow to 120 s (`pauses`). One extra list comes at once after the first judged run, to catch a
+run that shows late (debt ci-wake-lists-runs-once). It never loops on a red run.
 
 Seams: CI_WAKE_DEADLINE, the watch budget in seconds (default DEFAULT_DEADLINE, under the hook
 timeout in settings.json). CI_WAKE_LOCK_DIR, the folder of the per-PR lock files.
@@ -171,6 +172,30 @@ def ready_call(rest, env_repo=""):
     return (pos[0] if pos else ""), repo
 
 
+def exported_repo(tokens):
+    """The GH_REPO a segment sets for the shell, "" when it clears it, None when it leaves it alone:
+    `export GH_REPO=o/r` (an empty value clears), `unset GH_REPO` (bash), `$env:GH_REPO = o/r` or
+    `${env:GH_REPO} = o/r` (PowerShell, any case), `Remove-Item Env:GH_REPO` or `ri` (clears). The
+    hook reads text only, so a value it cannot expand (`$var`, `$null`, `$(...)`, a backtick) names
+    no repo: "" too, and the folder's repo is used."""
+    def value(v):
+        return "" if "$" in v or "`" in v else v
+    if tokens[:1] == ["export"]:
+        vals = [t[8:] for t in tokens[1:] if t.startswith("GH_REPO=")]
+        return value(vals[-1]) if vals else None
+    if tokens[:1] == ["unset"]:
+        return "" if "GH_REPO" in tokens[1:] else None
+    if tokens[:1] and tokens[0].lower() in ("remove-item", "ri"):
+        return "" if any(re.match(r"env:\\?gh_repo$", t, re.I) for t in tokens[1:]) else None
+    m = tokens and re.match(r"\$(?:env:gh_repo|\{env:gh_repo\})(=.*)?$", tokens[0], re.I)
+    if m:
+        if m.group(1):
+            return value(m.group(1)[1:])
+        if tokens[1:2] == ["="]:
+            return value(tokens[2]) if len(tokens) > 2 else ""
+    return None
+
+
 def triggers(command, powershell):
     """-> [(selector, repo)], one per `gh pr ready` in the command. Reads the text only. A heredoc
     body, quoted text and text after `#` is no command (split_segments drops comments and keeps
@@ -183,13 +208,17 @@ def triggers(command, powershell):
     guard_core.POWERSHELL_CALL[0] = powershell
     text = APOSTROPHE.sub("\x01", guard_core.strip_heredoc_bodies(command))
     found = []
+    exported = ""   # GH_REPO set earlier in the command text, for every later gh call
     for segment in (p for s in guard_core.split_segments(text) for p in _ampersand_split(s)):
         rest = gh_call_of(segment)
+        tokens = segment_tokens(segment) or []
         call = None
         if rest is not None:
-            tokens = segment_tokens(segment) or []
             env = [t[8:] for t in tokens[:resolve_command(tokens) or 0] if t.startswith("GH_REPO=")]
-            call = ready_call(rest, env[-1] if env else "")
+            call = ready_call(rest, env[-1] if env else exported)
+        else:
+            new = exported_repo(tokens)
+            exported = exported if new is None else new
         if call:
             found.append(call)
     return found
@@ -218,21 +247,36 @@ def wait_for(sha, cwd, deadline, repo=""):
     """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
     comes after it. While no run that ran is judged, list again, `pauses` apart; the last
-    pause ends at the deadline, with one list there. Once a run that ran is judged, return it:
-    later runs are not waited on (debt ci-wake-lists-runs-once)."""
+    pause ends at the deadline, with one list there. After the first run that ran is judged,
+    list once more at once and judge any run not yet read there, then return. The runs come back
+    newest first, as judge_runs reads them: the re-list's runs go ahead of the runs read before,
+    so a newer run of a name outranks the older one. A refused re-list returns the runs already
+    judged. A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once)."""
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
+    seen, viewed, relisted = set(), [], False
     while True:
-        runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
+        try:
+            listed = gh_json(list_args, cwd)
+        except Unknown:
+            if viewed:
+                return viewed   # the at-once re-list failed: the judged runs are the answer
+            raise
+        runs = [r for r in listed if r["conclusion"] != "skipped"]
         live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
-        for r in runs:
-            if r["conclusion"] == "cancelled" and r["name"] in live:
-                continue   # a cancelled twin: judge_runs reads the run that ran
+        fresh = [r for r in runs if r["databaseId"] not in seen
+                 and not (r["conclusion"] == "cancelled" and r["name"] in live)]   # a cancelled twin: judge_runs reads the run that ran
+        for r in fresh:
             watch_run(r["databaseId"], cwd, deadline, repo)
-        viewed = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
-                  for r in runs]
-        viewed = [r for r in viewed if r.get("conclusion") != "skipped"]   # it ended skipped: no run
+        got = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
+               for r in fresh]
+        seen.update(r["databaseId"] for r in fresh)
+        ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
+        viewed = ran + viewed   # newest first: gh lists newest first, and a later list shows newer runs
+        if ran and not relisted and deadline - time.monotonic() > 0:
+            relisted = True
+            continue   # the first judged run: list once more at once for a later one
         if viewed:
             return viewed
         left = deadline - time.monotonic()
@@ -313,6 +357,8 @@ def read_pr(selector, repo, cwd, timeout=READ_TIMEOUT):
     host, slug = (parts[0], "/".join(parts[1:])) if len(parts) == 3 else ("", repo or "{owner}/{repo}")
     tail = ["--hostname", host] if host else []
     base = "repos/%s/pulls" % slug
+    if selector[:1] == "#" and selector[1:].isdigit():
+        selector = selector[1:]   # `gh pr ready "#12"` names PR 12, as gh reads it
     if selector.isdigit():
         return pr_fields(gh_json(["api", base + "/" + selector, *tail], cwd, gone="http 404", timeout=timeout))
     head = selector or current_branch(cwd)
