@@ -103,6 +103,12 @@ def run_span(wt, span, timeout):
     return None
 
 
+def key_lines(pr_body):
+    """The `Retire-run:` and `Drops-lines:` lines of the PR body's last counted paragraph, trailing space cut, in order. The one home of
+    which lines a batch's integration PR must carry for its lanes (the merge tool copies them there)."""
+    return [m.group(0).rstrip() for m in re.finditer(r"^(?:%s|%s):.*$" % (CITE, undo.TRAILER), undo.last_paragraph(pr_body), re.I | re.M | re.ASCII)]
+
+
 def cites(pr_body):
     """{debt slug: run URL} from the `Retire-run: <slug> -- <url>` lines of the PR body's last paragraph. The last cite of a slug wins."""
     res = {}

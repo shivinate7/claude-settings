@@ -807,6 +807,16 @@ class Host:
                 "mergeable": self.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at")}
 
+    def prs_of_commit(self, sha):
+        """-> the REST rows of `commits/<sha>/pulls`: every pull request that holds the commit, all pages. A failed read is a Stop, never no rows."""
+        return self.pages(f"commits/{sha}/pulls")
+
+    def set_body(self, n, body):
+        """`PATCH pulls/<n>` with the new body. A failed write is a Stop."""
+        c, out = self.api(f"pulls/{n}", method="PATCH", body={"body": body})
+        if c:
+            raise Stop(f"writing the body of #{n} to GitHub failed: {out}")
+
     def cited_run(self, url):
         """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
         m = re.search(r"/actions/runs/(\d+)", url)
@@ -2782,6 +2792,50 @@ def run_ready_checks(wt, n, base, checks):
                               f"#{n} stays a draft and nothing was pushed. Fix it on the branch, push, and run --confirm again. {READY_CHECKS_CITE}"]))
     say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
 
+def lane_key_lines(wt, base_ref, sha, host, n, body):
+    """-> the integration body `body` of #n with the key lines of its lanes' PR bodies added, or None when none is missing.
+    A key line is a `Retire-run:` or `Drops-lines:` line in the last counted paragraph (check_debt_retire.key_lines). The check and the
+    merge read only that paragraph of the integration body, so a missing lane line goes at the end of it, above the closing paragraphs.
+    A lane is a tip of read_lanes, less a dropped one; its PR is the row of commits/<tip>/pulls whose head is the tip. Any failed read is a
+    Stop, never "no lanes" or "no key lines": the ready mark would go on with nothing copied."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_debt_retire as debt
+    import check_silent_undo as undo
+    nothing = f"Nothing was written and #{n} was not marked ready."
+    try:
+        tips, dropped = read_lanes(wt, base_ref, sha)
+    except Exception as e:
+        raise Stop(f"the lanes of the batch could not be read ({type(e).__name__}: {e}). {nothing}")
+    squash = lambda line: " ".join(line.split())
+    have = {squash(x) for x in debt.key_lines(body)}
+    rows, want = [], []
+    for tip in tips:
+        if tip in dropped:
+            continue
+        mine = [r for r in host.prs_of_commit(tip) if r.get("number") != n and (r.get("head") or {}).get("sha") == tip]
+        if not mine:
+            say(f"merge: lane tip {tip[:9]} has no pull request of its own, so no key line is copied from it.")
+        rows += mine
+    for row in sorted(rows, key=lambda r: r["number"]):
+        for line in debt.key_lines(row.get("body") or ""):
+            if squash(line) not in have:
+                have.add(squash(line))
+                want.append(line)
+    if not want:
+        return None
+    crlf = "\r\n" in body
+    text = body.replace("\r\n", "\n")
+    para = undo.last_paragraph(text)
+    at = text.rfind(para) if para else -1
+    if para and at < 0:
+        raise Stop(f"the last counted paragraph of the body of #{n} cannot be placed in it (a fence or comment sits inside it), so the lane key lines were not copied. {nothing}")
+    end = at + len(para)
+    added = "\n".join(want)
+    new = text[:end] + "\n" + added + text[end:] if para else added + ("\n\n" + text if text.strip() else "")
+    if not {squash(x) for x in want} <= {squash(x) for x in debt.key_lines(new)}:
+        raise Stop(f"the lane key lines would not be in the last counted paragraph of the body of #{n}. {nothing}")
+    return new.replace("\n", "\r\n") if crlf else new
+
 def draft_step(root, cfg, n, host, info):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
@@ -2795,35 +2849,41 @@ def draft_step(root, cfg, n, host, info):
     default = base == cfg["defaultBranch"]
     if not default:
         say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
-    if default or checks:  # one worktree, one open_worktree call, on either base
-        tmp, wt = open_worktree(root, info, base)
-        try:
-            if not default:
+    body = None  # the integration body with its lanes' key lines added, when any is missing
+    # one worktree, one open_worktree call, on any base: the lanes are read in it
+    tmp, wt = open_worktree(root, info, base)
+    try:
+        body = lane_key_lines(wt, f"origin/{base}", info["head"], host, n, info.get("body", ""))  # before any push: a failed read stops here
+        if not default:
+            if checks:
                 run_ready_checks(wt, n, base, checks)
-            else:
-                claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
-                if claim:
-                    if checks:
-                        run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
-                    raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
-                               f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
-                # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
-                stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
-                if stale:  # holds_base ends with the remedy
-                    raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
-                if stands:
-                    say(f"merge: {stands}. The green run stands.")
-                rebuilt = rebuild_records(wt)
-                sha = commit_claim(wt, None) if rebuilt else None
+        else:
+            claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
+            if claim:
                 if checks:
-                    run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
-                if rebuilt:
-                    push_branch(wt, info["branch"])
-                    say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
-                else:
-                    say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
-        finally:
-            drop_worktree(root, tmp, wt)
+                    run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
+                raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
+                           f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
+            # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
+            stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
+            if stale:  # holds_base ends with the remedy
+                raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
+            if stands:
+                say(f"merge: {stands}. The green run stands.")
+            rebuilt = rebuild_records(wt)
+            sha = commit_claim(wt, None) if rebuilt else None
+            if checks:
+                run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
+            if rebuilt:
+                push_branch(wt, info["branch"])
+                say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+            else:
+                say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
+    finally:
+        drop_worktree(root, tmp, wt)
+    if body is not None:
+        host.set_body(n, body)
+        say(f"merge: the lane key lines were copied into the body of #{n}.")
     ok, why = host.ready(n)
     if ok:
         say(f"merge: #{n} is ready now. Nothing was merged. When its run is green, run --confirm again to merge.")

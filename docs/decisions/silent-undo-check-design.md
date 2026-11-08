@@ -29,7 +29,7 @@ judgment: git reads, each Retire test in a temporary worktree, and at most one r
 an unflagged close gets no run read. It starts no long-lived process.
 
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
-  Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
+  Claude Code attribution line or only its session link. Read only the last paragraph left, with the trailer rules above.
 - **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
   line. A session in another repo that uses `bin/merge` asked for this.
 - **Verdict.** When the check finds a dropped line, `bin/merge preview` prints one `BLOCKED: <reason>`
