@@ -80,6 +80,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -885,13 +886,14 @@ class Host:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def review_comments(self, since):
-        """-> {PR number: [(created_at, review record body), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
-        when the review record marker is its whole first line. The number comes from the comment's issue_url. A failed read is a Stop."""
+        """-> {PR number: [(updated_at, review record body), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
+        when the review record marker is its whole first line. The time is the comment's last edit (updated_at, else created_at), because an edit keeps
+        created_at and the cutover must date the body as it now reads. The number comes from the comment's issue_url. A failed read is a Stop."""
         found = {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
             if m and review_marked(body):
-                found.setdefault(int(m.group(1)), []).append((c.get("created_at"), body))
+                found.setdefault(int(m.group(1)), []).append((c.get("updated_at") or c.get("created_at"), body))
         return found
 
     def open_heads(self):
@@ -2308,7 +2310,7 @@ def after_merge(root, cmds):
     """Run each command. True when every one passed. A failure never undoes the merge."""
     ok = True
     for cmd in cmds:
-        # nowindow: the afterMerge command prints on the caller's terminal; with no window that output goes to a hidden console
+        # nowindow: the afterMerge command prints on the caller's terminal; the wrapper's no-window flag could hide that output
         c = subprocess.run([resolve_program("bash"), "-c", cmd], cwd=root).returncode
         say(f"merge: afterMerge `{cmd}`: " + ("done." if not c else f"FAILED (exit {c}). The merge landed and stays."))
         ok = ok and not c
@@ -2536,13 +2538,14 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
-def ci_job_run(wt, *args):
+def ci_job_run(wt, *args, notes=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
-    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
+    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
+    notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
@@ -2551,6 +2554,8 @@ def ci_job_run(wt, *args):
     lines = out.splitlines()
     log = [l for l in lines if l.startswith("log=")][-1:]
     if c == 0:
+        if notes is not None:
+            notes.extend(l.rstrip() for l in lines if PIN_NOTE_MARKER in l)
         return "pass", [l.split(None, 1)[1].split(": ", 1)[0] for l in lines if l.startswith("skipped") and len(l.split(None, 1)) > 1], log, False
     if c == 1:
         return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
@@ -2573,13 +2578,14 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+        pin_notes = []
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
-        say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.")
+        say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.", *pin_notes)
         return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
@@ -3332,7 +3338,7 @@ def tool_stamp_since():
         _tool_stamp_since[tool] = stamp
     return _tool_stamp_since[tool]
 
-def review_stamp_since(root, base):
+def review_stamp_since(root, base, default=None):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
     `REVIEW_STAMP_SALT =`. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. When the caller's repo has no
@@ -3341,11 +3347,12 @@ def review_stamp_since(root, base):
     (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, a shallow file that cannot be read, or a
     tool checkout with no salt commit) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
-    created before this time may carry no Stamp line."""
+    created before this time may carry no Stamp line. `default` is the default branch name when the caller already read it (the report guard's
+    pulls/N payload, base.repo.default_branch); with none, default_branch_once asks gh."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
     key = (root, base)
     if key not in _stamp_since:
-        default = default_branch_once(root)
+        default = default or default_branch_once(root)
         stamp, c, out = salt_cutover(root, f"origin/{default}")
         if c:
             raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
@@ -3360,7 +3367,7 @@ def parse_review(text, created=None, cutover=None):
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. The `Stamp: <16 hex>` line between Net value and
     the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. A body with no Stamp line still parses when its
-    comment's `created` time is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
+    comment's `created` time (its last edit, see review_comments) is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
     as for a new post, the Stamp line is required. Trailing whitespace on a line and trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = [line.rstrip() for line in text.splitlines()]  # trailing spaces and CRLF are no part of a line, the marker's included
@@ -3474,8 +3481,8 @@ def reviewed_read(h, cutover=None):
         if not bodies:
             bare.append(f"#{n}")
             continue
-        created, body = bodies[-1]
-        rec = parse_review(body, created, cutover)
+        edited, body = bodies[-1]
+        rec = parse_review(body, edited, cutover)
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
         if state == "done":
             done.append((n, d["base"]["ref"]))
@@ -3772,7 +3779,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 fetch_default_branch(root)  # a stale local origin/<default> would give an old cutover
                 cutover = review_stamp_since(root, info["base"])
-                earlier = [parse_review(b, created, cutover) for created, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
+                earlier = [parse_review(b, edited, cutover) for edited, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)

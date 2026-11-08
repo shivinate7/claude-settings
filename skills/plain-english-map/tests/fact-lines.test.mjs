@@ -29,7 +29,7 @@
 //       the scanner rule needs strings too, and case R7 asserts it), then a literal parse.
 //       A set comes back as an array, in any order. A missing python3 or a file that does not parse is ok: false, never ok: true.
 //
-//   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 5, after the tested-by bump.
+//   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 6, the version the fixtures hold.
 //   scripts/lib/map-config.mjs, validateMapConfig: the optional key `mapPaths`, a list of path prefixes. See map-paths.test.mjs.
 //
 // The fixture (tests/fixture/) gained: src/retry.py, src/caller.py, config.json, docs/map/homes.md, and fact lines in core.md.
