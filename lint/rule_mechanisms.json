@@ -70,9 +70,11 @@
     },
     "roles-one-role-per-agent": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No hook judges it. A prompt hook sees only the event input, never what an agent did, and no check reads an agent's roles."
-      }
+        "kind": "guard",
+        "ref": "message-role-scope",
+        "reason": "The guard (message-role-scope, hooks/guard.py message_role_hit) refuses one slice: a SendMessage that asks a builder to change a test or a test-author to change product code. It reads the receiver's spawn role from the transcript and a path only when an edit verb governs it. It does not see a plain message with no path, a role mixed in the spawn brief, or any other act of an agent."
+      },
+      "test": "hooks/test_guard.py::message-role: a test edit to a builder is refused, and the refusal names test-author"
     },
     "roles-model-per-role-table": {
       "mechanism": {

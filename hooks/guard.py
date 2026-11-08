@@ -241,6 +241,16 @@ Other tools, in `judge` order:
                        holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
                        rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
+  message-role-scope   deny. A SendMessage whose receiver is a builder or a test-author (the role of the newest
+                       Agent or Task spawn whose toolUseResult.agentId equals `to`, read from the transcript) and
+                       whose message asks it to leave that role: a builder to change a test, a test-author to
+                       change product code. The refusal names the role to send the work to, never the path. An
+                       edit verb must govern the path, in the same clause or, when the verb's clause names no
+                       path, from the sentence right before. A path that is run, read, checked or waited on to go
+                       green, or that sits inside a command, is no edit. The transcript is read only when the
+                       message edits a path. No transcript, no spawn record, `main`, an unreadable file and any
+                       other role pass. An override lifts it. `mcp__claude-code-remote__send_message` is not
+                       judged. (message-role-scope)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
@@ -2000,6 +2010,186 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
             workflow_builder_refused(o, n) for o, n in workflow_pairs(tool_input, _expanded(target, cwd)) or ()):
         return target
     return ""
+
+
+# ---- message-role-scope: a SendMessage is judged by the role its receiver was spawned in (decision message-role-scope).
+# A builder is not sent an edit of a test, and a test-author is not sent an edit of product code. The edit verb and the
+# path it governs are read per sentence, so a path a message only runs, reads or waits on is no edit.
+MESSAGE_ROLE_TOOL = "SendMessage"
+MESSAGE_ROLE_BUILDER_REASON = (
+    "This message asks a builder to change a test. Send test changes to a test-author. "
+    "(decision message-role-scope, a message to an agent stays inside its role)"
+)
+MESSAGE_ROLE_AUTHOR_REASON = (
+    "This message asks a test-author to change product code. Send product changes to a builder. "
+    "(decision message-role-scope, a message to an agent stays inside its role)"
+)
+MESSAGE_EDIT_VERBS = {"edit", "change", "fix", "update", "modify", "replace", "rewrite", "add", "remove", "delete",
+                      "drop", "re-point", "write"}
+# A verb that only looks at a path or runs it. The nearest verb before a path says whether the path is edited.
+MESSAGE_READ_VERBS = {"run", "rerun", "re-run", "read", "check", "show", "make", "see", "view", "open", "cat",
+                      "verify", "inspect", "execute", "report", "look", "compare", "diff", "grep", "list"}
+# A word before a verb that makes it a noun (`the fix`), and a word that makes the verb another agent's act.
+MESSAGE_NOT_VERB_BEFORE = {"the", "a", "an", "this", "that", "these", "those", "your", "my", "its", "their", "our",
+                           "one", "no", "any", "each", "every", "some"}
+MESSAGE_OTHER_ACTORS = {"builder", "test-author", "reviewer", "orchestrator", "designer", "record-writer",
+                        "coordinator", "i", "i'll", "we", "we'll", "they", "he", "she"}
+# What follows ` and ` inside one clause: another edit, or a thing to edit. Anything else starts a new clause.
+MESSAGE_AND_KEEPS = MESSAGE_EDIT_VERBS | MESSAGE_NOT_VERB_BEFORE
+MESSAGE_GREEN = {"green", "pass", "passes", "passing", "passed", "red", "fails", "failing"}
+# A word with no slash is a path only with one of these extensions, so a method call (`os.path`) is none.
+MESSAGE_CODE_EXT = {"py", "js", "ts", "tsx", "jsx", "mjs", "cjs", "json", "yml", "yaml", "toml", "sh", "ps1", "swift",
+                    "java", "kt", "go", "rs", "rb", "c", "cc", "cpp", "h", "hpp", "cs", "css", "html", "sql", "ini",
+                    "cfg", "txt", "md", "mdx", "xml", "lock", "snap", "bat", "php", "vue", "svelte"}
+# A command word starts a command that runs to the clause end: a path in it is run, not edited.
+MESSAGE_COMMANDS = {"python", "python3", "node", "bash", "sh", "pwsh", "verdict", "pytest", "npm", "npx", "git"}
+MESSAGE_FENCE = re.compile(r"```.*?```", re.S)
+MESSAGE_SPAN = re.compile(r"`([^`\n]*)`")
+MESSAGE_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+MESSAGE_CLAUSE = re.compile(r"\s*;\s*|\s*,\s*then\b\s*|\s+then\b\s*|\s*,\s*so\b\s*|\s+so\b\s*|\s+and\s+(?=\S)", re.I)
+MESSAGE_NAME = re.compile(r"^[\w@+-][\w@+.-]*\.([A-Za-z][A-Za-z0-9]{0,5})$")
+MESSAGE_SPAN_MASK = " cmdspan "
+
+
+def _message_token(raw: str) -> str:
+    """One word of a message without its punctuation, its trailing `:` and its `:12` or `#L12` line mark."""
+    return re.sub(r"(?::\d+){1,2}$|#L\d+(?:-L?\d+)?$", "", raw.strip("\"'()[]{}<>,;!?*").rstrip(".:"))
+
+
+def _message_path(raw: str) -> str:
+    """The path a word names, else ''."""
+    tok = _message_token(raw)
+    if not tok or "://" in tok or tok[0] in "-$#" or tok.lower() in ("e.g", "i.e"):
+        return ""
+    slashed = norm(tok)
+    found = MESSAGE_NAME.match(slashed.rstrip("/").rsplit("/", 1)[-1])
+    if "/" not in slashed:
+        return tok if found and found.group(1).lower() in MESSAGE_CODE_EXT else ""
+    return tok if found or slashed.endswith("/") or slashed.count("/") >= 2 else ""
+
+
+def _message_words(clause: str):
+    """(word, path) per word of one clause. A word after a command word is part of that command and names no path."""
+    words, in_command = [], False
+    for raw in clause.split():
+        word = _message_token(raw).lower()
+        in_command = in_command or word in MESSAGE_COMMANDS
+        words.append((word, "" if in_command else _message_path(raw)))
+    return words
+
+
+def _message_edits(words):
+    """(governed, named) for one clause. `governed` is None when the clause has no edit verb, else the paths its edit verb
+    governs: those after the verb, else one that leads the clause. `named` is every path the clause names that no read
+    verb and no green goal takes."""
+    named, followed, led = [], [], []
+    edit_seen = actor_seen = False
+    verb_at, kind = -1, ""
+    for at, (word, path) in enumerate(words):
+        before = words[at - 1][0] if at else ""
+        if word in MESSAGE_EDIT_VERBS and before not in MESSAGE_NOT_VERB_BEFORE and not actor_seen:
+            verb_at, kind, edit_seen = at, "edit", True
+        elif word in MESSAGE_READ_VERBS:
+            verb_at, kind = at, "read"
+        actor_seen = actor_seen or word in MESSAGE_OTHER_ACTORS
+        if not path or any(w in MESSAGE_GREEN for w, _ in words[at + 1:at + 4]):
+            continue
+        if verb_at < 0:
+            led.append(path)
+        elif kind == "edit":
+            followed.append(path)
+        else:
+            continue
+        named.append(path)
+    return (followed or led if edit_seen else None), named
+
+
+def message_edit_paths(message: str):
+    """Every path a message asks its receiver to edit. A path counts when an edit verb governs it: the path follows the
+    verb in its clause, or leads the clause, or the verb's clause names no path at all and the sentence right before
+    names it (`X.py ~683: ... . Replace it with ...`)."""
+    text = MESSAGE_SPAN.sub(lambda m: m.group(1) if len(m.group(1).split()) == 1 else MESSAGE_SPAN_MASK,
+                            MESSAGE_FENCE.sub(MESSAGE_SPAN_MASK, message))
+    hits, before = [], []
+    for sentence in (s for s in MESSAGE_SENTENCE.split(text) if s.strip()):
+        pieces, joins = MESSAGE_CLAUSE.split(sentence), MESSAGE_CLAUSE.findall(sentence)
+        clauses = [pieces[0]]
+        for join, piece in zip(joins, pieces[1:]):
+            lead = _message_token(piece.split()[0]).lower() if piece.split() else ""
+            if join.strip().lower() == "and" and (lead in MESSAGE_AND_KEEPS or _message_path(lead)):
+                clauses[-1] += " and " + piece
+            else:
+                clauses.append(piece)
+        named = []
+        for clause in clauses:
+            words = _message_words(clause)
+            governed, seen = _message_edits(words)
+            named += seen
+            if governed:
+                hits += governed
+            elif governed is not None and not any(path for _, path in words):
+                hits += before
+        before = named
+    return hits
+
+
+def _message_spawn_role(transcript: str, agent: str) -> str:
+    """The role of the newest Agent or Task spawn whose answer names `agent`, read from the parent transcript, else ''.
+    The call carries the subagent_type, and the user line that answers it carries toolUseResult.agentId."""
+    uses, role = {}, ""
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            if '"subagent_type"' not in line and agent not in line:
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            content = (record.get("message") or {}).get("content") if isinstance(record, dict) else None
+            if not isinstance(content, list):
+                continue
+            if record.get("type") == "assistant":
+                for block in content:
+                    if (isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") in SPAWN_TOOLS
+                            and isinstance(block.get("input"), dict)):
+                        uses[block.get("id")] = block["input"].get("subagent_type")
+            elif isinstance(record.get("toolUseResult"), dict) and record["toolUseResult"].get("agentId") == agent:
+                for block in content:
+                    if isinstance(block, dict) and block.get("tool_use_id") in uses:
+                        role = role_key(str(uses[block["tool_use_id"]] or "").rsplit(":", 1)[-1])
+    return role
+
+
+def message_role_hit(tool: str, tool_input, transcript):
+    """(matched, reason) when this SendMessage asks a builder to change a test, or a test-author to change product code,
+    else None. The receiver's role is its spawn's. A message that edits no path reads no transcript. An unknown role
+    passes: no transcript, no spawn record, the main session, an unreadable file, and any role but these two."""
+    if tool != MESSAGE_ROLE_TOOL or not isinstance(tool_input, dict):
+        return None
+    to, message = tool_input.get("to"), tool_input.get("message")
+    if (not isinstance(to, str) or not to or to == "main" or not isinstance(message, str)
+            or not isinstance(transcript, str) or not transcript):
+        return None
+    paths = message_edit_paths(message)
+    if not paths:
+        return None
+    try:  # cost: one transcript read per SendMessage that edits a path
+        role = _message_spawn_role(transcript, to)
+    except Exception:
+        return None
+    for path in paths:
+        slashed = norm(path)
+        rooted = slashed.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:/", slashed))
+        rel = repo_rel(path, "", outside=role == BUILDER_ROLE) if rooted else slashed.removeprefix("./")
+        if rel is None:
+            continue
+        if role == BUILDER_ROLE and is_test_rel(rel):
+            return path, MESSAGE_ROLE_BUILDER_REASON
+        ext = os.path.splitext(norm(rel).rstrip("/"))[1].lower()
+        if (role == AUTHOR_ROLE and ext and ext != ".md" and not norm(rel).startswith("../")
+                and not author_path_ok(rel) and not is_workflow_rel(rel)):
+            return path, MESSAGE_ROLE_AUTHOR_REASON
+    return None
 
 
 # HEAD reflog subjects (`%gs`). The agent's own commit: `commit`, `commit (initial)`, `commit (amend)` and
@@ -4887,6 +5077,12 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A message to an agent that asks it to leave its role: a test edit to a builder, product code to a test-author
+    # (rule message-role-scope). An override lifts it: it is not in never_lifted, because the owner may mean the message.
+    sent = message_role_hit(tool, tool_input, trust_transcript)
+    if sent:
+        refuse(tool, "deny", "message-role-scope", sent[1], sent[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
