@@ -128,7 +128,7 @@ FAMILIES = {
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
-    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a && chain, -C with an absolute path, and reads pass",
+    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a git push after a check joined by ; is refused; a && chain, -C with an absolute path, a push that comes first, and reads pass",
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
@@ -5183,6 +5183,33 @@ sh("git-after-cd: echo set -e, then a failed cd, then ; a git push is refused",
 # A set -e inside a subshell ends with the subshell, so the shell's own errexit stays off.
 sh("git-after-cd: a set -e in a subshell, then a failed cd, then ; a git push is refused",
    "(set -e); cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
+# A PUSH AFTER A CHECK JOINED BY ;. Incident 2026-11-08, PR #2098 (the notes-fix-large-3 lane): a check and a
+# push were joined by `;`, so the push ran after the check failed. A push that follows a `;`-joined command is
+# refused, with or without a cd before it, and the remedy names `&&`. The cd here lands on a real folder, so
+# git-after-cd sees no stranded shell: the push is judged on its own.
+sh("git-after-cd: a landed cd, a check, then ; echo, then ; a git push is refused",
+   'cd %s && %s commit -q -am "msg" && python3 lint/check_silent_undo.py --upstream origin/b --head HEAD '
+   '--strict; echo "undo $?"; %s push origin HEAD:refs/heads/b 2>&1 | tail -1' % (slash(ROOT), VCS, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; echo, then ; a git push, with no cd, is refused",
+   'python3 lint/check_silent_undo.py --upstream origin/b --head HEAD --strict; echo "undo $?"; '
+   '%s push origin HEAD:refs/heads/b 2>&1 | tail -1' % VCS,
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: the same check and push joined by && throughout, after a landed cd, passes",
+   'cd %s && %s commit -q -am "msg" && python3 lint/check_silent_undo.py --upstream origin/b --head HEAD '
+   '--strict && echo "undo $?" && %s push origin HEAD:refs/heads/b 2>&1 | tail -1' % (slash(ROOT), VCS, VCS),
+   "allow", cwd=NOGIT)
+sh("git-after-cd: a git push alone, with an explicit refspec, passes",
+   "%s push origin HEAD:refs/heads/b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a git fetch, then ; a git status, with no push, passes",
+   "%s fetch origin; %s status" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a git push that comes first, then ; echo, passes",
+   '%s push origin HEAD:refs/heads/b; echo "undo $?"' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check, then ; a git push --dry-run, a read, passes",
+   "python3 lint/check_silent_undo.py --upstream origin/b --head HEAD --strict; "
+   "%s push --dry-run origin HEAD:refs/heads/b" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
