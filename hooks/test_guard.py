@@ -15790,6 +15790,28 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's first stop with a test cha
                          "second stop is allowed and logs role-diff-unresolved", stop_pair_case))
 
 
+# A test-config file is read from the run folder, so a commit run from src/ reads src/src/pytest.ini,
+# finds no text, and allows a testpaths line that disables tests. The rows from the top are the control:
+# the same file read from the top is refused.
+_bd_src_ini = diff_repo("bd-src-ini-untracked", _put("src/pytest.ini", "[pytest]\ntestpaths = nowhere\n"))
+sh("builder-refuse: a builder's commit from src/ with an untracked src/pytest.ini that sets testpaths is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's push from src/ with an untracked src/pytest.ini that sets testpaths is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: the same untracked src/pytest.ini, committed from the top, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini, agent_id="bld1", agent_type="builder")
+
+# The same join for a tracked src/pytest.ini: the base holds it, and the builder adds a testpaths line from src/.
+_bd_src_ini_t = diff_repo("bd-src-ini-tracked", _put("src/pytest.ini", "[pytest]\naddopts = -q\ntestpaths = nowhere\n"),
+                          files={**BASE_FILES, "src/pytest.ini": "[pytest]\naddopts = -q\n"})
+sh("builder-refuse: a builder's commit from src/ that adds testpaths to a tracked src/pytest.ini is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini_t, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's push from src/ that adds testpaths to a tracked src/pytest.ini is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini_t, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: the same tracked src/pytest.ini edit, committed from the top, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini_t, agent_id="bld1", agent_type="builder")
+
+
 # =========================================================================== failing open
 FAMILY = "paths"
 
