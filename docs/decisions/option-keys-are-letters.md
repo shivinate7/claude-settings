@@ -51,7 +51,7 @@ A letter also means the same option in the chat and on the page. Guard rule `opt
   - Known limit: after a `none` answer, ask the chat question again with the new options, then write them. The old question still cites the id, so a write made before the new question is compared to the old one.
   - Known limit: only the writing session's own transcript is read. A chat question asked in another session is not compared.
   - Known limit: the chat and the page must match in punctuation. The compare drops only case, spacing and the marks `*`, `_` and `` ` ``, so a chat `-role` and a page `--role` differ and refuse.
-  - Known limit: a reply that puts one cite above its options and another below is read by one side, so one of its items reads another item's lines.
+  - Known limit: a reply that puts one cite above its options and another below is read by one side, so one of its items reads another item's lines. So is a reply that cites its items once before any option line and again below each question's options.
   - Known limit: a cite's id ends at a space or at `*`, `_` or `` ` ``, the markdown marks (`PAGE_ITEM_CITE`). An item id is a slug of letters, digits and hyphens, so it holds none of them. An id with `_` would be cut short.
   - Known limit: an unreadable or missing transcript allows the write and logs one `noted` line.
   - Known limit: the prefix match works both ways, so a chat "Allow" matches a page "Allow merge --role", and the reverse passes too.

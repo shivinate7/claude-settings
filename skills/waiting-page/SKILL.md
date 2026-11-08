@@ -235,7 +235,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 - A question sent to both the chat and the page carries the same option text in the same order: the page's
   letters are positions, so letter a on the page must mean letter a in the chat. The chat form writes a line
   `Page item: <id>` and one line per option, `a) <the option's label>`. Put every cite in a reply on one side of
-  its options: each above its options, or each below them. With a cite below, the reply ends with a cite. The
+  its options: each above its options, or each below them. With cites below, no option line follows the last cite. The
   writer reads a reply that has an option line before its first cite and none after its last cite as cites
   below. Each cite then owns the option lines between the cite before it and itself. Any other reply is read as
   cites above, and each cite owns the option lines after it, up to the next cite. The page item carries that id
