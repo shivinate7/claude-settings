@@ -1,0 +1,11 @@
+{
+  "title": "Triage's outbox holds only notes whose finding lane has ended",
+  "phase": "process",
+  "status": "todo",
+  "order": 690,
+  "owner": "triage",
+  "lane": "",
+  "why": "Twice on Nov 8 (08:38 and 08:59 CST) triage held a live lane's notes in roadmap/outbox/triage.md. Under item 386 they ride in the lane that found them, and the coordinator had both pulled back. A note held away from its lane lands late, or twice.",
+  "note": "Fix: the roadmap skill's outbox section says a note from a running lane goes back to that lane as a Fix: line or a follow-up PR; the outbox takes only notes whose lane has ended. Done check: the skill text names the rule. Filed by triage 09:02 CST Nov 8.",
+  "updatedAt": "2026-11-08T09:02:00-06:00"
+}
