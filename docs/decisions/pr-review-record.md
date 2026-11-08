@@ -58,9 +58,10 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 - A record with a Findings line is done only if its Findings check also passes. The check runs only on a record that the rules above call done.
   - `none` passes with no read.
-  - `<n>, this PR` passes when the PR adds a file under `docs/debts/`, or adds lines to `docs/debts/notes.md`. Deleting a notes line does not count.
+  - `<n>, this PR` passes when the PR adds a file under the repo's debt store (its layout's `debts` folder and notes file), or adds lines to that notes file. Deleting a notes line does not count.
   - `<n>, follow-up #<pr>[, ...]` passes when each named PR is open or merged. A closed PR that was not merged does not pass. This PR does not pass.
   - A check that cannot read its input fails (owner, 2026-11-06 12:39 CST, page item 276 (unknown-read-one-rule), pick a). A follow-up PR that 404s is not done, and the line names it. Any other read failure is unknown, and it holds the record. `--findings-unknown-ok "<reason>"` lifts that hold, and the tool prints the lift.
+  - A layout that cannot be read makes the record `findings unknown`. It holds the record, like other unknowns (owner item 276 a, 2026-11-06 12:39 CST).
   - Owner item 394 a, 2026-11-08 06:08 CST: a fix check may pass a push that only files this PR's findings (record `hold-unsafe-after-round-3`). The fix-check reviewer judges that push; it passes only when the reviewed record's Findings is `<n>, this PR`. The tool does not check it.
 
 ## The cost
@@ -71,7 +72,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads. With no `.github/stamp.json` on main, `load_config` adds one `gh api` repo read.
 - One ready PR with a record (a batch line), each list on one page, on a base with no run that did not succeed: three calls, the open PRs, the comments and the base's runs. With a pinned `merge.requiredChecks` list, four: one branch protection read at the start of the run compares the pin. A held PR adds one events read.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened.
-- A Findings line reads only on a record the rules above call done: one paged read of the PR's files for `<n>, this PR` (one call per page), and one read per follow-up PR named. `none` costs what a legacy record costs.
+- A Findings line reads only on a record the rules above call done: one paged read of the PR's files for `<n>, this PR` (one call per page), with a few local layout-file reads (no process, no writes), and one read per follow-up PR named. `none` costs what a legacy record costs.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList.test_one_ready_pr_with_a_record_costs_three_gh_calls` in `merge/test_merge.py` pins the three calls. `ReviewedLedger.test_reads_one_comment_list_no_head_and_at_most_one_event_list_per_held_pr` pins the list reads. `ReviewedList.test_findings_this_pr_with_a_debt_file_added_is_done_and_reads_its_files_once`, `ReviewedList.test_findings_follow_up_reads_each_named_pr_once` and `ReviewedList.test_findings_none_reads_no_more_than_a_legacy_record` pin the Findings reads. `ReviewFixFiling` pins that a filing push (and a filing-plus-fix push) is accepted with no diff read.
 
