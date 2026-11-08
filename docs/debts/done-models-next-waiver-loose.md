@@ -4,3 +4,4 @@
 - **Where.** `done_models_problem` in `lint/report_guard.py`.
 - **Decision.** `agent-model-cap` (the model-per-role table); rule `reports-done-names-models`.
 - **Retire.** Waive only a spawn whose agent has no result or finish notice in the transcript, with a case that a finished reviewer named only in Next blocks.
+- **Fix.** `step:next-waiver-scope`.

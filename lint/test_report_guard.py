@@ -1225,6 +1225,27 @@ class DoneNamesModelsTests(unittest.TestCase):
                            "> **Next** Unstarted: none", [BUILDER_SONNET, self.BUILDER_OPUS_R2])
         assert_blocks(self, out, "no model named for builder opus")
 
+    def test_dm_red_next_role_word_alone_leaves_the_other_model_unnamed(self):
+        # Next names the builder but not its opus model, so the running opus builder is not waived.
+        out = self.verdict(waiver_report("the builder brief for step y is queued. Unstarted: none",
+                                         done="BUILT the guard, PR #5 (builder sonnet)"),
+                           [BUILDER_SONNET, self.BUILDER_OPUS_R2])
+        assert_blocks(self, out, "no model named for builder opus")
+
+    def test_dm_pin_next_role_with_its_model_waives_that_model(self):
+        # Next names builder opus with its model, so the running opus builder is waived in Done.
+        out = self.verdict(waiver_report("builder opus still running. Unstarted: none",
+                                         done="BUILT the guard, PR #5 (builder sonnet)"),
+                           [BUILDER_SONNET, self.BUILDER_OPUS_R2])
+        assert_no_model_block(self, out)
+
+    def test_dm_pin_next_role_word_waives_a_role_done_names_no_model_for(self):
+        # Done names no builder at all, so the role word alone waives the running builder (#1638).
+        out = self.verdict(waiver_report("builder still running. Unstarted: none",
+                                         done="BUILT the guard, PR #5"),
+                           [BUILDER_SONNET])
+        assert_no_model_block(self, out)
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
