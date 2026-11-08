@@ -16,8 +16,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import ALL_JOBS_PASSED_JOB, all_jobs, eval_if, shard_base, yaml_scalar  # noqa: E402  the one home of the scope condition and scalar parsers
-from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
+from test_windows_split import ALL_JOBS_PASSED_JOB, all_jobs, eval_if, shard_base  # noqa: E402  the one home of the scope condition
+from workflow_steps import job_block, step_blocks, step_key, yaml_scalar  # noqa: E402  the one home of the step parser and the scalar reader
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
