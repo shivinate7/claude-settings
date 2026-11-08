@@ -14699,7 +14699,7 @@ class BuildBatchOrderedAfter(BuildEnv):
 
     def test_a_pr_after_targets_neither_on_main_nor_in_the_batch_is_left_out(self):
         h1675, h1676, h1742 = self.lane(1675), self.lane(1676), self.lane(1742)
-        host = PullsHost([body_pull(1675, h1675, "Merge after: #1676, #1742."), batch_pull(1676, h1676)], {}, comments=[],
+        host = PullsHost([body_pull(1675, h1675, "Merge after: #1676, #1742."), batch_pull(1676, h1676)], {}, comments=self.done(1675, h1675),
                          closed={1742: closed_pull(1742, h1742, merged=False)})
         rc, out, err = self.build(host)
         self.assert_ran(rc, out, err, 0)
