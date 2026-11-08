@@ -1,11 +1,11 @@
 {
   "title": "The pre-existing guard reads \"a pre-existing issue\" as a claim, and stops its false alarms",
   "why": "#1907's round 3 findings (lane silent-undo-reads-retire-run, 04:45 CST Nov 8). Missed claim: \"The test fails due to a pre-existing issue.\" passes with no run. False alarms: \"pre-existing error handling\", \"the pre-existing failure mode\", \"Pre-existing failures: none.\", \"The guard refuses a line that calls a failure pre-existing.\" and \"the main job is already failing\" are refused. A run named as \"pre-existing (main tip <sha>)\" is refused.",
-  "note": "Fix: red cases first for each form above; the guard reads \"pre-existing issue/bug/problem\" as a claim, lets the listed non-claims pass, and accepts a run named as \"pre-existing (main tip <sha>)\". Branch pe-guard-false-alarms from #1907's head db10b8d6b; its PR merges after #1907. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 04:47 CST Nov 8; red cases started (lane, 04:45 CST).",
+  "note": "Fix: red cases first for each form above; the guard reads \"pre-existing issue/bug/problem\" as a claim, lets the listed non-claims pass, and accepts a run named as \"pre-existing (main tip <sha>)\". Branch pe-guard-false-alarms from #1907's head db10b8d6b; its PR merges after #1907. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 04:47 CST Nov 8; red cases started (lane, 04:45 CST). Its base #1907 is replaced by #1911, same tree (lane, 04:50 CST Nov 8).",
   "phase": "now",
   "status": "doing",
   "order": 609,
   "owner": "triage",
   "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
-  "updatedAt": "2026-11-08T04:46:00-06:00"
+  "updatedAt": "2026-11-08T04:51:00-06:00"
 }
