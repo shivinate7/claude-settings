@@ -228,19 +228,34 @@ _READERS = frozenset((
     "echo", "printf", "cat", "grep", "wc", "jq", "egrep", "fgrep", "rg", "ag", "ack", "head", "tail",
     "less", "more", "sort", "uniq", "cut", "tr", "nl", "tac", "rev", "column", "fold", "paste", "diff",
     "cmp", "file", "stat", "ls", "du", "md5sum", "sha1sum", "sha256sum", "readlink", "realpath",
+    "select-string",
     "basename", "dirname", "strings", "od", "xxd"))
 
 
-# An interpreter run on a file or a module (`python3 -m pytest -k copy x.py`) reads its path words like
-# a reader. Its inline flag (`-c`, `-e`) hands it program text, so it is read whole.
-_INTERPRETER = re.compile(r"python[\d.]*|py|node|nodejs|perl|ruby|php|deno|bun|pytest")
+# A test run (`pytest`, `python3 -m pytest -k copy x.py`) reads its path words like a reader. Any other
+# interpreter run on a file hands its words to a program (`install.py P`, `node cli.js rm P`), so it is
+# read whole. An inline flag (`-c`, `-e`) hands the interpreter program text, so it is read whole too.
+_PYTHON = re.compile(r"python[\d.]*|py")
+_PY_VERSION = re.compile(r"-\d[\d.]*")
 _INLINE_FLAG = re.compile(r"-[A-Za-z]*[ceEpr][A-Za-z]*|--eval|--print|--command|eval")
+# `git grep -O<cmd>` (`--open-files-in-pager`, any prefix of it) runs a program on the files it finds.
+_GIT_GREP_RUNS = re.compile(r"-[A-Za-z]*O.*|--o.*")
 
 
 def _reads_only(command: str, words) -> bool:
     if command in _READERS:
         return True
-    return bool(_INTERPRETER.fullmatch(command)) and not any(_INLINE_FLAG.fullmatch(w) for w in words)
+    if command == "git":
+        # Only a bare `git grep`: a `-c k=v` before it can set what git runs.
+        return words[:1] == ["grep"] and not any(_GIT_GREP_RUNS.fullmatch(w) for w in words)
+    if any(_INLINE_FLAG.fullmatch(w) for w in words):
+        return False
+    if command == "pytest":
+        return True
+    if _PYTHON.fullmatch(command):
+        rest = words[1:] if words[:1] and _PY_VERSION.fullmatch(words[0]) else words
+        return rest[:2] == ["-m", "pytest"]
+    return False
 
 
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
@@ -617,22 +632,21 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
-        # A printer piped on to a program hands that program its text, so a mutating word in the text
-        # may run. Only a segment nothing runs the text of is read by its command word alone.
-        piped_to_a_runner = False
+        # A segment piped on to a program hands that program its output (`rg -l x P | xargs rm`), so a
+        # mutating word or a path in it may run. Only a segment nothing runs the output of is read by its
+        # command word alone.
+        last = number
+        while last + 1 < len(kinds) and ends[last] == "|":
+            last += 1
+        chain = range(number, last + 1)
+        runs_nowhere = all(kinds[k] in ("printer", "filter") for k in chain[1:])
+        piped_to_a_runner = not runs_nowhere
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd)
         if kinds[number] in ("printer", "message"):
-            last = number
-            while last + 1 < len(kinds) and ends[last] == "|":
-                last += 1
-            chain = range(number, last + 1)
-            runs_nowhere = all(kinds[k] in ("printer", "filter") for k in chain[1:])
-            piped_to_a_runner = not runs_nowhere
-            to_file = any(_writes_a_file(parsed[k]) or kinds[k] == "filter" and _name(parsed[k][0]) == "tee"
-                          for k in chain)
+            to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown = [], []
