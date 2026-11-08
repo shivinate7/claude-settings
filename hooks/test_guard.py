@@ -19019,7 +19019,7 @@ BRIEF_CLAIM_EDGES = (
      "- `git push --force`\n\nControls that must still pass:\n- `user: root`"),
     ("brief-claim: test-author brief where main refuses each, after a list of inputs, is denied",
      "deny", "test-author", "- `user: root`\n- `port: 0`\nmain refuses each."),
-    ("brief-claim: builder brief where main refuses an input named before it, with no probe, is denied",
+    ("brief-claim: builder brief where main refuses an input named before the verb, with no probe, is denied",
      "deny", "builder", "For `user: root` main refuses."),
     ("brief-claim: test-author brief where two inputs pass on main, joined by and, is denied",
      "deny", "test-author", "`user: root` and `port: 0` pass on main."),
@@ -19048,6 +19048,60 @@ add("brief-claim: builder brief with two unprobed claims names both inputs in it
     "deny", BRIEF_PROBE, tool="Agent",
     prompt="Make these green.\nMain refuses `git push --force`.\nMain allows `port: 0`.",
     subagent_type="builder", model="sonnet", carries=("git push --force", "port: 0"))
+# A referent that is a pronoun, or a count word such as all three or both today, takes the inputs of its own sentence,
+# or of the sentence before it, and the refusal names them. Each deny here is a miss: the referent sat in the same
+# sentence as its inputs, or the count word named no referent at all.
+add("brief-claim: test-author brief where main refuses it, after an input in the same sentence, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Edit `x`, because main refuses it.",
+    subagent_type="test-author", carries=("`x`",))
+add("brief-claim: builder brief where main refuses them, after two inputs in the same sentence, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Edit `x` and `y`, because main refuses them.",
+    subagent_type="builder", model="sonnet", carries=("`x`", "`y`"))
+add("brief-claim: builder brief where main passes it, after an input in the same sentence, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Edit `x`, because main passes it.",
+    subagent_type="builder", model="sonnet", carries=("`x`",))
+add("brief-claim: test-author brief where main passes them, after two inputs in the same sentence, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Edit `x` and `y`, because main passes them.",
+    subagent_type="test-author", carries=("`x`", "`y`"))
+add("brief-claim: test-author brief where main refuses all three, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all three.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: builder brief where main refuses both cases, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses both cases.",
+    subagent_type="builder", model="sonnet", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses these two, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses these two.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: builder brief where main refuses each one, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses each one.",
+    subagent_type="builder", model="sonnet", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses both today, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses both today.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: builder brief where main passes all three, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main passes all three.",
+    subagent_type="builder", model="sonnet", carries=("`a`", "`b`"))
+add("brief-claim: builder brief where both cases must still pass, after two inputs, is allowed",
+    "allow", tool="Agent", prompt="Keep `a` and `b`. Both cases must still pass.",
+    subagent_type="builder", model="sonnet")
+# Each case below kills one mutant of the claim scan that no case read before: the base verb block after not, the -ing
+# verb refusing, the subjects check and rule before today, and now as the last word after a verb. Each is green on the
+# guard as it stands and red on the mutant.
+add("brief-claim: builder brief where main does not block an input is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is. Main does not block `git push --force`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief where an input is refusing on main is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is. `port: 0` is refusing on main.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: test-author brief where the check refuses an input today is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. The check refuses `port: 0` today.",
+    subagent_type="test-author")
+add("brief-claim: test-author brief where the rule refuses an input today is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. The rule refuses `port: 0` today.",
+    subagent_type="test-author")
+add("brief-claim: test-author brief where an input before main refuses now is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. For `port: 0` main refuses now.",
+    subagent_type="test-author")
 
 
 def _flow(model, role=None):
