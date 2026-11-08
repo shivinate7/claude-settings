@@ -342,15 +342,21 @@ def branch_cherry_empty(where: str, base: str, branch: str):
     return not any(line.startswith("+") for line in answer.stdout.splitlines())
 
 
-def branch_on_remote(where: str, branch: str, pattern: str = "refs/remotes"):
+def branch_on_remote(where: str, branch: str, pattern: str = "refs/remotes", exclude=()):
     """True when some remote-tracking ref under `pattern` (all of them by default) holds `branch`'s
-    tip in its history, False when none does, None when the read failed."""
+    tip in its history, False when none does, None when the read failed. A ref named in `exclude`
+    (full ref names) is no holder: a delete removes it, so it cannot keep the tip. A symbolic
+    `<remote>/HEAD` is no holder either, since it only repeats the branch it names."""
     answer = _git(
         where, "for-each-ref", "--contains", branch, "--format=%(refname)", pattern
     )
     if answer is None or answer.returncode != 0:
         return None
-    return bool(answer.stdout.strip())
+    skip = set(exclude)
+    return any(
+        ref and ref not in skip and not ref.endswith("/HEAD")
+        for ref in answer.stdout.split()
+    )
 
 
 def design_files(where: str, tip: str, folder: str, base=None):

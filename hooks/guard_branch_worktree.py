@@ -115,8 +115,9 @@ def design_branch_delete_ask(args, where: str, folder) -> bool:
 def design_push_delete_verdict(where: str, remote: str, names, folder) -> str:
     """'deny', 'ask' or '' for a push that deletes `names` on `remote`. A name counts when its tip
     (the remote-tracking ref, else the local branch) is not on the default branch, holds a file
-    under `folder` that the default branch lacks, and no `archive/*` ref on the remote holds the
-    tip. A tip that does not resolve, a failed read of the design files or of the archive refs, an
+    under `folder` that the default branch lacks, and no other ref on the remote holds the tip. A
+    ref this push deletes is no holder, so an archive branch is not its own holder. A tip that
+    does not resolve, a failed read of the design files or of the remote refs, an
     unreadable default branch and an unread design folder (FOLDER None) each ask: the delete
     removes origin's copy, so an unread tip never allows. Only a delete pushed to `origin` is judged; another remote keeps the other push rules.
     A name with no tip that is a local tag is skipped: a tag is not a branch. The default branch is
@@ -135,6 +136,8 @@ def design_push_delete_verdict(where: str, remote: str, names, folder) -> str:
     base = None
     base_read = False
     verdict = ""
+    # Every ref this push deletes is no holder of a tip: it is gone once the push lands.
+    deleted = {"refs/remotes/%s/%s" % (remote, name) for name in names}
     for name in names:
         tip = _tip_of(where, "refs/remotes/%s/%s" % (remote, name), "refs/heads/" + name)
         if tip is None and _is_tag(where, name):
@@ -152,7 +155,7 @@ def design_push_delete_verdict(where: str, remote: str, names, folder) -> str:
             continue
         if not files:
             continue
-        archived = branch_on_remote(where, tip, "refs/remotes/%s/archive" % remote)
+        archived = branch_on_remote(where, tip, "refs/remotes/" + remote, deleted)
         if archived:
             continue
         if archived is None or base is None:
