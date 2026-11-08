@@ -20656,6 +20656,25 @@ def worktree_home_cross_checkout_heredoc_text_case():
     return True, "quoted python text passes; interpreter, perl and ruby writes into another checkout refused"
 
 
+def _xco_problem(label, expect, primary, got, reason):
+    """The problem a judge-script check reports, or None when the verdict and its refusal are right."""
+    if got != expect:
+        return "%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120])
+    if expect == "deny" and ("other-checkout" not in reason or primary in reason):
+        return "%s: the refusal must name other-checkout and no path: %s" % (label, reason[:160])
+    return None
+
+
+def _judge_feed(command):
+    """The stdin a judge script hands the guard: one Bash call with `command`."""
+    return "input=json.dumps({'tool_name': 'Bash', 'tool_input': {'command': '%s'}}), text=True)" % command
+
+
+def _judge_body(call):
+    """A quoted python judge script: its imports, then `call`. The body is one heredoc."""
+    return "python3 - <<'PY'\nimport json, subprocess, sys\n%s\nPY" % call
+
+
 def worktree_home_cross_checkout_heredoc_list_argv_case():
     """Rule 0, `other-checkout`, a quoted python judge script that runs the guard over a list argv with
     no shell, beside `worktree_home_cross_checkout_heredoc_text_case`. Roadmap step python-text-list-argv:
@@ -20671,18 +20690,14 @@ def worktree_home_cross_checkout_heredoc_list_argv_case():
 
     def check(label, expect, tool, cwd, **tool_input):
         got, reason = _decide_full(tool, cwd, **tool_input)
-        if got != expect:
-            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
-        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
-            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
-                label, reason[:160]))
+        problem = _xco_problem(label, expect, primary, got, reason)
+        if problem:
+            problems.append(problem)
 
     # The judge script: each form differs only in its argv, shell flag or argv name, the body is one heredoc.
     shell_line = "cp x %s/y" % other
-    feed = "input=json.dumps({'tool_name': 'Bash', 'tool_input': {'command': '%s'}}), text=True)" % shell_line
-
-    def judge(call):
-        return "python3 - <<'PY'\nimport json, subprocess, sys\n%s\nPY" % call
+    feed = _judge_feed(shell_line)
+    judge = _judge_body
 
     # Allowed: a list argv that names the guard, with no shell, run or checked for output.
     check("judge script runs the guard over a list argv with no shell, quoting a copy into another checkout",
@@ -20748,6 +20763,89 @@ def worktree_home_cross_checkout_heredoc_list_argv_case():
         return False, "; ".join(problems)
     return True, ("a list argv to the guard with no shell passes; a shell argv, shell=True, a variable argv, "
                   "python code from stdin or -c, or a node or perl -e copy into another checkout is refused")
+
+
+def worktree_home_cross_checkout_named_argv_case():
+    """Rule 0, `other-checkout`, a quoted python judge script that binds its guard to one literal `.py` path
+    at module level and runs it over a list argv with no shell, beside
+    `worktree_home_cross_checkout_heredoc_list_argv_case`. Roadmap step py-argv-named-path: such a script
+    is text, so it passes. A GUARD bound twice, from a
+    non-literal, to a name that is not `.py`, or inside a function or loop is a name the guard cannot read, so it
+    is refused. A node -e list that the judge only prints or dumps runs nothing, so it passes; run by
+    subprocess, it is refused. Text in a comment, a string or a print is not a binding, so it does not change a verdict.
+    Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    """
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcolistargv")
+    other = slash(lane_b)
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        problem = _xco_problem(label, expect, primary, got, reason)
+        if problem:
+            problems.append(problem)
+
+    judge = _judge_body
+    feed = _judge_feed("cp x %s/y" % other)
+    literal = "GUARD = 'hooks/guard.py'\n"
+    guard_run = "subprocess.run([sys.executable, GUARD], " + feed
+    inline_run = "subprocess.run([sys.executable, 'hooks/guard.py'], " + feed
+    run_os = "CODE = %r\n" % ("import os; os.system('cp x %s/y')" % other)
+
+    # Allowed: the form of the repo's own judge scripts, GUARD bound once to a literal .py path. Its control
+    # passes the same call with the path inline, so the binding is the only thing that differs.
+    check("named path: GUARD bound once to a literal .py path, judge runs the guard over a list argv with no "
+          "shell, quoting a copy into another checkout",
+          "allow", "Bash", lane_a, command=judge(literal + guard_run))
+    check("named path: GUARD bound once to a literal .py path, judge checks the guard's output over a list "
+          "argv, quoting a copy into another checkout",
+          "allow", "Bash", lane_a,
+          command=judge(literal + "subprocess.check_output([sys.executable, GUARD], " + feed))
+    check("control: the same judge script with the .py path inline in the list argv is allowed", "allow",
+          "Bash", lane_a, command=judge(inline_run))
+
+    # Refused: each body is one change from the allowed judge, and each change leaves GUARD unreadable.
+    check("named path: GUARD bound twice, both to .py literals, is refused", "deny", "Bash", lane_a,
+          command=judge(literal + "GUARD = 'hooks/other.py'\n" + guard_run))
+    check("named path: GUARD bound from sys.argv[1] is refused", "deny", "Bash", lane_a,
+          command=judge("GUARD = sys.argv[1]\n" + guard_run))
+    check("named path: GUARD bound from os.environ is refused", "deny", "Bash", lane_a,
+          command=judge("import os\nGUARD = os.environ['GUARD']\n" + guard_run))
+    check("named path: GUARD bound to a non-.py literal, judge form, is refused", "deny", "Bash", lane_a,
+          command=judge("GUARD = 'x'\n" + guard_run))
+    check("named path: GUARD bound to a non-.py literal, the copy's code on input=CODE, is refused", "deny",
+          "Bash", lane_a,
+          command=judge(run_os + "GUARD = 'x'\nsubprocess.run([sys.executable, GUARD], input=CODE, text=True)"))
+    check("named path: GUARD bound inside a function is refused", "deny", "Bash", lane_a,
+          command=judge("def run_guard():\n    GUARD = 'hooks/guard.py'\n    %s\nrun_guard()" % guard_run))
+    check("named path: GUARD bound inside a loop is refused", "deny", "Bash", lane_a,
+          command=judge("for _ in range(1):\n    GUARD = 'hooks/guard.py'\n    %s" % guard_run))
+
+    # Allowed: a node -e list that the judge only prints or dumps as JSON. It runs nothing, so it is text.
+    # Its control runs the same list by subprocess, which stays refused.
+    node_list = "['node', '-e', \"fs.writeFileSync('%s/y','x')\"]" % other
+    check("node -e list only printed by the judge, copying into another checkout, is allowed", "allow",
+          "Bash", lane_a, command=judge("print(%s)" % node_list))
+    check("node -e list only dumped to JSON by the judge, copying into another checkout, is allowed", "allow",
+          "Bash", lane_a, command=judge("print(json.dumps(%s))" % node_list))
+    check("control: the same node -e list run by subprocess, copying into another checkout, is refused",
+          "deny", "Bash", lane_a, command=judge("subprocess.run(%s, text=True)" % node_list))
+
+    # Text in a comment, a string or a lone quote is not a binding, so each of these is allowed with the path inline.
+    check("comment: a `# GUARD = sys.argv[1]` line in the judge script is allowed", "allow", "Bash", lane_a,
+          command=judge("# GUARD = sys.argv[1]\n" + inline_run))
+    check("string: a `# GUARD = os.environ` text inside a string is allowed", "allow", "Bash", lane_a,
+          command=judge("NOTE = \"# GUARD = os.environ['GUARD']\"\n" + inline_run))
+    check("string: a multi-line string holding a GUARD = sys.argv[1] line is allowed", "allow", "Bash", lane_a,
+          command=judge('NOTE = """\nGUARD = sys.argv[1]\n"""\n' + inline_run))
+    check("lone quote: a print of don't in the judge script is allowed", "allow", "Bash", lane_a,
+          command=judge("print(\"don't\")\n" + inline_run))
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("a judge script with GUARD bound once to a literal .py path passes over a list argv with no "
+                  "shell; GUARD bound twice, from a non-literal, to a non-.py name, or in a function or loop is "
+                  "refused; a node -e list only printed or dumped passes, and run by subprocess is refused")
 
 
 def _stand_in_git(tag):
@@ -22250,6 +22348,10 @@ LOG_CHECKS = (
      "is allowed; a shell argv, shell=True, an argv held in a variable, python code from stdin or -c, "
      "or a node or perl -e copy into another checkout is refused",
      worktree_home_cross_checkout_heredoc_list_argv_case),
+    ("worktree-home: named argv path: a judge script that binds GUARD once to a literal .py path, and a "
+     "node -e list only printed, are allowed; GUARD bound twice, from a non-literal, to a non-.py name, or in "
+     "a function or loop is refused, and a node -e list run by subprocess is refused",
+     worktree_home_cross_checkout_named_argv_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
