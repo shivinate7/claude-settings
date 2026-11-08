@@ -7,7 +7,7 @@ A Cost sentence may name a file or state a count only when the same sentence bac
 - For a file: a test file that exists and holds the file's name.
 - For a count: the code span nearest the count word must be one that a test file holds as a whole name, or a bound, or a mark. A held span farther away does not rescue a near one that no test holds. The docstring lists the bounds.
 - For either: a mark, "not pinned", "unpinned", "unmeasured" or "no test".
-- A count in a debt note is `among N` or `N of M`. It passes on a bound, a mark, a date (YYYY-MM-DD), or a test named in the sentence that holds its nearest code span. It also passes on `run` and digits that `of` does not follow. A run of backticks that nothing closes is plain text in a note, with no finding. A note's count is a dated past observation, not a standing fact. An undated count in a note went stale at once, as in PR #2063 ("STALE010: skip a cite outside the repo's tracked top folders").
+- A count in a note is `among N` or `N of M`, where N is a count word or digits. It passes on a bound, a mark, a date (YYYY-MM-DD), or a test named in the sentence that holds its nearest code span. It also passes on `run` and digits that `of` does not follow. A run of backticks that nothing closes is plain text in a note, with no finding. A note's count is a dated past observation, not a standing fact. An undated count in a note went stale at once, as in PR #2063 ("STALE010: skip a cite outside the repo's tracked top folders").
 
 A check refuses any Cost sentence that does none of these. A count with no code span needs a bound or a mark.
 
@@ -22,8 +22,8 @@ Use "(not pinned)" only where a figure was measured. Use "(unmeasured)" where it
 - A file token is a backticked name that ends in a known extension in any case, or starts with `~/` or `.git/`. A trailing `:<digits>` is dropped before the test, and the token is reported as written. A test file name (`test_*`, `*_test.*`, `*.test.*`, `*Tests.swift`, and `*.spec.*` ending in js, jsx, ts, tsx, mjs, cjs, mts or cts) is a pin, not a file token. A token is flagged whether or not its file exists.
 - A file token is pinned when a test file named in the same sentence exists and holds the token's name as a whole name: its basename, or for a `<placeholder>` basename the folder before it. `box.json` does not pin `x.json`, and `HEADER` does not pin `HEAD`.
 - A count word is zero to six, ten, a single, digits, once, twice, thrice or Nx. A count word needs a cost noun with at most three words between. Once, twice, thrice and Nx count only after a verb of work, with at most three words between, never before a noun. The docstring of `lint/check_cost_pins.py` lists every count word, cost noun and verb of work.
-- A count passes on a test only when the test is named in the same sentence and holds, as a whole name, the code span nearest the count word. A test-name span is never the nearest span.
-- Code spans, dates, times, versions, decimals, numbers with a time unit or a size unit, line references, ids, "Round N of M", "PR N" and "one" before "of" are not read as part of a claim. The docstring lists each unit and id form.
+- A count passes on a test only when the test is named in the same sentence and holds, as a whole name, the code span nearest the count word. A test-name span never counts.
+- These are not read as part of a claim: code spans, dates, times, versions, decimals, line references and ids. Nor are numbers with a time or size unit, "Round N of M", "PR N", or "one" before "of". The docstring lists each unit and id form.
 - A finding is one line on the token's own line: `<record>:<line>: <token> named in a Cost sentence with no pin`. A count with no backing is one finding per sentence, on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`. Exit 1 when there is a finding.
 
 ## Why and harm
@@ -38,7 +38,7 @@ Source: step `cost-line-pinned` (file pins) and step `cost-line-has-reader` (cou
 
 Corpus: coordinator, 09:47 CST: mark the flagged sentences "unmeasured", or "(not pinned)" where a measured figure stands. This lane checks counts only; refusal reasons are a separate finding.
 
-Cost: one python start per CI run, and no file written (unmeasured). It reads the debt notes file once per run (unmeasured). `lint/layout.py` reads `lint/layout.json` and the repo's extras file again on each record-kind lookup, with no cache (unmeasured: no test counts these reads). It also reads git files to name the repo. It reads each decision record at most once. It reads each test file that a Cost sentence or a debt note names once per run, from a cache (unmeasured: no test counts the reads). `lint/test_check_cost_pins.py` proves the flag and the pin.
+Cost: one python start per CI run, and no file written (unmeasured). It reads the debt notes file once per run (unmeasured). `lint/layout.py` reads `lint/layout.json` and the repo's extras file again on each record-kind lookup, with no cache (unmeasured: no test counts these reads). It also reads git files to name the repo. It reads each decision record at most once. It reads each test file that a Cost sentence or a note names once per run, from a cache (unmeasured: no test counts the reads). `lint/test_check_cost_pins.py` proves the flag and the pin.
 
 ## Known limits
 
@@ -53,7 +53,7 @@ Cost: one python start per CI run, and no file written (unmeasured). It reads th
 - A trailing once, twice, thrice or Nx counts only after a verb of work, with at most three words between.
 - A refusal reason in ordinary prose is not read. Fix: none in this lane. Triage holds it as a separate finding.
 - A pin is the file's whole name found in the test text. The test may hold the name and not prove the claim. Review reads that.
-- Only these extensions mark a file: md, py, mjs, js, ts, tsx, json, jsonl, sh, ps1, cmd, bat, html, css, swift, jsx, cjs, mts, cts, yml, yaml, toml, txt, log, csv, tmpl, sql, cfg, ini, lock and xml. A file with another extension is not seen.
+- These extensions mark a file: md, py, mjs, js, ts, tsx, json, jsonl, sh, ps1, cmd, bat, html, css, swift. So do jsx, cjs, mts, cts, yml, yaml, toml, txt, log, csv, tmpl, sql, cfg, ini, lock and xml. A file with another extension is not seen.
 - A path with no extension is not a file token, so `bin/verdict` is not seen. A name outside backticks is not read at all.
 - A heading with an underline of `===` or `---` is not a heading here. A table row that starts with `| Cost` opens no paragraph.
 

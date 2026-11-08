@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fails when a decision record's Cost sentence names a file that no test pins. It also fails on a count with no
-reader, in a Cost sentence or in a debt note.
+reader, in a Cost sentence or in a note.
 
     python3 lint/check_cost_pins.py [--root DIR]
 
@@ -41,17 +41,17 @@ holds, as a whole name, the code span nearest the count word. A test-name span i
 with no other code span passes on no test: it needs a bound or a mark. A sentence with a claim that passes none of
 these is one finding, on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`.
 
-A debt note is one list item of the debt notes file (kind `debt-notes` in lint/layout.json), with its continuation
+A note is one list item of the debt notes file (kind `debt-notes` in lint/layout.json), with its continuation
 lines. A note is read sentence by sentence, with the same sentence split and code-span blanking as a Cost paragraph.
 A run of backticks that nothing closes is plain text in a note, so it makes no finding and the read goes on after it.
-A note's count claim is `among` and a count word (one to six, or digits), or digits, `of`, and a number of two or more
-digits (`406 of 8000`). A number may carry thousands separators (`1,406 of 8,000`). The first number of an `N of M`
-claim is not read after the word `Round` or `Try`, or in a decimal (`20.2 of 28`). Dates, times and ids are
+A note's count claim is `among` and a count word (the list above, or digits), or a count word or digits, `of`, and a
+number of two or more digits (`406 of 8000`, `two of 40`). A number may carry thousands separators (`1,406 of 8,000`).
+The first number of an `N of M` claim is not read after the word `Round` or `Try`, or in a decimal (`20.2 of 28`). Dates, times and ids are
 blanked first, as in a Cost sentence, so `item 3 of 40` and `step 2 of 12` make no claim. Words match in any case.
 A claim passes on the Cost rule's passes: a bound, an exempt word, or a test-name candidate that holds the nearest code
 span. It also passes when its sentence holds a date (YYYY-MM-DD), or `run` and digits that `of` does not follow
 (`run 40 of 543` is a count). A count in a note is a dated past observation, not a standing fact. A sentence with a claim that passes none of these is one finding, on the line of its
-claim: `<notes path>:<line>: count in a debt note with no reader`. A note's cost-noun counts are not read. A Cost
+claim: `<notes path>:<line>: count in a note with no reader`. A note's cost-noun counts are not read. A Cost
 sentence in a decision record keeps the Cost rule alone.
 
 The report is one line per token and line: `<record>:<line>: <token> named in a Cost sentence with no pin`.
@@ -89,7 +89,7 @@ TEST_NAME = re.compile(r"^(?:test_.*|.*_test\..*|.*\.test\..*|.*Tests\.swift|.*\
 CLOSERS = ")*\"'"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
 NO_READER = "count in a Cost sentence with no reader"
-NOTE_NO_READER = "count in a debt note with no reader"
+NOTE_NO_READER = "count in a note with no reader"
 WORD = re.compile(r"\w+(?:['\u2019-]\w+)*")
 COUNT_WORD = re.compile(r"(?:zero|one|two|three|four|five|six|ten|single|once|twice|thrice|\d+x?)", re.IGNORECASE)
 WORK_VERB = re.compile(r"(?:reads?|runs?|calls?|called|starts?|spawns?|writes?|fetch(?:es)?|stats?|checks?|opens?|scans?|loads?|parses?)", re.IGNORECASE)
@@ -106,15 +106,17 @@ NOT_COUNTS = [re.compile(r"[\w/.-]+\.[A-Za-z]+(?::\d+)+"), re.compile(r"\b\d{4}-
               re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
 # A number, with thousands separators (`1,406`) or without.
 NUMBER = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
-# A debt note's count claim: `among` and a count word, or `N of M` with M of two or more digits. The lookbehind drops
-# a number after Try. NOT_COUNTS blanks `Round N of M` and a decimal (`20.2 of 28`) before this reads the text.
-NOTE_CLAIM = re.compile(r"\bamong\s+(?:" + NUMBER + r"|one|two|three|four|five|six)\b"
-                        r"|(?<!\btry )\b" + NUMBER + r"\s+of\s+(?:\d{1,3}(?:,\d{3})+|\d{2,})(?!\d)",
+# A note's count claim: `among` and a count word, or `N of M` (N a number or count word) with M of two or more digits.
+# The lookbehinds drop an N after Try or Round. NOT_COUNTS blanks `Round N of M` and a decimal (`20.2 of 28`) before
+# this reads the text.
+NOTE_CLAIM = re.compile(r"\bamong\s+(?:" + NUMBER + r"|" + COUNT_WORD.pattern + r")\b"
+                        r"|(?<!\btry )(?<!\bround )\b(?:" + NUMBER + r"|" + COUNT_WORD.pattern + r")\s+of\s+"
+                        r"(?:\d{1,3}(?:,\d{3})+|\d{2,})(?!\d)",
                         re.IGNORECASE)
 # A date, or `run` and digits that `of` does not follow: `run 40 of 543` is a count, not a run id.
 NOTE_DATED = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\brun\s+\d+\b(?!\s+of\b)", re.IGNORECASE)
 # text, [(code span text, line)], line of the first character, text with code spans blanked, [(start, end)] of each span
-Sentence = collections.namedtuple("Sentence", "text spans line blanked holes")
+Sentence = collections.namedtuple("Sentence", "text spans line blanked blanks")
 
 
 def indent_of(text):
@@ -178,11 +180,11 @@ def mid_line_start(number, text):
     return None
 
 
-def sentence_of(text, spans, line, holes):
+def sentence_of(text, spans, line, blanks):
     blanked = list(text)
-    for start, end in holes:
+    for start, end in blanks:
         blanked[start:end] = "_" * (end - start)
-    return Sentence("".join(text), spans, line, "".join(blanked), holes)
+    return Sentence("".join(text), spans, line, "".join(blanked), blanks)
 
 
 def read_paragraph(paragraph, lone_is_text=False):
@@ -193,14 +195,14 @@ def read_paragraph(paragraph, lone_is_text=False):
     a run of backticks that nothing closes is plain text: the read goes back to just after it, and the paragraph
     is balanced."""
     chars = [(number, c) for number, text in paragraph for c in text + "\n"]
-    sentences, text, spans, holes, inside, opened, width, i = [], [], [], [], False, 0, 0, 0
-    begin, hole = 0, 0
+    sentences, text, spans, blanks, inside, opened, width, i = [], [], [], [], False, 0, 0, 0
+    begin, blank_at = 0, 0
     while True:
         if i == len(chars):
             if not (inside and lone_is_text):
                 break
             # while a span is open no sentence ends and no span closes, so only the text after the run is undone
-            del text[hole + width:]
+            del text[blank_at + width:]
             inside, i = False, opened
             continue
         if not text:
@@ -212,11 +214,11 @@ def read_paragraph(paragraph, lone_is_text=False):
             while i + n < len(chars) and chars[i + n][1] == "`":
                 n += 1
             if not inside:
-                hole = len(text)
+                blank_at = len(text)
             text.extend("`" * n)
             if inside and n == width:
                 spans.append((unpadded("".join(ch for _, ch in chars[opened:i])), chars[opened][0]))
-                holes.append((hole, len(text)))
+                blanks.append((blank_at, len(text)))
                 inside = False
             elif not inside:
                 inside, opened, width = True, i + n, n
@@ -229,11 +231,11 @@ def read_paragraph(paragraph, lone_is_text=False):
                 j += 1
             if j == len(chars) or chars[j][1].isspace():
                 text.extend(ch for _, ch in chars[i + 1:j])
-                sentences.append(sentence_of(text, spans, begin, holes))
-                text, spans, holes, i = [], [], [], j - 1
+                sentences.append(sentence_of(text, spans, begin, blanks))
+                text, spans, blanks, i = [], [], [], j - 1
         i += 1
     if "".join(text).strip():
-        sentences.append(sentence_of(text, spans, begin, holes))
+        sentences.append(sentence_of(text, spans, begin, blanks))
     return sentences, not inside
 
 
@@ -327,7 +329,7 @@ def has_reader(sentence, start, end, candidates, root, texts):
     """True when a bound, or a test that holds the code span nearest the count word, backs the count."""
     if BOUND.search(sentence.blanked):
         return True
-    near = [(min(abs(a - end), abs(start - b)), k) for k, (a, b) in enumerate(sentence.holes)
+    near = [(min(abs(a - end), abs(start - b)), k) for k, (a, b) in enumerate(sentence.blanks)
             if not is_test_name(sentence.spans[k][0])]
     if not near:
         return False
@@ -342,7 +344,7 @@ def blank_not_counts(text):
 
 
 def note_paragraphs(lines):
-    """Each debt note of `lines`, as a list of (line number, text) pairs. A note is a list item and its continuation
+    """Each note of `lines`, as a list of (line number, text) pairs. A note is a list item and its continuation
     lines. A blank line, a heading or a code fence ends it. Fenced code is not read."""
 
     found, current, fenced = [], None, False
