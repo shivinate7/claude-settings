@@ -407,19 +407,22 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # (_ps_bash_form), so PowerShell text that only looks like one passes: a pipe to a Unix-only program
 # (PowerShell has `Sort-Object`, `Tee-Object` and `more`, so those are left out; `jq` and `less` are in), a leading `NAME=value`
 # before a command (a `}` ends the value, so a hashtable's `b=2}` is none, unless it closes a `${...}` expansion, nested
-# one deep as in `${A:-${B}}`; each expansion holds no other `{` or `;`, so a failed read backtracks in linear time), a `[ ... ]` or `[[ ... ]]` test after a statement start or `if`, and a backslash that ends a line
+# two deep as in `${A:-${B:-${C}}}`; each expansion holds no other `{` or `;`, so a failed read backtracks in linear time), a `[ ... ]` or `[[ ... ]]` test after a statement start or `if`, and a backslash that ends a line
 # after a space with a line after it (a `C:\repo\` path ends in no space before its backslash, and a
 # lone backslash argument ends the text: `cd \`, and a `cd \` line before a line with no flag is a path).
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 # A pipe may end a line, so `|`, a newline, then the program is a pipe to it. A NAME=value value may hold `$(...)`
-# (one nested level) with spaces, read whole so a failed read backtracks in linear time. A value ending in `,` is a
-# wrapped attribute list (`Mandatory=$true, Position=0`), not a prefix before a command.
+# (one nested level) with spaces, read whole so a failed read backtracks in linear time. A value ending in `,` that
+# another `Name=` follows is a wrapped attribute list (`Mandatory=$true, Position=0`), not a prefix before a command.
+# A bracket test is one whitespace char, then any text, then whitespace and the closing bracket: `[ \t]` then
+# `[^\]\n]*` never take the same run twice, so one match start costs one pass over its line.
 PS_BASH_FORMS = re.compile(
     r"\|[ \t]*(?:\r?\n[ \t]*)?(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
     r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*="
-    r"(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|\$\((?:[^()]|\([^()]*\))*\)|(?!\$\()[^\s;}])*(?<!,)[ \t]+[A-Za-z./]"
-    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t]+[^\]\n]*[ \t]\]|\[\[[ \t]+[^\]\n]*[ \t]\]\])",
+    r"(?:\$\{(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|[^{}\s;])*\}|\$\((?:[^()]|\([^()]*\))*\)|(?!\$\()[^\s;}])*"
+    r"(?:(?<!,)[ \t]+[A-Za-z./]|(?<=,)[ \t]+(?![A-Za-z_][A-Za-z0-9_]*=)[A-Za-z./])"
+    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t][^\]\n]*[ \t]\]|\[\[[ \t][^\]\n]*[ \t]\]\])",
     re.M | re.I)
 # A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
 # argument (`cd \`, the drive root) and the next line does not start with a flag, it is a path, not a continuation.
@@ -442,9 +445,14 @@ SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "
                             "gcloud", "bq", "winget", "gsutil", "kubectl", "terraform", "yarn", "pnpm", "aws",
                             "az", "helm"))
 # A span whose command word is any lowercase word and whose second word is a flag (`grep -r x`, `chmod +x
-# f`) is a shell line too, as is one whose program is listed. A command word with a path is read by its
+# f`) is a shell line too, unless that word is a determiner (`the -x flag`), as is one whose program is listed. A command word with a path is read by its
 # basename, so `/usr/bin/chmod +x f` and `scripts/run.py --x` are shell lines.
 SPAN_FLAG = re.compile(r"(?:--?|\+)[A-Za-z]")
+# A determiner first word marks prose: `the -x flag` names a flag and runs nothing, so the span-flag rule skips it.
+SPAN_DETERMINERS = frozenset(("the", "a", "an", "this", "its"))
+# A Verb-Noun cmdlet at a Windows drive path (`C:\tools\Get-Thing`). guard_core's POSIX reader strips the backslashes, so
+# the raw segment is read. Each component ends in a separator, so the run reads in one pass.
+WIN_CMDLET_PATH = re.compile(r"[A-Za-z]:[\\/](?:[^\s\\/]+[\\/])*[A-Z][a-z]+-[A-Z][A-Za-z]+(?=\s|$)")
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
 # In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
 CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
@@ -636,6 +644,15 @@ def _chain_command(word, args) -> bool:
             or (args >= 1 and bool(CHAIN_COMMAND.fullmatch(word))))
 
 
+def _cmdlet_at_path(first, segment) -> bool:
+    """True when the first word `first` of `segment` is a Verb-Noun cmdlet, bare or at an absolute path (Unix,
+    `~/`, or a Windows drive). A relative path (`docs/Read-Me`, `Microsoft.PowerShell.Management/Get-Item`) or a
+    URL names a doc or a module, not a program. The basename keeps its case."""
+    if not SHELL_CMDLET.fullmatch(first.rsplit("/", 1)[-1]):
+        return bool(WIN_CMDLET_PATH.match(segment.lstrip()))
+    return "/" not in first or first.startswith(("/", "~/"))
+
+
 def _shell_line(span, run) -> bool:
     """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
     _relative_run. The segments, their prefixes and their command words come from guard_core, the one
@@ -661,12 +678,13 @@ def _shell_line(span, run) -> bool:
         if words[0].startswith(("./", "../")):
             if _relative_run(words, run):
                 return True
-        elif SHELL_CMDLET.fullmatch(words[0].rsplit("/", 1)[-1]):   # the basename keeps its case
+        elif _cmdlet_at_path(words[0], segment):
             return True
         elif chained and _chain_command(word, len(words) - 1):
             return True
         elif len(words) >= 2 and (word in SHELL_PROGRAMS
-                                  or (CHAIN_COMMAND.fullmatch(word) and SPAN_FLAG.match(words[1]))):
+                                  or (CHAIN_COMMAND.fullmatch(word) and word not in SPAN_DETERMINERS
+                                      and SPAN_FLAG.match(words[1]))):
             return True
     return False
 
