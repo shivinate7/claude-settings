@@ -13561,6 +13561,12 @@ sh("builder-test: shell write, sed -i over the src/*.py glob, is allowed",
 # crossed the `/` would name tests/test_a.py.
 sh("builder-test: shell write, sed -i over the *.py glob at the root, is allowed",
    "sed -i s/a/b/ *.py", "allow", **DR)
+# A find or a loop over src names product files only, since src holds no test. Pins: each passes today.
+for _name, _command in (
+    ("find src for *.py piped to xargs, sed -i", "find src -name '*.py' | xargs sed -i s/a/b/"),
+    ("for loop over src/*.py, sed -i on the loop variable", 'for f in src/*.py; do sed -i s/a/b/ "$f"; done'),
+):
+    sh("builder-test: shell write, %s, is allowed" % _name, _command, "allow", **DR)
 # Pin for the `""` skip after a cd: the script word of sed -i is data, and the file it writes is
 # ../src/app.py, outside the tests folder the cd entered. Without the skip, the data word reads as a
 # test in tests/, so the case is refused.
