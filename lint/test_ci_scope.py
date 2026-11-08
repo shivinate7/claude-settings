@@ -16,6 +16,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
+import fnmatch
 import functools
 import os
 import posixpath
@@ -468,6 +469,37 @@ def guard_closure():
 def merge_closure():
     """The merge suite's closure: closure_of(MERGE_SEEDS). The same derivation as the guard's, with its root at merge/test_merge.py."""
     return closure_of(MERGE_SEEDS)
+
+
+# cite_homes (lint/test_rule_audit.py) reads CLAUDE.md and each output-styles/*.md for their anchors. merge/test_merge.py calls it at import.
+CITE_HOMES_FILE = os.path.join(HERE, "test_rule_audit.py")
+# A name no repo file has: the case for a file a cite_homes glob reads, before the repo holds one.
+NEW_FILE_STEM = "cite-homes-probe"
+
+
+def cite_home_paths():
+    """The paths cite_homes builds under its root, as '/' paths, read from its syntax tree: each os.path.join(root, *literals) in
+    the function. A '*' is a glob. Read from the code, so a path cite_homes adds shows here with no edit to this file."""
+    with open(CITE_HOMES_FILE, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=CITE_HOMES_FILE)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "cite_homes")
+    return sorted({"/".join(a.value for a in n.args[1:]) for n in ast.walk(fn)
+                   if isinstance(n, ast.Call) and _callee(n) == "os.path.join" and n.args
+                   and isinstance(n.args[0], ast.Name) and n.args[0].id == "root" and all(_is_str(a) for a in n.args[1:])})
+
+
+def rule_file_cases():
+    """-> the rule files cite_homes reads, sorted, as '/' paths: a literal path that is a repo file, each repo file a glob matches,
+    and the file a glob would match that the repo does not hold yet. A folder path is listed, not read, so it has no case here."""
+    files = set(_repo_files())
+    cases = set()
+    for pat in cite_home_paths():
+        if "*" in pat:
+            cases.update(p for p in files if fnmatch.fnmatchcase(p, pat))
+            cases.add(pat.replace("*", NEW_FILE_STEM))
+        elif pat in files:
+            cases.add(pat)
+    return sorted(cases)
 
 
 @functools.lru_cache(maxsize=None)
@@ -1435,6 +1467,24 @@ class MergeWindowsSplit(unittest.TestCase):
         got = run(merge_closure()[0])
         self.assertEqual(got.get(MERGE_FULL), "true", f"{MERGE_FULL} is {got.get(MERGE_FULL)!r} for the full closure, want 'true'")
         self.assertEqual(got.get(MERGE_SLICE), "false", f"{MERGE_SLICE} is {got.get(MERGE_SLICE)!r} for the full closure, want 'false'")
+
+    def test_a_rule_file_cite_homes_reads_turns_the_full_merge_on(self):
+        # merge/test_merge.py calls cite_homes() at import, and cite_homes reads CLAUDE.md and each output-styles/*.md. A diff of
+        # only one of them turns code, checks_windows_merge and merge_windows_full on, as a closure file does. The files come from
+        # cite_homes' own syntax tree. output-styles/shiv-stylisms.md is named in the scope script already: it is the green control.
+        # The new output-styles file is the red case: the glob reads it, and no arm of the scope script names it.
+        cases = rule_file_cases()
+        self.assertIn("CLAUDE.md", cases, "scope: cite_homes names no CLAUDE.md, so this case probes nothing")
+        self.assertIn("output-styles/shiv-stylisms.md", cases,
+                      "scope: cite_homes names no output-styles file, so this case probes nothing")
+        files = set(_repo_files())
+        for p in cases:
+            with self.subTest(path=p):
+                got = run([p], existing=[p] if p in files else ())
+                flags = tuple(got.get(n) for n in ("code", "checks_windows_merge", MERGE_FULL))
+                self.assertEqual(flags, ("true", "true", "true"),
+                                 f"{p} is read by cite_homes, so a diff of only it must turn on code, checks_windows_merge and "
+                                 f"{MERGE_FULL}; got {flags}")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")

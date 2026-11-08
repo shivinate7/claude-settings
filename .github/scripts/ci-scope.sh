@@ -110,6 +110,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
     # The files the merge suite loads (merge_closure in lint/test_ci_scope.py derives them from merge/test_merge.py) turn the full Windows merge
     # shards on, with the merge job and code (the shards' checkouts and shard 1 read them). This second case adds to the arm above, so a path keeps
     # every flag it sets there. A .md file the suite reads takes it too: a Windows checkout can change line endings.
+    # CLAUDE.md and each output-styles/*.md: cite_homes reads them at the merge suite's import. docs/decisions/*.md stay docs.
     case "$f" in
       # guard_<family>.py modules are guard.py (it loads them); guard_test_* is not (it falls to hooks/* above).
       hooks/guard_test_*) ;;
@@ -131,7 +132,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       lint/check_skill_model_rows.py|lint/guard_log_report.py|lint/hook_catalog.py|lint/layout.json|lint/layout.py|lint/report_guard.py|\
       lint/rule_audit.py|lint/stale_cites.py|lint/test_rule_audit.py|lint/workflow_steps.py|\
       merge/cloud_allow.json|merge/install_from_main.sh|merge/merge.py|merge/test_merge.py|\
-      output-styles/shiv-stylisms.md|\
+      CLAUDE.md|output-styles/*.md|\
       skills/impeccable/SKILL.md|\
       skills/plain-english-map/scripts/lib/py-facts.py|\
       skills/roadmap/build.py|\
