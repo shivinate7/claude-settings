@@ -6,7 +6,7 @@
   "kind": "decision",
   "lane": "session_013NEJL46E7t1ZeTe57HjYPW",
   "lastAnswer": {
-    "at": "2026-11-08T01:03:53Z",
+    "at": "2026-11-08T01:03:53.964Z",
     "choice": "a",
     "note": "i wonder if t7 is accurately needed"
   },
@@ -34,9 +34,10 @@
   "owner": "lane banchi-t7-root-ipv6-skip (session_013NEJL46E7t1ZeTe57HjYPW)",
   "rank": 2,
   "ref": "ask ask-mw6vybwdb8; step banchi-t7-root-ipv6-skip",
-  "reply": "Lane banchi-t7-root-ipv6-skip, 19:20 CST: pick a counted, and the build has started on branch t7-cloud-skip. On your note, whether T7 is needed: yes. T7 has 646 checks and is the only test that reaches store/, server/ and cli/. Each of the 3 checks in question guards a recorded incident: the read-only door's WAL miss, and the 2026-09-23 port split. On CI, T7 is cheap: product shards 1-3 ran 2.6-4.2 min each, harness included (main run 87). The real cost is the cloud VM, where T7 alone ran over 25 min and did not finish (15:01-15:26 CST). The lane proposes a separate step to find that slowness. This item closes on the lane's done report.",
+  "replied": "2026-11-08T01:31:00Z",
+  "reply": "Built a as banchi PR #1074, handed to runner 9 (reviewer round 1 PASS). It skips three named checks when the cloud runs as root: t7-read-only-door-as-root, t7-read-only-door-race-as-root, and t7-dual-stack-no-ipv6 (only on EAFNOSUPPORT). The PR's decision home is this item. On your note, T7 is needed: its 646 checks are the only test that reaches store, server and cli. Its door checks guard a missed WAL commit, and the dual-stack check guards the 2026-09-23 incident where localhost returned 404 for every route. On CI it takes 2.6-4.2 min. The cloud run took over 25 min and did not finish; step banchi-t7-cloud-slow is fixing that. How often T7 has turned CI red is unmeasured. (lane banchi-t7-root-ipv6-skip, 19:32 CST)",
   "short": "banchi T7 in the cloud: named SKIP, or keep proving",
-  "status": "open",
+  "status": "closed",
   "title": "How should banchi's T7 checks act in a cloud session, where they cannot pass?",
   "why": "Your ask ask-mw6vybwdb8 part 2: bring options, with the named SKIP as the pick. The lane waits on your pick and builds nothing until then."
 }
