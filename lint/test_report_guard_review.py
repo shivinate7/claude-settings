@@ -39,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -66,10 +67,10 @@ CLAIM_FORMS = ("PASS, round 2 of 3, sonnet on PR 12",
                "round 2 PASS at https://github.com/example-owner/example-repo/pull/12")
 
 # The stand-in gh. It serves `pulls/<n>` and `issues/<n>/comments`, optionally under repos/<o>/<r>/, for each PR
-# the state names; any other number is a 404. A list read pages as gh does: 30 items a page unless per_page says
-# more (at most 100), one page unless --paginate. --paginate joins the pages into one array, and --paginate --slurp
-# prints an array of the pages. This follows listing() in hooks/test_guard.py, the repo's model of gh. Real gh's
-# bare --paginate output is not measured here.
+# the state names; any other number is a 404. `repos/<o>/<r>` answers the repo's default branch, as gh does.
+# A list read pages as gh does: 30 items a page unless per_page says more (at most 100), one page unless --paginate.
+# --paginate joins the pages into one array, and --paginate --slurp prints an array of the pages. This follows
+# listing() in hooks/test_guard.py, the repo's model of gh. Real gh's bare --paginate output is not measured here.
 FAKE_GH = r'''import json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(HERE, "state.json"), encoding="utf-8") as handle:
@@ -123,7 +124,10 @@ if pull:
     if number not in state["prs"]:
         not_found()
     print(json.dumps({"number": int(number), "state": "open", "draft": False,
-                      "head": {"sha": state["prs"][number]["head"], "ref": "feat-" + number}, "base": {"ref": state.get("base", "main")}}))
+                      "head": {"sha": state["prs"][number]["head"], "ref": "feat-" + number},
+                      "base": {"ref": state["base"], "repo": {"default_branch": state["default_branch"]}}}))
+elif re.fullmatch(r"repos/[^/]+/[^/]+", path):
+    print(json.dumps({"default_branch": state["default_branch"]}))
 elif issue:
     if state["fail_comments"]:
         fail(state["fail_comments"])
@@ -214,18 +218,24 @@ class ReviewRecordTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q", self.repo], check=True, capture_output=True)
         subprocess.run(["git", "-C", self.repo, "remote", "add", "origin",
                         "https://github.com/example-owner/example-repo.git"], check=True, capture_output=True)
+        # The default branch the stand-in names: origin/main at an empty commit, with no merge/merge.py, so its cutover is None.
+        subprocess.run(["git", "-C", self.repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
+                        "commit", "-q", "--allow-empty", "-m", "fixture"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, capture_output=True)
         write_fake_gh(self.gh_dir)
         self.assertIsNotNone(shutil.which("gh", path=self.gh_dir), "the stand-in gh is not on its own PATH")
         self.serve()
 
-    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None, base="main"):
+    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None, base="main", default_branch="main"):
         """The stand-in's answers: each PR's live head and its comments, oldest first, and any read to break. `base` is the branch
-        the pull requests name as their base. `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without it, PR 12 has
-        `comments`. A comment is its body, or a dict with body, created_at and updated_at, as the comment list gives them."""
+        the pull requests name as their base. `default_branch` is the repo's default branch: each pull carries it as
+        base.repo.default_branch, and the repo read answers it. `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without
+        it, PR 12 has `comments`. A comment is its body, or a dict with body, created_at and updated_at, as the comment list gives them."""
         if prs is None:
             prs = {PR: {"head": LIVE, "comments": list(comments)}}
         state = {"prs": {str(n): {"head": p["head"], "comments": list(p["comments"])} for n, p in prs.items()},
-                 "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments, "base": base}
+                 "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments,
+                 "base": base, "default_branch": default_branch}
         with open(os.path.join(self.gh_dir, "state.json"), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
 
@@ -242,6 +252,12 @@ class ReviewRecordTests(unittest.TestCase):
             subprocess.run(["git", "-C", self.repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
                             "commit", "-q", "-m", "fixture"], check=True, capture_output=True, env=env)
         subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/" + base, "HEAD"], check=True, capture_output=True)
+
+    def in_process_cutover(self, default):
+        """merge's review_stamp_since, run in this process for the default branch `default`. gh is not on this process's PATH, so the
+        default branch is the one the stand-in's pulls carry, given by a patch of host_default_branch."""
+        with mock.patch.object(merge_mod, "host_default_branch", return_value=default):
+            return merge_mod.review_stamp_since(self.repo, default)
 
     def gh_calls(self):
         """The argv of each stand-in call of the last Stop run."""
@@ -387,12 +403,12 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: a record made before the stamp's merge, with no Stamp line, read as no record, so a lane's PASS claim on its
         # pull request is refused. merge --reviewed reads the same record as done.
         self.cutover_history("fixture")
-        self.assertEqual(merge_mod.review_stamp_since(self.repo, "fixture"), CUTOVER,
+        self.assertEqual(self.in_process_cutover("fixture"), CUTOVER,
                          "fixture: the cutover is not the time of the commit that adds the salt line")
         body = unstamped(record())
         self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, BEFORE, CUTOVER), LIVE)[0], "done",
                          "fixture: merge/merge.py does not call this record done")
-        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture")
+        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture", default_branch="fixture")
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assertIsNone(out, out)
@@ -400,13 +416,14 @@ class ReviewRecordTests(unittest.TestCase):
     def test_an_unstamped_record_created_after_the_cutover_blocks_a_pass_claim(self):
         # Catches: the cutover letting a record made after the stamp's merge through with no Stamp line.
         self.cutover_history("fixture")
-        self.serve(comments=[{"body": unstamped(record()), "created_at": AFTER}], base="fixture")
+        self.serve(comments=[{"body": unstamped(record()), "created_at": AFTER}], base="fixture", default_branch="fixture")
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
     def test_an_unstamped_record_created_before_and_edited_after_the_cutover_blocks_a_pass_claim(self):
         # Catches: a record created before the cutover and edited after it, with no Stamp line, read as made before the cutover.
         self.cutover_history("fixture")
-        self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture")
+        self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture",
+                   default_branch="fixture")
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
     def test_record_whose_rounds_hold_no_pass_does_not_satisfy_a_pass_claim(self):
@@ -472,7 +489,7 @@ class ReviewRecordTests(unittest.TestCase):
     def test_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
         # Catches: the refusal of an unstamped record in a repo with no cutover, whose text names no Stamp line, so the
         # reviewer is not told what the record lacks. The render command stays in the remedy.
-        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        self.assertIsNone(self.in_process_cutover("main"), "fixture: a cutover is set for main")
         body = unstamped(record())
         self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the unstamped record with no cutover")
         self.serve(comments=[body])
@@ -581,6 +598,15 @@ class ReviewRecordTests(unittest.TestCase):
         self.serve(comments=[CHATTER, record()])
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
+
+    def test_stop_reads_no_repo_record_for_the_default_branch(self):
+        # Catches: the cutover read asking gh for the default branch through repos/{owner}/{repo}, a third read on each Stop.
+        # The pull carries base.repo.default_branch, so the Stop reads the pull and its comments, and never the repo.
+        self.serve(comments=[record()])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        repo_reads = [argv for argv in self.gh_calls() if "repos/{owner}/{repo}" in argv]
+        self.assertEqual(repo_reads, [], "a Stop read the repo for its default branch: %r" % (self.gh_calls(),))
         self.assertIsNone(out, out)
 
     def test_record_past_the_first_page_of_comments_passes(self):
