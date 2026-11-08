@@ -20543,14 +20543,14 @@ def worktree_home_cross_checkout_case():
 
 def _read_row(what, expect, template, rule=None):
     """One row of the read-into-another-checkout block, as its own case, so a failure names one cause.
-    `template` is the shell command, with %s where the other checkout's path goes. The session stands in
-    the primary checkout, as in the incident. The red rows fail on one cause: a sed, which is not a
-    printer, reads a quoted path whose file name holds a MUTATING_COMMAND word (install, copy, move).
-    `_words_of` repeats the quoted word in the text the write scan reads, so `writes_to`, in its
-    command-less MUTATING_COMMAND search, finds that word right before a copy of the path. Not the cause:
-    a `W=` variable or a `| head`. The sed read unquoted passes, and so does grep or cat on the quoted
-    path, since those are printers whose quoted words are data. Rule: other-checkout (hooks/guard.py,
-    OTHER_CHECKOUT_REASON). Causes: hooks/guard_frozen.py, writes_to and _words_of."""
+    `template` is the shell command, with %s where the other checkout's path goes, if it has one. The
+    session stands in the primary checkout, as in the incident. The red rows fail on one of two causes,
+    both in writes_to (hooks/guard_frozen.py), which other_checkout_hit (hooks/guard.py) calls with no
+    command position. (1) A MUTATING_COMMAND word anywhere earlier in the segment reads as a write to a
+    target after it, so `grep -n install <other>/x.md` is refused. (2) _words_of repeats a quoted path in
+    the text the scan reads, so a write word in that path's own name stands before a copy of the path.
+    Not the cause: a `W=` variable or a `| head`. Rule: other-checkout (hooks/guard.py,
+    OTHER_CHECKOUT_REASON)."""
     def case():
         primary, _lane_a, lane_b, _ = _cross_checkout_fixture("xcoread")
         write(os.path.join(lane_b, "install.sh"), "echo 1\n")
@@ -20559,7 +20559,8 @@ def _read_row(what, expect, template, rule=None):
         write(os.path.join(lane_b, "hooks", "guard_kill.py"), "_nowindow = 1\n")
         write(os.path.join(lane_b, "hooks", "git_reads.py"), "_nowindow = 2\n")
         problems = []
-        _expect_call(problems, what, expect, "Bash", primary, None, template % slash(lane_b), rule=rule)
+        command = template % slash(lane_b) if "%s" in template else template
+        _expect_call(problems, what, expect, "Bash", primary, None, command, rule=rule)
         if problems:
             return False, problems[0]
         return True, what
@@ -22052,6 +22053,12 @@ LOG_CHECKS = (
     ("worktree-home: a cp into another checkout is refused",
      _read_row("a cp into another checkout", "deny", "cp src/app.py %s/src/b.py",
                rule="other-checkout")),
+    ("worktree-home: a grep with a write word as its search term, of a file in another checkout, passes",
+     _read_row("a grep with a write word as its search term, of a file in another checkout", "allow",
+               "grep -n install %s/docs/decisions/x.md")),
+    ("worktree-home: a grep with a write word as its search term, of a file in this checkout, passes",
+     _read_row("a grep with a write word as its search term, of a file in this checkout", "allow",
+               "grep -n install src/app.py")),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
@@ -29115,6 +29122,10 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a quoted sed -i of install.sh in another checkout", "worktree-home"),
     ("worktree-home: an echo redirect into another checkout", "worktree-home"),
     ("worktree-home: a cp into another checkout", "worktree-home"),
+    ("worktree-home: a grep with a write word as its search term, of a file in another checkout",
+     "worktree-home"),
+    ("worktree-home: a grep with a write word as its search term, of a file in this checkout",
+     "worktree-home"),
     ("worktree-home: any session's write into another checkout is refused after a cd", "worktree-home"),
     ("worktree-home: an absolute cd into another checkout is refused after an untracked move", "worktree-home"),
     ("worktree-home: pushd into another checkout", "worktree-home"),
