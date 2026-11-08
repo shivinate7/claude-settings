@@ -2201,6 +2201,15 @@ def _build_links():
     _require_status(WTCTRLNESTED, ["?? vendor/"])
 
 
+# TESTHOLD: a checkout whose root holds a test file, so a listing of it names one. A builder's shell write
+# whose target comes from that listing (`$_`) could land on the test, so this folder is the case's cwd.
+TESTHOLD = os.path.join(ROOT, "testhold")
+
+
+def _build_testhold():
+    make_repo(TESTHOLD, {"test_app.py": "pass\n", "app.py": "x = 1\n"})
+
+
 build_fixtures()
 _start_ghdev_check()
 _mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
@@ -2228,6 +2237,7 @@ lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALE
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
 lazy_fixture([LINKMAIN, LINKOUT, WTLINKDIR, WTLINKFILE, WTCTRLFILE, WTCTRLTRACKED, WTCTRLDIR,
               WTCTRLNESTED], _build_links)
+lazy_fixture([TESTHOLD], _build_testhold)
 
 # DOTDOTWT: a path spelled through GITMAIN's .claude/worktrees/ that climbs back out with "..",
 # resolving to GITWT itself (a linked worktree OUTSIDE .claude/worktrees). It must be judged on
@@ -6947,6 +6957,16 @@ push_case("a force beside a lease and includes", "--force" + LEASE, "deny")
 push_case("includes alone is not a force, so a plain push allows", "--force-if-includes", "allow")
 push_case("a force while the default branch is trunk, main is ordinary there",
           "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
+# The short flag to main in a trunk repo denies in Bash, and the PowerShell tool's ASCII form denies too. The
+# smart-quoted destination is the same main once PowerShell reads its quotes, so it denies the same way.
+push_case("the short flag to main, in a trunk repo, denies [pwsh-r3 green]", "-f origin main", "deny",
+          cwd=PUSHTRUNK)
+push_case("the short flag to main from the PowerShell tool, in a trunk repo, denies [pwsh-r3 green]",
+          "-f origin main", "deny", cwd=PUSHTRUNK, tool="PowerShell")
+push_case("the short flag to a smart-quoted main from the PowerShell tool, in a trunk repo, denies "
+          "[pwsh-r3 green]", "-f origin “main”", "deny", cwd=PUSHTRUNK, tool="PowerShell")
+push_case("the short flag to a single smart-quoted main from the PowerShell tool, in a trunk repo, denies "
+          "[pwsh-r3 green]", "-f origin ‘main’", "deny", cwd=PUSHTRUNK, tool="PowerShell")
 push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
           "ask", cwd=PUSHTRUNK)
 push_case("a push option value with --push-option is not the remote",
@@ -12318,6 +12338,45 @@ sh("frozen pin: diff with ni as a file name, against the frozen settings file, a
    "diff ni " + CFG_SETTINGS, "allow", cwd=NOGIT)
 sh("frozen pin: PowerShell tool, Write-Host of ac and the frozen settings file, allows [pwsh-r3 red]",
    'Write-Host "ac ' + CFG_SETTINGS + '"', "allow", tool="PowerShell", cwd=NOGIT)
+# An alias that is the only command in a block, a subexpression, or a dot-sourced call is a command, so each
+# write below DENIES. The Bash form runs the same alias inside pwsh -c.
+sh("frozen shell: PowerShell tool, ac in a subexpression that is the only command, onto the config settings "
+   "denies [pwsh-r3 red]",
+   "Write-Output $(ac " + CFG_SETTINGS + " x)", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ac in a ForEach-Object block, onto the config settings denies [pwsh-r3 red]",
+   "ForEach-Object { ac " + CFG_SETTINGS + " 'x' }", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, sc in a % block fed by a pipe, onto the config settings denies [pwsh-r3 red]",
+   "1 | % { sc " + CFG_SETTINGS + " $_ }", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, sc as the only command in parentheses, onto the config settings denies "
+   "[pwsh-r3 red]",
+   "(sc " + CFG_SETTINGS + " x)", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, a dot-sourced sc onto the config settings denies [pwsh-r3 red]",
+   ". sc " + CFG_SETTINGS + " x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: pwsh -c, sc in a % block fed by a pipe, onto the config settings denies [pwsh-r3 red]",
+   "pwsh -c \"1 | % { sc " + CFG_SETTINGS + " 'x' }\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, ac in a ForEach-Object block over a docs file, allows [pwsh-r3 green]",
+   "ForEach-Object { ac docs/a.md 'x' }", "allow", tool="PowerShell", cwd=NOGIT)
+# A comma list of copy SOURCES reads each source, so a frozen source in it is a read. A frozen DESTINATION
+# still denies.
+sh("frozen pin: PowerShell tool, Copy-Item of the frozen settings and a docs file as sources, to scratch, "
+   "allows [pwsh-r3 green]",
+   "Copy-Item " + CFG_SETTINGS + ", docs/a.md /tmp/x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, Copy-Item of a docs file and the frozen settings as sources, to a folder, "
+   "allows [pwsh-r3 red]",
+   "Copy-Item docs/a.md, " + CFG_SETTINGS + " /tmp/d/", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, Copy-Item of a docs file onto the frozen settings denies [pwsh-r3 green]",
+   "Copy-Item docs/a.md " + CFG_SETTINGS, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# An UNQUOTED comma joins two paths into one PowerShell argument, so the frozen path after the comma is a write.
+sh("frozen shell: PowerShell tool, Set-Content of a docs file and the frozen settings joined by an unquoted "
+   "comma, denies [pwsh-r3 red]",
+   "Set-Content docs/a.md," + CFG_SETTINGS + " x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, Set-Content -Path with a docs file and the frozen settings joined by an "
+   "unquoted comma, denies [pwsh-r3 red]",
+   "Set-Content -Path docs/a.md," + CFG_SETTINGS + " -Value x", "deny", "frozen-path", tool="PowerShell",
+   cwd=NOGIT)
+sh("frozen shell: PowerShell tool, Set-Content of a docs file, a space, then the frozen settings after an "
+   "unquoted comma, denies [pwsh-r3 red]",
+   "Set-Content docs/a.md ," + CFG_SETTINGS + " x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 
 # =========================================================================== 6b. the model cap
@@ -13759,6 +13818,35 @@ sh("pwsh-r3 control: PowerShell tool, Write-Host of a smart-apostrophe line, the
 sh("pwsh-r3 control: PowerShell tool, a smart-quoted here-string that names a test file with no write, "
    "is allowed [pwsh-r3 green]",
    "@“\nedit hooks/test_x.py later\n”@", "allow", tool="PowerShell", **BR)
+# An UNQUOTED comma joins a docs path and a test path into one PowerShell argument, so the test path is a write.
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content of a docs file and a test file joined by a comma, "
+   "is refused [pwsh-r3 green]",
+   "Set-Content docs/a.md,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content -Path with a docs file and a test file joined by a "
+   "comma, is refused [pwsh-r3 green]",
+   "Set-Content -Path docs/a.md,hooks/test_x.py -Value x", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma: PowerShell tool, Set-Content of a docs file, a space, then a test file after a "
+   "comma, is refused [pwsh-r3 green]",
+   "Set-Content docs/a.md ,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-r3 unquoted comma control: PowerShell tool, Set-Content of a docs file and a product file joined by "
+   "a comma, is allowed [pwsh-r3 green]",
+   "Set-Content docs/a.md,src/app.py x", "allow", tool="PowerShell", **BR)
+# A mutating command inside a scriptblock is a command, so a test path it writes is refused.
+sh("pwsh-r3 scriptblock: PowerShell tool, Set-Content of a test file inside a ForEach-Object block is refused "
+   "[pwsh-r3 red]",
+   "ForEach-Object { Set-Content hooks/test_x.py x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-r3 scriptblock control: PowerShell tool, Set-Content of a product file inside a ForEach-Object block "
+   "is allowed [pwsh-r3 green]",
+   "ForEach-Object { Set-Content src/app.py x }", "allow", tool="PowerShell", **BR)
+# The target is the listing's $_, so the write can land on the test in a folder that holds one: it is refused there.
+sh("pwsh-r3 scriptblock: pwsh -c, a listing of a folder that holds a test, then Set-Content of $_, is refused "
+   "[pwsh-r3 red]",
+   "pwsh -c 'ls | % { Set-Content $_ 1 }'", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scriptblock control: pwsh -c, a listing of a folder with no test in it, then Set-Content of $_, "
+   "is allowed [pwsh-r3 green]",
+   "pwsh -c 'ls | % { Set-Content $_ 1 }'", "allow", **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
