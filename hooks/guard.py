@@ -72,6 +72,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
+  verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
+                       stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
@@ -205,6 +207,20 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
+  brief-claim-has-probe
+                       deny. An Agent or Task brief to a builder or a test-author with a sentence that says what
+                       main, origin/main or today passes, allows, accepts, refuses, rejects or blocks, for an input
+                       (a backtick span, a double-quoted string, or a single-quoted one), when no command line holds
+                       that input, as the whole text between quotes or the whole line, with a result line right
+                       under it. Active form: `main` or `origin/main` (a backticked one too) with the verb next to
+                       it, or today with it, they, guard, hook, rule or check; "the main session" is no subject.
+                       Passive form: `X` is refused on main. Fenced text is read. A command line is a line of its own
+                       in a fence, in backticks, or after `$ `, led by python, python3, git, verdict, bash, sh, node,
+                       npm, npx, pytest, gh, grep, rg or jq; a line that holds a claim is never one. A path after in,
+                       at, from, under, inside, within or via is a locator, not an input. A line that starts with
+                       `Add a case:` or `Must deny:` is case data. A sentence with no input is not judged. A lone
+                       backtick reads to the line's end. Other roles pass. An override lifts it.
+                       (brief-claim-has-probe)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
                        not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
@@ -380,14 +396,14 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
         )
         from guard_push_delete import names_default_branch
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target,
             FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
@@ -401,6 +417,7 @@ while True:
         _loading = "guard_env"
         from guard_env import (
             ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
+            substitution_commands,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -412,9 +429,10 @@ while True:
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
+            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_REASON,
+            background_end_hit,
             live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
-            narrated_tail_hit, waiter_verdict,
+            narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
@@ -2691,6 +2709,269 @@ def builder_third_round(brief) -> bool:
     return any(kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in brief_markers(brief))
 
 
+# BRIEF CLAIMS NEED A PROBE (rule brief-claim-has-probe, decision brief-claim-has-probe). A brief to a builder or a
+# test-author that says what main, origin/main or "today" passes, allows, accepts, refuses, rejects or blocks for an
+# input must carry the probe that showed it: a command line that holds the input, and a result line under it. The scan
+# reads the brief in one pass, line by line, and masks each line's quoted spans once (_claim_mask). An input is a
+# backtick span, a double-quoted string (backticks inside it too, so a quoted case text is one data span, not a claim)
+# or a single-quoted one that opens after a non-word character; an apostrophe or a lone quote opens nothing, and a lone
+# backtick reads to the line's end. A claim is a clause in the active form (a subject, then the verb) or the passive
+# form (`X` is refused on main), and the clause ends at ", so", ", and" or ", then". The subject is `main` or
+# `origin/main` with the verb next to it (so "the main session" is no subject), or today with it, they, guard, hook,
+# rule or check. A backticked `main` is still the word. The verb may be negated (doesn't refuse, never refuses) or be
+# "lets ... through". The verb may be a base or -ing form before "on main" or "today" ("`a` and `b` pass on main",
+# "listed `X` as passing on main"). A leading "On main," or "Today" before the inputs and the verb is a claim too, and
+# so is a subject with "today" later ("The guard refuses `x` today"). With no input after the verb, the clause takes
+# every input of its own only when nothing but today, now or punctuation follows the verb. A claim clause with no
+# input of its own that says it or them, or says both, all, each or these at its end, before "of them", "of these"
+# or "of those", or before a count word (all three, both cases, each one, both today), takes the inputs of its own
+# sentence if it has any, else those of the sentence, or the run of list lines, right before it; one that ends with ":"
+# takes the list lines after it, up to a "Controls ...:" heading. Fenced text is read too. A NUL in a brief is a space. A path after in, at, from, under, inside, within or via is a locator, not an input.
+# Cost: pure text work inside the one guard call. No process, no file.
+BRIEF_CLAIM_ROLES = ("builder", "test-author")
+_CLAIM_VERB = r"(?:passes|passed|allows|allowed|accepts|accepted|refuses|refused|rejects|rejected|blocks|blocked)"
+_CLAIM_BASE = r"(?:pass|allow|accept|refuse|reject|block)"
+_CLAIM_THROUGH = r"\b(?=[^.!?;]*\bthrough\b)"   # lets counts as a verb only with through after it
+_CLAIM_NOT = r"(?:(?:does|did|do)\s+not|(?:does|did|do)n['\u2019]t)\s+"
+_CLAIM_ADVERB = r"(?:(?:still|also|now|today|currently|already|even|always|never)\s+)?"
+_CLAIM_MAIN = r"(?<![\w/.-])(?:origin/main|main)(?![\w/-])(?!\.\w)"
+_CLAIM_ING = r"(?:passing|allowing|accepting|refusing|rejecting|blocking)"
+_CLAIM_ANY = r"(?:" + _CLAIM_VERB + r"|" + _CLAIM_BASE + r"|" + _CLAIM_ING + r")"
+_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule|check)"
+_CLAIM_ACTS = (_CLAIM_ADVERB + r"(?:" + _CLAIM_VERB + r"\b|lets" + _CLAIM_THROUGH
+               + r"|" + _CLAIM_NOT + _CLAIM_ADVERB + r"(?:" + _CLAIM_BASE + r"\b|let" + _CLAIM_THROUGH + r"))")
+_CLAIM_ACTIVE_LEAD = (r"(?:" + _CLAIM_MAIN + r"|(?<![\w/.-])today,?\s+(?:(?:the|this)\s+)?" + _CLAIM_SUBJECT + r")\s+"
+                      + _CLAIM_ACTS)
+BRIEF_CLAIM_ACTIVE_LEAD = re.compile(_CLAIM_ACTIVE_LEAD, re.IGNORECASE)
+BRIEF_CLAIM_ACTIVE = re.compile(
+    _CLAIM_ACTIVE_LEAD
+    # A subject first and "today" later in the sentence: "The guard refuses `x` today."
+    + r"|(?<![\w/.-])(?:(?:the|this)\s+)?" + _CLAIM_SUBJECT + r"\s+" + _CLAIM_ACTS + r"(?=[^.!?;]*\btoday\b)",
+    re.IGNORECASE)
+BRIEF_CLAIM_TODAY = re.compile(r"\btoday\b", re.IGNORECASE)
+BRIEF_CLAIM_PASSIVE = re.compile(
+    r"(?:\b(?:is|are|was|were|gets|get)\s+)?\b" + _CLAIM_ANY + r"\b\s+"
+    r"(?:(?:on|by)\s+(?:origin/main|main)(?![\w/-])|today\b)", re.IGNORECASE)
+# A leading "On main," or "Today" then the inputs, then the verb: "On main, `a` passes." The inputs are the masked
+# spans between the frame and the verb.
+BRIEF_CLAIM_FRAMED = re.compile(
+    r"(?<![\w/.-])(?:on\s+(?:origin/main|main)(?![\w/-])|today\b),?\s+"
+    r"(?:\x00\d+\x00(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s+)?)+" + _CLAIM_ADVERB + r"(?:" + _CLAIM_NOT + r")?"
+    + _CLAIM_ADVERB + _CLAIM_ANY + r"\b", re.IGNORECASE)
+BRIEF_CLAIM_SPAN = re.compile(
+    r"(`+)(.+?)\1(?!`)|`+(.*)$|\"([^\"\n]+)\"|(?<!\w)'([^'`\n]+)'(?!\w)")
+BRIEF_CLAIM_MASK = re.compile(r"\x00(\d+)\x00")
+BRIEF_CLAIM_LOCATOR = re.compile(r"\b(?:in|at|from|under|inside|within|via)\s+$", re.IGNORECASE)
+BRIEF_CLAIM_BREAK = re.compile(r",\s+(?:so|and|then)\b", re.IGNORECASE)
+# it and them are referents anywhere in the clause. both, all, each and these only at the clause end, or before
+# "of them", "of these" or "of those": "main passes all tests" has no referent, "main passes all of them" has one.
+BRIEF_CLAIM_REFERENT = re.compile(
+    r"\b(?:it|them)\b|\b(?:both|all|each|these)\b(?=[\s.!?:;,)]*$|\s+of\s+(?:them|these|those)\b)", re.IGNORECASE)
+# A count word that names the inputs before it: "all three", "both cases", "these two", "each one", "both today".
+_CLAIM_COUNT_WORD = r"(?:one|ones|two|three|four|five|six|seven|eight|nine|ten|\d+|cases?|inputs?)"
+BRIEF_CLAIM_COUNT = re.compile(
+    r"\b(?:both|all|each|these)\s+(?:" + _CLAIM_COUNT_WORD + r"\b(?:\s+(?:today|now)\b)?|(?:today|now)\b)[\s.!?:;,)]*$",
+    re.IGNORECASE)
+# What may follow a verb for the active form to take every input of its clause: today, now and punctuation only.
+BRIEF_CLAIM_BARE = re.compile(r"(?:\s|[.,:;!?)\"']|\b(?:today|now)\b)*", re.IGNORECASE)
+# A heading that closes a claimed list: "Controls that must still pass:", bare, bulleted or numbered.
+BRIEF_CLAIM_HEADING = re.compile(r"(?:(?:[-*+]|\d+[.)])\s+)?controls?\b[^:]*:\s*$", re.IGNORECASE)
+BRIEF_CLAIM_LIST = re.compile(r"(?:[-*+]|\d+[.)])\s")
+BRIEF_CLAIM_COMMAND = re.compile(
+    r"(?:(?:cd\s[^&|;\n]*&&|echo\s[^|\n]*\||[A-Za-z_]\w*=\S*|time)\s+)*"
+    r"(?:\S*/)?(?:python3?|git|verdict|bash|sh|node|npm|npx|pytest|gh|grep|rg|jq)(?=\s|$)")
+BRIEF_CLAIM_INLINE = re.compile(r"`([^`]+)`(.*)$")
+BRIEF_CLAIM_REASON = (
+    "The brief says what main, origin/main or today does with an input, and carries no probe for it. Add the probe, "
+    "or drop the claim. The probe is the command you ran, on a line of its own, that holds the input in quotes (in a "
+    "fence, in backticks, or after `$ `): for example `python3 ...`, `git show origin/main:<path>` piped into it, or "
+    "`verdict ...`; and its result line right under it. Each input with no probe: %s. "
+    "(decision brief-claim-has-probe, a brief's claim about main carries the probe that showed it)"
+)
+
+
+def _claim_mask(text: str):
+    """The line with each input masked as \\x00n\\x00, and the inputs in the order met. A backticked main stays the
+    word, so it can be a subject."""
+    spans = []
+    text = text.replace("\x00", " ")   # a NUL in a brief would read as a marker of its own
+
+    def mask(hit):
+        body = next((g for g in hit.groups()[1:] if g is not None), "").strip()
+        if hit.group(1) and body.lower() in ("main", "origin/main"):
+            return body
+        spans.append(body)
+        return "\x00%d\x00" % (len(spans) - 1)
+
+    return BRIEF_CLAIM_SPAN.sub(mask, text), spans
+
+
+def _claim_refers(text: str) -> bool:
+    """True when the clause text says it, them, or a count of inputs (both, all three, each one, these two today)."""
+    return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))
+
+
+def _claim_active(sentence: str):
+    """The leftmost active-form match in one masked sentence, or None. The subject-first form needs "today" later in
+    its sentence, so it is searched only up to the last "today": its lookahead then ends there and the scan stays
+    linear in the sentence."""
+    clause = BRIEF_CLAIM_ACTIVE_LEAD.search(sentence)
+    late = None
+    for late in BRIEF_CLAIM_TODAY.finditer(sentence):
+        pass
+    if late is not None:
+        subject = BRIEF_CLAIM_ACTIVE.search(sentence, 0, late.end())
+        if subject is not None and (clause is None or subject.start() < clause.start()):
+            return subject
+    return clause
+
+
+def _claim_clause(sentence: str, marks: list):
+    """The claim in one masked sentence, or None. A claim is (claimed, refer): the inputs its clause names, and, when
+    it names none, "after" for a clause that ends with ":", "before" for one that says both, all, them, it, each or
+    these, else None. The active form names the inputs after its verb, the passive form those before it; either falls
+    back to every input in its clause. marks are the sentence's (offset, input) pairs."""
+    clause = _claim_active(sentence)
+    passive = clause is None
+    framed = False
+    if passive:
+        clause = BRIEF_CLAIM_PASSIVE.search(sentence)
+        if clause is None:
+            clause = BRIEF_CLAIM_FRAMED.search(sentence)
+            framed = True
+            if clause is None:
+                return None
+    lo = max((b.end() for b in BRIEF_CLAIM_BREAK.finditer(sentence, 0, clause.start())), default=0)
+    stop = BRIEF_CLAIM_BREAK.search(sentence, clause.end())
+    hi = stop.start() if stop else len(sentence)
+    first, last = (clause.start(), clause.end()) if framed else (lo, clause.start()) if passive else (clause.end(), hi)
+    claimed = [item for at, item in marks if first <= at < last]
+    if not claimed and (passive or BRIEF_CLAIM_BARE.fullmatch(sentence, clause.end(), hi)):
+        claimed = [item for at, item in marks if lo <= at < hi]
+    refers = _claim_refers(sentence[first:last])
+    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if lo <= at < hi]
+    if claimed:
+        return claimed, None
+    if sentence[lo:hi].rstrip().endswith(":"):
+        return [], "after"
+    return [], "before" if refers else None
+
+
+def _claim_line(text: str) -> list:
+    """One line's sentences, in order, each as (inputs, claim): the sentence's inputs with locators left out, and its
+    claim from _claim_clause, or None."""
+    plain, spans = _claim_mask(text)
+    sentences = []
+    for sentence in re.split(r"(?<=[.!?;])\s+", plain):
+        marks = []
+        for m in BRIEF_CLAIM_MASK.finditer(sentence):
+            item = spans[int(m.group(1))]
+            locator = (bool(BRIEF_CLAIM_LOCATOR.search(sentence[:m.start()])) and len(item.split()) == 1
+                       and ("/" in item or "." in item))
+            if item and not locator:
+                marks.append((m.start(), item))
+        sentences.append(([item for _, item in marks], _claim_clause(sentence, marks)))
+    return sentences
+
+
+def _claim_rows(brief: str) -> list:
+    """The rows of a brief, in line order, for brief_claim_gaps: ("claim", [inputs]), ("cmd", text, result or None),
+    ("out", text) and ("fence", None). A result is only the row right after its command, so a fence marker or a claim
+    ends it. A fence marker with no partner is a plain line. A line that holds a claim is a claim row first, so it is
+    never its own probe. A claim that refers back takes the inputs of the sentence before it, or of the whole run of
+    list lines before it; a claim that ends with ":" takes the inputs of the list lines after it."""
+    lines = brief.split("\n")
+    marks = [i for i, line in enumerate(lines) if line.strip().startswith("```")]
+    if len(marks) % 2:
+        marks.pop()
+    marks = set(marks)
+    rows, fenced = [], False
+    before, block, waiting = [], [], None   # the inputs a referent takes; the list run; the claim that takes a list
+    for i, line in enumerate(lines):
+        if i in marks:
+            fenced = not fenced
+            rows.append(("fence", None))
+            continue
+        text = line.strip()
+        if not text:
+            continue
+        command = text if fenced else text[2:] if text[:2] in ("$ ", "> ") else None
+        if command is not None and BRIEF_CLAIM_COMMAND.match(command.lstrip("$> ")):
+            rows.append(("cmd", command, None))
+            before, block, waiting = [], [], None
+            continue
+        listed = bool(BRIEF_CLAIM_LIST.match(text))
+        sentences = _claim_line(text)
+        own = [item for inputs, _ in sentences for item in inputs]
+        if waiting is not None and not own and BRIEF_CLAIM_HEADING.match(text):
+            waiting = None
+        elif listed and waiting is not None:
+            waiting.extend(own)
+        else:
+            waiting = None
+        claimed, takes_list = [], False
+        for inputs, claim in sentences:
+            if claim:
+                items, refer = claim
+                claimed.extend(before if refer == "before" else items)
+                takes_list = takes_list or refer == "after"
+            before = inputs
+        block = (block + own) if listed else []
+        if listed:
+            before = block
+        if claimed or takes_list:
+            rows.append(("claim", claimed))
+            if takes_list:
+                waiting = claimed
+            continue
+        inline = BRIEF_CLAIM_INLINE.match(text) if text.startswith("`") and not fenced else None
+        if inline and BRIEF_CLAIM_COMMAND.match(inline.group(1).lstrip("$> ")):
+            rows.append(("cmd", inline.group(1), inline.group(2).strip(" -:=>–—→") or None))
+        else:
+            rows.append(("out", text))
+    return rows
+
+
+def _claim_probed(key: str, texts: list) -> bool:
+    """True when a probe line holds the input as a whole argument: the same text between quotes, or the whole line.
+    A longer input that merely contains it, such as `git push --force` for `git push`, is another input."""
+    shown = re.compile(r"(?:^|['\"`])" + re.escape(key) + r"(?:$|['\"`])")
+    return any(shown.search(text) for text in texts)
+
+
+def brief_claim_gaps(brief) -> list:
+    """The inputs a brief claims something about for main or today, with no probe, in the order claimed. An input has a
+    probe when a command line holds it, or the result line right under that command does, and that result line is
+    there (_claim_probed). A brief that is not text claims nothing. Pure."""
+    if not isinstance(brief, str):
+        return []
+    rows = _claim_rows(brief)
+    probes = []
+    for i, row in enumerate(rows):
+        if row[0] != "cmd":
+            continue
+        result = row[2]
+        if result is None and i + 1 < len(rows) and rows[i + 1][0] == "out":
+            result = rows[i + 1][1]
+        if result is not None:
+            probes.append([" ".join(row[1].split()), " ".join(result.split())])
+    gaps = []
+    for row in rows:
+        for item in row[1] if row[0] == "claim" else ():
+            key = " ".join(item.split())
+            if item not in gaps and not any(_claim_probed(key, texts) for texts in probes):
+                gaps.append(item)
+    return gaps
+
+
+def brief_claim_hit(tool: str, tool_input) -> list:
+    """Every input an Agent or Task brief to a builder or a test-author claims about main with no probe, or []."""
+    if tool not in SPAWN_TOOLS or role_key(tool_input.get("subagent_type")) not in BRIEF_CLAIM_ROLES:
+        return []
+    return brief_claim_gaps(tool_input.get("prompt"))
+
+
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
@@ -3390,9 +3671,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "git-env-set", GIT_ENV_REASON, matched)
 
-    # 1. Shared trees.
+    # 1. Shared trees. The shell runs a command inside `$( )` or backticks, so each such text is
+    # read as a command of its own, after the command (rules 1, 2 and 4 read `texts` the same way).
+    # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
+    texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in split_segments(stripped):
+    for segment in (part for text in texts for part in split_segments(text)):
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -3525,24 +3809,25 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
-    previous = None
     call_tokens = []
-    for segment in split_segments(stripped):
-        if not segment.strip():
-            continue
-        tokens = segment_tokens(segment)
-        if tokens is None:
-            previous = None
-            continue
-        call_tokens.append(tokens)
-        matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
-        previous = tokens
-        if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        # Every agent shares the main session's id, so only the main session may own by tag.
-        matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
-        if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+    for text in texts:
+        previous = None   # a pipe never reaches across a substitution's edge
+        for segment in split_segments(text):
+            if not segment.strip():
+                continue
+            tokens = segment_tokens(segment)
+            if tokens is None:
+                previous = None
+                continue
+            call_tokens.append(tokens)
+            matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
+            previous = tokens
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
+            # Every agent shares the main session's id, so only the main session may own by tag.
+            matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
     # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.
     matched = lsof_pids_reach_kill(call_tokens)
     if matched:
@@ -3578,6 +3863,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+    matched = verdict_pipe_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
@@ -3613,16 +3901,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
-    delete_segments = [delete_text(segment) for segment in split_segments(stripped)]
-    for number in range(len(delete_segments)):
-        matched, reason = parent_delete_hit(delete_segments, number, cwd)
-        if matched:
-            refuse(tool, "deny", "destructive-delete", reason, matched)
+    delete_texts = [[delete_text(segment) for segment in split_segments(text)] for text in texts]
+    for delete_segments in delete_texts:
+        for number in range(len(delete_segments)):
+            matched, reason = parent_delete_hit(delete_segments, number, cwd)
+            if matched:
+                refuse(tool, "deny", "destructive-delete", reason, matched)
     for pattern in DESTRUCTIVE_DELETE:
         found = pattern.search(cmd)
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
-    for segment in delete_segments:
+    for segment in (part for delete_segments in delete_texts for part in delete_segments):
         matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
@@ -3631,15 +3920,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in split_segments(stripped):
-        for subcommand, args in git_calls(push_text(segment)):
-            where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
-            verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
+    for segment in (part for text in texts for part in split_segments(text)):
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            verdict = push_verdict(args, where, overrides)
             if verdict == "ask":
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
-            elif subcommand == "push" and not read_verb("push", args):
+            elif not read_verb("push", args):
                 # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
                 # implied destination off the branch's upstream. A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
@@ -3744,7 +4032,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
+# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
@@ -4993,6 +5281,13 @@ def judge(payload) -> None:
                opus_model,
                spawn_role=opus_role or "general-purpose")
 
+    # 9e. A builder's or test-author's brief that claims what main or today does with an input carries the probe that
+    # showed it (rule brief-claim-has-probe). An override lifts it: the owner may mean the brief as it stands.
+    claimed = brief_claim_hit(tool, tool_input)
+    if claimed:
+        named = ", ".join("`" + item[:120].replace("`", "'") + "`" for item in claimed)
+        refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % named, named[:120])
+
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
         owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
@@ -5078,6 +5373,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "gh-login-switch", question_form.PAGE_REASONS["gh-login-switch"], matched)
         if rule == "task-names-check":
             refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
+        if rule == "task-why-cited":
+            refuse(tool, "deny", "task-why-cited", question_form.PAGE_REASONS["task-why-cited"], matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
         if rule == "option-letter-keys":
