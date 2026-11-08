@@ -2,13 +2,15 @@
 """Stop report guard: an Input Needed item that cites a closed waiting-page item.
 
 The check reads only the Input Needed item (report_guard.input_needed_section). A cite is `item N`, `page item N`,
-a list `items N, M and K` (joined by commas, "and", "&" or "or") or `page:N`. `#N` is a PR number, so it is no cite.
+a list `items N, M and K` (joined by commas, "and", "&" or "or"), or `page:N`. `#N` is a PR number, so it is no cite.
+Punctuation or bold around the word (`Items:`, `**item**`) is still a cite of the number after it.
 The status of each cited number comes from the waiting copy on origin/<record branch>, one JSON file per item, read
 by feedback_guard.waiting_statuses. A line that cites a closed item blocks, and the reason names only the closed
-numbers. These pass: a ruling cite (a ref, then an option letter, "pick" or "note"), a line that starts with "Based
-on" or "Departs from", a line that says the item is closed, and a closed item cited outside Input Needed. A copy
-that cannot be read is unknown: no block, and a systemMessage that says UNKNOWN. A report that cites no item reads
-no status, so it makes no git call.
+numbers. These pass: a ruling cite (a ref, then an option letter, "pick <letter>", or "note" that ends its clause,
+alone or with combined letters such as `a+c`); a line that starts with the question-form label `Based on (` or
+`Departs from:`; a closed ref, where "closed" follows the ref directly; and a closed item cited outside Input Needed.
+A copy that cannot be read, or an error inside the check, is unknown: no block, and a systemMessage that says UNKNOWN.
+A report that cites no item reads no status, so it makes no git call.
 
     python3 lint/test_report_guard_page_status.py -v
 """
@@ -40,10 +42,12 @@ shutil.rmtree(_IMPORTED_ROOT, ignore_errors=True)
 
 PAGE_URL = tfi.PAGE_URL  # the waiting page URL of the feedback fixtures
 RECORD_BRANCH = tfi.RECORD_BRANCH  # roadmap, the branch a repo reads with no record-branch key
-# The copy the cases read: (item id, n, status). 214, 381, 383 and 222 are the incident's list, all closed. 109 is
-# closed too, so a ruling cite on it is a real control. 365 is open.
+# The copy the cases read: (item id, n, status). 214, 381, 383 and 222 are the incident's list, all closed. 109, 127
+# and 131 are closed too, so a ruling cite on each is a real control. 365 is open.
 COPY = (
     ("item-109", 109, "closed"),
+    ("item-127", 127, "closed"),
+    ("item-131", 131, "closed"),
     ("item-214", 214, "closed"),
     ("item-222", 222, "closed"),
     ("item-365", 365, "open"),
@@ -201,18 +205,24 @@ class PageStatusTests(unittest.TestCase):
         self.assertIn("UNKNOWN", obj.get("systemMessage") or "",
                       "an unreadable copy gave no UNKNOWN systemMessage: landed=%s" % landed)
 
-    def run_in_process(self, cwd, text, landed, statuses):
-        """report_guard.main() in this process, as the Stop hook runs it, with the waiting-copy reader patched to
-        return `statuses`. Returns (the reader mock, the printed output)."""
+    def run_in_process(self, cwd, text, landed, statuses=None, error=None):
+        """report_guard.main() in this process, as the Stop hook runs it. The waiting-copy reader is patched to return
+        `statuses`, or to raise `error` when one is given. Returns (the reader mock, the printed output, the exception
+        main() let out or None). An exception is returned, not raised, so the case fails on its own assert."""
         hook = {"hook_event_name": "Stop", "transcript_path": self.transcript(text, landed),
                 "stop_hook_active": False, "cwd": cwd}
         out = io.StringIO()
-        with mock.patch.object(feedback_guard, "waiting_statuses", create=True, return_value=statuses) as reader, \
+        raised = None
+        mode = {"side_effect": error} if error is not None else {"return_value": statuses}
+        with mock.patch.object(feedback_guard, "waiting_statuses", create=True, **mode) as reader, \
                 mock.patch("sys.stdin", io.StringIO(json.dumps(hook))), contextlib.redirect_stdout(out):
-            report_guard.main()
-        return reader, out.getvalue()
+            try:
+                report_guard.main()
+            except Exception as err:
+                raised = err
+        return reader, out.getvalue(), raised
 
-    # --- blocks: a closed item cited in Input Needed (red today: no status check exists) ---
+    # --- blocks: a closed item cited in Input Needed ---
 
     def test_ps_red_a_closed_item_cite_in_input_needed_blocks(self):
         # Catches: an Input Needed item that cites a closed waiting-page item passes, so the owner is asked about
@@ -255,7 +265,78 @@ class PageStatusTests(unittest.TestCase):
         # Catches: the check reads roadmap, not the record branch the layout names, so a copy on that branch passes.
         self.assert_blocks(named_repo(), report(["Waiting on you: item 214."]), (214,))
 
-    # --- unknown: a copy that cannot be read (red today: no status check exists) ---
+    def test_ps_red_a_based_on_line_without_the_question_form_blocks(self):
+        # Catches: a line that starts "Based on" with no "(" is exempt, so a closed cite on it passes unasked.
+        cases = (("Based on the page, items 214 and 381 wait on you", (214, 381)),
+                 ("- **Based on** item 214 on the page, nothing waits.", (214,)))
+        for line, numbers in cases:
+            for landed in (True, False):
+                with self.subTest(line=line, landed=landed):
+                    self.assert_blocks(copy_repo(), report(["None new.", line]), numbers, landed=landed)
+
+    def test_ps_red_a_pick_that_is_not_a_letter_blocks(self):
+        # Catches: "pick" exempts the ref before it whatever follows, so "pick one of A or B" passes a closed cite.
+        # The question check also blocks this line in a waiting-page repo; the reason must still name 214 and 381.
+        for landed in (True, False):
+            with self.subTest(landed=landed):
+                self.assert_blocks(copy_repo(), report(["None new.", "items 214 and 381: pick one of A or B"]),
+                                   (214, 381), landed=landed)
+
+    def test_ps_red_a_note_that_does_not_end_its_clause_blocks(self):
+        # Catches: "note" exempts the ref before it wherever it stands, so "item 127 note on the page" passes.
+        for landed in (True, False):
+            with self.subTest(landed=landed):
+                self.assert_blocks(copy_repo(), report(["None new.", "item 127 note on the page, still open"]), (127,),
+                                   landed=landed)
+
+    def test_ps_red_a_closed_word_exempts_only_the_ref_it_follows(self):
+        # Catches: a line that says "closed" anywhere is exempt, so the cited refs on it pass with the closed word.
+        for line, numbers in (("items 214 and 381 wait on you; item 222 closed", (214, 381)),
+                              ("items 214 and 381 wait on you (closed on 11-04, still needs your word)", (214, 381))):
+            for landed in (True, False):
+                with self.subTest(line=line, landed=landed):
+                    self.assert_blocks(copy_repo(), report(["None new.", line]), numbers,
+                                       absent=(222,) if "222" in line else (), landed=landed)
+
+    def test_ps_red_a_cite_with_punctuation_or_bold_blocks(self):
+        # Catches: a cite with a colon after the word, or bold around the word, is not read, so it passes.
+        # The bold forms sit mid-line: a bold word at a line start is a report label to the shape guard, which blocks
+        # the turn for its own reason and would hide whether the status check read the cite.
+        cases = (("Items: 214, 381 wait on you", (214, 381)),
+                 ("Waiting on you: **Items:** 214, 381 wait on you", (214, 381)),
+                 ("Waiting on you: **item** 214 waits on you", (214,)))
+        for line, numbers in cases:
+            for landed in (True, False):
+                with self.subTest(line=line, landed=landed):
+                    self.assert_blocks(copy_repo(), report(["None new.", line]), numbers, landed=landed)
+
+    def test_ps_red_combined_option_letters_are_ruling_cites(self):
+        # Catches: combined option letters (a+c, a/c, a and c) are not read as ruling cites, so a closed ruling passes.
+        for line in ("item 131 a+c", "item 131 a/c", "item 131 a and c"):
+            for landed in (True, False):
+                with self.subTest(line=line, landed=landed):
+                    self.assert_quiet(copy_repo(), report([line]), landed)
+
+    def test_ps_red_an_error_in_the_check_is_unknown_not_a_block(self):
+        # Catches: an error inside the check (the reader raises OSError) is swallowed, so the owner gets no UNKNOWN note.
+        repo = copy_repo()
+        for landed in (True, False):
+            with self.subTest(landed=landed):
+                _, witness_out, witness_err = self.run_in_process(repo, report([WITNESS_QUESTION]), landed)
+                self.assertIsNone(witness_err, "scope: the witness question raised %r" % (witness_err,))
+                self.assertEqual(json.loads(witness_out).get("decision"), "block",
+                                 "scope: the in-process witness question did not block, so main() did not run")
+                reader, out, raised = self.run_in_process(repo, report(["Waiting on you: item 214."]), landed,
+                                                          error=OSError("the waiting copy cannot be read"))
+                self.assertTrue(reader.called, "scope: the cited item did not reach the reader, so no error was raised")
+                self.assertIsNone(raised, "an error in the check escaped the Stop guard: %r" % (raised,))
+                obj = json.loads(out) if out.strip() else {}
+                self.assertNotEqual(obj.get("decision"), "block", "an error in the check blocked a cited item: landed=%s"
+                                    % landed)
+                self.assertIn("UNKNOWN", obj.get("systemMessage") or "",
+                              "an error in the check gave no UNKNOWN systemMessage: landed=%s" % landed)
+
+    # --- unknown: a copy that cannot be read ---
 
     def test_ps_red_an_unreadable_copy_is_unknown_not_a_block(self):
         # Catches: a copy that cannot be read passes with no note, so the owner is never told the status is unknown.
@@ -281,19 +362,28 @@ class PageStatusTests(unittest.TestCase):
                     self.assert_quiet(copy_repo(), report([line]), landed)
 
     def test_ps_green_a_ruling_cite_on_a_closed_item_passes(self):
-        # Catches: a ruling cite (a ref, then an option letter, "pick" or "note") is read as an open question, so a
-        # closed item the owner has ruled on blocks.
-        for line in ("item 214 a", "item 214: b", "page item 109, pick b", "item 214 note: keep it"):
+        # Catches: a ruling cite (a ref, then an option letter, "pick <letter>", or "note" ending its clause) is read as
+        # an open question, so a closed item the owner has ruled on blocks.
+        for line in ("item 214 a", "item 214: b", "page item 109, pick b", "item 127, note", "(item 127 note)"):
             for landed in (True, False):
                 with self.subTest(line=line, landed=landed):
                     self.assert_quiet(copy_repo(), report([line]), landed)
 
-    def test_ps_green_a_based_on_or_departs_from_line_passes(self):
-        # Catches: a line that starts "Based on" or "Departs from" is read as a plain cite of a closed item and blocks.
-        for line in ("- **Based on** item 214 on the page, nothing waits.", "Departs from: item 214 on the page, no pick."):
+    def test_ps_green_a_question_form_label_line_passes(self):
+        # Catches: a question-form label line ("Based on (" or "Departs from:") is read as a plain cite and blocks.
+        for line in ("- **Based on (page)** item 214 is filed, nothing waits.",
+                     "Departs from: item 214 on the page, no pick.",
+                     "- **Departs from:** item 214 on the page, no pick."):
             for landed in (True, False):
                 with self.subTest(line=line, landed=landed):
                     self.assert_quiet(copy_repo(), report(["None new.", line]), landed)
+
+    def test_ps_green_a_closed_word_directly_after_a_ref_passes(self):
+        # Catches: "closed" directly after a ref is read as a waiting cite, so a closed item the page says is closed blocks.
+        for line in ("item 214 closed", "item 214 is closed", "item 214 (closed)"):
+            for landed in (True, False):
+                with self.subTest(line=line, landed=landed):
+                    self.assert_quiet(copy_repo(), report([line]), landed)
 
     def test_ps_green_a_line_that_says_the_item_is_closed_passes(self):
         # Catches: a line that itself says the item is closed is read as a waiting cite and blocks.
@@ -333,7 +423,8 @@ class PageStatusTests(unittest.TestCase):
 
     def test_ps_green_a_report_that_cites_no_item_reads_no_status(self):
         # Catches: every report reads the waiting copy, a git call, though a report with no item cite needs none.
-        self.assertEqual(os.path.realpath(feedback_guard.__file__), os.path.realpath(os.path.join(HOOKS, "feedback_guard.py")),
+        self.assertEqual(os.path.realpath(feedback_guard.__file__),
+                         os.path.realpath(os.path.join(HOOKS, "feedback_guard.py")),
                          "scope: feedback_guard is not this worktree's module, so the patch misses the guard's reader")
         self.assertEqual(os.path.realpath(report_guard.__file__), os.path.realpath(os.path.join(HERE, "report_guard.py")),
                          "scope: report_guard is not this worktree's module")
@@ -341,10 +432,10 @@ class PageStatusTests(unittest.TestCase):
         for landed in (True, False):
             for lines in (["none"], ["Waiting on the page writer for the copy."], ["None new.", "- Nothing else is open."]):
                 with self.subTest(lines=lines, landed=landed):
-                    _, witness_out = self.run_in_process(repo, report([WITNESS_QUESTION]), landed, {})
+                    _, witness_out, _ = self.run_in_process(repo, report([WITNESS_QUESTION]), landed, {})
                     self.assertEqual(json.loads(witness_out).get("decision"), "block",
                                      "scope: the in-process witness question did not block, so main() did not run")
-                    reader, _ = self.run_in_process(repo, report(lines), landed, {})
+                    reader, _, _ = self.run_in_process(repo, report(lines), landed, {})
                     self.assertFalse(reader.called, "a report that cites no item read the waiting copy: %r" % lines)
 
     def test_ps_red_a_cite_in_input_needed_reads_the_waiting_copy(self):
@@ -352,10 +443,10 @@ class PageStatusTests(unittest.TestCase):
         repo = copy_repo()
         for landed in (True, False):
             with self.subTest(landed=landed):
-                _, witness_out = self.run_in_process(repo, report([WITNESS_QUESTION]), landed, {})
+                _, witness_out, _ = self.run_in_process(repo, report([WITNESS_QUESTION]), landed, {})
                 self.assertEqual(json.loads(witness_out).get("decision"), "block",
                                  "scope: the in-process witness question did not block, so main() did not run")
-                reader, _ = self.run_in_process(repo, report(["Waiting on you: item 214."]), landed, {})
+                reader, _, _ = self.run_in_process(repo, report(["Waiting on you: item 214."]), landed, {})
                 self.assertTrue(reader.called, "a cite of item 214 in Input Needed did not read the waiting copy")
                 self.assertEqual(reader.call_args[0][0], os.path.realpath(repo),
                                  "the waiting copy was read from another repo")
