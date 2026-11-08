@@ -2892,6 +2892,16 @@ for (const width of [1440, 820]) for (const kind of Object.keys(FOLD_ROWS)) {
     assert.equal(g.rowH, 48, `the row is ${g.rowH} px tall at ${width} wide, not the one-line 48 px`);
   });
 }
+// Between 391 and 520 wide the row fits, so its date stays one line (the contract's section 1). A block date would break under its label
+// there, and the 360 and 390 cases do not see that, since the date wraps at those widths anyway.
+for (const kind of Object.keys(FOLD_ROWS)) {
+  test(`folded answered row ${FOLD_ROWS[kind].label}: at 440 wide its date line is one line, where the row fits`, async (t) => {
+    const page = await foldedRowPage(t, kind, 440); if (!page) return;
+    const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
+    foldedScope(g, kind, 440);
+    assert.equal(g.lines, 1, `the date line wraps to ${g.lines} lines at 440 wide, not one`);
+  });
+}
 
 test("a waiting ask says who has not read it, or who read it and is working on it", async (t) => {
   const asks = {
