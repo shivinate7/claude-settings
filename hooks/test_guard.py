@@ -28193,9 +28193,12 @@ def register_simulator_lease_cases():
 #     - `xcrun simctl <verb> UDID|booted` for a verb in DRIVE_SIMCTL, shutdown and erase included. The read set is
 #       `io ... screenshot`, list, get_app_container, and `ui UDID <setting>` with no value (appearance,
 #       content_size, increase_contrast). A boot is left to the boot rules.
-#     - inside `sim-test --hold [--for S] -- CMD`, a drive whose target is not `$SIM_TEST_UDID` (literally, or
-#       `${SIM_TEST_UDID}`), booted or shut down. A hold starts before its lease exists, so the lease cannot cover
-#       a UDID that CMD names. The refusal names `$SIM_TEST_UDID` in place of the two remedies (HOLD_CARRIES).
+#     - inside `sim-test --hold [--for S] -- CMD`, a drive whose target is not `$SIM_TEST_UDID` inside a single-quoted
+#       `sh -c '...'`, booted or shut down. A hold starts before its lease exists, so the lease cannot cover a UDID
+#       that CMD names. A double-quoted or unquoted `$SIM_TEST_UDID` (or `${SIM_TEST_UDID}`) expands to empty in the
+#       caller's shell before the hold exports it (coordinator ruling 2026-11-07 16:13 CST: every session leases the
+#       shared phone before it uses it; an empty -d may act on the booted phone). The refusal names `$SIM_TEST_UDID`
+#       and the `sh -c '...'` remedy (HOLD_CARRIES).
 #   `booted` names every booted device, so each of them needs a lease. A lease covers a UDID when its slot
 #   maps to it (SLOT_UDID), or, for slot `other`, when its udid field does. A device that is not booted is
 #   the boot rules' job. With no simctl, or an unreadable device list, the rule allows (fail open).
@@ -28203,7 +28206,7 @@ def register_simulator_lease_cases():
 # A booted device that no phone slot maps (Beta Air) is judged the same way: see the lease section.
 DRIVE_RULE = "simulator-drive-lease"
 DRIVE_CARRIES = ("sim-lease take", "sim-test --hold")
-HOLD_CARRIES = ("$SIM_TEST_UDID",)
+HOLD_CARRIES = ("$SIM_TEST_UDID", "sh -c '")
 DRIVE_SIMCTL = (("ui", "appearance dark"), ("openurl", "https://example.com"), ("install", "App.app"),
                 ("uninstall", "com.example.app"), ("launch", "com.example.app"),
                 ("terminate", "com.example.app"), ("push", "com.example.app payload.json"),
@@ -28311,7 +28314,8 @@ def register_simulator_drive_cases():
     drive_sh("drive: a hinge drive inside a command substitution, no lease, is refused",
              "echo $(hinge -d %s open)" % D1, "deny", nolease)
 
-    # Allowed without a lease: the reads, the quoted or echoed text, a hold drive of $SIM_TEST_UDID, unbooted phones.
+    # Allowed without a lease: the reads, the quoted or echoed text, a hold drive of $SIM_TEST_UDID under a
+    # single-quoted sh -c, unbooted phones.
     drive_sh("control: hinge get on a booted Duo 1 is a read, allowed with no lease",
              "hinge -d %s get" % D1, "allow", nolease)
     drive_sh("control: hinge posture on a booted Duo 1 is a read, allowed with no lease",
@@ -28364,15 +28368,41 @@ def register_simulator_drive_cases():
              "xcrun simctl erase %s" % D2, "allow", nolease)
     drive_sh("control: xcrun simctl shutdown booted with nothing booted is not a drive, allowed",
              "xcrun simctl shutdown booted", "allow", none)
+    # `all` names every booted device, as `booted` does: each booted phone needs this session's lease.
+    drive_sh("drive: xcrun simctl shutdown all with no lease is refused",
+             "xcrun simctl shutdown all", "deny", nolease)
+    drive_sh("drive: xcrun simctl erase all with no lease is refused",
+             "xcrun simctl erase all", "deny", nolease)
+    drive_sh("drive: xcrun simctl shutdown all while another session holds slot 1 is refused",
+             "xcrun simctl shutdown all", "deny", other1)
+    drive_sh("drive: xcrun simctl erase all while another session holds slot 1 is refused",
+             "xcrun simctl erase all", "deny", other1)
+    drive_sh("drive: xcrun simctl shutdown all, Duo 2 booted and unleased, is refused under slot 1's lease",
+             "xcrun simctl shutdown all", "deny", slot1_of_both)
+    drive_sh("drive: xcrun simctl erase all, Duo 2 booted and unleased, is refused under slot 1's lease",
+             "xcrun simctl erase all", "deny", slot1_of_both)
+    drive_sh("control: xcrun simctl shutdown all under this session's slot 1 lease is allowed",
+             "xcrun simctl shutdown all", "allow", own1)
+    drive_sh("control: xcrun simctl erase all under this session's slot 1 lease is allowed",
+             "xcrun simctl erase all", "allow", own1)
+    drive_sh("control: xcrun simctl shutdown all, both Duos under this session's leases, is allowed",
+             "xcrun simctl shutdown all", "allow", both)
+    drive_sh("control: xcrun simctl erase all, both Duos under this session's leases, is allowed",
+             "xcrun simctl erase all", "allow", both)
+    drive_sh("control: xcrun simctl shutdown all with nothing booted is not a drive, allowed",
+             "xcrun simctl shutdown all", "allow", none)
+    drive_sh("control: xcrun simctl erase all with nothing booted is not a drive, allowed",
+             "xcrun simctl erase all", "allow", none)
     drive_sh("control: a quoted simctl drive is text, allowed with no lease",
              'echo "xcrun simctl ui %s appearance dark"' % D1, "allow", nolease)
     drive_sh("control: an echoed hinge drive is text, allowed with no lease",
              "echo hinge -d %s open" % D1, "allow", nolease)
     drive_sh("control: a grep for a hinge drive is text, allowed with no lease",
              'grep -rn "hinge -d" skills', "allow", nolease)
-    # Inside `sim-test --hold -- CMD` a drive must target $SIM_TEST_UDID: the hold starts before its lease exists, so
-    # the lease cannot cover a UDID that CMD names. Each deny names a UDID, a device name, `booted` or a shut-down
-    # phone, and its refusal carries HOLD_CARRIES. Each was allowed before: the guard judged nothing inside sim-test.
+    # Inside `sim-test --hold -- CMD` a drive must target $SIM_TEST_UDID inside a single-quoted sh -c: the hold starts
+    # before its lease exists, so the lease cannot cover a UDID that CMD names, and an unquoted or double-quoted
+    # $SIM_TEST_UDID expands to empty before the hold runs. Each deny names a UDID, a device name, `booted` or a
+    # shut-down phone, and its refusal carries HOLD_CARRIES.
     drive_sh("drive: a simctl ui of Duo 1 by its UDID inside sim-test --hold is refused",
              "bin/sim-test --hold -- xcrun simctl ui %s appearance dark" % D1, "deny", nolease,
              carries=HOLD_CARRIES)
@@ -28412,20 +28442,42 @@ def register_simulator_drive_cases():
              "echo \"# x\"; bin/sim-test --hold -- hinge -d %s open" % D1, "deny", nolease, carries=HOLD_CARRIES)
     drive_sh("drive: a sim-test hold on the second line drives Duo 1 by its UDID, refused",
              "echo ok\nbin/sim-test --hold -- hinge -d %s open" % D1, "deny", nolease, carries=HOLD_CARRIES)
-    # The drive whose target is $SIM_TEST_UDID is the hold's own phone, so it passes. So does a read of a named
-    # UDID, a plain test run, and a hold drive that is only text (quoted, echoed or in a heredoc body).
-    drive_sh("control: a hinge open of $SIM_TEST_UDID inside sim-test --hold is allowed with no lease",
-             'bin/sim-test --hold -- hinge -d "$SIM_TEST_UDID" open', "allow", nolease)
-    drive_sh("control: a simctl ui of $SIM_TEST_UDID inside sim-test --hold is allowed with no lease",
-             'bin/sim-test --hold -- xcrun simctl ui "$SIM_TEST_UDID" appearance dark', "allow", nolease)
-    drive_sh("control: a hinge open of an unquoted $SIM_TEST_UDID inside sim-test --hold is allowed",
-             "bin/sim-test --hold -- hinge -d $SIM_TEST_UDID open", "allow", nolease)
-    drive_sh("control: a simctl ui of ${SIM_TEST_UDID} inside sim-test --hold is allowed with no lease",
-             'bin/sim-test --hold -- xcrun simctl ui "${SIM_TEST_UDID}" appearance dark', "allow", nolease)
-    drive_sh("control: a hinge open of $SIM_TEST_UDID under sh -c inside sim-test --hold is allowed",
+    # A drive of $SIM_TEST_UDID passes only inside a single-quoted sh -c, where the hold's own shell has the variable.
+    # So does a read of a named UDID, a plain test run, and a hold drive that is only text (quoted, echoed or in a
+    # heredoc body). An unquoted or double-quoted $SIM_TEST_UDID expands to empty in the caller's shell, so these are
+    # refused: an empty -d may act on the booted phone (coordinator ruling 2026-11-07 16:13 CST).
+    drive_sh("drive: a hinge open of double-quoted $SIM_TEST_UDID inside sim-test --hold is refused, no lease",
+             'bin/sim-test --hold -- hinge -d "$SIM_TEST_UDID" open', "deny", nolease, carries=HOLD_CARRIES)
+    drive_sh("drive: a simctl ui of double-quoted $SIM_TEST_UDID inside sim-test --hold is refused, no lease",
+             'bin/sim-test --hold -- xcrun simctl ui "$SIM_TEST_UDID" appearance dark', "deny", nolease,
+             carries=HOLD_CARRIES)
+    drive_sh("drive: a hinge open of an unquoted $SIM_TEST_UDID inside sim-test --hold is refused, no lease",
+             "bin/sim-test --hold -- hinge -d $SIM_TEST_UDID open", "deny", nolease, carries=HOLD_CARRIES)
+    drive_sh("drive: a simctl ui of double-quoted ${SIM_TEST_UDID} inside sim-test --hold is refused, no lease",
+             'bin/sim-test --hold -- xcrun simctl ui "${SIM_TEST_UDID}" appearance dark', "deny", nolease,
+             carries=HOLD_CARRIES)
+    drive_sh("drive: a sim-test --device duo, --for hold of double-quoted $SIM_TEST_UDID is refused, no lease",
+             'bin/sim-test --device duo --hold --for 300 -- hinge -d "$SIM_TEST_UDID" open', "deny", nolease,
+             carries=HOLD_CARRIES)
+    drive_sh("drive: a sim-test hold whose double-quoted sh -c drives $SIM_TEST_UDID is refused, no lease",
+             'bin/sim-test --hold -- sh -c "hinge -d $SIM_TEST_UDID open"', "deny", nolease, carries=HOLD_CARRIES)
+    drive_sh("drive: a sim-test hold whose double-quoted sh -c holds single quotes and $SIM_TEST_UDID is refused",
+             'bin/sim-test --hold -- sh -c "echo \'x\'; hinge -d $SIM_TEST_UDID open"', "deny", nolease,
+             carries=HOLD_CARRIES)
+    drive_sh("control: a hinge open of $SIM_TEST_UDID under single-quoted sh -c inside sim-test --hold is allowed",
              "bin/sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'", "allow", nolease)
-    drive_sh("control: a sim-test --device duo, --for hold of $SIM_TEST_UDID is allowed with no lease",
-             'bin/sim-test --device duo --hold --for 300 -- hinge -d "$SIM_TEST_UDID" open', "allow", nolease)
+    drive_sh("control: a hinge open of unquoted $SIM_TEST_UDID under single-quoted sh -c in a hold is allowed",
+             "bin/sim-test --hold -- sh -c 'hinge -d $SIM_TEST_UDID open'", "allow", nolease)
+    drive_sh("control: a simctl ui of ${SIM_TEST_UDID} under single-quoted sh -c inside sim-test --hold is allowed",
+             "bin/sim-test --hold -- sh -c 'xcrun simctl ui \"${SIM_TEST_UDID}\" appearance dark'", "allow", nolease)
+    drive_sh("control: a sim-test --device duo, --for hold of $SIM_TEST_UDID under single-quoted sh -c is allowed",
+             "bin/sim-test --device duo --hold --for 300 -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'", "allow", nolease)
+    drive_sh("control: a single-quoted sh -c hold of $SIM_TEST_UDID over two lines is allowed",
+             "bin/sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\"\n  open'", "allow", nolease)
+    drive_sh("control: an apostrophe in an echo before a single-quoted sh -c hold of $SIM_TEST_UDID is allowed",
+             "echo \"don't\"; bin/sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'", "allow", nolease)
+    drive_sh("control: a comment opener in an echo before a single-quoted sh -c hold of $SIM_TEST_UDID is allowed",
+             "echo \"# x\"; bin/sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'", "allow", nolease)
     drive_sh("control: a plain sim-test test run is allowed with no lease",
              "bin/sim-test -scheme App", "allow", nolease)
     drive_sh("control: a hinge get of Duo 1 by its UDID inside sim-test --hold is a read, allowed",
