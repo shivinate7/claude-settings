@@ -1358,6 +1358,22 @@ class SmallBaseMove(Env):
         self.assertIsNotNone(refusal)
         self.assertIn("does not hold main", refusal)
 
+    def test_a_batch_rename_of_a_path_main_changed_is_a_shared_path(self):
+        # --no-renames in small_base_move: the batch's rename names its old path too, so main's change to base.txt is shared.
+        # With rename detection the batch names moved.txt only, the shared check passes, and the green run stands.
+        repo, _ = self.batch_repo()
+        sh(repo, "git", "mv", "base.txt", "moved.txt"); sh(repo, "git", "commit", "-qm", "N renames base")
+        n_head = sh(repo, "git", "rev-parse", "HEAD")
+        base = sh(repo, "git", "merge-base", "main", n_head)
+        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, "base.txt"), "main changed\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main changes base")
+        scope = sh(repo, "git", "diff", "--name-status", "-M", base, n_head)
+        self.assertIn("R100\tbase.txt\tmoved.txt", scope, "the batch is not an exact rename, so the case proves nothing:\n" + scope)
+        with tempfiles_in_run_folder():
+            ok, why = merge.small_base_move(repo, "main", n_head)
+        self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
+        self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
+
     def scoped(self, workflow=CHECKS_YML, scope=True, name="checks.yml"):
         """Main and feat both gain the CI files, the workflow under the file name `name`; feat then holds main's tip."""
         o = self.other
