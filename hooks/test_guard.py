@@ -15504,6 +15504,60 @@ sh("builder-refuse: a builder's merge in progress that rewrites a conflicted tes
    "subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_edited, "src"), agent_id="bld1",
    agent_type="builder")
 
+# A builder run from sub/ with `diff.relative` set: git prints each path relative to sub/, so the edit to
+# sub/tests/test_b.py is named tests/test_b.py. The guard reads that name at the checkout's top, where the top-level
+# tests/test_b.py is unchanged, so the edit drops out and is allowed. The default-config row is the control. The sibling
+# pin for `git diff --check` under diff.relative is CMK_REL (conflict-markers).
+SUB_TEST = "sub/tests/test_b.py"
+SUB_FILES = {**BASE_FILES, "tests/test_b.py": "def test_top():\n    assert 1\n",
+             SUB_TEST: "def test_sub():\n    assert 1\n"}
+SUB_EDIT = "def test_sub():\n    assert 2\n"
+
+
+def _sub_names(where, *revs):
+    """The names `git diff --name-only` prints from sub/. A fixture checks them before a case relies on them."""
+    done = run_vcs(os.path.join(where, "sub"), "diff", "--name-only", *revs)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: git diff in sub/ of %r: %s" % (where, done.stderr.strip()))
+    return done.stdout.split()
+
+
+def _sub_open_edit(w, relative):
+    """The open merge of a clean merge, with the builder's edit to SUB_TEST. `relative` sets diff.relative."""
+    _clean_merge_open(w)
+    write(os.path.join(w, SUB_TEST), SUB_EDIT)
+    if relative:
+        _must(w, "config", "diff.relative", "true")
+        if _sub_names(w, "HEAD") != ["tests/test_b.py"]:
+            sys.exit("fixture setup failed: diff.relative did not name %r relative to sub/ in %r" % (SUB_TEST, w))
+    elif SUB_TEST not in _sub_names(w, "HEAD"):
+        sys.exit("fixture setup failed: the default config did not name %r from sub/ in %r" % (SUB_TEST, w))
+
+
+def _sub_commit_edit(w):
+    """The open merge of _sub_open_edit, committed as the builder's merge commit, with diff.relative set."""
+    _clean_merge_open(w)
+    write(os.path.join(w, SUB_TEST), SUB_EDIT)
+    _commit_merge(w)
+    _must(w, "config", "diff.relative", "true")
+    if _sub_names(w, "HEAD^1", "HEAD") != ["tests/test_b.py"]:
+        sys.exit("fixture setup failed: diff.relative did not name the merge commit's %r relative to sub/ in %r"
+                 % (SUB_TEST, w))
+
+
+_bd_sub_open_rel = diff_repo("bd-sub-open-rel", lambda w: _sub_open_edit(w, True), files=SUB_FILES)
+sh("builder-refuse: a builder's edit to sub/tests/test_b.py in an open merge, from sub/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_rel, "sub"), agent_id="bld1",
+   agent_type="builder")
+_bd_sub_commit_rel = diff_repo("bd-sub-commit-rel", _sub_commit_edit, files=SUB_FILES)
+sh("builder-refuse: a builder's merge commit that edits sub/tests/test_b.py, from sub/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_commit_rel, "sub"), agent_id="bld1",
+   agent_type="builder")
+_bd_sub_open_default = diff_repo("bd-sub-open-default", lambda w: _sub_open_edit(w, False), files=SUB_FILES)
+sh("builder-refuse: the same open-merge edit to sub/tests/test_b.py under the default config, from sub/, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_default, "sub"), agent_id="bld1",
+   agent_type="builder")
+
 # An untracked file is listed from the checkout's top, whatever folder the command runs in. The builder's test file
 # under src/ is judged as src/test_x.py. Read as test_x.py, it would be taken for the conflicted top-level file that
 # git's merge left as it wrote it, and allowed.
