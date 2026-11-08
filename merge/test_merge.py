@@ -14109,8 +14109,8 @@ class ReviewStampSince(unittest.TestCase):
         self.assertIsNone(review_fn(self, "review_stamp_since")(root, "main"), "a history with no salt commit gave a cutover")
 
     def test_a_fix_check_run_asks_for_the_default_branch_once(self):
-        # --fix-check runs fetch_default_branch, then review_stamp_since. The cutover cache covers only the second read, so a run asks
-        # for the default branch twice today. The stub answers "fixture" and counts its asks. The branch is fixture, never main.
+        # --fix-check runs fetch_default_branch, then review_stamp_since. Both read the default branch through default_branch_once, so
+        # the pin is one ask for a fix-check run. The stub answers "fixture" and counts its asks. The branch is fixture, never main.
         root = self.repo(salt_at=2, branch="fixture")
         parent = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
         self.addCleanup(shutil.rmtree, parent, True)
