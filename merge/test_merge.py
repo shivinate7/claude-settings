@@ -13194,7 +13194,7 @@ class ReviewFixBase(ReviewEnv):
 class ReviewChainFixture(ReviewEnv):
     """The one home of a pull request whose newest earlier record may carry a fix check. LIVE is the live head, NEWEST the Head of that newest
     record, and EARLIER the Head of the older record its fix check reviewed. OTHER and NOTES are heads some cases name, and CODE and NOTES_FILE
-    are the files of their compares. `pair` builds the two records and `run_chain` runs a fix check on them. No test lives here."""
+    are the files of their compares. `pair` builds the two records, `chain_link` one record of a longer chain, and `run_chain` runs a fix check on them. No test lives here."""
 
     LIVE = REVIEW_HEAD  # the live head of pull request 7 in every case
     NEWEST = REVIEW_OLD_HEAD  # the Head of the newest earlier record
@@ -13211,6 +13211,12 @@ class ReviewChainFixture(ReviewEnv):
         fix = (fix_check_line(verdict=verdict, head=self.EARLIER),) if verdict else ()
         return (review_comment(1, 7, record_text(head=self.EARLIER, rounds=REVIEW_PASS)),
                 review_comment(2, 7, record_text(head=self.NEWEST, rounds=rounds, guard=guard, kind=kind, fix=fix, net=net)))
+
+    def chain_link(self, cid, head, fix_base=None, rounds=REVIEW_PASS, net="not owed", guard="no", kind="normal"):
+        """Pull request 7's record number `cid` at `head`, with `rounds`, `net`, guard and kind. `fix_base` set gives it a Fix check PASS from that
+        head; None gives it no Fix check line. A longer chain is a run of these, each record's fix base the head before it."""
+        fix = (fix_check_line(verdict="PASS", head=fix_base),) if fix_base else ()
+        return review_comment(cid, 7, record_text(head=head, rounds=rounds, kind=kind, guard=guard, net=net, fix=fix))
 
     def run_chain(self, base, comments=(), diffs=None, verdict="PASS", net="not owed", guard="no", kind="normal",
                   rounds=("1:reviewer:sonnet:PASS",), live=None):
@@ -14146,6 +14152,62 @@ class ReviewFixAfterFinalFail(ReviewChainFixture):
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=ReviewFixRemedies.ALL_PASS_ARGS)
         self.assertEqual(rc, 0, "a fix check from B after records that passed every round was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+
+class ReviewFixChainCap(ReviewChainFixture):
+    """A chain holds at most two fix checks (owner page item 426 a, 2026-11-08 10:19 CST). A chain is the consecutive records on the pull request
+    after the last record with no Fix check line, each carrying a Fix check PASS. A fix check on a chain that already holds two is refused with exit
+    2 and no record. Its stderr names the two fix checks and a fresh chain at round 1. A record with no Fix check line starts a new count. Cases 1
+    and 3 are red on the old code, which writes the third link; cases 2 and 4 are its controls and pass there."""
+
+    HEAD_A, HEAD_B, HEAD_C = "4e" * 20, "5e" * 20, "6e" * 20  # the chain's records, oldest first; the live head is LIVE, or HEAD_C in case 2
+    HEAD_E = "7e" * 20  # a round 2 record with no Fix check line, after the chain
+    ONE_FAIL = ReviewFixRemedies.FAIL_ONE
+    TWO_FAILS = ReviewFixAfterFinalFail.TWO_FAILS
+    ALL_PASS, ALL_PASS_ARGS = ReviewFixRemedies.ALL_PASS, ReviewFixRemedies.ALL_PASS_ARGS
+
+    def assert_cap_refused(self, rc, out, err):
+        """A refused third link: rc 2, no record, and stderr that names the fix-check cap and the fresh chain as the remedy."""
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertIn("holds 2 fix checks", err, "the refusal does not say the chain already holds 2 fix checks:\n" + err)
+        self.assertRegex(err, r"fresh chain.*round 1", "the refusal does not name a fresh chain at round 1 as its remedy:\n" + err)
+
+    def test_a_third_fix_check_on_a_chain_of_two_is_refused(self):
+        # the chain A, B, C holds two fix checks, B's and C's. A fix check from C's head is refused at the live head, though the live head is ahead of C
+        comments = (self.chain_link(1, self.HEAD_A, rounds=self.ONE_FAIL),
+                    self.chain_link(2, self.HEAD_B, fix_base=self.HEAD_A, rounds=self.ONE_FAIL),
+                    self.chain_link(3, self.HEAD_C, fix_base=self.HEAD_B, rounds=self.ONE_FAIL))
+        diffs = {(self.HEAD_C, self.LIVE): compare_of("ahead", self.CODE)}
+        rc, out, err, _ = self.run_chain(self.HEAD_C, comments, diffs=diffs, rounds=round_args(self.ONE_FAIL))
+        self.assert_cap_refused(rc, out, err)
+
+    def test_a_second_fix_check_on_a_chain_of_one_is_written(self):
+        # control, green on the old code: the chain holds one fix check, B's, so a fix check from B's head at the live head C is written
+        comments = (self.chain_link(1, self.HEAD_A, rounds=self.ONE_FAIL),
+                    self.chain_link(2, self.HEAD_B, fix_base=self.HEAD_A, rounds=self.ONE_FAIL))
+        diffs = {(self.HEAD_B, self.HEAD_C): compare_of("ahead", self.CODE)}
+        rc, out, err, _ = self.run_chain(self.HEAD_B, comments, diffs=diffs, rounds=round_args(self.ONE_FAIL), live=self.HEAD_C)
+        self.assertEqual(rc, 0, "control: a second fix check on a chain of one was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_B, "reviewer", "haiku", "PASS"))
+
+    def test_a_third_fix_check_after_round_3_is_refused(self):
+        # the same chain after round 3: each record passed rounds 1 to 3 with Net value zero, and each link keeps it, so only the count refuses the link
+        comments = (self.chain_link(1, self.HEAD_A, rounds=self.ALL_PASS, net="zero"),
+                    self.chain_link(2, self.HEAD_B, fix_base=self.HEAD_A, rounds=self.ALL_PASS, net="zero"),
+                    self.chain_link(3, self.HEAD_C, fix_base=self.HEAD_B, rounds=self.ALL_PASS, net="zero"))
+        diffs = {(self.HEAD_C, self.LIVE): compare_of("ahead", self.CODE)}
+        rc, out, err, _ = self.run_chain(self.HEAD_C, comments, diffs=diffs, net="zero", rounds=self.ALL_PASS_ARGS)
+        self.assert_cap_refused(rc, out, err)
+
+    def test_a_round_2_record_after_the_chain_starts_a_new_count(self):
+        # control, green on the old code: E is a record with no Fix check line after the two links, so the count starts again and a fix check from E's head is written
+        comments = (self.chain_link(1, self.HEAD_A, rounds=self.ONE_FAIL),
+                    self.chain_link(2, self.HEAD_B, fix_base=self.HEAD_A, rounds=self.ONE_FAIL),
+                    self.chain_link(3, self.HEAD_C, fix_base=self.HEAD_B, rounds=self.ONE_FAIL),
+                    self.chain_link(4, self.HEAD_E, rounds=self.TWO_FAILS))
+        rc, out, err, _ = self.run_chain(self.HEAD_E, comments, rounds=round_args(self.TWO_FAILS))
+        self.assertEqual(rc, 0, "control: a fix check from a round 2 record after a chain of two was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_E, "reviewer", "haiku", "PASS"))
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
