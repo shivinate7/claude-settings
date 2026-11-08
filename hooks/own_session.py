@@ -3,9 +3,11 @@
 hooks/guard_merge.py (merge role, trust card, archive proofs) and lint/report_guard.py (lane or
 owner-facing pick guard) both read it. It is its own small module so the Stop hook can import it
 without loading the whole guard.
-Cost: one transcript read per call, no file written.
+Cost: one transcript read per call, no file written. An agent's own record is a second file read, by the
+caller, through agent_transcript_path.
 """
 import json
+import os
 import re
 
 # A get_session result for another session arrives as its untrusted text: an opening tag with a nonce, a preamble,
@@ -44,6 +46,13 @@ def _record_json(body):
     if inner[end:].strip():
         raise ValueError("text after the record")
     return record
+
+
+def agent_transcript_path(transcript, agent_id):
+    """The agent's own transcript: `<transcript minus .jsonl>/subagents/agent-<agent_id>.jsonl`, the layout the
+    harness writes beside the main transcript. The caller passes an agent_id already checked against guard.AGENT_ID."""
+    root = transcript[:-len(".jsonl")] if transcript.endswith(".jsonl") else transcript
+    return os.path.join(root, "subagents", "agent-" + agent_id + ".jsonl")
 
 
 def own_session_read(transcript, own_id, created=False):
