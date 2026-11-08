@@ -1,0 +1,11 @@
+{
+  "title": "The lane lint reads PR-body Fix lines with the same Fix-none cite rule",
+  "phase": "guards",
+  "status": "todo",
+  "order": 670,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "The four false `Fix: none` reasons on #2021 and #2024 are review-finding lines in PR bodies (item 386 form). The notes-side check (step fix-none-cite-check) reads only docs/debts/notes.md and debt files, so it does not catch this incident class (lane fix-none-cite-check, session_013NEJL2ChVc4QiMs2icnEB8, 08:19 CST Nov 8).",
+  "note": "Calls the Fix-none cite function that step fix-none-cite-check builds, through the PR-body reader of step lane-lint-reads-pr-body (#1969); no second copy of either. Merge after #1969 and fix-none-cite-check's PR. Done check: a red test where a PR body whose Fix: none reason names a commit or a cost with no check is refused by the lane lint. Build lane. Filed by triage 08:20 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:20:00-06:00"
+}

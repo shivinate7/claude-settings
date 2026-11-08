@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-08T14:24:00Z",
+  "context": "Goal: each phone or tablet screenshot from bin/shoot shows the page as a touch screen sees it.\nProblem (rule): no record says which widths count as touch. #2028's design-review line says a phone or tablet gets touch and a desktop none, but gives no width, and bin/shoot needs one.\nBased on (read): bin/shoot's default sizes are 1440, 820 and 390 px wide (decision shoot-is-one-shared-command).\nBased on (read): the design checklist asks for 44 px touch targets on touch screens and 24 px for a mouse (docs/design/checklist.md, ux-a11y-floor).\nDeparts from: main, where bin/shoot never sets touch \u2014 shots below a width cutoff get touch.\nMeanwhile: the lane builds option a. Your answer changes only the cutoff.",
+  "home": "shoot-touch-per-size",
+  "id": "shoot-touch-width",
+  "kind": "decision",
+  "n": 423,
+  "options": [
+    {
+      "gain": "Phones and tablets are shot as #2028 asks, with no config edit in any repo.",
+      "how": "Shots under 1024 px wide get touch: 390 and 820 yes, 1440 no. One rule for every repo.",
+      "key": "a",
+      "label": "Under 1024 px is touch",
+      "lose": "A 1024 px iPad portrait shot gets no touch, and no repo can change that."
+    },
+    {
+      "gain": "Fewer shots change.",
+      "how": "Only phone widths get touch: 390 yes, 820 and 1440 no.",
+      "key": "b",
+      "label": "Under 600 px is touch",
+      "lose": "The 820 px tablet shot stays without touch, against #2028's line."
+    },
+    {
+      "gain": "A repo that ships a 1024 px iPad view can shoot it with touch.",
+      "how": "As a, plus a config key touchWidths that a repo sets to list its own touch widths.",
+      "key": "c",
+      "label": "Under 1024 px, and a repo may list its own",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. Each repo can class widths its own way.",
+      "widens": true
+    },
+    {
+      "gain": "Nothing is guessed.",
+      "how": "bin/shoot sets touch only for widths a repo lists in touchWidths.",
+      "key": "d",
+      "label": "No default: each repo lists its widths",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. Every repo's shots stay without touch until it edits its config.",
+      "widens": true
+    }
+  ],
+  "owner": "lane shoot-touch-per-size (session_013NEJL3cfg1yrBuezf45D4i)",
+  "pick": "a",
+  "ref": "step shoot-touch-per-size; #2028 review note 10; decision shoot-is-one-shared-command",
+  "short": "bin/shoot: which widths get touch",
+  "status": "open",
+  "title": "Which screenshot widths should bin/shoot take as touch screens?"
+}
