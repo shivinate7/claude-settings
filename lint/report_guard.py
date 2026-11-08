@@ -122,17 +122,16 @@ the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Co
 the session's refusals file, and the rows file (hooks/route_match.py read_rows) when a line carries a route cite. It
 runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 
-Cannot-claim check (rule output-never-hand-off-doable-step): a prose sentence of the reply that says the session cannot do an
-act (cannot, could not, unable to, no way to, not able to, wasn't able to, won't be able to, followed within six words
-of its clause by the act) passes only when the turn after the last human message holds a failed try of that act, or the
-sentence carries a hand-off cite (a route row that says refused or asks, a dated `(measured ...)`, or a tool the
-classifier refused), and the sentence names its check (a backtick span, an MCP tool name, a word such as returned or
-refused, an HTTP 4xx, a non-zero exit). A try is a call whose result has an error flag, an exit code above zero or an
-HTTP 4xx or 5xx; a later call of the same act that did not fail cancels it. A notice is no try. An act outside the
-table needs a failed call that shares a content word with the claim. Skipped: a question, a Why yours line (the
-hand-off guard's), a line or sentence that starts with Unvetted:, quoted or coded text, a third-party subject, a conditional, a
-dependency (until, before) and a clause that names a rule. One block, then the rewrite runs unchecked. A check that
-cannot run prints an UNKNOWN note to stderr and allows.
+Cannot-claim check (rule output-never-hand-off-doable-step): a prose sentence of the reply that says this session cannot do a
+table act (pr-open, pr-merge, push, pr-edit, github-reach), named by the verb the phrase governs, passes only when the
+turn after the last human message holds a failed try of that act, or the sentence carries a hand-off cite (a route row
+that says refused or asks, a dated `(measured ...)`, or a tool the classifier refused), and the sentence names its check
+(a backtick span, an MCP tool name, a word such as returned or refused, an HTTP 4xx, a non-zero exit). A try is a call
+whose result has an error flag, an exit code above zero or an HTTP 4xx or 5xx; a later success of the same act, program,
+verb and target cancels it, and a --dry-run call is no try. A notice is no try. Not read: an act outside the table, a
+subject that is not the writer's own, a question, a Why yours line (the hand-off guard's), a line or sentence that starts
+with Unvetted:, quoted or coded text, a conditional, a dependency (until, before) and a sentence that names a rule. One
+block, then the rewrite runs unchecked. A check that cannot run prints an UNKNOWN note to stderr and allows.
 Cost: a regex over the reply and, on a sentence that claims, one pass over the transcript this hook already holds; the
 refusals file is read once, and only when a sentence claims; no file written, no timer, no log.
 """
@@ -1518,49 +1517,63 @@ def hand_off_problem(hook, text):
     return (" ".join(unique) + HAND_OFF_TAIL if unique else ""), " ".join(dict.fromkeys(notes))
 
 
-# The cannot-claim check (rule output-never-hand-off-doable-step). A reply sentence that says an act cannot be done is a claim
-# about this session, so the turn must show a failed try of that act, or the sentence must carry a hand-off cite, and it
-# must name its check. A notice (a connect-failure attachment, say) is no try: only a tool call with a failed result is.
+# The cannot-claim check (rule output-never-hand-off-doable-step). A reply sentence that says this session cannot do a table
+# act is a claim, so the turn must show a failed try of that act, or the sentence must carry a hand-off cite, and it must
+# name its check. A notice (a connect-failure attachment, say) is no try: only a tool call with a failed result is.
 # Incident, 2026-11-07 21:47 CST: a reply said a PR could not be opened after one connect-failure notice; the GitHub MCP
 # create-PR tool then worked on its first call. Record: decision claims-carry-backing.
 _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
 CANNOT_RE = re.compile(
     _NOT_NAME + r"(?:%s|can not|could(?:n['’]t| not)|no way (?:to|I can|we can)|not able to|wasn['’]t able to"
-    r"|(?:won['’]t|will not) be able to)(?![\w-])" % _CANT, re.I)
+    r"|(?:won['’]t|will not) be able to|ha(?:ve|s)(?:n['’]t| not) been able to)(?![\w-])" % _CANT, re.I)
 CANNOT_BREAK_RE = re.compile(r"[.;:!?—–]|\s-{1,2}\s")  # a clause ends here, after the phrase
 CANNOT_BEFORE_BREAK_RE = re.compile(r"[.;:!?,—–]|\s-{1,2}\s|\bbut\b", re.I)  # and before it, a comma or but too
 CANNOT_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 CANNOT_COND_RE = re.compile(r"\b(?:if|unless|whether|would)\b", re.I)
 CANNOT_NEGATOR_RE = re.compile(r"\bnot\b|n['’]t\b|\bnever\b|\bno\b", re.I)
 CANNOT_NEGATOR_GAP = 3  # words before the phrase a negator may sit in and still negate it
-# The phrase's subject: the words just before it name another party, so the sentence is no claim about this session.
-# "this session", "the cloud" and "here" are the writer's own and stay claims.
-CANNOT_THIRD_PARTY_RE = re.compile(
-    r"(?:\b(?:the|a|an|another|other)\s+(?:\w+\s+)?(?:sessions?|lanes?|agents?|subagents?|builders?|reviewers?|"
-    r"test-authors?|guards?|hooks?|checks?|owners?)|\b(?:you|they|it|he|she)|\bothers?)\s*$", re.I)
+# The subject just before the phrase must be the writer's own, or the phrase opens its clause. Any other subject (it, the
+# guard, the lane, the session, a draft PR) is another party, so the sentence is no claim about this session.
+CANNOT_SUBJECT_RE = re.compile(
+    r"(?:^|\b(?:I|we)(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re|\bthe\s+cloud(?:\s+session)?"
+    r"|\bthis\s+session|\bhere|\bthere(?:\s+(?:is|was)|['’]s))(?:\s+(?:still|also|just|really|now))?\s*$", re.I)
+CANNOT_LEAD_RE = re.compile(r"^\W*(?:(?:and|but|so|then)\b\W*)?", re.I)  # a joining word before the subject
+# A passive act whose clause says where it runs ("can't be merged from here") is a claim whatever its subject.
+CANNOT_FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|the\s+cloud|this\s+session)\b", re.I)
 # After the phrase: a doubt, a promise or a wait is no claim. "be" skips only before these words: "can't be merged" claims.
 CANNOT_SKIP_NEXT_RE = re.compile(
     r"^\s*(?:be\s+(?:undone|reverted|reversed|sure|certain)|tell|say|know|guarantee|promise|recall|wait|help)\b", re.I)
 CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re.I)
-# The clause that names a rule states the rule, so it is not the session's claim. Another clause of the sentence still is.
+# A sentence that names a rule states the rule, so it is not the session's claim. A semicolon ends that sentence: the
+# clause after it is judged on its own.
 CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
 # The past-ruling guard's own remedy says why its check could not run. A line or a sentence that starts with its label is
 # that form; the guard lets the label follow a question on the same line.
 CANNOT_UNVETTED_RE = re.compile(r"^(?:[-*+]|\d+[.)])?\s*(?:\*\*)?Unvetted:", re.I)
 CANNOT_WINDOW = 6  # words after the phrase, in its clause, that may name the act
+CANNOT_ADVERB_RE = re.compile(r"^(?:(?:even|yet|currently|actually|really|still|also|just|now|directly)\s+)+", re.I)
 _PR = r"(?:PRs?|pull[- ]requests?)"
-# Act -> the words, in the window after the phrase, that name it. An act outside this table is "other".
-CANNOT_ACTS = (
-    ("pr-open", re.compile(r"\b(?:open|create|make|raise|file|submit)\b(?:\s+\S+){0,2}\s+%s\b" % _PR, re.I)),
-    ("pr-merge", re.compile(r"\bmerg(?:e|es|ed|ing)\b", re.I)),
-    ("push", re.compile(r"\bpush(?:es|ed|ing)?\b", re.I)),
-    ("pr-edit", re.compile(r"\b(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
-)
-CANNOT_PASSIVE_RE = re.compile(r"^\s*be\s+\w+", re.I)
-CANNOT_PASSIVE_OPEN_RE = re.compile(r"\bbe\s+(?:opened|created|raised|filed|submitted)\b", re.I)
 CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
-CANNOT_OTHER = "other"
-# The act each tool is a route of. The Bash routes are read from the command by _segment_acts.
+# Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
+# window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
+CANNOT_ACTS = (
+    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+\S+){0,2}\s+%s\b" % _PR, re.I)),
+    ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
+    ("push", re.compile(r"^(?:be\s+)?push(?:ed)?\b", re.I)),
+    ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
+    ("github-reach", re.compile(
+        r"^(?:reach|use|access|connect\s+to)\s+(?:the\s+)?`?(?:mcp__github__\w*|github\b|gh(?![\w-])|api\.github\.com)",
+        re.I)),
+)
+# A passive form that names the PR elsewhere in its clause: "the PR can't be opened".
+CANNOT_PASSIVE_ACTS = (
+    ("pr-open", re.compile(r"^be\s+(?:opened|created|raised|filed|submitted)\b", re.I)),
+    ("pr-edit", re.compile(r"^be\s+(?:closed|edited|updated|marked)\b", re.I)),
+)
+CANNOT_GITHUB_SPAN_RE = re.compile(r"^`(?:gh\b|mcp__github__)", re.I)
+GITHUB_REACH = "github-reach"
+# The act each tool is a route of. Every mcp__github__ tool is also a route of github-reach. The Bash routes are read from
+# the command by _segment_tries.
 CANNOT_TOOL_ACTS = {
     "mcp__github__create_pull_request": "pr-open",
     "mcp__github__merge_pull_request": "pr-merge", "mcp__github__enable_pr_auto_merge": "pr-merge",
@@ -1572,15 +1585,15 @@ CANNOT_TOOL_ACTS = {
 # `gh pr <verb>` -> act; a verb not here is no route of a table act.
 CANNOT_GH_PR_ACTS = {"create": "pr-open", "merge": "pr-merge", "close": "pr-edit", "comment": "pr-edit",
                      "ready": "pr-edit", "edit": "pr-edit"}
+CANNOT_GIT_REACH = {"fetch", "push", "ls-remote"}  # the git calls that reach the remote
+CANNOT_HTTP_TOOLS = {"curl", "wget", "http", "https"}
+# The input fields that name a GitHub MCP call's target, read in this order.
+CANNOT_TARGET_FIELDS = ("pullNumber", "pull_number", "branch", "head")
 # A failed try: the result's error flag, an exit code above zero as the shell result reports it, or an HTTP 4xx or 5xx.
 # A loose word such as refused in a successful call's output is none of these.
 CANNOT_FAIL_RE = re.compile(r"^Exit code [1-9]|\bHTTP(?:/[\d.]+)?\s+[45]\d\d\b")
 CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
 CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push|merge)\b")
-CANNOT_WORD_RE = re.compile(r"[a-z0-9]{4,}")
-CANNOT_STOP_WORDS = frozenset((
-    "this that with from here them they have will your into what when then than over only some been were could would "
-    "should there their these those about also just like make made does done").split())
 CANNOT_CHECK_RE = re.compile(
     r"`[^`\n]+`|\bmcp__\w+|\b(?:tried|ran|returned|refused|denied|failed|errored)\b|\b[45]\d\d\b|\bexit(?: code)? [1-9]",
     re.I)
@@ -1600,45 +1613,56 @@ def _mask(text):
     return QUOTED_RE.sub(blank, CODE_SPAN.sub(blank, text))
 
 
-def _content_words(text):
-    """The lowercase words of `text` that are four letters or more and no stop word. A tool name splits at its underscores."""
-    return {w for w in CANNOT_WORD_RE.findall(re.sub(r"[_\W]+", " ", text.lower())) if w not in CANNOT_STOP_WORDS}
+def _window_act(window, clause):
+    """The table act the verb at the start of `window` names, else None. `clause` is the phrase's whole clause, where a
+    passive form looks for the PR. A code span at the start is read as a route: `gh pr create` is pr-open."""
+    window = CANNOT_ADVERB_RE.sub("", window)
+    if window.startswith("`"):
+        acts = sorted(_text_acts(window[1:].split("`", 1)[0]))
+        return acts[0] if acts else GITHUB_REACH if CANNOT_GITHUB_SPAN_RE.match(window) else None
+    for act, rx in CANNOT_ACTS:
+        if rx.match(window):
+            return act
+    for act, rx in CANNOT_PASSIVE_ACTS:
+        if rx.match(window) and CANNOT_PR_RE.search(clause):
+            return act
+    return None
 
 
 def _claim(body, mask, hit, floor):
-    """(act, window) when the phrase `hit` claims an act cannot be done, else None. `body` and `mask` are one sentence;
-    `floor` is where the previous phrase of the sentence ended, so words that condition it do not condition this one. Not
-    a claim: a conditional or a negator just before the phrase (since the last comma, but or clause break), another party
-    as subject, a verb of telling or waiting after it, a dependency (until, before, without your) in its clause, no word
-    after it, or a clause that names a rule. The act is read from the sentence's own words, code spans kept."""
+    """(act, window) when the phrase `hit` claims this session cannot do a table act, else None. `body` and `mask` are one
+    sentence; `floor` is where the previous phrase of the sentence ended, so words that condition it do not condition this
+    one. Not a claim: a conditional or a negator just before the phrase (since the last comma, but or clause break), a
+    subject that is not the writer's own (CANNOT_SUBJECT_RE), a verb of telling or waiting after it, a dependency (until,
+    before, without your) in its clause, a sentence that names a rule, or a verb that names no table act."""
     start = max((m.end() for m in CANNOT_BEFORE_BREAK_RE.finditer(mask, floor, hit.start())), default=floor)
     brk = CANNOT_BREAK_RE.search(mask, hit.end())
     end = brk.start() if brk else len(mask)
     before, after = body[start:hit.start()], body[hit.end():end]
     near = " ".join(before.split()[-CANNOT_NEGATOR_GAP:])
-    if CANNOT_COND_RE.search(before) or CANNOT_NEGATOR_RE.search(near) or CANNOT_THIRD_PARTY_RE.search(before):
+    if CANNOT_COND_RE.search(before) or CANNOT_NEGATOR_RE.search(near):
         return None
     words = after.split()
-    if (not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after)
-            or CANNOT_RULE_RE.search(before + " " + after)):
+    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after):
+        return None
+    if not CANNOT_SUBJECT_RE.search(CANNOT_LEAD_RE.sub("", before)) and not (
+            after.lstrip().lower().startswith("be ") and CANNOT_FROM_HERE_RE.search(after)):
+        return None
+    semis = [m.start() for m in re.finditer(";", mask)]
+    left = max((i + 1 for i in semis if i < hit.start()), default=0)
+    right = min((i for i in semis if i >= hit.end()), default=len(mask))
+    if CANNOT_RULE_RE.search(body[left:right]):
         return None
     window = " ".join(words[:CANNOT_WINDOW])
-    named = [(m.start(), act) for act, rx in CANNOT_ACTS for m in [rx.search(window)] if m]
-    if named:
-        return min(named)[1], window
-    if CANNOT_PASSIVE_OPEN_RE.search(window) and CANNOT_PR_RE.search(before + " " + after):
-        return "pr-open", window
-    act = (sorted(_text_acts(window))[:1] or [CANNOT_OTHER])[0]
-    if act == CANNOT_OTHER and CANNOT_PASSIVE_RE.match(after):  # "the ask could not be answered": a thing's state, no act
-        return None
-    return act, window
+    act = _window_act(window, before + " " + after)
+    return (act, window) if act else None
 
 
 def cannot_lines(text):
-    """(sentence, act, window) for each phrase of the reply's prose that claims an act cannot be done. The text is read a
-    sentence at a time: a sentence that ends in `?` asks and claims nothing, one that starts with Unvetted: (the past-ruling
-    guard's form) is not read, and neither is a line that starts with it or a Why yours line (the hand-off guard's). Every phrase of a
-    sentence is judged."""
+    """(sentence, act, window) for each phrase of the reply's prose that claims a table act cannot be done. The text is
+    read a sentence at a time: a sentence that ends in `?` asks and claims nothing, one that starts with Unvetted: (the
+    past-ruling guard's form) is not read, and neither is a line that starts with it or a Why yours line (the hand-off
+    guard's). Every phrase of a sentence is judged."""
     if not CANNOT_RE.search(text):
         return []
     found, hand_off = [], None
@@ -1671,29 +1695,46 @@ def _pulls_act(token):
     return "" if not hit else "pr-merge" if hit.group(2) else "pr-edit" if hit.group(1) else "pr-open"
 
 
-def _segment_acts(segment):
-    """The acts one shell segment is a route of: gh pr and gh api, git push and merge, curl to the pulls API."""
-    acts = set()
-    rest = guard.gh_call_of(segment)
-    if rest is not None and rest[:1] == ["pr"] and rest[1:2]:
-        acts.add(CANNOT_GH_PR_ACTS.get(rest[1], ""))
-    elif rest is not None and rest[:1] == ["api"]:
-        acts.update(_pulls_act(token) for token in rest[1:])
-    for subcommand, _ in guard.git_calls(segment):
-        if subcommand == "push":
-            acts.add("push")
-        elif subcommand == "merge":
-            acts.add("pr-merge")
+def _segment_tries(segment):
+    """{(act, key)} for the routes one shell segment is a try of: gh (every gh call reaches GitHub; gh pr and gh api
+    name table acts), git push, merge, fetch and ls-remote, and curl, wget or httpie to github.com. The key is the
+    program, its verb and the target the call names (a PR number, a branch or a URL), so a later success cancels only
+    a failure of the same call. A segment with --dry-run is no try."""
     tokens = guard.segment_tokens(segment) or segment.split()
-    if any(os.path.basename(t) == "curl" for t in tokens):
-        acts.update(_pulls_act(t.split("api.github.com", 1)[1]) for t in tokens if "api.github.com" in t)
-    acts.discard("")
-    return acts
+    if "--dry-run" in tokens:
+        return set()
+    tries = set()
+    rest = guard.gh_call_of(segment)
+    if rest is not None:
+        pr = rest[:1] == ["pr"]
+        key = ("gh " + " ".join(rest[:2] if pr else rest[:1]), " ".join(rest[2:3] if pr else rest[1:2]))
+        tries.add((GITHUB_REACH, key))
+        if pr and rest[1:2]:
+            tries.add((CANNOT_GH_PR_ACTS.get(rest[1], ""), key))
+        elif rest[:1] == ["api"]:
+            tries.update((_pulls_act(token), key) for token in rest[1:])
+    for subcommand, args in guard.git_calls(segment):
+        key = ("git " + subcommand, " ".join(a for a in args if not a.startswith("-")))
+        if subcommand in CANNOT_GIT_REACH:
+            tries.add((GITHUB_REACH, key))
+        if subcommand == "push":
+            tries.add(("push", key))
+        elif subcommand == "merge":
+            tries.add(("pr-merge", key))
+    if any(os.path.basename(t) in CANNOT_HTTP_TOOLS for t in tokens):
+        for token in (t for t in tokens if "github.com" in t):
+            tries.add((GITHUB_REACH, ("http", token)))
+            if "api.github.com" in token:
+                tries.add((_pulls_act(token.split("api.github.com", 1)[1]), ("http", token)))
+    return {(act, key) for act, key in tries if act}
 
 
 def _text_acts(text):
-    """The acts whose routes a text names: a route tool, `gh pr <verb>`, `git push` or `git merge`."""
+    """The acts whose routes a text names: a route tool, `gh pr <verb>`, `git push` or `git merge`. A GitHub MCP tool
+    name is also github-reach."""
     acts = {act for tool, act in CANNOT_TOOL_ACTS.items() if tool in text}
+    if "mcp__github__" in text:
+        acts.add(GITHUB_REACH)
     for hit in CANNOT_TEXT_ROUTE_RE.finditer(text):
         acts.add(CANNOT_GH_PR_ACTS[hit.group(1)] if hit.group(1) else "push" if hit.group(2) == "push" else "pr-merge")
     return acts
@@ -1703,42 +1744,39 @@ def _is_relay(use):
     return use.get("name") in SPAWN_TOOLS or use.get("name") in SEND_TOOLS
 
 
-def _call_acts(use, text):
-    """The acts one tool call is a try of. A shell call is read by its command; a relay (an agent spawn or a send) by the
-    route its result text names; any other tool by its name."""
+def _tool_acts(name):
+    """The acts a tool name is a route of: its table act, and github-reach for every GitHub MCP tool."""
+    acts = {CANNOT_TOOL_ACTS[name]} if name in CANNOT_TOOL_ACTS else set()
+    if isinstance(name, str) and name.startswith("mcp__github__"):
+        acts.add(GITHUB_REACH)
+    return acts
+
+
+def _call_tries(use, text):
+    """{(act, key)} for one tool call. A shell call is read a segment at a time; a relay (an agent spawn or a send) by the
+    route its result text names; any other tool by its name, keyed by the target its input names."""
     name = use.get("name")
+    given = use.get("input") if isinstance(use.get("input"), dict) else {}
     if name == "Bash":
-        command = (use.get("input") or {}).get("command")
-        acts = set()
+        command = given.get("command")
+        tries = set()
         if isinstance(command, str):
             for segment in guard.split_segments(guard.strip_heredoc_bodies(command)):
-                acts |= _segment_acts(segment)
-        return acts
+                tries |= _segment_tries(segment)
+        return tries
     if _is_relay(use):
-        return _text_acts(text)
-    act = CANNOT_TOOL_ACTS.get(name)
-    return {act} if act else set()
-
-
-def _call_label(use):
-    """The call's tool name and the values of its input, the words a claim about "other" act may share."""
-    given = use.get("input")
-    values = " ".join(str(v) for v in given.values()) if isinstance(given, dict) else ""
-    return "%s %s" % (use.get("name"), values)
+        return {(act, ("relay", use.get("id"))) for act in _text_acts(text)}
+    target = next((str(given[f]) for f in CANNOT_TARGET_FIELDS if given.get(f) not in (None, "")), "")
+    return {(act, (name, target)) for act in _tool_acts(name)}
 
 
 def failed_tries(records, refused=()):
-    """{act: [call label, ...]} for each failed tool try in `records`, sidechains skipped. A call failed when its result has
-    is_error, an exit code above zero as a shell result reports it, or an HTTP 4xx or 5xx (CANNOT_FAIL_RE). A call lands
-    under each act it is a route of, and every failed call also lands under CANNOT_OTHER. A later call of the same act
-    that did not fail cancels the earlier failures of that act (a relay's text is no call of its own, so it cancels
-    nothing). A tool in `refused` (the classifier's refusals file) counts as a failed try."""
+    """{act: {key, ...}} for each failed tool try in `records`, sidechains skipped. A call failed when its result has
+    is_error, an exit code above zero as a shell result reports it, or an HTTP 4xx or 5xx (CANNOT_FAIL_RE). A later call
+    that did not fail cancels the earlier failures of the same act and key (the same program, verb and target); a relay's
+    text is no call of its own, so it cancels nothing. A tool in `refused` (the classifier's refusals file) counts as a
+    failed try."""
     uses, tries = {}, {}
-
-    def add(acts, label):
-        for act in acts | {CANNOT_OTHER}:
-            tries.setdefault(act, []).append(label)
-
     for rec in records:
         if rec.get("isSidechain"):
             continue
@@ -1750,14 +1788,16 @@ def failed_tries(records, refused=()):
             if use is None:
                 continue
             text = _result_text(result.get("content"))
-            acts = _call_acts(use, text)
+            found = _call_tries(use, text)
             if result.get("is_error") is True or CANNOT_FAIL_RE.search(text):
-                add(acts, _call_label(use))
+                for act, key in found:
+                    tries.setdefault(act, set()).add(key)
             elif not _is_relay(use):
-                for act in acts:
-                    tries.pop(act, None)
+                for act, key in found:
+                    tries.get(act, set()).discard(key)
     for tool in refused:
-        add({CANNOT_TOOL_ACTS[tool]} if tool in CANNOT_TOOL_ACTS else set(), "refused " + tool)
+        for act in _tool_acts(tool):
+            tries.setdefault(act, set()).add(("refused", tool))
     return tries
 
 
@@ -1781,19 +1821,9 @@ def _cited(line, refused):
     return bool(ids) and _route_verdict(ids)[0] == "ok"
 
 
-def _tried(tries, act, window):
-    """True when `tries` holds a failed try that backs a claim of `act`. A table act is backed by a failed try of its own
-    route. An act outside the table is backed by a failed call whose name or input shares a content word with the claim's
-    words (a claim with no content word is backed by any failed call: nothing in it can be matched)."""
-    if act != CANNOT_OTHER:
-        return bool(tries.get(act))
-    wanted = _content_words(window)
-    return any(not wanted or wanted & _content_words(label) for label in tries.get(CANNOT_OTHER, ()))
-
-
 def cannot_problem(records, text, refused=()):
-    """The refusal for reply sentences that claim an act cannot be done, else ''. `records` are those after the last human
-    message. A sentence passes when a failed try of its act sits in them (failed_tries, _tried) or it carries a cite
+    """The refusal for reply sentences that claim a table act cannot be done, else ''. `records` are those after the last
+    human message. A sentence passes when a failed try of its act sits in them (failed_tries) or it carries a cite
     (_cited), and it names its check (CANNOT_CHECK_RE). A sentence with no try is listed under the no-try reason, one with
     a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target)."""
     claims = cannot_lines(text)
@@ -1807,8 +1837,8 @@ def cannot_problem(records, text, refused=()):
         return ""
     tries = failed_tries(records, refused)
     no_try, no_check = [], []
-    for sentence, act, window in claims:
-        if not _tried(tries, act, window) and not _cited(sentence, refused):
+    for sentence, act, _ in claims:
+        if not tries.get(act) and not _cited(sentence, refused):
             if sentence not in no_try:
                 no_try.append(sentence)
         elif not CANNOT_CHECK_RE.search(sentence) and sentence not in no_check:

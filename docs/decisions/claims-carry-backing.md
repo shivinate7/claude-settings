@@ -14,7 +14,7 @@ Code spans, 2026-11-06 12:28 CST, process-only: a code span used as a claim's su
 
 Part (v), the owner hand-off check. Coordinator agreed 2026-11-06 12:00 and 12:21 CST, process-only.
 
-- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow (read lint/report_guard.py:1486-1495).
+- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow (read lint/report_guard.py:1485-1494).
 - (b) `hooks/reply_judge.py` (the reply judge) judges the hand-off's cite against the cited route row and the act's alternates. When the cited id has no row on this surface, it reads the act from the other surface's row and carries neither that row nor its alternates (read hooks/reply_judge.py:146-152; read hooks/reply_judge.py:174-176).
 
 Lane ruling, 2026-11-06 12:34 CST, process-only: layer (a) checks only "Why yours" lines. A route cite passes only when the row's outcome is refused or asks. A row whose outcome is works refuses the cite. An unknown outcome reads UNKNOWN.
@@ -31,13 +31,23 @@ Part (vi), the cannot-claim check. Lane ruling, 2026-11-07 22:37 CST, process-on
 
 - The mistake. At 21:47 CST on 2026-11-07 a coordinator reported that it could not open a pull request. Its only evidence was one notice that the GitHub MCP server failed to connect. A notice is a system record, not a tool call. The act had no try. `mcp__github__create_pull_request` then worked on its first call.
 - The harm. The owner was told to do an act the session could do. He then spent time on a step that needed none of his.
-- What the check reads. At Stop, `cannot_problem` in `lint/report_guard.py` reads the reply a sentence at a time. A sentence is a claim when it holds one of these phrases: cannot, could not, unable to, no way to, not able to, was not able to, will not be able to. It must also name an act within six words, in the same clause. A phrase inside a hyphenated name, a code span or quotes is no phrase. It reads the turn after the last human message.
+- The phrases. cannot, can not and unable to. could not. no way to, no way I can and no way we can. not able to, was not able to and will not be able to. have not been able to and has not been able to. The n't form of each counts too. A phrase inside a hyphenated name, a code span or quotes is no phrase.
+- What the check reads. At Stop, `cannot_problem` in `lint/report_guard.py` reads the reply a sentence at a time. It reads the turn after the last human message.
+- The act table. A sentence is a claim only when the verb right after the phrase names a table act. The acts are pr-open, pr-merge, push, pr-edit and github-reach. github-reach is reach, use, access or connect to, followed by GitHub, the GitHub API, the GitHub MCP server or tools, gh, or api.github.com. A later noun names no act: "I cannot see the merge commit" is no claim. An act outside the table is no claim.
+- The subject. The words just before the phrase must be I, we, the cloud, the cloud session, this session, here, or there is. The phrase may also open its clause. Any other subject is a third party: it, the guard, the lane, the session, a builder, a draft PR. A passive verb whose clause says from here, from the cloud or from this session is a claim whatever its subject: "That PR cannot be merged from here."
 - When a claim passes. The turn holds a failed try of the same act. Or the sentence carries a hand-off cite: a route row that says refused or asks, a dated `(measured ...)`, or a tool the classifier refused. The sentence must also name its check: a backtick span, an MCP tool name, or a word such as returned or refused.
-- What a try is. A tool call whose result has an error flag, an exit code above zero, or an HTTP 4xx or 5xx. A loose word such as refused in the output of a call that worked is no failure. A later call of the same act that did not fail cancels the earlier failure. A relayed agent result counts when its text names the route. For an act outside the table, the failed call must share a content word with the claim.
-- What it skips. A sentence that ends in a question mark. A Why yours line, which the hand-off check reads. A line or sentence that starts with Unvetted:, the form of the past-ruling check. Quoted or coded text. A phrase with another party as subject. A conditional or negator since the last comma, but or clause break. A dependency (until, before). A clause that names a rule, ruling, decision or grant; another clause of the sentence is still read. A passive claim about an act outside the table, such as "could not be answered".
-- What it cannot see. A claim outside the phrase list, such as "only the owner can" or "it is impossible". For an act outside the table, whether the failure was a real try of that act. A try before the last human message, or in a sidechain, unless a cite backs the line. A failure with no error flag, no exit code and no HTTP status in its text. A subject named in an earlier sentence. A shell command that chains routes counts as a try of each route it holds.
+- What a try is. A tool call whose result has an error flag, an exit code above zero, or an HTTP 4xx or 5xx. A loose word such as refused in the output of a call that worked is no failure. A relayed agent result counts when its text names the route. A github-reach try is any `mcp__github__` tool, any gh call, curl, wget or httpie to github.com, or git fetch, push or ls-remote.
+- What cancels a try. A later call that works cancels an earlier failure only for the same act, program, verb and target. The target is the PR number, branch or URL the call names. A call with `--dry-run` never counts and never cancels.
+- What it skips. A sentence that ends in a question mark. A Why yours line, which the hand-off check reads. A line or sentence that starts with Unvetted:, the form of the past-ruling check. Quoted or coded text. A conditional or negator since the last comma, but or clause break. A dependency (until, before). A sentence that names a rule, ruling, decision or grant, such as "Rule: …", "Per the decision, …" or "Decision: x (…)". A semicolon ends that sentence, so a claim after it is still read.
+- What it cannot see. A claim of an act outside the table. A claim outside the phrase list, such as "only the owner can" or "it is impossible". A verb after a word the check does not skip, such as "I cannot get the PR opened". A subject named in an earlier sentence, or left out after and with no comma: "I tried and could not push" is no claim. A try before the last human message, or in a sidechain, unless a cite backs the line. A failure with no error flag, no exit code and no HTTP status in its text. A shell command that chains routes counts as a try of each route it holds.
 - Refuse once. The block lists the lines, and its remedy names no act (rule `git-remedy-never-names-target`). The rewrite that follows runs the report checks only, so the claim is not refused a second time.
 - Cost. A regex over the reply. On a claim line, one pass over the transcript this hook already holds, and one read of the refusals file. No file is written, and no timer or log runs.
+
+Lane ruling, 2026-11-07, process-only (review round 1, item 7): it, check, guard and hook are third party. "this session" is first person. "the session" is third party.
+
+Lane ruling, 2026-11-07, process-only (review round 1, item 11): the rule skip reads the words rule, ruling, decision and grant.
+
+Lane ruling, 2026-11-07 23:50 CST, process-only: only a table act is a claim. Measured on 400 recent main commit messages: a check of other acts flagged 12 of 12 phrase hits, and none was a hand-off claim (decision `guard-that-cries-wolf-is-spent`).
 
 ## Incident
 
@@ -108,9 +118,9 @@ No daemon and no timer.
 Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
-- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1350-1368).
-- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:1794-1817; read lint/report_guard.py:2306-2311).
-- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1486-1495; read lint/report_guard.py:2252).
+- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1349-1367).
+- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:1824-1847; read lint/report_guard.py:2336-2341).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1485-1494; read lint/report_guard.py:2282).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:759-764).
 - The merge's model judge, report-only (see Model judge at merge).
