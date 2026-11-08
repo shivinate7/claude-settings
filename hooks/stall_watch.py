@@ -528,11 +528,16 @@ def agent_transcripts(session, agent, output):
     return paths
 
 
+OPEN_CALL_CAP = 900  # seconds: Bash's 600 s maximum plus a margin; an older open foreground call is stuck
+
+
 def open_call(path, size):
-    """True when any tool_use in the read window has no tool_result yet: the agent is in
-    one long call, not stalled. Reads only the end of the file: TAIL_BYTES, doubled until the window
-    holds a whole last record (the first line of a window that starts mid-file is cut and dropped).
-    An empty file, or one with every tool_use answered, is not an open call."""
+    """The newest tool_use in the read window with no tool_result yet, as (tool name, epoch seconds of its
+    assistant record or None, run_in_background is true), or None when there is none: the agent is in one
+    call, not stalled. Newest is by timestamp; when any open call has no readable timestamp the time is None.
+    Reads only the end of the file: TAIL_BYTES, doubled until the window holds a whole last record (the
+    first line of a window that starts mid-file is cut and dropped). An empty file, or one with every
+    tool_use answered, has no open call."""
     window = TAIL_BYTES
     with open(path, "rb") as f:
         while True:
@@ -545,7 +550,7 @@ def open_call(path, size):
             if lines or start == 0 or window >= TAIL_MAX:
                 break
             window *= 2
-    pending = set()
+    pending = {}
     for line in lines:
         try:
             rec = json.loads(line)
@@ -556,12 +561,17 @@ def open_call(path, size):
                 if not isinstance(b, dict):
                     continue
                 if rec.get("type") == "assistant" and b.get("type") == "tool_use":
-                    pending.add(b.get("id"))
+                    given = b.get("input")
+                    pending[b.get("id")] = (b.get("name"), parse_time(rec.get("timestamp")),
+                                            isinstance(given, dict) and given.get("run_in_background") is True)
                 elif rec.get("type") == "user" and b.get("type") == "tool_result":
-                    pending.discard(b.get("tool_use_id"))
+                    pending.pop(b.get("tool_use_id"), None)
         except Exception:  # a bad or half-written line is skipped
             continue
-    return bool(pending)
+    calls = list(pending.values())
+    if not calls:
+        return None
+    return next((c for c in calls if c[1] is None), None) or max(calls, key=lambda c: c[1])
 
 
 def stop():
@@ -596,15 +606,20 @@ def stop():
                     job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
                 continue
             idle = now - st.st_mtime
-            if agent:  # a transcript has no named logs; one long tool call is not a stall
-                if idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
+            if agent:  # a transcript has no named logs
+                if idle >= quiet:
                     try:
-                        busy = open_call(real, st.st_size)
+                        latest = open_call(real, st.st_size)
                     except OSError:
-                        busy = False
-                    if not busy:
-                        rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
-                            job, idle, real, until, AGENT_REMEDY))
+                        latest = None
+                    if latest is None or latest[2]:  # no open call, or one started in the background: quiet
+                        if not (prev_stop is not None and now - idle + quiet <= prev_stop):
+                            rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
+                                job, idle, real, until, AGENT_REMEDY))
+                    elif latest[1] is not None and now - latest[1] >= OPEN_CALL_CAP:
+                        if not (prev_stop is not None and latest[1] + OPEN_CALL_CAP <= prev_stop):
+                            rows.append("%s: background agent, stuck in one tool call (%s) for %ds: %s%s %s" % (
+                                job, latest[0], now - latest[1], real, until, AGENT_REMEDY))
                 continue
             for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
                 if mark:  # a named log the job still writes keeps it off the list
