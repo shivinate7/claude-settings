@@ -32,6 +32,30 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # The label of an integration pull request: the merge ledger and the ready guard read it (`merge --lane-lint <pr> --integration` adds it).
 BATCH_LABEL = "batch"
 
+# The ledger's and the idle-lane list's summary lines, and the Backlog line of a runner's or coordinator's report. One home:
+# merge/merge.py prints them, lint/report_guard.py reads them back, and skills/roadmap/build.py names the row (rule
+# reports-backlog-counts). The row label of the lanes finished and not archived:
+IDLE_LANES_LINE = "lanes to archive"
+# The three Backlog fields, in report order: PRs reviewed and waiting past one batch cycle, open PRs with no next act, lanes to archive.
+BACKLOG_FIELDS = ("reviewed past one batch cycle", "no next act", IDLE_LANES_LINE)
+REVIEWED_WAIT_LABEL = "longest wait since a done record"
+
+
+def reviewed_summary(wait: int, none: int, past: int) -> str:
+    """The last line of `merge --reviewed`: the longest wait since a done record in hours, the count with no next act, then the count past one batch cycle."""
+    return f"{REVIEWED_WAIT_LABEL}: {wait}h; {BACKLOG_FIELDS[1]}: {none}; {BACKLOG_FIELDS[0]}: {past}"
+
+
+def idle_lanes_summary(count: int) -> str:
+    """The summary line of `merge --idle-lanes`, up to its first sentence."""
+    return f"merge: {count} {IDLE_LANES_LINE}."
+
+
+# Each reads back the line its writer above prints, built from the same labels, so the pattern follows the writer and never copies it.
+REVIEWED_SUMMARY_RE = re.compile(
+    "^%s: (\\d+)h; %s: (\\d+); %s: (\\d+)\\s*$" % tuple(re.escape(x) for x in (REVIEWED_WAIT_LABEL, BACKLOG_FIELDS[1], BACKLOG_FIELDS[0])), re.M)
+IDLE_LANES_SUMMARY_RE = re.compile("^merge: (\\d+) %s\\.(?:\\s|$)" % re.escape(IDLE_LANES_LINE), re.M)
+
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"

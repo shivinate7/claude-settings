@@ -146,8 +146,8 @@ merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MO
 merge --reviewed        the ledger: one line per open PR with its one next act (batch, batch run, lane round n, waits on <id>, blocked on #N,
                         or NO NEXT ACT) and its age in hours, read from GitHub alone. A draft with no record reads `lane round 1`; a PR
                         with the `batch` label reads `batch run`. When main's latest run is red, each batch line adds `held by main red <age>`.
-                        RED past the age limit or with no next act. The last line: the longest wait since a done record, and the count
-                        with no next act. Exit 0 nothing red, 1 any red, 2 on a failed read (a malformed field too).
+                        RED past the age limit or with no next act. The last line gives three numbers: the longest wait since a done record, the PRs with no next act, and the
+                        batch lines past one batch cycle. Exit 0 nothing red, 1 any red, 2 on a failed read (a malformed field too).
 merge --lane-lint <pr> --integration   the lane lint; after a PASS it adds the `batch` label to the integration PR (one POST).
 merge --dev ...         run the checkout's own tree, not origin main
 ```

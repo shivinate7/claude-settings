@@ -29,7 +29,8 @@
                           `blocked on #N` (its base is the head branch of another PR of this repo; a fork's head never counts),
                           `lane round n` with n 1 (a draft with no record; a failed fix check reads n 1 too), else `NO NEXT ACT`. A line past its limit
                           (merge.PR_STATE_AGE_HOURS) or with no next act is RED. When the base's latest run is red, each batch line adds
-                          `held by main red <age>`. The last line: the longest wait since a done record, and the count with no next act.
+                          `held by main red <age>`. The last line: the longest wait since a done record, the count with no next act, and the count of batch
+                          lines past one batch cycle (the report's Backlog counts).
                           Exit 0 nothing red, 1 any red, 2 on a failed read, with no list printed. Cost: the open-pull list, the repo's
                           comments since the oldest open PR (one read), one issue-events read per held or batch-labelled PR, one read of the base's latest run.
                           No GraphQL, no per-head check read, no timer, file or log. A malformed field from GitHub also exits 2.
@@ -79,7 +80,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
-from shared_names import BATCH_LABEL  # noqa: E402  the one home of the integration pull request's label (hooks/shared_names.py)
+from shared_names import BATCH_LABEL, idle_lanes_summary, reviewed_summary  # noqa: E402  the one home of the integration pull request's label and of the two summary lines (hooks/shared_names.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -3269,14 +3270,13 @@ def _reviewed_lines(h, root):
     event (a hold, batch run), or the pull request's opening (the rest, a draft's first lane round too). The batch line carries no CI state of its
     own: merge reads CI when it merges (design of 12:33 CST Nov 7, record pr-ledger). RED when the act is NO NEXT ACT, the age is past its PR_STATE_AGE_HOURS limit, or, for blocked (no limit of its own), the pull request it
     waits on is red. When the base's latest run is red, each batch line adds `held by main red <age>`; an unreadable run is a Stop. The last line
-    gives the longest wait since a done record and the count with no next act. `red` is True when any line is RED.
+    gives the longest wait since a done record, the count with no next act, and the count of batch lines past one batch cycle (shared_names.reviewed_summary). `red` is True when any line is RED.
     Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
     request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base (its jobs too, only when its latest run
     did not succeed: host.base_state). No GraphQL, no head or check read, no timer, file or log."""
     pulls = h.pages("pulls", fields={"state": "open"})
-    summary = lambda wait, none: f"longest wait since a done record: {wait}h; no next act: {none}"
     if not pulls:
-        return ["no open pull requests.", summary(0, 0)], False
+        return ["no open pull requests.", reviewed_summary(0, 0, 0)], False
     now = epoch_of(h.now())
     hours = lambda since: int(max(0.0, now - since) // 3600)
     records, plain = {}, {}  # PR number -> [(time, body)], oldest first: its review records, and all its comments
@@ -3349,7 +3349,8 @@ def _reviewed_lines(h, root):
         reds += red
         lines.append(f"#{n} {branch} {act} {hours(since)}h" + (held if kind == "batch" else "") + (" RED" if red else ""))
     done = [hours(a[3]) for a in acts.values() if a[2] == "batch"]
-    lines.append(summary(max(done, default=0), sum(a[2] is None for a in acts.values())))
+    past = sum(a[2] == "batch" and red_of(n) for n, a in acts.items())  # a done record that waited past one batch cycle; a batch run is no such line
+    lines.append(reviewed_summary(max(done, default=0), sum(a[2] is None for a in acts.values()), past))
     return lines, bool(reds)
 
 def head_arg(text):
@@ -3441,7 +3442,7 @@ def idle_lanes(live):
     # An unknown entry with no lane beside it is the whole list unread: no summary, so it never reads as an empty list.
     unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
-        entries = [*entries, f"merge: {len(lanes)} lanes to archive. Run get_session on each alone, then archive it."]
+        entries = [*entries, idle_lanes_summary(len(lanes)) + " Run get_session on each alone, then archive it."]
     say(*entries)
     return 1 if unread else 0
 

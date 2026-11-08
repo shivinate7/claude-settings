@@ -534,6 +534,13 @@
         "test": "lint/test_report_guard.py::UnstartedItemsTests.test_un_red_builder_turn_without_line_blocks"
       }
     },
+    "reports-backlog-counts": {
+      "mechanism": {
+        "kind": "check",
+        "ref": "lint/report_guard.py",
+        "test": "lint/test_report_guard_backlog.py::BacklogCountTests.test_bk_red_a_count_that_differs_from_its_read_is_refused"
+      }
+    },
     "reports-batch-pace-numbers": {
       "mechanism": {
         "kind": "unmechanized",

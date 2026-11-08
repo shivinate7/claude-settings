@@ -148,7 +148,6 @@ IDLE_BUCKETS = SESSION_BUCKETS[2:4]
 ITEM_DONE_STATUSES = ("closed",)
 # A live file with no items list: the open items are unknown, so the lanes to archive read unknown.
 ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
-IDLE_LANES_LINE = "lanes to archive"
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
 FUTURE_MINUTES = 5
 # `ready` reads as todo.
@@ -186,7 +185,7 @@ sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names and lane head refs, shared with the guard (hooks/shared_names.py)
-    BUILD_TAG, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names,
+    BUILD_TAG, IDLE_LANES_LINE, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names,
 )
 
 

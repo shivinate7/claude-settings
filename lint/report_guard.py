@@ -110,6 +110,20 @@ _shown_flags, and a turn with no flag and no successful call reads no rows file.
 state/ per session (janitor/session_end_sweep.py runs the branch and worktree sweep only), and a file holds a few
 short keys, so it stays as the refusals and reply-judge counter files do.
 
+Backlog counts (rule `reports-backlog-counts`): a session whose own newest get_session record carries cs-build:coordinator
+or cs-build:batch-runner (hooks/guard_merge.py _own_tier_proved) owes a `Backlog:` item in the report blockquote with three
+fields, each a whole number or `unknown`: `Backlog: reviewed past one batch cycle <N>; no next act <N>; lanes to archive <N>`
+(labels: hooks/shared_names.py BACKLOG_FIELDS). An item starts where a carry label may: at line start, after a report label,
+or after "; " or ". ". It holds on every Stop whose reply has the report shape, landed or not, and in the rewrite after a
+missing-report block. A lane, a triage session, an untagged session and a session with no own record owe nothing. Each number
+must equal the newest read in the transcript after the newest `compact_boundary`: counts one and two from the newest
+`merge --reviewed` summary line, count three from the newest `merge --idle-lanes` summary line (found by the output line;
+shared_names holds both writers and patterns). A run through verdict is read from the log its FAIL line names; a PASS verdict
+of `merge --reviewed` has no RED line, so both its counts read 0; a PASS verdict of `merge --idle-lanes` names no log, so it
+reads unknown. No read, or a failed one, means `unknown`. `unknown` always passes. A count blocks once: the correction after the
+block is not checked. Cost: no process and no network call. The transcript is already read; only for a tagged session with a
+report shape: the own-record read (the guard_merge import) and at most two verdict log reads. No file written, no timer, no log.
+
 Hand-off cite (rule output-never-hand-off-doable-step): a "Why yours:" line, in prose above the report or in the Input
 Needed or Next item (plain, behind a list marker, or in bold), that gives a capability reason (can't, cannot, refuse,
 refused, unable to, denied, forbidden, no access, not allowed, not permitted, unavailable, 403, blocked, not available)
@@ -191,8 +205,9 @@ LANDING_TOOLS = {
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 # A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
-# "**Recovered:**" or "**Handoff gave:**" is a compaction-carry line below; none is a report label.
-LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave))(.+?)\*\*")
+# "**Recovered:**" or "**Handoff gave:**" is a compaction-carry line below, and a bold "**Backlog:**" is the Backlog line;
+# none is a report label.
+LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave|Backlog))(.+?)\*\*")
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
@@ -1553,6 +1568,9 @@ def rewrite_problems(hook):
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
+        backlog = backlog_problem(hook, records, text)
+        if backlog:
+            reasons.append(backlog)
         return reasons
     except Exception:
         return []
@@ -1867,6 +1885,107 @@ def triage_hold(hook, records, active):
         return ""
 
 
+BACKLOG_TIERS = ("coordinator",)  # plus guard_merge.ROLE_TIERS, read when the check runs
+BACKLOG_START = re.compile(CARRY_START + r"backlog(?:\*\*)?:[ \t]*", re.I | re.M)
+BACKLOG_NUMBER = r"(\d+|unknown)"
+
+
+def _backlog_item_re():
+    """One Backlog item: the three fields of shared_names.BACKLOG_FIELDS, in order, each a whole number or `unknown`."""
+    fields = r"[ \t]*;[ \t]*".join(re.escape(label) + r"[ \t]*:?[ \t]*" + BACKLOG_NUMBER for label in _names().BACKLOG_FIELDS)
+    return re.compile(fields, re.I)
+
+
+def _names():
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import shared_names
+    return shared_names
+
+
+def _backlog_item(block):
+    """(found, counts) for the newest Backlog item of `block`: found is False when no item starts anywhere; counts is a list of
+    three `int` or `None` (for `unknown`), or None when the item is malformed."""
+    starts = list(BACKLOG_START.finditer(block))
+    if not starts:
+        return False, None
+    m = _backlog_item_re().match(block, starts[-1].end())
+    if not m:
+        return True, None
+    return True, [None if v.lower() == "unknown" else int(v) for v in m.groups()]
+
+
+MERGE_CALL = r"(?:^|[;&|(]\s*)(?:\w+=\S+\s+)*(?:(?:\S*/)?verdict\s+)?(?:python[\d.]*\s+(?:\S*/)?merge\.py|(?:\S*/)?merge)\s+"
+REVIEWED_CALL_RE = re.compile(MERGE_CALL + r"--reviewed(?![\w-])", re.M)
+IDLE_CALL_RE = re.compile(MERGE_CALL + r"--idle-lanes(?![\w-])", re.M)
+VERDICT_PASS_RE = re.compile(r"^PASS \S", re.M)
+
+
+def backlog_reads(records):
+    """(reviewed, idle) read from the transcript after its newest compact_boundary. `reviewed` is (past, none) and `idle` is the
+    lane count; each is None when the newest run of its command gave no number (a failed read, an unreadable log, an idle run
+    through a PASS verdict) or when no run is in the window. A run counts by its output line, or, when it printed none, by
+    its command. Cost: no process; one log read for each run through verdict that failed."""
+    names = _names()
+    start = 0
+    for i, rec in enumerate(records):
+        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+            start = i + 1
+    reviewed = idle = None
+    commands = {}
+    for rec in records[start:]:
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            inp = use.get("input")
+            if use.get("name") == "Bash" and isinstance(inp, dict):
+                commands[use.get("id")] = str(inp.get("command", ""))
+        for result in tool_results(rec):
+            shown = _result_text(result.get("content"))
+            command = commands.get(result.get("tool_use_id"), "")
+            logged = VERDICT_LOG_RE.search(shown)
+            body = (_verdict_log_text(logged.group(1)) or "") if logged else shown  # a missing log reads as no lines
+            passed = bool(VERDICT_PASS_RE.search(shown)) and not logged
+            sums = names.REVIEWED_SUMMARY_RE.findall(body)
+            if sums:
+                reviewed = (int(sums[-1][2]), int(sums[-1][1]))
+            elif REVIEWED_CALL_RE.search(command):
+                reviewed = (0, 0) if passed else None  # a PASS ledger has no RED line: none past a cycle, none without a next act
+            lanes = names.IDLE_LANES_SUMMARY_RE.findall(body)
+            if lanes:
+                idle = int(lanes[-1])
+            elif IDLE_CALL_RE.search(command):
+                idle = None
+    return reviewed, idle
+
+
+def backlog_problem(hook, records, text):
+    """The Backlog check's refusal for a coordinator's or batch runner's report `text`, else ''. Fails open on any error."""
+    try:
+        if not report_shape_ok(text):
+            return ""
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import guard_merge
+        if not any(guard_merge._own_tier_proved(hook.get("transcript_path"), tier) for tier in BACKLOG_TIERS + guard_merge.ROLE_TIERS):
+            return ""
+        labels = _names().BACKLOG_FIELDS
+        form = "`Backlog: %s <N>; %s <N>; %s <N>`, each a whole number or `unknown`" % labels
+        found, counts = _backlog_item(block_text(text))
+        if not found:
+            return "Backlog guard: a coordinator's or batch runner's report must hold a Backlog line. Add %s, inside the report blockquote (rule reports-backlog-counts)." % form
+        if counts is None:
+            return "Backlog guard: the Backlog line is not %s (rule reports-backlog-counts)." % form
+        reviewed, idle = backlog_reads(records)
+        expected = [reviewed and reviewed[0], reviewed and reviewed[1], idle]
+        wrong = ["%s %d, but the newest read gives %s" % (label, got, "unknown" if want is None else want)
+                 for label, got, want in zip(labels, counts, expected) if got is not None and got != want]
+        if not wrong:
+            return ""
+        return "Backlog guard: %s. A count with no read behind it says `unknown` (rule reports-backlog-counts)." % "; ".join(wrong)
+    except Exception as exc:
+        print("backlog check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        return ""
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -1982,6 +2101,7 @@ def main():
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
+                pick.append(backlog_problem(hook, records, text))
         except Exception:
             pass
         try:
@@ -2039,6 +2159,9 @@ def main():
             reasons.append(recovered)
     except Exception:
         pass
+    backlog = backlog_problem(hook, records, text) if shape_ok else ""
+    if backlog:
+        reasons.append(backlog)
     cite = bare_cite(text)
     if cite:
         reasons.append(

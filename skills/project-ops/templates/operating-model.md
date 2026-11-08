@@ -48,7 +48,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   batches each PR whose review record is done, as `merge --reviewed` lists it at its wake. It merges the
   integration PR on green. It asks the owner for no merge. It prints the merge output on the
   terminal, never to a log only. It dispatches no deferred step. At each wake it runs `merge --reviewed`
-  and reports its two numbers: the longest wait since a done record, and the count of PRs with no next act.
+  and reports three counts on a `Backlog:` line: the PRs reviewed and waiting past one batch cycle, the PRs with no next act, and the lanes to archive (`merge --idle-lanes`). A count it did not read says `unknown`.
   Each RED line (past its age limit in `merge/merge.py` `PR_STATE_AGE_HOURS`, or with no next act) gets a next act or a hold in the same wake. A hold is a label (`held`, `parked` or `replaced`)
   and a `Waits on: debt:<slug>` or `Waits on: page:<item-id>` comment on the PR.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
@@ -73,7 +73,7 @@ The coordinator does not rotate. It writes its own handoffs and compacts in plac
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
-- At each wake, the coordinator runs `merge --reviewed`, reports its two numbers, and gives each RED line a next act or a hold, as the batch runner does.
+- At each wake, the coordinator runs `merge --reviewed`, reports the same `Backlog:` counts, and gives each RED line a next act or a hold, as the batch runner does.
 - At each wake, the coordinator reads each standing session's use from `get_session`:
   `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
   is no reading, and the use is unknown. No session reports its own tally (owner, 2026-11-02 15:40 CST).
