@@ -35,6 +35,9 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
+  In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
+  opens or builds each batch the output names in that wake. It runs each `--confirm` as a background command,
+  so one repo's CI wait never holds another repo's hand-offs.
   It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
   the PR ready, so the branch is final at ready (claude-settings
@@ -121,11 +124,11 @@ parent, or miss a message while busy.
   `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
-- A session that waits on CI sets a timed check-in on each wait, and again after each red job.
+- A session that waits on CI sets a one-time check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
-  It ends each turn that leaves work in flight with a timed check-in, so a lost wake costs one gap.
-- A check-in's message names the home of each list it tracks (a page collection, a roadmap ref, a git
+  A turn that ends waiting on a named event sets a one-time check-in for that event. A check-in's own turn sets none unless a new event arrived.
+- A check-in's message names the home of each list it reads (a page collection, a roadmap ref, a git
   ref or a GitHub query), never a copy.
 
 ## Filing
