@@ -95,8 +95,20 @@ PREFIX_BYPASSES = ("Red-run: mutant(A) (x) -> 1 failed on SHA",
 # A key that is not `Red-run:` at line start. Beside a valid line, each is a malformed Red-run line.
 CASE_VARIANT_KEYS = ("Red-Run: none (x)", "red-run: none", "Red-run : x")
 VALID_NONE = "Red-run: none: ok"
-# Prose that mentions the key mid-line. It is not a Red-run line, so it passes.
-PROSE_LINE = "Prose: the Red-run: none form is for re-points."
+# A key that reads like `Red-run:` but is not. Each body is a valid failed form, so the key is the only defect. Beside a
+# valid line, each is a malformed Red-run line and flags the commit.
+NEAR_MISS_KEYS = ("Red-runs: python3 x -> 1 failed on SHA",
+                  "Red run: python3 x -> 1 failed on SHA",
+                  "Red_run: python3 x -> 1 failed on SHA",
+                  "Redrun: python3 x -> 1 failed on SHA",
+                  "Red-run python3 x -> 1 failed on SHA")
+# Lines that are not a Red-run key, so each passes beside a valid line: prose that mentions the key mid-line, and a
+# word that only starts like the key.
+NOT_KEY_LINES = ("Prose: the Red-run: none form is for re-points.",
+                 "the red-run check reads it",
+                 "see Red-run docs",
+                 "Redress: x",
+                 "Reduce: y")
 # Real commands pass as the failed form. Each first word is an ordinary word, a path, or an environment assignment. An
 # upper-case assignment (`NAME=value`, quoted or not) is never refused, even when the name starts `MUTATE` or the value
 # holds a colon: the quoted form is a real command. A lower-case assignment is exempt from the colon refusal only, as
@@ -502,11 +514,24 @@ class CheckCase(Fixture):
                 self.assertFlagged(sha, "add widget tests", rel,
                                    why="a case-variant Red-run key beside a valid line must flag the commit: " + variant)
 
-    def test_red_run_mentioned_mid_line_passes(self):
-        """Prose that mentions the key mid-line is not a Red-run line. The control for the case-variant cases."""
-        self.base()
-        self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, red=[VALID_NONE, PROSE_LINE])
-        self.assertClean(why="prose that mentions red-run mid-line must not count as a Red-run line: " + PROSE_LINE)
+    def test_near_miss_key_beside_a_valid_line_is_flagged(self):
+        """A key that reads like `Red-run:` but is not is malformed. It flags the commit beside a valid line."""
+        for line in NEAR_MISS_KEYS:
+            with self.subTest(line=line):
+                self.base()
+                rel = self.new_test_path()
+                sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=filled([VALID_NONE, line], self.base_sha))
+                self.assertFlagged(sha, "add widget tests", rel,
+                                   why="a near-miss Red-run key beside a valid line must flag the commit: "
+                                       + filled([line], self.base_sha)[0])
+
+    def test_lines_that_are_not_the_key_pass(self):
+        """Prose that mentions the key mid-line, and a word that only starts like it, are not Red-run lines. The controls for the near-miss cases."""
+        for line in NOT_KEY_LINES:
+            with self.subTest(line=line):
+                self.base()
+                self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, red=[VALID_NONE, line])
+                self.assertClean(why="a line that is not a Red-run key must not count as one: " + line)
 
     def test_real_commands_with_ordinary_first_words_pass(self):
         """Real commands pass as the failed form, including ones whose first word is an ordinary word. The controls for the typo cases."""

@@ -14,9 +14,12 @@ records that run as a trailer on the commit that adds the test:
     Red-run: none: <reason>                         a change that adds no new claim, such as a re-pointed fixture
 
 A message passes only when it has at least one Red-run line and every Red-run line is valid: one malformed line fails the
-commit, even beside a valid one. A line counts as a Red-run line when its key reads `red-run` followed by optional spaces and a colon at line
-start, in any case (`Red-Run:`, `red-run:`, `Red-run :`); a key that is not exactly `Red-run:` is malformed. Prose that
-mentions red-run mid-line is not judged. The failed form judges the lead word of its command in two layers, so a
+commit, even beside a valid one. A line counts as a Red-run line, at line start and in any case, in two ways. First, a key that reads
+`red`, then any run of spaces, underscores or hyphens (none too), then `run` or `runs`, then optional spaces and a colon
+(`Red-Run:`, `Red-run :`, `Red-runs:`, `Red run:`, `Red_run:`, `Redrun:`). Second, the same key with no colon, only when the
+line also ends in `-> <N> failed on <sha>` (`Red-run python3 x -> 1 failed on abc1234`). A bare line-start "Red run" with no colon
+and no such tail is prose: eleven main messages carry valid trailers and begin a line that way. A key that is not exactly
+`Red-run:` is malformed. Prose that mentions red-run mid-line, and words such as `Redress:` or `Reduce:`, are not judged. The failed form judges the lead word of its command in two layers, so a
 typo is not read as a failed form. The lead word is the text after `Red-run:` with leading wrappers dropped (an
 open bracket, a quote, a backtick, `*`, `-` and spaces: `(mutant A)`, `"mutant A"`, `- mutant:`), then its first word.
 The check reads the label region of the line, not every word: a scan of the whole line would flip 26 accepted main
@@ -67,7 +70,11 @@ MUTANT_KEY = re.compile(r"^Red-run:\s*(?i:mutant)\s*:")  # routes a line to the 
 MUTANT = re.compile(r"^Red-run:\s*(?i:mutant)\s*: \s*\S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
 REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILINE)
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
-RED_KEY = re.compile(r"^red-run\s*:", re.IGNORECASE)  # a Red-run line in any case; only `Red-run:` exactly can be valid
+# A Red-run line is a near-miss key followed by a colon (`Red-runs:`, `Red run:`, `Red_run:`, `Redrun:`, any case, spaces
+# before the colon), or a key with no colon that also carries the failed form's tail. Only `Red-run:` exactly can be valid.
+# A bare line-start "Red run" with no colon is not a key: eleven main messages carry valid trailers and begin a line so.
+RED_KEY = re.compile(r"^red[\s_-]*runs?\s*:", re.IGNORECASE)
+RED_KEY_NO_COLON = re.compile(r"^red[\s_-]*runs?\b.* -> \d+ failed on [0-9a-f]{7,64}\s*$", re.IGNORECASE)
 # First words, besides the mutant-like ones (`mutant_like`), a failed-form command may not be. Each is a typo of the none
 # keyword. The failed pattern would accept it as a command that never ran. No real command is one of these words.
 REFUSED_NONE_WORDS = frozenset(("none", "non"))
@@ -171,7 +178,7 @@ def refused_word(line):
 
 def has_valid_trailer(message):
     """True when the message has a Red-run line and every Red-run line is valid. Pure: it reads no repo."""
-    lines = [line for line in message.splitlines() if RED_KEY.match(line)]
+    lines = [line for line in message.splitlines() if RED_KEY.match(line) or RED_KEY_NO_COLON.match(line)]
     return bool(lines) and all(valid_line(line) for line in lines)
 
 
