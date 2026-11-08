@@ -282,11 +282,19 @@ def _ask_scope(text):
     clause = [len(CLAUSE_MARK.findall(text, 0, m.start())) for m in matches]
 
     def _governs_rest(to, at):
-        # A model or stay word whose clause names the other roles and not this one governs those roles.
+        # A model, stay, keep, leave or `other` word whose clause names the other roles ("other roles on sonnet",
+        # "keep the rest") and no role of the ask governs those roles, not this one. `save the rest` and the other
+        # exclusion words stay out: they read as "except", so they still negate.
         lower = words[to].lower()
-        if lower not in MODEL_WORDS | STAY_WORDS or clause[to] == clause[at]:
+        if clause[to] == clause[at] or lower not in MODEL_WORDS | STAY_WORDS | KEEP_WORDS | LEAVE_WORDS | {"other"}:
             return False
-        return any(c == clause[to] and w.lower() in REST_WORDS for w, c in zip(words, clause))
+        same = [w.lower() for w, c in zip(words, clause) if c == clause[to]]
+        return any(w in REST_WORDS for w in same) and not any(opus_role(w) in ASK_ROLES for w in same)
+
+    def _manner(to):
+        # `but` that no role word follows in its clause starts a manner ("but keep it short"), not an exclusion.
+        return words[to].lower() == "but" and not any(
+            opus_role(w) in ASK_ROLES for w, c in zip(words[to + 1:], clause[to + 1:]) if c == clause[to])
 
     def _opus_after_roles(at):
         # `opus` within STAY_SPAN words after the plain list of role words that holds words[at].
@@ -304,7 +312,7 @@ def _ask_scope(text):
         span = range(first, min(len(words), at + 1 + NEGATION_SPAN))
         for to in span:
             lower = words[to].lower()
-            if to == at or _governs_rest(to, at):
+            if to == at or _governs_rest(to, at) or _manner(to):
                 continue
             if lower in NEGATIONS or EXCLUSION_STEM.fullmatch(lower):
                 return None

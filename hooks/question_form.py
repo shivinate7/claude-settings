@@ -197,8 +197,9 @@ CHANGE_AFTER = re.compile(r"\b(?:adds?|added|mov(?:es?|ed)|remov(?:es?|ed)"
 CHANGE_NEGATOR = re.compile(r"\b(?:not|never|nothing|none|no)\b|n['\u2019]t\b", re.I)
 CHANGE_CLAUSE_END = re.compile(r";|,|\b(?:and|but)\b", re.I)
 # A negator as the verb's object cancels it too: "changes nothing", "removes nothing", "drops no field". "no-op"
-# is a thing the verb acts on ("adds a no-op flag"), not a negator.
-CHANGE_NEGATED_OBJECT = re.compile(r"\s+(?:nothing|none|no)\b(?!-)", re.I)
+# is a thing the verb acts on ("adds a no-op flag"), not a negator. A colon may stand between them ("changes:
+# none"), and "not at all" after the verb negates it as well ("the header changes not at all").
+CHANGE_NEGATED_OBJECT = re.compile(r"(?:\s*:\s*|\s+)(?:nothing|none|no)\b(?!-)|\s+not\s+at\s+all\b", re.I)
 
 
 def _real_change(change, start) -> bool:

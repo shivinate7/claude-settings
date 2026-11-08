@@ -834,6 +834,13 @@ _STDIN_FILE = re.compile(r"(?<![<\d&])\d*<(?![<(&])[ \t]*[\"']?([^\s;&|<>()\"'`]
 _SUBSTITUTION = re.compile(r"\$\(|`|<\(")
 
 
+# A command that only reads or lists the file it is given, so a wrapper before it runs no file; and a Python
+# module (`-m`) that runs the files it is given as code.
+_READERS = frozenset("cat tac nl wc ls head tail less more grep egrep fgrep rg diff cmp file stat od xxd hexdump strings "
+                     "md5sum sha1sum sha256sum cksum sort uniq cut du touch chmod rm mv cp tee".split())
+_FILE_RUNNING_MODULES = frozenset("pytest py.test unittest runpy trace cProfile profile pdb doctest".split())
+
+
 def _runner(word) -> bool:
     return bool(_RUNNER(word.rsplit("/", 1)[-1]))
 
@@ -877,15 +884,24 @@ def _follows_runner(words, at, fed=False) -> bool:
     if runner is None:
         return False
     after_flag = False
-    for word in words[runner + 1:at]:
+    taker = _WRAPPER(words[runner].rsplit("/", 1)[-1]) or words[runner].rsplit("/", 1)[-1] == "exec"
+    for index in range(runner + 1, at):
+        word = words[index]
         if _FLAG(word):
             after_flag = word != "-m"
         elif _DURATION(word):
             after_flag = False
         elif after_flag:
             after_flag = False
+        elif taker:
+            # A wrapper's operand is the command it starts, and that command may take the file as a script
+            # (`nohup php f`, `timeout 30 npx ts-node f.ts`). Main counted every such file as run; only a command
+            # that reads its argument (`sudo cat f`) is let go, so an unknown command stays a run.
+            return word.rsplit("/", 1)[-1] not in _READERS
         else:
-            return False
+            # An interpreter's operand is its script, and the file is the script's argument (`python3 check.py f`),
+            # unless a module that runs the files it is given follows `-m` (`python3 -m pytest f`).
+            return words[index - 1] == "-m" and word.rsplit("/", 1)[-1] in _FILE_RUNNING_MODULES
     return True
 
 
