@@ -552,9 +552,9 @@ class CostPinTests(unittest.TestCase):
         # A lone apostrophe and a comment opener inside a span must not end the sentence or hide the count.
         text = self.decide("scan-marks.md",
                            "- **Cost:** it's read twice by the `//` pass.\n"
-                           "- **Cost:** it's read by the `#` pass, once a run.\n")
+                           "- **Cost:** it's read by the `#` pass, and it reads the list twice.\n")
         self.assert_found([count_row("scan-marks.md", text, "it's read twice"),
-                           count_row("scan-marks.md", text, "once a run.")], counts=True)
+                           count_row("scan-marks.md", text, "it reads the list twice.")], counts=True)
 
     def test_pin_is_the_nearest_span_not_any_span(self):
         # The nearest span to the count is `near`. A test that holds only the far span pins nothing here.
@@ -588,6 +588,30 @@ class CostPinTests(unittest.TestCase):
         # `at most` inside a code span is code, not a bound, so the count has no reader and is flagged.
         text = self.decide("span-bound.md", "- **Cost:** one `at most` read per call.\n")
         self.assert_found([count_row("span-bound.md", text, "- **Cost:**")], counts=True)
+
+    def test_leading_once_is_no_count_and_a_trailing_once_after_a_verb_is(self):
+        # A leading once is no claim even with a cost noun after it. The trailing form after a verb is still read.
+        text = self.decide("leading-once.md",
+                           "- **Cost:** `sed` once redirects the file.\n"
+                           "- **Cost:** it reads the list once.\n")
+        self.assert_found([count_row("leading-once.md", text, "it reads the list once.")], counts=True)
+
+    def test_line_reference_is_not_a_count(self):
+        # The digits of a line reference name a line, not a count, so no count word stands in the sentence.
+        text = self.decide("line-ref.md", "- **Cost:** reads stale_cites.py:1120 lines.\n" + CONTROL)
+        self.assert_found([count_row("line-ref.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_one_of_is_no_count(self):
+        # "one" before "of" is a pronoun, so the cost noun after it does not make a claim.
+        text = self.decide("one-of.md", "- **Cost:** one of its added lines is read.\n" + CONTROL)
+        self.assert_found([count_row("one-of.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_trailing_count_after_a_plain_noun_is_no_count(self):
+        # A plain noun before once is no verb of work, so the count is no claim. The verb form is still read.
+        text = self.decide("plain-noun.md",
+                           "- **Cost:** a mutating command or `sed` once redirects.\n"
+                           "- **Cost:** it writes the file twice.\n")
+        self.assert_found([count_row("plain-noun.md", text, "it writes the file twice.")], counts=True)
 
 
 class CorpusTests(unittest.TestCase):
