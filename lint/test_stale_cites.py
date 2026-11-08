@@ -1851,7 +1851,7 @@ class RouteClaimTests(StaleCase):
             ("```", False),
             ("The cloud cannot push to main, after the fence.", True),  # prose again after the closing fence
             ("- `The cloud cannot push to main.`", False),  # a code span holds the whole claim
-            ("- Use `cannot` and `cloud` only in code.", False),  # a verb in a span is a mention (lane ruling 12:47 CST)
+            ("- Use `cannot` and `cloud` only in code.", False),  # a verb in a span is a mention (lane ruling)
             ("- The cloud cannot push to main; see `hooks/guard.py`.", True),  # the words sit outside the span
             ("- Open a fence with `` ``` `` and the cloud cannot push to main.", True),  # no fence opens in a span
             ("- Open a comment with `<!--`. The cloud cannot push to main.", True),  # a comment opener in a span
@@ -1873,7 +1873,7 @@ class RouteClaimTests(StaleCase):
     def test_route_claim_is_silent_on_a_local_branch_because_local_alone_is_no_route_word(self):
         rows = [
             ("- A local branch cannot hold the record.", False),  # `local` alone names no route
-            ("- Local runs cannot push to main.", False),  # `local runs` is no route word (lane ruling 12:47 CST)
+            ("- Local runs cannot push to main.", False),  # `local runs` is no route word (lane ruling)
             ("- The cloud cannot hold the record.", True),  # the same verb with a route word fires
         ]
         rng, flagged = self.route_range(rows)
@@ -2032,11 +2032,10 @@ class RouteClaimTests(StaleCase):
         self.assert_route_claims(rng, flagged)
 
     def test_route_claim_read_or_test_backing_naming_a_file_absent_at_head_is_a_dead_backing(self):
-        """Class (d), a test re-pointed by a ruling. Coordinator ruling, 2026-11-08 04:03 CST (item 386): "a cite to a code
-        name missing there is red". Lane pick, 04:16 CST: a dead cite has one home, STALE010. Their home is decision
-        `record-cites-live-code` (claims about code cite live code names). Owner, 2026-11-01 16:30 CST, "make it a
-        standing thing that stale prose never makes it anymore", in decision `stale-cites-at-merge`. The node id is
-        that dead cite, so the exit is 1. The read backing names no code name, so it keeps only its STALE005 report."""
+        """Class (d), a test re-pointed by a ruling. Decision `record-cites-live-code` (claims about code cite live code
+        names): a cite to a code name missing there is red, so a dead cite has one home, STALE010. Decision
+        `stale-cites-at-merge` (stale prose never lands; ruled by the owner) governs it. The node id is that dead cite,
+        so the exit is 1. The read backing names no code name, so it keeps only its STALE005 report."""
         rows = [
             ("- The cloud cannot push to main (read hooks/guard.py:12).", False),  # the file exists at head: backed
             ("- The cloud cannot push to main (read hooks/gone.py:12).", True),  # no such file: a dead backing
@@ -3025,11 +3024,9 @@ class CodeClaimTests(StaleCase):
 
     def test_a_cite_to_a_name_unbound_in_its_file_at_head_is_stale010_and_no_stale009_report(self):
         """Class (d), a test re-pointed by a ruling: a dead cite moves from a STALE009 report to the STALE010 finding.
-        Coordinator ruling, 2026-11-08 04:03 CST (item 386): "a cite to a code name missing there is red". Lane pick,
-        04:16 CST: a dead cite has one home, STALE010, and STALE009 keeps only "a code claim with no cite".
-        Their home is decision `record-cites-live-code` (claims about code cite live code names). Owner, 2026-11-01
-        16:30 CST, "make it a standing thing that stale prose never makes it anymore", in decision
-        `stale-cites-at-merge`."""
+        Decision `record-cites-live-code` (claims about code cite live code names): a cite to a code name missing there
+        is red, and STALE009 keeps only "a code claim with no cite". Decision `stale-cites-at-merge` (stale prose never
+        lands; ruled by the owner) governs it."""
         cited =[(DEAD_PAREN, "no_such_name"), (DEAD_TICK, "no_such_name"), (GONE_FILE, "lane_lint")]
         rng, _ = self.rows_range([("- " + text, False) for text, _ in cited] + [("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
@@ -3090,11 +3087,10 @@ class CodeClaimTests(StaleCase):
         self.assert_code_claims(rng, [(DECISION, 2)])
 
     def test_report_lines_leave_the_exit_code_at_zero_and_the_verdict_at_pass(self):
-        """Class (d), a test re-pointed by a ruling. Lane pick, 04:16 CST: STALE009 keeps only "a code claim with no
-        cite", so both lines here stay report lines. A dead cite is STALE010, never a report line (coordinator ruling,
-        2026-11-08 04:03 CST, item 386). Their home is decision `record-cites-live-code` (claims about code cite live
-        code names). Owner, 2026-11-01 16:30 CST, "make it a standing thing that stale prose never makes it
-        anymore", in decision `stale-cites-at-merge`."""
+        """Class (d), a test re-pointed by a ruling. STALE009 keeps only "a code claim with no cite", so both lines here
+        stay report lines. A dead cite is STALE010, never a report line (decision `record-cites-live-code`: claims about
+        code cite live code names). Decision `stale-cites-at-merge` (stale prose never lands; ruled by the owner) governs
+        it."""
         rng, flagged = self.rows_range([("- " + INCIDENT, True), ("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
         rc, out = self.run_check(rng)
@@ -3171,7 +3167,7 @@ class CodeClaimTests(StaleCase):
 STALE_FIXTURE = "lint/stale_cites.py"  # the file the incident line cites; the fixture lacks CODE_CLAIM unless a case binds it
 LACKS_CODE_CLAIM = "def check():\n    return 3\n\n\ndef scan():\n    return 4\n"
 BINDS_CODE_CLAIM = LACKS_CODE_CLAIM + 'CODE_CLAIM = "x"\n'
-INCIDENT_LINE = (  # the line PR #1553 added to docs/debts/notes.md, verbatim
+INCIDENT_LINE = (  # the line the incident added to docs/debts/notes.md, verbatim
     '- stale009-idiom-false-alarms: STALE009 fires on idioms such as "tool calls", "calls for" and "check runs" '
     "(docs/decisions/hook-inputs-carry-token-counts.md:64). Round 1 of #1539 sampled 10 of 226 full-tree hits: "
     "8 real, 1 borderline, 1 false (lint/stale_cites.py `CODE_CLAIM`). Decision: claims-carry-backing "
@@ -3427,7 +3423,7 @@ class NameCiteTests(StaleCase):
         self.assertIn("stale-cites: PASS", out)
         subs = [command.split()[0] for command in commands]
         # The three starts of a Markdown-only range, and the one cat-file that reads lint/x.py for the cite: 4 in all.
-        # No ls-tree of the tree and no second cat-file. Passes on b63286047 already: a cost pin, not a red case.
+        # No ls-tree of the tree and no second cat-file. Passes already: a cost pin, not a red case.
         self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
         self.assertEqual(whole_tree_listings(commands), [], commands)
 
