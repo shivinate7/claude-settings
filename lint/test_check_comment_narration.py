@@ -1175,6 +1175,11 @@ class ShellScan(Case):
         self.assertNoHit(out, "x.sh", 3)
         self.assertEqual(rc, 1, out)
 
+    def test_let_argument_redirect_is_a_heredoc_and_skips_its_body(self):
+        rc, out = self.scan({"x.sh": "let x=1 <<EOF\nit's\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertEqual(rc, 1, out)
+
 
 class RuleQuotes(Case):
     def test_round_cited_with_a_matching_id_is_clean(self):
@@ -1190,6 +1195,26 @@ class RuleQuotes(Case):
         rc, out = self.scan({"x.py": "# fixed in round 2 (decision hold-unsafe-after-round-3)\nx = 1\n"})
         self.assertHit(out, "x.py", 1)
         self.assertEqual(rc, 1, out)
+
+    def test_round_history_forms_citing_an_id_stay_flagged(self):
+        rc, out = self.scan({"x.py": "# Added in round 3 (hold-unsafe-after-round-3).\n# fixed in round 3; the round-3 trip is slow\n# Previously in round 3, see round-3\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertHit(out, "x.py", 2)
+        self.assertHit(out, "x.py", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_quotes_with_only_the_decision_and_the_round_stay_clean(self):
+        rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3, net-value hold after round 3)\n# keeps the net value round 3 gave (decision hold-unsafe-after-round-3, net-value hold after round 3)\nx = 1\n"})
+        self.assertEqual(rc, 0, out)
+
+
+class SelfCheck(unittest.TestCase):
+    def test_check_file_has_no_hit_on_itself_at_the_round_two_base(self):
+        r = subprocess.run([sys.executable, MODULE, "--base", "a8959bc6a"], cwd=os.path.join(HERE, ".."),
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        hits = [row for row in r.stdout.splitlines() if row.startswith("lint/check_comment_narration.py:")]
+        self.assertEqual(hits, [], r.stdout)
 
 
 class Degraded(Case):
