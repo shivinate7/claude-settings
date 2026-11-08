@@ -367,6 +367,26 @@ def calendar_judge(case, path, text, listed=(), clean=(), root=None):
     return out
 
 
+def fake_clock_judge(case, root, categories):
+    """Scope first (P7): the fixture was read. Then no row of each named category. Each failure names one category."""
+    proc = run(root, "--json")
+    case.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
+    out = json.loads(proc.stdout)
+    case.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+    for cat in categories:
+        rows = sorted(r for r in case.rows(out) if r[2] == cat)
+        case.assertFalse(rows, "%s listed under a fake clock: %s" % (cat, rows))
+
+
+# A JS test that reads the date. The fake clock, when a case adds one, sets the date it reads.
+JS_DATE_READ = [
+    "it('reads the faked date', () => {",
+    "  const f_now = new Date();",
+    "  expect(f_now.getUTCFullYear()).toBe(2024);",
+    "});",
+]
+
+
 class PythonCalendarTest(FinderCase):
     def last_line(self):
         proc = run(self.root)
@@ -561,6 +581,144 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_today.py", text,
                        listed=["assert datetime.date.today() == x", "assert datetime.datetime.today() == x"])
 
+    def test_python_date_library_now_reads_are_listed(self):
+        text = src(
+            "import arrow",
+            "import pandas",
+            "import pandas as pd",
+            "import pendulum",
+            "from django.utils import timezone",
+            "",
+            "def test_libraries(stamp):",
+            "    t_pendulum = pendulum.now()",
+            "    t_arrow = arrow.now()",
+            "    t_arrow_utc = arrow.utcnow()",
+            "    t_pd = pd.Timestamp.now()",
+            "    t_pandas = pandas.Timestamp.now()",
+            "    t_django = timezone.now()",
+        )
+        self.put("tests/test_libraries.py", text)
+        calendar_judge(self, "tests/test_libraries.py", text, listed=[
+            "t_pendulum = pendulum.now()", "t_arrow = arrow.now()", "t_arrow_utc = arrow.utcnow()",
+            "t_pd = pd.Timestamp.now()", "t_pandas = pandas.Timestamp.now()", "t_django = timezone.now()",
+        ])
+
+    def test_python_date_library_fixed_time_is_not_listed(self):
+        text = src(
+            "import pendulum",
+            "",
+            "def test_fixed(stamp):",
+            "    t_fixed = pendulum.datetime(2024, 1, 1)",
+        )
+        self.put("tests/test_fixed_dates.py", text)
+        calendar_judge(self, "tests/test_fixed_dates.py", text,
+                       clean=["t_fixed = pendulum.datetime(2024, 1, 1)"])
+
+    def test_freeze_time_decorator_suppresses_calendar_not_elapsed_assert(self):
+        text = src(
+            "import datetime",
+            "from datetime import timedelta",
+            "from freezegun import freeze_time",
+            "",
+            "@freeze_time('2024-01-01')",
+            "def test_decorated(stamp):",
+            "    t0 = datetime.datetime.now()",
+            "    t_now = datetime.datetime.now()",
+            "    assert datetime.datetime.now() - t0 < timedelta(seconds=1)",
+        )
+        self.put("tests/test_frozen.py", text)
+        out = calendar_judge(self, "tests/test_frozen.py", text, clean=[
+            "t0 = datetime.datetime.now()", "t_now = datetime.datetime.now()",
+            "assert datetime.datetime.now() - t0 < timedelta(seconds=1)",
+        ])
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_frozen.py", text, ("assert datetime.datetime.now() - t0", "elapsed-assert")),
+            "a fake clock must leave the elapsed-assert row on a subtracted clock read")
+
+    def test_freeze_time_block_suppresses_calendar_for_a_plain_read(self):
+        text = src(
+            "import datetime",
+            "from freezegun import freeze_time",
+            "",
+            "def test_block(stamp):",
+            "    with freeze_time('2024-01-01'):",
+            "        t_now = datetime.datetime.now()",
+            "        assert stamp == 2024",
+        )
+        self.put("tests/test_frozen_block.py", text)
+        out = calendar_judge(self, "tests/test_frozen_block.py", text, clean=["t_now = datetime.datetime.now()"])
+        self.assertEqual(self.rows(out), set(), "a plain read under a fake clock is listed in some category")
+
+    def test_freeze_time_in_a_comment_or_a_string_does_not_suppress_calendar(self):
+        text = src(
+            "import datetime",
+            "",
+            "# from freezegun import freeze_time",
+            "FROZEN = \"@freeze_time('2024-01-01')\"",
+            "",
+            "",
+            "def test_real(stamp):",
+            "    t_real = datetime.datetime.now()",
+        )
+        self.put("tests/test_freeze_text.py", text)
+        calendar_judge(self, "tests/test_freeze_text.py", text, listed=["t_real = datetime.datetime.now()"])
+
+    def test_python_date_library_in_a_string_or_comment_is_not_listed(self):
+        text = src(
+            "import pendulum",
+            "",
+            "# t_comment = pendulum.now()",
+            "NOTE = 't_note = pendulum.now()'",
+            "",
+            "",
+            "def test_text(stamp):",
+            "    '''Docstring: t_doc = pendulum.now()'''",
+        )
+        self.put("tests/test_library_text.py", text)
+        calendar_judge(self, "tests/test_library_text.py", text, clean=[
+            "# t_comment = pendulum.now()", "NOTE = 't_note = pendulum.now()'",
+            "Docstring: t_doc = pendulum.now()",
+        ])
+
+    def test_hash_opener_in_a_string_before_pendulum_now_still_lists(self):
+        text = src(
+            "import pendulum",
+            "",
+            "NOTE = \"# not a comment\"",
+            "",
+            "",
+            "def test_hash(stamp):",
+            "    t_real = pendulum.now()",
+        )
+        self.put("tests/test_hash_library.py", text)
+        calendar_judge(self, "tests/test_hash_library.py", text, listed=["t_real = pendulum.now()"])
+
+    def test_unfrozen_datetime_now_still_lists_calendar(self):
+        text = src(
+            "import datetime",
+            "from datetime import timedelta",
+            "",
+            "def test_unfrozen(stamp):",
+            "    t0 = datetime.datetime.now()",
+            "    t_now = datetime.datetime.now()",
+            "    assert datetime.datetime.now() - t0 < timedelta(seconds=1)",
+        )
+        self.put("tests/test_unfrozen.py", text)
+        calendar_judge(self, "tests/test_unfrozen.py", text, listed=[
+            "t0 = datetime.datetime.now()", "t_now = datetime.datetime.now()",
+            "assert datetime.datetime.now() - t0 < timedelta(seconds=1)",
+        ])
+
+    def test_bare_name_imported_from_time_is_listed_in_an_assert(self):
+        text = src(
+            "from time import timezone",
+            "",
+            "def test_offset():",
+            "    assert timezone == 0",
+        )
+        self.put("tests/test_bare_zone.py", text)
+        calendar_judge(self, "tests/test_bare_zone.py", text, listed=["assert timezone == 0"])
+
 
 # ---- JS/TS: masker then patterns ----------------------------------------------------------------
 
@@ -609,6 +767,21 @@ class JsCategoriesTest(FinderCase):
         code, out = self.report()
         self.assertEqual(self.rows(out), pinned(
             "tests/fake.test.js", text, ("expect(Date.now() - t0)", "elapsed-assert")))
+
+    def test_jest_fake_clock_skips_new_date_calendar(self):
+        text = src("jest.useFakeTimers();", "jest.setSystemTime(new Date(0));", *JS_DATE_READ)
+        self.put("tests/jest_clock.test.js", text)
+        fake_clock_judge(self, self.root, ("calendar",))
+
+    def test_vi_fake_clock_skips_new_date_calendar(self):
+        text = src("vi.useFakeTimers();", "vi.setSystemTime(new Date(0));", *JS_DATE_READ)
+        self.put("tests/vi_clock.test.js", text)
+        fake_clock_judge(self, self.root, ("calendar",))
+
+    def test_new_date_without_a_fake_clock_still_lists_calendar(self):
+        text = src(*JS_DATE_READ)
+        self.put("tests/real_clock.test.js", text)
+        calendar_judge(self, "tests/real_clock.test.js", text, listed=["const f_now = new Date();"])
 
     def test_elapsed_assert_on_expect_or_assert_calls(self):
         text = src(
@@ -824,6 +997,37 @@ class JsTrapsTest(FinderCase):
                 calendar_judge(self, f"tests/{name}", text,
                                listed=["const today = new Date();"], root=root)
 
+    def test_comment_openers_in_a_string_before_dayjs_still_list(self):
+        text = src(
+            'const u = "http://a.test/"; const today = dayjs();',
+            'const v = "/* open"; const later = dayjs();',
+            'const w = "# tag"; const hashed = dayjs();',
+        )
+        self.put("tests/library_slashes.test.js", text)
+        calendar_judge(self, "tests/library_slashes.test.js", text, listed=[
+            "const today = dayjs();", "const later = dayjs();", "const hashed = dayjs();",
+        ])
+
+    def test_moment_text_in_a_template_is_not_listed_and_its_interpolation_is(self):
+        text = src(
+            "const doc = `",
+            "  note: moment() text",
+            "`;",
+            "const label = `at ${moment()}`;",
+        )
+        self.put("tests/template_moment.test.js", text)
+        calendar_judge(self, "tests/template_moment.test.js", text,
+                       listed=["const label = `at ${moment()}`;"], clean=["note: moment() text"])
+
+    def test_lone_quote_in_jsx_text_does_not_hide_a_date_library_read(self):
+        for name in ("note.test.jsx", "note.test.tsx"):
+            with self.subTest(name=name):
+                root = os.path.join(self.tmp.name, name)
+                text = src("export const Note = () => <p>Don't stop here</p>;", "const today = dayjs();")
+                put(root, f"tests/{name}", text)
+                calendar_judge(self, f"tests/{name}", text,
+                               listed=["const today = dayjs();"], root=root)
+
 
 class JsCalendarTest(FinderCase):
     def test_new_date_with_no_argument_is_listed_and_with_one_is_not(self):
@@ -895,6 +1099,55 @@ class JsCalendarTest(FinderCase):
         self.put("tests/fixed_date.test.js", text)
         calendar_judge(self, "tests/fixed_date.test.js", text,
                        clean=["const fixed = new Date(0);", "const epoch = new Date(EPOCH_MS);"])
+
+    def test_date_library_now_reads_are_listed(self):
+        text = src(
+            "it('reads the library clocks', () => {",
+            "  const d_day = dayjs();",
+            "  let d_moment = moment();",
+            "  const d_instant = Temporal.Now.instant();",
+            "  const d_plain = Temporal.Now.plainDateISO();",
+            "});",
+        )
+        self.put("tests/library_now.test.js", text)
+        calendar_judge(self, "tests/library_now.test.js", text, listed=[
+            "const d_day = dayjs();", "let d_moment = moment();",
+            "const d_instant = Temporal.Now.instant();", "const d_plain = Temporal.Now.plainDateISO();",
+        ])
+
+    def test_date_library_fixed_time_is_not_listed(self):
+        text = src(
+            "const EPOCH = 0;",
+            "const c_day_fixed = dayjs(0);",
+            "const c_moment_fixed = moment(EPOCH);",
+        )
+        self.put("tests/library_fixed.test.js", text)
+        calendar_judge(self, "tests/library_fixed.test.js", text,
+                       clean=["const c_day_fixed = dayjs(0);", "const c_moment_fixed = moment(EPOCH);"])
+
+    def test_new_date_in_a_template_interpolation_is_listed(self):
+        text = src(
+            "test('labels the run', () => {",
+            "  const label = `run at ${new Date()}`;",
+            "  const block = `",
+            "    stamp ${new Date()}",
+            "  `;",
+            "  expect(label + block).toMatch(/run/);",
+            "});",
+        )
+        self.put("tests/template_clock.test.js", text)
+        calendar_judge(self, "tests/template_clock.test.js", text, listed=[
+            "const label = `run at ${new Date()}`;", "stamp ${new Date()}",
+        ])
+
+    def test_date_library_in_a_string_or_comment_is_not_listed(self):
+        text = src(
+            "// const note = dayjs();",
+            "const quoted = 'const q = dayjs();';",
+        )
+        self.put("tests/library_text.test.js", text)
+        calendar_judge(self, "tests/library_text.test.js", text,
+                       clean=["// const note = dayjs();", "const q = dayjs();"])
 
 
 # ---- Swift: one-pass masker then patterns --------------------------------------------------------
@@ -1252,6 +1505,13 @@ class ExitCodeTest(FinderCase):
         proc = run(self.root)
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("UNREAD tests/test_bad.py: ", proc.stdout)
+
+    def test_calendar_alone_exits_1(self):
+        self.put("tests/test_stamp.py", src("import datetime", "", "def test_stamp():", "    t_now = datetime.datetime.now()"))
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "scope: the fixture was not read")
+        self.assertEqual([f["category"] for f in out["findings"]], ["calendar"], "the fixture is not calendar-only")
+        self.assertEqual(code, 1, "a calendar-only finding does not exit 1")
 
 
 # ---- a hang guard (wait-cap or test-cap) is listed, never counted (test-practices P5) ----
