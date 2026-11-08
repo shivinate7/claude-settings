@@ -4,6 +4,8 @@
 Records live in the folders lint/layout.json marks as records. The UI crops long file names, so a slug is 32
 characters or fewer, not counting `.md`. Existing files are not checked or renamed.
 
+Also fails when the notes file holds two rows that start with the same `- <slug>:` (duplicate_note_slugs).
+
 Also fails when a debt file deleted, renamed out of the debt folder, or edited to drop its Feel line against
 origin/main was a feel-fix (a line starting `**Feel.**`) with no valid device-trial line (`**Device check.**`, then
 simulator or device, then an ISO time with a zone): a fix CI passes can still feel wrong on a device.
@@ -134,6 +136,28 @@ def too_long(files, dirs):
             and f.endswith(".md") and len(os.path.basename(f.replace("\\", "/"))[:-3]) > MAX]
 
 
+NOTE_ROW = re.compile(r"^- ([A-Za-z0-9][\w.-]*):", re.M)
+
+
+def duplicate_note_slugs(text):
+    """The slugs that `text`, a notes file, writes as the start of two or more rows (`- <slug>:` at line start), in
+    first-seen order. A slug named inside a row's text is not a row."""
+    seen = {}
+    for slug in NOTE_ROW.findall(text):
+        seen[slug] = seen.get(slug, 0) + 1
+    return [slug for slug, n in seen.items() if n > 1]
+
+
+def notes_text(root):
+    """The text of the first notes file that exists among layout.candidates, or "" when none does."""
+    for rel in layout.candidates(root, "debt-notes"):
+        full = os.path.join(root, rel)
+        if os.path.isfile(full):
+            with open(full, encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+    return ""
+
+
 def main(args):
     unknown = [a for a in args if a.startswith("-")]
     if unknown:  # read as a file name, an unknown option would skip git and check nothing
@@ -162,7 +186,15 @@ def main(args):
     for f, how in feel:
         print("check_record_slugs: FAIL: feel-fix debt %s with no device check: %s"
               % ("deleted" if how == "deleted" else "lost its Feel line", f))
-    return 1 if bad or feel else 0
+    try:
+        dup = duplicate_note_slugs(notes_text(ROOT))
+    except layout.LayoutError as err:
+        print("check_record_slugs: FAIL: " + str(err))
+        return 1
+    for slug in dup:
+        print("check_record_slugs: FAIL: notes slug written on more than one row: %s. Merge the rows into one, "
+              "or give each its own slug." % slug)
+    return 1 if bad or feel or dup else 0
 
 
 if __name__ == "__main__":
