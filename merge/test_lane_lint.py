@@ -630,7 +630,7 @@ class BatchLintFlags(tm.Env):
         text = out.getvalue()
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(pass_lines(text)), 1, text)
-        values = {"github.base_ref": BASE, "github.event.pull_request.head.sha": head}
+        values = {"github.base_ref": BASE, "github.event.pull_request.head.sha": head, "github.event.pull_request.body": ""}
         for name, ci_step in self.found:
             if name == STE:
                 continue
