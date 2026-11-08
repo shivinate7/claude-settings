@@ -1637,9 +1637,9 @@ def _build_pointer():
 def _build_samebranch():
     """The same-branch repos: SBCUR, SBDET, SBOTHER, SBMAIN, and the SBPRIME clone with its SBLINK
     worktree. Each is clean."""
-    # THE INCIDENT SHAPE. An agent on `lane-x` ran `git checkout -B lane-x origin/lane-x` to reach a
-    # newer pushed head, and the old files stayed in place. SBCUR is that checkout: on `lane-x`, with
-    # origin/lane-x one commit ahead. `sub/` is a real folder, so the cd case runs in one.
+    # SBCUR is the checkout that holds `lane-x`, with origin/lane-x one commit ahead. Its own-tree
+    # `checkout -B lane-x origin/lane-x` is allowed (the held-branch rule). `sub/` is a real folder,
+    # so the cd case runs in one.
     make_repo(SBCUR, {"f.txt": "base\n", "sub/keep.txt": "base\n"})
     run_vcs(SBCUR, "checkout", "-q", "-b", "lane-x")
     _require_clean(SBCUR)
@@ -2757,9 +2757,11 @@ sh("checkout: a forced new branch at a commit", VCS + " checkout -B tmp 380d5fc"
 sh("checkout: tracking a remote branch", VCS + " checkout --track origin/main", "allow", cwd=NOGIT)
 
 # THE HELD-BRANCH RULE, rule id CURRENT_BRANCH_RULE. A `checkout -B <name>` or `switch -C <name>` is
-# refused when a worktree of the clone holds <name>: the checkout the command runs in, or a linked
-# worktree beside it. Git moves the branch under a working tree that keeps the old files, and the
-# holder's index goes stale. Which checkout runs the command is the one `-C <path>` names, else the cwd.
+# refused when a worktree OTHER than the command's own holds <name>: the primary of the clone, or a
+# linked worktree beside it. The command's own checkout is allowed. Coordinator ruling 04:50 CST Nov 8.
+# Round 2 of PR 1889 measured that on git 2.43.0 `git checkout -B lane-x other` in the worktree holding
+# lane-x moves its files and index cleanly. Which checkout runs the command is the one `-C <path>`
+# names, else the cwd.
 # A refusal names the rule and a remedy in words only. It never echoes the held branch, and never
 # offers the forcing flag git has for this case.
 CURRENT_BRANCH_RULE = "checkout-b-current-branch"
@@ -2772,29 +2774,29 @@ def held_refuse(name, command, cwd, held_text):
        lacks=(held_text, "--ignore-other-worktrees"), carries=REMEDY_IN_WORDS)
 
 
-# (a) the branch the command's own checkout holds, then (b) and (c): a branch a worktree beside it holds.
-held_refuse("checkout -B of the branch it is on, from origin, is refused",
-          VCS + " checkout -B lane-x origin/lane-x", SBCUR, "lane-x")
-held_refuse("switch -C of the branch it is on, from origin, is refused",
-          VCS + " switch -C lane-x origin/lane-x", SBCUR, "lane-x")
-held_refuse("checkout -B of the branch it is on, with no start point, is refused",
-          VCS + " checkout -B lane-x", SBCUR, "lane-x")
-held_refuse("switch -C of the branch it is on, with no start point, is refused",
-          VCS + " switch -C lane-x", SBCUR, "lane-x")
-held_refuse("from a folder inside that checkout, it is refused too",
-          "cd sub && " + VCS + " checkout -B lane-x origin/lane-x", SBCUR, "lane-x")
-held_refuse("-C names the checkout on that branch, checkout form, from another checkout",
-          VCS + " -C " + slash(SBCUR) + " checkout -B lane-x origin/lane-x", SBOTHER, "lane-x")
-held_refuse("-C names the checkout on that branch, switch form, from another checkout",
-          VCS + " -C " + slash(SBCUR) + " switch -C lane-x origin/lane-x", SBOTHER, "lane-x")
-# The pointer checkout's reset of main onto origin/main is this same form. It stays allowed there
-# (the pointer cases below pin it). A checkout on main that is NOT the pointer gets no such
-# exemption, so this form is refused here by this rule alone.
-held_refuse("checkout -B main onto origin/main is refused in a checkout on main that is not the pointer",
-          VCS + " checkout -B main origin/main", SBMAIN, "-B main")
+# THE OWN CHECKOUT HOLDS THE BRANCH: ALLOWED. Each case is the own-tree form the rule no longer refuses.
+sh("same branch: checkout -B of the branch it is on, from origin, is allowed",
+   VCS + " checkout -B lane-x origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: switch -C of the branch it is on, from origin, is allowed",
+   VCS + " switch -C lane-x origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: checkout -B of the branch it is on, with no start point, is allowed",
+   VCS + " checkout -B lane-x", "allow", cwd=SBCUR)
+sh("same branch: switch -C of the branch it is on, with no start point, is allowed",
+   VCS + " switch -C lane-x", "allow", cwd=SBCUR)
+sh("same branch: from a folder inside that checkout, checkout -B of the branch it is on is allowed",
+   "cd sub && " + VCS + " checkout -B lane-x origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: -C names the checkout on that branch, checkout form, from another checkout, is allowed",
+   VCS + " -C " + slash(SBCUR) + " checkout -B lane-x origin/lane-x", "allow", cwd=SBOTHER)
+sh("same branch: -C names the checkout on that branch, switch form, from another checkout, is allowed",
+   VCS + " -C " + slash(SBCUR) + " switch -C lane-x origin/lane-x", "allow", cwd=SBOTHER)
+# The own checkout on main: the same form, allowed here too. The pointer cases below pin the pointer
+# checkout's reset of main onto origin/main.
+sh("same branch: checkout -B main onto origin/main, in a checkout on main that is not the pointer, is allowed",
+   VCS + " checkout -B main origin/main", "allow", cwd=SBMAIN)
 # The linked worktree SBLINK holds lane-q and the primary SBPRIME holds lane-p, in one clone.
-held_refuse("a linked worktree: checkout -B of the branch it is on is refused",
-          VCS + " checkout -B lane-q origin/main", SBLINK, "lane-q")
+sh("same branch: a linked worktree: checkout -B of the branch it is on is allowed",
+   VCS + " checkout -B lane-q origin/main", "allow", cwd=SBLINK)
+# A WORKTREE BESIDE THE COMMAND'S OWN HOLDS THE BRANCH: REFUSED. Each name is held by the other worktree of the clone.
 held_refuse("a linked worktree: checkout -B of the branch the primary holds is refused",
           VCS + " checkout -B lane-p origin/main", SBLINK, "lane-p")
 held_refuse("a linked worktree: switch -C of the branch the primary holds is refused",
@@ -2817,6 +2819,16 @@ held_refuse("forced form: switch -C with the name glued, of the branch a linked 
 # THE CONTROL for those forms: a --force-create of a name no worktree of the clone holds stays allowed.
 sh("same branch: forced form: switch --force-create of a name no worktree of the clone holds is allowed",
    VCS + " switch --force-create lane-r origin/main", "allow", cwd=SBPRIME)
+
+# THE -C PARSE, with the cwd on the other branch of the same clone. The own-tree -B names the primary
+# with -C from the linked worktree, so a guard that reads the cwd refuses it (the cwd holds lane-q, and
+# lane-p sits in a sibling), and a guard that ignores -C allows the refused case below.
+sh("same branch: -C names the primary, checkout form, from a linked worktree beside it, is allowed",
+   VCS + " -C " + slash(SBPRIME) + " checkout -B lane-p origin/main", "allow", cwd=SBLINK)
+sh("same branch: -C names the primary, switch form, from a linked worktree beside it, is allowed",
+   VCS + " -C " + slash(SBPRIME) + " switch -C lane-p origin/main", "allow", cwd=SBLINK)
+held_refuse("-C names a linked worktree, checkout form, from another clone, is refused for the branch the primary holds",
+            VCS + " -C " + slash(SBLINK) + " checkout -B lane-p origin/main", SBOTHER, "lane-p")
 
 # CONTROLS, EACH STAYS ALLOWED. The name is exact; the holder must sit in the same clone; a plain
 # checkout and a `switch -c` of a new name are not the rule's form at all.
