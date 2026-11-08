@@ -66,6 +66,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   tokenizer reads the cd, so a cd in quotes, a comment or a heredoc body is text. Only a cd that surely
   runs in the main shell moves the directory: the first command of a list item, or one that follows only
   cds joined by `&&`. A cd behind `||`, `&`, `|` or `then`, or inside `{ }`, leaves it unknown.
+  A list that ends in `&` runs in a background subshell, so after the `&` the directory is the list's start.
+  Limit: `builtin cd`, `command cd` and `eval "cd ..."` are not read as a cd.
   The hook never refuses for this (coordinator ruling, 2026-11-08). It leaves that log out of `--also`,
   passes it as `--unwatched`, and the STALL report names it. A refusal on `cd "$REPO" && make > log`
   costs more than a missed log.
@@ -74,7 +76,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   the shell's own time does not.
   Cost: no new process, timer or file. The once-a-second `ps` that reads the job's state reads the
   process table with CPU time, and the watcher compares each process to its last reading. On Linux ps
-  gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall. A job that
+  gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall. So may a serial
+  chain of sub-second children (`for t in ...; do python $t; done | tail -1`). A job that
   `exec`s has no child to count.
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
