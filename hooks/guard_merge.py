@@ -1157,6 +1157,22 @@ def _transcript_reader():
     return _transcript
 
 
+_READ_CACHE = {}  # one slot: the main session's records for the last transcript read, with the file's identity
+
+
+def _main_records(transcript: str):
+    """The main session's records of the transcript at `transcript` (no sidechain), read once per call: the second
+    reader of the same file, unchanged since, takes the cached list. Raises what the read raises. The file's size
+    and mtime are in the key, so a file that grew between two calls is read again."""
+    stat = os.stat(transcript)
+    key = (os.path.realpath(transcript), stat.st_mtime_ns, stat.st_size)
+    if _READ_CACHE.get("key") != key:
+        records = [rec for rec in _transcript_reader().read_transcript(transcript) if not rec.get("isSidechain")]
+        _READ_CACHE.clear()
+        _READ_CACHE.update(key=key, records=records)
+    return _READ_CACHE["records"]
+
+
 def _is_spawn_of(use, roles) -> bool:
     given = use.get("input")
     return use.get("name") in RECORD_SPAWN_TOOLS and isinstance(given, dict) and given.get("subagent_type") in roles
@@ -1226,8 +1242,9 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
     a review record, else ("", "", unknown). A reviewer spawn whose result is an error never ran and gates nothing.
     `unknown` is true when the merge tool (the home of the record marker) could not be loaded: the call is
     allowed and the caller notes it. A call with an agent_id is an agent's and is not judged. A missing or
-    unreadable transcript allows. Cost: one transcript read per judged call, no subprocess, no network; the merge
-    tool is loaded once, and only when a reviewer spawn is found."""
+    unreadable transcript allows. Cost: one transcript read per judged call, shared with resume_finished_hit (_main_records
+    holds it for the second reader), no subprocess, no network; the merge tool is loaded once, and only when a reviewer
+    spawn is found."""
     if agent or not isinstance(tool_input, dict) or not transcript:
         return "", "", False
     try:
@@ -1235,7 +1252,7 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
         judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS and tool_input.get("subagent_type") in RECORD_TRIGGER_ROLES)
         if not judged:
             return "", "", False
-        records = [rec for rec in reader.read_transcript(transcript) if not rec.get("isSidechain")]
+        records = _main_records(transcript)
         failed = {res.get("tool_use_id") for rec in records for res in reader.tool_results(rec) if res.get("is_error") is True}
         uses = [use for rec in records for use in reader.tool_uses(rec)]
     except Exception:
@@ -1273,42 +1290,57 @@ RESUME_ASK_REASON = (
 )
 
 
+RESUME_UNREAD_NOTE = "resume-finished-reviewer-unread"      # the guard.log rule of a send whose transcript could not be read
+RESUME_UNPARSED_NOTE = "resume-finished-reviewer-unparsed"  # the guard.log rule of a send whose records could not be parsed
+RESUME_UNPARSED_REASON = (
+    "resume-finished-reviewer: the guard could not parse this session's transcript, so it cannot tell whether this "
+    "reviewer or design-reviewer has finished. A finished one has no worktree, so a resume runs with no tree; then "
+    "spawn a fresh reviewer and pass it the prior report. Allow this send only if the reviewer is still running. "
+    "(rule roles-resume-by-name)"
+)
+
+
 def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = False):
-    """(decision, reason, matched, unread): "deny" when this built-in SendMessage from the main session names a
-    reviewer or design-reviewer spawn that has finished, "ask" when the spawn's state is unknown, else ("", "", "", ...).
+    """(decision, reason, matched, note): "deny" when this built-in SendMessage from the main session names a
+    reviewer or design-reviewer spawn that has finished, "ask" when the spawn's state is unknown or the transcript's
+    records cannot be parsed, else ("", "", "", ...).
     `to` names the spawn by its launch result's toolUseResult.agentId or by its call's `name`; the latest spawn with
-    the name wins. A send to main, a name no spawn holds, a spawn of any other role, a running spawn and a call with an
-    agent_id pass. `unread` is true when a send that would be judged finds no transcript to read: it passes and
-    the caller notes it. The state read is _transcript.agent_state, the one reader of a spawn's finish. Cost: one
-    transcript read per judged send, no subprocess, no network."""
+    the name wins. A spawn whose result is an error ran no agent and is skipped, as review_record_hit skips it. A send
+    to main, a name no spawn holds, a spawn of any other role, a running spawn and a call with an agent_id pass.
+    `note` is the guard.log rule the caller writes as a `noted` line, or "": RESUME_UNREAD_NOTE when a send that would
+    be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when the read records cannot be parsed
+    (it asks). The state read is _transcript.agent_state, the one reader of a spawn's finish. Cost: one transcript
+    read per judged send, shared with review_record_hit (_main_records), no subprocess, no network."""
     target = tool_input.get("to") if isinstance(tool_input, dict) else None
     if agent or tool != RESUME_TOOL or not isinstance(target, str) or not target or target == RESUME_MAIN:
-        return "", "", "", False
+        return "", "", "", ""
     if not transcript:
-        return "", "", "", True
+        return "", "", "", RESUME_UNREAD_NOTE
     try:
         reader = _transcript_reader()
-        records = [rec for rec in reader.read_transcript(transcript) if not rec.get("isSidechain")]
+        records = _main_records(transcript)
     except Exception:
-        return "", "", "", True
+        return "", "", "", RESUME_UNREAD_NOTE
     try:
+        failed = {res.get("tool_use_id") for rec in records for res in reader.tool_results(rec) if res.get("is_error") is True}
         agents = {res.get("tool_use_id"): rec["toolUseResult"].get("agentId")
                   for rec in records if isinstance(rec.get("toolUseResult"), dict)
                   for res in reader.tool_results(rec)}
         spawns = [use for rec in records for use in reader.tool_uses(rec)
-                  if use.get("name") in RECORD_SPAWN_TOOLS and isinstance(use.get("input"), dict)]
+                  if use.get("name") in RECORD_SPAWN_TOOLS and isinstance(use.get("input"), dict)
+                  and use.get("id") not in failed]
         named = [use for use in spawns if use["input"].get("name") == target or agents.get(use.get("id")) == target]
         if not named or named[-1]["input"].get("subagent_type") not in RECORD_REVIEWER_ROLES:
-            return "", "", "", False
+            return "", "", "", ""
         state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)
     except Exception:
-        return "", "", "", False
+        return "ask", RESUME_UNPARSED_REASON, "%s with a transcript record the read cannot parse" % tool, RESUME_UNPARSED_NOTE
     role = named[-1]["input"]["subagent_type"]
     if state == reader.FINISHED:
-        return "deny", RESUME_REASON, "%s to a finished %s" % (tool, role), False
+        return "deny", RESUME_REASON, "%s to a finished %s" % (tool, role), ""
     if state == reader.UNKNOWN:
-        return "ask", RESUME_ASK_REASON, "%s to a %s of unknown state" % (tool, role), False
-    return "", "", "", False
+        return "ask", RESUME_ASK_REASON, "%s to a %s of unknown state" % (tool, role), ""
+    return "", "", "", ""
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
