@@ -1174,6 +1174,7 @@ class ConstantCheck(Tree):
         tracked_tree.copy_tracked(self.tree, "lint", "actions")  # the lint readers, the actions and the stamp examples
         os.makedirs(os.path.join(self.tree, "hooks"))  # the check parses hooks/ text and imports none of it
         shutil.copyfile(os.path.join(REPO, "hooks", "guard.py"), os.path.join(self.tree, "hooks", "guard.py"))
+        shutil.copyfile(os.path.join(REPO, "hooks", "git_reads.py"), os.path.join(self.tree, "hooks", "git_reads.py"))
         for name in ("layout.py", "layout.json", "check_layout.py"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
 
@@ -1270,6 +1271,12 @@ class ConstantCheck(Tree):
         self.edit("hooks/guard.py", 'RECORD_LAYOUT_FILE = os.path.join("lint", "layout.json")',
                   'RECORD_LAYOUT_FILE = os.path.join("lint", "check_record_slugs.py")')
         self.assert_red("RECORD_LAYOUT_FILE")
+
+    def test_extras_literal_that_drifts_from_the_layout_is_red(self):
+        # hooks/git_reads.py repeats the layout's "extras" path so a lane reads one file; the check pins it like RECORD_LAYOUT_FILE.
+        self.edit("hooks/git_reads.py", 'LAYOUT_EXTRAS = (".claude", "layout-extras.json")',
+                  'LAYOUT_EXTRAS = (".claude", "extras.json")')
+        self.assert_red("LAYOUT_EXTRAS")
 
     def test_action_default_that_names_a_folder_is_red(self):
         self.edit("actions/ruling-kind/action.yml", 'default: ""', "default: decisions")
@@ -1369,7 +1376,7 @@ SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asse
 class MockupHomes(Tree):
     """The one mockup home of a repo is its design folder: a mockup is a repo path under it, and git holds it. The
     machine-home form ~/Developer/<repo name>-imports is refused. Two readers:
-    mockup_homes(root, home=None) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
+    mockup_homes(root) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
     file in the design folder and a sentence for any other file. The home is passed in, so no case reads or writes
     the real home. A missing name fails by name (not built yet)."""
 
