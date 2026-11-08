@@ -1104,7 +1104,8 @@ def case_powershell_bash_forms():
                      ("an until bracket test", "until [ -f x ]; do git push; done"),
                      ("an elif bracket test", "if false; then git push; elif [ -f x ]; then git push; fi"),
                      ("a bracket test after an open paren", "git push ( [ -f x ] )"),
-                     ("a bracket test after a semicolon", "git status; [ -f x ]; git push")):
+                     ("a bracket test after a semicolon", "git status; [ -f x ]; git push"),
+                     ("a bracket test at a line start", "[ -f x ]\nRun-It")):
         page("a PowerShell command with %s is refused as a bash operator" % name, "set",
              entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
     # A backslash that ends the string, with no line after it, is a path or an argument: each passes.
@@ -1125,11 +1126,16 @@ def case_powershell_bash_forms():
                      ("a PowerShell if test", "if (Test-Path x) { git push }"),
                      ("a backtick line continuation", "git push origin `\nmain")):
         page("a PowerShell twin with %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A `[ ... ]` with spaces is a test only at a line start, after `;` or `(`, or after `if`, `elif`, `while` or
+    # `until`, so an index with a space after a variable passes. A pipe to a cmdlet whose name starts with a listed
+    # name, such as Trace-Command for `tr`, passes: a listed name must end at a word edge.
     for name, ps in (("a backslash path that ends a line", "Set-Location C:\\repo\\\ngit push origin main"),
                      ("a cast and a regex escape", "[int]$n = 5; if ('a[b' -match '\\[') { git push }"),
                      ("a pipe inside a string", 'Write-Host "a | head"'),
                      ("a pipe after a comment opener", "git log # | head"),
-                     ("a here-string holding a pipe", "@'\n| head\n'@")):
+                     ("a here-string holding a pipe", "@'\n| head\n'@"),
+                     ("a pipe to Trace-Command, named like tr", "Get-Date | Trace-Command"),
+                     ("an index with a space in brackets after a variable", "Write-Output $names[ 0 ]")):
         page("a PowerShell trap, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
 
 
