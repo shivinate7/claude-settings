@@ -218,24 +218,30 @@ MUTATING_COMMAND = (
     r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
 )
 
+# The words that make a file or folder. A caller that must count them as writes passes this to
+# `_shell_write_hit` as `extra_verbs`. They stay out of MUTATING_COMMAND, so every other rule reads
+# the same commands as before.
+CREATING_COMMAND = r"\b(?i:mkdir|touch|md|ni)\b"
+
 
 # A command that hands its arguments to another program, so a mutating word in them may run.
 _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 
 
-def _mutates_as_command(command: str, words) -> bool:
+def _mutates_as_command(command: str, words, extra: str = "") -> bool:
     """True when the segment's own command (`command`, its resolved name) changes the files it names:
     a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
     arguments counts too, as it always did, so `find -exec rm` stays seen. A shell `-c` script is read at
-    its own command positions, so `bash -c "pytest -k install t.py"` reads and `bash -c "rm x"` writes."""
+    its own command positions, so `bash -c "pytest -k install t.py"` reads and `bash -c "rm x"` writes.
+    EXTRA is a regex of more command names that count as writes (CREATING_COMMAND)."""
     if command in guard_core.INLINE_SCRIPT_SHELLS:
-        return _script_mutates(guard_core.inline_script([command, *words]))
+        return _script_mutates(guard_core.inline_script([command, *words]), extra)
     if command in _RUNS_ITS_ARGUMENTS:
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
         return any(word in ("mv", "rm") for word in rest[:2])
-    return bool(re.fullmatch(MUTATING_COMMAND, command))
+    return bool(re.fullmatch(MUTATING_COMMAND, command) or (extra and re.fullmatch(extra, command)))
 
 
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
@@ -243,7 +249,7 @@ def _mutates_as_command(command: str, words) -> bool:
 _SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
 
 
-def _script_mutates(script: str) -> bool:
+def _script_mutates(script: str, extra: str = "") -> bool:
     """True when a `sh -c` script may change files through a command of its own. No script found, or one
     with a substitution or group in it, counts as a write, as it always did."""
     if not script or _SCRIPT_RUNS_HIDDEN.search(script):
@@ -251,13 +257,13 @@ def _script_mutates(script: str) -> bool:
     for segment in split_segments(script):
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
-        if _mutates_as_command(command, rest) or (
+        if _mutates_as_command(command, rest, extra) or (
                 command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
             return True
     return False
 
 
-def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
+def writes_to(path: str, cmd: str, command=None, words=(), extra: str = "") -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -273,9 +279,10 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
         return True
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
-    if command is not None and not _mutates_as_command(command, words):
+    if command is not None and not _mutates_as_command(command, words, extra):
         return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
-    if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
+    verbs = "(?:" + MUTATING_COMMAND + "|" + extra + ")" if extra else MUTATING_COMMAND
+    if re.search(verbs + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
@@ -619,12 +626,17 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False) -> str:
+                     command_position=False, predicate_command=False, extra_verbs="",
+                     skip_after_cd=None) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
-    name as a third argument (`''` when none)."""
+    name as a third argument (`''` when none). `extra_verbs` is a regex of more command names that count as
+    writes (CREATING_COMMAND); it needs `command_position`. `skip_after_cd` (needs `follow_cd`) is a
+    function of the folder the last absolute or `~` `cd` before a segment landed in (`dir_before_segment`,
+    `origin`) and the folder the segment runs in; a segment it accepts is left unjudged, as its absolute
+    form is the caller's to judge."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -675,14 +687,19 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        at, anchor = cwd, None
+        if follow_cd:
+            at, anchor = dir_before_segment(segments, number, cwd, ends, origin=True)
+            at = at or cwd
+        if anchor and skip_after_cd and skip_after_cd(anchor, at):
+            continue
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ()), extra=extra_verbs):
                 return word
     return ""
 
