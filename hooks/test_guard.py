@@ -23248,14 +23248,12 @@ def spo_top_level_case(tag, name, overwrite):
 
 
 def spo_removed_case():
-    """Agent A writes probe2.py, and agent B's overwrite is asked (the control). The file is then removed outside
-    the guard. Agent B's Write of a new probe2.py at the same path is allowed: the record of the removed file
-    does not name B's new file."""
+    """Agent A writes probe2.py. The file is removed outside the guard before any agent B step, so A's record is
+    the only trace left. Agent B's Write of a new probe2.py at the same path is allowed. The record still names
+    A, so a rule that does not check the record against the file asks here: the case fails on that gap."""
     fx = spo_fixture("removed")
     probe = os.path.join(fx["scratch"], "probe2.py")
     problems = [spo_scope(fx, "removed", probe)] + spo_wrote(fx, "removed", SPO_WRITER, probe, PY_TEXT)
-    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=probe, content=SPO_OVERWRITE_TEXT)
-    problems.append(spo_asked("removed, control before the removal", got, reason, (fx["scratch"], "probe2.py")))
     os.remove(probe)
     if os.path.exists(probe):
         problems.append("removed, setup: probe2.py still exists after the removal")
