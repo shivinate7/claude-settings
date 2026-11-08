@@ -153,8 +153,11 @@ class Case(object):
         # Each case sets its own window and flags. This run's shell may set the remote knobs (a
         # cloud session sets CLAUDE_CODE_REMOTE and CLAUDE_AUTOCOMPACT_PCT_OVERRIDE), and
         # CLAUDE_CODE_ENTRYPOINT picks the flag table's column, so none of them leaks in.
+        # CLAUDE_CODE_REMOTE_SESSION_ID is the cloud session's own id (cse_<x>): a case that needs it sets
+        # it through extra_env, so no other case inherits the run's own id.
         for name in ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_REMOTE",
-                     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_ENTRYPOINT"):
+                     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_ENTRYPOINT",
+                     "CLAUDE_CODE_REMOTE_SESSION_ID"):
             env.pop(name, None)
         env["CLAUDE_CONFIG_DIR"] = self.cfg
         env["PATH"] = self.bin + os.pathsep + env.get("PATH", "")
@@ -2362,11 +2365,12 @@ AUDIT_WRAPPER = "\n".join([
 ]) + "\n"
 
 
-def as_coordinator(c, tags):
-    """A get_session result for the own session, carrying these tags."""
-    body = json.dumps({"ccr": {"id": c.session_id, "tags": tags}})
+def as_coordinator(c, tags, sid=None):
+    """A get_session result for the own session (or for sid, the record id it is known by), carrying these tags."""
+    record_id = sid or c.session_id
+    body = json.dumps({"ccr": {"id": record_id, "tags": tags}})
     call = {"type": "tool_use", "id": "tu-get", "name": "mcp__claude-code-remote__get_session",
-            "input": {"session_id": c.session_id}}
+            "input": {"session_id": record_id}}
     return [transcript_line("assistant", [call], timestamp=OWNER_TS),
             transcript_line("user", [{"type": "tool_result", "tool_use_id": "tu-get", "content": body}],
                             timestamp=OWNER_TS)]
@@ -2381,14 +2385,17 @@ def tagged_by_call(c, add, sid=None):
                             timestamp=OWNER_TS)]
 
 
-def bash_call(tu, command):
-    call = {"type": "tool_use", "id": tu, "name": "Bash", "input": {"command": command}}
+def bash_call(tu, command, description=None):
+    inp = {"command": command}
+    if description is not None:
+        inp["description"] = description
+    call = {"type": "tool_use", "id": tu, "name": "Bash", "input": inp}
     return transcript_line("assistant", [call], timestamp=OWNER_TS)
 
 
-def refused_act(tu, command):
+def refused_act(tu, command, description=None):
     """A Bash call and the hook's refusal of it, with no answer after it."""
-    return [bash_call(tu, command), tool_result(REFUSED_TEXT, OWNER_TS, tool_use_id=tu)]
+    return [bash_call(tu, command, description), tool_result(REFUSED_TEXT, OWNER_TS, tool_use_id=tu)]
 
 
 def coord_refusal(c):
@@ -2699,6 +2706,174 @@ def case_owner_waits_writes_no_file_and_starts_no_process():
         c.cleanup()
 
 
+# --- owner waits: round 1 review findings ---------------------------------------------------------
+# A cloud session names itself three ways: the Stop payload by UUID, its env by cse_<x>, and its
+# get_session record and set_session_tags calls by session_<x>. The hook must read the record id.
+REMOTE_PAYLOAD_ID = "5f2b8c1e-3d4a-4b6e-9c7f-0a1b2c3d4e5f"
+REMOTE_CSE = "cse_Hq3vN8rT"
+REMOTE_SESSION = "session_Hq3vN8rT"
+OTHER_SESSION = "session_Zp7kLw2b"
+MERGE_PR12 = "gh pr merge 12"
+COST_PAIRS = 1000  # a plain transcript of 2000 lines: Bash calls and their successful results
+FENCED_SECTION = "\n".join([
+    "- Page item 219: owner allow-once for an open prompt.",
+    "```bash",
+    "# merge after the owner's yes",
+    "echo waiting",
+    "```",
+    "- Gate: `%s` waits for the owner's yes." % REFUSED_CMD,
+])
+UNFENCED_SECTION = "\n".join([
+    "- Page item 219: owner allow-once for an open prompt.",
+    "# merge after the owner's yes",
+    "echo waiting",
+    "- Gate: `%s` waits for the owner's yes." % REFUSED_CMD,
+])
+
+
+def cloud_case(name):
+    """A Case for a cloud session: the Stop payload names it by UUID, and the env names it cse_<x>."""
+    c = Case(name, extra_env={"CLAUDE_CODE_REMOTE_SESSION_ID": REMOTE_CSE})
+    c.session_id = REMOTE_PAYLOAD_ID
+    return c
+
+
+def case_owner_waits_cloud_record_id_blocks():
+    coordinator_scope(coord_refusal)
+    c = cloud_case("ow_cloud_get")
+    try:
+        proc = owner_stop(c, as_coordinator(c, [COORD_TAG], sid=REMOTE_SESSION), handoff=owner_handoff(None))
+        reason = stop_reason(proc)
+        check("owner waits cloud id (get_session): a cloud coordinator whose record is session_<x> blocks when "
+              "its handoff lacks the heading", reason is not None and proc.returncode == 0,
+              "rc=%r stdout: %r" % (proc.returncode, (proc.stdout or "")[:200]))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_cloud_set_tags_blocks():
+    coordinator_scope(coord_refusal)
+    c = cloud_case("ow_cloud_set")
+    try:
+        reason = stop_reason(owner_stop(c, tagged_by_call(c, [COORD_TAG], sid=REMOTE_SESSION),
+                                        handoff=owner_handoff(None)))
+        check("owner waits cloud id (set_session_tags): a set_session_tags call that names session_<x> tags a "
+              "cloud coordinator, and its Stop blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_cloud_other_record_stays_quiet():
+    coordinator_scope(coord_refusal)
+    c = cloud_case("ow_cloud_other")
+    try:
+        reason = stop_reason(owner_stop(c, as_coordinator(c, [COORD_TAG], sid=OTHER_SESSION),
+                                        handoff=owner_handoff(None)))
+        check("owner waits cloud id (other record): a coordinator record for another session does not make "
+              "this cloud session a coordinator", reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_answer_key_is_the_act():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_answer_key")
+    try:
+        lines = as_coordinator(c, [COORD_TAG]) + refused_act("tu-r", MERGE_PR12, description="Merge PR 12") + [
+            bash_call("tu-ok", MERGE_PR12, description="Merge pull request 12 now"),
+            tool_result("merged", OWNER_TS, is_error=False, tool_use_id="tu-ok")]
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits answer key: a refused act that a later success of the same command answers does not "
+              "block, though the two descriptions differ", reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_answer_other")
+    try:
+        lines = as_coordinator(c, [COORD_TAG]) + refused_act("tu-r", MERGE_PR12, description="Merge PR 12") + [
+            bash_call("tu-ok", "gh pr merge 13", description="Merge PR 12"),
+            tool_result("merged", OWNER_TS, is_error=False, tool_use_id="tu-ok")]
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits answer key control: a success of another command with the same description does not "
+              "answer the refused act", reason is not None and MERGE_PR12 in reason, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def plain_lines(pairs):
+    """Bash calls and their successful results. No coordinator tag text anywhere."""
+    lines = []
+    for i in range(pairs):
+        tu = "tu-p%d" % i
+        lines.append(bash_call(tu, "echo step-%04d" % i))
+        lines.append(tool_result("step-%04d done" % i, OWNER_TS, is_error=False, tool_use_id=tu))
+    return lines
+
+
+def gap_with_decodes(c, lines):
+    """owner_waits_gap over these transcript lines, in-process, as (reason, error, JSON decodes it made).
+    Every json.loads reaches JSONDecoder.raw_decode, so counting there sees a parse in any module."""
+    tp = os.path.join(c.root, "cost-transcript.jsonl")
+    write_transcript(tp, lines)
+    decodes = [0]
+    original = json.decoder.JSONDecoder.raw_decode
+
+    def counting(self, s, idx=0):
+        decodes[0] += 1
+        return original(self, s, idx)
+
+    json.decoder.JSONDecoder.raw_decode = counting
+    try:
+        with Env(CLAUDE_CONFIG_DIR=c.cfg, CLAUDE_CODE_REMOTE_SESSION_ID=None):
+            reason, err = call_under_test("owner_waits_gap", {"session_id": c.session_id, "transcript_path": tp})
+    finally:
+        json.decoder.JSONDecoder.raw_decode = original
+    return reason, err, decodes[0]
+
+
+def case_owner_waits_cost_skips_plain_transcripts():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_cost_parse")
+    try:
+        # A handoff must exist, or the hook returns before it reads the transcript at all.
+        put(c.handoff_path(), owner_handoff(None))
+        plain = plain_lines(COST_PAIRS)
+        reason, err, decodes = gap_with_decodes(c, plain)
+        check("owner waits cost (parse): the owner waits check runs without error on a plain transcript",
+              err is None, "error: %r" % err)
+        check("owner waits cost (parse): a session with no coordinator tag text gets no reason",
+              not reason, "reason: %r" % reason)
+        check("owner waits cost (parse): a plain transcript of %d lines is not decoded line by line "
+              "(%d decodes)" % (len(plain), decodes), decodes * 10 < len(plain),
+              "%d decodes for %d lines" % (decodes, len(plain)))
+        coord_reason, coord_err, _ = gap_with_decodes(c, as_coordinator(c, [COORD_TAG]) + plain)
+        check("owner waits cost (parse): a coordinator's transcript of the same size still blocks when the "
+              "handoff lacks the heading", coord_err is None and coord_reason is not None,
+              "error: %r reason: %r" % (coord_err, coord_reason))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_fenced_comment_keeps_section():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_fenced")
+    try:
+        proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(FENCED_SECTION))
+        reason = stop_reason(proc)
+        check("owner waits fence: a '# comment' line inside a fenced block does not end the section, so the "
+              "refused act named after the block is named", reason is None and proc.returncode == 0,
+              "rc=%r reason: %r" % (proc.returncode, reason))
+    finally:
+        c.cleanup()
+    c = Case("ow_unfenced")
+    try:
+        proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(UNFENCED_SECTION))
+        reason = stop_reason(proc)
+        check("owner waits fence control: the same comment line outside a fence still ends the section, so the "
+              "act named after it blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
@@ -2777,6 +2952,12 @@ def main() -> int:
     case_owner_waits_no_handoff_stays_quiet()
     case_owner_waits_fails_open()
     case_owner_waits_writes_no_file_and_starts_no_process()
+    case_owner_waits_cloud_record_id_blocks()
+    case_owner_waits_cloud_set_tags_blocks()
+    case_owner_waits_cloud_other_record_stays_quiet()
+    case_owner_waits_answer_key_is_the_act()
+    case_owner_waits_cost_skips_plain_transcripts()
+    case_owner_waits_fenced_comment_keeps_section()
 
     if FAILED:
         print()
