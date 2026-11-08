@@ -8,7 +8,7 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
+    PY_PATH_SPELLINGS, REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
     code_paths, dir_before_segment, heredoc_code, inline_code, norm, resolve_command, segment_tokens,
     split_segments,
 )
@@ -724,7 +724,6 @@ _PY_C_FLAG = re.compile(r"^-[A-Za-z]*c$")
 _NODE_EVAL_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)$")
 _INLINE_FLAG_WORDS = ("-c", "-e", "-p", "--eval", "--print")
 _PATH_CTORS = ("Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath")
-_PATH_PASS = ("resolve", "expanduser", "absolute")
 _COPY_NAMES = ("copy", "copy2", "copyfile", "copytree", "move")
 _PY_WRITE_CALL = re.compile(
     r"""open\s*\([^)]*['"][rwabt]*[wax+][rwabt+]*['"]|write_text|write_bytes|shutil\s*\.\s*(?:copy|move)"""
@@ -760,8 +759,9 @@ def _py_paths(node, env):
                 if options:
                     out = [_join_path(a, b) for a in out for b in options]
             return out if out != [""] else []
-        if isinstance(func, ast.Attribute) and func.attr in _PATH_PASS:
-            return _py_paths(func.value, env)
+        if name in PY_PATH_SPELLINGS:   # one list with guard_core's reader: `os.path.abspath(p)` or `p.resolve()`
+            owner = node.args[0] if node.args else func.value if isinstance(func, ast.Attribute) else None
+            return _py_paths(owner, env) if owner is not None else []
     return []
 
 
@@ -932,7 +932,8 @@ def interpreter_write_hit(raw: str, cwd: str, predicate, modes=None) -> str:
 
 
 # The frozen rule refuses a literal the interpreter writes, and one whose use the reader cannot tell
-# ("unknown": a name handed to some other call, held in a variable, or built from parts). A read, an
+# ("unknown": a name handed to some other call, or held in a variable no use of which tells). A path built
+# from parts is read whole (`code_paths(frozen=True)`). A read, an
 # existence check and a printed or compared string are never refused (decision frozen-path-resolves-shell-vars).
 FROZEN_CODE_MODES = ("write", "unknown")
 _CODE_WORDS = re.compile(r"py|node|bun|deno")
@@ -947,7 +948,7 @@ def _code_literal_hit(raw: str, cwd: str, predicate, modes) -> str:
 
     def hit(code: str, language: str, where: str) -> str:
         try:
-            literals = code_paths(code, language)
+            literals = code_paths(code, language, frozen=True)
         except ValueError:
             return ""   # node code nested past JS_DEPTH: the reader names no path
         return next((text.strip() for text, mode in literals

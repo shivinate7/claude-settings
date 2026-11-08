@@ -1896,6 +1896,15 @@ def command_indexes(tokens):
 
 CODE_EXISTS_CALLS = frozenset({"exists", "lexists", "isfile", "isdir", "islink", "access"})
 CODE_EXISTS_METHODS = frozenset({"exists", "is_file", "is_dir", "is_symlink"})
+# What `code_paths(..., frozen=True)` reads as "exists" besides the calls above: a call that asks about a
+# path's metadata or the names in it and never reads its content. The env-file rule does not read them
+# so (decision env-file-stays-unread: a getsize of the file is refused); the frozen rule does.
+CODE_METADATA_CALLS = frozenset({"stat", "lstat", "getsize", "getmtime", "getatime", "getctime", "samefile",
+                                 "glob", "iglob", "listdir", "scandir", "walk", "readlink"})
+CODE_METADATA_METHODS = frozenset({"stat", "lstat", "glob", "rglob", "iterdir", "samefile", "readlink"})
+# A string a call or an attribute takes from a path: `Path(p).name`, `os.path.basename(p)`. Frozen reading only.
+PY_PATH_STRING_PARTS = frozenset({"name", "stem", "suffix", "suffixes", "parts"})
+PY_PATH_STRING_CALLS = frozenset({"basename"})
 # Python calls by the mode they give the path in their first argument. The destination is judged
 # apart: `shutil.copy(src, dst)` reads src and writes dst, and a move or rename changes both.
 PY_READ_METHODS = frozenset({"read_text", "read_bytes"})
@@ -1910,8 +1919,9 @@ PY_TEXT_CALLS = frozenset({"print", "pprint", "write", "writelines", "write_text
                            "dumps", "dump"})
 # A call that returns its one path argument in another spelling: the mode passes on to the call around
 # it, as it does through a join. `open(os.path.expanduser(p))` opens p; `print(expanduser(p))` prints it.
+# This is the one home of the list: guard_frozen's own path reader (`_py_paths`) reads it too.
 PY_PATH_SPELLINGS = frozenset({"expanduser", "expandvars", "abspath", "realpath", "normpath", "normcase",
-                               "fspath"})
+                               "fspath", "resolve", "absolute", "dirname"})
 PY_TEXT_COMPARES = (ast.In, ast.NotIn, ast.Eq, ast.NotEq)
 # Nodes that carry a string on to the call around them: a list, a dict, an f-string, a sum.
 PY_CARRIERS = (ast.Dict, ast.List, ast.Tuple, ast.Set, ast.JoinedStr, ast.FormattedValue, ast.BinOp,
@@ -1926,6 +1936,7 @@ JS_COPY_CALLS = frozenset({"copyFileSync", "copyFile", "cpSync", "cp"})   # read
 JS_MOVE_CALLS = frozenset({"renameSync", "rename"})                       # write, then write
 JS_CONTENT_CALLS = frozenset({"writeFileSync", "writeFile", "appendFileSync", "appendFile"})
 JS_EXISTS_CALLS = frozenset({"exists", "existsSync", "access", "accessSync"})
+JS_METADATA_CALLS = frozenset({"stat", "statSync", "lstat", "lstatSync"})   # frozen reading only
 JS_JOIN_CALLS = frozenset({"join", "resolve", "normalize"})
 JS_TEXT_CALLS = frozenset({"write", "writeln", "stringify", "includes", "indexOf"})
 JS_CONSOLE_CALLS = frozenset({"log", "error", "warn", "info", "debug"})
@@ -1959,7 +1970,7 @@ def _stdlib_call(call) -> bool:
     if isinstance(func, ast.Name):
         return True
     owner = func.value if isinstance(func, ast.Attribute) else None
-    return (isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "path")) or (
+    return (isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "path", "glob")) or (
         isinstance(owner, ast.Attribute) and owner.attr == "path")
 
 
@@ -1987,13 +1998,16 @@ def _spelled_path_call(expr, parents):
     return None
 
 
-def _path_method_mode(call, parents) -> str:
+def _path_method_mode(call, parents, frozen=False) -> str:
     """The mode a `Path(...)` call gives its path, from the method called on it."""
     method = parents.get(call)
     outer = parents.get(method)
+    if frozen and isinstance(method, ast.Attribute) and method.value is call \
+            and method.attr in PY_PATH_STRING_PARTS:
+        return "text"
     if not (isinstance(method, ast.Attribute) and isinstance(outer, ast.Call) and outer.func is method):
         return "unknown"
-    if method.attr in CODE_EXISTS_METHODS:
+    if method.attr in CODE_EXISTS_METHODS or (frozen and method.attr in CODE_METADATA_METHODS):
         return "exists"
     if method.attr in PY_READ_METHODS:
         return "read"
@@ -2002,17 +2016,38 @@ def _path_method_mode(call, parents) -> str:
     return "write" if method.attr in PY_WRITE_CALLS else "unknown"
 
 
-def _python_mode(node, parents) -> str:
+PY_MODE_RANK = ("text", "exists", "read", "unknown", "write")   # the riskiest use of a name wins
+
+
+def _bound_mode(assign, path_object, parents, names, seen, frozen) -> str:
+    """The mode a value bound to a name (`p = Path(x).expanduser()`) gives its path, from every use of
+    that name in the code (`p.read_text()`, `open(p, "w")`). The riskiest use wins. A name with no use
+    the reader can see, or a target that is not one plain name, reads "unknown"."""
+    target = assign.targets[0] if isinstance(assign, ast.Assign) and len(assign.targets) == 1 \
+        else getattr(assign, "target", None)
+    uses = names.get(target.id) if isinstance(target, ast.Name) and names is not None else None
+    if not uses:
+        return "unknown"
+    modes = [_python_mode(use, parents, path_object, names, seen | {assign}, frozen) for use in uses]
+    return max(modes, key=PY_MODE_RANK.index)
+
+
+def _python_mode(node, parents, path_object=False, names=None, seen=frozenset(), frozen=False) -> str:
     """The mode a python string constant gives its path, from the call that holds it. A join
     (`os.path.join(a, p)`) passes the mode of its result on; a list, a dict, an f-string or a sum
-    carries the string to the call around it, where only a text call reads it (`direct` is then off)."""
-    value, direct, path_object = node, True, False
+    carries the string to the call around it, where only a text call reads it (`direct` is then off).
+    A bare `Path(p)` argument is p as a path object. A value bound to a name takes the mode of the
+    name's uses when `names` (the name to its load nodes) is given (`_bound_mode`)."""
+    value, direct = node, True
     while True:
         parent = parents.get(value)
         spelled = None
         if direct and isinstance(parent, ast.Call) and _call_name(parent).endswith("Path") \
                 and value in parent.args:
             spelled = _spelled_path_call(parent, parents)
+            if spelled is None and not isinstance(parents.get(parent), ast.Attribute):
+                value, path_object = parent, True    # `open(Path(p))`: the call around it judges p
+                continue
         elif path_object:
             spelled = _spelled_path_call(value, parents)
         if spelled is not None:
@@ -2030,18 +2065,20 @@ def _python_mode(node, parents) -> str:
             break
     call = parent
     if path_object and isinstance(call, ast.Attribute):
-        return _path_method_mode(value, parents)    # `Path(p).expanduser().exists()` checks p
+        return _path_method_mode(value, parents, frozen)    # `Path(p).expanduser().exists()` checks p
+    if direct and isinstance(call, (ast.Assign, ast.AnnAssign)) and names is not None:
+        return "text" if call in seen else _bound_mode(call, path_object, parents, names, seen, frozen)
     if not isinstance(call, ast.Call):
         return "unknown"
     name = _call_name(call)
     if direct and name.endswith("Path") and value in call.args:
-        return _path_method_mode(call, parents)
-    if name in PY_TEXT_CALLS:
+        return _path_method_mode(call, parents, frozen)
+    if name in PY_TEXT_CALLS or (frozen and name in PY_PATH_STRING_CALLS):
         return "text"
     position = call.args.index(value) if direct and value in call.args else -1
     if position < 0 or position > 1 or not _stdlib_call(call):
         return "unknown"
-    if name in CODE_EXISTS_CALLS:
+    if name in CODE_EXISTS_CALLS or (frozen and name in CODE_METADATA_CALLS):
         return "exists" if position == 0 else "unknown"
     if name == "open":
         return _open_mode(call, 1) if position == 0 else "unknown"
@@ -2052,14 +2089,101 @@ def _python_mode(node, parents) -> str:
     return "write" if position == 0 and name in PY_WRITE_CALLS else "unknown"
 
 
-def _python_paths(code: str):
+PY_HOME_ENV = ("HOME", "USERPROFILE")
+
+
+def _join_text(head: str, tail: str) -> str:
+    """`os.path.join(head, tail)` on text: an absolute tail replaces the head."""
+    if tail.startswith("/") or not head:
+        return tail
+    return head.rstrip("/") + "/" + tail
+
+
+def _py_composed_text(node, bound, depth=0) -> str:
+    """The path an expression builds, as text: literals joined as `os.path.join`, `Path(a, b)` and
+    `a / b` join them, `a + b` joins them as is, a name bound once reads as its value, the home
+    directory reads as `~`. `_` stands for a part it cannot tell (a call, a name bound twice), so a
+    frozen folder followed by an unknown child reads `<frozen folder>/_`."""
+    if depth > 8:
+        return "_"
+    step = depth + 1
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else "_"
+    if isinstance(node, ast.Name):
+        return _py_composed_text(bound[node.id], bound, step) if node.id in bound else "_"
+    if isinstance(node, ast.JoinedStr):
+        return "".join(_py_composed_text(part.value if isinstance(part, ast.FormattedValue) else part,
+                                         bound, step) for part in node.values)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
+        left, right = _py_composed_text(node.left, bound, step), _py_composed_text(node.right, bound, step)
+        return _join_text(left, right) if isinstance(node.op, ast.Div) else left + right
+    if isinstance(node, ast.Subscript):
+        key = node.slice
+        return "~" if isinstance(key, ast.Constant) and key.value in PY_HOME_ENV else "_"
+    if isinstance(node, ast.Call):
+        name = _call_name(node)
+        first = node.args[0] if node.args else None
+        if name == "home" or (name in ("getenv", "get") and isinstance(first, ast.Constant)
+                              and first.value in PY_HOME_ENV):
+            return "~"
+        if name == "join" or name.endswith("Path"):
+            text = ""
+            for arg in node.args:
+                text = _join_text(text, _py_composed_text(arg, bound, step))
+            return text or "_"
+        if name in PY_PATH_SPELLINGS:
+            owner = first if first is not None else node.func.value if isinstance(node.func, ast.Attribute) else None
+            return _py_composed_text(owner, bound, step) if owner is not None else "_"
+    return "_"
+
+
+def _py_builds_path(node) -> bool:
+    """True for an expression that builds one path from parts: `a / b`, `a + b`, `os.path.join(a, b)`,
+    `Path(a, b)` and an f-string with a hole."""
+    if isinstance(node, ast.BinOp):
+        return isinstance(node.op, (ast.Div, ast.Add))
+    if isinstance(node, ast.JoinedStr):
+        return any(isinstance(part, ast.FormattedValue) for part in node.values)
+    return isinstance(node, ast.Call) and len(node.args) > 1 and (
+        _call_name(node) == "join" or _call_name(node).endswith("Path"))
+
+
+def _py_composed_paths(tree, parents, names, bound):
+    """[(path, mode)] for each expression that builds a path from parts, once for the whole chain. The
+    parts of `os.path.join(a, b, c)` are string literals the reader names one by one, and none of them
+    is a frozen file; the built path is."""
+    found = []
+    for node in ast.walk(tree):
+        if not _py_builds_path(node):
+            continue
+        parent = parents.get(node)
+        if _py_builds_path(parent) and (not isinstance(parent, ast.Call) or node in parent.args):
+            continue   # a part of a longer chain: the chain is read whole
+        path_object = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) or (
+            isinstance(node, ast.Call) and _call_name(node).endswith("Path"))
+        text = _py_composed_text(node, bound)
+        if text != "_":
+            found.append((text, _python_mode(node, parents, path_object, names, frozen=True)))
+    return found
+
+
+def _python_paths(code: str, frozen=False):
     try:
         tree = ast.parse(code)
     except (SyntaxError, ValueError, RecursionError):
         return [(text, "unknown") for text in _python_token_strings(code)]
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
-    return [(node.value, _python_mode(node, parents)) for node in ast.walk(tree)
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+    names, bound, count = {}, {}, {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            names.setdefault(node.id, []).append(node)
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            count[node.targets[0].id] = count.get(node.targets[0].id, 0) + 1
+            bound[node.targets[0].id] = node.value
+    bound = {name: value for name, value in bound.items() if count[name] == 1}
+    found = [(node.value, _python_mode(node, parents, names=names, frozen=frozen)) for node in ast.walk(tree)
+             if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+    return found + _py_composed_paths(tree, parents, names, bound) if frozen else found
 
 
 def _python_token_strings(code: str):
@@ -2081,8 +2205,8 @@ def _python_token_strings(code: str):
     return found
 
 
-def _js_file_mode(name: str, index: int) -> str:
-    if name in JS_EXISTS_CALLS:
+def _js_file_mode(name: str, index: int, frozen=False) -> str:
+    if name in JS_EXISTS_CALLS or (frozen and name in JS_METADATA_CALLS):
         return "exists" if index == 0 else "unknown"
     if name in JS_CONTENT_CALLS and index >= 1:
         return "text"   # the content, never the path
@@ -2094,7 +2218,7 @@ def _js_file_mode(name: str, index: int) -> str:
     return "unknown"
 
 
-def _js_mode(frames, code: str, start: int, end: int, whole: bool) -> str:
+def _js_mode(frames, code: str, start: int, end: int, whole: bool, frozen=False) -> str:
     """The mode a node string at code[start:end] gives its path. `frames` are the open brackets,
     `[kind, callee, argument index]`. `whole` is true when the string is a whole argument (a
     quote or comma before it, a comma or paren after it): only then does a file call read it as its
@@ -2103,7 +2227,7 @@ def _js_mode(frames, code: str, start: int, end: int, whole: bool) -> str:
     if JS_COMPARE_BEFORE.search(code[max(0, start - 8):start]) or JS_COMPARE_AFTER.match(code, end):
         return "text"
     direct = whole
-    for kind, callee, index in reversed(frames):
+    for kind, callee, index, *_ in reversed(frames):
         if kind != "(":
             direct = False
             continue
@@ -2112,18 +2236,47 @@ def _js_mode(frames, code: str, start: int, end: int, whole: bool) -> str:
             return "text"
         if base in JS_JOIN_CALLS:
             continue
-        return _js_file_mode(base, index) if direct else "unknown"
+        return _js_file_mode(base, index, frozen) if direct else "unknown"
     return "unknown"
 
 
-def _js_paths(code: str):
+JS_HOME = (r"\bhomedir\s*\(|\bprocess\s*\.\s*env\s*\.\s*(?:HOME|USERPROFILE)\b"
+           r"|\benv\s*\[\s*['\"](?:HOME|USERPROFILE)['\"]")
+JS_HOME_BOUND = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=[^;\n]*?(?:" + JS_HOME + ")")
+
+
+def _js_paths(code: str, frozen=False):
+    """`frozen` is the reading the frozen rule judges by (`code_paths`). It also gives the path a string
+    is a part of when the home directory heads it (`path.join(os.homedir(), ".claude/hooks", f)`,
+    `os.homedir() + "/.claude/x"`): that path as `~/...`, and again with `/_` (an unknown child) after
+    it. A string joined to another with `+` is then a whole argument too, and `stat` asks only."""
     found, stack, frames, prev = [], [], [], ""
     i, n = 0, len(code)
+    home = re.compile("|".join([JS_HOME] + [r"\b%s\b" % re.escape(name)
+                                            for name in JS_HOME_BOUND.findall(code)])) if frozen else None
 
     def whole_arg(start: int, end: int) -> bool:
         before = code[:start].rstrip()[-1:]
         after = code[end:].lstrip()[:1]
-        return bool(frames) and frames[-1][0] == "(" and before in ("(", ",") and after in (",", ")")
+        ends = ("(", ",", "+") if frozen else ("(", ",")
+        return bool(frames) and frames[-1][0] == "(" and before in ends and after in (
+            (",", ")", "+") if frozen else (",", ")"))
+
+    def add(text: str, mode: str, start: int, whole: bool):
+        found.append((text, mode))
+        if not frozen:
+            return
+        frame = frames[-1] if frames else None
+        joined = bool(whole and frame and frame[0] == "(" and frame[1].rsplit(".", 1)[-1] in JS_JOIN_CALLS)
+        if joined:
+            frame[4].append(text.strip("/"))
+        brace = max((at for at, other in enumerate(frames) if other[0] == "{"), default=-1)
+        scope = frames[brace + 1][3] if brace + 1 < len(frames) else max(
+            code.rfind(";", 0, start), code.rfind("\n", 0, start)) + 1
+        if home.search(code, scope, start):
+            built = "~/" + "/".join(part for part in frame[4] if part) if joined else "~/" + text.lstrip("/")
+            found.append((built, mode))
+            found.append((built + "/_", mode))
 
     def close(kind: str):
         while frames and frames[-1][0] != kind and frames[-1][0] != "{":
@@ -2143,13 +2296,14 @@ def _js_paths(code: str):
                 j += step
             closed = j < n and code[j] == "`"
             whole = first and closed and whole_arg(i - 1, j + 1)
-            found.append(("".join(part), _js_mode(frames, code, i - 1 if first else i, j + closed, whole)))
+            at = i - 1 if first else i
+            add("".join(part), _js_mode(frames, code, at, j + closed, whole, frozen), at, whole)
             if closed:
                 stack.pop()
                 prev, i = "a", j + 1
             elif j < n:
                 stack.append("${")
-                frames.append(["{", "", 0])
+                frames.append(["{", "", 0, i, []])
                 prev, i = "{", j + 2
             else:
                 i = n
@@ -2165,7 +2319,8 @@ def _js_paths(code: str):
             j = i + 1
             while j < n and code[j] != char and code[j] != "\n":
                 j += 2 if code[j] == "\\" else 1
-            found.append((code[i + 1:j], _js_mode(frames, code, i, j + 1, whole_arg(i, j + 1))))
+            whole = whole_arg(i, j + 1)
+            add(code[i + 1:j], _js_mode(frames, code, i, j + 1, whole, frozen), i, whole)
             prev, i = "a", j + 1
         elif char == "`":
             stack.append("`")
@@ -2182,7 +2337,7 @@ def _js_paths(code: str):
         elif char in "{}":
             if char == "{":
                 stack.append("{")
-                frames.append(["{", "", 0])
+                frames.append(["{", "", 0, i, []])
             else:
                 if stack:
                     stack.pop()
@@ -2190,7 +2345,7 @@ def _js_paths(code: str):
             prev, i = char, i + 1
         elif char in "([":
             callee = JS_CALLEE.search(code[max(0, i - 120):i]) if char == "(" else None
-            frames.append([char, callee.group(1) if callee else "", 0])
+            frames.append([char, callee.group(1) if callee else "", 0, i, []])
             prev, i = char, i + 1
         elif char in ")]":
             close("(" if char == ")" else "[")
@@ -2211,7 +2366,7 @@ def _js_paths(code: str):
     return found
 
 
-def code_paths(code: str, language: str):
+def code_paths(code: str, language: str, frozen=False):
     """[(string literal, mode)] for each string literal of the code that could be a path.
 
     `language` is "python" or "node". Python is read with `ast` (the literal parts of an f-string
@@ -2223,10 +2378,17 @@ def code_paths(code: str, language: str):
     `fs.writeFileSync(p)`), "exists" (`os.path.exists(p)`, `Path(p).is_file()`, `fs.existsSync(p)`,
     also through `os.path.join`, `os.path.expanduser` and its kin, and `Path(a, b)`), "text" (printed, written as content, dumped as
     JSON, or compared: `print(s)`, `f.write(s)`, `console.log(s)`, `s in names`), and "unknown" for
-    any other literal: a name handed to some other call, bound to a variable, or built from parts.
+    any other literal: a name handed to some other call, bound to a variable (judged by the uses of
+    the name, python), or built from parts.
     A caller that refuses a path must refuse "unknown" as well as the modes it names. Raises
-    ValueError for a nest deeper than JS_DEPTH."""
-    return _python_paths(code) if language == "python" else _js_paths(code)
+    ValueError for a nest deeper than JS_DEPTH.
+
+    `frozen=True` is the reading the frozen rule judges by. It also gives each path built from parts
+    (`os.path.join(a, b)`, `a / b`, `a + b`, `Path(a, b)`, an f-string, node's `path.join` and `+`
+    behind the home directory) as one more entry with the mode of the whole, `_` standing for a part
+    it cannot tell, and reads a metadata call (`os.stat`, `getsize`, `glob`, `fs.statSync`) and a
+    string taken from a path (`Path(p).name`, `os.path.basename(p)`) as no write."""
+    return _python_paths(code, frozen) if language == "python" else _js_paths(code, frozen)
 
 
 def code_language(word: str) -> str:
