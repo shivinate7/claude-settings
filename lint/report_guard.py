@@ -1727,14 +1727,20 @@ def _names_rule_id(clause):
     """True when a slug in parentheses in `clause` (CANNOT_RULE_ID_RE) is a real rule or decision id: a `rule:<id>`
     anchor in the rule files (rule_audit.RULE_FILES, the one home of that list) or a docs/decisions/<id>.md file. Both
     are read in this file's checkout and in the checkout the global CLAUDE.md points at (guard.pointer_checkout): an
-    installed copy holds only the pointer and no decisions. Cost: on the first such slug of a hook run, one read of the
-    pointer and of each rule file per checkout; per slug, one file stat per checkout. When no checkout's rule files can
-    be read, the slug skips: a guard that cannot read cannot accuse."""
+    installed copy holds only the pointer and no decisions. Cost: on the first such slug of a hook run, the guard import
+    (cannot_problem needs it next anyway), one read of the pointer and of each rule file per checkout; per slug, one
+    file stat per checkout. A guard that does not load prints UNKNOWN and reads this checkout alone. When no checkout's
+    rule files can be read, the slug skips with no note: a guard that cannot read cannot accuse."""
     slugs = [m.group(1).lower() for m in CANNOT_RULE_ID_RE.finditer(clause)]
     if not slugs:
         return False
     if not _RULE_IDS:
         import rule_audit
+        if guard is None:  # the Stop run judges claims before cannot_problem loads the guard
+            _load_guard()
+        if guard is None:
+            print("cannot-claim guard: UNKNOWN, the guard did not load, so the pointer checkout's rule ids went unread.",
+                  file=sys.stderr)
         pointer = guard.pointer_checkout() if guard is not None else ""
         roots = list(dict.fromkeys(os.path.realpath(r) for r in (os.path.join(HERE, ".."), pointer) if r))
         ids, read = set(), False
