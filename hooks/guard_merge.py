@@ -888,11 +888,14 @@ def _ste_base(where):
     return "", "the default branch of origin could not be read, and ste-changed reads origin only"
 
 
-def _segment_top(segment, stripped, cwd):
-    """The top folder of the checkout a git segment acts on (its `-C` folder, else the call's folder), or ''."""
-    target = _segment_git_c_target(segment_tokens(segment) or [])
-    root = command_root(stripped, cwd)
-    where = _absolute(target, root) if target is not None else root
+def _segment_top(segments, number, ends, cwd):
+    """The top folder of the checkout `segments[number]` acts on (its `-C` folder, else the folder the shell is
+    in when it runs, after each earlier `cd`), or ''."""
+    target = _segment_git_c_target(segment_tokens(segments[number]) or [])
+    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)
+    if target is not None:
+        where = _absolute(target, where or "")
+        where = where if os.path.isabs(where) else None
     done = _toplevel(where) if where and os.path.isdir(where) else None
     return os.path.normpath(done.stdout.strip()) if done is not None and done.returncode == 0 and done.stdout.strip() else ""
 
@@ -975,16 +978,18 @@ def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
     linted = set()
     committed, added = set(), set()   # tops where an earlier segment of this call commits / adds
     brought = {}                      # top: [(verb, args)] of each earlier merge, cherry-pick, am or revert there
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         call = git_call_of(segment) if segment.strip() else None
         resumes = call is not None and call[0] in _BRINGING_VERBS + _CONTINUE_VERBS and "--continue" in call[1]
         if call is not None and (call[0] in ("add", "commit") or resumes):
-            made = _segment_top(segment, stripped, cwd)
+            made = _segment_top(segments, number, ends, cwd)
             if made:
                 (added if call[0] == "add" else committed).add(made)
             continue
         if call is not None and call[0] in _BRINGING_VERBS and not _BRING_DONE_FLAGS & set(call[1]):
-            made = _segment_top(segment, stripped, cwd)
+            made = _segment_top(segments, number, ends, cwd)
             if made:
                 brought.setdefault(made, []).append(call)
             continue
