@@ -5890,9 +5890,11 @@ class DebtRetire(Env):
     """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
     lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
 
-    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None):
+    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None, main_line=None):
         """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
-        the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
+        the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it.
+        main_line: a line main adds to the debt after feat is cut. feat merges main in before it changes the debt, so a close
+        deletes a line main added since the cut: the silent-undo check's finding on the debt's delete."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -5904,6 +5906,13 @@ class DebtRetire(Env):
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
         put(os.path.join(o, "docs/decisions/second.md"), record("pending", "second"))
         put(os.path.join(o, "tests/test_retire_target.py"), test_text or "import sys\nsys.exit(%d)\n" % test_exit)
+        if main_line is not None:
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: the pending record and the test")
+            sh(o, "git", "checkout", "-q", "main")
+            put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % retire + main_line)
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a line on the debt"); sh(o, "git", "push", "-q", "origin", "main")
+            sh(o, "git", "checkout", "-q", "feat")
+            sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
         if closes:
             sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
         else:
@@ -5968,6 +5977,36 @@ class DebtRetire(Env):
         self.assertEqual(self.claims(), 1, out)
         names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
         self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
+
+    def cited_undo_pr(self, conclusion):
+        """A PR that closes the debt, whose Retire names no test, after main adds a line to the debt. The close undoes that line,
+        so the silent-undo check has a finding on the debt's path. The body cites the debt's run; the run reads `conclusion` on the head."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE, main_line="- **Note.** Added on main after the cut.\n")
+        head = self.head()
+        self.host.body = "Summary.\n\nRetire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        self.host.cited_run = lambda url: (conclusion, head)
+        return head
+
+    def test_a_cite_the_debt_close_check_refuses_is_named_before_the_refusal(self):
+        self.cited_undo_pr("failure")
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("silently undoes", out, "premise: the close undoes main's line, so the silent-undo check has a finding")
+        self.assertIn("docs/debts/retire-target.md", out, "premise: the finding names the debt's path")
+        lines = out.splitlines()
+        named = [i for i, ln in enumerate(lines) if ln.startswith("merge: cite for retire-target not accepted: ")]
+        blocked = [i for i, ln in enumerate(lines) if ln.startswith("BLOCKED: ")]
+        self.assertTrue(named, "no 'merge: cite for retire-target not accepted:' line for the failed cited run:\n" + out)
+        self.assertTrue(blocked, out)
+        self.assertLess(named[0], blocked[0], "the cite line comes after the refusal it explains:\n" + out)
+        self.assertIn("ended failure, not success", lines[named[0]], "the cite line does not give the debt-close verdict:\n" + out)
+
+    def test_an_accepted_cite_prints_no_not_accepted_line(self):  # control: the same PR with a green run on the head
+        self.cited_undo_pr("success")
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("ALLOWED docs/debts/retire-target.md", out, "premise: the green cite excuses the debt's delete")
+        self.assertNotIn("not accepted", out, "an accepted cite printed a not-accepted line:\n" + out)
 
 
 class DraftPreview(Env):

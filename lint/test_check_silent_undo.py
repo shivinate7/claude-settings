@@ -2245,6 +2245,18 @@ class RetireCite(unittest.TestCase):
     def allowed(notes):
         return [n for n in notes if n.startswith("ALLOWED ")]
 
+    def assert_not_accepted(self, notes, fact, label):
+        """The one cite line for the flagged debt says its cite was not accepted, and the reason holds `fact`."""
+        lines = [n for n in notes if n.startswith("cite for ")]
+        prefix = "cite for %s not accepted: " % self.SLUG
+        self.assertEqual(len(lines), 1, "%s: want one 'cite for' line, got %r" % (label, notes))
+        self.assertTrue(lines[0].startswith(prefix), "%s: the line does not name the slug and the verdict: %s" % (label, lines[0]))
+        self.assertIn(fact, lines[0], "%s: the reason does not hold %r: %s" % (label, fact, lines[0]))
+
+    def assert_no_cite_line(self, notes, label):
+        """No cite line at all: no cite in the body, or a cite for a debt that is not flagged, or an accepted cite."""
+        self.assertEqual([n for n in notes if n.startswith("cite for ")], [], "%s: a cite line was printed: %r" % (label, notes))
+
     def test_green_cite_on_a_prose_retire_excuses_the_debt_delete(self):
         """The #1099 shape: the debt's Retire names no test, and the PR body's last paragraph cites a green run on the head."""
         self.land({self.DEBT: debt(PROSE)})
@@ -2256,6 +2268,9 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(problems, [], (problems, notes))
         self.assertEqual(len(self.allowed(notes)), 1, notes)
         self.assertTrue(self.allowed(notes)[0].startswith("ALLOWED %s:" % self.DEBT), notes)
+        self.assert_no_cite_line(notes, "accepted cite")  # control: an accepted cite prints ALLOWED, never a not-accepted line
+        _, bare_notes = self.silent(head)
+        self.assert_no_cite_line(bare_notes, "no cite")  # control: no cite in the body, no cite line
 
     def test_a_cite_for_another_slug_does_not_excuse_the_debt_delete(self):
         self.land({self.DEBT: debt(PROSE)})
@@ -2265,6 +2280,7 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(self.scope(head, body, Runs(("success", head))), [(self.SLUG, "prose")], "scope")
         problems, notes = self.silent(head, body, Runs(("success", head)))
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_no_cite_line(notes, "another slug")  # control: the flagged debt is not cited, so no line names it
 
     def test_a_cited_run_that_failed_does_not_excuse_the_debt_delete(self):
         self.land({self.DEBT: debt(PROSE)})
@@ -2274,6 +2290,7 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(self.scope(head, body, Runs(("failure", head))), [(self.SLUG, "red")], "scope")
         problems, notes = self.silent(head, body, Runs(("failure", head)))
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_not_accepted(notes, "ended failure", "failed run")
 
     def test_a_green_run_below_the_pr_head_does_not_excuse_the_debt_delete(self):
         self.land({self.DEBT: debt(PROSE)})
@@ -2284,6 +2301,7 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(self.scope(head, body, Runs(("success", below))), [(self.SLUG, "red")], "scope")
         problems, notes = self.silent(head, body, Runs(("success", below)))
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_not_accepted(notes, below[:9], "run below the head")
 
     def test_no_run_reader_excuses_nothing(self):
         self.land({self.DEBT: debt(PROSE)})
@@ -2293,6 +2311,7 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(self.scope(head, body, None), [(self.SLUG, "unknown")], "scope")
         problems, notes = self.silent(head, body, None)  # no run_state: the default, so the case passes the argument only if check() takes one
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_not_accepted(notes, "no reader", "no run reader")
 
     def test_a_run_reader_that_raises_excuses_nothing(self):
         self.land({self.DEBT: debt(PROSE)})
@@ -2303,6 +2322,7 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(self.scope(head, body, Runs(boom)), [(self.SLUG, "unknown")], "scope")
         problems, notes = self.silent(head, body, Runs(boom))
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_not_accepted(notes, "HTTP 502", "reader raises")
 
     def test_a_green_cite_does_not_excuse_a_retire_test_that_fails(self):
         self.land({self.DEBT: debt(self.RED_RETIRE)})
@@ -2312,6 +2332,7 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(self.scope(head, body, Runs(("success", head))), [(self.SLUG, "red")], "scope")
         problems, notes = self.silent(head, body, Runs(("success", head)))
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_not_accepted(notes, "tests/test_fail.py exited 1", "red retire with a green cite")
 
     def test_a_cite_matching_a_deleted_non_debt_file_does_not_excuse_it(self):
         self.land({self.NOTE: "A note.\n"})
@@ -2501,17 +2522,18 @@ class RetireCite(unittest.TestCase):
             raising = Runs(RuntimeError("the run read failed: HTTP 502"))
             code, out = self.cli(head, raising, env={CASE_BODY: body})
             self.assertIn(RUN_URL, raising.urls, "the cited run was never read, so the case proves nothing")
-            self.assert_unread_line(code, out, "the read raises")
+            self.assert_unread_line(code, out, "the read raises", "HTTP 502")
 
         with self.subTest("no run reader"), unittest.mock.patch.object(merge.Host, "__init__", no_host):
             code, out = self.cli(head, Runs(("success", head)), env={CASE_BODY: body})
-            self.assert_unread_line(code, out, "no run reader")
+            self.assert_unread_line(code, out, "no run reader", "merge cannot build the Host")
 
-    def assert_unread_line(self, code, out, label):
+    def assert_unread_line(self, code, out, label, fact):
         lines = [ln for ln in out.splitlines() if ln.startswith("silent-undo: cite for ")]
         self.assertEqual(len(lines), 1, "%s: want one 'cite for' line, got %r:\n%s" % (label, lines, out))
-        self.assertTrue(lines[0].startswith("silent-undo: cite for %s not read: " % self.SLUG), "%s: %s" % (label, lines[0]))
-        self.assertTrue(lines[0].split("not read: ", 1)[1].strip(), "%s: the line gives no reason: %s" % (label, lines[0]))
+        self.assertTrue(lines[0].startswith("silent-undo: cite for %s not accepted: " % self.SLUG), "%s: %s" % (label, lines[0]))
+        self.assertNotIn(" not read: ", out, "%s: the old 'not read' line is still printed:\n%s" % (label, out))
+        self.assertIn(fact, lines[0], "%s: the line does not give the reader's failure %r: %s" % (label, fact, lines[0]))
         self.assertEqual(code, 1, "%s: an unread cite must still fail the check:\n%s" % (label, out))
 
     def test_a_body_with_no_cite_prints_no_cite_line(self):  # control
