@@ -1503,3 +1503,4 @@
 - plan-reads-local-tools: `ci-job --plan` (under --lint and --step) plans from the local tools, so a pinned tree that lacks a file shows `would run` while the real run is unknown. Harmless: merge reads the plan only after a real lint exits 0. Decision: lanes-run-no-full-ci-job (the lane-check decision).
 - local-ste-lint-ignores-pin: the local `$/actions/ste-lint` form runs ci-job's own `bin/ste-changed`, not the pinned tree's, under --step and --lint. Decision: lanes-run-no-full-ci-job (the lane-check decision).
 - page-write-forms-still-block: after a read-back, a writer's `file_path` write and a non-close update without `n` still block (hooks/feedback_guard.py `page_problem`). Decision: owner-feedback-inbox (owner feedback goes to an inbox before the turn ends).
+- map-alias-links-unread: `jsconfig.json`, nested tsconfigs and vitest or jest aliases are unread (skills/plain-english-map/scripts/lib/tsconfig-paths.mjs). Decision: map-tested-by-line.
