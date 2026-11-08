@@ -1456,6 +1456,16 @@ class CannotClaimTests(unittest.TestCase):
                          *ok_bash("./open-pr.sh feature", "tu_2"), landed_reply(line)])
         self.assert_blocks(out, line)
 
+    def test_cc_red_a_ci_failing_with_lint_errors_or_a_colon_names_the_blocker(self):
+        # Catches: "CI is failing" followed by lint errors, a lint job or a colon read as an outage, so a merge claim that CI
+        # blocks blocked with no try. A CI state names the blocker of a merge.
+        for line in ("I can't merge PR 12 because CI is failing with lint errors.",
+                     "I can't merge PR 12 because CI is failing: lint job.",
+                     "CI is failing: I can't merge PR 12."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_passes(out, "a merge claim whose blocker is CI failing")
+
 
 if __name__ == "__main__":
     unittest.main()
