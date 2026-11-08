@@ -351,6 +351,79 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     return "stray" if merge != current() and not upstream else ""
 
 
+_OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+
+def _common_git_dir_from_files(cwd: str):
+    """The common directory of the checkout holding CWD, read from files alone, else None. A `.git`
+    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
+    one, so a linked worktree reads the clone's shared refs. No process is spawned. guard.py's
+    `_git_common_dir` reads the same files from a known root, but guard.py imports this module, and
+    this read must walk up from a cwd, so it cannot call that one."""
+    here = os.path.abspath(cwd)
+    while True:
+        dot = os.path.join(here, ".git")
+        try:
+            if os.path.isdir(dot):
+                return dot
+            if os.path.isfile(dot):
+                with open(dot, encoding="utf-8") as handle:
+                    first = handle.readline(4096).strip()
+                if not first.startswith("gitdir:"):
+                    return None
+                git_dir = os.path.join(here, first[len("gitdir:"):].strip())
+                try:
+                    with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
+                        git_dir = os.path.join(git_dir, handle.readline(4096).strip())
+                except FileNotFoundError:
+                    pass   # no commondir: a submodule's own dir is its common dir
+                return git_dir
+        except (OSError, UnicodeDecodeError):
+            return None
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def _remote_tips_from_files(cwd: str, remote: str):
+    """{branch: sha} of `refs/remotes/<remote>/*` read from the ref files (loose over packed), else None.
+    None means a layout this read does not know, and the caller asks the VCS instead: a reftable store,
+    a value that is not an object id (a symbolic ref other than `HEAD`), any unreadable file. A missing
+    remote folder is a readable empty set, as `for-each-ref` answers it."""
+    common = _common_git_dir_from_files(cwd)
+    if not common or os.path.isdir(os.path.join(common, "reftable")):
+        return None
+    prefix = "refs/remotes/" + remote + "/"
+    tips = {}
+    try:
+        try:
+            with open(os.path.join(common, "packed-refs"), encoding="utf-8") as handle:
+                for line in handle:
+                    sha, _, name = line.rstrip("\n").partition(" ")
+                    if name.startswith(prefix) and name != prefix + "HEAD":
+                        if not _OBJECT_ID.fullmatch(sha):
+                            return None
+                        tips[name[len(prefix):]] = sha
+        except FileNotFoundError:
+            pass
+        root = os.path.join(common, "refs", "remotes", remote)
+        for folder, _dirs, files in os.walk(root):
+            for name in files:
+                path = os.path.join(folder, name)
+                branch = os.path.relpath(path, root).replace(os.sep, "/")
+                if branch == "HEAD" or name.endswith(".lock"):
+                    continue
+                with open(path, encoding="utf-8") as handle:
+                    sha = handle.readline(256).strip()
+                if not _OBJECT_ID.fullmatch(sha):
+                    return None
+                tips[branch] = sha
+    except (OSError, UnicodeDecodeError):
+        return None
+    return tips
+
+
 def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
     """The refspec of a push that creates a branch at another branch's tip, else '' (rule push-new-branch).
 
@@ -358,8 +431,8 @@ def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
     is judged when it is `<source>:<destination>` with a source that is neither `HEAD`, `@` nor a local
     branch (a sha, `HEAD~1`, a remote-tracking ref), its destination is a branch the remote does not hold,
     `archive/*` apart, and its source commit equals the tip of a branch the remote holds. Reads local
-    `refs/remotes/<remote>/*` only, never the network: one `for-each-ref`, plus up to two `rev-parse` per
-    judged refspec. A colon-less push, `HEAD:name` and `lane:name` are the ruled-silent forms of
+    `refs/remotes/<remote>/*` only, never the network: the ref files with no spawn (`for-each-ref` only for a
+    layout the file read does not know), plus up to two `rev-parse` per judged refspec. A colon-less push, `HEAD:name` and `lane:name` are the ruled-silent forms of
     plain-push-asks and stay allowed. So do a deletion, a forced push, a mirror, `--all`, tags, a glob, a
     remote named by URL and any read that fails: this judges only what it can read.
     """
@@ -373,15 +446,18 @@ def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
         remote = (_push_config(cwd, "branch." + current + ".remote", overrides) if current else "") or "origin"
     if not re.fullmatch(r"[\w.-]+", remote):
         return ""
-    refs = guard_core._git(cwd, "for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes/" + remote)
-    if refs is None or refs.returncode != 0:
-        return ""
-    prefix = "refs/remotes/" + remote + "/"
-    tips = {}   # branch name on the remote -> its tip commit
-    for line in refs.stdout.splitlines():
-        sha, _, name = line.partition(" ")
-        if name.startswith(prefix) and name != prefix + "HEAD":
-            tips[name[len(prefix):]] = sha
+    tips = _remote_tips_from_files(cwd, remote)   # branch name on the remote -> its tip commit
+    if tips is None:
+        # A layout the file read does not know (no checkout, reftable, a symbolic ref): ask git, as before.
+        refs = guard_core._git(cwd, "for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes/" + remote)
+        if refs is None or refs.returncode != 0:
+            return ""
+        prefix = "refs/remotes/" + remote + "/"
+        tips = {}
+        for line in refs.stdout.splitlines():
+            sha, _, name = line.partition(" ")
+            if name.startswith(prefix) and name != prefix + "HEAD":
+                tips[name[len(prefix):]] = sha
     for spec in plain:
         source, colon, target = spec.partition(":")
         # Only `<source>:<destination>`, and only a source that is not a branch of this checkout: `HEAD:name`
