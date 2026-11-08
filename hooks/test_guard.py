@@ -13829,8 +13829,8 @@ sh("builder-add-only: awk -i inplace on hooks/mutate_guard.py is refused, since 
    "awk -i inplace '{ print }' hooks/mutate_guard.py", "deny", rule=BT, carries=("test-author",), **BM)  # CONTROL
 
 # A checkout or restore that rewrites an add-only file from a revision refuses, and so does one whose pathspec is a
-# folder that holds such a file: the rewrite is the same whichever revision or folder names it. The four file forms
-# are refused already (CONTROLS). The two folder forms are allowed on fff58ba26 (red).
+# folder that holds such a file, or the repository top `.`: the rewrite is the same whichever revision or folder
+# names it. The four file forms are refused already (CONTROLS).
 for _command, _what in (
         ("git checkout 1234abc -- hooks/mutate_guard.py", "a checkout of hooks/mutate_guard.py from a revision"),
         ("git checkout HEAD~1 -- hooks/mutate_shared.py", "a checkout of hooks/mutate_shared.py from HEAD~1"),
@@ -13838,12 +13838,17 @@ for _command, _what in (
         ("git restore --source HEAD~1 --worktree janitor/mutate_sweep.py",
          "a restore of janitor/mutate_sweep.py from HEAD~1"),
         ("git checkout 1234abc -- hooks/", "a checkout of the hooks folder, which holds hooks/mutate_guard.py"),
-        ("git restore --source=HEAD~1 hooks", "a restore of the hooks folder, which holds hooks/mutate_guard.py")):
+        ("git restore --source=HEAD~1 hooks", "a restore of the hooks folder, which holds hooks/mutate_guard.py"),
+        ("git checkout 1234abc -- .", "a checkout of the repository top from a revision"),
+        ("git restore --source=HEAD~1 .", "a restore of the repository top from HEAD~1")):
     sh("builder-add-only: %s is refused" % _what, _command, "deny", rule=BT, carries=("test-author",), **BM)
 
-# The control: a checkout of a test file is allowed, as on fff58ba26.
+# The control: a checkout of a test file is allowed.
 sh("builder-test: git checkout 1234abc -- hooks/test_guard.py is allowed, as today",
    "git checkout 1234abc -- hooks/test_guard.py", "allow", **BM)  # CONTROL
+# The control: a checkout with no revision names no revision, so it rewrites nothing from one: allowed.
+sh("builder-add-only: git checkout -- . with no revision is allowed, since it names no revision",
+   "git checkout -- .", "allow", **BM)  # CONTROL
 
 FAMILY = "diff"
 _inh_main = os.path.join(DIFFROOT, "g-inherited-main")
