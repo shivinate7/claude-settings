@@ -63,8 +63,30 @@ KEYWORD_TYPOS = ("Red-run: mutants: x -> 1 failed on SHA",
                  "Red-run: mutnat: x -> 1 failed on SHA",
                  "Red-run: nonee: x -> 1 failed on SHA",
                  "Red-run: runner: x -> 1 failed on SHA")
-# The refused keywords that start `mutant` or `mutation`. Their FAIL line holds the hint that names the mutant form.
-MUTANT_TYPOS = tuple(line for line in KEYWORD_TYPOS if re.match(r"Red-run: mut(?:ant|ation)", line, re.IGNORECASE))
+# Wrapped and typo'd words. A wrapper is a bracket, a quote (straight or curly), an underscore, `*` or `#`. A word is a typo of
+# `mutant` or `mutation` (one edit or one adjacent swap away), or starts `mutat` or `mutan` (`mutate=x`). The failed form would
+# read each as a command, so each must flag its commit, alone and beside a valid line. `**none**` is a none word, not a mutant
+# word, so it sits in WRAPPED_AND_TYPO only: the hint test reads MUTANT_TYPOS, and a none word takes no mutant hint.
+WRAPPED_MUTANT_TYPOS = ("Red-run: (mutant A) -> 1 failed on SHA",
+                        'Red-run: "mutant A" -> 1 failed on SHA',
+                        "Red-run: [mutant] -> 1 failed on SHA",
+                        "Red-run: - mutant: A -> 1 failed on SHA",
+                        "Red-run: _mutant_ x -> 1 failed on SHA",
+                        "Red-run: _mutnat_ x -> 1 failed on SHA",
+                        "Red-run: “mutant A” -> 1 failed on SHA",
+                        "Red-run: #mutant x -> 1 failed on SHA",
+                        "Red-run: ‘mutant’ x -> 1 failed on SHA",
+                        "Red-run: mutnat x -> 1 failed on SHA",
+                        "Red-run: mtuant x -> 1 failed on SHA",
+                        "Red-run: mutnt x -> 1 failed on SHA",
+                        "Red-run: mutaiton x -> 1 failed on SHA",
+                        "Red-run: mutate=x -> 1 failed on SHA",
+                        "Red-run: mutan=x -> 1 failed on SHA")
+WRAPPED_AND_TYPO = WRAPPED_MUTANT_TYPOS + ("Red-run: (none) -> 1 failed on SHA", "Red-run: **none** x -> 1 failed on SHA")
+# The refused keywords that start `mutant` or `mutation`, and the wrapped and typo'd mutant words. Their FAIL line holds the
+# hint that names the mutant form.
+MUTANT_TYPOS = (tuple(line for line in KEYWORD_TYPOS if re.match(r"Red-run: mut(?:ant|ation)", line, re.IGNORECASE))
+                + WRAPPED_MUTANT_TYPOS)
 # A mutant keyword with text glued on. The failed form would read it as a command, so each must flag its commit.
 PREFIX_BYPASSES = ("Red-run: mutant(A) (x) -> 1 failed on SHA",
                    "Red-run: mutant-A (x) -> 1 failed on SHA",
@@ -75,9 +97,10 @@ CASE_VARIANT_KEYS = ("Red-Run: none (x)", "red-run: none", "Red-run : x")
 VALID_NONE = "Red-run: none: ok"
 # Prose that mentions the key mid-line. It is not a Red-run line, so it passes.
 PROSE_LINE = "Prose: the Red-run: none form is for re-points."
-# Real commands pass as the failed form. Each first word is an ordinary word, a path, or an environment assignment
-# (`NAME=value`, quoted or not). A word rule must not refuse one, even when the name starts `MUTATE` or the value holds a
-# colon: main's commit 049f8d8c0 carries the quoted form. `mutant=x` is different: it stays refused (PREFIX_BYPASSES).
+# Real commands pass as the failed form. Each first word is an ordinary word, a path, or an environment assignment. An
+# upper-case assignment (`NAME=value`, quoted or not) is never refused, even when the name starts `MUTATE` or the value
+# holds a colon: main's commit 049f8d8c0 carries the quoted form. A lower-case assignment is exempt from the colon refusal
+# only, as `lint_mode=on:` is. `mutant=x` and `mutate=x` stay refused (PREFIX_BYPASSES, WRAPPED_AND_TYPO).
 REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: MUTATE_ONLY='x' python3 hooks/test_guard.py -> 1 failed on SHA",
                  "Red-run: MUTATE_ONLY=x python3 lint/test_x.py -> 1 failed on SHA",
@@ -89,7 +112,17 @@ REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: ./bin/verdict python3 lint/test_x.py -> 1 failed on SHA",
                  "Red-run: mutmut run -> 1 failed on SHA",
                  "Red-run: ./mutation_probe.sh -> 1 failed on SHA",
-                 "Red-run: ./scripts/mutation_probe.sh -> 1 failed on SHA")
+                 "Red-run: ./scripts/mutation_probe.sh -> 1 failed on SHA",
+                 "Red-run: python3 -m pytest -k mutant_case -> 1 failed on SHA",
+                 "Red-run: lint/mutation/run.py -> 1 failed on SHA",
+                 "Red-run: env mutatest run -> 1 failed on SHA",
+                 "Red-run: node lint/test_x.js -> 1 failed on SHA",
+                 "Red-run: mutagen run -> 1 failed on SHA",
+                 "Red-run: (cd lint && python3 test_x.py) -> 1 failed on SHA",
+                 "Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA",
+                 "Red-run: lint_mode=on: python3 lint/test_x.py -> 1 failed on SHA",
+                 "Red-run: _build/run_tests.sh -> 1 failed on SHA",
+                 "Red-run: __main__.py -> 1 failed on SHA")
 BASE_REF = "origin/main"
 # origin/main's name for the message verdict, read from its checker. #1672 renames has_trailer to has_valid_trailer,
 # so the baseline read takes either name.
@@ -414,8 +447,8 @@ class CheckCase(Fixture):
                 self.assertClean(why="two valid Red-run lines must pass: " + " | ".join(filled(pair, self.base_sha)))
 
     def test_keyword_typo_line_is_flagged_alone(self):
-        """A keyword typo is refused, not read as the failed form, even as the only Red-run line."""
-        for typo in KEYWORD_TYPOS:
+        """A keyword typo, wrapped or not, is refused, not read as the failed form, even as the only Red-run line."""
+        for typo in KEYWORD_TYPOS + WRAPPED_AND_TYPO:
             with self.subTest(typo=typo):
                 self.base()
                 rel = self.new_test_path()
@@ -424,8 +457,8 @@ class CheckCase(Fixture):
                                    why="a keyword typo must flag the commit, not pass as a failed form: " + filled([typo], self.base_sha)[0])
 
     def test_keyword_typo_beside_a_valid_line_is_flagged(self):
-        """A keyword typo beside a valid line flags the commit. The valid line must not carry the typo through."""
-        for typo in KEYWORD_TYPOS:
+        """A keyword typo, wrapped or not, beside a valid line flags the commit. The valid line must not carry the typo through."""
+        for typo in KEYWORD_TYPOS + WRAPPED_AND_TYPO:
             with self.subTest(typo=typo):
                 self.base()
                 rel = self.new_test_path()
@@ -482,6 +515,14 @@ class CheckCase(Fixture):
                 self.base()
                 self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, red=filled([command], self.base_sha))
                 self.assertClean(why="a real command must pass as the failed form: " + filled([command], self.base_sha)[0])
+
+    def test_mutatest_command_stays_refused(self):
+        """A `mutatest` command is a mutat-start word, so it stays refused. The pin for the word rule's second layer."""
+        self.base()
+        rel = self.new_test_path()
+        line = "Red-run: mutatest run -> 1 failed on SHA"
+        sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=filled([line], self.base_sha))
+        self.assertFlagged(sha, "add widget tests", rel, why="mutatest run must stay refused, not pass as a failed form: " + line)
 
     def test_zero_failures_is_flagged(self):
         for form in ("Red-run: python3 lint/test_widgets.py -> 0 failed on %s",
