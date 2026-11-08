@@ -75,10 +75,14 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-try:  # stdlib only: the one home of the machine-text tags
+# Stdlib only: the one home of the machine-text tags. With no helper, or one that lacks MACHINE_TAGS or
+# NOTICE_FRAMES, NOTICE_TAGS is empty: the keyword grants still run, and the plain ask grants nothing, as grant_opus_ask
+# refuses on an empty tuple. A helper that has both lists but lacks config_dir keeps them (the next import is its own),
+# so the plain ask still grants, with owner text and the judge call still required, as in hooks/local_time.py.
+try:
     from shared_names import MACHINE_TAGS, NOTICE_FRAMES
     NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
-except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
+except ImportError:
     NOTICE_TAGS = ()
 
 try:  # its own import, so a helper that lacks config_dir keeps the tags above
