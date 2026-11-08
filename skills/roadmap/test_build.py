@@ -2182,6 +2182,25 @@ class DoneWithoutCheck(UpkeepFixture):
                                           "bad-month" + self.UNREADABLE]),
                          "a done step with an unreadable updatedAt is not listed as unreadable")
 
+    def test_a_naive_updated_at_is_listed_as_unreadable(self):
+        """A time with no zone is unreadable, as build.zoned_time reads it (None for naive). The step is listed with the
+        unreadable mark whatever its note says, and before the constant too. The zoned step is the control."""
+        since = self.since_dt()
+        after = (since + datetime.timedelta(hours=1)).replace(tzinfo=None).isoformat()
+        early = (since - datetime.timedelta(seconds=1)).replace(tzinfo=None).isoformat()
+        closed = "Done check: X. Done check green on main: #1312."
+        self.commit_steps({
+            "aware-control": self.done_step(note="Shipped."),
+            "naive-note": self.done_step(updated=after, note="Shipped."),
+            "naive-closed": self.done_step(updated=after, note=closed),
+            "naive-early": self.done_step(updated=early, note="Shipped."),
+        })
+        _, entries = self.listed()
+        self.assertIn("aware-control", entries)  # scope first: a zoned done step is in scope and listed
+        self.assertEqual(entries, sorted(["aware-control", "naive-note" + self.UNREADABLE,
+                                          "naive-closed" + self.UNREADABLE, "naive-early" + self.UNREADABLE]),
+                         "a done step with a naive updatedAt is not listed as unreadable")
+
     def test_a_well_formed_close_is_not_listed(self):
         # False-alarm class: a Done check, and the phrase `Done check green on main:` with a ref after it, are not listed.
         closes = {"colon-ref": "Done check: X. Done check green on main: #1312.",

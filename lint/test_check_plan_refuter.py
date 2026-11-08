@@ -247,6 +247,53 @@ class PlanRefuterCase(Fixture):
                 self.assertStatus(rel, "A")
                 self.assertNamed(rel)
 
+    def test_a_fence_closes_only_at_a_run_as_long_as_its_opener(self):
+        """CommonMark: a closer has at least as many backticks as the opener. A ``` line inside a ```` fence is text, so
+        a Refuter line after it stays hidden until the ```` closes."""
+        cases = [(["````", "```", REFUTER, "````"], True), (["````", "```", "````", REFUTER], False)]
+        for index, (lines, flagged) in enumerate(cases):
+            with self.subTest(lines=lines):
+                self.rebase_here()
+                rel = PLANS + "/long-fence-%d.md" % index
+                self.commit("add plan with a longer fence", {rel: plan(*lines)})
+                self.assertStatus(rel, "A")
+                if flagged:
+                    self.assertNamed(rel)
+                else:
+                    rc, out = self.lint()
+                    self.assertEqual(rc, 0, "a ``` line closed the ```` fence, so the Refuter line after it is hidden:\n%s"
+                                     % out)
+
+    def test_a_closer_with_an_info_string_does_not_close_the_fence(self):
+        """CommonMark: a closing fence has no info string. A ```text line inside a ``` fence is text, so a Refuter line
+        after it stays hidden; the bare ``` after it closes the fence, so a Refuter line after that counts."""
+        cases = [(["```", "```text", REFUTER, "```"], True), (["```", "```text", "```", REFUTER], False)]
+        for index, (lines, flagged) in enumerate(cases):
+            with self.subTest(lines=lines):
+                self.rebase_here()
+                rel = PLANS + "/info-closer-%d.md" % index
+                self.commit("add plan with an info-string line in a fence", {rel: plan(*lines)})
+                self.assertStatus(rel, "A")
+                if flagged:
+                    self.assertNamed(rel)
+                else:
+                    rc, out = self.lint()
+                    self.assertEqual(rc, 0, "a ```text line closed the ``` fence, so the Refuter line after it counts:\n%s"
+                                     % out)
+
+    def test_a_line_that_opens_with_inline_code_is_not_a_fence(self):
+        """CommonMark: a backtick fence's info string has no backtick. A line that starts with a code span is a
+        paragraph, so the Refuter line after it is a real line and counts."""
+        for index, line in enumerate(["```x``` is code", "```x` then the rest"]):
+            with self.subTest(line=line):
+                self.rebase_here()
+                rel = PLANS + "/inline-code-%d.md" % index
+                self.commit("add plan with an inline code run", {rel: plan(line, REFUTER)})
+                self.assertStatus(rel, "A")
+                rc, out = self.lint()
+                self.assertEqual(rc, 0, "a line that opens with inline code opened a fence and hid the Refuter line:\n%s"
+                                 % out)
+
     def test_refuter_mid_line_is_flagged(self):
         for index, line in enumerate(["The refuter: none", "See Refuter: %s opus, PASS" % REFUTER_ROLE,
                                       "Review by Refuter: %s opus, PASS" % REFUTER_ROLE]):
@@ -408,6 +455,20 @@ class PlanRefuterCase(Fixture):
         self.assertEqual(rc, 2, "a --root that names no folder exits %d, not 2:\n%s" % (rc, out))
         self.assertIn("unknown", out.lower(), out)
         self.assertNotIn("Traceback", out, out)
+
+    def test_an_extras_file_that_is_not_json_exits_two_as_unknown(self):
+        """The layout reader wraps a decode failure as LayoutError, so the check prints UNKNOWN with exit 2: never a
+        traceback, and never a green 0 on a layout it could not read. The range holds a real finding, so 0 or 1 is wrong."""
+        for index, text in enumerate(["{ not json\n", ""]):
+            with self.subTest(text=text):
+                self.rebase_here()
+                rel = PLANS + "/unknown-extras-%d.md" % index
+                self.commit("add widget plan and break the extras file", {rel: plan("Body only."), EXTRAS_REL: text})
+                self.assertStatus(rel, "A")
+                rc, out = self.lint()
+                self.assertEqual(rc, 2, "a non-JSON extras file exits %d, not 2:\n%s" % (rc, out))
+                self.assertIn("UNKNOWN", out, out)
+                self.assertNotIn("Traceback", out, out)
 
     def test_a_check_whose_hooks_do_not_import_exits_two_as_unknown(self):
         """The import-failure branch: REFUTER_ROLE is unread, so the check exits 2 and prints UNKNOWN, even on a real
