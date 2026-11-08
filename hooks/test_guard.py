@@ -14892,6 +14892,29 @@ def _open_test_conflict_mode(w):
         sys.exit("fixture setup failed: chmod +x did not land on %r" % TEST_A)
 
 
+# A top-level test file that an add/add merge conflicts. The base holds no such file, so the lane and main each add it;
+# _f2_conflict_open changes tests/test_a.py, which the base holds. The builder's untracked file of the same name sits
+# under src/, so the guard must tell the two apart by their folders.
+TOP_TEST = "test_x.py"
+
+
+def _top_test_conflict_open(w):
+    """The open merge of an add/add conflict on TOP_TEST: the lane adds the file with one case, main adds it with
+    another, and the builder merges main. The conflicted file stays as git's merge wrote it, unmerged, and nothing is
+    committed. The builder then adds an untracked test file of the same name under src/."""
+    main = w + "-main"
+    _test_author_lane(w, TOP_TEST, "def test_x():\n    assert 1\n")
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, TOP_TEST), "def test_x():\n    assert 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds the same test file")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, TOP_TEST)
+    write(os.path.join(w, "src", TOP_TEST), "def test_x_builder():\n    assert 3\n")
+
+
 # An empty test file is still a test file. text_at reads '' for a missing file and for an empty one alike, so a merge
 # check that compares text alone reads an empty file added or deleted in a merge as no change. Line endings and
 # invalid bytes are the same kind of change: the bytes differ, and the text, read in text mode, does not.
@@ -15481,6 +15504,14 @@ sh("builder-refuse: a builder's merge in progress that rewrites a conflicted tes
    "subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_edited, "src"), agent_id="bld1",
    agent_type="builder")
 
+# An untracked file is listed from the checkout's top, whatever folder the command runs in. The builder's test file
+# under src/ is judged as src/test_x.py. Read as test_x.py, it would be taken for the conflicted top-level file that
+# git's merge left as it wrote it, and allowed.
+_bd_m_top = diff_repo("bd-m-top-test", _top_test_conflict_open)
+sh("builder-refuse: a builder's merge in progress, with a conflicted top-level test file left as git wrote it and an "
+   "untracked test file of the same name under src/, is denied at commit from a subfolder", COMMIT, "deny", rule=BDIFF,
+   cwd=os.path.join(_bd_m_top, "src"), agent_id="bld1", agent_type="builder")
+
 # A merge in progress where the merged branch added twenty test files that merged clean is git's, and allowed.
 _bd_m_many = diff_repo("bd-m-many-clean", _c1_many_clean)
 sh("builder-refuse: a builder's merge in progress, with twenty test files that merged clean and a product file "
@@ -15718,6 +15749,10 @@ sh("builder-refuse: a new test file is denied at commit, and the reason says to 
 sh("builder-refuse: a new test file is denied at push, and the reason says to delete it and names no path",
    PUSH, "deny", rule=BDIFF, cwd=_bd_u2, agent_id="bld1", agent_type="builder",
    lacks=("tests/", "test_new"), carries=("delete",))
+# Untracked files are listed from the checkout's top, so the same new test file, under tests/, is refused from a
+# subfolder too.
+sh("builder-refuse: a builder's plain change with an untracked test file in another folder is denied at commit from "
+   "a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_u2, "src"), agent_id="bld1", agent_type="builder")
 
 
 def stop_pair_case():
