@@ -14,9 +14,10 @@ date read counted as a real clock. The tool fixes none, and it writes nothing. E
   (test-cap or wait-cap) is allowed (decision test-practices P5): it
   is listed, never counted as time-pinned, and never sets exit 1. Check that each cap sits well above
   the run, so it only stops a hang and never decides a verdict by speed.
-- calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
-  `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.strftime(fmt)`,
-  `time.tzname`, `time.timezone`, the date libraries `pendulum.now()`, `arrow.now()`, `arrow.utcnow()`,
+- calendar: a read of the real date or the machine's zone (`datetime.now()`, `date.today()`,
+  `time.localtime(<any>)`, `time.ctime(<any>)`, `time.gmtime()`, `time.asctime()`, `time.strftime(fmt)`,
+  `datetime.fromtimestamp(<x>)` and `<x>.astimezone()` with no zone argument, Swift `Date()`,
+  `Calendar.current` and `TimeZone.current`, `time.tzname`, `time.timezone`, the date libraries `pendulum.now()`, `arrow.now()`, `arrow.utcnow()`,
   `pendulum.today()`, `pd.Timestamp.now()`, `pd.Timestamp.today()`, `pd.Timestamp.utcnow()` and Django
   `timezone.now()`, plus, with no argument or only a zone keyword (`tzinfo=` or `timezone=`),
   `arrow.get()`, `timezone.localtime()` and `timezone.localdate()`, JS
@@ -24,8 +25,10 @@ date read counted as a real clock. The tool fixes none, and it writes nothing. E
   or through a name that holds one, any `Date(...)` call without `new`, and the JS date libraries
   `dayjs()`, `dayjs.utc()`, `new dayjs()`, `moment()`, `moment.utc()` and `Temporal.Now.*()`).
   `new Date(0)`, `new Date(EPOCH_MS)` with a declared constant, `dayjs(0)`, `moment.utc(EPOCH)`,
-  `arrow.get(0)`, `timezone.localtime(fixed_dt)` and `pendulum.datetime(...)` read no clock and are
-  not listed. A fake clock hides every calendar row in its scope, even a read it does not fake: in Python a
+  `arrow.get(0)`, `timezone.localtime(fixed_dt)`, `pendulum.datetime(...)`, `time.gmtime(EPOCH)`, a
+  `tz` argument on `fromtimestamp` or `astimezone`, and Swift `Date(timeIntervalSince1970: 0)` read no
+  clock or local zone and are not listed. A Swift `Date()` that an assert subtracts is that assert's
+  elapsed-assert row only. A fake clock hides every calendar row in its scope, even a read it does not fake: in Python a
   `@freeze_time(...)` def or class, or the body of a `with freeze_time(...)`; in JS a file that calls
   `jest.useFakeTimers()` or `vi.useFakeTimers()`. Its elapsed-assert rows stay. `time.tzname` and
   `time.timezone` stay listed under `freeze_time`, because freezegun fakes no zone. `Temporal.Now.*()`
@@ -465,10 +468,14 @@ PY_SIGNAL_CAP = {"signal.alarm", "signal.setitimer"}
 PY_PASS_THROUGH = {"round", "int", "float", "abs", "max", "min", "sum", "divmod", "math.floor", "math.ceil"}
 
 
-# A date or zone read with no time given. `time.strftime(fmt)`, `time.localtime()`, `time.gmtime()`,
-# `time.ctime()` and `time.asctime()` read the clock only when no time argument is passed, so they are
-# matched apart from the always-real forms. `time.tzname` and `time.timezone` are attribute reads.
-PY_CALENDAR_NO_ARG = {"time.localtime", "time.gmtime", "time.ctime", "time.asctime", "pandas.Timestamp.utcnow"}
+# A date or zone read with no time given. `time.strftime(fmt)`, `time.gmtime()` and `time.asctime()` read the
+# clock only when no time argument is passed, so they are matched apart from the always-real forms. `time.tzname` and `time.timezone` are attribute reads.
+PY_CALENDAR_NO_ARG = {"time.gmtime", "time.asctime", "pandas.Timestamp.utcnow"}
+# These read the machine's zone even when given a fixed time, so a fixed time does not pin them:
+# `time.localtime(x)` and `time.ctime(x)` always, `datetime.fromtimestamp(x)` and `x.astimezone()` unless a
+# zone is given.
+PY_CALENDAR_LOCAL_ZONE = {"time.localtime", "time.ctime"}
+PY_CALENDAR_FROMTIMESTAMP = {"datetime.fromtimestamp", "datetime.datetime.fromtimestamp"}
 # These read the real date unless a time is given, and take a zone by keyword: with no positional argument and
 # nothing but that keyword, the call still reads the real date.
 PY_CALENDAR_ZONE_KW = {"arrow.get": "tzinfo", "django.utils.timezone.localtime": "timezone",
@@ -496,6 +503,17 @@ def dotted(node):
         parts.append(node.id)
         return ".".join(reversed(parts))
     return None
+
+
+def zone_given(call, index):
+    """True when the call names a zone: a `tz` keyword, or the positional argument at index, that is not None.
+    `tz=None` and `None` ask for the machine's zone. A `*args` or `**kwargs` may hold a zone, so it counts."""
+    def real(node):
+        return not (isinstance(node, ast.Constant) and node.value is None)
+
+    return any(k.arg == "tz" and real(k.value) for k in call.keywords) or (
+        len(call.args) > index and real(call.args[index])) or any(
+        k.arg is None for k in call.keywords) or any(isinstance(a, ast.Starred) for a in call.args)
 
 
 def py_number(node):
@@ -661,8 +679,11 @@ def scan_python(text):
                     and isinstance(first.value, (int, float)) and first.value == 0):
                 found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
         zone_kws = {PY_CALENDAR_ZONE_KW[n] for n in names if n in PY_CALENDAR_ZONE_KW}
-        if names & PY_CALENDAR_NOW or (
+        if names & PY_CALENDAR_NOW or names & PY_CALENDAR_LOCAL_ZONE or (
                 not call.args and not call.keywords and names & PY_CALENDAR_NO_ARG) or (
+                names & PY_CALENDAR_FROMTIMESTAMP and not zone_given(call, 1)) or (
+                isinstance(call.func, ast.Attribute) and call.func.attr == "astimezone"
+                and not zone_given(call, 0)) or (
                 zone_kws and not call.args and all(k.arg in zone_kws for k in call.keywords)) or (
                 len(call.args) == 1 and not call.keywords and names & {"time.strftime"}):
             calendar_calls.append(call)
@@ -1050,6 +1071,8 @@ SWIFT_CLOCK = re.compile(
     r"|ProcessInfo\s*\.\s*processInfo\s*\.\s*systemUptime|mach_absolute_time\s*\("
     r"|\b(?:Continuous|Suspending)Clock\b|\.timeIntervalSince(?:Now)?\b|\.duration\s*\(\s*to\s*:"
     r"|\bclock\s*\.\s*measure\b")
+# A read of the real date or the machine's calendar or zone.
+SWIFT_CALENDAR = re.compile(r"(?<![\w$])Date\s*\(\s*\)|(?<![\w$])(?:Calendar|TimeZone)\s*\.\s*current\b")
 SWIFT_PASS_THROUGH = {"abs", "max", "min", "round", "floor", "ceil", "trunc", "Double", "Int", "Float", "CGFloat",
                       "timeIntervalSince", "distance", "duration", "advanced"}
 SWIFT_DECL = re.compile(r"(?<![\w$.])(?:let|var)\s+(?=[A-Za-z_])")
@@ -1206,12 +1229,21 @@ def scan_swift(text):
             hits.add(mm.start(), "sleep")
 
     tainted = clock_taint(m, SWIFT_DECL, SWIFT_CLOCK, SWIFT_PASS_THROUGH, swift_function_returns)
+    elapsed_spans = []
     for mm in SWIFT_ASSERT.finditer(m):
         close = find_close(m, mm.end() - 1)
         if close >= 0:
             a, b = asserted_range(m, mm.end() - 1, close)
             if reads_clock(m, a, b, SWIFT_CLOCK, tainted, SWIFT_PASS_THROUGH, True):
                 hits.add(mm.start(), "elapsed-assert")
+                elapsed_spans.append((a, b))
+
+    # A `Date()` that an assert subtracts or hands to `timeIntervalSince` is that assert's elapsed row alone.
+    for mm in SWIFT_CALENDAR.finditer(m):
+        if mm.group().startswith("Date") and any(
+                a <= mm.start() < b and measured(m, mm.start(), mm.end()) for a, b in elapsed_spans):
+            continue
+        hits.add(mm.start(), "calendar")
 
     for mm in re.finditer(r"(?<![\w.])measure\s*[({]|(?<![\w])self\s*\.\s*measure\s*[({]|executionTimeAllowance"
                           r"|\.timeLimit\s*\(", m):
