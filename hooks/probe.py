@@ -74,11 +74,36 @@ def verdict_line(guard_stdout):
     return " ".join(("%s %s" % (decision, reason)).split())
 
 
+def crash_reason(config_dir):
+    """The reason of a guard-crash line in this run's guard.log, else None. The guard fails open on a
+    crash (exit 0, no output), so only its log tells a crash from an allow. The dir is fresh, so any
+    such line is this run's."""
+    try:
+        with open(os.path.join(config_dir, "guard.log"), encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) >= 5 and fields[3] == "guard-crash":
+            return fields[4]
+    return None
+
+
+def remove_dir(path):
+    shutil.rmtree(path, ignore_errors=True)
+    if os.path.exists(path):
+        print("probe: could not remove its temp dir %s" % path, file=sys.stderr)
+
+
 def probe(payload):
     config_dir = tempfile.mkdtemp(prefix="probe-guard-")
     try:
         env = dict(os.environ)
         env["CLAUDE_CONFIG_DIR"] = config_dir
+        env["PYTHONDONTWRITEBYTECODE"] = "1"  # the guard's imports must not write __pycache__ beside hooks/
+        # The session ids pick the guard's override and log context, so the verdict must not depend on them.
+        payload = {k: v for k, v in payload.items() if k not in ("session_id", "agent_id")}
         cwd = payload.get("cwd")
         run_cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else None
         try:
@@ -89,9 +114,12 @@ def probe(payload):
             raise BadInput("the guard did not answer in %d seconds" % TIMEOUT_SECONDS)
         if result.returncode != 0:
             raise BadInput("the guard exited %d: %s" % (result.returncode, result.stderr.strip()[-200:]))
+        crashed = crash_reason(config_dir)
+        if crashed is not None:
+            raise BadInput("guard crashed (%s), verdict unknown" % " ".join(crashed.split()))
         return verdict_line(result.stdout)
     finally:
-        shutil.rmtree(config_dir, ignore_errors=True)
+        remove_dir(config_dir)
 
 
 def main():
