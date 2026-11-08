@@ -121,8 +121,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
   sendmessage-session-id
-                       deny. A SendMessage whose `to` is a string starting `session_`: SendMessage reaches agents by
-                       name, never a cloud session. A missing or non-string `to`, an agent name, @parent and the
+                       deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
+                       hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
@@ -4146,11 +4146,11 @@ def page_design_hit(writes, tool_input, cwd):
 
 # ------------------------------------------------------------------ SendMessage to a cloud session
 #
-# SendMessage addresses in-process agents and local teammates by name. A `to` that starts `session_` names a cloud
-# session it cannot reach, so the hand-off goes missing with no error.
-SENDMESSAGE_REASON = ("SendMessage addresses an agent by name and never reaches a cloud session, so this hand-off "
-                      "would go missing. Send it with mcp__claude-code-remote__send_message, passing the id as "
-                      "session_id. Rule sendmessage-session-id.")
+# SendMessage addresses an agent by name. A `session_...` id is no agent name, and auto mode refused such a call, so
+# the hand-off could go missing. Whether it would deliver is unmeasured.
+SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Send it with "
+                      "mcp__claude-code-remote__send_message, passing the id as session_id, the sure route. "
+                      "Rule sendmessage-session-id.")
 
 
 # ------------------------------------------------------------------ impeccable is review-only
