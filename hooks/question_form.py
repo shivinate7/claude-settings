@@ -42,6 +42,7 @@ An update is judged only for the fields it carries. A closed item passes the for
 nothing, and the chat-answer flow writes one. A str_replace on `context` that removes a form line is
 refused.
 """
+import functools
 import json
 import os
 import re
@@ -484,10 +485,15 @@ ABS_CMDLET_PATH = re.compile(r"(?:[A-Za-z]:|~|\$HOME|\$\{HOME\})?[\\/](?:[^\s\\/
                              r"(?:" + "|".join(PS_VERBS) + r")-[A-Z][A-Za-z]+(?=\s|$)")
 # PowerShell's own pipeline cmdlets, whose verbs are no Get-Verb verbs (so they stay out of PS_VERBS) and which Claude
 # writes in a pipeline (`ForEach-Object { $_ }`). SHELL_CMDLET reads them as a cmdlet verb beside PS_VERBS.
-PS_NONSTANDARD_VERBS = ("ForEach", "Where")
+PS_NONSTANDARD_VERBS = ("ForEach",)
 SHELL_CMDLET = re.compile(r"(?:[A-Z][a-z]+|" + "|".join(PS_VERBS + PS_NONSTANDARD_VERBS) + r")-[A-Z][A-Za-z]+")
-# What may come before a cmdlet path in a segment: `&`, then any `VAR=value`, `sudo` or `env` words.
-CMDLET_PREFIX = re.compile(r"\s*(?:&\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|sudo|env)\s+)*")
+# What may come before a cmdlet path in a segment: `&`, then any `VAR=value` or command-wrapper word. The wrapper
+# words come from guard_core's COMMAND_WRAPPERS, the list its token reader unwraps, so the two readers agree.
+@functools.lru_cache(maxsize=1)
+def _cmdlet_prefix():
+    import guard_core
+    words = "|".join(re.escape(w) for w in sorted(guard_core.COMMAND_WRAPPERS - {"&"}))
+    return re.compile(r"\s*(?:&\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|" + words + r")\s+)*")
 # What the refusal prints for a Verb-Noun at an absolute path: a folder written with a trailing `/` is text.
 SHELL_LINE_HIT = "step holds a shell line"
 ABS_CMDLET_HIT = SHELL_LINE_HIT + " (a Verb-Noun at a path reads as a cmdlet). If it names a folder, end it with /."
@@ -686,7 +692,7 @@ def _cmdlet_at_path(first, segment) -> bool:
     PS_VERBS verb (see ABS_CMDLET_PATH). A relative path (`docs/Read-Me`, `Microsoft.PowerShell.Management/Get-Item`)
     or a URL names a doc or a module, not a program. The basename keeps its case."""
     return bool(SHELL_CMDLET.fullmatch(first) or ABS_CMDLET_PATH.fullmatch(first)
-                or ABS_CMDLET_PATH.match(segment, CMDLET_PREFIX.match(segment).end()))
+                or ABS_CMDLET_PATH.match(segment, _cmdlet_prefix().match(segment).end()))
 
 
 def _shell_line(span, run) -> str:
