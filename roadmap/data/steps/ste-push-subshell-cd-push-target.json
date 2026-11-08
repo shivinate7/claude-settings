@@ -1,11 +1,11 @@
 {
   "title": "The ste-push check leaves out a `cd` inside a subshell when it finds a push's folder",
   "why": "hooks/guard_push_delete.py push_target reads the last `cd` of the whole call, so `(cd M) && git push` takes \"M)\" as the push's folder, and ste-push skips that push with no note (lane lint-before-record-push, 04:42 CST Nov 8).",
-  "note": "Fix: push_target leaves out a `cd` inside a subshell, using the guard's existing shell tokenizer. Red case first. The PR carries `Merge after: #1898`. Related: step ste-push-segment-top-c-then-cd, same lane. Queue fix (owner item 386). Slug and lane from the coordinator (04:41 CST Nov 8). Filed 04:44 CST Nov 8.",
+  "note": "Fix: push_target leaves out a `cd` inside a subshell, using the guard's existing shell tokenizer. Red case first. Related: step ste-push-segment-top-c-then-cd, same lane. Queue fix (owner item 386). Slug and lane from the coordinator (04:41 CST Nov 8). Filed 04:44 CST Nov 8. Now rides in PR #1898 with step ste-push-segment-top-c-then-cd, because the same `(cd A)` cases need both fixes; its own branch is abandoned (lane, 04:48 CST Nov 8).",
   "phase": "now",
   "status": "doing",
   "order": 606,
   "owner": "triage",
   "lane": "session_013NEJKzXyKNARtJsbz3Q1R2",
-  "updatedAt": "2026-11-08T04:43:00-06:00"
+  "updatedAt": "2026-11-08T04:49:00-06:00"
 }
