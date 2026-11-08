@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Nov 7: claude-settings 5b05f884, banchi affcbb7, q_max b745419, home-app ee1d7c0 (home merged in)",
+    "asOf": "Measured Nov 8: claude-settings e2703c61, banchi 78398f4, q_max 121bee8, home-app 580b018 (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -29,7 +29,7 @@
     ]
   },
   "later": {
-    "asOf": "Measured Nov 7 at claude-settings 5b05f884",
+    "asOf": "Measured Nov 8 at claude-settings e2703c61",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Nov 7: claude-settings 5b05f884, banchi affcbb7, q_max b745419, home-app ee1d7c0 (home merged in)",
+    "asOf": "Measured Nov 8: claude-settings e2703c61, banchi 78398f4, q_max 121bee8, home-app 580b018 (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -68,7 +68,7 @@
         "label": "Biggest CLAUDE.md, lines",
         "rule": "banchi 402 (Oct 27, fbb9200), q_max 182, claude-settings 106, home-app 15",
         "target": "200 or fewer",
-        "value": 182
+        "value": 180
       },
       {
         "label": "Remote branches, claude-settings",
@@ -89,9 +89,10 @@
           402,
           264,
           281,
-          456
+          456,
+          1360
         ],
-        "value": 456
+        "value": 1360
       },
       {
         "label": "Repos with a living roadmap page",
@@ -102,7 +103,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Nov 7: q_max b745419, home-app ee1d7c0",
+    "asOf": "Measured Nov 8: q_max 121bee8, home-app 580b018",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
@@ -127,7 +128,7 @@
         "label": "home-app web border radii",
         "rule": "Distinct border-radius values in web CSS, HTML and JS. The Oct 17 audit counted 12, likely CSS only (r3)",
         "target": "a few tokens",
-        "value": 52
+        "value": 54
       }
     ]
   }
