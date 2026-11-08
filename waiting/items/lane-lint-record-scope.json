@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T13:36:00Z",
+  "answeredAt": "2026-11-08T13:39:00Z",
   "context": "Goal: the record on lane lint states what lane lint runs.\nProblem (rule): decision lanes-run-no-full-ci-job says lane lint runs only the fast lint steps and no hook suite or mutation test. In fact bin/ci-job runs every `python3 lint/*.py` step, the Stop-hook guard suite included, and its own cost line says 550-660 s. A record you ruled on changes only on your word.\nBased on (measured): `merge --lane-lint 1988` ran about 55 fixture suites and passed the 600 s command cap (lane windows-local-lint and its round-1 reviewer, 2026-11-08).\nDeparts from: main, where the record says lane lint is fast and runs no hook suite \u2014 it says lane lint runs every lint CI step, fixture suites included, and drops \"fast\".\nMeanwhile: the lane goes on with #1988; making lane lint fast again stays with step lane-lint-cloud-time-limit.",
   "home": "lane-lint-cloud-time-limit",
   "id": "lane-lint-record-scope",
@@ -24,7 +25,8 @@
   "owner": "lane windows-local-lint (session_013NEJL1E2M7ciXj66Y5zdLH)",
   "pick": "a",
   "ref": "decision lanes-run-no-full-ci-job (line 5); bin/ci-job:200 and :248; checks.yml:234-235; step lane-lint-cloud-time-limit",
+  "reply": "Withdrawn 07:39 CST Nov 8: your ruling on page item 27 a (2026-10-27) already answers it. Lane lint runs only the fast steps and no hook suite, so the tool goes back to the ruling and the record stays. Home: step lane-lint-cloud-time-limit.",
   "short": "Lane lint record: say what it really runs",
-  "status": "open",
+  "status": "closed",
   "title": "May the lanes-run-no-full-ci-job record be rewritten to say lane lint runs every lint CI step, fixture suites included?"
 }

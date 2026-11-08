@@ -1,0 +1,11 @@
+{
+  "title": "A GitHub comment body that is a bare shell substitution is refused",
+  "phase": "next",
+  "status": "todo",
+  "order": 656,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "The MCP comment tool runs no shell, so a body like `$(cat file)` posts as that literal text. Hit twice at 07:34 CST Nov 8, on #1551 and #1914; both junk comments were relabelled and the real records posted below (lane notes-fix-large-3).",
+  "note": "Done check: a red test where the guard refuses an MCP comment or review body that is only a `$(...)` or backtick substitution, and passes a body that quotes one inside prose. A fix for a found gap (item 410 a). Slug from the lane; title by triage.",
+  "updatedAt": "2026-11-08T07:37:00-06:00"
+}
