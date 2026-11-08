@@ -13383,9 +13383,10 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
-# A sed script is a string, not a path. Its words split at `/` (`"testdata"`, `testing`, `tests`) name no
-# file, so a sed that edits product code stays allowed. The controls pin that a sed on a real test path
-# is still refused, whichever argument holds it.
+# A sed `s` script is a string, not a path: its words split at `/` (`"testdata"`, `testing`, `tests`)
+# and name no file, so a sed that edits product code stays allowed. A `w` command names the file it
+# writes, and an `e` command runs a command, so both are judged. The controls pin that a sed whose file
+# operand is a real test path is still refused, after the script, after -e or after -f.
 sh("builder-test: shell sed -i on hooks/guard.py, a script naming the quoted testdata word, is allowed",
    "sed -i 's/\"testdata\"/\"x\"/' hooks/guard.py", "allow", **BR)
 sh("builder-test: shell sed -i on hooks/guard.py, a script naming testing, is allowed",
@@ -13398,6 +13399,28 @@ sh("builder-test: shell sed -i on testing/x.py is refused",
    "sed -i 's/a/b/' testing/x.py", "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: shell sed -i -e on hooks/guard.py and tests/x.py is refused",
    "sed -i -e 's/a/b/' hooks/guard.py tests/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+# A `w` command in a script writes the file it names, and an `e` command runs a command: each is judged.
+sh("builder-test: shell sed -i, an s command ending in w tests/x.py, on hooks/guard.py, is refused",
+   "sed -i 's/a/b/w tests/x.py' hooks/guard.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell sed -i, a script that is only w tests/x.py, on hooks/guard.py, is refused",
+   "sed -i 'w tests/x.py' hooks/guard.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell sed -i, a second -e that is w tests/x.py, on hooks/guard.py, is refused",
+   "sed -i -e 's/a/b/' -e 'w tests/x.py' hooks/guard.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell sed -i, an e command that touches tests/x.py, on hooks/guard.py, is refused",
+   "sed -i '1e touch tests/x.py' hooks/guard.py", "deny", rule=BT, carries=("test-author",), **BR)
+# An s///e flag runs a command, so it is pinned as refused under any rule: no test-path rule is asserted for it.
+sh("builder-test: shell sed -i, an s///e flag, on hooks/guard.py, is refused",
+   "sed -i 's/testing/x/e' hooks/guard.py", "deny", **BR)
+# Sed's script words are no file in any form: BSD -i '', --expression=, and -e before --.
+sh("builder-test: shell BSD sed -i '' on hooks/guard.py, a script naming the quoted testdata word, is allowed",
+   "sed -i '' 's/\"testdata\"/\"x\"/' hooks/guard.py", "allow", **BR)
+sh("builder-test: shell sed -i --expression= on hooks/guard.py, a script naming tests, is allowed",
+   "sed -i --expression='s/tests/x/' hooks/guard.py", "allow", **BR)
+sh("builder-test: shell sed -i -e before -- on hooks/guard.py, a script naming testing, is allowed",
+   "sed -i -e 's/testing/x/' -- hooks/guard.py", "allow", **BR)
+# A -f script is read, not written, so the file operand after it is still judged.
+sh("builder-test: shell sed -i -f fix.sed tests/x.py is refused",
+   "sed -i -f fix.sed tests/x.py", "deny", rule=BT, carries=("test-author",), **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
