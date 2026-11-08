@@ -492,9 +492,11 @@ def _wrapper_name(word: str) -> str:
     return re.sub(r"\.(cmd|exe|bat|py)$", "", word)
 
 
-def _quoted_words(segment: str):
+def _quoted_words(segment: str, keep_newlines=False):
     """Split a segment into words the way the shell does: a quoted string with a space is ONE word.
-    The redirects are spaced into words of their own outside the quotes only. A quote with no
+    A newline inside a quote reads as a space, or stays a newline with `keep_newlines`, for a caller that
+    reads the quoted text as a script (a `bash -c` string with two lines runs two commands). The redirects
+    are spaced into words of their own outside the quotes only. A quote with no
     closing mate is a plain character, so a lone quote in text still leaves the words after it."""
     chunks, plain, i, n = [], [], 0, len(segment)
 
@@ -515,13 +517,14 @@ def _quoted_words(segment: str):
                 j += 2 if char == '"' and segment[j] == "\\" else 1
             if j < n:
                 flush()
-                chunks.append(re.sub(r"\s", "\0", segment[i:j + 1]))
+                chunks.append(re.sub(r"\s", lambda m: "\1" if keep_newlines and m.group() == "\n" else "\0",
+                                     segment[i:j + 1]))
                 i = j + 1
                 continue
         plain.append(char)
         i += 1
     flush()
-    return [w.replace("\0", " ") for w in "".join(chunks).split()]
+    return [w.replace("\0", " ").replace("\1", "\n") for w in "".join(chunks).split()]
 
 
 def _env_words(segment: str):
