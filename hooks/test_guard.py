@@ -19104,6 +19104,55 @@ add("brief-claim: test-author brief where an input before main refuses now is de
     subagent_type="test-author")
 
 
+# Pins for the count word, the pronoun tail and today (rule brief-claim-has-probe). A count word (all three, both now,
+# all 3, these ones) after a claim refers to the inputs before it, as a pronoun does. The allows are claims the scan
+# reads with no input of their own.
+add("brief-claim: test-author brief where main refuses all three today, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all three today.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses all three now, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all three now.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses both now, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses both now.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses all 3, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all 3.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses both inputs, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses both inputs.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses these ones, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses these ones.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main refuses all five, after two inputs, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep `a` and `b`. Main refuses all five.",
+    subagent_type="test-author", carries=("`a`", "`b`"))
+add("brief-claim: test-author brief where main passes all three tests is allowed",
+    "allow", tool="Agent", prompt="Main passes all three tests.", subagent_type="test-author")
+add("brief-claim: test-author brief where main refuses it after a fixed input is allowed",
+    "allow", tool="Agent", prompt="Fix `X`, and main refuses it.", subagent_type="test-author")
+add("brief-claim: test-author brief where main refuses it, then a verdict command, is allowed",
+    "allow", tool="Agent", prompt="Main refuses it, so run `verdict pytest`.", subagent_type="test-author")
+add("brief-claim: test-author brief where main passes CI for a kept input is allowed",
+    "allow", tool="Agent", prompt="Keep it in `x` because main passes CI.", subagent_type="test-author")
+add("brief-claim: test-author brief where main passes CI, and an edit keeps it green, is allowed",
+    "allow", tool="Agent", prompt="Edit `x` because main passes CI, and keep it green.", subagent_type="test-author")
+# A count word that is not the clause's end is no referent: "all three tests" names no inputs, so the two before it are not claimed.
+add("brief-claim: test-author brief where main passes all three tests, after two inputs, is allowed",
+    "allow", tool="Agent", prompt="Keep `a` and `b`. Main passes all three tests.", subagent_type="test-author")
+add("brief-claim: test-author brief where today we know the guard refuses an input today is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Today we know the guard refuses `x` today.",
+    subagent_type="test-author", carries=("`x`",))
+add("brief-claim: test-author brief where the guard refuses an input in capitals TODAY is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="The guard refuses `x` TODAY.",
+    subagent_type="test-author", carries=("`x`",))
+# Names only the first input: the scan reads one claim per sentence. The verdict is pinned.
+add("brief-claim: test-author brief where the guard refuses an input today, and main refuses a second, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="The guard refuses `a` today, and main refuses `b`.",
+    subagent_type="test-author", carries=("`a`",))
+
+
 def _flow(model, role=None):
     spec = "model: '%s'" % model + (", agentType: '%s'" % role if role else "")
     return "const r = await agent({prompt: 'x', %s}); return r" % spec
