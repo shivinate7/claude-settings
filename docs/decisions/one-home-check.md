@@ -40,7 +40,7 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
 - Precision 1.00: 25 of 25 flagged cases were paraphrases. No false positive. On 25 flags, the
   95% lower bound is about 0.87.
 - Recall 0.86: 25 of 29 paraphrases were flagged. Missed: p11, p26, p27, p28.
-- Precision was not under 0.9, so no second prompt was tried. There is one run.
+- Precision was 0.9 or more, so no second prompt was tried. There is one run.
 - Limits. The prompt was written after the set was read, so both figures lean high. 22 distinct cases
   is a small base. The figures measure the model alone, on each case's own rule text; 8 cases carry
   superseded rule text.

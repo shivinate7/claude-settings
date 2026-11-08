@@ -19,6 +19,15 @@ commit trailers of the branch and from the PR body. A bare path excuses nothing,
 nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off.
 
+A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
+that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
+another file, and only a whole delete, not a rename out of `docs/debts/`. Merge tool only: the CLI and CI pass
+no PR body, as with a `Drops-lines` line in the body; CI's way out is a `Drops-lines` commit trailer. With no
+run reader, or a read that fails, the finding stays. Cost: it runs only in the merge tool, when the scan has a
+finding and the body holds a cite. For each flagged cited debt, it runs the debt-close judgment: git reads,
+each Retire test in a temporary worktree, and at most one run read. A test proves that
+an unflagged close gets no run read. It starts no long-lived process.
+
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
   Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
 - **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
