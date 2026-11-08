@@ -822,15 +822,17 @@ def _drop_heredoc_bodies(cmd: str, keep: "set | None" = None) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
-_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
+_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|xargs|sudo|env|timeout|nohup|nice|command"
                      r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
-# A runner that reads its operand as a script. The others (`sudo`, `timeout`, `xargs` ...) run the command after
-# them, so a flag before it may take a value (`sudo -u root f`).
-_SCRIPT_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval)(?:\.exe|\.cmd)?").fullmatch
+# An interpreter reads its operand as a script. The other runners (`sudo`, `timeout`, `xargs` ...) run the command
+# after them, so a flag before it may take a value (`sudo -u root f`).
 _INTERPRETER = re.compile(r"(?:" + _INTERPRETERS + r")(?:\.exe|\.cmd)?").fullmatch
+# A word that runs shell text, whose files no reader below can follow: a quoted script (`bash -lc "bash f"`),
+# xargs into a shell, a subshell piped into one, `bash -s` on stdin. `.` counts only as a command.
+_SHELL_WORD = re.compile(r"(?:" + _SHELLS + r"|eval|source|exec)(?:\.exe|\.cmd)?").fullmatch
 _LEADING_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "{"}
 # Wrappers that run the command after them, and the commands that only read a file named after them.
-_WRAPPERS = {"sudo", "env", "timeout", "nohup", "nice", "command", "time", "xargs", "exec"}
+_WRAPPERS = {"sudo", "env", "timeout", "nohup", "nice", "command", "time", "xargs"}
 _READERS = {"cat", "wc", "head", "tail", "less", "grep", "jq", "diff"}
 # An interpreter flag that takes a value which is no script, and a flag whose value is code, not a file.
 _VALUE_FLAGS = {"-W", "-X", "-r", "--require", "-o", "-O"}
@@ -859,19 +861,34 @@ def _command_start(words) -> int:
     return start
 
 
+def _holds_shell(line: str) -> bool:
+    """True when a line holds a shell word anywhere, in a subshell, a substitution or a quoted script too, or an
+    xargs that runs more than a pure reader (`xargs -I{} $SHELL -c {}`, `xargs -I{} python3 -c {}`)."""
+    if any(_SHELL_WORD(_basename_word(word)) for word in _WORDS(line)):
+        return True
+    for part in re.split(r"[;&|()`]|\$\(|<\(", line):
+        words = _plain_words(_WORDS(part))
+        if words[_command_start(words):][:1] == ["."]:
+            return True
+        if "xargs" in map(_basename_word, words) and not _reads_only(words):
+            return True
+    return False
+
+
 def _stage_runs(words):
-    """(the command word of a stage, whether it reads a script on stdin). A script runner in the chain from the
-    command word (`sh`, `sudo bash`, `timeout 5 sh`) reads stdin when it has no operand after its flags, or
-    `-`. The word after a wrapper's flag may be the flag's value (`sudo -u root sh`)."""
+    """(the command word of a stage, whether it reads a script on stdin). An interpreter in the chain from the
+    command word (`python3`, `sudo node`, `timeout 5 perl`) reads stdin when it has no operand after its flags,
+    or `-`. The word after a wrapper's flag may be the flag's value (`sudo -u root python3`). The caller passes
+    no line that holds a shell word."""
     start = _command_start(words)
     ran = words[start:start + 1]
     stdin = False
     at = start
     while at < len(words):
         name = _basename_word(words[at])
-        if not _RUNNER(name) or (name == "." and at != start):   # `ls . f` runs nothing
+        if not _RUNNER(name):
             break
-        script = bool(_SCRIPT_RUNNER(name))
+        script = bool(_INTERPRETER(name))
         flags = []
         picked = []
         end = at
@@ -882,9 +899,9 @@ def _stage_runs(words):
             picked.append(words[end])
             if script or not flags or len(picked) == 2:
                 break
-        if script and name != "eval":
+        if script:
             stdin = not picked or picked[0] == "-"
-        if script and name != "eval" and "-c" not in flags:
+        if script and "-c" not in flags:
             break   # its operand is a file, so no runner after it is in the chain
         at = next((i for i in range(at + 1, end + 2) if i < len(words) and _RUNNER(_basename_word(words[i]))),
                   len(words))
@@ -912,7 +929,7 @@ def _reads_only(words) -> bool:
 
 def _data_positions(words) -> set:
     """The positions of the operands a script interpreter takes after its script (`python3 check.py f`,
-    `python3 -m json.tool f`, `bash run.sh f`): data, not a file it runs. An interpreter given code (`-c`, `-e`)
+    `python3 -m json.tool f`): data, not a file it runs. An interpreter given code (`-c`, `-e`)
     has none, as its code may run a file."""
     data = set()
     for at, word in enumerate(words):
@@ -929,20 +946,24 @@ def _data_positions(words) -> set:
 
 
 def _run_files(text: str, written) -> set:
-    """The files of WRITTEN that a command in TEXT runs: as the command word (`./f`), as a runner's stdin
-    (`sh < f`), piped into a runner (`cat f | sh`), read by a runner through a substitution (`eval "$(cat f)"`),
-    or named in a pipeline that holds a runner (`bash f`, `ssh host < f`, `find -exec bash`, `kubectl exec p --
-    bash f`, as main). Not run: an operand of a pure reader (`wc -c f`, `sudo cat f`, `ls f | xargs wc`), and an
-    operand after the script of an interpreter (`python3 check.py f`). The word is compared as written, so
-    `$HOME/f` matches only itself."""
+    """The files of WRITTEN that a command in TEXT runs. Each one a line names that holds a shell word, as main
+    (`bash f`, `(cat f) | sh`, `xargs -I{} sh -c {}`, `ssh host bash < f`). On any other line: the command
+    word (`./f`), a runner's stdin (`python3 < f`), a pipe into a runner (`cat f | python3 -`), a runner's
+    substitution (`python3 -c "$(cat f)"`), or a word in a pipeline that holds a runner (`ssh host < f`,
+    `kubectl exec p -- python3 f`), less an operand of a pure reader (`wc -c f`, `sudo cat f`, `ls f | xargs wc`)
+    and an operand after the script of an interpreter (`python3 check.py f`). The word is compared as written,
+    so `$HOME/f` matches only itself."""
     ran = set()
     for line in _WRITE_TARGET.sub(" ", text).split("\n") if written else ():
         line_words = _plain_words(_WORDS(line))
+        if _holds_shell(line):
+            ran.update(written.intersection(line_words))
+            continue
         if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):
             ran.update(written.intersection(line_words))
-        # A substitution is a command of its own: `cat f` inside `eval "$(cat f)"` reads f, and the line above decides
-        # whether the runner runs what it prints.
-        for pipeline in re.split(r";|&&|\|\||&|\$\(|<\(|`|\)", line):
+        # A substitution is a command of its own: `cat f` inside `python3 -c "$(cat f)"` reads f, and the line above
+        # decides whether the runner runs what it prints. A `)` ends no pipeline, so `(cat f) | python3 -` pipes f.
+        for pipeline in re.split(r";|&&|\|\||&|\$\(|<\(|`", line):
             stages = pipeline.split("|")
             words = [_plain_words(_WORDS(stage)) for stage in stages]
             reads = [_reads_only(stage_words) for stage_words in words]
