@@ -9909,6 +9909,7 @@ REVIEW_TRAILING = review_record() + "Lane note after the record.\n"
 REVIEW_FULL_TRAILING = REVIEW_FULL.split("---\n", 1)[0] + "Lane note after the record.\n"   # the full size, with the prose
 REVIEW_FOOTED = review_record(footer=True)                                              # a record, then `---` and the footer
 REVIEW_FENCED = "```\n" + review_record() + "```\n"                                     # a code fence, then the marker
+REVIEW_PROSE_FOOTED = review_record() + "\nLane prose after the CI line.\n\n---\nGenerated with Claude Code\n"  # prose after the CI line, then `---` and a footer
 # The bodies the Bash forms read from a file, one file each in the record folder (build_record_fixtures writes them).
 RECORD_BODY_FILES = {"trailing.md": REVIEW_TRAILING, "full-trailing.md": REVIEW_FULL_TRAILING, "footed.md": REVIEW_FOOTED,
                      "fenced.md": REVIEW_FENCED, "prose.md": REVIEW_PROSE}
@@ -10078,6 +10079,9 @@ for _label, _command in every_form(REVIEW_TRAILING, TRAILING_PATH):
               rule=REVIEW_RULE, carries=SHAPE_TEXT)
 mcp_post("review-record: prose after the CI line is refused and names the shape, MCP add_issue_comment", REVIEW_TRAILING,
          "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+# Control, green on the old code too: PR #1926's shape, prose after the CI line then `---` and a footer, is refused as the text is cut at the CI line.
+mcp_post("review-record: prose after the CI line, then a `---` and a footer, is refused and names the shape, MCP add_issue_comment",
+         REVIEW_PROSE_FOOTED, "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
 # The malformed bodies in the add and post cases also name the form text: the same judge refuses them.
 mcp_post("review-record: a marker with no record is refused and names the shape, MCP add_issue_comment", REVIEW_MARKER_TEXT,
          "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
