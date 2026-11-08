@@ -240,14 +240,18 @@ test("the phase head's bar draws no stalled or paused step as active", async (t)
 // ---------------------------------------------------------------- stalled and paused read apart (lane nfp-stalled-kind-color)
 // The design (the hatch-and-ring option, as the notes record it): a stalled label is --bad, as the blocked label is; each bar cell is
 // its own shape. The colour is read from the page's own --bad token, so a token change moves the test with it.
-const badColour = (page) => page.evaluate(() => {
-  const p = document.createElement("span");
-  p.style.color = "var(--bad)";
-  document.body.appendChild(p);
-  const c = getComputedStyle(p).color;
-  p.remove();
-  return c;
-});
+// A CSS value as the browser computes it on an element: a probe span takes the value inside that element, so a token set on the element
+// resolves as it does there. The probe is removed before the read returns. Two computed values compare as strings.
+const probeOf = (loc, prop, value) => loc.evaluate((el, [p, v]) => {
+  const s = document.createElement("span");
+  s.style[p] = v;
+  el.appendChild(s);
+  const out = getComputedStyle(s)[p];
+  s.remove();
+  return out;
+}, [prop, value]);
+const computedOf = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el)[p], prop);
+const badColour = (page) => probeOf(page.locator("body"), "color", "var(--bad)");
 const colourOf = (loc) => loc.evaluate((el) => getComputedStyle(el).color);
 const feedKind = (page, id) => page.locator("#side .feed li", { has: page.locator(`button[data-go="${id}"]`) }).locator(".kind");
 const logKind = (page, id) => page.locator("#days .ev", { has: page.locator(`button[data-go="${id}"]`) }).locator(".kind");
@@ -270,6 +274,50 @@ for (const scheme of ["light", "dark"]) {
     }
   });
 }
+
+// ---------------------------------------------------------------- the row tint: a stalled row takes the stalled colour, a paused row none (lane nfp-stalled-row-tint)
+// The tint and the edge are on the row's .rw. A stalled row takes --bad-soft and a 3px left edge in --bad. A paused row takes no tint and a
+// 3px left edge in --muted. An in-progress row keeps --accent-soft and --accent. Each expected value is the page's own token, computed on
+// the row, in each scheme. The row's status is checked first, so a red names the tint or the edge and not the label.
+test("the row tint: a stalled row's background is --bad-soft and its left edge --bad, in light and dark", async (t) => {
+  const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "doing", 1) }, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  const row = page.locator("#s-c1 .rw");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "var(--bad-soft)");
+    assert.equal(bg, wantBg, `in ${scheme} the stalled row's background is ${bg}, not the --bad-soft tint ${wantBg}`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--bad)");
+    assert.equal(edge, wantEdge, `in ${scheme} the stalled row's left edge is ${edge}, not the 3px --bad edge ${wantEdge}`);
+  }
+});
+test("the row tint: a paused row takes no tint and a 3px left edge in --muted, in light and dark", async (t) => {
+  const page = await open(t, builtPage({ steps: { a3: stepOf("Step a3", "doing", 3) }, stalled: PAUSED_A3 })); if (!page) return;
+  await assertRowReads(page, "a3", "Paused");
+  const row = page.locator("#s-a3 .rw");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "transparent");
+    assert.equal(bg, wantBg, `in ${scheme} the paused row keeps a tint: its background is ${bg}, not none`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--muted)");
+    assert.equal(edge, wantEdge, `in ${scheme} the paused row's left edge is ${edge}, not the 3px --muted edge ${wantEdge}`);
+  }
+});
+test("control: the row tint: an in-progress row keeps the --accent-soft tint and its 3px --accent edge, in light and dark", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  assert.match(await statusLabel(page, "a"), /In progress/, "step a has a live thread but does not read In progress");
+  const row = page.locator("#s-a .rw");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "var(--accent-soft)");
+    assert.equal(bg, wantBg, `in ${scheme} the in-progress row's background is ${bg}, not the --accent-soft tint ${wantBg}`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--accent)");
+    assert.equal(edge, wantEdge, `in ${scheme} the in-progress row's left edge is ${edge}, not the 3px --accent edge ${wantEdge}`);
+  }
+});
 
 // One cell per step, in the order done, in progress, stalled, paused, blocked, to do. Three bars: the Now card, the rail's cleanup
 // button and the phase head. The fixture is a full phase of 30 steps: 1 done, a2 live (in progress), s3 stalled, p4 paused, 26 to do.

@@ -6281,6 +6281,62 @@ test("a stalled or paused row reads Stalled or Paused in its status, label and m
   }
 });
 
+// ---------------------------------------------------------------- the row tint: a stalled row takes the stalled colour, a paused row none (lane nfp-stalled-row-tint)
+// The tint and the edge are on the row's .rrow. A stalled row takes the page's own red tint, --holds mixed 14% into --surface as .dl.bad
+// draws it, and a 3px left edge in --holds. A paused row takes no tint and a 3px left edge in --muted. The in-progress row (a4, with a live
+// lane) keeps --acc-soft and --acc. Each expected value is computed on the row, in each scheme. Each row's mark is checked first, so a red
+// names the tint or the edge and not the label.
+// The probe helpers are copies of the roadmap test file's: the two pages' test files keep their own, as their colour helpers already do.
+const probeOf = (loc, prop, value) => loc.evaluate((el, [p, v]) => {
+  const s = document.createElement("span");
+  s.style[p] = v;
+  el.appendChild(s);
+  const out = getComputedStyle(s)[p];
+  s.remove();
+  return out;
+}, [prop, value]);
+const computedOf = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el)[p], prop);
+const STALLED_TINT = "color-mix(in srgb, var(--holds) 14%, var(--surface))";
+test("the row tint: a stalled row's background is the stalled tint and its left edge --holds, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-c1 [aria-label="Stalled"]').count(), 1, "step c1 is not marked Stalled: there is no stalled row to tint");
+  const row = page.locator("#s-c1 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", STALLED_TINT);
+    assert.equal(bg, wantBg, `in ${scheme} the stalled row's background is ${bg}, not the stalled tint ${wantBg}`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--holds)");
+    assert.equal(edge, wantEdge, `in ${scheme} the stalled row's left edge is ${edge}, not the 3px --holds edge ${wantEdge}`);
+  }
+});
+test("the row tint: a paused row takes no tint and a 3px left edge in --muted, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "step a3 is not marked Paused: there is no paused row to clear");
+  const row = page.locator("#s-a3 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "transparent");
+    assert.equal(bg, wantBg, `in ${scheme} the paused row keeps a tint: its background is ${bg}, not none`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--muted)");
+    assert.equal(edge, wantEdge, `in ${scheme} the paused row's left edge is ${edge}, not the 3px --muted edge ${wantEdge}`);
+  }
+});
+test("control: the row tint: an in-progress row keeps the --acc-soft tint and its 3px --acc edge, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.match(await page.locator("#s-a4 .rrow").getAttribute("aria-label"), /In progress/, "step a4 does not read In progress");
+  const row = page.locator("#s-a4 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "var(--acc-soft)");
+    assert.equal(bg, wantBg, `in ${scheme} the in-progress row's background is ${bg}, not the --acc-soft tint ${wantBg}`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--acc)");
+    assert.equal(edge, wantEdge, `in ${scheme} the in-progress row's left edge is ${edge}, not the 3px --acc edge ${wantEdge}`);
+  }
+});
+
 test("merged_page.py --live hands its JSON to the build as the live file", () => {
   const live = { readAt: new Date().toISOString(), threads: [], pulls: [] };
   const html = mergedPage("--live", JSON.stringify(live));
