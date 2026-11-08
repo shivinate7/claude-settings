@@ -15022,7 +15022,7 @@ class ReviewFixHiddenByCopy(ReviewChainFixture):
 
     ROUND_1 = REVIEW_PASS  # a record whose first round passed
     ROUND_1_2 = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS")
-    FAIL_IN_ROUND_2 = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, FAIL")  # a FAIL fix check counts as round 2, so the record after it carries that line
+    FAIL_IN_ROUND_2 = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, FAIL")  # a FAIL fix check takes the next Round slot, so the record after it carries a FAIL Round line for that slot
 
     def hidden(self, verdict):
         """Pull request 7's three records before the new fix check: EARLIER's record, then NEWEST's record with a fix check of `verdict` from EARLIER,
@@ -15039,7 +15039,7 @@ class ReviewFixHiddenByCopy(ReviewChainFixture):
         self.assertIn("WIDE", err, "the refusal does not name the WIDE fix check the copy hides:\n" + err)
 
     def test_a_fail_fix_check_is_not_hidden_by_a_plain_copy_of_its_record(self):
-        # control, green on the old code: a record with round 1 alone sits below the round a FAIL fix check counts as, so the round floor refuses it
+        # control, green on the old code: a record with only a first Round line sits below the slot a FAIL fix check takes, so the floor refuses it
         rc, out, err, _ = self.run_chain(self.NEWEST, self.hidden("FAIL"), rounds=round_args(self.ROUND_1))
         self.assert_refused(rc, out, err)
         self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
@@ -15055,7 +15055,7 @@ class ReviewFixHiddenByCopy(ReviewChainFixture):
         host, rc, out, err = self.listing([batch_pull(7, self.NEWEST)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {self.NEWEST[:9]} open: ", "control: the WIDE does not hold the listing open:\n" + out)
-        # the fix check PASS at LIVE is one the write step refuses; a WIDE needs a new lane at round 1, so the listing must not read it as cleared
+        # the fix check PASS at LIVE is one the write step refuses; a WIDE clears only by a fresh review, not by a fix check PASS, so the listing must not read this PASS as cleared
         comments += (review_comment(4, 7, record_text(head=self.LIVE, rounds=self.ROUND_1, fix=(fix_check_line(verdict="PASS", head=self.NEWEST),))),)
         host, rc, out, err = self.listing([batch_pull(7, self.LIVE)], comments)
         self.assertEqual(rc, 0, out + err)
