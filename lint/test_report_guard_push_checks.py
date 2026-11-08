@@ -20,9 +20,10 @@ the fixture the case writes. No real gh runs, no network is reached and no clock
 cases run in process with a fake clock.
 
 Cost, proved by the stand-in's call log: a turn with no push, and a Stop with stop_hook_active, make no
-gh call. A push reads at most 2 gh calls for its head: the PR read and the run list. A bare-name push with no ref
-line starts at most 1 git process when its remote-tracking ref names the head, else 3 per name (the tag, the local
-branch and the remote-tracking ref); a git stand-in's call log counts them.
+gh call. A push reads at most 3 gh calls for its head: the PR read, the run list, and the workflow list when the run
+list is empty. A bare-name push with no ref line starts at most 1 git process when its remote-tracking ref names the
+head, else 3 per name (the tag, the local branch and the remote-tracking ref). A HEAD refspec or a push with no refspec
+starts 1 more for the checked-out branch. A git stand-in's call log counts them.
 
 A red case fails on an assertion on the old code, where the guard blocks nothing. A control passes on
 the old code and on the new.
@@ -535,8 +536,9 @@ class PushCheckTests(unittest.TestCase):
         self.assertIn("CI running on " + HEAD7, reason, "the branch head of the push is not named running: " + reason)
 
     def test_colon_form_tag_only_push_needs_no_ci_line(self):
-        # `git push origin v1.0:v1.0` names a tag in the colon form, with a [new tag] line and no ref line. The local tag
-        # exists, as git needs for a push of it, so the name reads as a tag and no CI line is due. Green on the old code.
+        # `git push origin v1.0:v1.0` names a tag in the colon form, with a [new tag] line and no ref line. The local
+        # tag exists, as git needs for a push of it, so the name reads as a tag and no CI line is due. Green on the old
+        # code.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=TAG)
         steps = push(REMOTE_LINE + " * [new tag]         %s -> %s\n" % (TAG, TAG),
@@ -794,17 +796,29 @@ class PushCheckTests(unittest.TestCase):
         self.assertGreaterEqual(len(calls), 1, "a push with a pending run read no CI: %s" % calls)
         self.assertLessEqual(len(calls), 2, "a push read more than two gh calls for its head: %s" % calls)
 
-    def bare_push_git_reads(self, folder, fixture_):
-        """-> (states, git calls) of a bare-name push, `git push origin feat`, with no ref line, read in process by
-        report_guard.push_ci_states. The git stand-in leads PATH, so each git process the read starts is one
-        log line."""
+    def test_push_turn_with_no_run_listed_reads_three_gh_calls_for_its_head(self):
+        # The record's Cost line: the PR read, the run list (empty here), then the workflow list that decides between
+        # none and running. Three gh processes is the most a head reads.
+        decision, reason, calls = self.stop(turn(REPORT, push(push_out(HEAD7))),
+                                            answers(prs=[pr_entry()], runs=[]))
+        self.assertEqual(decision, "block", "a ready PR with no run listed passed with no CI line (scope check)")
+        self.assertIn("CI running on " + HEAD7, reason, "a ready PR with no run listed is not named running: " + reason)
+        self.assertEqual(len(calls), 3, "a push with no run listed started %d gh processes for its head, not the "
+                         "record's 3: %s" % (len(calls), calls))
+        self.assertEqual([call[:2] for call in calls[1:]], [["run", "list"], ["workflow", "list"]],
+                         "the reads after the PR read are not the run list, then the workflow list: %s" % calls)
+
+    def bare_push_git_reads(self, folder, fixture_, command="git push origin %s" % FEAT):
+        """-> (states, git calls) of a push with no ref line, `command` (default `git push origin feat`), read in
+        process by report_guard.push_ci_states. The git stand-in leads PATH, so each git process the read starts is
+        one log line."""
         bin_dir, log = git_stand_in(folder)
         fixture_path = os.path.join(folder, "fixture.json")
         with open(fixture_path, "w", encoding="utf-8") as f:
             json.dump(fixture_, f)
         env = {"PATH": os.pathsep.join((bin_dir, os.environ["PATH"])), "GH_STUB_FIXTURE": fixture_path,
                "GH_STUB_LOG": os.path.join(folder, "gh.log")}
-        records = turn(REPORT, push("", command="git push origin %s" % FEAT))[1:]
+        records = turn(REPORT, push("", command=command))[1:]
         budget = ci_wake.Budget(total=20, per_read=8, clock=StepClock([0.0]))  # a fixed clock: no read runs out
         with mock.patch.dict(os.environ, env):
             states = report_guard.push_ci_states(records, {"cwd": folder}, budget=budget)
@@ -834,6 +848,24 @@ class PushCheckTests(unittest.TestCase):
                 self.assertGreaterEqual(len(calls), 1, "scope: the git stand-in counted no process for %s" % label)
                 self.assertLessEqual(len(calls), bound, "a bare-name push, %s, started %d git processes, past the cost "
                                      "bound of %d: %s" % (label, len(calls), bound, calls))
+
+    @unittest.skipIf(os.name == "nt", "the git stand-in is a POSIX launcher; no Windows run is made here")
+    def test_head_refspec_and_bare_push_start_one_git_process_for_the_branch_and_one_for_the_ref(self):
+        # The record's Cost line: a `HEAD` refspec or a push with no refspec reads the checked-out branch, one git
+        # process more, then its remote-tracking ref names the head, one more: 2 in all. A `HEAD:name` push names its
+        # branch, so it starts only the ref read: 1. Green on the old code, which the record describes.
+        cases = (("git push origin HEAD", 2), ("git push", 2), ("git push origin HEAD:%s" % BRANCH, 1))
+        for command, count in cases:
+            with self.subTest(command=command):
+                folder = self.case_folder()
+                head = git_commit(folder, remote_branch=BRANCH, on_branch=BRANCH)
+                fixture_ = answers(prs=[pr_entry(branch=BRANCH, sha=head)],
+                                   runs=[run_entry(None, sha=head, status="in_progress")])
+                states, calls = self.bare_push_git_reads(folder, fixture_, command=command)
+                self.assertEqual([name for name, _, _ in states], [head[:7]],
+                                 "scope: %r did not name the checked-out branch's head: %s" % (command, states))
+                self.assertEqual(len(calls), count, "%r started %d git processes, not the record's %d: %s"
+                                 % (command, len(calls), count, calls))
 
 
 class BudgetTests(unittest.TestCase):
