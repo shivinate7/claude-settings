@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
   "why": "Review records on #1502 and #1535 had prose after the CI line, so merge.parse_review returned None and they were fixed by hand.",
-  "note": "Fix: a guard on a PR comment holding `<!-- review-record -->` (gh or MCP) runs parse_review and refuses on None; or merge.py --review-record posts the record itself. Done check: a guard test refuses a record with trailing prose and allows the bare record. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask. Coordinator 18:45 CST: built as #1671, which extends #1601's guard (review-record-from-render, in round 3); one guard home.",
-  "updatedAt": "2026-11-07T18:44:00-06:00"
+  "note": "Fix: a guard on a PR comment holding `<!-- review-record -->` (gh or MCP) runs parse_review and refuses on None; or merge.py --review-record posts the record itself. Done check: a guard test refuses a record with trailing prose and allows the bare record. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask. Coordinator 18:45 CST: built as #1671, which extends #1601's guard (review-record-from-render, in round 3); one guard home. Fifth incident (coordinator, 03:09 CST Nov 8): lane cannot-claim-needs-tries posted #1812's first record with a note above the `---` line, so the merge tool could not parse it. That lane's suggested slug review-record-posts-itself (the tool posts the record itself, or refuses a hand-posted body it cannot parse) folds in here.",
+  "updatedAt": "2026-11-08T03:09:00-06:00"
 }
