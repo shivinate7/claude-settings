@@ -8,6 +8,10 @@ import re
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
+SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
+# The one line bin/ci-job prints for the picked suites of another job, and the reader of it that merge --lane-lint uses.
+NOT_RUN_JOB = "job {job}: picked {suites}; job {job} runs them, not {linted}"
+NOT_RUN_JOB_LINE = re.compile(r"not run\s+job ([\w-]+): picked (\S.*?); job \1 runs them, not ([\w-]+)\s*$")
 
 
 def job_block(text, name):
@@ -127,3 +131,14 @@ def step_env(step):
 def step_with(step):
     """A step's own `with:` block as {name: raw value}, or {} when it has none."""
     return step_map(step, "with")
+
+
+def run_lines(step):
+    """The step's run: lines, with no blank line and no comment."""
+    return [ln.strip() for ln in (run_body(step) or "").splitlines() if ln.strip() and not ln.strip().startswith("#")]
+
+
+def suite_paths(step):
+    """The suites a CI step runs: the path of each of its run: lines that is `python3 hooks|merge/test_<name>.py`, with
+    arguments allowed. Any other line of the step stays in it, so a picked step runs whole, as CI runs it."""
+    return [m.group(1) for ln in run_lines(step) if (m := SUITE_LINE.fullmatch(ln))]

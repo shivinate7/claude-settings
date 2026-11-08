@@ -29,8 +29,13 @@
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
-                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
-                          measured once on one PR head), one worktree.
+                          and pushes nothing; any session may run it, cloud included. After the checks lint it runs each CI step of
+                          another Linux job (runs-on ubuntu*) whose suite the lint picked, as `bin/ci-job <job> --step NAME`, one run
+                          per job; a job on another OS stays one `not run` line. Such a run that passes OTHER_JOB_SECONDS reads
+                          unknown and names the suite. The fetch of a branch retries a ref-lock collision (FETCH_COLLISION_TRIES).
+                          Cost per call: one ci-job run (about 550 s, measured once on one PR head), one worktree, plus up to 1800 s
+                          (OTHER_JOB_SECONDS) and one ci-job run per other Linux job with a picked suite, none with no pick, and at
+                          most 3 extra `git fetch` and 6 s of wait per fetch, only on a collision.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -45,7 +50,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, collections, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -66,6 +71,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+import workflow_steps  # noqa: E402  the one home of the step parser (lint/workflow_steps.py, on sys.path above with the records generator)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -1540,6 +1546,9 @@ READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on 
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 UNSHALLOW_SECONDS = 600  # the bound on the lane lint's `git fetch --unshallow origin`: a full fetch of this repo over a slow link, about half of LINT_SECONDS, since the lint it gates runs 550 s to 660 s. Unmeasured; raise it on a timeout from a link that was only slow.
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
+OTHER_JOB_SECONDS = 1800  # the bound on each run of a picked suite in another Linux job in the lane lint, on top of LINT_SECONDS for the checks lint. One run per job, so a lane that picks suites in two jobs waits up to 2 x this after the checks lint. 1800 s is the larger CI cap of the two jobs that hold suites (checks-merge-install 30 min, checks-guard 27 min); their slowest CI runs are 21.0 and 18.9 min. Unmeasured locally. LINT_SECONDS is not raised. Raise this on a timeout from a slow machine.
+FETCH_COLLISION_TRIES, FETCH_COLLISION_PAUSE = 4, 2  # a lane lint's fetch of a branch retries on a ref-lock collision with another lint's fetch: 4 tries, 2 s between them, so at most 3 extra `git fetch` and 6 s of wait per fetch. Any other fetch error stops after one try
+COLLISION = re.compile(r"cannot lock ref .*but expected")  # git's text when another fetch moved the ref
 SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
 
 def needles(path):
@@ -2399,10 +2408,19 @@ def refuse_bad_pr(info):
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed. " + BASE_CITE)
 
+def fetch_branch(root, ref):
+    """-> (code, output) of `git fetch -q origin +refs/heads/<ref>:refs/remotes/origin/<ref>`. Two lane lints in one clone each fetch main, and the loser of the
+    ref lock fails with "cannot lock ref ... but expected": that one error is retried (FETCH_COLLISION_TRIES, FETCH_COLLISION_PAUSE). Any other error returns at once."""
+    for attempt in range(1, FETCH_COLLISION_TRIES + 1):
+        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
+        if not c or not COLLISION.search(out) or attempt == FETCH_COLLISION_TRIES:
+            return c, out
+        time.sleep(FETCH_COLLISION_PAUSE)
+
 def open_worktree(root, info, base):
     """Fetch, check that the head is the one gh named, and make a detached worktree there."""
     for ref in (base, info["branch"]):
-        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
+        c, out = fetch_branch(root, ref)
         if c:
             raise Stop(f"git fetch origin {ref} failed: {out}")
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
@@ -2432,7 +2450,7 @@ def lane_head_and_base(root, target, base):
     """-> (head sha, base branch) of a --lane-lint ref target: the commit or ref `target`, linted against `base` (default main).
     The base is fetched, and the target too when this clone lacks it."""
     base = base or "main"
-    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    c, out = fetch_branch(root, base)
     if c:
         raise Stop(f"git fetch origin {base} failed: {out} {LANE_LINT_CITE}")
     if not re.fullmatch(r"[0-9a-fA-F]{7,64}", target):  # a bare branch name means the pushed branch, never a local one that may differ
@@ -2455,26 +2473,67 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
-def ci_job_run(wt, *args):
+CiRun = collections.namedtuple("CiRun", "state lines log liftable others timed_out")
+
+def ci_job_run(wt, *args, seconds=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
-    -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
+    The run is bounded by `seconds`, LINT_SECONDS when None. -> CiRun. state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
-    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
+    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
+    others: [(job, [suites])], from each `not run  job J: picked ...` line, the suites picked for a CI step of another job (workflow_steps.NOT_RUN_JOB).
+    timed_out: True when the run passed `seconds`."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    seconds = LINT_SECONDS if seconds is None else seconds
     try:
-        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
+        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=seconds, live_stderr=True)
     except subprocess.TimeoutExpired:
-        return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
+        return CiRun("unknown", [f"ci-job did not finish in {seconds} s"], [], False, [], True)
     lines = out.splitlines()
     log = [l for l in lines if l.startswith("log=")][-1:]
+    others = [(m.group(1), [x.strip() for x in m.group(2).split(",")]) for m in map(workflow_steps.NOT_RUN_JOB_LINE.match, lines) if m]
     if c == 0:
-        return "pass", [], log, False
+        return CiRun("pass", [], log, False, others, False)
     if c == 1:
-        return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
+        return CiRun("fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False, others, False)
     if c == 2:
-        return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
-    return "unknown", [f"ci-job exited {c}"], log, False
+        return CiRun("unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True, others, False)
+    return CiRun("unknown", [f"ci-job exited {c}"], log, False, others, False)
+
+def other_job_runs(wt, others, base):
+    """The lane lint's run of each picked suite CI step in another job (decision lanes-run-no-full-ci-job). `others` is ci_job_run's list
+    of (job, suites) the checks lint picked but did not run. A Linux job (runs-on ubuntu*) runs through `ci-job <job> --step NAME ...`, the
+    one runner, one run per job bounded by OTHER_JOB_SECONDS; a job on another OS prints one `not run` line and runs nowhere. A job or step
+    this cannot read from the workflow at the head reads unknown, never a pass. Cost: one ci-job run (its own processes) per Linux job
+    with a picked suite, none when nothing is picked; one read of the workflow. -> [(job, suites, CiRun)]."""
+    if not others:
+        return []
+    try:
+        with open(os.path.join(wt, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeError) as e:
+        text = None
+        why = f"the workflow cannot be read ({type(e).__name__})"
+    out = []
+    for job, suites in others:
+        block = workflow_steps.job_block(text, job) if text is not None else None
+        if block is None:
+            out.append((job, suites, CiRun("unknown", [f"unknown         job {job}: picked {', '.join(suites)}, but " + (why if text is None else "the workflow has no such job")],
+                                           [], False, [], False)))
+            continue
+        runs_on = re.search(r"^    runs-on:[ \t]*(\S+)", block, re.M)
+        if not runs_on or not runs_on.group(1).lower().startswith("ubuntu"):
+            say("%-15s job %s: picked %s; runs-on %s, so the lane lint does not run it" % ("not run", job, ", ".join(suites), runs_on.group(1) if runs_on else "unread"))
+            continue
+        names = [workflow_steps.step_key(st, "name") for st in workflow_steps.step_blocks(block) if set(workflow_steps.suite_paths(st)) & set(suites)]
+        if not names or not all(names):
+            out.append((job, suites, CiRun("unknown", [f"unknown         job {job}: no named step runs the picked {', '.join(suites)}"], [], False, [], False)))
+            continue
+        run = ci_job_run(wt, job, *[a for name in names for a in ("--step", name)], "--base", f"origin/{base}", seconds=OTHER_JOB_SECONDS)
+        if run.timed_out:
+            run = run._replace(lines=[f"unknown         job {job}: the picked suite {', '.join(suites)} timed out: ci-job did not finish in {OTHER_JOB_SECONDS} s"])
+        out.append((job, suites, run))
+    return out
 
 def unshallow_for_lint(root):
     """Make `root` a full clone before the lane lint reads history: the silent-undo check reads a shallow clone as unknown (decision
@@ -2508,6 +2567,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     A shallow clone is unshallowed first (unshallow_for_lint).
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
+    Then each picked suite CI step of another Linux job runs through ci-job (other_job_runs, bounded by OTHER_JOB_SECONDS per job), unless the checks lint FAILed.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
     unshallow_for_lint(root)
     if target.isdigit():
@@ -2518,15 +2578,26 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+        checks = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+        extra = other_job_runs(wt, checks.others, base) if checks.state != "fail" else []  # a FAIL refuses anyway: no run of another job first
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
-    if state == "pass":
-        say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
+    runs = [(f"the lint of {short} against {base}", checks)] + [(f"job {job}, picked {', '.join(suites)}", run) for job, suites, run in extra]
+    failed = [(what, run) for what, run in runs if run.state == "fail"]
+    if failed:
+        body = [f"the lint of {short} against {base} FAILs:"]
+        for what, run in failed:
+            body += ([what + ":"] if run is not checks else []) + [*run.lines, *run.log]
+        raise Stop("\n".join([*body, LANE_LINT_REMEDY]))
+    unknown = [(what, run) for what, run in runs if run.state == "unknown"]
+    if not unknown:
+        more = "".join(f", and the picked suites of {job} ({', '.join(suites)})" for job, suites, _ in extra)
+        say(f"PASS: lint of {short} against {base} passes{more}. The batch runner may take this head, or join it to a batch.")
         return 0
-    if state == "fail":
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
+    lines = [l for what, run in unknown for l in ([what + ":"] if run is not checks else []) + run.lines]
+    log = [l for _, run in unknown for l in run.log]
+    liftable = all(run.liftable for _, run in unknown)
     if liftable and unknown_ok.strip():
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
         return 0
@@ -2837,7 +2908,7 @@ def run_ready_checks(wt, n, base, checks):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
     would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list."""
     args = ["checks", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
-    state, lines, log, _ = ci_job_run(wt, *args)
+    state, lines, log = ci_job_run(wt, *args)[:3]
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
     if state != "pass":
         raise Stop("\n".join([f"the ready checks of {short} against {base} {'FAIL' if state == 'fail' else 'are unknown, not a pass'}:", *lines, *log,

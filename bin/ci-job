@@ -13,7 +13,8 @@
 # line (preamble_marked; not under pwsh) and reads a failure with no marker in the log as the preamble's. A selector that
 # cannot run, or runs past its 60 s limit (SELECTOR_LIMIT), is unknown on each such CI step, exit 2. With no base or no
 # pick, the CI step is `not run`. The job scope is the linted job only: the suites picked for the CI steps of another job
-# print one `not run` line per job, naming the job and those suites, and run nowhere here. Cost: one selector process per
+# print one `not run` line per job, naming the job and those suites, and run nowhere here; merge --lane-lint reads that line (NOT_RUN_JOB in
+# lint/workflow_steps.py) and runs each such CI step of a Linux job through `ci-job <job> --step NAME`. Cost: one selector process per
 # lane lint (one git diff, one git ls-files, one parse of each tracked test_*.py and of each module they reach, once for
 # the whole diff), plus one process per picked CI step. A mutation script (a name with "mutate")
 # and every other command (bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
@@ -48,7 +49,11 @@
 # it leaves out prints `not run`, which is no verdict.
 # A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
-# its remote; ${{ github.event.pull_request.head.sha }} is HEAD. Any other expression makes the step unknown.
+# its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.workspace }} is the top folder of the tree under test, as the
+# runner's workspace is the checkout. Any other expression makes the step unknown.
+# An env NODE_PATH entry that is no folder here reads unknown, naming it: the step that installs it is a uses: that never runs here (checks-guard's
+# Playwright). Cost: one stat per entry. A step whose shell or verdict a signal killed, and a step whose verdict printed no verdict line
+# with a nonzero exit, read unknown, never FAIL: the run was cut, so the tree is not shown at fault.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
@@ -74,11 +79,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
-from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import NOT_RUN_JOB, SUITE_LINE, job_block, run_body, run_lines, step_blocks, step_env, step_key, step_with, suite_paths  # noqa: E402  the one home of the step parser
 
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 7 s on this repo's 118 suites) before it reads unknown
+NO_VERDICT_LINE = "(verdict printed no verdict line)"  # the verdict line's default, when verdict printed none
+SIGNALED = re.compile(r" rc=\d+ killed by signal (\d+) \(")  # the note bin/verdict puts on its FAIL line when a signal killed the step's shell
 PREAMBLE_DONE = "echo ci-job-preamble-done"  # the line preamble_marked adds right before a CI step's first suite line
-SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 BUILTINS = {"cd", "echo", "printf", "test", "[", "[[", "export", "set", "exit", "if", "then", "else", "elif", "fi",
@@ -255,11 +261,6 @@ def is_lint(step):
         1 if ln.startswith("python3") else 2 if ln.startswith("pipx") else 0] for ln in lines)
 
 
-def run_lines(step):
-    """The step's run: lines, with no blank line and no comment."""
-    return [ln.strip() for ln in (run_body(step) or "").splitlines() if ln.strip() and not ln.strip().startswith("#")]
-
-
 def is_install(step):
     """True when the step's whole run: is install commands: a lockfile install or a framework's type generation."""
     lines = run_lines(step)
@@ -333,6 +334,10 @@ def plan(step, pr, values, top):
         env[name] = val
     if EXPR.search(body):
         return "unknown", "run: holds an expression this runner cannot read", None, None, None
+    for entry in filter(None, env.get("NODE_PATH", "").split(os.pathsep)):  # a node install that a skipped uses: step makes: absent here, the suite cannot run
+        if not os.path.isdir(os.path.join(top, step_key(step, "working-directory") or "", entry)):
+            return "unknown", ("env NODE_PATH names %s, which is not installed here: the step that installs it (a uses: action) is not run locally, "
+                               "so the suite cannot run" % entry), None, None, None
     shell = step_key(step, "shell")
     if shell not in SHELLS:
         return "unknown", "shell %s is not one this runner knows" % shell, None, None, None
@@ -347,12 +352,6 @@ def plan(step, pr, values, top):
     if gone:
         return "unknown", "tool missing: %s" % ", ".join(gone), None, None, None
     return "run", body, argv, env, step_key(step, "working-directory")
-
-
-def suite_paths(step):
-    """The suites a CI step runs: the path of each of its run: lines that is `python3 hooks|merge/test_<name>.py`, with
-    arguments allowed. Any other line of the step stays in it, so a picked step runs whole, as CI runs it."""
-    return [m.group(1) for ln in run_lines(step) if (m := SUITE_LINE.fullmatch(ln))]
 
 
 def log_text(log, start):
@@ -443,7 +442,8 @@ def main(argv):
                       "steps are skipped: %s" % ", ".join(unread))
                 no_base = True
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
-              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
+              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or "",
+              "github.workspace": top}  # the runner's workspace is the checkout: the git top of the tree under test
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
@@ -552,12 +552,18 @@ def main(argv):
         finally:
             os.remove(script)
         first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))),
-                     "(verdict printed no verdict line)")
+                     NO_VERDICT_LINE)
+        no_verdict = first == NO_VERDICT_LINE
+        killed = m.group(1) if (m := SIGNALED.search(first)) else None
         if known_action(step) == "code-check":
             first += " (code_check.py: %s)" % code_check(top, step)[0]
         if rc == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
+        elif killed is not None or (rc and no_verdict):  # a signal cut the step's shell or the verdict: the run was cut, so the tree is not shown at fault
+            state = "unknown"
+            first = ("the step's shell was killed by signal %s; %s" % (killed, first)) if killed is not None else (
+                "verdict ended with no verdict line (exit %s)%s" % (rc, " by signal %d" % -rc if rc < 0 else ""))
         elif unstarted and only:
             state = "unknown"
             first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
@@ -575,7 +581,7 @@ def main(argv):
     if lint:
         for other, found in elsewhere.items():  # one line per job: picked, but each CI step belongs to a job this run is not
             if picked is not None and picked.intersection(found):
-                print("%-15s job %s: picked %s; job %s runs them, not %s" % ("not run", other, ", ".join(sorted(picked & found)), other, job))
+                print("%-15s %s" % ("not run", NOT_RUN_JOB.format(job=other, suites=", ".join(sorted(picked & found)), linted=job)))
         if picked is None and elsewhere and not any(suites):
             print("%-15s suites of other jobs: --lint could not select them: %s" % ("not run", why))
         print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
