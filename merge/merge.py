@@ -22,6 +22,12 @@
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
                           PR's issue comments since the PR opened.
+                          It runs the lane lint (as --lane-lint does) on the reviewed head after those refusals, for every kind,
+                          docs-only too, and prints the record only when the lint passes: the record alone on stdout, a `PASS:` line on
+                          stderr. A FAIL stops with the failing step lines and the log, and prints no record. An unknown (ci-job exit 2,
+                          a timeout, any odd exit) stops as "unknown, not a pass", prints no record, and takes no --lint-unknown-ok.
+                          Cost per printed record: one ci-job run (691 s measured once, on #1687's head), one worktree and two git
+                          fetches; none on a usage error or an earlier refusal.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -2426,7 +2432,8 @@ def ci_job_run(wt, *args):
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    # CI sets no HOOK_CATALOG_ROOT; set, lint/hook_catalog.py checks that other tree and the lint passes falsely (measured on #1687 head db9a31f).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != "HOOK_CATALOG_ROOT"}  # as the merge's own lint run reads it
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -2441,6 +2448,15 @@ def ci_job_run(wt, *args):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+def lint_run(root, head, base, make_tree):
+    """The one home of the lane lint's run: `ci-job checks --lint --base origin/<base>` in the detached tree `make_tree()` makes at `head`, removed on
+    every exit. lane_lint and the review record call it. -> ci_job_run's (state, lines, log, liftable)."""
+    tmp, wt = make_tree()
+    try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
+        return ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+    finally:
+        drop_worktree(root, tmp, wt)
+
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -2450,14 +2466,11 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     if target.isdigit():
         info = (host or Host()).pr(int(target))
         head, base = info["head"], info["base"]
-        tmp, wt = open_worktree(root, info, base)
+        make_tree = lambda: open_worktree(root, info, base)
     else:
         head, base = lane_head_and_base(root, target, base)
-        tmp, wt = add_worktree(root, head)
-    try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
-    finally:
-        drop_worktree(root, tmp, wt)
+        make_tree = lambda: add_worktree(root, head)
+    state, lines, log, liftable = lint_run(root, head, base, make_tree)
     short = head[:9]
     if state == "pass":
         say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
@@ -2472,6 +2485,22 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
     raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
+
+REVIEW_LINT_REMEDY = "Fix it on the lane, push, review the new head, and run `merge --review-record` again. " + REVIEW_CITE
+
+def review_lint(root, info):
+    """The lint the review record owes, on the reviewed head (decision pr-review-record): the lane lint's run (lint_run) on `info`, the PR read the
+    record already made. Returns on a PASS, with its one line on stderr so stdout holds the record alone. A FAIL or any unknown raises Stop, so no
+    record prints; no flag lifts an unknown here."""
+    head, base = info["head"], info["base"]
+    state, lines, log, _liftable = lint_run(root, head, base, lambda: open_worktree(root, info, base))
+    short = head[:9]
+    if state == "pass":
+        print(f"PASS: lint of {short} against {base} passes.", file=sys.stderr)
+        return
+    if state == "fail":
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs, so no review record was printed:", *lines, *log, REVIEW_LINT_REMEDY]))
+    raise Stop("\n".join([f"the lint of {short} against {base} is unknown, not a pass, so no review record was printed:", *lines, REVIEW_LINT_REMEDY]))
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
@@ -3374,6 +3403,8 @@ def main(argv, host=None, lock=None):
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
+            with release_on_signals():  # the lint runs on every kind, docs-only too; a signal ends the run through lint_run's `finally`
+                review_lint(root, info)
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
