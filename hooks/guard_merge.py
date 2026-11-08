@@ -13,7 +13,6 @@ from guard_core import (
     dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     strip_heredoc_bodies,
 )
-from guard_env import substitution_commands
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
@@ -930,10 +929,10 @@ def _push_calls(segment: str, script: str, cwd: str):
             yield _command_words(args), where, overrides
     tokens = segment_tokens(segment)
     inner = inner_commands(tokens) if tokens else []
+    from guard_env import substitution_commands   # imported late: a family reads only the families before it
     inner += substitution_commands(segment, segment)   # the shell runs each `$( )` and backtick text
     if inner:
         inner_cwd = push_target(segment, script, cwd)[0] or cwd
-        from guard_env import substitution_commands   # imported late: a family reads only the families before it
         for text in inner:
             # The shell reads the wrapped script as it reads a command: a heredoc body is data, and
             # each `$( )` or backtick text runs as a command of its own (judge_shell does the same).
