@@ -654,7 +654,8 @@ def _walk_wrappers(tokens):
 # the value of a message flag of a commit or a pull request (`gh pr create --title "node 20 bump"`).
 # Other quoted text still counts: the shell word of `ssh host "bash -s" <<EOF` runs its body.
 # SHELL_HEREDOC names the shells alone: a rule that reads shell lines keeps only a body a shell
-# runs, never a Python or Node script.
+# runs. A file that python, perl, ruby or node writes and runs is no shell lines: those words
+# read it in their own language, so `shells_only` drops them from the runners too (_SHELL_RUNNER).
 # The delimiter is the whole shell word, read as bash reads it: a backslash, a single-quoted run or a
 # double-quoted run inside it is dequoted, so `E\OF`, `E'OF'` and `"E"OF` all close at a line `EOF`
 # (heredoc_delimiter). An unquoted word ends at a blank or a shell operator.
@@ -842,22 +843,27 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
-_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
-                     r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+_RUNNER_TAIL = r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command|time|ssh)(?:\.exe|\.cmd)?"
+_RUNNER = re.compile(r"(?:" + _INTERPRETERS + _RUNNER_TAIL).fullmatch
+# The runners of a rule that judges shell lines: python, perl, ruby and node read the file in their own
+# language, so a bare run of one is no shell. A wrapper word (`env python3 f`) stays a possible shell.
+_SHELL_RUNNER = re.compile(r"(?:" + _SHELLS + _RUNNER_TAIL).fullmatch
 
 
 def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers) -> bool:
+def _runs_written_file(text: str, headers, shells_only: bool = False) -> bool:
     """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
     (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
-    runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+    runs nothing. The word is compared as written, so `$HOME/f` matches only itself. `shells_only` drops the
+    bare interpreters (python, perl, ruby, node) from the runners."""
+    runner = _SHELL_RUNNER if shells_only else _RUNNER
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
+        runs = any(runner(word.rsplit("/", 1)[-1]) for words in stages for word in words)
         if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
             return True
     return False
@@ -886,7 +892,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     # is text, and no body line may make another body look run.
     text = _without_message_values(dropped)
     if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, [header for _, _, header in bodies]):
+            text, [header for _, _, header in bodies], shells_only):
         return cmd  # the body may be executed, so keep it under inspection
     return "\n".join([dropped] + runs)
 
