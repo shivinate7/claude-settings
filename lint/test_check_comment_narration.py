@@ -1130,6 +1130,38 @@ class ShellScan(Case):
         self.assertHit(out, "x.sh", 2)
         self.assertEqual(rc, 1, out)
 
+    def test_reader_gap_comment_in_a_case_arm_in_a_quoted_substitution_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\n# fixed in round 2\nesac)"\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_comment_in_a_case_arm_in_an_unquoted_substitution_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=$(case $k in\na) echo ;;\n# fixed in round 2\nesac)\n"})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_comment_in_a_case_arm_in_an_unquoted_parameter_default_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=${y:-$(case $k in\na) echo ;;\n# fixed in round 2\nesac)}\n"})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_hash_in_a_quoted_string_in_a_later_arm_is_text(self):
+        src = 'x="$(case $k in\na) echo ;;\nb) echo "# fixed in round 2" ;;\nesac)"\n# fixed in round 2\n'
+        rc, out = self.scan({"x.sh": src})
+        self.assertHit(out, "x.sh", 5)
+        self.assertNoHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_spaced_hash_in_a_quoted_string_in_a_later_arm_is_text(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\nb) echo "x # fixed in round 2" ;;\nesac)"\n'})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_reader_gap_comment_after_a_quoted_word_in_a_later_arm_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\nb) echo "x" # fixed in round 2\nesac)"\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
 
 class Degraded(Case):
     def test_node_failure_still_prints_python_and_swift_hits_and_exits_3(self):
