@@ -13225,8 +13225,10 @@ class ReviewedList(ReviewEnv):
                 comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="2, follow-up #8"), created=ago(hours))]
                 host, got, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True,
                                                    pull_errors={8: "gh: Server Error (HTTP 502)"})
+                line = list_line(self, out, 7)
+                self.assertTrue(line.startswith("#7 feat7 findings unknown: "), "line 7 is not a findings unknown line, so this case would probe another kind's limit:\n" + out)
                 self.assertEqual(got, rc, "the exit of a findings unknown line at its age is not the one its batch limit gives:\n" + out + err)
-                self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 findings unknown: .+ {hours}h{' RED' if rc else ''}$",
+                self.assertRegex(line, rf"^#7 feat7 findings unknown: .+ {hours}h{' RED' if rc else ''}$",
                                  f"the findings unknown line at {hours}h does not read {'RED' if rc else 'clear of RED'} under the batch limit:\n" + out)
 
     def test_findings_follow_up_needs_every_named_pr_to_pass(self):
