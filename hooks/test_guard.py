@@ -5153,6 +5153,24 @@ sh("git-after-cd: set -e, a cd that lands, then ; a && test that fails before a 
    "set -e; cd %s; [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
 
 
+# THE DIRECTORY TEST BY ITS SHAPE. `[ -d M ]`, `[[ -d M ]]` and `test -d M` each joined to a cd to M by && is a test
+# that fails when M is missing, so the cd never runs and the push after ; runs where the shell is. The word matches
+# after quote removal, so `test -d "M"` counts too. Each form is checked under bash with a stub git.
+sh("git-after-cd: a [ -d M ] test that fails, then && cd to a missing folder, then ; a git push, passes, the cd never runs",
+   "[ -d %s ] && cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a [[ -d M ]] test that fails, then && cd to a missing folder, then ; a git push, passes, the cd never runs",
+   "[[ -d %s ]] && cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a test -d M that fails, then && cd to a missing folder, then ; a git push, passes, the cd never runs",
+   "test -d %s && cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh('git-after-cd: a quoted test word that fails, then && cd to the same word, then ; a git push, passes, the words match after quote removal',
+   'test -d "%s" && cd %s; %s push' % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+# The test must head its && list. After && true || the test may be skipped, so the cd behind it is judged as before:
+# here the cd runs, fails, and the push after ; runs in the folder the first cd landed in.
+sh("git-after-cd: a cd that lands, then && true || a test that may be skipped, then && cd to a missing folder, then ; a git push is refused",
+   "cd %s && true || [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
 # THE WIDE READ. case, select and a function definition open a compound that errexit must see, so the cd in
 # their body is not bare. Each body is on the left of ||, so errexit is ignored there and the push runs. A select
 # body runs once its menu gets an answer, so it is judged as a body that may run.
