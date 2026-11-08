@@ -852,20 +852,25 @@ _BACKTICK_RUNNER = re.compile(r"(?<![\w.-])(?:perl|ruby)(?:\.exe|\.cmd)?(?![\w.-
 
 
 def _shell_reads_bodies(text: str, bodies):
-    """One flag per body: may a shell read it? The one test strip_heredoc_bodies(shells_only) and
-    without_data_bodies share. A body is read when a shell heredoc or pipe reaches it, a shell or runner runs
-    the file its header writes, or an interpreter reads it and it holds a shell-out call (`os.system`,
-    `subprocess` with `shell=True`, `exec(`): the shell then runs its `$( )`. Other interpreter text is data.
-    `text` is the command with its bodies gone."""
+    """One flag per body: does a shell read its lines as commands? The one test strip_heredoc_bodies(shells_only)
+    and without_data_bodies share. A body is read when a shell heredoc or pipe reaches it, or a shell or runner
+    runs the file its header writes. `text` is the command with its bodies gone."""
     if SHELL_HEREDOC(text):
         return [True] * len(bodies)   # a pipe or an eval may span lines to a shell: every body may run
     flags = []
-    for _, body, header in bodies:
+    for _, _, header in bodies:
         read = _runs_written_file(text, [header], _SHELL_RUNNER)
-        if not read and (_SHELL_OUT(body) or "`" in body and _BACKTICK_RUNNER(text)):
-            read = INTERPRETER_HEREDOC(text) or _runs_written_file(text, [header], _RUNNER)
         flags.append(read)
     return flags
+
+
+def _body_shells_out(text: str, body: str, header: str) -> bool:
+    """True when an interpreter reads the body and the body holds a shell-out call (`os.system`, `subprocess`
+    with `shell=True`, `exec(`): that shell runs the `$( )` in the string. Only without_data_bodies asks this.
+    The body's own lines stay interpreter code, so a rule that counts shell lines must not count them."""
+    if not (_SHELL_OUT(body) or "`" in body and _BACKTICK_RUNNER(text)):
+        return False
+    return bool(INTERPRETER_HEREDOC(text) or _runs_written_file(text, [header], _RUNNER))
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
@@ -902,7 +907,8 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
 def without_data_bodies(cmd: str) -> str:
     """`cmd` less each quoted-delimiter heredoc body that no shell reads: bash expands nothing in it, so a
     `$( )` or backtick there is text (an interpreter body, a file only an interpreter runs, a `cat` print).
-    A body a shell may read stays (`_shell_reads_bodies`)."""
+    A body a shell may read stays (`_shell_reads_bodies`), and so does an interpreter body that shells out
+    (`_body_shells_out`), since its shell runs the substitution."""
     if "<<" not in cmd:
         return cmd
     spans = []
@@ -911,8 +917,8 @@ def without_data_bodies(cmd: str) -> str:
         return cmd
     text = _without_message_values(_drop_heredoc_bodies(cmd))
     gone = set()
-    for (quote, _, _), read, (start, end) in zip(bodies, _shell_reads_bodies(text, bodies), spans):
-        if quote and not read:
+    for (quote, body, header), read, (start, end) in zip(bodies, _shell_reads_bodies(text, bodies), spans):
+        if quote and not read and not _body_shells_out(text, body, header):
             gone.update(range(start, end))
     if not gone:
         return cmd
