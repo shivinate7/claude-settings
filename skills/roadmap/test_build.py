@@ -4173,6 +4173,19 @@ class IdleLanes(UpkeepFixture):
         self.assertIn("cs-repo:owner/other", line)
         self.assert_no_unknown_line(entries)
 
+    def test_absent_step_with_a_trailer_and_another_repo_tag_is_still_listed(self):
+        # The other repo's tag holds a lane only when no Step trailer on main names its step. The trailer is the positive
+        # proof here, so the lane is listed. session_a is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("ghost")
+        other = session_row("session_orphan", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:ghost", self.REPO,
+                            "cs-repo:owner/other", status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[other, self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_orphan"), "session_orphan (ghost; topic -)", entries)
+        self.assert_no_unknown_line(entries)
+
     def test_lanes_to_archive_row_lists_a_trailer_landed_lane_and_holds_an_absent_step_lane(self):
         # The row prints the list merge --idle-lanes prints, so its raw detail carries the archive line and the hold
         # line. The detail is read raw: a hold reason is not split on the row's ", " joiner. session_a is the control.
