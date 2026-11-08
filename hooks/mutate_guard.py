@@ -1625,7 +1625,7 @@ MUTATIONS = [
      'r"(?:^|(?<=[\\s\\"\'`(\\[<,;=@*]))(?:\\./)?(?:"', 'r"(?:^|(?<=[\\s\\"\'`(\\[<,;=@*]))(?:"',
      "guard", 'cite-by-id: a dot-slash record path denies'),
     ("cite-by-id: an unread folder list denies nothing but says nothing",
-     '        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")\n',
+     '        record(tool, "noted", "subject-unread", "cite-by-id: record folders unread")\n',
      '', "guard", 'merge-checks: a merge tool that cannot load'),
     ("cite-by-id: any file of a record folder is a record",
      '+ r")/[\\w.-]+\\.md\\b")', '+ r")/[\\w.-]+")', "guard",

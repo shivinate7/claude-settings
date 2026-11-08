@@ -139,8 +139,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 try:
     from shared_names import LANDING_TOOLS  # noqa: E402
 except ImportError:
-    # An install lands lint/ before hooks/, so hooks/ may be missing or older. The Stop hook fails open: only the
-    # MCP landing read goes quiet, and the shell forms still work.
+    # An install lands lint/ before hooks/, so hooks/ may be missing or older. The Stop hook fails open: with an
+    # older hooks/ only the MCP landing read goes quiet; with no hooks/ the guard parser is gone too, so no landing is read.
     LANDING_TOOLS = frozenset()
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
