@@ -1,11 +1,11 @@
 {
   "title": "The merge tool's review_state counts a guard or check change as done only after round 3 and its net-value test",
   "why": "Coordinator 13:15 CST Nov 8: review_state counts a guard change as done when its round 2 passes. #2209 (lane review-record-before-any-push) stopped there, but owner items 359 b and 402 a need rounds 1-3 with the net-value test for any guard or check change. No step owned review_state's round count (triage grep: process-held-end-to-end, record-replacement-pr-rounds and review-rounds-rework touch review_state for other reasons). Related: merge-guard-flag-from-paths, which sets the `Guard or check` field this count depends on.",
-  "note": "Sighting (lane other-checkout-cp-own, session_013NEJL3R2CBFavz7grtbJY8, 13:31 CST Nov 8): the lane handed #2125 and #2213 to runner 8 after a round-2 PASS on a guard change; runner 8 caught it and round 3 runs on both. Proposed check, folded here instead of a new step guard-record-needs-round-3: `merge --review-record` with `--guard yes` refuses a record with no round 3 and a net value of `not owed`; the remedy cites owner item 402 a. Sighting (coordinator 13:30 CST Nov 8): lane open-asks-listed-at-wake (session_013NEJL4DA5XcyP7kY5qkXP5, Sonnet) called round 3 \"not owed\" on a check change. Coordinator 14:30 CST Nov 8: #2252 with runner 8 at head 0d791c45e, Merge after #1353.",
+  "note": "Sighting (lane other-checkout-cp-own, session_013NEJL3R2CBFavz7grtbJY8, 13:31 CST Nov 8): the lane handed #2125 and #2213 to runner 8 after a round-2 PASS on a guard change; runner 8 caught it and round 3 runs on both. Proposed check, folded here instead of a new step guard-record-needs-round-3: `merge --review-record` with `--guard yes` refuses a record with no round 3 and a net value of `not owed`; the remedy cites owner item 402 a. Sighting (coordinator 13:30 CST Nov 8): lane open-asks-listed-at-wake (session_013NEJL4DA5XcyP7kY5qkXP5, Sonnet) called round 3 \"not owed\" on a check change. Coordinator 14:30 CST Nov 8: #2252 with runner 8 at head 0d791c45e, Merge after #1353. Sighting (coordinator 14:58 CST Nov 8): #2280 re-handed with rounds 1-3 at its live head; its proposed guard (refuse a Guard-yes record with no round 3) is this step's #2252.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "status": "ready",
   "order": 805,
-  "updatedAt": "2026-11-08T14:31:00-06:00"
+  "updatedAt": "2026-11-08T14:58:00-06:00"
 }
