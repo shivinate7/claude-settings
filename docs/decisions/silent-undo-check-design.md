@@ -24,8 +24,8 @@ that the debt-close check accepts (decision `debt-close-runs-retire`). It excuse
 another file, and only a whole delete, not a rename out of `docs/debts/`. Merge tool only: the CLI and CI pass
 no PR body, as with a `Drops-lines` line in the body; CI's way out is a `Drops-lines` commit trailer. With no
 run reader, or a read that fails, the finding stays. Cost: it runs only in the merge tool, when the scan has a
-finding and the body holds a cite. Then it runs the debt-close judgment for each flagged cited debt: git reads,
-each Retire test in a temporary worktree that it adds and removes, and at most one run read. A test proves that
+finding and the body holds a cite. For each flagged cited debt, it runs the debt-close judgment: git reads,
+each Retire test in a temporary worktree, and at most one run read. A test proves that
 an unflagged close gets no run read. It starts no long-lived process.
 
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
