@@ -13770,6 +13770,8 @@ class ProseJudgePrompt(unittest.TestCase):
         got = tokens(text, "xs")
         self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
                          "the excerpt of %s is %s, want lines 9 to 15 next to the missing and empty paths" % (NAMED, got))
+        notes = [row for row in text.split("\n") if "hooks/missing.py" in row and not row.startswith("Line 5: ")]
+        self.assertEqual(notes, [], "a row other than the labelled line names hooks/missing.py: a note about the missing file is in the prompt")
 
     def test_a_path_the_line_cites_gets_no_second_excerpt(self):
         line = "`src/widget.py` `hooks/x.py` `run_all` returns 3 (read src/widget.py:4)"
@@ -14024,6 +14026,101 @@ class ProseJudgePrompt(unittest.TestCase):
                                  % (size, merge.PROSE_JUDGE_CALL_BYTES))
             self.assertIn("row cut at", prompt, "the cited row of %s is not cut: the call has no cut marker" % self.INDEX)
             self.assertFalse("f" * 1000 in prompt, "the call carries more than 1000 characters of the cited row of %s" % self.INDEX)
+
+
+    def def_rows(self, text, name):
+        """The rows where `name` is a def or a class, by the parser. [] when the text does not parse, so a fixture that is not
+        Python fails its scope assert rather than reading as a file with no def."""
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return []
+        return [n.lineno for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.name == name]
+
+    def test_a_defined_name_in_a_named_path_shows_its_body_in_the_prompt(self):
+        # run_all is defined on row 10 of hooks/x.py. Row 38 is 28 rows into its body and names nothing, so only the body reaches it.
+        lines = ["xs%03d = %d" % (n, n) for n in range(1, 10)] + ["def run_all(x):"] + ["    xs%03d = %d" % (n, n) for n in range(11, 61)]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.def_rows(text, "run_all"), [10], "scope: run_all is not defined on row 10 of a Python file")
+        prompt, reads = self.prompt({5: ("`hooks/x.py` `run_all` returns 3", [])}, {NAMED: text})
+        self.assertIn("    10: def run_all(x):", prompt, "scope: the def row of run_all is not in the prompt")
+        self.assertIn("xs038", tokens(prompt, "xs"), "row 38, 28 rows into the body of run_all, is not in the prompt")
+
+    def test_a_docstring_row_past_the_window_of_a_named_def_is_in_the_prompt(self):
+        # The incident shape: the line names refused_network and sendto. refused_network is row 4, its docstring lists the doors, and
+        # sendmsg is row 12, past the three rows around the def. No row of the file names sendto.
+        lines = ["import os", "", "", "def refused_network(self):",
+                 '    """Refuse network calls from the T7 children.', "", "    The wrapped doors are:",
+                 "      connect", "      connect_ex", "      create_connection", "      getaddrinfo", "      sendmsg",
+                 '    """', "    return True"]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.def_rows(text, "refused_network"), [4], "scope: refused_network is not defined on row 4 of a Python file")
+        line = "`harness/t7_run_support.py`'s `refused_network` leaves an unconnected UDP `sendto` open."
+        prompt, reads = self.prompt({7: (line, [])}, {"harness/t7_run_support.py": text})
+        self.assertIn("    4: def refused_network(self):", prompt, "scope: the def row of refused_network is not in the prompt")
+        self.assertIn("    %d: %s" % (12, "      sendmsg"), prompt,
+                      "row 12, a docstring row of refused_network past its window, is not in the prompt")
+
+    def test_a_stub_row_in_the_body_of_a_named_def_of_the_cited_path_is_in_the_prompt(self):
+        # The incident shape: check_server_read_budget is row 4 of its file, and the stub that names reading_for_row is row 32,
+        # 28 rows into the body. No window of either name reaches row 32.
+        stub = '    with mock.patch.object(pricehistory.Market, "reading_for_row", mirror):'
+        lines = ["import os", "", "", "def check_server_read_budget(checks):"] + ["    pad_%02d = checks" % n for n in range(1, 28)] + [stub, "        pass"]
+        text = "\n".join(lines) + "\n"
+        line = ("`harness/tests/t7/read_budget.py`'s `check_server_read_budget` stubs "
+                "`pipeline/pricehistory.py`'s `Market.reading_for_row`")
+        self.assertEqual(lines[31], stub, "scope: row 32 is not the stub row")
+        self.assertEqual(self.def_rows(text, "check_server_read_budget"), [4], "scope: check_server_read_budget is not defined on row 4 of a Python file")
+        prompt, reads = self.prompt({7: (line, [])}, {"harness/tests/t7/read_budget.py": text})
+        self.assertIn("    4: def check_server_read_budget(checks):", prompt, "scope: the def row is not in the prompt")
+        self.assertIn("    %d: %s" % (32, stub), prompt, "row 32, the stub 28 rows into check_server_read_budget, is not in the prompt")
+
+    def test_a_dotted_name_naming_a_method_of_a_named_path_shows_its_body_in_the_prompt(self):
+        # pipeline/pricehistory.py defines reading_for_row inside class Market, on row 2. Row 10 is 8 rows into its body.
+        body = ["        pad_%02d = row" % n for n in range(1, 13)]
+        body[7] = "        probe = row"
+        lines = ["class Market:", "    def reading_for_row(self, row):"] + body + ["        return row"]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(lines[9], "        probe = row", "scope: row 10 is not the probe row")
+        self.assertEqual(self.def_rows(text, "reading_for_row"), [2], "scope: reading_for_row is not defined on row 2 of a Python file")
+        prompt, reads = self.prompt({5: ("The stub is `pipeline/pricehistory.py`'s `Market.reading_for_row`.", [])},
+                                    {"pipeline/pricehistory.py": text})
+        self.assertIn("    %d: %s" % (10, "        probe = row"), prompt,
+                      "row 10, 8 rows into the body of Market.reading_for_row, is not in the prompt")
+
+    def test_a_missing_named_path_reads_as_none_and_adds_no_note_through_read_backing(self):
+        # No read hook here, so the real read_backing reads a real tree. hooks/x.py is in it, and hooks/missing.py is not.
+        wt = tempfile.mkdtemp(dir=run_folder())
+        os.makedirs(os.path.join(wt, "hooks"))
+        with open(os.path.join(wt, NAMED), "w", encoding="utf-8") as f:
+            f.write(numbered_source("xs", 30, named={12}))
+        self.assertIsNone(merge.read_backing(wt, "hooks/missing.py"), "read_backing of a missing file is not None")
+        line = "`hooks/missing.py` `hooks/x.py` `run_all` returns 3"
+        text = merge.prose_judge_prompt(wt, "docs/notes/named.md", {5: (line, [])})
+        self.assertIn("named path: hooks/x.py", text, "scope: the real read did not excerpt hooks/x.py")
+        notes = [row for row in text.split("\n") if "hooks/missing.py" in row and not row.startswith("Line 5: ")]
+        self.assertEqual(notes, [], "a row other than the labelled line names hooks/missing.py: a note about the missing file is in the prompt")
+
+    def test_a_line_naming_thirty_defined_paths_keeps_each_path_to_forty_rows_within_the_budget(self):
+        # Thirty paths each define run_all on row 1, with a body of 60 rows of about 200 characters. One line names them all, so
+        # each path shows at most 40 rows, and every packed call stays within PROSE_JUDGE_CALL_BYTES.
+        paths = ["hooks/p%02d.py" % k for k in range(30)]
+        served = {path: "def run_all(x):\n" + "\n".join("    v%03d = '%s'" % (n, "x" * 180) for n in range(1, 61)) + "\n" for path in paths}
+        line = " ".join("`%s`" % path for path in paths) + " `run_all` returns 3."
+        jobs, past = self.pack({self.DEFS_PROSE: {3: (line, [])}}, served)
+        self.assertEqual(past, 0, "scope: %d lines are past the calls, want none" % past)
+        self.assertTrue(jobs, "scope: no call was built")
+        shown = set()
+        for _, _, prompt in jobs:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, merge.PROSE_JUDGE_CALL_BYTES,
+                                 "a call of %d bytes, want at most the budget of %d" % (size, merge.PROSE_JUDGE_CALL_BYTES))
+            for path in paths:
+                got = [row for row in excerpt_rows(prompt, path) if re.match(r"\d+: ", row)]
+                if got:
+                    shown.add(path)
+                self.assertLessEqual(len(got), 40, "the excerpt of %s has %d rows, want at most 40" % (path, len(got)))
+        self.assertTrue(shown, "scope: no path's excerpt is in any call")
 
 
 class OrderLock(merge.GitLock):

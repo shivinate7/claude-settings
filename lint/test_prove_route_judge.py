@@ -55,6 +55,7 @@ sys.path.insert(0, os.path.join(ROOT, "testing"))
 import tracked_tree  # noqa: E402  removes a fixture tree, read-only git objects included (testing/tracked_tree.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py)
 import merge  # noqa: E402  prose_judge_prompt: the one home of the judge's prompt (merge/merge.py)
+import prove_route_judge  # noqa: E402  reader_at: the one reader of a backing file at a rev (this folder's prove_route_judge.py)
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
@@ -478,6 +479,29 @@ class FullFileTests(Base):
         self.assertNotIn("second line of stderr", run.out,
                          "the verdict line carries the error's second line, not only its first")
         self.assertEqual(run.code, 0, "a run whose every model call failed must still exit 0")
+
+
+class ReaderAtTests(Base):
+    """reader_at: a backing file read at a rev, through git in the process cwd. A named path that is absent at the rev reads as None,
+    and the prompt built through that reader adds no note about it."""
+
+    def test_reader_at_a_missing_path_is_none_and_a_present_one_is_its_text(self):
+        case = self.case()
+        repo, (rev,) = make_repo(case, [{"docs/d.md": doc({1: "intro"}), "hooks/x.py": "def run_all(x):\n    return 1\n"}])
+        with contextlib.chdir(repo):
+            reader = prove_route_judge.reader_at(rev)
+            self.assertIsNotNone(reader(repo, "hooks/x.py"), "scope: hooks/x.py is not read at its rev")
+            self.assertIsNone(reader(repo, "hooks/missing.py"), "a path absent at the rev reads as text, want None")
+
+    def test_a_prompt_read_at_a_rev_adds_no_note_for_a_missing_named_path(self):
+        case = self.case()
+        repo, (rev,) = make_repo(case, [{"docs/d.md": doc({1: "intro"}), "hooks/x.py": "def run_all(x):\n    return 1\n"}])
+        by_line = {1: ("`hooks/missing.py` `hooks/x.py` `run_all` returns 3", [])}
+        with contextlib.chdir(repo):
+            prompt = merge.prose_judge_prompt(repo, "docs/d.md", by_line, read=prove_route_judge.reader_at(rev))
+        self.assertIn("named path: hooks/x.py", prompt, "scope: the excerpt of hooks/x.py is missing from the prompt built at the rev")
+        notes = [row for row in prompt.split("\n") if "hooks/missing.py" in row and not row.startswith("Line 1: ")]
+        self.assertEqual(notes, [], "a row other than the labelled line names hooks/missing.py: a note about the missing file is in the prompt")
 
 
 if __name__ == "__main__":

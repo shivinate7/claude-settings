@@ -2248,5 +2248,152 @@ class CitedExcerptTests(unittest.TestCase):
         self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
 
 
+class NamedExcerptTests(unittest.TestCase):
+    """named_excerpt: the numbered rows of a file that a prose line's backticked names point at. A name the file defines in Python
+    shows from its def row through its body, and those rows come before other names' windows in the cap. Any other name shows the
+    rows within three of each row that holds it. Each case asserts its fixture's scope before the excerpt it checks."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stale = load_module_under_test()
+
+    def excerpt_rows(self, names, text):
+        """The excerpt's rows as a list. A None excerpt reads as no rows, so a failed assert reports, never crashes."""
+        return (self.stale.named_excerpt(names, text) or "").split("\n")
+
+    def test_a_defined_name_shows_its_body_past_the_three_row_window(self):
+        # The def is row 4. Row 32 is 28 rows into its body and holds no name, so only the body reaches it.
+        body = ["    pad_%02d = x + %d" % (n, n) for n in range(1, 28)] + ["    probe = 28", "    return x"]
+        lines = ["import os", "", "", "def target(x):"] + body
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "target"), 4, "scope: target is not defined on row 4")
+        self.assertEqual(lines[31], "    probe = 28", "scope: row 32 is not the probe row")
+        self.assertIn("%d: %s" % (32, "    probe = 28"), self.excerpt_rows(["target"], text),
+                      "row 32, 28 rows into the body of target, is not in the excerpt")
+
+    def test_the_def_row_of_a_defined_name_is_shown(self):
+        # The control: the def row sits in the three-row window every name already had, so it is shown on the old code too.
+        lines = ["import os", "", "", "def target(x):"] + ["    pad_%02d = x" % n for n in range(1, 29)]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "target"), 4, "scope: target is not defined on row 4")
+        self.assertIn("%d: %s" % (4, "def target(x):"), self.excerpt_rows(["target"], text),
+                      "the def row of target is not in the excerpt")
+
+    def test_a_defined_name_shows_its_first_forty_rows_from_the_def_row(self):
+        # The def is row 3 and its body runs 60 rows. The excerpt is the def row and the 39 rows after it, not the rows around it.
+        lines = ["import os", "", "def target(x):"] + ["    v_%02d = x" % n for n in range(1, 61)]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "target"), 3, "scope: target is not defined on row 3")
+        want = ["%d: %s" % (n, lines[n - 1]) for n in range(3, 43)]
+        got = [row for row in self.excerpt_rows(["target"], text) if re.match(r"\d+: ", row)]
+        self.assertEqual(got, want, "the excerpt of target is not its first 40 rows, counted from the def row")
+
+    def test_a_body_longer_than_the_cap_ends_with_the_left_out_marker(self):
+        lines = ["import os", "", "def target(x):"] + ["    v_%02d = x" % n for n in range(1, 61)]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "target"), 3, "scope: target is not defined on row 3")
+        rows = self.excerpt_rows(["target"], text)
+        self.assertIn("left out", rows[-1], "the excerpt of target ends with %r, want the marker that rows were left out" % rows[-1])
+
+    def test_a_docstring_row_past_the_window_of_a_defined_name_is_shown(self):
+        # The def is row 4. Its docstring lists the wrapped doors, and sendmsg is row 12, past the three rows around the def.
+        lines = ["import os", "", "", "def refused_network(self):",
+                 '    """Refuse network calls from the T7 children.', "", "    The wrapped doors are:",
+                 "      connect", "      connect_ex", "      create_connection", "      getaddrinfo", "      sendmsg",
+                 '    """', "    return True"]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "refused_network"), 4, "scope: refused_network is not defined on row 4")
+        self.assertEqual(lines[11], "      sendmsg", "scope: row 12 is not the sendmsg row of the docstring")
+        self.assertIn("%d: %s" % (12, "      sendmsg"), self.excerpt_rows(["refused_network"], text),
+                      "row 12, a docstring row of refused_network past its window, is not in the excerpt")
+
+    def test_a_dotted_name_whose_last_segment_is_a_defined_method_shows_its_body(self):
+        # Market.reading_for_row: the method is row 2 and its body runs to row 15. Row 10 is 8 rows into the body and names nothing.
+        body = ["        pad_%02d = row" % n for n in range(1, 13)]
+        body[7] = "        probe = row"
+        lines = ["class Market:", "    def reading_for_row(self, row):"] + body + ["        return row"]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "reading_for_row"), 2, "scope: reading_for_row is not defined on row 2")
+        self.assertEqual(lines[9], "        probe = row", "scope: row 10 is not the probe row")
+        self.assertIn("%d: %s" % (10, "        probe = row"), self.excerpt_rows(["Market.reading_for_row"], text),
+                      "row 10, 8 rows into the body of Market.reading_for_row, is not in the excerpt")
+
+    def test_a_defined_name_keeps_its_def_row_when_another_name_fills_the_cap(self):
+        # alpha is named on rows 8, 16 ... 160, and its windows alone fill the 40-row cap. target is defined on row 180.
+        lines = []
+        for n in range(1, 201):
+            if n <= 160 and n % 8 == 0:
+                lines.append("alpha()")
+            elif n == 180:
+                lines.append("def target(x):")
+            elif n > 180:
+                lines.append("    pad_%03d = %d" % (n, n))
+            else:
+                lines.append("pad_%03d = %d" % (n, n))
+        text = "\n".join(lines) + "\n"
+        self.assertIn("left out", self.excerpt_rows(["alpha"], text)[-1], "scope: alpha alone does not fill the cap")
+        self.assertEqual(self.stale.defined_line(text, "target"), 180, "scope: target is not defined on row 180")
+        self.assertIn("%d: %s" % (180, "def target(x):"), self.excerpt_rows(["alpha", "target"], text),
+                      "the def row of target is cut by the windows of alpha, which took the cap first")
+
+    def test_a_def_named_in_a_string_or_comment_above_the_real_def_does_not_move_the_body(self):
+        # Rows 2 and 3 hold a fake def inside a triple-quoted string. Row 5 has a lone quote in a comment, and row 6 a comment
+        # opener inside a string. The real def is row 50, and row 78 is 28 rows into its body.
+        head = ['MSG = """', "def target(x):", "    fake_body = x", '"""', "# don't move the def below", 'MARK = "# not a comment"']
+        filler = ["pad_%03d = %d" % (n, n) for n in range(7, 50)]
+        body = ["    deep_%02d = x" % n for n in range(1, 31)]
+        lines = head + filler + ["def target(x):"] + body
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "target"), 50, "scope: the real def is not on row 50")
+        self.assertEqual(lines[77], "    deep_28 = x", "scope: row 78 is not the deep row of the real body")
+        self.assertIn("%d: %s" % (78, "    deep_28 = x"), self.excerpt_rows(["target"], text),
+                      "row 78, 28 rows into the real body of target, is not in the excerpt: a string or comment moved the body")
+
+    def test_an_undefined_name_shows_the_three_rows_around_each_row_that_holds_it(self):
+        lines = ["pad_%02d = %d" % (n, n) for n in range(1, 31)]
+        lines[19] = "value = helper()"
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "helper"), 0, "scope: helper is defined in the fixture")
+        want = ["%d: %s" % (n, lines[n - 1]) for n in range(17, 24)]
+        got = [row for row in self.excerpt_rows(["helper"], text) if re.match(r"\d+: ", row)]
+        self.assertEqual(got, want, "an undefined name does not show the rows within three of the row that holds it")
+
+    def test_a_dotted_name_never_takes_its_first_segment_as_a_definition(self):
+        # The file has class Market on row 1 and calls Market.reading_for_row on row 60. The row 60 window is the scope. The
+        # class row must stay out: a first segment read as a definition would show the class and its body.
+        lines = ["class Market:"] + ["    pad_%02d = %d" % (n, n) for n in range(1, 59)] + ["    Market.reading_for_row(3)"]
+        text = "\n".join(lines) + "\n"
+        rows = self.excerpt_rows(["Market.reading_for_row"], text)
+        self.assertIn("%d: %s" % (60, "    Market.reading_for_row(3)"), rows, "scope: the call row 60 is not in the excerpt")
+        self.assertNotIn("1: class Market:", rows, "the class row of Market is in the excerpt: its first segment was read as a name")
+
+    def test_a_dotted_name_never_matches_its_first_segment_as_a_word(self):
+        # import os is row 1 and os.environ is row 40. The row 40 window is the scope. The import row must stay out.
+        lines = ["import os"] + ["pad_%02d = %d" % (n, n) for n in range(1, 39)] + ["home = os.environ['HOME']"]
+        text = "\n".join(lines) + "\n"
+        rows = self.excerpt_rows(["os.environ"], text)
+        self.assertIn("%d: %s" % (40, "home = os.environ['HOME']"), rows, "scope: the os.environ row 40 is not in the excerpt")
+        self.assertNotIn("1: import os", rows, "the import row of os is in the excerpt: the first segment of os.environ matched as a word")
+
+    def test_a_long_body_shows_no_more_than_forty_rows(self):
+        lines = ["import os", "", "def target(x):"] + ["    v_%03d = x" % n for n in range(1, 101)]
+        text = "\n".join(lines) + "\n"
+        got = [row for row in self.excerpt_rows(["target"], text) if re.match(r"\d+: ", row)]
+        self.assertGreater(len(got), 0, "scope: target shows no rows at all")
+        self.assertLessEqual(len(got), 40, "the excerpt of target has %d rows, want at most 40" % len(got))
+
+    def test_a_body_row_over_two_hundred_characters_is_cut_with_its_marker(self):
+        long_row = "    v = '" + "y" * 300 + "'"
+        lines = ["import os", "", "def target(x):", long_row, "    return x"]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "target"), 3, "scope: target is not defined on row 3")
+        self.assertIn("%d: %s" % (4, self.stale.cut_row(long_row)), self.excerpt_rows(["target"], text),
+                      "the body row of target over 200 characters is not cut with its marker")
+
+    def test_a_file_with_no_name_or_empty_text_gives_none(self):
+        self.assertIsNone(self.stale.named_excerpt(["target"], ""), "empty text gives an excerpt, want None")
+        self.assertIsNone(self.stale.named_excerpt(["target"], "a = 1\nb = 2\n"), "a file with no name gives an excerpt, want None")
+
+
 if __name__ == "__main__":
     unittest.main()
