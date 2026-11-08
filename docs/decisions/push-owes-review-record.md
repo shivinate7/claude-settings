@@ -13,7 +13,7 @@ Coordinator brief, 2026-11-08 09:45 CST. Fix checks count, coordinator 09:54 CST
 - Per destination, only the newest matching entry (by its written time) governs; on a tie, each tied entry does. An older entry's remedy cannot run: `merge --review-record` needs the live head.
 - A state read or a gh read that fails asks too, with the note `owed-record-unread`. So does an entry that is this repo's (its head is a commit here) when the push's directory or destination cannot be read, or when `.github/stamp.json` exists and is not a JSON object. A missing `stamp.json` skips the check.
 - A bare push under `push.default=matching` reads as the current branch.
-- A push chained after a step of the same shell call that moves HEAD (checkout, switch, commit, merge, pull, rebase, cherry-pick, revert, am, reset) reads its source as new: the guard judges the call before that step runs, so HEAD still equals the tracking tip. `head_moved_before` reads the earlier segments and the earlier parts of the push's own segment (a lone `&` splits, by `background_parts`). The verb list is `HEAD_MOVE_SUBCOMMANDS` in `hooks/guard_pointer.py`, plus commit, revert, reset and the conflict verbs. A checkout of a path counts too. A chain that holds an ask is refused by `ask-alone` (decision `ask-commands-run-alone`), so the agent runs the commit and the push in separate calls.
+- A push chained after a step of the same shell call that moves HEAD (checkout, switch, commit, merge, pull, rebase, cherry-pick, revert, am, reset) reads its source as new: the guard judges the call before that step runs, so HEAD still equals the tracking tip. `head_moved_before` reads the earlier segments. The verb list is `HEAD_MOVE_SUBCOMMANDS` in `hooks/guard_pointer.py`, plus commit, revert, reset and the conflict verbs. A checkout of a path counts too. A chain that holds an ask is refused by `ask-alone` (decision `ask-commands-run-alone`), so the agent runs the commit and the push in separate calls.
 - The ask names the rule and the remedy: render the record with `merge <pr> --review-record --head <H>`, post it, then push. It names no branch (rule `git-remedy-never-names-target`, a refusal names no target).
 - The owner's typed override lifts the ask.
 - Why: a push past an unrecorded head leaves the record unable to name that head. Fact: `merge <pr> --review-record --head <H>` stops with exit 1 when the live head is another sha (decision `pr-review-record`, the review record form).
@@ -80,6 +80,11 @@ The cases are in `hooks/test_guard.py`, section 5f-3 (family `push-owes-review-r
 | H6, builder push from its own worktree | Entry at H, no record. A builder commits past H in its own worktree of the repo and pushes from there | ask |
 | H6t, test-author push from its own worktree | As H6, a test-author pushing a test file | ask |
 | H5, status then push | As H1, with `status` before the push, which moves no HEAD | allow |
+| J1, switch then push | Entry at H, no record. `switch <commit past H> && push` in one call | deny, `ask-alone` |
+| J1b, checkout then push | As J1, with `checkout` | deny, `ask-alone` |
+| J3, other HEAD movers | As J1, with a `reset --soft`, `revert`, `cherry-pick`, `am`, `-C <lane> commit`, a newline before the push, or `commit \|\|` before the push | deny, `ask-alone` |
+| J4, chain pushes a branch with no entry | A commit, then a push to `archive/<lane>`, which no entry names | allow |
+| J5, fetch then push | As H1, with `fetch` before the push, HEAD at H and the remote at H | allow |
 
 ## The misses
 
@@ -98,6 +103,7 @@ Found in the code:
 - A design-reviewer or a workflow agent writes no entry. The stop reads only agent type `reviewer`.
 - A head on origin's default branch writes no entry, so a push past it passes. An unreadable default-branch or ancestor read writes the entry, and so does a stale tracking ref that does not yet hold the head.
 - An older entry with no record passes once a newer entry on the same branch is recorded. Its head stays unrecorded.
+- A chain joined by a lone `&` is refused earlier, as a detached launch, before the owed read runs.
 - A push to a non-origin remote or a URL never matches an origin entry (a note).
 - A bare push under `push.default=matching` checks only the current branch (a note).
 - Unknown whether the SubagentStop runs before the reviewer's worktree is removed. If after, no entry is written (a note).
