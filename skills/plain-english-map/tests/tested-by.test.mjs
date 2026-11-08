@@ -18,9 +18,8 @@
 //   - the known places of T11, in JS and Python, and a file is a place too (T11j, T11ah, T11ai). A join from a Python file place is a place
 //     only under an outer normpath, abspath or realpath (T11ab, T11ag, T11ak, T11al, T11n). The bare join names nothing (T11aa, T11af, T11aj).
 //   - a `/` piece resets `path.resolve`, so the call names nothing (T10aa).
-// The ruling does not name the `URL` import. T11am, T11an and T11ao are fixed under the coordinator's found-gap ruling (2026-11-07 13:20 CST):
-// a `URL` imported from `node:url` is the global and counts (T11am), a `URL` imported from another module does not (T11an), and a `URL`
-// that the file shadows does not count (T11ao).
+// The `URL` rule is in decision `map-tested-by-line`: a `URL` imported from `node:url` is the global and counts (T11am), a `URL`
+// imported from another module does not (T11an), and a `URL` that the file shadows does not count (T11ao).
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -1308,7 +1307,7 @@ export const page = path.join(SRC, 'home.ts');
 
 // T11aa to T11ak. The Python forms of `__file__`. `os.path.join` keeps `..` as written, so `<file>/..` is no folder and the bare join
 // names nothing (T11aa, and T11af at the root). An outer normpath resolves the `..`, so the same join is the place it names (T11ab, T11ag).
-// T11aa and T11af were re-pointed to FAIL at lane pick 2026-11-07 16:38 CST. T11aj and T11ak are the pathlib twins of T11af and T11ag.
+// T11aa and T11af are the bare joins that the wrap rule of decision `map-tested-by-line` refuses. T11aj and T11ak are the pathlib twins of T11af and T11ag.
 // `Path(__file__).parent.parent` is the folder above the test's folder (T11ac). A negative index is no known place (T11ad), and neither is a
 // normpath of a parameter (T11ae). A sibling join is masked in the test's own folder: a plain "x.py" string there already names the file
 // (namedFiles), so the case would stay green without the join. The one-`..` cases sit at the root, where no literal names the sibling (T11af, T11ag).
@@ -1322,7 +1321,7 @@ def test_wait():
     path = os.path.join(__file__, "..", "..", "src", "retry.py")
     assert os.path.isfile(path)
 `;
-  // Re-pointed to FAIL at lane pick 2026-11-07 16:38 CST. The scope first: no outer normpath, abspath or realpath wraps the join, so the verdict is about the bare join.
+  // The scope first: no outer normpath, abspath or realpath wraps the join, so the verdict is about the bare join.
   assert.doesNotMatch(text, /normpath|abspath|realpath/, 'the test must not wrap the join');
   const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
   mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'a bare os.path.join from __file__ keeps ".." as written, so it is no load');
@@ -1400,7 +1399,7 @@ def test_wait():
     path = os.path.join(__file__, "..", "src", "retry.py")
     assert os.path.isfile(path)
 `;
-  // Re-pointed to FAIL at lane pick 2026-11-07 16:38 CST. The scope first: no outer normpath, abspath or realpath wraps the join, so the verdict is about the bare join.
+  // The scope first: no outer normpath, abspath or realpath wraps the join, so the verdict is about the bare join.
   assert.doesNotMatch(text, /normpath|abspath|realpath/, 'the test must not wrap the join');
   const dir = pieceCase(testFile, text, 'src/retry.py', ['src', 'retry.py']);
   mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'a bare os.path.join from __file__ keeps ".." as written, so it is no load');
@@ -1501,7 +1500,7 @@ export function page() {
   mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a URL that the file shadows is no node:url global, so the call is no load');
 });
 
-// T11aj and T11ak, the pathlib twins of T11af and T11ag (lane pick 2026-11-07 16:38 CST). `Path(__file__) / ".." / ...` is a bare chain: it keeps
+// T11aj and T11ak, the pathlib twins of T11af and T11ag. `Path(__file__) / ".." / ...` is a bare chain: it keeps
 // `..` as written, so it names nothing (T11aj). An outer normpath resolves the `..`, so the same chain names the file's sibling folder (T11ak).
 test('T11aj. Path(__file__) / ".." / "src" / "retry.py" in a test at the repository root names nothing: the pathlib chain keeps ".." as written, so `<file>/..` is no folder: MAP11 fails and names the page, the test and the file', () => {
   needFile(REL);
@@ -1513,7 +1512,7 @@ def test_wait():
     path = Path(__file__) / ".." / "src" / "retry.py"
     assert path.is_file()
 `;
-  // Lane pick 2026-11-07 16:38 CST. The scope first: no outer normpath, abspath or realpath wraps the chain, so the verdict is about the bare chain.
+  // The scope first: no outer normpath, abspath or realpath wraps the chain, so the verdict is about the bare chain.
   assert.doesNotMatch(text, /normpath|abspath|realpath/, 'the test must not wrap the chain');
   assert.match(text, /Path\(__file__\) \/ "\.\." \/ "src" \/ "retry\.py"/, 'the test must join "retry.py" from a chain of "/" that starts at Path(__file__)');
   const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
@@ -1531,7 +1530,7 @@ def test_wait():
     path = os.path.normpath(Path(__file__) / ".." / "src" / "retry.py")
     assert os.path.isfile(path)
 `;
-  // Lane pick 2026-11-07 16:38 CST. The scope first: the chain is the one of T11aj, wrapped in an outer normpath and nothing else.
+  // The scope first: the chain is the one of T11aj, wrapped in an outer normpath and nothing else.
   assert.match(text, /os\.path\.normpath\(Path\(__file__\) \/ "\.\." \/ "src" \/ "retry\.py"\)/, 'the test must wrap the chain in normpath');
   const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
   mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is Path(__file__), and an outer normpath wraps the chain');
