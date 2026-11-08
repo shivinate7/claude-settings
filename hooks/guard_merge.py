@@ -1000,7 +1000,7 @@ ARCHIVE_READ_REASON = (
 )
 ARCHIVE_SCOPE_REASON = (
     "the lane's repo is not in this session's GitHub scope, so no read from here can reach its pull requests. "
-    "Route the archive to the batch runner whose session holds that repo (the lane's cs-repo tag names it). "
+    "Route the archive to the batch runner whose session holds that repo. "
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_NO_PR_REASON = (
@@ -1014,8 +1014,9 @@ _SOURCE_REPO = re.compile(r"github\.com[/:]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:
 
 def _scope_checked(module, code, out):
     """Raise the merge tool's ScopeStop when a failed read is the proxy's scope 403, so archive_hit tells it from a transient failure."""
-    if module.is_scope(code, out):
-        raise module.ScopeStop(out)
+    is_scope, stop = getattr(module, "is_scope", None), getattr(module, "ScopeStop", None)
+    if is_scope is not None and stop is not None and is_scope(code, out):  # a merge tool older than the scope read has neither: its failure keeps the read reason
+        raise stop(out)
 
 
 def _head_landed(module, repo: str, row) -> bool:
@@ -1027,6 +1028,7 @@ def _head_landed(module, repo: str, row) -> bool:
         return False
     with module.shared_deadline(MERGE_READ_TIMEOUT):
         code, out = module.Host(repo=repo).api("compare/" + base + "..." + sha)
+    _scope_checked(module, code, out)
     try:
         if code:
             raise ValueError(out)
@@ -1138,7 +1140,8 @@ def archive_hit(tool: str, tool_input, transcript: str):
         if isinstance(ccr, dict) and _stranded_branch(module, ccr, repos):
             return "archive of a lane with a branch that has no pull request", ARCHIVE_NO_PR_REASON
     except (Exception, SystemExit) as e:
-        if module is not None and isinstance(e, module.ScopeStop):  # typed, never read from the message: waiting never passes it
+        stop = getattr(module, "ScopeStop", None)
+        if stop is not None and isinstance(e, stop):  # typed, never read from the message: waiting never passes it
             return "archive of a lane whose repo is outside this session's GitHub scope", ARCHIVE_SCOPE_REASON
         return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
     return None

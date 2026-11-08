@@ -780,7 +780,7 @@ class Host:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
 
-    def pages(self, rel, key=None, fields=None):
+    def pages(self, rel, key=None, fields=None, kind=Stop):  # `kind` is the class of the one raise below: a scope failure rebinds it to ScopeStop, as `fail(why, kind=Stop)` does
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
         Each page is asked for by number (`page=n`) with -i, and the read goes on to page n+1 only while its `Link` header has rel="next". The last page has none,
         so a read costs one call per page. gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
@@ -790,7 +790,8 @@ class Host:
             c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
             headers, out = split_headers(out)
             if is_scope(c, out):
-                raise ScopeStop(f"reading {rel} from GitHub failed: {out}")
+                kind, why = ScopeStop, f": {out}"  # typed, so the archive guard tells it from a transient failure
+                break
             try:
                 if c:
                     raise ValueError(out)
@@ -806,7 +807,7 @@ class Host:
                 return items
         else:
             why = f": more than {PAGE_CEILING} pages of 100"
-        raise Stop(f"reading {rel} from GitHub failed{why}")
+        raise kind(f"reading {rel} from GitHub failed{why}")
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
