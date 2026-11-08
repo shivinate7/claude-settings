@@ -36,12 +36,15 @@ VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", 
 # The generated tail holds the permission forms: "do not have the permission to", with or without "the", does for do, and
 # the nouns of _PERMISSION_NOUNS.
 _PERMISSION_NOUNS = ("permission", "authorization", "authorisation", "authority", "ability")
+_BE_NT_FORMS = ("isn't", "aren't", "wasn't", "weren't")  # every be-form with n't
 CANNOT_FORMS = ("can't", "cannot", "can not", "unable to", "could not", "couldn't", "no way to", "no way I can",
-                "no way we can", "not able to", "wasn't able to", "won't be able to", "will not be able to",
+                "no way we can", "not able to", "won't be able to", "will not be able to",
                 "haven't been able to", "hasn't been able to", "have not been able to", "has not been able to",
                 "not allowed to", "not permitted to", "not going to be able to", "not authorized to", "not authorised to",
                 "don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
                 "lack permission to", "lacks permission to", "blocked from", "forbidden from") + tuple(
+    "%s %s" % (be, able)
+    for be in _BE_NT_FORMS for able in ("able to", "allowed to", "permitted to", "going to be able to")) + tuple(
     "%s have %s%s to" % (verb, the, noun)
     for verb in ("don't", "do not", "doesn't", "does not") for the in ("", "the ") for noun in _PERMISSION_NOUNS)
 # The nouns that make a checks noun an outage, not a CI check ("the network checks are failing"), and the verbs that make
@@ -150,7 +153,7 @@ _LEAD_RE = re.compile(r"^\W*(?:(?:and|but|so|then)\b\W*)?", re.I)
 _OWN_RE = re.compile(
     r"(?:^|\b(?:I|we)(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re|\bthe\s+cloud(?:\s+session)?"
     r"|\bthis\s+session|\bhere|\bthere(?:\s+(?:is|was)|['’]s))(?:\s+" + _ADV + r")*\s*$", re.I)
-_PAST_RE = re.compile(r"^(?:could|wasn['’]t)", re.I)
+_PAST_RE = re.compile(r"^(?:could|(?:was|were)n['’]t)", re.I)
 _WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADV, re.I)
 _ADV_LEAD_RE = re.compile(r"^(?:%s\s+)+" % _ADV, re.I)
 _FIRST_WORD = re.compile(r"\s*(\w+)")
@@ -188,7 +191,7 @@ def own_subject(before):
 
 
 def past(phrase, before):
-    """True when a phrase reports a failure: could not, wasn't able, or any phrase right after was or were."""
+    """True when a phrase reports a failure: could not, wasn't or weren't able, or any phrase right after was or were."""
     return bool(_PAST_RE.match(phrase) or _WAS_RE.search(before))
 
 
@@ -248,12 +251,12 @@ def reasons(text):
 
 def form_pattern(form):
     """The regex of a CANNOT_FORMS phrase: its words joined by whitespace, either apostrophe, and a gap for adverbs
-    (ADVERBS) after not or a word in n't when able, allowed, permitted or been follows."""
+    (ADVERBS) after not or a word in n't when able, allowed, permitted, going or been follows."""
     parts = form.split()
     out = re.escape(parts[0]).replace("'", "['’]")
     for k in range(1, len(parts)):
         gapped = (parts[k - 1] == "not" or parts[k - 1].endswith("n't")) and parts[k] in (
-            "able", "allowed", "permitted", "been", "authorized", "authorised")
+            "able", "allowed", "permitted", "going", "been", "authorized", "authorised")
         out += (r"\s+(?:%s\s+)*" % _ADV if gapped else r"\s+") + re.escape(parts[k]).replace("'", "['’]")
     return out
 

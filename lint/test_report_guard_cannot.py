@@ -37,6 +37,10 @@ REFUSED_ROW_ID = "r-archive"
 ROW_REFUSED = hook_base.route_row(REFUSED_ROW_ID, "archive_session", "refused", surface="local")
 # Words a remedy must not name: the act a refusal is about (git-remedy-never-names-target).
 ACT_WORDS = re.compile(r"\bPR\b|pull request|\bopen\b|\bpush\b|\bmerge\b|\bgit\b|\bgh\b|mcp__", re.I)
+# The weren't forms of the be-form claims, with straight and curly apostrophes. Two cases build lines from them.
+WEREN_T_CLAIMS = ("We weren't able to merge PR 12", "We weren’t able to merge PR 12",
+                  "We weren't allowed to merge PR 12", "We weren’t allowed to merge PR 12",
+                  "We weren't going to be able to merge PR 12", "We weren’t going to be able to merge PR 12")
 
 
 # Runs report_guard.py as the Stop hook runs it, and writes to stderr the paths its process opened (the audit event
@@ -315,7 +319,7 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_passes(out, "a failed gh pr create, named")
 
     def test_cc_green_curl_on_the_pulls_route_with_a_403_passes(self):
-        # The text carries the failure (no error flag), so the HTTP 4xx reading is the one that counts.
+        # The text carries the failure as an exit code with no error flag, which counts; the HTTP 403 names the check.
         line = "I cannot open the PR: `curl` returned HTTP 403."
         out = self.stop([trg.human("open a PR"),
                          *failed_bash("curl -s -X POST https://api.github.com/repos/o/r/pulls -d @body.json",
@@ -483,7 +487,8 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_red_a_successful_call_with_refused_in_its_output_is_no_try(self):
         # Catches: a successful call whose output holds the word refused counted as a failed try. A failure is an error
-        # flag, an exit code above zero, or an HTTP 4xx or 5xx status. A loose word in the output is none of these.
+        # flag or an exit code above zero. A status counts only in an error result, so an HTTP 4xx or 5xx in an ok
+        # result is no failure. A loose word in the output is none of these.
         line = "I could not open the PR: `gh pr create` failed."
         out = self.stop([trg.human("open a PR"), use("Bash", {"command": "gh pr create --title t"}, "tu_g"),
                          done("tu_g", "3 refused connections in the log; nothing failed."), landed_reply(line)])
@@ -530,6 +535,119 @@ class CannotClaimTests(unittest.TestCase):
         line = "I won't be able to push from here."
         out = self.stop([trg.human("push it"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_we_werent_able_to_is_a_claim(self):
+        # Catches: "weren't able to" missing from the n't phrases, so the line reads as no claim.
+        line = "We weren't able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_we_arent_able_to_is_a_claim(self):
+        # Catches: "aren't able to" missing from the n't phrases, so the line reads as no claim.
+        line = "We aren't able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_we_arent_able_to_with_a_curly_apostrophe_is_a_claim(self):
+        # Catches: the curly apostrophe missing from "aren't", so a straight-quote-only fix passes the other reds.
+        line = "We aren’t able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_this_session_isnt_able_to_is_a_claim(self):
+        # Catches: "isn't" missing from the be-form n't phrases, so "This session isn't able to" reads as no claim.
+        line = "This session isn't able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_we_arent_going_to_be_able_to_is_a_claim(self):
+        # Catches: the n't form of "not going to be able to" missing. The listed phrase has no be-form before "not".
+        line = "We aren't going to be able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_this_session_isnt_allowed_to_is_a_claim(self):
+        # Catches: "isn't allowed to" missing. The record lists "not allowed to", and its n't form counts.
+        line = "This session isn't allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_arent_allowed_to_is_a_claim(self):
+        # Catches: "aren't allowed to" missing, the present plural of the listed "not allowed to".
+        line = "We aren't allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_arent_allowed_to_with_a_curly_apostrophe_is_a_claim(self):
+        # Catches: the curly apostrophe missing from "aren't allowed to", so a straight-quote-only fix passes the other reds.
+        line = "We aren’t allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_werent_allowed_to_is_a_claim(self):
+        # Catches: "weren't allowed to" missing, the past plural of the listed "not allowed to".
+        line = "We weren't allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_i_wasnt_allowed_to_is_a_claim(self):
+        # Catches: "wasn't allowed to" missing, the singular past of the listed "not allowed to".
+        line = "I wasn't allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_this_session_isnt_permitted_to_is_a_claim(self):
+        # Catches: "isn't permitted to" missing. The record lists "not permitted to", and its n't form counts.
+        line = "This session isn't permitted to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_arent_permitted_to_is_a_claim(self):
+        # Catches: "aren't permitted to" missing, the present plural of the listed "not permitted to".
+        line = "We aren't permitted to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_werent_permitted_to_is_a_claim(self):
+        # Catches: "weren't permitted to" missing, the past plural of the listed "not permitted to".
+        line = "We weren't permitted to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_this_session_isnt_going_to_be_able_to_is_a_claim(self):
+        # Catches: "isn't going to be able to" missing. The listed "not going to be able to" has its n't form.
+        line = "This session isn't going to be able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_i_wasnt_going_to_be_able_to_is_a_claim(self):
+        # Catches: "wasn't going to be able to" missing, the singular past of the listed "not going to be able to".
+        line = "I wasn't going to be able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_werent_going_to_be_able_to_is_a_claim(self):
+        # Catches: "weren't going to be able to" missing, the past plural of the listed "not going to be able to".
+        line = "We weren't going to be able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_be_n_t_able_to_forms_pass_after_a_failed_merge(self):
+        # Control: each new form passes after a failed `gh pr merge 12` that the line names as its check.
+        # Each form has its own run, so one form's block cannot hide another's pass.
+        for line in ("We weren't able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren't able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren’t able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "This session isn't able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren't going to be able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "This session isn't going to be able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We weren't going to be able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We weren't allowed to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren't permitted to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren’t allowed to merge PR 12: `gh pr merge 12` exited 1."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_passes(out, "a failed gh pr merge 12, named as its check, with the form: %r" % line)
 
     def test_cc_red_no_way_i_can_is_a_claim(self):
         # Catches: "no way I can" missing from the phrase list. Only "no way to" is in it.
@@ -776,6 +894,26 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p1"),
                          *ok_bash("git push origin HEAD", "tu_p2"), landed_reply(line)])
         self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_past_werent_form_recovered_by_a_later_merge_is_no_claim(self):
+        # Catches: "weren't" dropped from the past-tense read (CANNOT_PAST_RE), so "We weren't able to merge PR 12 at
+        # first" reads as a present claim that the merge cannot be done, although a later merge of the same PR
+        # succeeded. Each form runs after a failed `gh pr merge 12` and a later success in the turn.
+        for claim in WEREN_T_CLAIMS:
+            line = claim + " at first; the retry merged it."
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
+                                 *ok_bash("gh pr merge 12", "tu_m2"), landed_reply(line)])
+                self.assert_passes(out, "a past failure of a merge that a later merge recovered: %r" % line)
+
+    def test_cc_green_a_werent_form_without_a_later_merge_still_blocks(self):
+        # Control: the same claims after the same failed merge, with no later success and no reason. Each line is read
+        # as a claim here, so the pass above comes from the past read and not from a line the check never reads.
+        for claim in WEREN_T_CLAIMS:
+            line = claim + "."
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_blocked_for(out, NO_CHECK, line)
 
     def test_cc_red_r4_rule_forms_and_the_cannot_suite_pass(self):
         # A sentence that names a rule or a decision is the rule's text, not the session's claim. "Cannot" directly
@@ -1864,6 +2002,36 @@ class CannotClaimTests(unittest.TestCase):
         line = "I could not merge PR 12: it sent back 403."
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
         self.assert_passes(out, "a refused merge whose status 403 is sent back")
+
+    # ---- a local merge is no pr-merge try, and a status in an ok result is no failure
+
+    def test_cc_red_a_failed_local_merge_is_no_try_of_a_pr_merge(self):
+        # Catches: a failed `git merge origin/main` read as a try of merging the PR, so the line that says the PR cannot be
+        # merged passed. A local merge is no pr-merge route, so the turn holds no try of that act: the no-try variant fires.
+        line = "I cannot merge PR 12: `git merge origin/main` conflicted."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("git merge origin/main", "tu_g"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_an_ok_result_quoting_http_500_is_no_failed_try(self):
+        # Catches: an HTTP 500 quoted in the output of an ok `gh pr list` read as a failure, so the line that says GitHub
+        # cannot be reached passed. A status counts as a failure only in an error result: the error flag or a non-zero exit.
+        line = "I cannot reach GitHub: `gh pr list` returned nothing."
+        out = self.stop([trg.human("reach GitHub"), use("Bash", {"command": "gh pr list"}, "tu_l"),
+                         done("tu_l", "HTTP 500 quoted in the log; no PRs listed."), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_failed_gh_pr_merge_still_backs_the_merge_claim(self):
+        # Control: a failed `gh pr merge 12` is a pr-merge try, so the merge claim that names it passes.
+        line = "I cannot merge PR 12: `gh pr merge 12` failed."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_passes(out, "a failed gh pr merge 12 backs the merge claim")
+
+    def test_cc_green_an_error_result_with_http_500_still_backs_the_reach_claim(self):
+        # Control: an error result that carries HTTP 500 is a failed try of GitHub reach, so the reach claim passes.
+        line = "I cannot reach GitHub: `gh pr list` returned nothing."
+        out = self.stop([trg.human("reach GitHub"), use("Bash", {"command": "gh pr list"}, "tu_l"),
+                         done("tu_l", "HTTP 500 Internal Server Error", error=True), landed_reply(line)])
+        self.assert_passes(out, "an error result with HTTP 500 backs the reach claim")
 
 
     def test_cc_red_a_claim_on_a_non_pr_or_docs_object_is_no_claim(self):

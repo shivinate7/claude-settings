@@ -131,8 +131,9 @@ table act (pr-open, pr-merge, push, pr-edit, github-reach), named by the verb th
 turn after the last human message holds a failed try of that act, or the sentence carries a hand-off cite (a route row
 that says refused or asks, a dated `(measured ...)`, or a tool the classifier refused), and the sentence names its check
 (a backtick span, an MCP tool name, a word such as returned or refused, an HTTP 4xx, a non-zero exit). A try is a call
-whose result has an error flag, an exit code above zero or an HTTP 4xx or 5xx; a later success of the same act, program,
-verb and target cancels it, and a --dry-run call is no try. A notice is no try. Not read: an act outside the table, a
+whose result has an error flag or an exit code above zero (an HTTP 4xx or 5xx counts only in an error result, or in an
+agent's relayed text); a later success of the same act, program, verb and target cancels it, and a --dry-run call is no
+try. A local merge is no try of pr-merge. A notice is no try. Not read: an act outside the table, a
 subject that is not the writer's own, a question, a Why yours line (the hand-off guard's), a line or sentence that starts
 with Unvetted:, quoted or coded text, a conditional, a dependency (until, before) and a sentence that names a rule. One
 block, then the rewrite runs unchecked. A check that cannot run prints an UNKNOWN note to stderr and allows.
@@ -1745,11 +1746,13 @@ CANNOT_RUNNERS = {
     "npm": {"--prefix", "-w", "--workspace"}, "yarn": {"--cwd"}, "pnpm": {"-C", "--dir", "--filter", "-F"}}
 # The input fields that name a GitHub MCP call's target, read in this order.
 CANNOT_TARGET_FIELDS = ("pullNumber", "pull_number", "branch", "head")
-# A failed try: the result's error flag, an exit code above zero as the shell result reports it, or an HTTP 4xx or 5xx.
+# A failed try: the result's error flag or an exit code above zero as the shell result reports it. An HTTP 4xx or 5xx
+# in an ok result is output text, not a failure; only a relayed agent result, which has no exit of its own, reads it.
 # A loose word such as refused in a successful call's output is none of these.
-CANNOT_FAIL_RE = re.compile(r"^Exit code [1-9]|\bHTTP(?:/[\d.]+)?\s+[45]\d\d\b")
+CANNOT_FAIL_RE = re.compile(r"^Exit code [1-9]")
+CANNOT_RELAY_FAIL_RE = re.compile(r"\bHTTP(?:/[\d.]+)?\s+[45]\d\d\b")
 CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
-CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push|merge)\b")
+CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push)\b")
 # Before the phrase, a bare check word with the writer as subject names no call: "I tried; I cannot push." names no check,
 # while "the push failed, so I could not push" does.
 CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _clause.ADVERB_PATTERN, re.I)  # any -ly adverb too
@@ -2087,7 +2090,7 @@ def _checked_out(segment):
 
 def _segment_tries(segment, branch=""):
     """{(act, key)} for the routes one shell segment is a try of: gh (every gh call reaches GitHub; gh pr and gh api
-    name table acts), git push, merge, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
+    name table acts), git push, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
     whose name holds an act word (_script_tries). The key is the
     program, its verb and the target the call names (a PR number, a branch or a URL), so a later success cancels only
     a failure of the same call. A gh pr call that names no target is keyed by its own arguments (_gh_target);
@@ -2112,8 +2115,6 @@ def _segment_tries(segment, branch=""):
             tries.add((GITHUB_REACH, key))
         if subcommand == "push":
             tries.add(("push", key))
-        elif subcommand == "merge":
-            tries.add(("pr-merge", key))
     tries |= _script_tries(tokens)
     if any(os.path.basename(t) in CANNOT_HTTP_TOOLS for t in tokens):
         for token in (t for t in tokens if "github.com" in t):
@@ -2124,13 +2125,13 @@ def _segment_tries(segment, branch=""):
 
 
 def _text_acts(text):
-    """The acts whose routes a text names: a route tool, `gh pr <verb>`, `git push` or `git merge`. A GitHub MCP tool
+    """The acts whose routes a text names: a route tool, `gh pr <verb>` or `git push`. A GitHub MCP tool
     name is also github-reach."""
     acts = {act for tool, act in CANNOT_TOOL_ACTS.items() if tool in text}
     if "mcp__github__" in text:
         acts.add(GITHUB_REACH)
     for hit in CANNOT_TEXT_ROUTE_RE.finditer(text):
-        acts.add(CANNOT_GH_PR_ACTS[hit.group(1)] if hit.group(1) else "push" if hit.group(2) == "push" else "pr-merge")
+        acts.add(CANNOT_GH_PR_ACTS[hit.group(1)] if hit.group(1) else "push")
     return acts
 
 
@@ -2168,7 +2169,8 @@ def _call_tries(use, text):
 
 def failed_tries(records, refused=(), recovered=None):
     """{act: {key, ...}} for each failed tool try in `records`, sidechains skipped. A call failed when its result has
-    is_error, an exit code above zero as a shell result reports it, or an HTTP 4xx or 5xx (CANNOT_FAIL_RE). A later call
+    is_error or an exit code above zero as a shell result reports it (CANNOT_FAIL_RE); a relay's text also fails on an HTTP
+    4xx or 5xx (CANNOT_RELAY_FAIL_RE), an ok call's does not. A later call
     that did not fail cancels the earlier failures of the same act and key (the same program, verb and target). A gh pr
     act verb (CANNOT_GH_PR_ACTS) with no arguments has the empty target, which is no identity and cancels nothing; a relay's
     text is no call of its own, so it cancels nothing. A tool in `refused` (the classifier's refusals file) counts as a
@@ -2186,7 +2188,8 @@ def failed_tries(records, refused=(), recovered=None):
                 continue
             text = _result_text(result.get("content"))
             found = _call_tries(use, text)
-            if result.get("is_error") is True or CANNOT_FAIL_RE.search(text):
+            if (result.get("is_error") is True or CANNOT_FAIL_RE.search(text)
+                    or (_is_relay(use) and CANNOT_RELAY_FAIL_RE.search(text))):
                 for act, key in found:
                     tries.setdefault(act, set()).add(key)
             elif not _is_relay(use):
