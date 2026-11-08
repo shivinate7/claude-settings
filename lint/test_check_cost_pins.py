@@ -727,6 +727,22 @@ class CostPinTests(unittest.TestCase):
         text = self.note("- a: it reads `list\n  of files` and is among 266 folder cites.\n")
         self.assert_found([note_row(text, "is among 266")], counts=True)
 
+    def test_note_lone_backtick_is_no_unbalanced_finding_and_its_count_is_still_read(self):
+        # Pinned: a lone backtick in a debt note is plain text. It prints no unbalanced-backtick finding, and a count
+        # claim in another sentence of the same note is still read and flagged.
+        text = self.note("- frozen-trim-quoted-backtick: a write to a file named with a trailing ` reads as the bare "
+                         "name (hooks/guard_frozen.py). The list is among 266 folder cites in this repo.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_run_id_followed_by_of_is_a_count_not_a_run_id(self):
+        # `run N` exempts a note's sentence only when no `of` follows N: then N is a count, not a run id.
+        text = self.note("- a: does not run 40 of 543 checks.\n"
+                         "- b: the run 7 of 40 tests failed.\n")
+        self.assert_found([note_row(text, "40 of 543"), note_row(text, "7 of 40")], counts=True)
+
+    def test_note_real_run_id_before_a_unit_count_still_passes(self):
+        self.note_control("- record-run-id: run 42283179251, 20 of 28 min.\n")
+
     def test_leading_once_is_no_count_and_a_trailing_once_after_a_verb_is(self):
         # A leading once is no claim even with a cost noun after it. The trailing form after a verb is still read.
         text = self.decide("leading-once.md",
