@@ -538,28 +538,16 @@ def _owner_acts(clause) -> bool:
 _SESSION_SUBJECT = re.compile(r"\bsession\s+(?:\w+ly\s+)?$", re.I)
 _PAST_OWNER_PRESS = re.compile(OWNER_NAME.pattern + r"\s+(?:(?:has|had|already)\s+)*$", re.I)
 _PAST_PRESS = re.compile(r"(?:press|click|tap)(?:ed|ped)\b", re.I)
-# In a session clause, "by clicking Merge" is the means of the clause's own subject, the session, and "a click"
-# or "one press" after "with" or "without" is how the session acts, not a press asked of anyone ("without a
-# click"). "after clicking Approve", "approved by clicking Approve", "after a click on Approve" and "after your
-# Merge click" name no such means, so they stay presses.
-_GERUND_PRESS = re.compile(r"(?:press|click|tap)(?:ing|ping)\b", re.I)
-_SESSION_MEANS = re.compile(r"(?<!ed )\b(?:by|via)\s+$", re.I)   # "approved by clicking" names no subject
-_NOUN_PRESS = re.compile(r"(?:press(?:es)?|clicks?|taps?)\b", re.I)
-_PRESS_COUNT = re.compile(r"\bwith(?:out)?\s+(?:(?:a|an|one|no|any|a\s+single)\s+)?$", re.I)
 
 
 def _owner_press_in(clause) -> bool:
     """True when `clause` holds a press verb that the session does not make: one the session's own subject
-    is not directly before, no past press by the owner, no "by clicking" means and no counted press noun.
+    is not directly before and no past press by the owner.
     "after clicking Approve", "after Approve is clicked", "after your Merge click" and "after the owner has to
     click Approve" each hold one."""
     for m in PRESS_VERB.finditer(clause):
         before = clause[:m.start()]
         if _SESSION_SUBJECT.search(before) or (_PAST_PRESS.match(m.group()) and _PAST_OWNER_PRESS.search(before)):
-            continue
-        if _GERUND_PRESS.fullmatch(m.group()) and _SESSION_MEANS.search(before):
-            continue
-        if _NOUN_PRESS.fullmatch(m.group()) and _PRESS_COUNT.search(before):
             continue
         return True
     return False
