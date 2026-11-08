@@ -251,7 +251,8 @@ _SED_IN_PLACE_FLAG = r"(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)"
 _SED_IN_PLACE = r"\b(?:g?sed)\b[^\n;|&]*" + _SED_IN_PLACE_FLAG + r"[^\n;|&]*"
 # `writes_to` reads one segment, whose quoted words the shell scan has already unquoted, so a `;`, `|` or `&`
 # left in it is script text (`-e 's/a/b/;s/c/d/'`) and must not end the match before the path.
-_PERL_IN_PLACE = r"\bperl\b[^\n]*\s-[0-9aCcFlnpsStTuUvwW]*i[^\n]*"
+_PERL_IN_PLACE_FLAG = r"(?<!\S)-[0-9aCcFlnpsStTuUvwW]*i"
+_PERL_IN_PLACE = r"\bperl\b[^\n]*" + _PERL_IN_PLACE_FLAG + r"[^\n]*"
 
 
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
@@ -285,7 +286,7 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     counting as a write to a path named in a comment.
     """
     target = re.escape(path)
-    if re.search(r"\d?>>?\s*&?\s*['\"]?" + target, cmd):   # `>& FILE` and `>&FILE` write it (the word scan shows `> & FILE`); `>&1` names no file
+    if re.search(r"\d?>>?\s*&?\s*['\"]?" + target, cmd):   # `>` and `>&` redirect onto the path, with or without a space; `>&1` names no file
         return True
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
@@ -294,7 +295,7 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
         return bool(in_place) and bool(re.search(in_place + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(_SED_IN_PLACE + target, cmd):
+    if re.search(_SED_IN_PLACE + target, cmd) or re.search(_PERL_IN_PLACE + target, cmd):
         return True
     return False
 
@@ -377,30 +378,35 @@ _FIND_WRITERS = frozenset(("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fp
 
 
 # Per command, the short flags that write a file (`_OUTPUT_SHORTS`), the short flags that take a value
-# (`_VALUE_SHORTS`: what follows one in its cluster is its value, never a flag), and the long flag that
-# writes a file with the shortest form a command reads for it (`_OUTPUT_LONGS`). `git diff` is the command
-# name `_output_targets` gives a `git` call whose subcommand is `diff`.
-_OUTPUT_SHORTS = {"sort": "o", "less": "oO", "curl": "o", "wget": "O"}
+# (`_VALUE_SHORTS`: what follows one in its cluster is its value, never a flag), and the long flags that
+# write a file, each with the fewest letters a command reads for it (`_OUTPUT_LONGS`). `git diff`, `git log`
+# and `git show` are the command names `_output_targets` gives a `git` call with that subcommand.
+_OUTPUT_SHORTS = {"sort": "o", "less": "oO", "curl": "oDc", "wget": "Ooa"}
 _VALUE_SHORTS = {"sort": "kStT", "less": "bhjkPpTtxyzD#", "curl": "AbCcDdEeFHKmPQrTtUuwXxYyz",
                  "wget": "oaeiBtTwQPlARDIXU"}
-_OUTPUT_LONGS = {"sort": ("output", 1), "less": ("log-file", 3), "git diff": ("output", 6),
-                 "curl": ("output", 3), "wget": ("output-document", 9)}
+_GIT_OUTPUT = (("output", 6),)   # git reads no shorter form: it is a prefix of other flags
+_OUTPUT_LONGS = {"sort": (("output", 1),), "less": (("log-file", 3),),
+                 "curl": (("output", 3), ("dump-header", 2), ("cookie-jar", 7)),
+                 "wget": (("output-document", 9), ("output-file", 8), ("append-output", 2)),
+                 "git diff": _GIT_OUTPUT, "git log": _GIT_OUTPUT, "git show": _GIT_OUTPUT}
+_GIT_OUTPUT_SUBCOMMANDS = ("diff", "log", "show")
 
 
 def _output_flag_value(command: str, word: str):
     """The one home of the flags that name the file a command writes. None when `word` is no such flag of
     `command`; else the file glued to it (`-ofile`, `--output=file`), or '' when the next word is the file
     (`-o file`, `--output file`). `sort`: `-o` in a short cluster, `--output` or a prefix of it (`--o`, `--out`).
-    `less`: `-o` and `-O`, `--log-file` or a prefix of it from `--log`, in any case. `git diff`: `--output` only, as git
-    reads no shorter form (it is a prefix of other flags). `curl`: `-o`, `--output` or a prefix from `--out`.
-    `wget`: `-O`, `--output-document` or a prefix from `--output-d` (`--output-file` is a log file, not read)."""
+    `less`: `-o` and `-O`, `--log-file` or a prefix of it from `--log`, in any case. `git diff`, `git log` and
+    `git show`: `--output` only, as git reads no shorter form (it is a prefix of other flags). `curl`: `-o`,
+    `-D` and `-c`, `--output` or a prefix from `--out`, `--dump-header` or a prefix from `--du`, `--cookie-jar`
+    or a prefix from `--cookie-`. `wget`: `-O`, `-o` and `-a`, `--output-document` or a prefix from `--output-do`,
+    `--output-file` or a prefix from `--output-f`, `--append-output` or a prefix from `--ap`."""
     if command not in _OUTPUT_LONGS or not word.startswith("-") or word == "-":
         return None
     if word.startswith("--"):
         flag, equals, value = word.partition("=")
-        name, least = _OUTPUT_LONGS[command]
         typed = flag[2:].lower() if command == "less" else flag[2:]
-        if len(typed) < least or not name.startswith(typed):
+        if not any(len(typed) >= least and name.startswith(typed) for name, least in _OUTPUT_LONGS[command]):
             return None
         return value if equals else ""
     for place, letter in enumerate(word[1:], 1):
@@ -414,8 +420,11 @@ def _output_flag_value(command: str, word: str):
 def _output_targets(words):
     """The files that the output flags in one segment's unquoted `words` name (`_output_flag_value`)."""
     command, rest = _segment_command(words)
-    if command == "git" and "diff" in [word for word in rest if not word.startswith("-")][:2]:
-        command = "git diff"
+    if command == "git":
+        subcommand = next((name for name in [word for word in rest if not word.startswith("-")][:2]
+                           if name in _GIT_OUTPUT_SUBCOMMANDS), "")
+        if subcommand:
+            command = "git " + subcommand
     targets = []
     for at, word in enumerate(rest):
         value = _output_flag_value(command, word)
@@ -1417,6 +1426,8 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             # A sed with no in-place option reads its script as text: an in-place flag spelled inside it is no flag.
             data = data | {at for at in _sed_script_words(parsed[number])
                            if re.search(_SED_IN_PLACE_FLAG, _unquoted(raw[at]))}
+            # A perl script (the word after `-e`) that spells an in-place flag is text, as a sed script is.
+            data = data | _perl_script_words(raw)
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -1437,10 +1448,15 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
                 shown.append("dup")
             else:
+                glued = index and word.startswith("&") and raw[index - 1].endswith(">")
+                if glued:   # `>&FILE` splits as `>` and `&FILE`: the `&` is part of the operator, FILE is the target
+                    word = word[1:]
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
                 kept = scripts[number][index]
+                if glued:
+                    kept = kept[1:]
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
             files, commands = sed_targets.get(index, ((), ()))
             # a sed script's w or W names a file, and its e runs a command: the words that command writes
@@ -1622,6 +1638,18 @@ def _sed_script_targets(script):
         else:
             at += 1
     return targets, commands
+
+
+def _perl_script_words(raw):
+    """The indexes of the words of a `perl` segment that are a `-e` or `-E` script holding an in-place flag
+    spelling (a word of it, as `_words_of` splits it): text, not a flag. `-pe` ends in `e`, so its next word is
+    its script; `-ie` is an in-place flag with the suffix `e`, so its next word is not."""
+    command, _rest = _segment_command([_unquoted(word) for word in raw])
+    if command != "perl":
+        return set()
+    return {at for at in range(1, len(raw))
+            if re.fullmatch(r"-[0-9aCcFlnpsStTuUvwW]*[eE]", _unquoted(raw[at - 1]))
+            and any(re.match(_PERL_IN_PLACE_FLAG, piece) for piece in _words_of(raw[at]))}
 
 
 def _sed_command_words(command):
