@@ -360,7 +360,7 @@ class WaitingPage(Tree):
                 self.assertTrue(self.layout.is_waiting_page_url(self.tree, url), "%s does not name the page" % url)
 
     def test_a_link_without_scheme_or_www_or_in_upper_case_or_padded_is_the_page(self):
-        # Checks each link form a stored page URL may take: no scheme, http, www, an upper-case scheme, host or
+        # Checks each link form a page URL may be read in: no scheme, http, www, an upper-case scheme, host or
         # path, and leading spaces. Each names the same artifact, so the page is recognised in any of them.
         self.set_page(self.URL)
         for url in ("claude.ai/artifact/abc123", "http://claude.ai/artifact/abc123",
