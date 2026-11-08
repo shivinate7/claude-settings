@@ -922,7 +922,7 @@ MUTATIONS = [
      '            fenced = not fenced',
      '            fenced = fenced', "guard",
      'whose only guard marker line sits inside a'),
-    ("role-model: the rank gate on the reviewer's marker is dropped, so an unranked model with it walks past on sonnet",
+    ("role-model: the guard's rank test on the reviewer's marker is dropped, so an unranked model with it walks past on sonnet",
      '        if role == "reviewer" and named < top and (',
      '        if role == "reviewer" and (', "guard",
      'role-model: reviewer on an unranked model with the guard marker is denied'),
