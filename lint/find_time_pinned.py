@@ -17,16 +17,19 @@ date read counted as a real clock. The tool fixes none, and it writes nothing. E
 - calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
   `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.strftime(fmt)`,
   `time.tzname`, `time.timezone`, the date libraries `pendulum.now()`, `arrow.now()`, `arrow.utcnow()`,
-  `pd.Timestamp.now()`, `pd.Timestamp.utcnow()` and Django `timezone.now()`, plus, with no argument,
-  `pendulum.today()`, `arrow.get()`, `timezone.localtime()` and `timezone.localdate()`, JS
+  `pendulum.today()`, `pd.Timestamp.now()`, `pd.Timestamp.today()`, `pd.Timestamp.utcnow()` and Django
+  `timezone.now()`, plus, with no argument or only a zone keyword (`tzinfo=` or `timezone=`),
+  `arrow.get()`, `timezone.localtime()` and `timezone.localdate()`, JS
   `new Date()`, `new Date(<clock>)` where the argument reads `Date.now` or `performance.now` directly
   or through a name that holds one, any `Date(...)` call without `new`, and the JS date libraries
   `dayjs()`, `dayjs.utc()`, `new dayjs()`, `moment()`, `moment.utc()` and `Temporal.Now.*()`).
   `new Date(0)`, `new Date(EPOCH_MS)` with a declared constant, `dayjs(0)`, `moment.utc(EPOCH)`,
-  `arrow.get(0)` and `pendulum.datetime(...)` read no clock and are not listed. A fake clock turns
-  calendar off and nothing else: in Python a `@freeze_time(...)` def or class, or the body of a
-  `with freeze_time(...)`; in JS a file that calls `jest.useFakeTimers()` or `vi.useFakeTimers()`. Its
-  elapsed-assert rows stay. `Temporal.Now.*()` stays listed under JS fake timers, which fake Date only.
+  `arrow.get(0)`, `timezone.localtime(fixed_dt)` and `pendulum.datetime(...)` read no clock and are
+  not listed. A fake clock hides the calendar rows of the reads it fakes: in Python a
+  `@freeze_time(...)` def or class, or the body of a `with freeze_time(...)`; in JS a file that calls
+  `jest.useFakeTimers()` or `vi.useFakeTimers()`. Its elapsed-assert rows stay. `time.tzname` and
+  `time.timezone` stay listed under `freeze_time`, because freezegun fakes no zone. `Temporal.Now.*()`
+  stays listed under JS fake timers, which fake Date only.
 
 Scanned: test files only. Python is `test_*.py`, `*_test.py`, `conftest.py` or any `.py` under a
 `tests` or `test` folder. JS and TS (`.js .mjs .cjs .jsx .ts .tsx .mts .cts`) is a `.test.` or
@@ -465,16 +468,19 @@ PY_PASS_THROUGH = {"round", "int", "float", "abs", "max", "min", "sum", "divmod"
 # A date or zone read with no time given. `time.strftime(fmt)`, `time.localtime()`, `time.gmtime()`,
 # `time.ctime()` and `time.asctime()` read the clock only when no time argument is passed, so they are
 # matched apart from the always-real forms. `time.tzname` and `time.timezone` are attribute reads.
-PY_CALENDAR_NO_ARG = {"time.localtime", "time.gmtime", "time.ctime", "time.asctime",
-                      "pandas.Timestamp.utcnow", "pendulum.today", "arrow.get",
-                      "django.utils.timezone.localtime", "django.utils.timezone.localdate",
-                      "timezone.localtime", "timezone.localdate"}
+PY_CALENDAR_NO_ARG = {"time.localtime", "time.gmtime", "time.ctime", "time.asctime", "pandas.Timestamp.utcnow"}
+# These read the real date unless a time is given, and take a zone by keyword: with no positional argument and
+# nothing but that keyword, the call still reads the real date.
+PY_CALENDAR_ZONE_KW = {"arrow.get": "tzinfo", "django.utils.timezone.localtime": "timezone",
+                       "django.utils.timezone.localdate": "timezone", "timezone.localtime": "timezone",
+                       "timezone.localdate": "timezone"}
 PY_CALENDAR_ATTRS = {"time.tzname", "time.timezone"}
 # The date libraries' `now` calls read the real date whatever zone they are given, as `datetime.now(tz)` does.
 # Matched on the import-resolved name too, so `pd.Timestamp.now` and `from django.utils import timezone` land.
 PY_CALENDAR_NOW = {"datetime.now", "datetime.utcnow", "datetime.datetime.now", "datetime.datetime.utcnow",
                    "date.today", "datetime.today", "datetime.date.today", "datetime.datetime.today",
-                   "pendulum.now", "arrow.now", "arrow.utcnow", "pandas.Timestamp.now",
+                   "pendulum.now", "pendulum.today", "arrow.now", "arrow.utcnow", "pandas.Timestamp.now",
+                   "pandas.Timestamp.today",
                    "django.utils.timezone.now", "timezone.now"}
 # A call of these sets a fake clock for the code under it, so a real-date read there is not a read of the
 # real date. A difference of two clock reads there is still an elapsed-assert.
@@ -654,8 +660,10 @@ def scan_python(text):
             if not (isinstance(first, ast.Constant) and not isinstance(first.value, bool)
                     and isinstance(first.value, (int, float)) and first.value == 0):
                 found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
+        zone_kws = {PY_CALENDAR_ZONE_KW[n] for n in names if n in PY_CALENDAR_ZONE_KW}
         if names & PY_CALENDAR_NOW or (
                 not call.args and not call.keywords and names & PY_CALENDAR_NO_ARG) or (
+                zone_kws and not call.args and all(k.arg in zone_kws for k in call.keywords)) or (
                 len(call.args) == 1 and not call.keywords and names & {"time.strftime"}):
             calendar_calls.append(call)
         capped = bool(names & PY_MARK_CAP) or (id(call) in decorator_calls and bool(names & PY_DECORATOR_CAP))
