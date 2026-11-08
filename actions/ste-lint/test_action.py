@@ -144,7 +144,7 @@ LINT_OK = (json.dumps({"files": 1, "findings": [], "summary": {"error": 0, "warn
 LINT_STE = (json.dumps({"files": 1, "summary": {"error": 1, "warning": 0},
                         "findings": [{"path": "a.md", "line": 5, "code": "STE001", "message": "Long sentence.",
                                       "severity": "error"}]}), 0)
-LINT_EXIT3 = ("", 3)
+LINT_EXIT3 = (LINT_OK[0], 3)  # valid findings JSON, then exit 3: only the exit code can fail the job
 LINT_GARBAGE = ("this is not json\n", 0)
 
 
@@ -985,7 +985,7 @@ for scope, name, tree_run, zero in (
 # both scopes and with fail true or false. Each case proves the linter ran first.
 for scope in ("changed", "all"):
     for fail in ("true", "false"):
-        for label, linter in (("exits 3", LINT_EXIT3), ("prints non-JSON", LINT_GARBAGE)):
+        for label, linter in (("exits 3 after valid JSON", LINT_EXIT3), ("prints non-JSON", LINT_GARBAGE)):
             rc, out = run(scope, fail, stubs={"linter": linter})
             check("run.sh exit codes: linter %s, scope %s, fail=%s → step exits non-zero" % (label, scope, fail),
                   "ste_lint stub ran" in out and rc != 0 and "ste-lint: PASS" not in out, out)
@@ -997,10 +997,20 @@ for fail in ("true", "false"):
     check("run.sh exit codes: git diff of the range fails (no merge base), scope changed, fail=%s → step exits non-zero"
           % fail, rc != 0 and "no merge base" in out, out)
 
+# A base with no merge base: the step's git diff fails. The step names it on a line of its own, with the fix, and
+# exits non-zero for fail true and false. Stub helpers, so the only range read is the step's own diff.
+for fail in ("true", "false"):
+    rc, out = run("changed", fail, change=unrelated_change, stubs={})
+    check("run.sh exit codes: git diff fails, scope changed, fail=%s → 'ste-lint: UNKNOWN, git diff' line, "
+          "fetch-depth 0, non-zero" % fail,
+          any(l.startswith("ste-lint: UNKNOWN, git diff") for l in out.splitlines())
+          and "fetch-depth 0" in out and rc != 0, out)
 
-# action.yml: the fail input opts out of findings only, so its description must not say "never fails".
+
+# action.yml: 'false' opts out of findings only, and a check that crashed still fails. The description must say so,
+# and must not say "never fails".
 fail_block = input_block("fail")
-check("run.sh exit codes: action.yml fail input says it opts out of findings only, not 'never fails'",
-      "findings" in fail_block and "never fails" not in fail_block, fail_block)
+check("run.sh exit codes: action.yml fail input says 'false' opts out of findings only and a crash still fails, not 'never fails'",
+      "findings only" in fail_block and "crashed" in fail_block and "never fails" not in fail_block, fail_block)
 
 sys.exit(1 if failed else 0)
