@@ -2376,7 +2376,7 @@ def case_owner_waits_writes_no_file_and_starts_no_process():
         c.cleanup()
 
 
-# --- owner waits: round 1 review findings ---------------------------------------------------------
+# --- owner waits: cloud record id, act-keyed answers, scan cost, fenced sections ------------------
 # A cloud session names itself three ways: the Stop payload by UUID, its env by cse_<x>, and its
 # get_session record and set_session_tags calls by session_<x>. The hook must read the record id.
 REMOTE_PAYLOAD_ID = "5f2b8c1e-3d4a-4b6e-9c7f-0a1b2c3d4e5f"
