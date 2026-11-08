@@ -401,8 +401,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
-            is_project_config, project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit,
+            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -498,10 +498,9 @@ def __getattr__(name):
 
 # ------------------------------------------------------------------ the silent write
 #
-# Rule 1c. CLAUDE.md (Git): "Never discard a command's output." A discarding REDIRECT is refused on
-# every one of these six subcommands, whatever the subcommand does with its own output: the shell
-# throws the stream away before git ever gets a say, so a hook's refusal and git's own proof of
-# landing are both gone, together, always.
+# A discarding REDIRECT is refused on each of these seven subcommands, whatever the subcommand does
+# with its own output: the shell throws the stream away before git speaks, so a hook's refusal and
+# git's own proof of landing are both lost.
 SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", "pull")
 
 # Gap roster. Each one moves a ref or lands a merge, so each is a write when its
@@ -831,7 +830,9 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
     runs in (`dir_before_segment`, then its own `-C`). A repo under the temp folder is a throwaway
-    and passes, so the repo is judged, never the target. Anything unreadable allows."""
+    and passes, so the repo is judged, never the target. A variable an earlier
+    segment assigned reads as its value. One with no readable value is judged by the folder before
+    it. Any other unreadable part allows."""
     tokens = segment_tokens(segments[number])
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -847,7 +848,7 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     named = _segment_git_c_target(tokens)
     if named is not None:
         where = None if _unexpanded(named) else shell_abs(named, where)
-    if not where or _unexpanded(target):
+    if not where:
         return ""
     primary = primary_checkout(where)
     if not primary:
@@ -855,6 +856,21 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     import tempfile   # lazy: only a real worktree add reaches here
     if path_is_inside(primary, tempfile.gettempdir()):
         return ""
+    if _unexpanded(target):
+        # A variable an earlier segment assigned is read as its value (`_resolve_vars`), so a tree
+        # path through it is judged as the literal path is.
+        mark = "\x00"
+        target = _resolve_vars("; ".join(segments[:number]) + "; " + mark + target).rsplit(mark, 1)[-1]
+    if _unexpanded(target):
+        # A variable with no value the guard can read (a loop variable): the folder before it is all
+        # the guard can read. The tree passes only when that folder sits in the home folder, as the
+        # same path does with a literal tail; a variable first, or a folder elsewhere, is refused.
+        literal = re.split(r"[$%`]", target, maxsplit=1)[0]
+        folder = os.path.dirname(literal)
+        tree = shell_abs(folder, where) if folder else None
+        inside = tree is not None and path_is_inside(
+            tree, os.path.join(primary, ".claude", "worktrees")) is True
+        return "" if inside else target
     tree = shell_abs(target, where)
     if tree is None:
         return ""
@@ -1602,9 +1618,14 @@ DESIGNER_SCOPE_REASON = (
 )
 
 
+PYTHON_CACHE_DIRS = ("__pycache__", ".pytest_cache")
+
+
 def is_test_rel(rel: str) -> bool:
     """True when a repository-relative path is a test path (see the block comment above)."""
     parts = [part for part in norm(rel).split("/") if part]
+    if any(part in PYTHON_CACHE_DIRS for part in parts):
+        return False   # a Python cache folder holds no test source, so clearing it is no test change
     return bool(parts) and (
         bool(TEST_BASENAME.match(parts[-1].lower())) or bool(JAVA_TEST.match(parts[-1]))
         or bool(SWIFT_TEST.match(parts[-1])) or any(XCODE_TEST_DIR.match(p) for p in parts)
@@ -4453,6 +4474,56 @@ def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool
         folder = parent
 
 
+def _homeless_write_hit(targets, command: str, where: str, session_id: str, has_agent: bool,
+                        temp: str, writes: bool, payload=None) -> str:
+    """The log detail when a write from a cwd in no checkout lands in a checkout of the home clone,
+    else ''. TARGETS is a write tool's targets; None means the shell COMMAND. The home clone is the
+    one that holds CLAUDE_PROJECT_DIR; unset or in no clone, it is unknown and nothing is refused.
+    The temp folder (scratchpads, scratch clones), a top-level call's own scratchpad, the folder its
+    session-home record names (the session's own lane) and the clone's common `.git` directory pass.
+    Stat and small file reads only: no git is spawned."""
+    home = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    try:
+        top = _checkout_root_by_stat(os.path.realpath(home)) if home else ""
+        home_common = _git_common_dir(top) if top else ""
+    except Exception:
+        return ""
+    if not home_common:
+        return ""
+    own_home = ""
+    sid = payload.get("session_id") if isinstance(payload, dict) else None
+    if not has_agent and isinstance(sid, str) and SESSION_ID_RE.match(sid):
+        try:
+            with open(os.path.join(home_common, SESSION_HOME_DIR, sid), encoding="utf-8") as handle:
+                own_home = handle.read().strip()
+        except OSError:
+            own_home = ""
+
+    def in_home_clone(target, at, verb=""):
+        try:
+            resolved = _resolved(target, at)
+            if not has_agent and under_session_scratchpad(resolved, session_id):
+                return False
+            if own_home and os.path.isdir(own_home) and path_is_inside(resolved, own_home) is True:
+                return False
+            if path_is_inside(resolved, temp) is True:
+                return False
+            root = _checkout_root_by_stat(os.path.realpath(resolved))
+            return (bool(root) and _git_common_dir(root) == home_common
+                    and path_is_inside(resolved, os.path.join(root, ".git")) is not True)
+        except Exception:
+            return False
+
+    if targets is None:
+        hit = _shell_write_hit(command, where, in_home_clone, follow_cd=True,
+                               predicate_command=True) if writes else ""
+        return "shell write into the home clone from a cwd in no checkout: " + hit if hit else ""
+    for target in targets:
+        if in_home_clone(target, where):
+            return "write target in the home clone from a cwd in no checkout: " + target
+    return ""
+
+
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
                        payload=None,
                        has_agent: bool = True) -> str:
@@ -4460,7 +4531,10 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. A
     linked checkout in this session's own scratchpad passes for a call with no `agent_id` and a
     valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
-    state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
+    state is unknown and passes. A cwd in no checkout reads no `cd` and no git verb, but a write
+    from it into a checkout of the home clone (the one CLAUDE_PROJECT_DIR names) is refused
+    (`_homeless_write_hit`), except into the session's own recorded home; with that variable unset it passes. One git read per call that can
+    write, and none from a cwd in no checkout.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
     `payload` marks the target as the caller's own home or red-run folder (a write strictly inside that red-run
     folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
@@ -4493,12 +4567,17 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         return ""
     roots = clone_checkouts(where) if where else None
     own = _owning_checkout(where, roots) if roots else ""
-    if not own:
-        return ""
-
-    tops, common, stranded = _clone_scope(roots, own)
     import tempfile   # lazy: only a call that can write or move reaches here
     temp = os.path.realpath(tempfile.gettempdir())
+    if not own:
+        # A cwd in no checkout (stat alone says so) reads no `cd` and no git verb. It may not write
+        # into a checkout of the home clone, the one CLAUDE_PROJECT_DIR names. An unreadable git state
+        # (a `.git` above cwd that git cannot list) stays unknown and passes.
+        if not where or _checkout_root_by_stat(os.path.realpath(where)):
+            return ""
+        return _homeless_write_hit(targets, command if targets is None else "", where, session_id,
+                                   has_agent, temp, writes, payload)
+    tops, common, stranded = _clone_scope(roots, own)
     clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
 
     def elsewhere(target, at, verb=""):
@@ -4606,9 +4685,53 @@ def session_home_record(payload, primary: str):
     return os.path.join(primary, ".git", SESSION_HOME_DIR, sid)
 
 
+def _session_lived(payload, tool: str, where: str, folder: str) -> bool:
+    """True when this call is a write or a mutating call that acts inside FOLDER: the session worked
+    there, so the folder was its home and no mere visit. A write tool counts by its cwd or a target
+    inside FOLDER. A shell call counts by a git verb of SESSION_HOME_GIT_VERBS that runs inside
+    FOLDER, by a shell write whose target resolves inside it from any cwd, or by a shell write whose
+    cwd or `cd` move is inside it."""
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return False
+
+    def inside(path) -> bool:
+        return path_is_inside(path, folder) is True
+
+    try:
+        if tool in WRITE_TOOLS:
+            return (inside(os.path.realpath(where))
+                    or any(inside(_resolved(target, where)) for target in write_targets(tool_input)))
+        if tool in SHELL_TOOLS:
+            command = str(tool_input.get("command", "") or "")
+            stripped = strip_heredoc_bodies(command)
+            if "git" in stripped and session_home_git_hit(stripped, where, lambda at, _from: inside(at)):
+                return True
+            if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)):
+                return False
+            return (inside(os.path.realpath(where))
+                    or any(inside(move) for move in _cd_targets(tool, command, where))
+                    or bool(_shell_write_hit(stripped, where, lambda target, at: inside(_resolved(target, at)),
+                                             follow_cd=True)))
+    except Exception:
+        return False
+    return False
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
-    session's own ExitWorktree deletes it. An agent call does neither."""
+    session's own ExitWorktree deletes it. An agent call does neither. A sibling file
+    `<record>.lived` marks a lane the session wrote in, so the record file itself stays the one path
+    every reader expects. The mark is written only once the call is allowed (`guard_core.on_allow`),
+    so a call that any rule refuses marks nothing. A call from the primary drops a record that is not
+    marked: that lane was a visit."""
     if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
         # create_session reaches the guard for rules lane-effort-pin and agent-model-floor; it keeps no record
         return
@@ -4617,6 +4740,7 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
     record = session_home_record(payload, primary) if primary else ""
     if not record:
         return
+    lived = record + ".lived"
     try:
         try:
             with open(record, encoding="utf-8") as handle:
@@ -4628,25 +4752,47 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
             # worktree is gone stays, and the guard keeps judging.
             if held and os.path.isdir(held):
                 os.remove(record)
+                _remove_quietly(lived)
             return
-        if not lane or held == lane or session_home_agent_tree(lane):
+        if not lane and held and os.path.isdir(held):
+            if os.path.exists(lived):
+                return
+            if _session_lived(payload, tool, where, held):
+                guard_core.on_allow(lambda: _mark_lived(lived))
+                return
+            tool_input = payload.get("tool_input")
+            command = str(tool_input.get("command", "") or "") if isinstance(tool_input, dict) else ""
+            # A `cd` from the primary into the held folder is the way back home, so it keeps the
+            # record (`_cd_home_exempt` reads it in the same call).
+            if tool in SHELL_TOOLS and any(
+                    path_is_inside(move, held) is True for move in _cd_targets(tool, command, where)):
+                return
+            os.remove(record)   # the session came back to the primary: that lane was a visit
             return
-        import tempfile   # lazy: only a first or changed record reaches here
-        folder = os.path.dirname(record)
-        os.makedirs(folder, exist_ok=True)
-        handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as out:
-                out.write(lane)
-            os.replace(temp, record)  # one step: a reader never sees a half-written path
-        except BaseException:
+        if not lane or session_home_agent_tree(lane):
+            return
+        if held != lane:
+            import tempfile   # lazy: only a first or changed record reaches here
+            folder = os.path.dirname(record)
+            os.makedirs(folder, exist_ok=True)
+            _remove_quietly(lived)   # a new lane starts as a visit
+            handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
             try:
-                os.remove(temp)
-            except OSError:
-                pass
-            raise
+                with os.fdopen(handle, "w", encoding="utf-8") as out:
+                    out.write(lane)
+                os.replace(temp, record)  # one step: a reader never sees a half-written path
+            except BaseException:
+                _remove_quietly(temp)
+                raise
+        if not os.path.exists(lived) and _session_lived(payload, tool, where, lane):
+            guard_core.on_allow(lambda: _mark_lived(lived))
     except Exception:
         pass  # an unwritable record means no refusal later, never a failed call
+
+
+def _mark_lived(path: str) -> None:
+    with open(path, "w", encoding="utf-8"):
+        pass
 
 
 def session_home_git_hit(command: str, where: str, in_primary) -> str:
@@ -5483,6 +5629,7 @@ def main() -> None:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:
         judge(payload)
+        guard_core.run_on_allow()  # judge returns only for an allowed call
     except SystemExit:
         raise
     except Exception as exc:

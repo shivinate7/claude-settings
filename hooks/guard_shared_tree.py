@@ -54,29 +54,56 @@ def checkout_names_a_path(args, root: str = "") -> str:
     return ""
 
 
+# `git switch -c <name>` and `-C <name>` take a value: the rest of that cluster, or the next
+# argument, is the branch name and never a flag.
+SWITCH_SHORT_WITH_VALUE = "cC"
+# `git clean -e <pattern>` takes a value in the same way.
+CLEAN_SHORT_WITH_VALUE = "e"
+
+
+def _short_flags(arg: str, value_letters: str) -> str:
+    """The flag letters of one short cluster, up to the first letter that takes a value."""
+    letters = ""
+    for letter in arg[1:]:
+        letters += letter
+        if letter in value_letters:
+            break
+    return letters
+
+
 def switch_discards(args) -> bool:
     """True when a `git switch` carries a flag that throws the local changes away: `-f`,
     `--force` (the same flag as `checkout -f`) or `--discard-changes`. A short flag may sit
-    inside a cluster (`-fc`). A long flag is read whole, so `--force-create`, which resets a
+    inside a cluster (`-fc`), but the letters after `-c` or `-C` are the branch name (`-Cf x`
+    makes the branch `f`). A long flag is read whole, so `--force-create`, which resets a
     branch and keeps the tree, does not match."""
     for arg in args:
         if arg in ("--force", "--discard-changes"):
             return True
-        if arg.startswith("-") and not arg.startswith("--") and "f" in arg:
+        if arg.startswith("-") and not arg.startswith("--") and \
+                "f" in _short_flags(arg, SWITCH_SHORT_WITH_VALUE):
             return True
     return False
 
 
 def clean_deletes_files(args) -> bool:
-    """True when `git clean` carries the force flag that makes it delete."""
+    """True when `git clean` carries the force flag that makes it delete. A dry run (`-n`,
+    `--dry-run`, in any place in a cluster before `-e`) lists and deletes nothing."""
+    forced = False
     for arg in args:
+        if arg == "--dry-run":
+            return False
         if arg == "--force":
-            return True
+            forced = True
         if arg.startswith("--"):
             continue
-        if arg.startswith("-") and "f" in arg:
-            return True
-    return False
+        if arg.startswith("-"):
+            letters = _short_flags(arg, CLEAN_SHORT_WITH_VALUE)
+            if "n" in letters:
+                return False
+            if "f" in letters:
+                forced = True
+    return forced
 
 
 STASH_READ_ACTIONS = {"list", "show", "help"}

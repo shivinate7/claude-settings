@@ -2695,6 +2695,12 @@ sh("shared tree: a stash from the PowerShell tool", VCS + " stash", "deny", "sha
    tool="PowerShell", cwd=NOGIT)
 
 sh("clean: -n only lists", VCS + " clean -n", "allow", cwd=NOGIT)
+# A DRY RUN THAT NAMES THE FORCE FLAG. `-n` makes the clean list only, so `-fdn` and `-nfd` delete
+# nothing. `-e` takes a value, so in `-fden` the `n` is an exclude pattern, and that clean deletes.
+sh("clean: -fdn is a dry run and is allowed", VCS + " clean -fdn", "allow", cwd=NOGIT)
+sh("clean: -nfd is a dry run and is allowed", VCS + " clean -nfd", "allow", cwd=NOGIT)
+sh("clean: -fden takes n as the exclude pattern and stays denied", VCS + " clean -fden", "deny",
+   "shared-tree", cwd=NOGIT)
 sh("checkout: a new branch keeps every file", VCS + " checkout -b claude/lane main", "allow",
    cwd=NOGIT)
 sh("checkout: a branch move keeps every file", VCS + " checkout main", "allow", cwd=NOGIT)
@@ -2881,6 +2887,21 @@ for _command in ("switch main", "switch -c newbranch"):
        "allow", cwd=GITMAIN)
     sh("looser-git-acts: %s is allowed in a worktree" % _command, VCS + " " + _command,
        "allow", cwd=GITWT)
+
+# `-C` takes the new branch's name, so the `f` in `-Cf` names the branch and is no force flag. A plain
+# `-f` (and `-fC`, `-fc`) still throws the local changes away, so it keeps the verdict above.
+sh("looser-git-acts: switch -Cf x is a branch create, allowed in the shared checkout",
+   VCS + " switch -Cf x", "allow", cwd=GITMAIN)
+sh("looser-git-acts: switch -Cf x is a branch create, allowed in a worktree",
+   VCS + " switch -Cf x", "allow", cwd=GITWT)
+sh("looser-git-acts: switch -fC x still denies in the shared checkout", VCS + " switch -fC x",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("looser-git-acts: switch -fC x still asks in a worktree", VCS + " switch -fC x", "ask",
+   "shared-tree", cwd=GITWT)
+sh("looser-git-acts: switch -fc x still denies in the shared checkout", VCS + " switch -fc x",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("looser-git-acts: switch -fc x still asks in a worktree", VCS + " switch -fc x", "ask",
+   "shared-tree", cwd=GITWT)
 
 # A FOLDER WITH NO `--`. Git reads a bare name as a path, so a folder is a whole-folder discard.
 sh("per-file deny: checkout of a folder with no -- in the shared checkout",
@@ -3899,6 +3920,22 @@ add("hand-made worktree: an Agent call with no isolation, whose prompt names a w
     prompt="Work in the worktree at ../lane-x. Run `git worktree add ../lane-x` first.")
 add("hand-made worktree: an Explore Agent call with no isolation passes", "allow", tool="Agent",
     cwd=HMMAIN, subagent_type="Explore", description="look", prompt="Read the repo.")
+
+# A LOOP THAT BUILDS THE TREE PATH FROM A VARIABLE. The path is `/tmp/.../wt-$c` and the ref is `$c`,
+# so each pass makes a tree outside the home folder, as the one-line form does. The one-line control
+# is refused on main already. A quoted word with a `#` in it is the same act: a scanner trap.
+hm_deny("the one-line form that makes a tree outside the home folder is refused",
+        HMADD + "-q --detach /tmp/claude-0/wt-A A")
+hm_deny("a for loop whose tree path holds a loop variable is refused",
+        "for c in A B; do " + HMADD + "-q --detach /tmp/claude-0/wt-$c $c; done")
+hm_deny("a for loop whose quoted tree path holds a # and a loop variable is refused",
+        'for c in A B; do ' + HMADD + '-q --detach "/tmp/claude-0/#wt-$c" $c; done')
+hm_allow("a for loop that builds its trees under the home folder passes",
+         "for c in A B; do " + HMADD + "-q --detach " + HMIN + "/.claude/worktrees/wt-$c $c; done")
+# A tree path that a shell variable resolves to the home folder. The `/tmp/...-$c` deny above is the
+# control: a variable that resolves outside the home folder stays refused.
+hm_allow("a tree path through a variable that resolves to the lanes folder passes",
+         "P=" + HMIN + "/.claude/worktrees; " + HMADD + '-q "$P/hmvar" -b hmvar')
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
@@ -12675,6 +12712,25 @@ sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs t
    "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 
+# THE DESCRIPTOR INSIDE A SUBSHELL, A BACKTICK OR A BACKGROUND JOB. A `)`, a backtick or a `&` glued
+# after `&1` ends the descriptor word, not a path. Each ALLOW reads a descriptor. Each DENY still writes
+# a file. The last three are scanner traps: a `#` and an apostrophe inside quotes must not end the
+# quote early or open a comment that hides the write after them.
+sh("frozen dup: x=$(ls 2>&1) from the live pin is allowed", "x=$(ls 2>&1)", "allow", cwd=LIVE_PIN)
+sh("frozen dup: (ls 2>&1) from the live pin is allowed", "(ls 2>&1)", "allow", cwd=LIVE_PIN)
+sh("frozen dup: x=`ls 2>&1` from the live pin is allowed", "x=`ls 2>&1`", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 2>&1& from the live pin is allowed", "ls 2>&1&", "allow", cwd=LIVE_PIN)
+sh("frozen dup: x=$(ls 2>&1) && echo x > f from the live pin stays frozen",
+   "x=$(ls 2>&1) && echo x > f", "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: ls > \"&1)\" from the live pin is a real file and stays frozen", 'ls > "&1)"',
+   "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a # inside quotes beside a dup from the live pin is allowed",
+   'echo "a # b" 2>&1', "allow", cwd=LIVE_PIN)
+sh("frozen dup: a # in quotes does not hide a write after it, from the live pin",
+   'echo "#"; echo x > f', "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: an apostrophe inside double quotes beside a dup is allowed",
+   'echo "don\'t" 2>&1', "allow", cwd=LIVE_PIN)
+
 # ================================================================ 6a-2. cap-ask-fix (frozen)
 # Each case is a frozen write the guard reads as text, so each case names its safety hole. Each DENIES. The
 # cap-key twins of H2 and H3 are in the model-cap section below.
@@ -14017,6 +14073,20 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
+
+# ---- a builder's cache cleanup. A Python cache folder is no test change, so `rm -rf` of
+# `__pycache__` or `.pytest_cache` under a test folder passes. Any other path under a test folder is
+# still a test path, including one reached through `..` from a cache folder.
+sh("builder-test: rm -rf tests/__pycache__ is cache cleanup and is allowed", "rm -rf tests/__pycache__",
+   "allow", **B)
+sh("builder-test: rm -rf tests/.pytest_cache is cache cleanup and is allowed",
+   "rm -rf tests/.pytest_cache", "allow", **B)
+sh("builder-test: rm -rf tests/test_x.py stays refused", "rm -rf tests/test_x.py", "deny", BT, **B)
+sh("builder-test: rm -rf tests stays refused", "rm -rf tests", "deny", BT, **B)
+sh("builder-test: rm -rf of a cache folder with a test file beside it stays refused",
+   "rm -rf tests/__pycache__ tests/test_x.py", "deny", BT, **B)
+sh("builder-test: rm -rf of a cache folder reached through .. to a test file stays refused",
+   "rm -rf tests/__pycache__/../test_x.py", "deny", BT, **B)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
@@ -18470,10 +18540,13 @@ def decide(case):
                    json.dumps(case["probe_spec"])]
     started = time.monotonic()
     limit = case.get("max_seconds")
+    # A payload of bytes reaches the guard as those bytes, so a case can send a stream that is no UTF-8
+    # (see stdin_invalid_byte_case). Its output is decoded as UTF-8, a byte that is no UTF-8 replaced.
+    as_bytes = isinstance(payload, bytes)
     try:
         # A case with a limit stops its guard at the limit, so a guard too slow fails at once, not at 120 s.
         result = subprocess.run(
-            command, input=payload, capture_output=True, text=True, env=env,
+            command, input=payload, capture_output=True, text=not as_bytes, env=env,
             timeout=min(120, limit + 1) if limit else 120, cwd=case.get("process_cwd") or None,
         )
     except subprocess.TimeoutExpired:
@@ -18484,8 +18557,13 @@ def decide(case):
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
     if result.returncode != 0:
-        return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
-    return read_decision(result.stdout)
+        return "error", "exit %d: %s" % (result.returncode, _as_text(result.stderr).strip()[:200])
+    return read_decision(_as_text(result.stdout))
+
+
+def _as_text(data):
+    """`data` as text: a bytes stream decoded as UTF-8, a byte that is no UTF-8 shown as a replacement."""
+    return data.decode("utf-8", "replace") if isinstance(data, bytes) else data
 
 
 def read_decision(stdout):
@@ -20892,6 +20970,8 @@ def worktree_home_cross_checkout_case():
     """Rule 0, `other-checkout`, beside `worktree-home`: any session, agent or not, may not write
     into a checkout of its clone other than the one its cwd stands in. A target in no checkout of
     the clone is allowed. A nested worktree belongs to itself, not to the primary that holds it.
+    A session whose cwd is in no checkout is refused a write into a checkout of its home clone, the
+    one CLAUDE_PROJECT_DIR names; with that variable unset, no clone is named and the write passes.
     Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md."""
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xco")
     in_a = os.path.join(lane_a, "src", "app.py")
@@ -20951,6 +21031,83 @@ def worktree_home_cross_checkout_case():
           file_path=exclude, content="x")
     check("shell append into the common git directory", "allow", "Bash", lane_b,
           command="echo x >> " + slash(exclude))
+    # THE CWD IN NO CHECKOUT. Decision an-agent-outside-its-home-tree-must-stop: each session writes
+    # only inside its own checkout. A top-level session works from its scratchpad, so every case here
+    # runs from one. Its own scratchpad, its own scratchpad checkout, a clone or repo it made there,
+    # the config folder, a notes folder outside the clone and a copy out of the clone stay allowed.
+    # Own fixture, so no other check sees its worktree.
+    r3_primary, _r3_lane_a, _r3_lane_b, _r3_scratch = _cross_checkout_fixture("xcor3")
+    r3_tmp = os.path.join(ROOT, "xcor3_tmp")   # the temp folder the guard reads as its own
+    r3_sid = "xcor3-sid-0001"
+    r3_pad = os.path.join(r3_tmp, "-home-user-claude-settings", r3_sid, "scratchpad")
+    os.makedirs(r3_pad, exist_ok=True)
+    home = {"CLAUDE_PROJECT_DIR": r3_primary}
+    r3_problems = []
+
+    def from_pad(label, expect, tool, env=home, **tool_input):
+        got, reason = decide({
+            "raw": None, "tool": tool, "cwd": r3_pad, "session": r3_sid, "env_path": None,
+            "config": None, "agent_id": None, "process_cwd": None, "temp": r3_tmp,
+            "env": env, "tool_input": tool_input})
+        if got != expect:
+            r3_problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or r3_primary in reason
+                                   or r3_tmp in reason):
+            r3_problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # RED. From the scratchpad, a write into the home clone, and a shell redirect into it, are refused.
+    from_pad("red: a Write from a scratchpad cwd into the home clone", "deny", "Write",
+             file_path=os.path.join(r3_primary, "f.txt"), content="x")
+    from_pad("red: a shell redirect from a scratchpad cwd into the home clone", "deny", "Bash",
+             command="echo x > " + slash(os.path.join(r3_primary, "f")))
+    # GREEN. Each one is a false alarm a top-level session working from its scratchpad would hit.
+    from_pad("green: a Write inside the scratchpad", "allow", "Write",
+             file_path=os.path.join(r3_pad, "note.md"), content="x")
+    from_pad("green: a shell redirect inside the scratchpad", "allow", "Bash",
+             command="echo x > " + slash(os.path.join(r3_pad, "out.txt")))
+    from_pad("green: a Write into the config folder", "allow", "Write",
+             file_path=os.path.join(CFG, "r3-note.md"), content="x")
+    from_pad("green: a Write into a notes folder outside the clone", "allow", "Write",
+             file_path=os.path.join(ROOT, "xcor3_notes", "side.md"), content="x")
+    from_pad("green: a copy out of the home clone into the scratchpad", "allow", "Bash",
+             command="cp " + slash(os.path.join(r3_primary, "src", "app.py")) + " "
+             + slash(os.path.join(r3_pad, "app-copy.py")))
+    from_pad("green: a Read of the home clone", "allow", "Read",
+             file_path=os.path.join(r3_primary, "src", "app.py"))
+    from_pad("green: a git read of the home clone", "allow", "Bash",
+             command=VCS + " -C " + slash(r3_primary) + " log --oneline -1")
+    own_checkout = os.path.join(r3_pad, "wt-notes")   # this session's own linked checkout
+    if run_vcs(r3_primary, "worktree", "add", "-q", own_checkout, "-b", "xcor3-notes").returncode != 0:
+        sys.exit("fixture setup failed in worktree_home_cross_checkout_case: own scratchpad checkout")
+    from_pad("green: a Write into the own scratchpad checkout", "allow", "Write",
+             file_path=os.path.join(own_checkout, "src", "new.txt"), content="x")
+    from_pad("green: a shell redirect into the own scratchpad checkout", "allow", "Bash",
+             command="echo x > " + slash(os.path.join(own_checkout, "src", "new2.txt")))
+    scratch_clone = os.path.join(r3_pad, "other-clone")   # a clone of the same repo, made here
+    if run_vcs(r3_pad, "clone", "-q", r3_primary, scratch_clone).returncode != 0:
+        sys.exit("fixture setup failed in worktree_home_cross_checkout_case: the scratch clone")
+    from_pad("green: a Write into a scratch clone of the same repo", "allow", "Write",
+             file_path=os.path.join(scratch_clone, "src", "app.py"), content="x")
+    other_repo = os.path.join(r3_pad, "other-tool")   # another repo, made here
+    make_repo(other_repo, {"x.py": "1\n"})
+    from_pad("green: a Write into another repo in the scratchpad", "allow", "Write",
+             file_path=os.path.join(other_repo, "x.py"), content="x")
+    from_pad("green: with no CLAUDE_PROJECT_DIR, no home clone is named and a Write passes", "allow",
+             "Write", env={}, file_path=os.path.join(r3_primary, "f.txt"), content="x")
+    from_pad("green: a relative Write, resolved against the scratchpad", "allow", "Write",
+             file_path="relative.md", content="x")
+    from_pad("green: a cd into the own scratchpad checkout, then a relative write", "allow", "Bash",
+             command="cd " + slash(own_checkout) + " && echo x > a.txt")
+    from_pad("green: a heredoc in the scratchpad whose body names a home-clone path", "allow", "Bash",
+             command="cat > " + slash(os.path.join(r3_pad, "notes.md")) + " <<'EOF'\n"
+             + os.path.join(r3_primary, "src", "app.py") + "\nEOF")
+    from_pad("green: a cat read of a home-clone path", "allow", "Bash",
+             command="cat " + slash(os.path.join(r3_primary, "src", "app.py")))
+    from_pad("green: a git add in another repo in the scratchpad", "allow", "Bash",
+             command=VCS + " -C " + slash(other_repo) + " add x.py")
+    problems.extend(r3_problems)
+
     # A whole worktree removed by hand: refused, and the remedy names the proper tool.
     got, reason = _decide_full("Bash", primary, command="rm -rf .claude/worktrees/lane-b")
     if got != "deny" or "other-checkout" not in reason or "git worktree remove" not in reason \
@@ -22339,10 +22496,115 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a stranded cwd
                          xcl_override_stranded_case))
 
 
+def homeless_write_into_own_home_case():
+    """Rule other-checkout, the act for a cwd in no checkout: a write into a checkout of the home clone is
+    refused, but not into this session's own recorded home, which the session's lane call wrote. The cwd
+    is a folder in no checkout and CLAUDE_PROJECT_DIR names the primary. Control: a Write into the
+    primary's own files from the same cwd is still refused."""
+    primary = sh_new_primary("homeless")
+    lane, _branch = sh_add_lane(primary, "lane-homeless")
+    session = sh_session()
+    nowhere = os.path.join(ROOT, "homeless_nowhere")
+    os.makedirs(nowhere, exist_ok=True)
+    tmp = os.path.join(ROOT, "tmp")
+
+    def judge(cwd, tool, tool_input):
+        return decide({
+            "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
+            "config": None, "agent_id": None, "process_cwd": None, "temp": tmp,
+            "env": {"CLAUDE_PROJECT_DIR": primary}, "tool_input": tool_input})
+
+    problems = []
+    got, reason = judge(lane, "Bash", {"command": "echo hi"})
+    if got != "allow":
+        problems.append("the lane call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    got, reason = judge(nowhere, "Write", {"file_path": os.path.join(lane, "src", "app.py"), "content": "x"})
+    if got != "allow":
+        problems.append("a Write from a cwd in no checkout into the session's own recorded home: want allow, "
+                        "got %s (%s)" % (got, reason[:120]))
+    got, reason = judge(nowhere, "Write", {"file_path": os.path.join(primary, "src", "app.py"), "content": "x"})
+    if got != "deny" or "other-checkout" not in reason or primary in reason:
+        problems.append("control: a Write from a cwd in no checkout into the primary's own files: want deny "
+                        "naming other-checkout and no path, got %s (%s)" % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("a Write from a cwd in no checkout passes into the session's own recorded home, "
+                  "and is refused into the primary's own files")
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: a Write from a cwd in no checkout passes into the session's own "
+                         "recorded home, and is refused into the primary's own files",
+                         homeless_write_into_own_home_case))
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
 FAMILY = "misc"  # this literal mixes several rules, so its log checks are not one family
+
+# ---- stdin is read as UTF-8 (debt guard-stdin-not-utf8). guard_core._force_utf8_streams reconfigures
+# stdout and stderr only, so under a locale that is not UTF-8 the guard reads a non-ASCII payload
+# back changed. The locale is LC_ALL=C with locale coercion and UTF-8 mode off: plain LC_ALL=C gives
+# UTF-8 stdin on Linux (coercion), which would pass on main and show nothing. The probe runs the
+# reconfigure and one read in a child process. The ASCII payload is the control.
+STDIN_PROBE = ("import sys; sys.path.insert(0, %r); import guard_core; guard_core._force_utf8_streams(); "
+               "sys.stdout.write(ascii(sys.stdin.read()))" % HERE)
+NON_UTF8_LOCALE = dict(os.environ, LC_ALL="C", PYTHONCOERCECLOCALE="0", PYTHONUTF8="0")
+NON_UTF8_LOCALE.pop("PYTHONIOENCODING", None)
+
+
+def stdin_utf8_case():
+    """A non-ASCII stdin payload is read back unchanged under a non-UTF-8 locale; ASCII is the control."""
+    problems = []
+    for payload, want in (("café", "'caf\\xe9'"), ("abc", "'abc'")):
+        got = subprocess.run([sys.executable, "-c", STDIN_PROBE], input=payload.encode("utf-8"),
+                             env=NON_UTF8_LOCALE, capture_output=True, timeout=60)
+        text = got.stdout.decode("ascii", "replace")
+        if got.returncode != 0 or text != want:
+            problems.append("stdin %r read back as %s, want %s" % (payload, text[:60], want))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a non-ASCII stdin payload is read back unchanged under LC_ALL=C with coercion and UTF-8 mode off"
+
+
+LOG_CHECKS_EXTRA.append(("misc: the guard's stdin is read as UTF-8 under a non-UTF-8 locale, so a non-ASCII "
+                         "payload comes back unchanged", stdin_utf8_case))
+
+
+def stdin_invalid_byte_case():
+    """A stdin payload with one byte that is no UTF-8 is still judged. The guard keeps the byte, so the
+    deny-worthy command in the payload is refused, and the unreadable input is not allowed as a whole.
+    The control is the same payload without the byte. The last row puts the byte after the deny-worthy
+    part of the command, so the refusal is judged on a command that holds it."""
+    def payload(command, description):
+        body = {"tool_name": "Bash", "tool_input": {"command": command, "description": description},
+                "cwd": NOGIT}
+        return json.dumps(body).encode("utf-8").replace(b"@@BAD@@", b"\xff")
+
+    rows = (
+        ("the control, no odd byte", payload("rm -rf /", "clear the scratch")),
+        ("one odd byte in the description", payload("rm -rf /", "clear the scratch @@BAD@@")),
+        ("one odd byte after the deny-worthy part of the command",
+         payload("rm -rf / ; echo done @@BAD@@", "clear the scratch")),
+    )
+    problems = []
+    for label, data in rows:
+        got, reason = decide({
+            "raw": data, "tool": "Bash", "cwd": NOGIT, "session": None, "env_path": None,
+            "config": None, "agent_id": None, "process_cwd": None, "temp": None, "env": None,
+            "tool_input": {}})
+        problem = ov_want(got, reason, "deny", "destructive-delete")
+        if problem:
+            problems.append("%s: %s" % (label, problem))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a payload with one odd byte is refused like its control, not allowed as unreadable input"
+
+
+LOG_CHECKS_EXTRA.append(("misc: a stdin payload with one byte that is no UTF-8 is judged, so its deny-worthy "
+                         "command is refused, not allowed as unreadable input", stdin_invalid_byte_case))
 LOG_CHECKS = (
     ("log: one line per refusal and none for an allow", log_case),
     ("log: the refused file is named in the log and nowhere else", log_env_case),
@@ -22408,8 +22670,9 @@ LOG_CHECKS = (
      session_is_live_backwards_clock_step_case),
     ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "
      "unreadable", worktree_home_case),
-    ("worktree-home: any session's write into another checkout of its clone is refused; outside "
-     "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: any session's write into another checkout of its clone is refused, and a write "
+     "from a cwd in no checkout into its home clone is refused; outside the clone, its scratchpad, its "
+     "own scratchpad checkout and a scratch clone pass", worktree_home_cross_checkout_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
@@ -23078,6 +23341,86 @@ LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -
                          "pass", session_home_clean_reads_case))
 
 
+def session_home_clean_dry_run_case():
+    """Rule session-home: while the record is lost, `git clean -fdn` and `git clean -nfd` in the
+    primary checkout pass, since a dry run deletes nothing. In `-fden` the `n` is the exclude
+    pattern, so that clean still deletes and stays refused."""
+    primary = sh_new_primary("cleandry")
+    lane, branch = sh_add_lane(primary, "lane-cleandry")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    for command in (VCS + " clean -fdn", VCS + " clean -nfd"):
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    command = VCS + " clean -fden"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    problems += sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git clean -fdn and -nfd in the primary pass while the record is lost; -fden is refused"
+
+
+LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -fdn and -nfd in the primary "
+                         "are dry runs and pass; -fden is refused", session_home_clean_dry_run_case))
+
+
+def session_home_lane_visit_case():
+    """Rule session-home: a visit from a lane tree is no home once the session calls into the primary
+    while that lane's folder still stands. The primary call drops the record, so after the tree is
+    removed a primary Write passes."""
+    primary = sh_new_primary("lanevisit")
+    lane, branch = sh_add_lane(primary, "lane-visit")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    _decide_full("Bash", primary, session=session, command="echo hi")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    if got != "allow":
+        problems.append("a primary Write after the visit and the tree's removal: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a primary call while the lane stands drops the record; the primary Write passes after the removal"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a call into the primary while a visited lane stands drops that lane's "
+                         "record, so the primary stays writable once the lane is removed",
+                         session_home_lane_visit_case))
+
+
+def session_home_lane_visit_kept_case():
+    """Rule session-home: a visit from a lane tree that never comes back to the primary stays the home.
+    Once the tree is removed, a primary Write is refused, as the rule refuses a lost home."""
+    primary = sh_new_primary("lanevisitkept")
+    lane, branch = sh_add_lane(primary, "lane-visit-kept")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    problems += sh_refusal_problems("a primary Write after a visit with no return", got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a visit with no return to the primary keeps the lane as home: the primary Write is refused"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a visit from a lane tree with no return to the primary keeps the lane "
+                         "as home, so a primary Write is refused once the lane is removed",
+                         session_home_lane_visit_kept_case))
+
+
 def session_home_agent_tree_inspect_case():
     """Rule session-home: a top-level call (no agent_id) whose cwd sits in an agent's worktree,
     `.claude/worktrees/agent-<id>`, is an orchestrator inspecting that tree. It writes no session
@@ -23198,6 +23541,212 @@ LOG_CHECKS_EXTRA.append(("session-home: an owner override lifts the refusal, whi
                          "never_lifted", session_home_owner_override_lifts_case))
 LOG_CHECKS_EXTRA.append(("session-home: the record and the refusal add no git spawn to the same call "
                          "with no session", session_home_spawn_cost_case))
+
+
+# THE LANE'S OWN ACTS MARK IT LIVED. A lane commit or merge changes the lane's branch and files, so it
+# makes the lane home as a shell write does. The cases below pin that, the lived mark of a shell write
+# from the primary, the refused writes that mark nothing, and the cost of the `<record>.lived` file.
+
+
+def sh_lane_then_visit_case(tag, command):
+    """Rule session-home: an act in a lane makes the lane home. A primary call after it is no visit, so
+    once the lane is removed a primary Write is refused, naming session-home. `command` runs in the lane.
+    The control is a lane shell write, which the rule already counts."""
+    primary = sh_new_primary("verb-" + tag)
+    lane, branch = sh_add_lane(primary, "lane-verb-" + tag)
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", lane, session=session, command=command)
+    if got != "allow":
+        problems.append("the lane %s: want allow, got %s (%s)" % (tag, got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane %s wrote no session record naming the lane" % tag)
+    _decide_full("Bash", primary, session=session, command="echo hi")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    problems += sh_refusal_problems("the primary Write after the lane's %s" % tag, got, reason,
+                                    primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a lane %s makes the lane home: the primary Write is refused once the lane is removed" % tag
+
+
+def session_home_lane_commit_case():
+    return sh_lane_then_visit_case("commit", VCS + " commit -m x")
+
+
+def session_home_lane_merge_case():
+    return sh_lane_then_visit_case("merge", VCS + " merge --no-edit other")
+
+
+def session_home_lane_write_control_case():
+    return sh_lane_then_visit_case("write", "echo x > f.txt")
+
+
+def session_home_primary_shell_lived_case():
+    """Rule session-home: a shell write from the primary checkout whose target sits inside the recorded
+    lane marks the lane lived, once the write is allowed. other-checkout refuses that write unless the
+    owner grants a timed override, so the grant comes first and the write is judged under it."""
+    primary = sh_new_primary("shlived")
+    lane, branch = sh_add_lane(primary, "lane-shlived")
+    session = sh_session()
+    config = ov_config("sh-lived")
+    tmp = os.path.join(ROOT, "tmp")
+    target = os.path.join(lane, "f.txt")
+    problems = []
+    got, reason = ov_call("Bash", {"command": "echo hi"}, lane, config, session, 0, temp=tmp)
+    if got != "allow":
+        problems.append("the lane call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    note = ov_type(config, session, "override 15m", 30)
+    if note:
+        problems.append("the owner override was not granted: %s" % note)
+    got, reason = ov_call("Bash", {"command": "echo x > " + slash(target)}, primary, config, session, 60,
+                          temp=tmp)
+    if got != "allow":
+        problems.append("the shell write into the lane from the primary, under the override: want allow, "
+                        "got %s (%s)" % (got, reason[:120]))
+    elif not os.path.exists(sh_record(primary, session) + ".lived"):
+        problems.append("an allowed shell write into the lane from the primary left the lane unmarked: "
+                        "no .lived file")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an allowed shell write into the lane from the primary marks the lane lived"
+
+
+def _sh_refused_into_lane(tag, what, tool, make_input):
+    """A write from the primary into the recorded lane, refused by other-checkout. Scope first: the refusal
+    names other-checkout. Subject: a refused act marks nothing, so the session holds no `.lived` file.
+    `tag` names the fixture (a branch-safe word); `what` is the act's name in the messages."""
+    primary = sh_new_primary("refused-" + tag)
+    lane, branch = sh_add_lane(primary, "lane-refused-" + tag)
+    session = sh_session()
+    tmp = os.path.join(ROOT, "tmp")
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi", temp=tmp)
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    got, reason = _decide_full(tool, primary, session=session, temp=tmp, **make_input(lane))
+    if got != "deny" or "other-checkout" not in reason:
+        problems.append("the primary %s into the lane: want deny naming other-checkout, got %s (%s)"
+                        % (what, got, reason[:120]))
+    elif os.path.exists(sh_record(primary, session) + ".lived"):
+        problems.append("a refused %s from the primary into the lane marked the lane lived" % what)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a refused %s from the primary into the recorded lane marks nothing" % what
+
+
+def session_home_refused_write_unmarked_case():
+    return _sh_refused_into_lane("write", "Write", "Write",
+                                 lambda lane: {"file_path": os.path.join(lane, "src", "app.py"), "content": "x"})
+
+
+def session_home_refused_shell_unmarked_case():
+    return _sh_refused_into_lane("shell", "shell write", "Bash",
+                                 lambda lane: {"command": "echo x > " + slash(os.path.join(lane, "f.txt"))})
+
+
+def _sh_folder_names(primary, session):
+    """Every name in the session-homes folder of this case's primary, which holds only this case's session.
+    Empty when the folder is absent."""
+    folder = os.path.dirname(sh_record(primary, session))
+    return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+
+
+def session_home_lived_file_count_case():
+    """Cost of `<record>.lived`: one lived lane leaves exactly one such file beside its record, however
+    many lane writes follow, and ExitWorktree from the primary removes both. The folder holds nothing
+    else of the session."""
+    primary = sh_new_primary("lcount")
+    lane, branch = sh_add_lane(primary, "lane-lcount")
+    session = sh_session()
+    problems = []
+    for command in ("echo x > f.txt", "echo y > g.txt"):
+        got, reason = _decide_full("Bash", lane, session=session, command=command)
+        if got != "allow":
+            problems.append("the lane call %r: want allow, got %s (%s)" % (command, got, reason[:120]))
+    names = _sh_folder_names(primary, session)
+    if names != sorted([session, session + ".lived"]):
+        problems.append("after two lane writes the session-homes folder holds %s, want the record and one "
+                        ".lived file" % names)
+    got, reason = _decide_full("ExitWorktree", primary, session=session)
+    if got != "allow":
+        problems.append("an ExitWorktree from the primary: want allow, got %s (%s)" % (got, reason[:120]))
+    left = _sh_folder_names(primary, session)
+    if left:
+        problems.append("an ExitWorktree from the primary left %s in the session-homes folder" % left)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "one lived lane leaves exactly one .lived file beside its record, and ExitWorktree removes both"
+
+
+def session_home_visit_no_lived_file_case():
+    """The empty state: a lane that is only visited, with no act that marks it lived, leaves no `.lived`
+    file. A primary call drops the record, so the session holds no file in the folder."""
+    primary = sh_new_primary("visitnone")
+    lane, branch = sh_add_lane(primary, "lane-visitnone")
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", lane, session=session, command="echo hi")
+    if got != "allow":
+        problems.append("the lane call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    _decide_full("Bash", primary, session=session, command="echo hi")
+    left = _sh_folder_names(primary, session)
+    if left:
+        problems.append("a visit with no lived act left %s in the session-homes folder" % left)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a visit with no lived act leaves no .lived file and no record"
+
+
+def session_home_lived_folder_stands_case():
+    """Rule session-home: a lane the session wrote in (its `<record>.lived` file exists) whose worktree
+    folder stands keeps the session home. The lane write marks the lane lived, so the primary Write after
+    it is judged by the folder, which stands, and is allowed."""
+    primary = sh_new_primary("lived-stands")
+    lane, _ = sh_add_lane(primary, "lane-lived-stands")
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", lane, session=session, command="echo x > f.txt")
+    if got != "allow":
+        problems.append("the lane write: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane write wrote no session record naming the lane")
+    if not os.path.exists(sh_record(primary, session) + ".lived"):
+        problems.append("the lane write left the lane unmarked: no .lived file")
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    if got != "allow":
+        problems.append("the primary Write with the lived lane's folder standing: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a lived lane whose worktree folder stands lets the primary Write through"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a lane commit makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_commit_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane merge makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_merge_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane shell write makes the lane home, so a primary Write is refused "
+                         "once the lane is removed (control)", session_home_lane_write_control_case))
+LOG_CHECKS_EXTRA.append(("session-home: an allowed shell write from the primary whose target is inside the "
+                         "recorded lane marks the lane lived", session_home_primary_shell_lived_case))
+LOG_CHECKS_EXTRA.append(("session-home: a Write from the primary into the recorded lane, refused by "
+                         "other-checkout, marks nothing", session_home_refused_write_unmarked_case))
+LOG_CHECKS_EXTRA.append(("session-home: a shell write from the primary into the recorded lane, refused by "
+                         "other-checkout, marks nothing (control)", session_home_refused_shell_unmarked_case))
+LOG_CHECKS_EXTRA.append(("session-home: one lived lane leaves exactly one .lived file beside its record, and "
+                         "ExitWorktree from the primary removes both", session_home_lived_file_count_case))
+LOG_CHECKS_EXTRA.append(("session-home: a visit with no lived act leaves no .lived file and no record",
+                         session_home_visit_no_lived_file_case))
+LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree folder stands, with its lane lived, writes into "
+                         "the primary checkout", session_home_lived_folder_stands_case))
 
 
 # =========================================================================== mask_script lexemes
