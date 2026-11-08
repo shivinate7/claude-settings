@@ -1801,24 +1801,27 @@ test("scanner: a near-miss after a fence that holds a multi-line template litera
 // tree, prints what ran and exits 1. STAMP_SUITE_CAP_S sets the cap, inside the step's own.
 const CHILD = "STAMP_SUITE_CHILD";
 const HANG = "STAMP_SUITE_HANG_FIXTURE"; // a pid file: the child runs only the hang fixture
-const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold" or "orphan", as hangCommand reads it
+const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold", "orphan" or "escape", as hangCommand reads it
 const START = "STAMP-START ";
 
-// node -e code: its child holds the pipe and sleeps forever. "hold": the command sleeps too.
-// "orphan": the command exits, so the sleeper's parent pid names a dead process. Both pids go to
-// pidFile first. Both command lines carry pidFile raw, in a comment, so a check can tell them from
-// a reused pid. JSON.stringify doubles a Windows backslash, so a quoted copy alone would not match.
-function hangCommand(pidFile, orphan) {
+// node -e code, by kind. "hold": the child holds the pipe and the command sleeps too. "orphan": the
+// command exits, so the child holds the pipe and its parent pid names a dead process. "escape": the
+// child is detached with no pipe, and the command exits 0, so nothing waits on the child. Both pids
+// go to pidFile first. Both command lines carry pidFile raw, in a comment, so a check can tell them
+// from a reused pid. JSON.stringify doubles a Windows backslash, so a quoted copy alone would not match.
+function hangCommand(pidFile, kind) {
   const sleeper = `setInterval(() => {}, 1e9); // ${pidFile}`;
-  return `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], { stdio: "inherit" });
-require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
-${orphan ? "process.exit(0);" : "setInterval(() => {}, 1e9);"}
+  const escape = kind === "escape";
+  const spawnOpts = escape ? `{ detached: true, stdio: "ignore" }` : `{ stdio: "inherit" }`;
+  return `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], ${spawnOpts});
+${escape ? "c.unref();\n" : ""}require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
+${kind === "hold" ? "setInterval(() => {}, 1e9);" : "process.exit(0);"}
 // ${pidFile}`;
 }
 
 test("hang fixture: each command line carries a Windows pid-file path raw", () => {
   const pidFile = "C:\\Temp\\stamp-test-x\\pids";
-  const code = hangCommand(pidFile, false);
+  const code = hangCommand(pidFile, "hold");
   assert.ok(code.includes(pidFile), code); // the intermediate's own command line
   assert.ok(JSON.parse(code.match(/"-e", ("(?:[^"\\]|\\.)*")/)[1]).includes(pidFile), code);
 });
@@ -1834,8 +1837,8 @@ test("watchdog: the Windows orphan sweep runs only in CI or with STAMP_SUITE_SWE
 });
 
 const hangFixture = (kind) => ({
-  name: `hang fixture (${kind}): a command's child holds its pipe and sleeps forever`,
-  fn: () => { shSync(process.execPath, ["-e", hangCommand(process.env[HANG], kind === "orphan")]); },
+  name: `hang fixture (${kind}): ${kind === "escape" ? "a command's detached child outlives it, holding no pipe" : "a command's child holds its pipe and sleeps forever"}`,
+  fn: () => { shSync(process.execPath, ["-e", hangCommand(process.env[HANG], kind)]); },
 });
 
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -1872,7 +1875,7 @@ test("a timed-out call names its command, and on Windows leaves no orphan behind
     let found;
     try {
       // process.execPath may hold a space (C:\Program Files\nodejs\node.exe), so match it whole.
-      assert.throws(() => shSync(process.execPath, ["-e", hangCommand(pidFile, false)], { timeout: 3000 }),
+      assert.throws(() => shSync(process.execPath, ["-e", hangCommand(pidFile, "hold")], { timeout: 3000 }),
         (e) => e.message.startsWith(`timed out after 3 s: ${process.execPath} -e `));
     } finally {
       found = leftovers(pidFile);
@@ -1918,6 +1921,58 @@ for (const kind of ["hold", "orphan"]) {
       assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
     }));
 }
+
+// An escape: a process the suite started, detached with no pipe, outlives the suite. Nothing waits on
+// it, so the suite and the watchdog both finish, and the watchdog must still name it, kill it and fail.
+// The helper runs the watchdog with piped stdio and reads its 'close' against a deadline of its own:
+// spawnSync returns at the direct child's exit on Windows, so it cannot see a pipe a grandchild holds.
+// Values reach the helper through env, so no temp path sits in its command line.
+const ESCAPE_CAP_S = 5;
+const WATCH_HELPER = `
+const { spawn } = require("child_process");
+const env = process.env;
+const c = spawn(process.execPath, [env.HELPER_SELF], { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+let out = "", done = false;
+c.stdout.setEncoding("utf8");
+c.stderr.setEncoding("utf8");
+c.stdout.on("data", (d) => { out += d; });
+c.stderr.on("data", (d) => { out += d; });
+const report = (code, signal, closed) => {
+  if (done) return;
+  done = true;
+  clearTimeout(deadline);
+  process.stdout.write(JSON.stringify({ code, signal, closed, out }) + "\\n");
+};
+const deadline = setTimeout(() => { report(null, null, false); c.kill("SIGKILL"); }, Number(env.HELPER_DEADLINE_MS));
+c.on("close", (code, signal) => report(code, signal, true));
+`;
+
+test("watchdog: a detached process the suite started, holding no pipe, is named, killed, and fails the suite", () =>
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const deadlineMs = (ESCAPE_CAP_S + 30) * 1000;
+    const env = { ...process.env, STAMP_SUITE_CAP_S: String(ESCAPE_CAP_S), STAMP_SUITE_SWEEP: "1",
+      [HANG]: pidFile, [HANG_KIND]: "escape", HELPER_SELF: SELF, HELPER_DEADLINE_MS: String(deadlineMs) };
+    delete env[CHILD];
+    let run, found;
+    try {
+      run = shSync(process.execPath, ["-e", WATCH_HELPER], { env, timeout: deadlineMs + 15_000 });
+    } finally {
+      found = leftovers(pidFile); // reaps the sleeper whatever happened, and reports what was still running
+    }
+    let rep = null;
+    try { rep = JSON.parse(run.stdout); } catch {}
+    assert.ok(rep, `the helper printed no report\n${run.stdout}${run.stderr}`);
+    const { code, signal, closed, out } = rep;
+    // Scope first: the escape fixture ran, passed, and wrote both pids, so a sleeper existed.
+    assert.equal(found.pids.length, 2, `the escape fixture wrote no pid file, so no sleeper was started\n${out}`);
+    assert.match(out, /ok - hang fixture \(escape\)/, `the escape fixture did not pass\n${out}`);
+    // Pipes first: output read before they close is partial, and the checks below would mislead.
+    assert.equal(closed, true, `the suite's output pipes did not close within ${ESCAPE_CAP_S + 30} s: a process still holds them\n${out}`);
+    assert.notEqual(code, 0, `the suite exited ${code ?? `on signal ${signal}`} while a process it started still ran: no failure was reported\n${out}`);
+    assert.match(out, new RegExp(`\\b${found.pids[1]}\\b`), `the suite's output does not name the leftover sleeper pid ${found.pids[1]}\n${out}`);
+    assert.deepEqual(found.left, [], `the sleeper is still running after the suite ended: ${found.left}\n${out}`);
+  }));
 
 // POSIX: each live process in the child's group, with its command line. The child leads its own
 // group, so the group holds even an orphan. ps is fast, so it lists before the kill.
