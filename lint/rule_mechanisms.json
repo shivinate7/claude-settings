@@ -994,6 +994,9 @@
     "uniform-pick": {
       "test": "hooks/test_guard.py::uniform pick: a batch with today's item among the sets is denied"
     },
+    "verdict-pipe": {
+      "test": "hooks/test_guard.py::verdict_pipe"
+    },
     "waiter": {
       "test": "hooks/test_guard.py::waiter: a bare sleep"
     },
