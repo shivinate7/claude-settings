@@ -11304,6 +11304,72 @@ records_allow("a chain that logs the generator's history, then add -A and commit
               VCS + " log --oneline -- lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 records_allow("a chain that runs the generator with --print, then add -A and commit",
               GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+
+# argparse reads a flag by any unambiguous prefix, and -h or --help exits before any write. So -h, --help,
+# --che (a prefix of --check) and --pri (a prefix of --print) read the generator and write no page. A --root
+# names the repo a run writes, so a run aimed at another repo writes none of this repo's page, in either form.
+# A run of this repo's generator still counts, whichever way it names this repo's root.
+OTHER_REPO = os.path.join(RECMORE, "other-repo")   # another repo: the --root target that is not this repo
+
+
+def _build_other_repo():
+    make_repo(OTHER_REPO, {"README.md": "another repo\n"})
+
+
+lazy_fixture([OTHER_REPO], _build_other_repo)
+for _flag in ("-h", "--help", "--che", "--pri"):
+    records_allow("a chain that runs the generator with %s, then add -A and commit" % _flag,
+                  GEN + " " + _flag + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --root at another repo, then add -A and commit",
+              GEN + " --root " + OTHER_REPO + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --root=another repo, then add -A and commit",
+              GEN + " --root=" + OTHER_REPO + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_deny("a chain that runs the generator with --root at this repo, then add -A and commit",
+             GEN + " --root " + REC_LANES["product"] + " && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with --root . in this repo, then add -A and commit",
+             GEN + " --root . && " + ADD_A + " && " + COMMIT_X, "product")
+
+# A relative --root resolves from the directory the run is in, and a leading `cd` moves that directory. So a
+# run from this repo's lint folder with `--root ..` writes this repo's page, and is refused, whether the commit
+# follows with a plain git or with `git -C`. A --root the guard cannot resolve (`~+`, `~-`) or that names no
+# repo it can find (`/x/...`) may name this repo, so it is refused too.
+RUN_FROM_LINT = "python3 hook_catalog.py --root .."
+LANE = REC_LANES["product"]
+records_deny("a chain that runs the generator from lint with --root .., then cd back, add -A and commit",
+             "cd " + os.path.join(LANE, "lint") + " && " + RUN_FROM_LINT + " && cd " + LANE + " && " + ADD_A
+             + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator from lint with --root .., then cd back and git -C commit",
+             "cd " + os.path.join(LANE, "lint") + " && " + RUN_FROM_LINT + " && cd " + LANE + " && " + ADD_A
+             + " && " + VCS + " -C " + LANE + " commit -m x", "product")
+records_deny("a chain that runs the generator with --root ~+, then add -A and commit",
+             GEN + " --root ~+ && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with --root ~-, then add -A and commit",
+             GEN + " --root ~- && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with --root=/x/other, then add -A and commit",
+             GEN + " --root=/x/other && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with --root=/x/<this repo's name>, then add -A and commit",
+             GEN + " --root=/x/" + os.path.basename(LANE) + " && " + ADD_A + " && " + COMMIT_X, "product")
+
+# A token the generator's parser refuses does not make the run no run: argparse exits on it, but the shell
+# still runs the generator, which writes this repo's page. Redirections and a trailing & are such tokens; so
+# are a subshell that moves the run into lint, and an `env -C` that runs the generator in this repo from
+# another folder.
+for _name, _run in (
+    ("2>&1", GEN + " 2>&1"),
+    ("> /dev/null", GEN + " > /dev/null"),
+    (">/dev/null 2>&1", GEN + " >/dev/null 2>&1"),
+    ("&> /dev/null", GEN + " &> /dev/null"),
+    ("--root . > /dev/null", GEN + " --root . > /dev/null"),
+):
+    records_deny("a chain that runs the generator with %s, then add -A and commit" % _name,
+                 _run + " && " + ADD_A + " && " + COMMIT_X, "product")
+# A trailing & detaches the run, which detached-launch refuses before records-page reads it: a control, not a red.
+sh("a chain that runs the generator with a trailing &, then add -A and commit is refused",
+   GEN + " & " + ADD_A + " && " + COMMIT_X, "deny", cwd=LANE)
+records_deny("a chain that runs the generator in a subshell from lint with --root .., then add -A and commit",
+             "( cd lint && " + RUN_FROM_LINT + " ) && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with env -C into this repo, from another folder, then git -C commit -am",
+             "env -C " + LANE + " " + GEN + " --root . && " + VCS + " -C " + LANE + " commit -am x", OTHER_REPO)
 records_deny("a chain that runs the generator as its own command word, then add -A and commit",
              "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator through env, then add -A and commit",
