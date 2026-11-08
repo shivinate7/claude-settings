@@ -24,6 +24,7 @@ PR: #<n>
 Head: <40-hex sha>
 Kind: normal|delete-only|docs-only
 Guard or check: yes|no
+Grant: item <n> <letter>, owner, <YYYY-MM-DD HH:MM CST|CDT>
 Round <n>: <reviewer|design-reviewer>, <model>, <PASS|FAIL|PARTIAL>
 Fix check: <40-hex reviewed head>, reviewer, <model>, <PASS|FAIL>
 Net value: not owed|zero|positive|negative
@@ -33,9 +34,10 @@ CI: read live by merge --reviewed
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
+- The `Grant` line is optional and comes once, directly after `Guard or check`. It is the owner's grant of round 4, the one round past round 3 (rule `roles-review-cap-three`). `--grant TEXT` writes it, only with `--review-record`. Its text is an item number, one lowercase letter for the pick, `owner`, and a CST or CDT time. With the line the rounds must reach round 4. Without it they stop at round 3. Never round 5.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
-- A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
+- A body is not a record when the marker is missing, a field is malformed or out of place, round numbers skip, or a round is above 3 with no `Grant` line, above 4 with one, or short of 4 with one.
 - The newest record for a head counts. A record for an old head is stale.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
@@ -52,6 +54,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - Kind is `docs-only`, with zero rounds, unless the change is a record that files an owner ruling. That change posts `Kind: normal` with one round (decision `docs-only-prs-skip-review`).
 
 - A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
+- With a `Grant` line, round 4 is the final round. The round 3 rules above run on it unchanged, and their reason names round 4.
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
