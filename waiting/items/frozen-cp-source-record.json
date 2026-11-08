@@ -24,7 +24,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "docs/decisions/frozen-path-resolves-shell-vars.md; hooks/test_guard.py case \"frozen: cp FROM a frozen hook to scratch is a read\"; PR #1867",
+  "reply": "You picked a (06:13 CST Nov 8): record frozen-path-resolves-shell-vars says \"A `cp` from a frozen source is a read; a frozen target is refused.\" The guard does not change. Routed to the coordinator and lane session_013NEJL3R2CBFavz7grtbJY8; home: step other-checkout-cp-own. Closed 06:15 CST Nov 8.",
   "short": "Fix a false sentence in a guard record",
-  "status": "open",
+  "status": "closed",
   "title": "Should record frozen-path-resolves-shell-vars say a copy FROM a frozen file is a read, as main already does?"
 }

@@ -13,7 +13,8 @@
   "n": 395,
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "lane notes-fix-guard-1 (session_013NEJL3G6vFtN2TjNZrMETW); #1492",
+  "reply": "Done (06:13 CST Nov 8): you answered the lane's permission prompt. Routed to the coordinator; #1492 can go back into a batch. Closed 06:15 CST Nov 8.",
   "short": "Permission prompt in a lane",
-  "status": "open",
+  "status": "closed",
   "title": "Answer a permission prompt in lane notes-fix-guard-1"
 }
