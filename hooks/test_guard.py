@@ -9105,10 +9105,11 @@ sh("draft-pr: a perl body with a backtick span left unclosed, holding a $( ) gh 
    "\n".join(["perl - <<'EOF'", "print `echo $(gh pr create -t x);", "EOF"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A PowerShell here-string is shell text when a shell runs it: piped to or passed to `iex` or Invoke-Expression,
-# piped to `pwsh -Command -`, or built into a scriptblock. A bare gh pr create line in such a body runs, so it is
-# refused. A here-string held in a variable is not read, even when a later line runs it (`iex $b`, `$b | iex`),
-# so it is allowed, and so is a `$( )` in a single-quoted body (literal). A `$( )` in a double-quoted body runs
-# while the string is built.
+# piped to `pwsh -Command -`, passed as the `-Command` or `-c` argument of pwsh or powershell, or built into a
+# scriptblock. The pipe into the shell may pass through Out-String first, and a `&` call operator may start the
+# pwsh that reads stdin. A bare gh pr create line in such a body runs, so it is refused. A here-string held in a
+# variable is not read, even when a later line runs it (`iex $b`, `$b | iex`), so it is allowed, and so is a `$( )`
+# in a single-quoted body (literal). A `$( )` in a double-quoted body runs while the string is built.
 PS_PR_LINE = "gh pr create -t x"
 PS_RUN_CASES = (
     ("piped to Invoke-Expression", '@"\n' + PS_PR_LINE + '\n"@ | Invoke-Expression'),
@@ -9128,6 +9129,11 @@ PS_RUN_CASES = (
     ("piped to pwsh with -ExecutionPolicy:Bypass before the stdin dash", '@"\n' + PS_PR_LINE + '\n"@ | pwsh -ExecutionPolicy:Bypass -'),
     ("piped to pwsh with -ep:Bypass before the stdin dash", '@"\n' + PS_PR_LINE + '\n"@ | pwsh -ep:Bypass -'),
     ("piped to powershell.exe with -ExecutionPolicy:Bypass before -Command -", '@"\n' + PS_PR_LINE + '\n"@ | powershell.exe -ExecutionPolicy:Bypass -Command -'),
+    ("through a wrapper or pipe, passed to pwsh -Command", 'pwsh -Command @"\n' + PS_PR_LINE + '\n"@'),
+    ("through a wrapper or pipe, passed to powershell -Command", 'powershell -Command @"\n' + PS_PR_LINE + '\n"@'),
+    ("through a wrapper or pipe, passed to pwsh -c", 'pwsh -c @"\n' + PS_PR_LINE + '\n"@'),
+    ("through a wrapper or pipe, piped through Out-String to iex", '@"\n' + PS_PR_LINE + '\n"@ | Out-String | iex'),
+    ("through a wrapper or pipe, piped to a & call operator that runs pwsh -", '@"\n' + PS_PR_LINE + '\n"@ | & pwsh -'),
 )
 for _name, _command in PS_RUN_CASES:
     sh("draft-pr: a PowerShell here-string body run " + _name + " holds gh pr create, is refused",
@@ -9147,6 +9153,11 @@ sh("draft-pr: a PowerShell double-quoted here-string piped to pwsh -File x.ps1, 
    '@"\n' + PS_PR_LINE + '\n"@ | pwsh -File x.ps1', "allow", tool="PowerShell", cwd=NOGIT)
 sh("draft-pr: a PowerShell double-quoted here-string piped to pwsh -File:x.ps1, with a bare gh pr create line, is allowed",
    '@"\n' + PS_PR_LINE + '\n"@ | pwsh -File:x.ps1', "allow", tool="PowerShell", cwd=NOGIT)
+# A here-string passed to an output cmdlet, or written to a file, is data: no shell runs it, so both are allowed.
+sh("draft-pr: a PowerShell double-quoted here-string passed to Write-Output and not run by a shell, with a bare gh pr create line, is allowed",
+   'Write-Output @"\n' + PS_PR_LINE + '\n"@', "allow", tool="PowerShell", cwd=NOGIT)
+sh("draft-pr: a PowerShell single-quoted here-string given to Set-Content f.ps1 and not run by a shell, with a bare gh pr create line, is allowed",
+   "Set-Content f.ps1 -Value @'\n" + PS_PR_LINE + "\n'@", "allow", tool="PowerShell", cwd=NOGIT)
 # A lone backtick inside a quoted string opens no span. The span rule must not pair it with the next backtick, or the
 # real span after it goes unread. Each body below holds such a stray backtick before a real span with the gh call.
 sh("draft-pr: a node file with a stray backtick in a single-quoted string, then an execSync gh pr create span, is refused",
