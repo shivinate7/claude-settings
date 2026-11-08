@@ -124,7 +124,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   draft-pr             deny. A `gh pr create` without `--draft`, or an MCP create_pull_request without
                        draft true. (draft-until-reviewed)
   pr-review-record     deny. A marked review record posted with a wrong or hand-typed head or number, as a comment
-                       or as an MCP add_issue_comment or update_issue_comment (the update finds its pull request from the comment).
+                       or as an MCP add_issue_comment, or any edit of a comment to a marked body (gh api PATCH,
+                       --edit-last, MCP update_issue_comment).
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
@@ -388,8 +389,8 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
-            FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
+            undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target, ansi_c_decoded,
+            FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1538,16 +1539,17 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
-    form_only = False
+    edit = False
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
+        edit = any(a in ("--edit-last", "--edit-last=true", "-e") for a in args)
         selector, repo = _comment_target(args)
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
         posted = _api_post_bodies(rest)
         if posted is None:
             posted = _api_post_bodies(rest, _COMMENT_EDIT_ROUTE)
-            form_only = posted is not None   # an edit names a comment, not a pull request: judge its form, read no head
+            edit = posted is not None   # an edit names a comment, not a pull request: a marked body is refused, no read
         if posted is None:
             return None
         repo, selector, texts, files, stdin = posted
@@ -1578,9 +1580,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             review_note("the body file " + name + " could not be read")
     if stdin and not judged_stdin:
         review_note("the body comes from stdin and cannot be read")
-    if form_only:
-        return review_form_hit(texts)
-    return review_record_hit(texts, repo, selector, where)
+    return review_record_hit(texts, repo, selector, where, edit)
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
@@ -5035,16 +5035,11 @@ def judge(payload) -> None:
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
 
-    # The update tool names a comment, not a pull request. Its one comment read runs only once a marked body parses.
+    # The update tool replaces a comment's text. A marked body is refused before any read, so the call needs no comment id.
     if tool == UPDATE_COMMENT_TOOL:
-        owner, name, comment_id = (tool_input.get(k) for k in ("owner", "repo", "comment_id"))
-        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
-        if isinstance(comment_id, int) and not isinstance(comment_id, bool):
-            hit = review_record_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
-            if hit:
-                refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
-        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
-            review_note("the call names no comment id")
+        hit = review_record_hit([tool_input.get("body")], "", "", cwd, True)
+        if hit:
+            refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
 
     # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
     trust_transcript = payload.get("transcript_path")

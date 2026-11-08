@@ -331,16 +331,17 @@ def undrafted_pr_create(segment: str) -> bool:
 # ---- a review record posted as a comment (rule pr-review-record)
 #
 # A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form).
-# That is the form check, `review_form_hit`: the render output as it is, or with a footer after a line exactly `---` and
-# no text between the CI line and `---`. A post, and a shell edit in place (`gh api -X PATCH`), are both judged for form. A post must also name the pull request it is posted
-# on and name that pull request's live head (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is
+# That is the form check, inside `review_record_hit`: the render output as it is, or with a footer after a line exactly `---` and
+# no text between the CI line and `---`. A post must also name the pull request it is posted
+# on and name that pull request's live head. A hand-typed head is how a record goes stale the moment it is
 # posted. The remedy is the render, which fills the live head itself.
+# An edit of a comment (`gh api` on issues/comments/<id>, `--edit-last`, the MCP update tool) whose new body is marked is refused
+# after the form check, stamped or not.
 # Cost: the form check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
-# for a post with no marker. A marked update through the MCP tool adds one comment read (its input names a comment, not a pull request);
-# a shell edit in place makes no read. A read that fails allows the
+# for a post with no marker. A marked edit makes no read. A read that fails allows the
 # post with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
 REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
-# The update tool's input names a comment, not a pull request: the pull request comes from one read of the comment.
+# The update tool replaces a comment's text: a marked body is refused as an edit (REVIEW_EDIT_REASON).
 UPDATE_COMMENT_TOOL = "mcp__github__update_issue_comment"
 # The host's file-write tools each push a commit to the `branch` they name, as `git push` does.
 FILE_WRITE_TOOLS = ("mcp__github__push_files", "mcp__github__create_or_update_file", "mcp__github__delete_file")
@@ -356,6 +357,12 @@ REVIEW_FORM_REASON = (
     "Remedy: run `%s` and post its output as it is. If you add a footer, put a line exactly `---` before it, "
     "with no text between the CI line and `---`. "
     "(decision pr-review-record, a review record must parse)"
+)
+REVIEW_EDIT_REASON = (
+    "Rule (pr-review-record): an edit of a comment whose new body is a review record is refused, stamped or not. "
+    "A record is rendered by the merge tool for the live head, and an edited one was rendered by no run. "
+    "Remedy: post a fresh record. Run `%s` and post its output as a new comment. "
+    "(decision pr-review-record, an edit of a record comment is refused)"
 )
 
 
@@ -397,19 +404,6 @@ def review_note(why: str) -> None:
     sys.stderr.write("review-record: not checked, " + why + "\n")
 
 
-def comment_pull_request(comment_id):
-    """A selector for review_record_hit: the pull request number a conversation comment sits on, from one read of the comment."""
-    def read(host):
-        code, out = host.api("issues/comments/%d" % comment_id)
-        if code:
-            raise RuntimeError("reading the comment failed")
-        found = re.search(r"/issues/(\d+)$", str(json.loads(out).get("issue_url", "")))
-        if not found:
-            raise RuntimeError("the comment names no issue")
-        return found.group(1)
-    return read
-
-
 def _review_render(module, number, head):
     return REVIEW_RENDER % (number, head, "|".join(module.REVIEW_KINDS), "|".join(module.REVIEW_GUARDS))
 
@@ -435,36 +429,37 @@ def _unparsed(module, marked):
 def _form_reason(module, selector):
     """Return (matched, reason) for a record that does not parse. The refusal sits one call below its two callers, so the
     rule audit reads its reason within its depth limit."""
-    named = "" if callable(selector) else str(selector).strip()
+    named = str(selector).strip()
     return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
         module, named if named.isdigit() else "<pr>", "<live head>")
 
 
-def review_form_hit(bodies, selector=""):
-    """Return (matched, reason) when a body that opens with the record marker does not parse, else None. The one home of the
-    form check: an edit in place is judged by this alone, and review_record_hit calls the same two helpers. It makes no read."""
-    found = _marked_bodies(bodies)
-    if found and _unparsed(*found):
-        return _form_reason(found[0], selector)
-    return None
+def _edit_reason(module):
+    """Return (matched, reason) for an edit whose new body is a record. The refusal sits one call below its callers, so the
+    rule audit reads its reason within its depth limit."""
+    return "edit of a review record comment", REVIEW_EDIT_REASON % _review_render(module, "<pr>", "<live head>")
 
 
-def review_record_hit(bodies, repo: str, selector, where: str):
+def review_record_hit(bodies, repo: str, selector, where: str, edit: bool = False):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
-    or '' for the current branch's), `repo` is OWNER/NAME or ''. A callable `selector` takes the Host and returns that name,
-    so its read happens only once the body parses. No body holding the marker: None, and no read."""
+    or '' for the current branch's), `repo` is OWNER/NAME or ''. No body holding the marker: None, and no read. `edit` is true when the
+    body replaces a comment's text (a PATCH of the comment, `--edit-last`, the MCP update tool): a marked body is refused
+    after the form check and before any read, because an edited record was rendered by no run. Limit: an edit that strips
+    the marker is not seen without a read of the old body, and a stripped record reads as no record."""
     found = _marked_bodies(bodies)
     if not found:
         return None
     module, marked = found
     if _unparsed(module, marked):
         return _form_reason(module, selector)
+    if edit:
+        return _edit_reason(module)
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)
-            number = host.pr_number(selector(host) if callable(selector) else selector)
+            number = host.pr_number(selector)
             live = str(host.pr(number)["head"])
     except (Exception, SystemExit) as e:
         review_note("the live head could not be read (" + cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80) + ")")
