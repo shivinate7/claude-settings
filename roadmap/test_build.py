@@ -138,8 +138,8 @@ class NoteCapHook(unittest.TestCase):
         self.git("add", "roadmap")
         self.commit("tools")
 
-    def install(self):
-        r = subprocess.run(self.SETUP, cwd=self.repo, env=self.env, capture_output=True, text=True)
+    def install(self, cwd=None):
+        r = subprocess.run(self.SETUP, cwd=cwd or self.repo, env=self.env, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
@@ -166,10 +166,10 @@ class NoteCapHook(unittest.TestCase):
             d["gap"] = gap
         self.write(sid, d, where)
 
-    def stage(self, *sids):
+    def stage(self, *sids, cwd=None):
         """Stage every change, then assert the named step files are staged: the scope a gap test probes."""
-        self.git("add", "-A")
-        staged = self.git("diff", "--cached", "--name-only").stdout.split()
+        self.git("add", "-A", cwd=cwd)
+        staged = self.git("diff", "--cached", "--name-only", cwd=cwd).stdout.split()
         for sid in sids:
             self.assertIn(f"roadmap/data/steps/{sid}.json", staged,
                           "scope: the step is not staged, so the test probes nothing")
@@ -636,6 +636,137 @@ exit 0
         self.step("fresh", 10, gap="key-117")
         self.stage("fresh")
         self.assert_refused(self.commit(), "s117", "fresh", why="a key held by one of 200 open steps was not matched")
+
+
+class GapAfterMergeOrRebase(NoteCapHook):
+    """Two clones of one bare remote. The pre-commit hook diffs the index against HEAD, so a step that
+    arrives by `git pull --rebase` or a clean merge is never checked as a new step. `python roadmap/build.py`
+    must check what the branch added since origin/roadmap against the HEAD tree. A is self.repo (it
+    pushes plain commits, so roadmap.html stays out of the rebase); B runs the chain in roadmap/README.md."""
+
+    # Subclassing reuses the fixture; unittest would also collect every inherited case, so hide them here.
+    locals().update({n: None for n in dir(NoteCapHook) if n.startswith("test_")})
+
+    def setUp(self):
+        super().setUp()
+        page = self.repo / "roadmap" / "page" / "index.html"
+        page.parent.mkdir()
+        page.write_text("<html><body></body></html>", encoding="utf-8")  # main() bakes data into this
+        self.git("add", "-A")
+        self.assert_passed(self.commit("page"))
+        self.bare = pathlib.Path(self.tmp.name) / "remote.git"
+        self.git("init", "-q", "--bare", "-b", "roadmap", str(self.bare))
+        self.git("remote", "add", "origin", str(self.bare))
+        self.push()
+        bin_dir = pathlib.Path(self.tmp.name) / "bin"
+        bin_dir.mkdir()
+        python = bin_dir / "python"  # the chain says `python`; the box may only have python3
+        python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        python.chmod(0o755)
+        self.env["PATH"] = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+        self.env["GIT_MERGE_AUTOEDIT"] = "no"
+
+    def push(self):
+        self.git("push", "-q", "-u", "origin", "roadmap")
+
+    def clone(self, name):
+        """A clone of the remote with the hook installed, as the README says to set up each checkout."""
+        where = pathlib.Path(self.tmp.name) / name
+        self.git("clone", "-q", "-b", "roadmap", str(self.bare), str(where))
+        self.install(where)
+        return where
+
+    def sh(self, cmd, cwd):
+        return subprocess.run(["sh", "-c", cmd], cwd=cwd, env=self.env, capture_output=True, text=True)
+
+    def chain(self):
+        """The indented write chain in roadmap/README.md, with its message placeholder filled."""
+        for line in (HERE / "README.md").read_text(encoding="utf-8").splitlines():
+            if line.startswith("    python roadmap/build.py && "):
+                return line.strip().replace("<what>", "add step")
+        self.fail("scope: roadmap/README.md has no indented `python roadmap/build.py && ...` chain to run")
+
+    def remote_files(self):
+        return self.git("ls-tree", "-r", "--name-only", "roadmap", cwd=self.bare).stdout.split()
+
+    def local_commits(self, where):
+        return self.git("rev-list", "origin/roadmap..HEAD", cwd=where).stdout.split()
+
+    def two_writers(self, key_a, key_b):
+        """B is cloned first. Then A pushes open step c71 on key_a. B gets open step c72 on key_b, uncommitted."""
+        b = self.clone("b")
+        self.step("c71", 10, gap=key_a)
+        self.stage("c71")
+        self.assert_passed(self.commit("A adds c71"))
+        self.push()
+        self.step("c72", 10, gap=key_b, where=b)
+        self.assertIn("roadmap/data/steps/c71.json", self.remote_files(), "scope: A's step is not on the remote")
+        self.assertFalse((b / "roadmap" / "data" / "steps" / "c71.json").exists(),
+                         "scope: B already has A's step, so the pull brings in nothing new")
+        return b
+
+    def html(self, where):
+        return (where / "roadmap" / "roadmap.html").read_text(encoding="utf-8")
+
+    def assert_chain_stopped_before_push(self, r, b):
+        self.assert_refused(r, "c71", "c72",
+                            why="the chain finished: a rebase brought a second open step onto a held gap key")
+        self.assertNotIn("roadmap/data/steps/c72.json", self.remote_files(), "the refused step reached the remote")
+        self.assertNotIn('"c71"', self.html(b), "the failing build still rewrote roadmap.html with both steps")
+
+    def test_rebase_onto_a_held_gap_key_stops_the_chain(self):
+        b = self.two_writers("shared-key", "shared-key")
+        self.assert_chain_stopped_before_push(self.sh(self.chain(), b), b)
+
+    def test_rebase_with_distinct_gap_keys_pushes(self):
+        b = self.two_writers("key-a", "key-b")
+        self.assert_passed(self.sh(self.chain(), b))
+        self.assertTrue({"roadmap/data/steps/c71.json", "roadmap/data/steps/c72.json"} <= set(self.remote_files()),
+                        "the remote lacks one of the two steps")
+
+    def test_rebase_collision_is_found_among_a_full_size_tree(self):
+        self.seed(*[(f"s{i:03d}", 10, "open", f"key-{i:03d}") for i in range(200)])
+        self.push()
+        b = self.two_writers("shared-key", "shared-key")
+        self.assert_chain_stopped_before_push(self.sh(self.chain(), b), b)
+
+    def test_clean_merge_onto_a_held_gap_key_fails_the_build(self):
+        b = self.two_writers("shared-key", "shared-key")
+        self.stage("c72", cwd=b)
+        self.assert_passed(self.commit("B adds c72", cwd=b))
+        self.git("pull", "-q", "--no-rebase", "origin", "roadmap", cwd=b)
+        self.git("rev-parse", "--verify", "-q", "HEAD^2", cwd=b)  # scope: the pull made a merge commit
+        r = self.sh("python roadmap/build.py", b)
+        self.assert_refused(r, "c71", "c72", why="the build passed a merge that put two open steps on one gap key")
+        self.assertFalse((b / "roadmap" / "roadmap.html").exists(), "the refused build wrote roadmap.html")
+
+    def test_legacy_pair_already_on_the_remote_builds(self):
+        self.seed(("c1", 10, "open", "shared-key"), ("c2", 10, "open", "shared-key"))
+        self.push()
+        b = self.clone("b")
+        self.assertEqual(self.local_commits(b), [], "scope: B has local commits, so this is not the empty range")
+        self.assert_passed(self.sh("python roadmap/build.py", b))
+
+    def test_legacy_pair_with_an_unrelated_local_step_builds(self):
+        self.seed(("c1", 10, "open", "shared-key"), ("c2", 10, "open", "shared-key"))
+        self.push()
+        b = self.clone("b")
+        self.step("c3", 10, gap="own-key", where=b)
+        self.stage("c3", cwd=b)
+        self.assert_passed(self.commit("B adds c3", cwd=b))
+        self.assertEqual(len(self.local_commits(b)), 1, "scope: B has no local commit, so the range is empty")
+        self.assert_passed(self.sh("python roadmap/build.py", b))
+
+    def test_build_with_no_origin_roadmap_says_the_gap_check_did_not_run(self):
+        self.git("remote", "remove", "origin")
+        self.assertNotEqual(self.git("rev-parse", "--verify", "-q", "refs/remotes/origin/roadmap", check=False).returncode,
+                            0, "scope: origin/roadmap still exists")
+        r = self.sh("python roadmap/build.py", self.repo)
+        self.assert_passed(r)
+        self.assertTrue((self.repo / "roadmap" / "roadmap.html").exists(), "the build wrote no page")
+        said = [ln for ln in (r.stdout + r.stderr).splitlines() if "gap check" in ln.lower()]
+        self.assertEqual([("did not run" in ln.lower()) for ln in said], [True],
+                         "expected exactly one line saying the gap check did not run, got: " + repr(said))
 
 
 if __name__ == "__main__":
