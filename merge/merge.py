@@ -115,6 +115,7 @@ FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head. Base t
 FIX_LAYOUT_REMEDY = "Fix or restore lint/layout.json so the record folders can be read."
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
+FIX_FINAL_FAIL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
 FIX_DROPPED_REMEDY = "Copy every Round line of that record unchanged and in its order, then add the new lines after them."
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
@@ -3637,12 +3638,16 @@ def main(argv, host=None, lock=None):
                         if last["fix"][3] == "WIDE":
                             remedy = FIX_WIDE_REMEDY
                         elif reached >= REVIEW_LAST_ROUND:  # a FAIL after the final round holds the change, and its finding starts a new lane
-                            remedy = "This FAIL holds the change: its finding starts a new lane at round 1."
+                            remedy = FIX_FINAL_FAIL_REMEDY
                         else:
                             remedy = f"Post round {reached + 1}'s review record: a FAIL line for round {reached + 1} and no Fix check line."
                     else:  # the record's rounds may not fall below the floor the earlier records set, or a later record could copy them and relabel the final round's net value
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
                         problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
+                held = next((r for r in reversed([r for r in map(parse_review, recs) if r and r["n"] == a.pr]) if r["fix"] and r["fix"][3] != "PASS" and max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # a plain record posted after a held record copies its rounds without the fix line, so the newest record alone does not show the hold
+                if not problem and held:
+                    problem = f"the review record on head {held['head'][:9]} has a Fix check {held['fix'][3]} after round {REVIEW_LAST_ROUND}, so a new fix check may not follow it"
+                    remedy = FIX_WIDE_REMEDY if held["fix"][3] == "WIDE" else FIX_FINAL_FAIL_REMEDY
                 if not problem:
                     problem, remedy = dropped_round_lines(last, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 if not problem and last["head"] != a.fix_check[0]:
