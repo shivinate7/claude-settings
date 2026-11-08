@@ -873,13 +873,48 @@ def waiver_report(next_line, done=TEST_AUTHOR_DONE):
     return "> **Done**\n> - %s\n>\n> **Next**\n> - %s" % (done, next_line)
 
 
+class Background:
+    """A spawn that runs in the background. `finish` is None while the agent runs. Otherwise it names the
+    record type the finish notice arrives as: 'queue-operation' or 'attachment'."""
+
+    def __init__(self, spawn, finish=None):
+        self.spawn = spawn
+        self.finish = finish
+
+
+def finish_record(use_id, kind):
+    """A background agent's finish notice, in the record type it arrives as. Its text names the tool use
+    and its status, as the real notice does."""
+    text = ("<task-notification>\n<tool-use-id>%s</tool-use-id>\n<status>completed</status>\n"
+            "</task-notification>" % use_id)
+    if kind == "attachment":
+        return {"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}}
+    return {"type": "queue-operation", "operation": "enqueue", "content": text}
+
+
+def background_records(bg):
+    """The call and its launch result for a background spawn. The launch result is async_launched; the
+    finish notice follows only when bg.finish is set."""
+    use_id = "tu_spawn_" + uuid.uuid4().hex[:8]
+    launch = tool_result_msg(use_id)
+    launch["toolUseResult"] = {"status": "async_launched", "agentId": "a" + uuid.uuid4().hex[:16]}
+    records = [tool_use_msg("Agent", bg.spawn, tool_use_id=use_id), launch]
+    if bg.finish:
+        records.append(finish_record(use_id, bg.finish))
+    return records
+
+
 def spawn_records(spawn):
     """The call and its result for one Agent spawn, under a tool_use id of its own, as a real transcript
     pairs them. `spawn` is the call's input, or (input, resolved_model) when the result names the model
-    the agent ran."""
+    the agent ran, or a Background for a spawn that runs in the background."""
+    if isinstance(spawn, Background):
+        return background_records(spawn)
     inp, resolved = spawn if isinstance(spawn, tuple) else (spawn, None)
     use_id = "tu_spawn_" + uuid.uuid4().hex[:8]
-    return [tool_use_msg("Agent", inp, tool_use_id=use_id), tool_result_msg(use_id, resolved_model=resolved)]
+    result = tool_result_msg(use_id, resolved_model=resolved)
+    result.setdefault("toolUseResult", {})["status"] = "completed"  # a foreground spawn's result
+    return [tool_use_msg("Agent", inp, tool_use_id=use_id), result]
 
 
 def prior_records(earlier=()):
@@ -1112,17 +1147,17 @@ class DoneNamesModelsTests(unittest.TestCase):
     def test_dm_red_next_waives_the_running_builder(self):
         # The builder runs in the background, so Done has no builder line, and Next names it.
         out = self.verdict(waiver_report("The builder is running (sonnet). It builds the tree check."),
-                           [BUILDER_SONNET])
+                           [Background(BUILDER_SONNET)])
         assert_no_model_block(self, out)
 
     def test_dm_red_next_waives_the_running_reviewer(self):
         out = self.verdict(waiver_report("The reviewer (haiku) is reading the diff. It reports next."),
-                           [REVIEWER_HAIKU])
+                           [Background(REVIEWER_HAIKU)])
         self.assertIsNone(out, (out or {}).get("reason"))
 
     def test_dm_green_unnamed_running_builder_still_blocks(self):
-        # Next names no role, so the builder spawned in the window is unnamed and blocks.
-        out = self.verdict(waiver_report("The tree check is next."), [BUILDER_SONNET])
+        # Next names no role, so the running builder spawned in the window is unnamed and blocks.
+        out = self.verdict(waiver_report("The tree check is next."), [Background(BUILDER_SONNET)])
         assert_blocks(self, out, "no model named for builder")
 
     def test_dm_green_next_pair_is_not_judged(self):
@@ -1212,6 +1247,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         assert_no_model_block(self, json.loads(run.stdout) if run.stdout.strip() else None)
 
     BUILDER_OPUS_R2 = {"subagent_type": "builder", "model": "opus", "prompt": "Round 2 of 3"}
+    REVIEWER_OPUS_R2 = {"subagent_type": "reviewer", "model": "opus", "prompt": "Round 2 of 3"}
 
     def test_dm_false_alarm_double_backtick_model_word_names_its_run(self):
         # A double-backticked model word still names its run: builder ``opus`` is named, so no model block.
@@ -1226,7 +1262,8 @@ class DoneNamesModelsTests(unittest.TestCase):
         assert_blocks(self, out, "no model named for builder opus")
 
     def test_dm_red_next_role_word_alone_leaves_the_other_model_unnamed(self):
-        # Next names the builder but not its opus model, so the running opus builder is not waived.
+        # Next names the builder but not its opus model. The opus builder is finished, so no spawn is
+        # running for the role word to waive.
         out = self.verdict(waiver_report("the builder brief for step y is queued. Unstarted: none",
                                          done="BUILT the guard, PR #5 (builder sonnet)"),
                            [BUILDER_SONNET, self.BUILDER_OPUS_R2])
@@ -1236,15 +1273,65 @@ class DoneNamesModelsTests(unittest.TestCase):
         # Next names builder opus with its model, so the running opus builder is waived in Done.
         out = self.verdict(waiver_report("builder opus still running. Unstarted: none",
                                          done="BUILT the guard, PR #5 (builder sonnet)"),
-                           [BUILDER_SONNET, self.BUILDER_OPUS_R2])
+                           [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2)])
         assert_no_model_block(self, out)
 
     def test_dm_pin_next_role_word_waives_a_role_done_names_no_model_for(self):
         # Done names no builder at all, so the role word alone waives the running builder (#1638).
         out = self.verdict(waiver_report("builder still running. Unstarted: none",
                                          done="BUILT the guard, PR #5"),
-                           [BUILDER_SONNET])
+                           [Background(BUILDER_SONNET)])
         assert_no_model_block(self, out)
+
+    def test_dm_red_running_round3_builder_opus_is_waived_by_its_role_word(self):
+        done = "BUILT the guard, PR #5 (builder sonnet)"
+        # Control: the same opus builder, finished, is unnamed and blocks.
+        finished = self.verdict(waiver_report("builder round 3 on opus still running. Unstarted: none", done=done),
+                                [BUILDER_SONNET, Background(BUILDER_OPUS_ROUND3, finish="queue-operation")])
+        assert_blocks(self, finished, "no model named for builder opus")
+        # Red: the opus builder still runs. Next names the builder with no model word, so the role word waives it.
+        running = self.verdict(waiver_report("builder round 3 on opus still running. Unstarted: none", done=done),
+                               [BUILDER_SONNET, Background(BUILDER_OPUS_ROUND3)])
+        assert_no_model_block(self, running)
+
+    def test_dm_red_finished_reviewer_named_only_in_next_blocks(self):
+        done = "BUILT the guard, PR #5 (builder sonnet)"
+        # Control: the reviewer opus still running is waived by its Next line.
+        running = self.verdict(waiver_report("reviewer opus for round 2. Unstarted: none", done=done),
+                               [BUILDER_SONNET, Background(self.REVIEWER_OPUS_R2)])
+        assert_no_model_block(self, running)
+        # Red: the same reviewer finished in the foreground, so its Next line waives nothing.
+        finished = self.verdict(waiver_report("reviewer opus for round 2. Unstarted: none", done=done),
+                                [BUILDER_SONNET, self.REVIEWER_OPUS_R2])
+        assert_blocks(self, finished, "no model named for reviewer")
+
+    def test_dm_red_finished_builder_opus_named_as_unstarted_blocks(self):
+        done = "BUILT the guard, PR #5 (builder sonnet)"
+        # Control: the builder opus still running is waived by its Unstarted line.
+        running = self.verdict(waiver_report("Unstarted: builder opus for item Y", done=done),
+                               [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2)])
+        assert_no_model_block(self, running)
+        # Red: the same builder finished, so its Unstarted line waives nothing.
+        finished = self.verdict(waiver_report("Unstarted: builder opus for item Y", done=done),
+                                [BUILDER_SONNET, self.BUILDER_OPUS_R2])
+        assert_blocks(self, finished, "no model named for builder opus")
+
+    def test_dm_red_finished_background_builder_opus_blocks_after_queue_op(self):
+        self.assert_finished_background_builder_blocks("queue-operation")
+
+    def test_dm_red_finished_background_builder_opus_blocks_after_attachment(self):
+        self.assert_finished_background_builder_blocks("attachment")
+
+    def assert_finished_background_builder_blocks(self, finish):
+        """A background builder opus whose finish notice arrived as `finish` is not running, so Next's
+        "still running" waives nothing. The same builder, still running, is waived by its Next line."""
+        done = "BUILT the guard, PR #5 (builder sonnet)"
+        running = self.verdict(waiver_report("builder opus still running. Unstarted: none", done=done),
+                               [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2)])
+        assert_no_model_block(self, running)
+        finished = self.verdict(waiver_report("builder opus still running. Unstarted: none", done=done),
+                                [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2, finish=finish)])
+        assert_blocks(self, finished, "no model named for builder opus")
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1401,7 +1488,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
     def stop(self, reply, active, earlier=(), later=(BUILDER,), env_model="sonnet"):
         records = prior_records(earlier)
         for spawn in later:
-            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+            records += spawn_records(spawn)
         records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                     assistant_text(reply)]
         return self.run_hook(records, active, env_model)
@@ -1561,20 +1648,20 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertNotIn("ran , ", out["reason"], "the block lists an empty model: " + out["reason"])
 
     def test_rw_red_next_waives_the_running_builder(self):
-        self.missing_report_block(later=[BUILDER_SONNET])
+        self.missing_report_block(later=[Background(BUILDER_SONNET)])
         out = self.stop(waiver_report("The builder is running (sonnet). It builds the tree check."), True,
-                        later=[BUILDER_SONNET])
+                        later=[Background(BUILDER_SONNET)])
         assert_no_model_block(self, out)
 
     def test_rw_red_next_waives_the_running_reviewer(self):
-        self.missing_report_block(later=[REVIEWER_HAIKU])
+        self.missing_report_block(later=[Background(REVIEWER_HAIKU)])
         out = self.stop(waiver_report("The reviewer (haiku) is reading the diff. It reports next."), True,
-                        later=[REVIEWER_HAIKU])
+                        later=[Background(REVIEWER_HAIKU)])
         self.assertIsNone(out, (out or {}).get("reason"))
 
     def test_rw_green_unnamed_running_builder_still_blocks(self):
-        self.missing_report_block(later=[BUILDER_SONNET])
-        out = self.stop(waiver_report("The tree check is next."), True, later=[BUILDER_SONNET])
+        self.missing_report_block(later=[Background(BUILDER_SONNET)])
+        out = self.stop(waiver_report("The tree check is next."), True, later=[Background(BUILDER_SONNET)])
         assert_blocks(self, out, "no model named for builder")
 
     def test_rw_green_next_pair_is_not_judged(self):
