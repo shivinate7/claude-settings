@@ -1225,7 +1225,7 @@ MUTATIONS = [
      'return m.group(0)', "guard",
      'reviewer-brief-blind: refused: a reviewer brief with a Done: FAIL line that names no round, on haiku'),
     ("reviewer-brief-blind: a verdict word before a comma is read as bare, so a comma-led choice list is refused, Done: PASS, FAIL or PARTIAL, then list the findings",
-     r'(?![ \t]*,[ \t]*[*_`]*\b(?:%(w)s)\b)',
+     r'(?![ \t]*,[ \t]*(?:(?:or|and)\b[ \t]*)?[*_`]*\b(?:%(w)s)\b)',
      '(?:)', "guard",
      'reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS, FAIL or PARTIAL, then list the findings line'),
     ("reviewer-brief-blind: the report line count is one short, so a report refused at line 3 names line 2",

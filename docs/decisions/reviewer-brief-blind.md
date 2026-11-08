@@ -28,6 +28,7 @@ reviewer and whose brief holds a report-shaped block or a verdict line. The rule
   - After `verdict`, a dash reads as the colon if a space or an em or en dash comes first:
     `Prior verdict - FAIL` and `Prior verdict—FAIL` are refused. An unspaced hyphen does not: `Prior verdict-FAIL` passes.
   - `round result` reads as a verdict label: `Prior round result: FAIL` is refused.
+  - A report label (`Done:`, `Deviations:`, `Input Needed:`, `Next:`) followed by a bare verdict word that ends its clause reads as a verdict line: `Done: FAIL.` is refused. A choice list does not: `Next: PASS or FAIL` passes.
   - One short label of one to four words, such as `Done:` or `Prior review:`, may come before a verdict shape.
     A label of five or more words passes, as in `Prior review of the diff: verdict: FAIL`. A `verdict` or
     `round result` in the label still refuses.

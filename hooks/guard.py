@@ -2690,9 +2690,10 @@ _BRIEF_BLIND_AFTER_COLON = re.compile(r"[ \t]*[*_`\"'(]*(?:%s)\b" % BRIEF_BLIND_
 _BRIEF_BLIND_LEADING = re.compile(r"(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+" % BRIEF_BLIND_VERDICT_WORDS)
 # After a report label (BRIEF_REPORT_LABELS), a bare verdict word that ends its clause (`Done: FAIL, ...`, `Done: PASS.`,
 # `Done: FAIL` at the line end) is a leading verdict too, with no round named. A verdict word that starts a choice list
-# (`Done: PASS, FAIL or PARTIAL, then ...`) or runs on into a word or a hyphen is not. Group 1 is the verdict word.
+# (`Done: PASS, FAIL or PARTIAL, then ...`, `Done: PASS, or FAIL, then ...`; the comma may be followed by `or` or `and`, as
+# _BRIEF_BLIND_SEP reads it, so a choice list is never bare) or runs on into a word or a hyphen is not. Group 1 is the verdict word.
 _BRIEF_BLIND_BARE = re.compile(
-    r"[*_`]*(%(w)s)[*_`]*(?![ \t]*,[ \t]*[*_`]*\b(?:%(w)s)\b)[ \t]*(?:[,.;!?]|$)"
+    r"[*_`]*(%(w)s)[*_`]*(?![ \t]*,[ \t]*(?:(?:or|and)\b[ \t]*)?[*_`]*\b(?:%(w)s)\b)[ \t]*(?:[,.;!?]|$)"
     % {"w": BRIEF_BLIND_VERDICT_WORDS})
 # A backtick span stays on one line. Group 1 is set when the span holds only a verdict word; brief_blind_verdict_text keeps
 # that span. One pattern pairs every span left to right, so a kept span's closing backtick never opens the next span.
