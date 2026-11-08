@@ -9985,6 +9985,18 @@ def pr_body_of(n):
     return text[:-1] + "." if text.endswith(" ") else text
 
 
+def pr_body_led_by(head, n):
+    """A body of exactly n characters that opens with `head`, then real words: no trailing space, never one token."""
+    text = (head + PR_BODY_FILLER * (n // len(PR_BODY_FILLER) + 1))[:n]
+    return text[:-1] + "." if text.endswith(" ") else text
+
+
+# Two 150-character bodies, each under a third of the 1700-character live body: one holds a backtick code span, the
+# other a `$` that an unquoted heredoc expands. The shrink rule asks about the first whenever the shell keeps it literal.
+PR_SPAN_BODY = pr_body_led_by("The check reads `pr_edit_body` on each update. ", 150)
+PR_DOLLAR_BODY = pr_body_led_by("The check reads $HOME on each update. ", 150)
+
+
 def pr_live_body(n):
     """A live body of exactly n characters, shaped like a lane body: its summary, review records and Merge-after line."""
     return (PR_BODY_HEAD + PR_BODY_FILLER * (n // len(PR_BODY_FILLER) + 2))[:n]
@@ -10069,6 +10081,15 @@ pr_update("pr-body-shrink: an MCP update of 100 characters over a live body of 3
           "allow", body=pr_body_of(100), live=PRBODY_399)
 pr_update("pr-body-shrink: an MCP update of 120 characters is allowed when the live read fails", "allow",
           body=pr_body_of(120), live=PRBODY_BROKEN)
+
+# The shell decides the text `gh pr edit` sends. A `$` or a backtick that the shell keeps literal (a single-quoted
+# value, a quoted heredoc, or that heredoc inside `$(cat ...)`) is the text the guard reads, so the shrink rule asks.
+pr_edit("pr-body-shrink: a 150-character body with a backtick span, single-quoted, over a live body of 1700 asks", "ask",
+        "gh pr edit 5 --body '" + PR_SPAN_BODY + "'", PR_SHRINK)
+pr_edit("pr-body-shrink: a 150-character body with a backtick span, in a quoted heredoc, over a live body of 1700 asks",
+        "ask", "gh pr edit 5 --body-file - <<'EOF'\n" + PR_SPAN_BODY + "\nEOF", PR_SHRINK)
+pr_edit("pr-body-shrink: a 150-character body with a backtick span, in a quoted heredoc in $(cat), over a live body of 1700 asks",
+        "ask", 'gh pr edit 5 --body "$(cat <<\'EOF\'\n' + PR_SPAN_BODY + '\nEOF\n)"', PR_SHRINK)
 
 # A create is not an update, so the rules do not judge it. A draft create with a real body is allowed.
 sh("pr-body-placeholder: gh pr create --draft with a real body is allowed",
@@ -14293,6 +14314,86 @@ pr_body_count_check("pr-body-shrink: a state-only update makes no gh call", {"st
 pr_body_count_check("pr-body-shrink: a draft-only update makes no gh call", {"draft": True}, "allow", 0)
 pr_body_count_check("pr-body-shrink: a body update reads the live body in exactly one gh call",
                     {"body": pr_body_of(900)}, "allow", 1)
+
+
+def read_past_deadline_seconds():
+    """How long the fake holds a live read: the read deadline of guard_merge.py plus HANG_MARGIN_S, so the guard cuts
+    the read before the fake answers. None when the deadline cannot be read."""
+    budget = guard_merge_read_timeout()
+    return None if budget is None else budget + HANG_MARGIN_S
+
+
+def pr_counted_judged(tool, tool_input, folder, config=None):
+    """The guard's (decision, reason) for one call, with the counted fake `folder` on PATH."""
+    return decide({
+        "raw": None, "tool": tool, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
+        "env_path": folder + os.pathsep + PY_PATH, "config": config, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": None, "transcript": None, "tool_input": tool_input,
+    })
+
+
+def pr_counted_case(tool, tool_input, want_decision, want_calls, want_path=None, delay_s=0, config=None):
+    """A check that one call is judged `want_decision` and makes `want_calls` gh calls, the first of them naming
+    `want_path` as one argument. The counted fake answers with a live body of 1700 characters, after `delay_s`
+    seconds, or after the seconds `delay_s` gives when it is a function."""
+    def case():
+        folder = os.path.join(ROOT, "prbodycount")
+        log = os.path.join(folder, ARCHIVE_CALLS)
+        make_fake_gh(folder, "main", body=pr_live_body(1700), count_file=log)
+        gh_calls_taken(folder)
+        program = shutil.which("gh", path=folder + os.pathsep + PY_PATH)
+        if not program or os.path.dirname(program) != folder:
+            return False, "the counted gh did not resolve in its own folder: %r" % (program,)
+        subprocess.run([program, "api", "repos/y/x/pulls/12"], capture_output=True, text=True, timeout=60)
+        if len(gh_calls_taken(folder)) != 1:
+            return False, "the counted gh did not log one probe call, so its count proves nothing"
+        seconds = delay_s() if callable(delay_s) else delay_s
+        if seconds is None:
+            return False, "MERGE_READ_TIMEOUT cannot be read as a number from the guard_merge.py beside the guard under test"
+        if seconds > HANG_CEILING_S:   # the hook's 60 s budget must still hold the read
+            return False, "the fake waits %gs, past the %gs a read may take inside the hook budget" % (seconds, HANG_CEILING_S)
+        make_fake_gh(folder, "main", body=pr_live_body(1700), count_file=log, delay_s=seconds)
+        decision, reason = pr_counted_judged(tool, tool_input, folder, config)
+        calls = gh_calls_taken(folder)
+        if decision != want_decision:
+            return False, "wanted %s, got %s: %r" % (want_decision, decision, reason[:90])
+        if len(calls) != want_calls:
+            return False, "%d gh call(s) wanted for the call, %d seen: %r" % (want_calls, len(calls), calls)
+        if want_path and want_path not in json.loads(calls[0]):
+            return False, "the read went to %r, wanted %s" % (calls[0], want_path)
+        return True, "%s, %d gh call(s)%s" % (want_decision, want_calls, ", to " + want_path if want_path else "")
+    return case
+
+
+def pr_counted_check(label, tool, tool_input, want_decision, want_calls, **kw):
+    """Register one counted check (see pr_counted_case) in the pr-body family. It builds its own folder."""
+    check = pr_counted_case(tool, tool_input, want_decision, want_calls, **kw)
+    FIXTURELESS_CHECKS.add(check)
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
+# The shell keeps a `$` or a backtick literal only in a single-quoted value, a quoted heredoc, or that heredoc inside
+# `$(cat ...)`. Where the shell expands one, the text the call sends is not the text the guard reads: the call passes
+# unjudged and makes no gh call.
+pr_counted_check("pr-body-placeholder: gh pr edit --body \"$BODY\" is not judged, and makes no gh call", "Bash",
+                 {"command": 'gh pr edit 5 --body "$BODY"'}, "allow", 0)
+pr_counted_check("pr-body-placeholder: gh pr edit --body \"$(cat f)\" is not judged, and makes no gh call", "Bash",
+                 {"command": 'gh pr edit 5 --body "$(cat f)"'}, "allow", 0)
+pr_counted_check("pr-body-shrink: an unquoted heredoc holding $ is not judged, and makes no gh call", "Bash",
+                 {"command": "gh pr edit 5 --body-file - <<EOF\n" + PR_DOLLAR_BODY + "\nEOF"}, "allow", 0)
+
+# The read of a `gh pr edit` body goes to the repo its flag names, in each form the flag takes: attached, with `=`,
+# and long. The long form is a control: the guard already reads it.
+for flag in ("-Rowner/repo", "-R=owner/repo", "--repo=owner/repo"):
+    pr_counted_check("pr-body-shrink: gh pr edit 5 %s reads the live body from repos/owner/repo/pulls/5" % flag,
+                     "Bash", {"command": 'gh pr edit 5 %s --body "The lane lands the check."' % flag},
+                     "ask", 1, want_path="repos/owner/repo/pulls/5")
+
+# A live read held past the read deadline is cut there, and the call passes unread. The fake answers with a body that
+# asks, so an answer that came back in time would show as an ask. One gh call, and no more.
+pr_counted_check("pr-body-shrink: a live read held past the read deadline passes unread, after one gh call", PR_UPDATE,
+                 dict(owner="y", repo="x", pullNumber=12, body=pr_body_of(120)), "allow", 1,
+                 want_path="repos/y/x/pulls/12", delay_s=read_past_deadline_seconds, config=MERGECFG)
 FAMILY = "lane-closes-after-records"
 
 
