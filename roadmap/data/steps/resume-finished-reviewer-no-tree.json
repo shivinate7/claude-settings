@@ -1,0 +1,11 @@
+{
+  "title": "Resuming a finished reviewer is refused, and the refusal says to send a fresh reviewer the prior report",
+  "phase": "now",
+  "status": "doing",
+  "order": 268.61,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3qSsV2LJ6R1a1HMCB",
+  "why": "A SendMessage resume of a finished reviewer runs with no worktree and on the parent's model. Rule roles-resume-by-name says to send a fresh reviewer the prior report instead. Three incidents on Nov 7.",
+  "note": "Topic guards. From a note of lane resumed-agent-stale-tree, made a step by the coordinator at 20:28 CST Nov 7 (3 incidents today); started in lane session_013NEJL3qSsV2LJ6R1a1HMCB the same minute. No earlier step held it (resume-lost-worktree covers a top-level session). Filed 20:30 CST Nov 7.",
+  "updatedAt": "2026-11-07T20:30:00-06:00"
+}
