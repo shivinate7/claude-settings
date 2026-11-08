@@ -1029,58 +1029,94 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
     return False
 
 
-def _command_words(args, glued=None):
+def _command_words(args, glued=None, joined=None):
     """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
     newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
     sits in, and a glued `&` sends it to the background: either ends that word and the command.
-    `glued` is, per word, how many of its trailing `)` or `&` are unquoted (_glued_counts): a quoted one
-    is text. Without `glued` every trailing one counts."""
+    `glued` is, per word, how many of its trailing `)` or `&` are unquoted and end the command
+    (_glued_counts): a quoted one is text, and so is a `)` that closes a `$(` opened inside the command.
+    `joined` is, per word, whether a `$(` is still open at its end, so the next word is part of the same
+    argument; the words of one substitution are read as one. Without `glued` every trailing one counts."""
     words = []
-    for index, arg in enumerate(args):
+    index = 0
+    while index < len(args):
+        last = index
+        while joined is not None and joined[last] and last + 1 < len(args):
+            last += 1
+        group = list(args[index:last + 1])
+        arg = group[-1]
         word = arg.rstrip(")&")
         if glued is not None:
-            word = arg[:len(arg) - glued[index]]
+            word = arg[:len(arg) - glued[last]]
         if word != arg:
-            if word:
-                words.append(word)
+            parts = group[:-1] + ([word] if word else [])
+            if parts:
+                words.append(" ".join(parts))
             break
-        words.append(arg)
+        words.append(" ".join(group))
+        index = last + 1
     return words
 
 
 def _glued_counts(segment: str, args):
-    """Per word of `args` (a tail of the segment's tokens), how many trailing `)` or `&` it holds outside quotes, read from the quote
-    state of walk_quotes, the one quote walk. Raises _FlagsUnreadable when the walk and the tokens do not split the segment into the same
-    words, so the caller denies and never falls back to the unquoted reading."""
-    words, current = [], []
+    """(counts, joined, unclosed) for `args` (a tail of the segment's tokens), read from the quote state of walk_quotes, the one quote walk.
+    `counts` is, per word, how many trailing `)` or `&` it holds outside quotes and outside any `$(` that is open inside the command: a `)`
+    that closes such a `$(` is part of the argument, not the end of the command. `joined` is, per word, whether a `$(` is still open at
+    its end. `unclosed` is True when one is still open at the segment's end. A `$(` opened before the first of `args` is not counted: its
+    `)` ends the command. Raises _FlagsUnreadable when the walk and the tokens do not split the segment into the same words, so the
+    caller denies and never falls back to the unquoted reading."""
+    tokens = segment_tokens(segment)
+    if tokens is None or len(args) > len(tokens):
+        raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
+    skip = len(tokens) - len(args)
+    words, ends_open, current = [], [], []
+    depth, reset, after_dollar = 0, False, False
     for index, char, quote in walk_quotes(segment):
         if not quote and char in " \t\r\n":
+            after_dollar = False
             if current:
                 words.append(current)
-            current = []
-        else:
-            current.append((char, quote))
+                ends_open.append(depth > 0)
+                current = []
+            continue
+        if not current and not reset and len(words) == skip:
+            depth, reset = 0, True
+        inside = depth > 0
+        if not quote and char == "(" and (inside or after_dollar):
+            depth += 1
+            inside = True
+        elif not quote and char == ")" and depth > 0:
+            depth -= 1
+            inside = True
+        after_dollar = not quote and char == "$"
+        current.append((char, quote, inside))
     if current:
         words.append(current)
-    tokens = segment_tokens(segment)
-    if tokens is None or len(words) != len(tokens) or len(args) > len(words):
+        ends_open.append(depth > 0)
+    if len(words) != len(tokens):
         raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
     counts = []
-    for word, arg in zip(words[len(words) - len(args):], args):
+    for word, arg in zip(words[skip:], args):
         run = 0
-        while run < len(word) and word[-1 - run][0] in ")&" and not word[-1 - run][1]:
+        while run < len(word) and word[-1 - run][0] in ")&" and not word[-1 - run][1] and not word[-1 - run][2]:
             run += 1
         if run > len(arg) or any(arg[len(arg) - 1 - k] != word[-1 - k][0] for k in range(run)):
             raise _FlagsUnreadable("a trailing ) or & does not match its token")
         counts.append(run)
-    return counts
+    return counts, ends_open[skip:], depth > 0
 
 
 def _merge_words(segment: str):
-    """The merge's arguments up to the end of its command, else None when the segment runs no merge. Raises _FlagsUnreadable when
-    the closing `)` or `&` cannot be read from the quotes."""
+    """The merge's arguments up to the end of its command, else None when the segment runs no merge. A `$(...)` is one argument, so the
+    flags after it are read. Raises _FlagsUnreadable when the closing `)` or `&` cannot be read from the quotes, and when a `$(` stays
+    open to the end of a segment that holds `--confirm` (the splitter cut the substitution at a `|` or `;`)."""
     args = merge_tool_args(segment)
-    return None if args is None else _command_words(args, _glued_counts(segment, args))
+    if args is None:
+        return None
+    counts, joined, unclosed = _glued_counts(segment, args)
+    if unclosed and any("--confirm" in arg for arg in args):
+        raise _FlagsUnreadable("a $( is open at the end of the segment")
+    return _command_words(args, counts, joined)
 
 
 def _push_calls(segment: str, script: str, cwd: str):
