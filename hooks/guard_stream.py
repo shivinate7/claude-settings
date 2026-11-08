@@ -340,6 +340,16 @@ def _enters_lint_dir(segment: str, in_lint: bool) -> bool:
     return basename(path) == "lint"
 
 
+LINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lint")
+
+
+def _is_lint_file(name: str) -> bool:
+    """Whether `name` is a file in the lint folder of the checkout this guard runs from. No list of lint
+    scripts exists (LINT_SCRIPT is a path pattern), so the folder is the one home. Under `cd lint`, a bare
+    name that is no file there (`-m pytest` reads as `pytest.py`) runs no lint script."""
+    return os.path.isfile(os.path.join(LINT_DIR, name))
+
+
 def lint_stage(segment: str, background: bool, in_lint: bool = False) -> str:
     """`lint` when one segment runs a script under `lint/`, through an interpreter, as `-m lint.<name>`,
     or as the `.py` command word (`uv run lint/x.py`), else ''. With `in_lint` (an earlier `cd lint` in
@@ -352,12 +362,29 @@ def lint_stage(segment: str, background: bool, in_lint: bool = False) -> str:
     index = _skip_uv_run(tokens, index)
     if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
         return ""
-    script = _script_run(tokens, index).replace("\\", "/")
-    if in_lint and script and "/" not in script.removeprefix("./"):
+    script = _script_run(tokens, index).replace("\\", "/").lstrip("(")   # `(./x.py` opens a subshell
+    if in_lint and script and "/" not in script.removeprefix("./") and _is_lint_file(script.removeprefix("./")):
         script = "lint/" + script.removeprefix("./")
     if LINT_SCRIPT.search(script):
         return "lint"
     return ""
+
+
+SUBSTITUTION_SLOT = re.compile(r"(?<![\w.-])x(?![\w.-])|`x`")
+
+
+def _inherited_in_lint(pipelines) -> bool:
+    """Whether a command substitution inside the outer text `pipelines` runs with `lint/` as its working
+    directory. `_substitutions` leaves each substitution's place in the outer text as `x`, so a segment
+    holding that slot, reached after a `cd lint`, hands `lint/` to every substitution. Which slot a text
+    fills is not tracked, so one slot after `cd lint` counts for all (the reading that refuses more)."""
+    in_lint = False
+    for stages in pipelines:
+        for segment in stages:
+            if in_lint and SUBSTITUTION_SLOT.search(segment):
+                return True
+            in_lint = _enters_lint_dir(segment, in_lint)
+    return False
 
 
 def _pipeline_hit(stages, background: bool, stage_of=check_stage, any_later: bool = False) -> str:
@@ -423,8 +450,9 @@ def check_tail_hit(stripped: str, background: bool) -> str:
             hit = _pipeline_hit(stages, background)
             if hit:
                 return hit
+    inherited = len(texts) > 1 and _inherited_in_lint(texts[-1])
     for number, pipelines in enumerate(texts):
-        in_lint = False
+        in_lint = inherited and number < len(texts) - 1
         for at, stages in enumerate(pipelines):
             hit = _pipeline_hit(stages, background, lambda segment, bg: lint_stage(segment, bg, in_lint),
                                 any_later=True)
