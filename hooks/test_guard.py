@@ -22466,6 +22466,56 @@ _relesc_add("other-checkout: heredoc replay missing: python3 missing_judge.py wi
             "a script that is neither on disk nor written here, is refused",
             "deny", 'python3 missing_judge.py "echo x > ../other/f"', "home", rule="other-checkout")
 
+# Kept bodies and fed scripts. In the kept-body group a script that a heredoc writes runs a second script that the same
+# command writes, so the write sits one script down. In the fed-script group a script run by path or by name takes a
+# heredoc on its stdin, and the body is shell text it runs. Neither script exists on disk before the call. The tags
+# "kept body" and "fed script" let each group run alone.
+RELESC_KEPT_BASH = "\n".join([
+    "cat > helper.sh <<'EOF'",
+    "echo hi > ../other/f",
+    "EOF",
+    "cat > run.sh <<'EOF'",
+    "bash helper.sh",
+    "EOF",
+    "bash run.sh",
+])
+RELESC_KEPT_SOURCE = "\n".join([
+    "cat > helper.sh <<'EOF'",
+    "echo hi > ../other/f",
+    "EOF",
+    "cat > run.sh <<'EOF'",
+    "source ./helper.sh",
+    "EOF",
+    "bash run.sh",
+])
+RELESC_KEPT_PYTHON = "\n".join([
+    "cat > helper.sh <<'EOF'",
+    "echo hi > ../other/f",
+    "EOF",
+    "cat > run.py <<'EOF'",
+    "import subprocess",
+    "subprocess.run(['bash', 'helper.sh'])",
+    "EOF",
+    "python3 run.py",
+])
+RELESC_FED_PATH = "\n".join(["./run.sh <<'EOF'", "echo x > ../other/f", "EOF"])
+RELESC_FED_NAME = "\n".join(["x.bash <<'EOF'", "echo x > ../other/f", "EOF"])
+_relesc_add("other-checkout: heredoc replay kept body: a heredoc helper.sh that echoes to ../other/f, then a heredoc "
+            "run.sh that runs bash helper.sh, then bash run.sh, is refused",
+            "deny", RELESC_KEPT_BASH, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay kept body: a heredoc helper.sh that echoes to ../other/f, then a heredoc "
+            "run.sh that sources ./helper.sh, then bash run.sh, is refused",
+            "deny", RELESC_KEPT_SOURCE, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay kept body: a heredoc helper.sh that echoes to ../other/f, then a heredoc "
+            "run.py that runs subprocess.run(['bash','helper.sh']), then python3 run.py, is refused",
+            "deny", RELESC_KEPT_PYTHON, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay fed script: ./run.sh run by path with a heredoc body of echo x > ../other/f, "
+            "is refused",
+            "deny", RELESC_FED_PATH, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay fed script: x.bash run by name with a heredoc body of echo x > ../other/f, "
+            "is refused",
+            "deny", RELESC_FED_NAME, "home", rule="other-checkout")
+
 
 # ---- Script rows. The fixture writes every on-disk script these rows run into RELESC_TREE_AGENT's home
 # (`_relesc_tree_files`). No command here writes one. The root's judge.py only prints, and sub/judge.py runs its
