@@ -2271,3 +2271,4 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- owner-waits-rejected-act-listed: decision precompact-handoff item 14: an act the owner rejected, or a refusal worked around by a different command, stays unanswered, so a coordinator names it under its owner-waits heading though nothing waits on it. Capped at the newest 5, cleared by one handoff edit. Also: a long first line is shown cut (head and tail) in the block text.
