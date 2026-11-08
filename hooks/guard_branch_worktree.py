@@ -66,7 +66,7 @@ _ARCHIVE_REMEDY = (
 )
 DESIGN_DELETE_REFUSE_REASON = (
     "Archive before delete (rule shared-trees-archive-then-delete): the tip of this remote branch holds a file under "
-    "the design folder that the default branch lacks, and no archive branch on origin holds that "
+    "the design folder that the default branch lacks, and no other branch on origin, archive or not, holds that "
     "tip. Deleting the branch loses the file. " + _ARCHIVE_REMEDY
 )
 DESIGN_DELETE_ASK_REASON = (
