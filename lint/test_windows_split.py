@@ -1935,14 +1935,27 @@ def node_test_files(folder):
     return found
 
 
+def mod_check_files(folder):
+    """Repo-relative paths of the check.mjs files under `folder`: recursive, node_modules skipped."""
+    found = []
+    for dirpath, dirs, names in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != "node_modules"]
+        for name in names:
+            if name == "check.mjs":
+                found.append(os.path.relpath(os.path.join(dirpath, name), REPO).replace(os.sep, "/"))
+    return found
+
+
 class CiCoverageCollector(unittest.TestCase):
     def test_mod_tests_list_prints_what_both_phases_run(self):
-        # The oracle: the mods find (node_modules pruned), and Node's default test run under the skill's tests.
+        # The oracle: the mods find (node_modules pruned), the check.mjs files under mods, which mod_check_files
+        # walks on its own, and Node's default test run under the skill's tests.
         bash = shutil.which("bash")
         mods = subprocess.run([bash, "-c", "find mods -name node_modules -prune -o \\( -name '*.test.mjs' -o -name '*.test.js' \\) -print"],
                               cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.assertEqual(mods.returncode, 0, "the mods find exits %d: %s" % (mods.returncode, mods.stderr))
-        expected = sorted(mods.stdout.splitlines() + node_test_files(os.path.join(REPO, SKILL_TESTS)))
+        expected = sorted(mods.stdout.splitlines() + mod_check_files(os.path.join(REPO, "mods"))
+                          + node_test_files(os.path.join(REPO, SKILL_TESTS)))
         self.assertTrue(expected, "the two oracles list no file, so the case proves nothing")
         # An npm shim that fails and logs. A list run must never reach the skill phase's install.
         shim = tempfile.mkdtemp(prefix="npm-", dir=RUN_FOLDER)
