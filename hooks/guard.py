@@ -1647,10 +1647,8 @@ WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
 WORKFLOW_DISABLE_STEP = re.compile(
     r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:([\"']?)false\1|\$\{\{\s*false\s*\}\}))\s*$",
     re.IGNORECASE)
-# What a `|| <command>` or `; <command>` tail may be and still let the run fail: a nonzero exit, `false`.
-WORKFLOW_FAILING_TAIL = re.compile(r"^(?:exit\s+[1-9]\d*|false)$")
-# What a `; <command>` tail may be that makes the run's status zero.
-WORKFLOW_PASSING_TAIL = re.compile(r"^(?:true|:|exit(?:\s+0)?)$")
+# The lexer-free reading of a `|| <command>` that always succeeds, for a line whose quotes or groups do not balance.
+WORKFLOW_OR_ALWAYS_OK = re.compile(r"\|\|\s*(?:true\b|:(?:\s|$)|exit\s+0\b|echo\b|printf\b)")
 
 
 def is_workflow_rel(rel: str) -> bool:
@@ -1770,7 +1768,8 @@ def workflow_command_tests(command: str, base: str = "") -> set:
     interpreter runs past its flags, every test path after a test runner, or the command itself when it is a
     test path. A lint tool that is given a test folder (`ruff check tests/`) runs none. Each path is
     resolved against `base` (the step's `working-directory`) and a `cd <dir>` that precedes it on the line
-    with `&&` or `;`, so one test file has one spelling."""
+    with `&&` or `;`, so one test file has one spelling. A script in a test folder counts by its resolved
+    path, so `working-directory: tests` with a bare `run_all.py` is `tests/run_all.py`."""
     found, cwd = set(), base
     parts = re.split(r"(&&|\|\||[;|])", command)
     for position in range(0, len(parts), 2):
@@ -1790,32 +1789,35 @@ def workflow_command_tests(command: str, base: str = "") -> set:
             args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
         else:
             args = tokens if runner else tokens[:1]
-        found.update(posixpath.normpath(posixpath.join(cwd, workflow_path(tok))) for tok in args
-                     if is_test_rel(workflow_path(tok)))
+        for tok in args:
+            path = posixpath.normpath(posixpath.join(cwd, workflow_path(tok)))
+            if is_test_rel(workflow_path(tok)) or (
+                    cwd and not tok.startswith("-") and "." in posixpath.basename(path) and is_test_rel(path)):
+                found.add(path)
     return found
 
 
 def workflow_run_entries(text: str):
-    """The (line index of its `run:` key, command line) of every `run:` in `text`: an inline value, or each
-    line of a block scalar."""
+    """The (line index of its `run:` key, command line, line index of the command) of every `run:` in `text`:
+    an inline value, or each line of a block scalar."""
     entries, block, opener = [], None, 0
     for index, line in enumerate(text.splitlines()):
         if block is not None:
             if not line.strip() or len(line) - len(line.lstrip()) > block:
-                entries.append((opener, line.strip()))
+                entries.append((opener, line.strip(), index))
                 continue
             block = None
         opened = WORKFLOW_RUN_BLOCK.match(line)
         if opened:
             block, opener = len(opened.group(1)) + (2 if line.lstrip().startswith("- ") else 0), index
         elif WORKFLOW_RUN_PREFIX.match(line):
-            entries.append((index, WORKFLOW_RUN_PREFIX.sub("", line, count=1)))
+            entries.append((index, WORKFLOW_RUN_PREFIX.sub("", line, count=1), index))
     return entries
 
 
 def workflow_run_commands(text: str):
     """The command lines of every `run:` in `text`."""
-    return [command for _index, command in workflow_run_entries(text)]
+    return [command for _opener, command, _line in workflow_run_entries(text)]
 
 
 def workflow_step_workdir(lines, index: int) -> str:
@@ -1831,31 +1833,109 @@ def workflow_invoked_tests(text: str) -> set:
     """Every test path a `run:` line of the workflow text runs, resolved against its step's working directory."""
     lines = text.splitlines()
     return set().union(set(), *(workflow_command_tests(cmd, workflow_step_workdir(lines, index))
-                                for index, cmd in workflow_run_entries(text)))
+                                for index, cmd, _line in workflow_run_entries(text)))
 
 
-def workflow_command_cannot_fail(command: str) -> bool:
-    """True when the last command of one line cannot fail the step: a `|| <command>` tail that is no nonzero
-    `exit` or `false`, or a `; true`, `; :` or `; exit 0` tail. A `&&` chain can fail, and so can a tail
-    that runs in a pipe or a list. A line the lexer cannot read is judged as one that can fail."""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    lexer.commenters = ""
+def workflow_strip_comment(command: str) -> str:
+    """`command` without its trailing shell comment: an unquoted `#` that starts a word."""
+    quote, i = "", 0
+    while i < len(command):
+        char = command[i]
+        if quote:
+            if char == "\\" and quote == '"':
+                i += 1
+            elif char == quote:
+                quote = ""
+        elif char == "\\":
+            i += 1
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (i == 0 or command[i - 1].isspace()):
+            return command[:i]
+        i += 1
+    return command
+
+
+def workflow_split_top(text: str, op: str):
+    """`text` split at each `op` (`;`, `&&`, `||` or `|`) outside quotes, `( )` and `{ }` groups. Raises
+    ValueError when a quote or a group does not close."""
+    pieces, start, quote, depth, i = [], 0, "", 0, 0
+    while i < len(text):
+        char, before, after = text[i], text[i - 1] if i else " ", text[i + 1] if i + 1 < len(text) else " "
+        if quote:
+            if char == "\\" and quote == '"':
+                i += 1
+            elif char == quote:
+                quote = ""
+        elif char == "\\":
+            i += 1
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "{" and before in " \t;|&(" and after in " \t":
+            depth += 1
+        elif char == "}" and before in " \t;" and after in " \t;|&)":
+            depth -= 1
+        elif text.startswith("||", i) and op == "|":
+            i += 1
+        elif depth == 0 and text.startswith(op, i):
+            pieces.append(text[start:i])
+            start = i + len(op)
+            i = start - 1
+        i += 1
+    if quote or depth:
+        raise ValueError("unbalanced")
+    return pieces + [text[start:]]
+
+
+def workflow_exit_status(element: str) -> str:
+    """How one `||` element ends the run: "ok" when it always succeeds (`true`, `:`, `exit 0`, `echo`, `printf`,
+    or a group whose last command does), "stop" when it ends the shell with a failure (`exit 1`, `exit $?`,
+    or a group whose last command does), else "other"."""
+    element = element.strip()
+    if element[:1] == "{" and element[-1:] == "}" or element[:1] == "(" and element[-1:] == ")":
+        pieces = [piece for piece in workflow_split_top(element[1:-1], ";") if piece.strip()]
+        return workflow_chain_status(pieces[-1], False) if pieces else "other"
+    if len(workflow_split_top(element, "&&")) > 1 or len(workflow_split_top(element, "|")) > 1:
+        return "other"
+    words = element.split()
+    if not words:
+        return "other"
+    if words[0] in ("true", ":", "echo", "printf"):
+        return "ok"
+    if words[0] == "exit":
+        return "ok" if words[1:2] == ["0"] else "stop"
+    return "other"
+
+
+def workflow_chain_status(segment: str, skip_first: bool) -> str:
+    """The status of the first element of a `||` chain that is "ok" or "stop" (`workflow_exit_status`), else
+    "other". `skip_first` leaves out the chain's first element, the command whose failure is in question."""
+    for element in workflow_split_top(segment, "||")[1 if skip_first else 0:]:
+        status = workflow_exit_status(element)
+        if status != "other":
+            return status
+    return "other"
+
+
+def workflow_command_cannot_fail(command: str, base: str = "") -> bool:
+    """True when a `;` part of one line runs a test and a `|| <command>` after it always succeeds (`|| true`,
+    `|| :`, `|| exit 0`, `|| echo ...`), so its failure never fails the step. Under `bash -e` a `; true` tail
+    changes nothing, and a `|| exit 1`, `|| false` or retry leaves the step able to fail. A line whose quotes
+    or groups do not close is judged by a regex on its text."""
+    command = workflow_strip_comment(command)
     try:
-        tokens = list(lexer)
+        return any(workflow_command_is_test(part, base) and workflow_chain_status(part, True) == "ok"
+                   for part in workflow_split_top(command, ";"))
     except ValueError:
-        return False
-    for separator, tail_ok in (("||", WORKFLOW_FAILING_TAIL), (";", WORKFLOW_PASSING_TAIL)):
-        if separator in tokens:
-            tail = tokens[len(tokens) - tokens[::-1].index(separator):]
-            if tail and ((separator == "||" and not tail_ok.match(" ".join(tail)))
-                         or (separator == ";" and tail_ok.match(" ".join(tail)))):
-                return True
-    return False
+        return bool(WORKFLOW_OR_ALWAYS_OK.search(command))
 
 
-def workflow_command_is_test(command: str) -> bool:
-    return bool(workflow_command_tests(command) or TEST_RUNNER_CONTEXT.search(command))
+def workflow_command_is_test(command: str, base: str = "") -> bool:
+    return bool(workflow_command_tests(command, base) or TEST_RUNNER_CONTEXT.search(command))
 
 
 def workflow_added_indexes(old_text: str, new_text: str):
@@ -1897,15 +1977,15 @@ def workflow_disables_tests(old_text: str, new_text: str) -> bool:
 
 def workflow_disables_step(old_text: str, new_text: str) -> bool:
     """True when the change adds `continue-on-error: true` or `if: false` to a step that runs tests, or adds a
-    run line of a test step whose last command cannot fail (`|| true`, `; true`)."""
+    run line (an inline value, or any line of a block `run: |`) that runs a test and cannot fail the step."""
     lines = new_text.splitlines()
+    entries = workflow_run_entries(new_text)
     for index in workflow_added_indexes(old_text, new_text):
         commands = workflow_run_commands("\n".join(workflow_step_lines(lines, index)))
         if workflow_step_disables(lines[index]) and any(workflow_command_is_test(cmd) for cmd in commands):
             return True
-        added = WORKFLOW_RUN_PREFIX.sub("", lines[index], count=1).strip()
-        if any(cmd.strip() == added and workflow_command_cannot_fail(cmd) and workflow_command_is_test(cmd)
-               for cmd in commands):
+        if any(line == index and workflow_command_cannot_fail(cmd, workflow_step_workdir(lines, opener))
+               for opener, cmd, line in entries):
             return True
     return False
 
