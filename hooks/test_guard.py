@@ -9150,8 +9150,8 @@ PS_RUN_CASES = (
 for _name, _command in PS_RUN_CASES:
     sh("draft-pr: a PowerShell here-string body run " + _name + " holds gh pr create, is refused",
        _command, "deny", "draft-pr", tool="PowerShell", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
-# An unclosed quote in the segment before a here-string used to crash the guard. The crash allowed the call and ran
-# no later check. The body iex runs holds a bare gh pr create line, so the call is refused.
+# An unclosed quote in the segment before a here-string leaves that segment unread. The pipe into iex still decides,
+# so the bare gh pr create body it runs is refused.
 DRAFT_CRASH_CMD = 'Write-Host "Dont\n@"\n' + PS_PR_LINE + '\n"@ | iex'
 sh("draft-pr: a PowerShell unclosed double quote ahead of a here-string run by iex, holding gh pr create, is refused",
    DRAFT_CRASH_CMD, "deny", "draft-pr", tool="PowerShell", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
@@ -9167,6 +9167,11 @@ sh("draft-pr: a PowerShell unclosed quote, then a here-string iex runs with a dr
    UNCLOSED_THEN_DELETE, "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
 sh("draft-pr: a PowerShell closed quote, then a here-string iex runs with a draft line, then a wide delete, is refused by the delete",
    CLOSED_THEN_DELETE, "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+# An unclosed quote in the pipe stage that holds iex leaves that stage unread, so the draft body is allowed. The
+# no-crash check below runs this command too, and a stage that crashes the guard fails there.
+UNCLOSED_PIPE_CMD = '@"\ngh pr create --draft -t x\n"@ | iex "'
+sh("draft-pr: a PowerShell here-string piped to iex, with an unclosed quote in the pipe stage, holding a draft gh pr create line, is allowed",
+   UNCLOSED_PIPE_CMD, "allow", tool="PowerShell", cwd=NOGIT)
 sh("draft-pr: a PowerShell double-quoted here-string whose $( ) runs gh pr create, held in a variable, is refused",
    '$b = @"\n$(' + PS_PR_LINE + ')\n"@', "deny", "draft-pr", tool="PowerShell", cwd=NOGIT,
    carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
@@ -14053,11 +14058,12 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --re
                          gh_root_repo_spaced_check))
 
 
-# ---- draft-pr: the crash that allowed a call and skipped its later checks. Each run's log holds no guard-crash line;
-# the verdicts are the sh() cases in the draft-pr section.
+# ---- draft-pr: an unclosed quote in a PowerShell here-string command leaves no guard-crash line. Each run's log holds
+# none; the verdicts are the sh() cases in the draft-pr section.
 def draft_here_string_no_crash_case():
-    """No run of the unclosed-quote here-string bodies logs a guard-crash line."""
-    for name, command in (("the iex-run body", DRAFT_CRASH_CMD), ("the control with a later delete", UNCLOSED_THEN_DELETE)):
+    """No run of the unclosed-quote here-string commands logs a guard-crash line."""
+    for name, command in (("the iex-run body", DRAFT_CRASH_CMD), ("the control with a later delete", UNCLOSED_THEN_DELETE),
+                          ("the unclosed quote in a pipe stage", UNCLOSED_PIPE_CMD)):
         folder = os.path.join(ROOT, "draft-here-crash")
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, "guard.log")
@@ -14073,7 +14079,7 @@ def draft_here_string_no_crash_case():
             fields = row.split("\t")
             if fields[2:4] == ["crash", "guard-crash"]:
                 return False, "%s crashed the guard: %s" % (name, fields[4][:100])
-    return True, "no guard-crash line for the iex-run body or the control"
+    return True, "no guard-crash line for the iex-run body, the control or the pipe stage"
 
 
 LOG_CHECKS_EXTRA.append(("draft-pr: an unclosed quote ahead of a PowerShell here-string logs no guard-crash line",
