@@ -302,6 +302,43 @@ class CostPinTests(unittest.TestCase):
         self.assert_found([row("case.md", text, "state/UP.JSON", "state/UP.JSON"),
                            row("case.md", text, "hooks/guard.py:42", "hooks/guard.py:42")])
 
+    def test_cost_heading_section_body_is_cost_text(self):
+        # A heading that starts with the word Cost, at any level, makes its body cost text up to the next heading.
+        # A heading whose word is Costs, or any other word, makes none.
+        text = self.decide("heading.md",
+                           "## Cost\n"
+                           "\n"
+                           "It reads `state/h1.json` once.\n"
+                           "\n"
+                           "Reads `state/h2.json`; `lint/test_h.py` proves it.\n"
+                           "\n"
+                           "### Cost per call\n"
+                           "\n"
+                           "Each call reads `state/h4.json` once.\n"
+                           "\n"
+                           "## Costs\n"
+                           "\n"
+                           "Not a cost section: reads `state/h5.json` once.\n"
+                           "\n"
+                           "## Next\n"
+                           "\n"
+                           "`state/h6.json` is read later.\n")
+        self.put("lint/test_h.py", "# h cases\n\nh2.json is read\n")
+        self.assert_found([row("heading.md", text, "state/h1.json", "state/h1.json"),
+                           row("heading.md", text, "state/h4.json", "state/h4.json")])
+
+    def test_numbered_cost_items_start_a_paragraph_like_a_bullet(self):
+        # 8. and 3) are list markers, so a deeper-indented line after them and a deeper bullet stay in the paragraph.
+        text = self.decide("numbered.md",
+                           "- Parent item\n"
+                           "8. Cost: It reads `state/o1.json` once.\n"
+                           "   It also reads `state/o2.json` each run.\n"
+                           "\n"
+                           "3) Cost: It reads `state/o3.json` once.\n"
+                           "    - Nested under the cost: reads `state/o4.json` each run.\n")
+        self.assert_found([row("numbered.md", text, "state/o%d.json" % n, "state/o%d.json" % n)
+                           for n in (1, 2, 3, 4)])
+
 
 class CorpusTests(unittest.TestCase):
     """The corpus case: this repo's own records, with no --root. It may stay red until the records that name
