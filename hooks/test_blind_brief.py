@@ -335,6 +335,20 @@ class BriefFaults(unittest.TestCase):
                 found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
                 self.assertIn(("token-colour", "Job"), found)
 
+    def test_label_or_plural_id_word_before_an_all_digit_hash_is_refused(self):
+        # Main refuses these. A label ("Item:", "Ref:") or a plural ("Items") does not spare an all-digit hash.
+        for line in ("Item: #333333", "Items #000000", "Show Items: #444444", "Ref: #222222"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
+    def test_colour_word_before_an_id_word_and_an_all_digit_hash_is_refused(self):
+        # Main refuses these. A colour word before an id word makes the all-digit hash after it a colour.
+        for line in ("Brand colour of orders #123456", "Fill: Orders #123456"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
     def test_pixel_value_written_in_words_is_refused(self):
         # "12 pixels" is a px value in words. The spacing pattern reads px, rem and dp, so it misses this.
         self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\nCards have 12 pixels of padding."))))
