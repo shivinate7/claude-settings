@@ -271,7 +271,7 @@ def lift_message(lifts):
     """-> the merge commit message for the lifts of this run, one line per flag, or None when no check was lifted (GitHub's default message stays)."""
     return "\n".join(f"Reason flag: {flag}: {reason}" for flag, reason in lifts.items()) or None
 
-def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
+def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
     A finding refuses. An unreadable history refuses too, unless the run has the reason flag
     --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (octopus merge,
@@ -279,9 +279,10 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
-    # and the default refs it reads, so the second call reuses the first when all of them are unchanged.
+    # the default refs it reads, and the cited runs (through the PR head). The key holds no run answer. Reuse is still safe: debt_check
+    # judges each close again after every scan, and reads again any run that a Retire-run excuse rests on. So the second call reuses the first when the key is unchanged.
     try:
-        key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")), pr_body)
+        key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")), pr_body, retire_head)
         if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused; a hit skips the scan and its beat
             c, n = git(wt, "rev-list", "--count", f"{base_ref}..HEAD")
             say(f"merge: scanning for silent undos ({n.strip() if not c else '?'} commits) ...")  # the scan can run for minutes
@@ -296,7 +297,7 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
             beater = threading.Thread(target=beat, daemon=True)
             beater.start()
             try:
-                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS, pr_body=pr_body)  # a base with no generator: the page is judged by the generator that rebuilds it
+                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS, pr_body=pr_body, run_state=run_state, retire_head=retire_head)  # a base with no generator: the page is judged by the generator that rebuilds it
             finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
                 done.set()
                 beater.join()
@@ -2751,7 +2752,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
     try:
         try:
-            undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
+            undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
             debt_check(wt, f"origin/{base}", host, info)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
@@ -2898,7 +2899,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
-        record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
+        record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
@@ -2972,7 +2973,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 if c:  # never check against a stale base tip
                     stop(f"cannot fetch origin {base}, so the claim cannot be proved fresh {BASE_CITE}:\n" + out)
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
-                    record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
+                    record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
                     debt_check(wt, base_ref, host, info)
                 except Stop as e:
                     stop(str(e), Liftable if isinstance(e, Liftable) else Stop)

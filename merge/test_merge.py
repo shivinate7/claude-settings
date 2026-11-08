@@ -2881,9 +2881,9 @@ class BaseAware(Env):
             if "fetch" in a:
                 self.fetches.append((len(self.host.waits), a))
             return real_git(cwd, *a, **k)
-        def undo(wt, base_ref, unknown_ok="", pr_body=""):
+        def undo(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             self.undo_bases.append(base_ref)
-            return real_undo(wt, base_ref, unknown_ok, pr_body)
+            return real_undo(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         for name, fn in (("node_stamp", stamp), ("git", git), ("undo_check", undo)):
             p = unittest.mock.patch.object(merge, name, fn); p.start(); self.addCleanup(p.stop)
 
@@ -5106,9 +5106,9 @@ class GhHalf(Env):
         self.set(draft=True)
         before = self.refs()
         real, seen = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok="", pr_body=""):
+        def spy(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             seen.append((base_ref, sh(wt, "git", "rev-parse", "HEAD")))  # the check runs on the PR head's worktree
-            return real(wt, base_ref, unknown_ok, pr_body)
+            return real(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         with unittest.mock.patch.object(merge, "undo_check", spy):
             rc, out = self.run_merge("7", host=self.gh_host())
         self.assertEqual(rc, 0, out)
@@ -6159,17 +6159,42 @@ class SilentUndo(Env):
     def test_the_check_runs_again_after_the_wait_and_a_red_reverts_the_claim(self):
         calls = []
         real = merge.undo_check
-        def second_is_red(wt, base, unknown_ok="", pr_body=""):
+        def second_is_red(wt, base, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             calls.append(base)
             if len(calls) == 2:
                 raise merge.Stop("the branch silently undoes earlier work: main moved during the wait")
-            return real(wt, base, unknown_ok, pr_body)
+            return real(wt, base, unknown_ok, pr_body, run_state, retire_head)
         with unittest.mock.patch.object(merge, "undo_check", second_is_red):
             rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(len(calls), 2)
         self.assertEqual(rc, 1)
         self.assertEqual(self.claims(), 0)
         self.assertFalse(getattr(self.host, "merged", False))
+
+    def test_the_silent_undo_check_gets_the_cite_reader_and_the_pr_head_at_each_read(self):
+        """undo.check is handed run_state (a reader of a cited run, through the host) and retire_head (the PR head, as read at
+        the start). The claim at confirm moves the branch, so a read after it has a worktree HEAD that is not the PR head."""
+        DebtRetire.pr_on_debt(self, 0)
+        pr_head = self.head()
+        reads = []
+        self.host.cited_run = lambda url: (reads.append(url), ("success", pr_head))[1]
+        sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+        import check_silent_undo as undo
+        seen = []
+
+        def spy(*a, **k):
+            seen.append(k)
+            return [], []
+        with unittest.mock.patch.object(undo, "check", spy):
+            rc_preview, out_preview = self.run_merge("7")
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertGreaterEqual(len(seen), 2, out_preview + out)
+        for k in seen:
+            self.assertIn("run_state", k, "undo.check got no run_state: a Retire-run cite cannot reach the silent-undo check")
+            self.assertEqual(k.get("retire_head"), pr_head, "undo.check got a retire_head that is not the PR head")
+            k["run_state"]("https://github.com/fixture/repo/actions/runs/42")
+        self.assertTrue(reads, "the run reader undo.check got does not reach the host's cited_run")
+        self.assertEqual((rc_preview, rc), (0, 0), out_preview + out)
 
 
 DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
@@ -6332,9 +6357,9 @@ class DraftPreview(Env):
 
     def test_a_closed_or_merged_pr_is_refused_at_preview_and_the_check_never_runs(self):  # control
         real, calls = merge.undo_check, []
-        def spy(wt, base_ref, unknown_ok="", pr_body=""):
+        def spy(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             calls.append(base_ref)
-            return real(wt, base_ref, unknown_ok, pr_body)
+            return real(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         before = self.refs()
         with unittest.mock.patch.object(merge, "undo_check", spy):
             for state in ("CLOSED", "MERGED"):
@@ -6468,9 +6493,9 @@ class UndoMemo(Env):
             scans.append(a[1])
             return real_check(*a, **k)
 
-        def spy_undo(wt, base_ref, unknown_ok="", pr_body=""):
+        def spy_undo(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             undos.append(base_ref)
-            return real_undo(wt, base_ref, unknown_ok, pr_body)
+            return real_undo(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         with unittest.mock.patch.object(undo, "check", spy_check), unittest.mock.patch.object(merge, "undo_check", spy_undo):
             res = fn()
         return res, len(scans), len(undos)
@@ -7934,7 +7959,7 @@ class ScanProgress(Env):
         out, seen = io.StringIO(), []
         stub = unittest.mock.MagicMock()
 
-        def scan(cwd, upstream, head, default=None, tool=None, pr_body=""):
+        def scan(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
             seen.append(out.getvalue())
             return [], []
 
