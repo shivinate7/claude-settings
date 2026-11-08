@@ -35,6 +35,7 @@ Two literals are assembled from parts, so that this file cannot trip the guard i
 import ast
 import contextlib
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -6903,7 +6904,7 @@ FAMILY = "push-delete"
 
 LEASE = " --force-with-lease --force-if-includes"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-REMEDY = "retry with --force-with-lease --force-if-includes"
+REMEDY = "retry with --force-with-lease=<branch>:<sha>"
 
 
 def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=()):
@@ -6912,6 +6913,65 @@ def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent
     sh("push: " + name, VCS + " push " + tail, expected,
        rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
        carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
+
+
+# THE RETRY FORM. The refusal's last sentence names the push to retry with. A retry must be a form the
+# guard allows (decision stale-safe-force-push, table row 2): a lease naming the ref and a sha, with no
+# --force-if-includes. The sentence is read from the guard under test, beside GUARD, so a copy whose
+# remedy text differs is the one read.
+RETRY_FORM_RE = re.compile(r"Remedy: retry with (.+?)\.\s*$")
+
+
+def retry_form():
+    """(form, why): the form the push refusal says to retry with, or (None, why) when it names none."""
+    spec = importlib.util.spec_from_file_location(
+        "guard_push_delete_under_test", os.path.join(os.path.dirname(GUARD), "guard_push_delete.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    found = RETRY_FORM_RE.search(module.PUSH_REASON)
+    if found is None:
+        return None, "PUSH_REASON does not end with a 'Remedy: retry with <form>.' sentence"
+    return found.group(1), ""
+
+
+RETRY_FORM, RETRY_WHY = retry_form()
+PUSH_REMEDY_CHECKS = []
+
+
+def retry_form_lease_check():
+    """The retry form is a lease that names <branch>:<sha>, the two placeholders a retry fills in."""
+    if RETRY_FORM is None:
+        return False, RETRY_WHY
+    if re.fullmatch(r"--force-with-lease=<[^>]+>:<sha>", RETRY_FORM) is None:
+        return False, "the retry form %r is not a lease naming <branch>:<sha>" % RETRY_FORM
+    return True, "the retry form is %s" % RETRY_FORM
+
+
+def retry_form_no_includes_check():
+    """The retry form carries no --force-if-includes."""
+    if RETRY_FORM is None:
+        return False, RETRY_WHY
+    if "--force-if-includes" in RETRY_FORM:
+        return False, "the retry form %r still carries --force-if-includes" % RETRY_FORM
+    return True, "the retry form carries no --force-if-includes"
+
+
+def retry_form_template_check():
+    """The push the retry form builds, from the one-line push template, is the sha lease push."""
+    if RETRY_FORM is None:
+        return False, RETRY_WHY
+    built = (VCS + " push %s origin <branch>") % RETRY_FORM
+    want = VCS + " push --force-with-lease=<branch>:<sha> origin <branch>"
+    if built != want:
+        return False, "the push the retry form builds is %r, not %r" % (built, want)
+    return True, "the push the retry form builds is the sha lease push"
+
+
+PUSH_REMEDY_CHECKS.extend([
+    ("push: the retry form the refusal prints is a lease naming <branch>:<sha>", retry_form_lease_check),
+    ("push: the retry form the refusal prints carries no --force-if-includes", retry_form_no_includes_check),
+    ("push: the push the retry form builds is the sha lease push", retry_form_template_check),
+])
 
 
 # ALLOW: a lease that cannot overwrite newer work, off the default branch.
@@ -6932,6 +6992,15 @@ push_case("lease with includes to a branch under the default name's prefix",
           "--force-with-lease --force-if-includes origin HEAD:refs/heads/main-fix", "allow")
 push_case("lease to a branch main-fix when the default branch is trunk",
           "--force-with-lease --force-if-includes origin HEAD:main", "allow", cwd=PUSHTRUNK)
+
+# The retry form, with its placeholders filled in, is allowed off the default branch. This is the green
+# control for the checks above: it passes on the code that prints the form too.
+if RETRY_FORM is None:
+    PUSH_REMEDY_CHECKS.append(("push: the retry form, filled in, is allowed off the default branch",
+                               lambda: (False, RETRY_WHY)))
+else:
+    push_case("the retry form, filled in, is allowed off the default branch",
+              RETRY_FORM.replace("<branch>", "feat").replace("<sha>", SHA) + " origin feat", "allow")
 
 # DENY with the remedy: any force that can overwrite newer work.
 push_case("the long force flag", "--force", "deny")
@@ -13909,6 +13978,11 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The push remedy checks are appended here because LOG_CHECKS_EXTRA is defined here. Their family is the
+# push section's, set by hand.
+for _label, _check in PUSH_REMEDY_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "push-delete"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
