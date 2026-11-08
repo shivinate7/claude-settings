@@ -1052,14 +1052,17 @@ def _unflagged_missing(session_id, state):
 # --- Owner waits (decision precompact-handoff, the owner-waits section) -----------------------
 # A coordinator's handoff keeps every item waiting on the owner in this session. The Stop nudge
 # blocks when the section is missing or empty, or when a refused act with no later success is not
-# named in it. Cost per coordinator Stop: one more read of the transcript and of the handoff; no
-# file written, no process started.
+# named in it. Cost per Stop of a session that never held the coordinator tag text: one raw read
+# of the transcript (it stops at the first line holding the tag text), no JSON parse. A
+# coordinator's Stop adds one parse of the transcript and one read of the handoff. No file is
+# written, no process started.
 OWNER_HEADING = "Waiting on the owner in this session"
 COORDINATOR_TAG = "cs-build:coordinator"
 OWNER_NAMED_MAX = 5  # the newest unanswered refusals the section must name
 OWNER_NAME_CHARS = 60
 _OWNER_HEAD = re.compile(r"^##[ \t]+%s[ \t]*$" % re.escape(OWNER_HEADING), re.I | re.M)
-_ANY_HEAD = re.compile(r"^#{1,2}[ \t]", re.M)
+_ANY_HEAD = re.compile(r"^#{1,2}[ \t]")
+_FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$")
 
 
 def _squash(text):
@@ -1067,23 +1070,35 @@ def _squash(text):
 
 
 def _call_name(name, inp):
-    """(identifier, label) of a tool call. The identifier is the text a handoff line would hold to name
-    the act: a command's first line, a path or url, else the tool name."""
+    """(answer key, identifier, label) of a tool call. The identifier is the text a handoff line would
+    hold to name the act: a command's first line, a path or url, else the tool name. The key tells acts
+    apart: the tool and its whole command, path or url; for a tool with none, the tool and its input
+    without `description`. A refused merge of PR 12 is then not answered by a success for PR 13."""
     inp = inp if isinstance(inp, dict) else {}
-    for key in ("command", "file_path", "path", "url"):
-        value = inp.get(key)
+    for field in ("command", "file_path", "path", "url"):
+        value = inp.get(field)
         if isinstance(value, str) and value.strip():
             ident = _squash(value.strip().splitlines()[0])[:OWNER_NAME_CHARS]
-            return ident, "%s `%s`" % (name, ident)
-    return name, name
+            return (name, value.strip()), ident, "%s `%s`" % (name, ident)
+    rest = {k: v for k, v in inp.items() if k != "description"}
+    return (name, json.dumps(rest, sort_keys=True, default=str)), name, name
 
 
-def owner_waits_scan(transcript_path, session_id):
+def _transcript_has_tag(transcript_path):
+    """Whether any line of the transcript holds the coordinator tag text. A raw read, no parse."""
+    with open(transcript_path, "r", encoding="utf-8") as f:
+        return any(COORDINATOR_TAG in line for line in f)
+
+
+def owner_waits_scan(transcript_path, own_id):
     """(coordinator, refused): whether the own session carries the coordinator tag, and the unanswered
     refusals as [(identifier, label)], oldest first. The tags are the newest own get_session record,
     moved by each own set_session_tags add or remove after it. A refusal is answered by a later
-    success of the same tool with the same input; a success of another call does not answer it."""
+    success of the same act (see _call_name); a success of another act does not answer it. A
+    transcript that never holds the tag text is no coordinator's, and is not parsed."""
     import own_session  # the one reader of the own get_session record
+    if not _transcript_has_tag(transcript_path):
+        return False, []
     calls, uses, sets = {}, set(), {}
     tags, refused = set(), {}
     with open(transcript_path, "r", encoding="utf-8") as f:
@@ -1104,57 +1119,70 @@ def owner_waits_scan(transcript_path, session_id):
                 inp = block.get("input") if isinstance(block.get("input"), dict) else {}
                 name = str(block.get("name", ""))
                 if kind == "tool_use":
-                    calls[tu] = (name, json.dumps(inp, sort_keys=True, default=str), inp)
+                    calls[tu] = _call_name(name, inp)
                     if name.endswith("get_session"):
                         uses.add(tu)
-                    elif name.endswith("set_session_tags") and session_id in (inp.get("session_ids") or []):
+                    elif name.endswith("set_session_tags") and own_id in (inp.get("session_ids") or []):
                         sets[tu] = inp
                 elif kind == "tool_result":
                     ref = block.get("tool_use_id")
                     failed = block.get("is_error") is True
                     if ref in uses and not failed:
-                        try:
-                            ccr = own_session._record_json(_result_text(block))["ccr"]
-                            if ccr["id"] == session_id and isinstance(ccr["tags"], list):
-                                tags = {str(t) for t in ccr["tags"]}
-                        except (ValueError, KeyError, TypeError):
-                            pass
+                        record = own_session.record_tags(_result_text(block), own_id)
+                        if record is not None:
+                            tags = record
                     elif ref in sets and not failed:
-                        for key, op in (("add", tags.update), ("remove", tags.difference_update)):
-                            given = sets[ref].get(key)
-                            if isinstance(given, list):
-                                op(str(t) for t in given)
+                        own_session.move_tags(tags, sets[ref])
                     if ref not in calls:
                         continue
-                    key = calls[ref][:2]
+                    key, ident, label = calls[ref]
                     if failed and _refusal_line(block):
                         refused.pop(key, None)  # a repeat refusal is the newest
-                        refused[key] = _call_name(calls[ref][0], calls[ref][2])
+                        refused[key] = (ident, label)
                     elif not failed:
                         refused.pop(key, None)
     return COORDINATOR_TAG in tags, list(refused.values())
 
 
+def _owner_section(text):
+    """The squashed text under the owner-waits heading, up to the next `#` or `##` heading that is not
+    inside a fenced code block; None when the heading is missing."""
+    head = _OWNER_HEAD.search(text)
+    if not head:
+        return None
+    kept, fence = [], None
+    for line in text[head.end():].splitlines():
+        found = _FENCE.match(line)
+        if fence is None and found:
+            fence = found.group(1)
+        elif fence is not None and found and found.group(1)[0] == fence[0] \
+                and len(found.group(1)) >= len(fence) and not found.group(2).strip():
+            fence = None
+        elif fence is None and _ANY_HEAD.match(line):
+            break
+        kept.append(line)
+    return _squash(" ".join(kept))
+
+
 def owner_waits_gap(payload):
-    """The block reason when a coordinator's handoff does not keep what waits on the owner, else None.
-    None for a subagent, a session that is not a coordinator, no handoff, and any read that fails."""
+    """The block reason when a coordinator's handoff does not keep what waits on the owner, else "".
+    "" for a subagent, a session that is not a coordinator, no handoff, and any read that fails."""
     try:
         if payload.get("agent_id"):
-            return None
+            return ""
         session_id = payload.get("session_id", "")
         path = handoff_path(session_id)
         if not session_id or not os.path.isfile(path):
-            return None
-        coordinator, refused = owner_waits_scan(payload.get("transcript_path", ""), session_id)
+            return ""
+        import override
+        # A cloud session's get_session record and set_session_tags calls name it session_<x>, not the
+        # Stop payload's UUID (hooks/guard.py reads the same way).
+        own_id = override.remote_session_id() or session_id
+        coordinator, refused = owner_waits_scan(payload.get("transcript_path", ""), own_id)
         if not coordinator:
-            return None
+            return ""
         with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
-        head = _OWNER_HEAD.search(text)
-        section = None
-        if head:
-            nxt = _ANY_HEAD.search(text, head.end())
-            section = _squash(text[head.end():nxt.start() if nxt else len(text)])
+            section = _owner_section(f.read())
         problems = []
         if section is None:
             problems.append("It has no `## %s` section." % OWNER_HEADING)
@@ -1165,13 +1193,13 @@ def owner_waits_gap(payload):
             problems.append("The section does not name these refused acts: %s. Name each, with what it "
                             "unblocks, or the act that replaced it." % "; ".join(unnamed))
         if not problems:
-            return None
+            return ""
         return ("Your handoff at %s must keep every item waiting on the owner in this session. %s Fix it "
                 "under step 4 of %s, one line per item, then continue. (decision precompact-handoff)"
                 % (path, " ".join(problems), prompt_path()))
     except Exception as e:
         sys.stderr.write("precompact_handoff: owner waits error: %s\n" % e)
-        return None
+        return ""
 
 
 def run_nudge(payload):
