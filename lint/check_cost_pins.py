@@ -54,8 +54,9 @@ sentence in a decision record keeps the Cost rule alone.
 The report is one line per token and line: `<record>:<line>: <token> named in a Cost sentence with no pin`.
 Exit 1 when there is a finding, 0 when there is none. The decision records (kind `decisions` in lint/layout.json) and
 the debt notes file are read. A debt record's Cost line is not read. Each test file is read once per run.
-Cost: per run, one read of the notes file, one read of lint/layout.json (through lint/layout.py), and one read of each
-test file a Cost sentence or a note names, cached. The number of test files read is not pinned.
+Cost: per run, one read of the notes file and one read of each test file a Cost sentence or a note names, cached.
+The number of test files read is not pinned. lint/layout.py reads lint/layout.json and its extras file again on each
+record-kind lookup, with no cache. Those layout reads are not pinned.
 """
 import argparse
 import collections
