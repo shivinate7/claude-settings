@@ -51,7 +51,8 @@
 # detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names,
 # fetched from that clone's origin when it lacks the sha. A remote ste-lint, code-check or zizmor step runs from the
 # worktree of its own pin only (ste-lint as its bin/ste-changed), as CI downloads each pinned sha separately.
-# CLAUDE_SETTINGS_DIR is set to the tree only when the job has exactly one distinct pin (the step's own env: wins).
+# Each step's CLAUDE_SETTINGS_DIR, first that exists: the step's own env:, the step's pinned tree (CI runs the pin, so a
+# caller's dir at another sha is wrong), the caller's value, the settings clone; none of them leaves it unset.
 # With two or more pins, a plain run step is one `unknown` line naming the shas. A ref that is no sha, a sha that cannot
 # be fetched or a failed `npm ci` makes each step that needs that tree one `unknown` line; the other steps run. With no
 # pin, a step runs as before. Each worktree is removed on every exit.
@@ -618,6 +619,7 @@ def run(argv, stack):
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "" for st in steps] if lint else [""] * len(steps)
     planned = [plan(st, bool(base), values, top) if k else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
+    settings_fallback = None  # the settings clone, read once by the first step that runs
     ran, blocker = 0, None  # blocker: the install step that did not finish
     for n, step in enumerate(steps, 1):
         name = names[n - 1]
@@ -628,6 +630,9 @@ def run(argv, stack):
             print("%-15s %s: %s" % ("unknown", name, blocked[n - 1]))
             continue
         pinned = trees.get(need[n - 1][0]) if wanted else None  # this step's own tree: its own sha, else the job's one
+        if settings_fallback is None:
+            settings_fallback = settings_clone() or ""
+        settings_dir = pinned or os.environ.get("CLAUDE_SETTINGS_DIR") or settings_fallback
         if lint and not kind[n - 1]:
             if LOCAL_ACTION.fullmatch(uses(step)):
                 tally["unknown"] += 1
@@ -673,7 +678,7 @@ def run(argv, stack):
                                  stderr=subprocess.STDOUT, text=True,
                                  env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"}},
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
-                                      **({"CLAUDE_SETTINGS_DIR": trees[plain_sha]} if plain_sha in trees else {}),
+                                      **({"CLAUDE_SETTINGS_DIR": settings_dir} if settings_dir else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
                 LIVE[:] = [proc]
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
