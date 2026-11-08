@@ -21612,6 +21612,17 @@ add("other-checkout: a cwd stranded in a separate clone refuses an absolute Writ
     "CLAUDE_PROJECT_DIR names the home clone",
     "deny", "other-checkout", tool="Write", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY},
     file_path=os.path.join(XCL_SEP, "src", "app.py"), content="x")
+# An agent's write from a stranded cwd. The agent id has no recorded home, so worktree-home does not judge
+# the call, and the refusal is the stranded act's alone. The shell row is the green control.
+XCL_STRANDED_AGENT = "xclstranded1"
+sh("other-checkout: an agent's python -c write into a cwd stranded in a separate clone is refused when "
+   "CLAUDE_PROJECT_DIR names the home clone",
+   "python3 -c \"open('notes.md','w').write('x')\"", "deny", "other-checkout", cwd=XCL_SEP,
+   env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY}, agent_id=XCL_STRANDED_AGENT)
+sh("other-checkout: an agent's shell write into a cwd stranded in a separate clone is refused when "
+   "CLAUDE_PROJECT_DIR names the home clone (control)",
+   "echo x > notes.md", "deny", "other-checkout", cwd=XCL_SEP,
+   env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY}, agent_id=XCL_STRANDED_AGENT)
 
 # Allowed: the own checkout, a repo inside it, a different repo, the temp folder, a clone that cannot be
 # read, and a plain folder. Each one is a false alarm the act must not raise.
