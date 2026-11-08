@@ -462,6 +462,84 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
 
+    # ---- the review record step: a PR target reads the record comments of its PR; a ref target reads none
+    def pr_host(self, comments):
+        """The fixture host of the lane: pull request 7 at the lane's head, with the repo's comments given, oldest first."""
+        pull = tm.batch_pull(7, self.head("feat"))
+        pull["head"]["ref"] = "feat"  # the lane's branch in this fixture, as FakeHost names it
+        self.host = tm.PullsHost([pull], {}, comments=comments)
+        return self.host
+
+    def comment_reads(self):
+        """The repo-wide comment list reads of the fixture host, one entry per read."""
+        return [fields for rel, fields in self.host.list_calls if rel == "issues/comments"]
+
+    def review_record_line(self, out):
+        """The one `Review record` step line of a lane lint's output."""
+        lines = [line for line in out.splitlines() if "Review record" in line]
+        self.assertTrue(lines, "the lane lint prints no Review record step line:\n" + out)
+        return lines[0]
+
+    def test_a_newest_record_with_text_between_its_ci_line_and_the_rule_fails_the_review_record_step(self):
+        # the #2317 shape: a note sits between the CI line and `---`, so the step line names both
+        self.pr_host([tm.review_comment(1, 7, tm.record_text(head=self.head("feat")) + "Lane note.\n" + tm.REVIEW_FOOTER)])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, out)
+        line = self.review_record_line(out)
+        self.assertIn("CI line", line, out)
+        self.assertIn("---", line, out)
+
+    def test_a_pr_whose_marker_line_is_cut_off_with_no_other_record_fails_the_review_record_step(self):
+        # the #2294 shape: the body starts at `PR: #7`, so no record is marked and none names the live head
+        body = tm.record_text(head=self.head("feat")).split("\n", 1)[1]
+        self.pr_host([tm.review_comment(1, 7, body)])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, out)
+        line = self.review_record_line(out)
+        self.assertIn("no record", line, out)
+        self.assertIn("live head", line, out)
+
+    def test_a_newest_record_at_an_older_head_fails_the_review_record_step_and_names_the_live_head(self):
+        head = self.head("feat")
+        self.pr_host([tm.review_comment(1, 7, tm.record_text(head=tm.REVIEW_OLD_HEAD))])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, out)
+        line = self.review_record_line(out)
+        self.assertIn("live head", line, out)
+        self.assertIn(head[:9], line, out)
+
+    def test_a_good_record_at_the_live_head_passes_the_review_record_step(self):
+        # control: the newest record parses and names the live head, so the step does not fail
+        head = self.head("feat")
+        self.pr_host([tm.review_comment(1, 7, tm.record_text(head=tm.REVIEW_OLD_HEAD)), tm.review_comment(2, 7, tm.record_text(head=head))])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertFalse([line for line in out.splitlines() if "Review record" in line and "FAIL" in line], out)
+
+    def test_a_pr_target_reads_its_comment_list_once(self):
+        # cost: one extra comment-list read for a PR target
+        head = self.head("feat")
+        self.pr_host([tm.review_comment(1, 7, tm.record_text(head=head))])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(self.comment_reads()), 1, "a PR target read the comment list %d times, want once" % len(self.comment_reads()))
+
+    def test_a_ref_target_is_unchanged_and_reads_no_comment_list(self):
+        # control: a commit target lints as before, with a stale record on the PR it never reads, and reads no comment list
+        head = self.head("feat")
+        self.pr_host([tm.review_comment(1, 7, tm.record_text(head=tm.REVIEW_OLD_HEAD))])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", head, head=head)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertEqual(self.comment_reads(), [], "a ref target read the comment list")
+
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
     """The ready check of the draft step (merge.draft_step): before a draft goes ready, the repo's declared merge.readyChecks
