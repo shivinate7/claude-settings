@@ -2065,7 +2065,7 @@ class Restates(unittest.TestCase):
         self.assert_refused(self.child("- " + grant_line()), "CLAUDE.md:1")
 
     def test_a_copied_record_line_inside_a_two_line_comment_passes(self):
-        # Review round 2, F3: a comment is no prose in either form, and a comment over two lines is one comment, so the
+        # A comment is no prose in either form, and a comment over two lines is one comment, so the
         # record line on its middle line is comment text and passes.
         unit = "<!-- a note about the grant\n%s\nand its check -->" % grant_line()
         self.assert_passes(self.child(unit))

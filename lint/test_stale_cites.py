@@ -2315,7 +2315,7 @@ OLD_STE = "Write in Simplified " + "Technical English"
 OLD_RULE = ("**Output.** " + OLD_STE + " by default, to me and between agents,\n"
             "unless told otherwise.<!-- rule:output-write-in-ste -->\n")
 NEW_RULE = "**Output.** Write plainly: short sentences, one term per meaning, no filler.<!-- rule:output-write-in-ste -->\n"
-# The eight agent lines and the debt line, verbatim from origin/main 5a5f081e (grep "Technical English"), one line per
+# The eight agent lines and the debt line, verbatim from main before the retired phrase was removed (grep "Technical English"), one line per
 # file. Each is at line 1 here, where it sat at lines 18 to 510 there. The old phrase is the %s.
 NINE = {
     "agents/builder.md": "that does not apply. %s. Start with the point. No preamble.\n",
@@ -2450,8 +2450,7 @@ class RewordCostTests(RewordCase):
         self.assertEqual(before, after, out)
 
 
-# Review round 2, F5: a head sentence that only gained words used to skip the reword check. The skip was checked against
-# every rule's head sentences, and it ignored a negator in the added words. Now a negator ends the skip, and a rule is
+# A head sentence that only gained words skips the reword check, unless the added words hold a negator. A rule is
 # compared with its own head sentences only.
 MERGE_BASE = "**Merge.** Main may merge only by pull request.<!-- rule:merge-by-pr -->\n"
 MERGE_MOVED = "**Merge.** Main moves only by pull request.<!-- rule:merge-by-pr -->\n"

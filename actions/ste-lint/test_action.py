@@ -910,7 +910,7 @@ with scratch("one-home-step") as d:
     check("one-home step, control: a child with no copy passes the step with no COPY001",
           rc == 0 and "COPY001" not in out, out)
 
-# Review round 2, F1: in claude-settings itself the step runs the copy check too, and a copy fails the step. A child
+# In claude-settings itself the step runs the copy check too, and a copy fails the step. A child
 # still only prints (above). So the parent gate sits in this same step, with no new CI step.
 def own_step(d, brief):
     """A claude-settings clone under d whose tracked agents/brief.md holds `brief`."""
