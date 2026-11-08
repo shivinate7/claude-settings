@@ -9364,6 +9364,16 @@ for _spell in ("-X PUT", "--method PUT", "--method=PUT", "-XPUT"):
        **_BARE_GUARD)
 sh("merge-checks: gh api -X PUT of the merge path allows a green head in a repo with no merge tool",
    "gh api -X PUT repos/o/r/pulls/5/merge", "allow", silent=True, cwd=NOGIT, **_AUTO_GREEN)
+# A subshell hides the path's end: the call's last word reads `merge)`, so the route must match before the `)`.
+sh("merge-checks: (cd /tmp && gh api -X PUT repos/o/r/pulls/5/merge) is refused on a pending head",
+   "(cd /tmp && gh api -X PUT repos/o/r/pulls/5/merge)", "deny", "merge-checks", carries="pending", cwd=NOGIT,
+   **_AUTO_PENDING)
+sh("bare-merge: cd into a repo with a merge block, then (gh api -X PUT repos/o/r/pulls/5/merge), asks on a green head",
+   "cd " + slash(STAMPREPO) + " && (gh api -X PUT repos/o/r/pulls/5/merge)", "ask", BARE_MERGE, carries=BARE_SAYS,
+   cwd=NOGIT, **_BARE_GUARD)
+# The control: the same subshell as a GET is a read, and stays allowed.
+sh("gh api: (cd /tmp && gh api repos/o/r/pulls/5/merge) is a read, on a pending head",
+   "(cd /tmp && gh api repos/o/r/pulls/5/merge)", "allow", silent=True, cwd=NOGIT, **_AUTO_PENDING)
 
 
 # =========================================================================== 5e. the merge role record
