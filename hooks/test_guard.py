@@ -90,6 +90,7 @@ FAMILIES = {
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
     "stale-tree-commit": "a commit from a checkout whose branch moved under it: refused while the index holds the old copy of a file the move changed, passed after the acts that sync the index, and the git processes a commit or a read starts",
+    "commit-leaves-edit-unstaged": "a plain commit that leaves a tracked edit unstaged beside a staged path in the same folder: asked, including the quoted-text forms, the forms that name or stage their own paths pass, a failed read passes, and the git reads a commit starts",
     "hand-made-worktree": "a worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
@@ -4406,6 +4407,232 @@ STALE_COST_CHECKS = (
      stale_cost_control_check),
 )
 FIXTURELESS_CHECKS.update(check for _label, check in STALE_COST_CHECKS)  # each builds only the folder it judges
+
+
+# =========================================================================== 1b-3. a commit that leaves an edit unstaged
+FAMILY = "commit-leaves-edit-unstaged"
+#
+# Decision commit-leaves-edit-unstaged, section "The ruling". A plain `git commit` asks when a tracked file
+# is edited in the work tree and left out of the commit, and a path in the same folder is in it. The rule
+# reads two lists in the commit's own tree: `git diff --cached --name-only` and `git diff --name-only`.
+#
+# Each state is one folder under ULDIR, built with git itself. A builder reads its state back with git
+# before any case runs, so an ask or an allow means what its case name says.
+
+ULDIR = os.path.join(ROOT, "unstaged")
+UL_RULE = "commit-leaves-edit-unstaged"
+UL_ASK = os.path.join(ULDIR, "ask")      # docs/a.md removed with git rm, docs/b.md edited and left unstaged
+UL_EDIT = os.path.join(ULDIR, "edit")    # docs/a.md edited and staged, docs/b.md edited and left unstaged
+UL_OTHER = os.path.join(ULDIR, "other")  # docs/a.md staged, hooks/c.py edited and left unstaged
+UL_NEW = os.path.join(ULDIR, "new")      # docs/a.md staged, docs/new.md untracked beside it
+UL_ALL = os.path.join(ULDIR, "all")      # docs/a.md and docs/b.md both staged: nothing left unstaged
+UL_ROOT = os.path.join(ULDIR, "root")    # a.txt staged and b.txt left unstaged, both at the top level
+UL_FULL = os.path.join(ULDIR, "full")    # 20 files staged and 20 left unstaged, all in docs/
+UL_FULL_STAGED = ["docs/s%02d.md" % number for number in range(20)]
+UL_FULL_LEFT = ["docs/u%02d.md" % number for number in range(20)]
+
+
+def _ul_must(ok, what):
+    """Scope check for a fixture: stop the suite, naming WHAT, unless OK holds."""
+    if not ok:
+        sys.exit("fixture setup failed in commit-leaves-edit-unstaged: %s" % what)
+
+
+def _ul_git(where, *args):
+    """git in WHERE, which must succeed. Returns its stdout."""
+    result = run_vcs(where, *args)
+    _ul_must(result.returncode == 0, "git %s in %r: %s" % (" ".join(args), where, result.stderr.strip()))
+    return result.stdout
+
+
+def _ul_names(where, *args):
+    """The sorted lines one git listing prints: one path each."""
+    return sorted(line for line in _ul_git(where, *args).splitlines() if line)
+
+
+def _ul_state(where, staged, unstaged, untracked=()):
+    """Scope: STAGED is what differs from HEAD in the index, UNSTAGED is what differs from the index in the
+    work tree, and UNTRACKED is the untracked set. Each is read back with git and must match exactly."""
+    reads = (
+        ("staged", staged, _ul_names(where, "diff", "--cached", "--name-only")),
+        ("unstaged", unstaged, _ul_names(where, "diff", "--name-only")),
+        ("untracked", untracked, _ul_names(where, "ls-files", "--others", "--exclude-standard")),
+    )
+    for label, want, got in reads:
+        _ul_must(got == sorted(want), "%r: the %s paths are %r, want %r" % (where, label, got, sorted(want)))
+
+
+def _ul_edit(where, rel, stage=False):
+    """Write new text into REL, and stage it when STAGE is set."""
+    write(os.path.join(where, rel), "edited\n")
+    if stage:
+        _ul_git(where, "add", "--", rel)
+
+
+def _build_ulask():
+    make_repo(UL_ASK, {"docs/a.md": "base\n", "docs/b.md": "base\n"})
+    _ul_git(UL_ASK, "rm", "-q", "docs/a.md")
+    _ul_edit(UL_ASK, "docs/b.md")
+    _ul_state(UL_ASK, ["docs/a.md"], ["docs/b.md"])
+
+
+def _build_uledit():
+    make_repo(UL_EDIT, {"docs/a.md": "base\n", "docs/b.md": "base\n"})
+    _ul_edit(UL_EDIT, "docs/a.md", stage=True)
+    _ul_edit(UL_EDIT, "docs/b.md")
+    _ul_state(UL_EDIT, ["docs/a.md"], ["docs/b.md"])
+
+
+def _build_ulother():
+    make_repo(UL_OTHER, {"docs/a.md": "base\n", "hooks/c.py": "base\n"})
+    _ul_edit(UL_OTHER, "docs/a.md", stage=True)
+    _ul_edit(UL_OTHER, "hooks/c.py")
+    _ul_state(UL_OTHER, ["docs/a.md"], ["hooks/c.py"])
+
+
+def _build_ulnew():
+    make_repo(UL_NEW, {"docs/a.md": "base\n"})
+    _ul_edit(UL_NEW, "docs/a.md", stage=True)
+    _ul_edit(UL_NEW, "docs/new.md")
+    _ul_state(UL_NEW, ["docs/a.md"], [], untracked=["docs/new.md"])
+
+
+def _build_ulall():
+    make_repo(UL_ALL, {"docs/a.md": "base\n", "docs/b.md": "base\n"})
+    _ul_edit(UL_ALL, "docs/a.md", stage=True)
+    _ul_edit(UL_ALL, "docs/b.md", stage=True)
+    _ul_state(UL_ALL, ["docs/a.md", "docs/b.md"], [])
+
+
+def _build_ulroot():
+    make_repo(UL_ROOT, {"a.txt": "base\n", "b.txt": "base\n"})
+    _ul_edit(UL_ROOT, "a.txt", stage=True)
+    _ul_edit(UL_ROOT, "b.txt")
+    _ul_state(UL_ROOT, ["a.txt"], ["b.txt"])
+
+
+def _build_ulfull():
+    make_repo(UL_FULL, {rel: "base\n" for rel in UL_FULL_STAGED + UL_FULL_LEFT})
+    for rel in UL_FULL_STAGED:
+        _ul_edit(UL_FULL, rel, stage=True)
+    for rel in UL_FULL_LEFT:
+        _ul_edit(UL_FULL, rel)
+    _ul_state(UL_FULL, UL_FULL_STAGED, UL_FULL_LEFT)
+
+
+lazy_fixture([UL_ASK], _build_ulask)
+lazy_fixture([UL_EDIT], _build_uledit)
+lazy_fixture([UL_OTHER], _build_ulother)
+lazy_fixture([UL_NEW], _build_ulnew)
+lazy_fixture([UL_ALL], _build_ulall)
+lazy_fixture([UL_ROOT], _build_ulroot)
+lazy_fixture([UL_FULL], _build_ulfull)
+
+
+def _ul_ask(name, command, cwd, carries="docs/b.md"):
+    sh("commit-leaves-edit-unstaged: " + name, command, "ask", UL_RULE, cwd=cwd, carries=carries)
+
+
+def _ul_allow(name, command, cwd):
+    sh("commit-leaves-edit-unstaged: " + name, command, "allow", cwd=cwd)
+
+
+# THE ASKS. Each reason names the left-out path, so the reader sees what stays behind the commit.
+_ul_ask("a plain commit with docs/a.md removed by git rm and docs/b.md unstaged asks",
+        VCS + " commit -m x", UL_ASK)
+_ul_ask("a plain commit with docs/a.md staged and docs/b.md unstaged asks", VCS + " commit -m x", UL_EDIT)
+_ul_ask("git -C naming the repo with the unstaged edit, from a cwd that is no git tree, asks",
+        VCS + " -C " + slash(UL_EDIT) + " commit -m x", NOGIT)
+_ul_ask("a cd into the repo with the unstaged edit before the commit asks",
+        "cd " + slash(UL_EDIT) + " && " + VCS + " commit -m x", NOGIT)
+_ul_ask("commit --amend -m x with docs/b.md unstaged beside a git rm asks", VCS + " commit --amend -m x", UL_ASK)
+_ul_ask("git commit --dry-run with docs/b.md unstaged beside a staged edit asks",
+        VCS + " commit --dry-run", UL_EDIT)
+_ul_ask("the root folder: a.txt staged and b.txt unstaged asks", VCS + " commit -m x", UL_ROOT, carries="b.txt")
+_ul_ask("full size: 20 staged and 20 unstaged files in docs/ asks", VCS + " commit -m x", UL_FULL,
+        carries="docs/u00.md")
+
+# THE QUOTED TEXT. A flag, a path or a comment opener inside -m is text, so each form still leaves docs/b.md
+# out and asks.
+_ul_ask('a quoted -a inside -m is text and still asks', VCS + ' commit -m "add -a later"', UL_EDIT)
+_ul_ask('a quoted -- path inside -m is text and still asks', VCS + ' commit -m "see -- docs/a.md"', UL_EDIT)
+_ul_ask('a comment opener inside -m does not hide the commit', VCS + ' commit -m "fix # later"', UL_EDIT)
+_ul_ask("a lone quote inside -m does not hide the commit", VCS + ' commit -m "don\'t fix"', UL_EDIT)
+
+# THE PASSES. Each form that names its own paths, stages every file or leaves nothing behind, and a read
+# that fails. Each sits beside an ask of the same state, so the pair shows what the rule keys on.
+_ul_allow("an unstaged edit in another folder (hooks/c.py) beside a staged docs/a.md is allowed",
+          VCS + " commit -m x", UL_OTHER)
+_ul_allow("only an untracked file beside the staged docs/a.md is allowed", VCS + " commit -m x", UL_NEW)
+_ul_allow("with nothing left unstaged the commit is allowed", VCS + " commit -m x", UL_ALL)
+_ul_allow("git commit --dry-run with nothing left unstaged is allowed", VCS + " commit --dry-run", UL_ALL)
+_ul_allow("commit -a -m x with docs/b.md unstaged is allowed", VCS + " commit -a -m x", UL_EDIT)
+_ul_allow("commit -am x with docs/b.md unstaged is allowed", VCS + " commit -am x", UL_EDIT)
+_ul_allow("commit --all -m x with docs/b.md unstaged is allowed", VCS + " commit --all -m x", UL_EDIT)
+_ul_allow("commit -m x -- docs/a.md is allowed", VCS + " commit -m x -- docs/a.md", UL_EDIT)
+_ul_allow("commit -o -m x docs/a.md is allowed", VCS + " commit -o -m x docs/a.md", UL_EDIT)
+_ul_allow("commit --only -m x docs/a.md is allowed", VCS + " commit --only -m x docs/a.md", UL_EDIT)
+_ul_allow("commit -i -m x docs/b.md is allowed", VCS + " commit -i -m x docs/b.md", UL_EDIT)
+_ul_allow("commit --include -m x docs/b.md is allowed", VCS + " commit --include -m x docs/b.md", UL_EDIT)
+_ul_allow("git status with docs/b.md unstaged is allowed", VCS + " status", UL_EDIT)
+_ul_allow("a read that fails passes: a commit aimed at a folder that is no git tree is allowed",
+          VCS + " -C " + slash(NOGIT) + " commit -m x", NOGIT)
+
+
+# THE COST. The rule's two reads are the only git processes it starts. Each check judges its own guard run
+# and counts that run's trace lines, so a shard that skips a case cannot skip the check.
+UL_STAGED_READ = "diff --cached --name-only"
+UL_UNSTAGED_READ = "diff --name-only"
+
+
+def _ul_read_counts(starts):
+    """How many of the git processes in STARTS are the staged read, and how many the unstaged read."""
+    staged = sum(1 for line in starts if line.endswith(UL_STAGED_READ))
+    unstaged = sum(1 for line in starts if line.endswith(UL_UNSTAGED_READ))
+    return staged, unstaged
+
+
+def _ul_non_commit_check(command, name, what):
+    """COMMAND, a non-commit command in a repo with an unstaged edit, is allowed and starts neither read."""
+    got, reason, starts = _st_traced(command, UL_EDIT, name)
+    if got != "allow":
+        return False, "%s was judged %s, want allow: %s" % (what, got, reason[:90])
+    staged, unstaged = _ul_read_counts(starts)
+    if staged or unstaged:
+        return False, "%s started %d staged and %d unstaged read(s) of this rule, want none" % (
+            what, staged, unstaged)
+    return True, "%s is allowed, and starts neither read of this rule (%d git processes in all)" % (
+        what, len(starts))
+
+
+def ul_cost_ls_check():
+    return _ul_non_commit_check("ls", "ul-ls", "ls")
+
+
+def ul_cost_status_check():
+    return _ul_non_commit_check(VCS + " status", "ul-status", "git status")
+
+
+def ul_cost_commit_check():
+    got, reason, starts = _st_traced(VCS + " commit -m x", UL_ASK, "ul-commit")
+    if got != "ask":
+        return False, "a commit leaving docs/b.md unstaged was judged %s, want ask: %s" % (got, reason[:90])
+    staged, unstaged = _ul_read_counts(starts)
+    if (staged, unstaged) != (1, 1):
+        return False, "the commit started %d staged and %d unstaged read(s) of this rule, want one of each" % (
+            staged, unstaged)
+    return True, "the commit starts one staged read and one unstaged read of this rule"
+
+
+UL_COST_CHECKS = (
+    ("commit-leaves-edit-unstaged cost: ls in a repo with an unstaged edit starts no read of this rule",
+     ul_cost_ls_check),
+    ("commit-leaves-edit-unstaged cost: git status in such a repo starts no read of this rule",
+     ul_cost_status_check),
+    ("commit-leaves-edit-unstaged cost: a commit that leaves an edit unstaged starts one staged and one unstaged read",
+     ul_cost_commit_check),
+)
+FIXTURELESS_CHECKS.update(check for _label, check in UL_COST_CHECKS)  # each builds only the repo it judges
 
 
 # =========================================================================== 1c. hand-made worktree
@@ -14407,6 +14634,10 @@ LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 for _label, _check in STALE_COST_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     LOG_FAMILY[_label] = "stale-tree-commit"
+# The commit-leaves-edit-unstaged cost checks, registered at the same place with their family set by hand.
+for _label, _check in UL_COST_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "commit-leaves-edit-unstaged"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
