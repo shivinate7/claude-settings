@@ -1582,6 +1582,12 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     is_commit, texts, unread = read
     if unread:
         return UNREAD_MARK + unread
+    return cited_in_texts(texts, is_commit)
+
+
+def cited_in_texts(texts, is_commit: bool) -> str:
+    """Return the first record path the message texts cite, else ''. The shell scan and the MCP
+    create tool's body both end here."""
     pattern = record_path_pattern()
     if pattern is None:
         # An unread folder list is logged, as every unread subject is, and the rule stands down.
@@ -1628,7 +1634,12 @@ def lane_number_named(segment: str, raw: str, where: str, before: int) -> str:
         return ""
     if read[2]:
         return UNREAD_MARK + read[2]
-    for text in read[1]:
+    return lane_in_texts(read[1])
+
+
+def lane_in_texts(texts) -> str:
+    """Return the first session-number lane name in the message texts, else ''."""
+    for text in texts:
         found = LANE_NUMBER.search(LANE_QUOTED.sub(" ", text))
         if found:
             return found.group(0)
@@ -4999,6 +5010,16 @@ def judge(payload) -> None:
     # The MCP create tool carries its own `draft` field.
     if tool == CREATE_PR_TOOL and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
+    # The same cite and lane scans as the shell create, on the tool's own body and title.
+    if tool == CREATE_PR_TOOL:
+        body, title = (tool_input.get(k) for k in ("body", "title"))
+        body_texts = [body] if isinstance(body, str) else []
+        matched = cited_in_texts(body_texts, False)
+        if matched:
+            refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
+        matched = lane_in_texts(body_texts + ([title] if isinstance(title, str) else []))
+        if matched:
+            refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
 
     # A review record posted through the MCP comment tool (rule pr-review-record). One pull request read per marked post.
     if tool == REVIEW_COMMENT_TOOL:

@@ -134,6 +134,9 @@ from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
+# hooks/ is lint/'s sibling in the repo and under ~/.claude. shared_names is stdlib only and does not load the guard.
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+from shared_names import LANDING_TOOLS  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -179,15 +182,6 @@ GH_LANDING_PR_VERBS = {"merge", "create", "update-branch"}
 GH_NO_WRITE_FLAGS = {
     "merge": {"--disable-auto"},
     "create": {"--web", "-w"},
-}
-LANDING_TOOLS = {
-    "mcp__github__merge_pull_request",
-    "mcp__github__create_pull_request",
-    "mcp__github__push_files",
-    "mcp__github__create_or_update_file",
-    "mcp__github__delete_file",
-    "mcp__github__update_pull_request_branch",
-    "mcp__github__enable_pr_auto_merge",
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 # A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold

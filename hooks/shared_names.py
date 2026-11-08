@@ -88,6 +88,18 @@ def repo_tag_names(tag: object, slug: str) -> bool:
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
 
+# The GitHub MCP tools that land on a remote: a merge, a PR open, a push, a file write or delete, a branch update, an
+# auto-merge. The report guard demands a report after a turn that calls one (lint/report_guard.py).
+LANDING_TOOLS = frozenset({
+    "mcp__github__merge_pull_request",
+    "mcp__github__create_pull_request",
+    "mcp__github__push_files",
+    "mcp__github__create_or_update_file",
+    "mcp__github__delete_file",
+    "mcp__github__update_pull_request_branch",
+    "mcp__github__enable_pr_auto_merge",
+})
+
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
 

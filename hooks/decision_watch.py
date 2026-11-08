@@ -903,7 +903,7 @@ def _shared_transcript():
 
 FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SHELL_TOOLS = {"Bash", "PowerShell"}
-MERGE_TOOLS = {"mcp__github__merge_pull_request"}
+from guard_merge import MERGE_TOOLS  # noqa: E402  the guard has loaded it above; the one home of the merge tools
 
 GH_PR_MERGE = re.compile(r"\bgh\s+pr\s+merge\b")
 PR_NUM_TOKEN = re.compile(r"^(\d+)$")
