@@ -28,9 +28,10 @@ digit, `_`, `-` or `.`-and-name character beside it. A sentence that says "not p
 
 A count claim is a count word (one to six, once, twice, thrice, or digits) with at most three words between it and
 a cost noun (read, call, process, spawn, `ps`, write, file, run, start, times, line, command, request, lookup, query;
-plural too), or a cost noun followed within two words by once, twice or thrice. Code spans, dates (YYYY-MM-DD), times
-(HH:MM) and ids (`ruling`, `item`, `rule`, `step` or `decision` and a number; `#` and a number) are not read as part of
-a claim. A claim passes when its sentence holds a bound (at most, up to, no more than, fewer, at least), says "not
+plural too). Once, twice and thrice count only after a verb of work (read, run, call, start, spawn, write, fetch)
+within two words, never before a noun. Code spans, dates (YYYY-MM-DD), times (HH:MM), line references
+(`name.ext:123`) and ids (`ruling`, `item`, `rule`, `step` or `decision` and a number; `#` and a number) are not read
+as part of a claim, and "one" before "of" is no count. A claim passes when its sentence holds a bound (at most, up to, no more than, fewer, at least), says "not
 pinned", "unpinned", "unmeasured" or "no test", or holds a test-name candidate that exists under the root and holds, as a
 whole name, the code span nearest the count word. A test-name span is never the nearest span. A sentence with no other
 code span passes on any existing test-name candidate. A sentence with a claim that passes none of these is one finding,
@@ -70,6 +71,7 @@ UNBALANCED = "unbalanced backtick in a Cost paragraph"
 NO_READER = "count in a Cost sentence with no reader"
 WORD = re.compile(r"\w+(?:['\u2019-]\w+)*")
 COUNT_WORD = re.compile(r"(?:one|two|three|four|five|six|once|twice|thrice|\d+)", re.IGNORECASE)
+WORK_VERB = re.compile(r"(?:reads?|runs?|calls?|called|starts?|spawns?|writes?|fetch(?:es)?)", re.IGNORECASE)
 TIMES_WORD = re.compile(r"(?:once|twice|thrice)", re.IGNORECASE)
 COST_NOUN = re.compile(r"(?:reads?|calls?|process(?:es)?|spawns?|ps|writes?|files?|runs?|starts?|times|lines?|commands?"
                        r"|requests?|lookups?|quer(?:y|ies))", re.IGNORECASE)
@@ -255,14 +257,9 @@ def pinned(token, candidates, root, texts):
 
 
 def trailing(words):
-    """True when a cost noun stands among `words`, the words before once, twice or thrice, with no code span between
-    it and the count: a count after a span counts the span ("`sed` once"), not the noun before it."""
-    for word in reversed(words):
-        if COST_NOUN.fullmatch(word.group()):
-            return True
-        if set(word.group()) == {"_"}:
-            return False
-    return False
+    """True when a verb of work stands among `words`, the words before once, twice or thrice ("it reads the list
+    once"). A plain noun before the count is no claim ("a mutating command or `sed` once redirects")."""
+    return any(WORK_VERB.fullmatch(word.group()) for word in words)
 
 
 def counts(sentence):
