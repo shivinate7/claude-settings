@@ -199,7 +199,7 @@ def auto_merge_call_of(segment: str) -> bool:
     if args is not None:
         index = 0
         while index < len(args):
-            arg = args[index]
+            arg = args[index].rstrip(")")   # `(cd d && gh pr merge 5 --auto)` ends its last word with the subshell's ")"
             index += 1
             if arg in MERGE_VALUE_FLAGS:
                 index += 1   # its value is data, even a word that spells a flag
