@@ -7546,6 +7546,13 @@ sh("push: nested quote printer pin, bash -c sudo echo prints a forced push, allo
    r'bash -c "sudo echo \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
 sh("push: nested quote printer pin, bash -c command printf prints a forced push, allows",
    r'bash -c "command printf \"%s\" \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
+# GAPS, red on this code. The guard allows each one today. php -r is in no runner list, and a Deno.Command
+# spawn names git as an argument, never as `git push` text on one line.
+sh("push: nested quote gap, php -r shell_exec runs a forced push, denies",
+   r'php -r "shell_exec(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote gap, deno eval spawns git through Deno.Command, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
 # The push text reader's scanner shapes. A comment opener or a multi-line string inside quotes is text, so
 # each is an allow control, green today. A lone quote in text opens no string that hides a push: nothing
 # after an unterminated quote runs, so the push-looking text after `it's #` is not a live push.
