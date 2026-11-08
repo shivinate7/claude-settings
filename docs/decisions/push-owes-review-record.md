@@ -119,7 +119,7 @@ Found in the code:
 - No long-lived process, no timer.
 - Not proved by a test: the git spawn counts. C1 and C11 prove the no-gh-call part.
 
-Dated by: the head compare in `_records_hold`, the descent test and the newest-entry pick in `_owed_scan`, the default-branch test in `owed_record_write`, the HEAD-mover list in `head_moved_before`, and the 14-day constant `OWED_KEEP_SECONDS`, all in `hooks/guard_merge.py`. A change to any of them rewrites this record.
+Dated by: head compare in `_records_hold`, descent test and newest-entry pick in `_owed_scan`, default-branch test in `owed_record_write`, HEAD-mover list in `head_moved_before`, and 14-day constant `OWED_KEEP_SECONDS`, all in `hooks/guard_merge.py`. A change to any of them rewrites this record.
 
 Risk: incident (PR #1869, PR #1914, PR #1958, PR #1985, PR #1699, PR #2015, PR #2025, PR #2026, PR #2042, PR #2068, PR #2088, lane `builder-report-in-head`).
 
