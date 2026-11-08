@@ -8540,11 +8540,13 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
 # ---- flag-false-alarm: env-file forms that read no file's contents, and the controls. Decision env-file-stays-unread.
 # Each allow row reads no file's contents. The word after a boolean flag is a pattern, a glob that
 # excludes the name reads nothing, a jq or yq word is a key, a folder named with the prefix is only
-# made or entered, and a file type after rg -T names no file. Main refuses each allow row except the
+# made by mkdir, and a file type after rg -T names no file. Main refuses each allow row except the
 # rg -T one, which main allows.
 # Each deny row is refused by this guard: the name is a path, a glob that includes it, a loader or
-# in-place write of it, or a folder that a commit or a printer reads. jq, gojq and yq read -C as a
-# colour switch, so the word after it is the program or a file, never a value.
+# in-place write of it, a folder that a commit or a printer reads, or a folder entered by cd or pushd
+# (the next word reads from it). jq, gojq and yq read -C as a
+# colour switch, so the word after it is the program or a file, never a value. ag's --file-search-regex
+# picks the files it reads by name, and its -p names a file of ignore patterns it reads.
 FLAG_FALSE_ALARM_ALLOW = (
     "ag -f " + ENV + " src",
     "ack -f " + ENV,
@@ -8552,9 +8554,6 @@ FLAG_FALSE_ALARM_ALLOW = (
     "grep -r --exclude " + ENV + " foo .",
     "rg -t py " + ENV,
     "mkdir " + ENV + "s",
-    "cd " + ENV + "s",
-    "pushd " + ENV + "s",
-    "cd " + ENV + ".d",
     "jq " + ENV + "ironment f.json",
     "jq " + ENV + "From f.json",
     "jq " + ENV + " f.json",
@@ -8593,16 +8592,20 @@ FLAG_FALSE_ALARM_REFUSE = (
     "gojq . " + ENV,
     "yq eval .x " + ENV,
     "grep --exclude-from " + ENV + " foo .",
+    "ag --file-search-regex " + ENV + " K",
+    "ag -fp " + ENV + " K",
+    "cd " + ENV + "s",
+    "pushd " + ENV + "s",
+    "cd " + ENV + ".d",
 )
 for _cmd in FLAG_FALSE_ALARM_ALLOW:
     sh("env: flag-false-alarm: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
 for _cmd in FLAG_FALSE_ALARM_REFUSE:
     sh("env: flag-false-alarm: still refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
 
-# ---- a folder move into an env-prefixed name, then a read in the same call. Decision env-file-stays-unread.
-# `cd` and `pushd` read no contents, so `cd .envs` alone stays allowed (FLAG_FALSE_ALARM_ALLOW). The move
-# changes the folder the next word reads from, so a read after it in the same call names that folder's contents.
-# Set-Location is the PowerShell cd.
+# ---- a folder move into an env-prefixed name. Decision env-file-stays-unread.
+# A lone cd or pushd into one is refused (FLAG_FALSE_ALARM_REFUSE). The Bash tool keeps its folder, so the
+# move would open the next call's reads. The chained forms are pinned here too. Set-Location is the PowerShell cd.
 sh("env: folder move: cd into .envs, then cat a file in it", "cd " + ENV + "s && cat config.json",
    "deny", "env-file", cwd=NOGIT)
 sh("env: folder move: pushd into .envs, then cat a file in it", "pushd " + ENV + "s && cat config.json",
@@ -8611,6 +8614,10 @@ sh("env: folder move: cd into .env.d, then cat a file in it", "cd " + ENV + ".d 
    "deny", "env-file", cwd=NOGIT)
 sh("env: folder move: PowerShell Set-Location into .envs, then Get-Content a file in it",
    "Set-Location " + ENV + "s; Get-Content config.json", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: folder move: cd into .envs, then ls in it", "cd " + ENV + "s && ls", "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: cd into .envs, then cd back out", "cd " + ENV + "s && cd ..", "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: PowerShell Set-Location into .envs, alone", "Set-Location " + ENV + "s",
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
 # ag reads the files its -G glob names. -G takes a value, so the `.env` after `-fG` is that glob, and it is read.
 sh("env: flag-false-alarm: ag -fG takes .env as its -G glob, and the glob reads it",
    "ag -fG " + ENV + " K", "deny", "env-file", cwd=NOGIT)
