@@ -1452,8 +1452,8 @@ def _text_folders(texts, cwd, places):
 
 def _every_folder(texts, cwd):
     """Every folder a segment of any text may run in, started from `cwd` (a folder, or a list of them).
-    It fails closed when the place of each substitution is not known (a heredoc body, whose own text
-    is dropped): each text is judged in every folder a `cd` in any text reaches. A `cd` in a nested
+    It fails closed when the place of each substitution is not known (`places` out of step with the
+    texts): each text is judged in every folder a `cd` in any text reaches. A `cd` in a nested
     substitution moves from the folders found before it, so the search repeats until it finds no new
     folder, once per text at most."""
     found = [cwd] if isinstance(cwd, str) else list(cwd)
