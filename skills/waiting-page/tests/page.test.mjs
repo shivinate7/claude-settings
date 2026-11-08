@@ -2889,6 +2889,8 @@ const TAB_ASKS = () => ({
 const TAB_ARRIVED = { id: "ask-arrived", text: "Asked before the tab hid", at: "2026-10-01T09:00:00Z", owner: "triage", answered: TAB_ARRIVED_AT, reply: "The answer that arrived while the tab was hidden." };
 // On screen: the section overlaps the viewport.
 const asksOnScreen = (page) => page.evaluate(() => { const r = document.getElementById("asks").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; });
+// On screen: the answers list (#askList) overlaps the viewport. The Ask seen stamp is measured on this list, not on the section.
+const listOnScreen = (page) => page.evaluate(() => { const r = document.getElementById("askList").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; });
 // A tab hides as a browser hides it: document.hidden turns true, then visibilitychange fires.
 const hideTab = (page) => page.evaluate(() => { Object.defineProperty(document, "hidden", { value: true, configurable: true }); document.dispatchEvent(new Event("visibilitychange")); });
 const seenStamp = (page) => page.evaluate(() => localStorage.getItem("waiting.askSeen"));
@@ -2921,17 +2923,14 @@ test("the Ask seen stamp moves when the tab hides while the Ask section is on sc
   const page = await tabOpen(t); if (!page) return;
   await page.locator("#asks").scrollIntoViewIfNeeded();
   await page.waitForFunction(() => { const r = document.getElementById("asks").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; });
-  // An IntersectionObserver reports the scroll a frame or two later, so two frames pass before the hide.
-  await frameWait(page, 2);
   await hideTab(page);
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the Ask section on screen did not stamp the asks as seen");
 });
-// pagehide is the second path that stamps: a page closing on a visible tab with the Ask section on screen stamps it too.
+// pagehide is the second path that stamps: a page closing on a visible tab with the answers list on screen stamps it too.
 test("the Ask seen stamp moves when the page closes while the Ask section is on screen: pagehide", async (t) => {
   const page = await tabOpen(t); if (!page) return;
   await page.locator("#asks").scrollIntoViewIfNeeded();
-  await frameWait(page, 2); // the same settle as the hide case above, so the close does not beat the IntersectionObserver
-  assert.equal(await asksOnScreen(page), true, "the Ask section is off screen after it is scrolled into view, so this case cannot show a closing page's stamp");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen after the Ask section is scrolled into view, so this case cannot show a closing page's stamp");
   assert.equal(await page.evaluate(() => document.hidden), false, "the tab reads as hidden, so this case cannot show a visible page closing");
   assert.equal(await seenStamp(page), TAB_SEED, "scrolling the Ask section into view moved the Ask seen stamp");
   await page.clock.setFixedTime(new Date(TAB_CLOSE));
@@ -2942,7 +2941,6 @@ test("the Ask seen stamp stays at the hide time when the page closes on a hidden
   // The Ask section is below the fold at load. The owner scrolls it into view, as the on-screen case above does, so the hide stamps it.
   const page = await open(t, { dbExtra: { asks: TAB_ASKS() }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE }); if (!page) return;
   await page.locator("#asks").scrollIntoViewIfNeeded();
-  await frameWait(page, 2); // the same settle as the hide case above, so the hide does not beat the IntersectionObserver
   assert.equal(await asksOnScreen(page), true, "the Ask section is off screen after it is scrolled into view, so this case cannot show a hidden tab's stamp");
   await hideTab(page);
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the Ask section on screen did not stamp the asks as seen");
@@ -2961,7 +2959,6 @@ const BELOW_ASK = { id: "ask-below", text: "An answer listed below the fold", at
 // A phone height. At this height the answers list starts below the fold when the section's top sits 300 px down.
 const PHONE_SHORT = { width: 390, height: 700 };
 const scrollTopTo = (page, sel, px) => page.evaluate(([s, p]) => window.scrollTo(0, document.querySelector(s).getBoundingClientRect().top + scrollY - p), [sel, px]);
-const listOnScreen = (page) => page.evaluate(() => { const r = document.getElementById("askList").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; });
 
 test("an answer listed below the fold is not seen when the tab hides, so its New answer mark survives the next load", async (t) => {
   const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [BELOW_ASK.id]: BELOW_ASK } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: PHONE_SHORT }); if (!page) return;
