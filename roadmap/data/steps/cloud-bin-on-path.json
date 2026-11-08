@@ -1,11 +1,11 @@
 {
   "title": "In a cloud session, wait-pid and verdict run by bare name, as the printed remedies say",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 645,
   "owner": "coordinator",
-  "lane": null,
+  "lane": "session_013NEJL2k68U41yt5xBhfp93",
   "why": "The stall watcher (hooks/stall_watch.py) prints `wait-pid <pid>` as its remedy, but in a cloud container ~/.claude/bin is not on PATH, so the bare command fails with command not found and the wait ends at once while the job runs on. A builder also could not find `verdict` (lane notes-fix-large-2, 07:15 CST Nov 8).",
-  "note": "Done check: in a cloud session, `command -v wait-pid` and `command -v verdict` succeed, or every remedy that names them prints the path install.sh writes; a test pins whichever is chosen. A fix for a found gap (item 410 a). Slug and title by triage.",
-  "updatedAt": "2026-11-08T07:16:00-06:00"
+  "note": "Done check: in a cloud session, `command -v wait-pid` and `command -v verdict` succeed, or every remedy that names them prints the path install.sh writes; a test pins whichever is chosen. A fix for a found gap (item 410 a). Slug and title by triage. Doing 09:57 CST Nov 8 in lane cloud-install (session_013NEJL2k68U41yt5xBhfp93), which takes cloud-install-code-check-config and cloud-bin-on-path together (coordinator, 09:55 CST).",
+  "updatedAt": "2026-11-08T09:57:00-06:00"
 }

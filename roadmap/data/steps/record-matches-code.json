@@ -1,11 +1,11 @@
 {
   "title": "A record's claim about what a guard reads matches that guard's tested cases",
   "why": "A decision bullet in aee40063c (the Cite part of notes-name-their-fix) claimed more than the code reads: a run URL as check output, and spelled numbers with any unit. A fix check caught it; 3f1ac66ad corrected it.",
-  "note": "Filed 09:55 CST Nov 8 from lane fix-none-cite-check (session_013NEJL2ChVc4QiMs2icnEB8), its own mistake. STALE009 and STALE010 read cites, not truth (lane record-claim-cites-code, 09:55 CST). agents/reviewer.md already tells the reviewer to read each cited name against its claim, and here the fix check did that job. First act: say what a check would add beyond that reviewer step; ideas: map a decision's grammar claims for a guard to that guard's tested cases, or a reviewer probe per claim. Unverified: the lane's word that a ruling leaves truth to the reviewer; trace it with git log --full-history -S on the record before building.",
+  "note": "Filed 09:55 CST Nov 8 from lane fix-none-cite-check (session_013NEJL2ChVc4QiMs2icnEB8), its own mistake. STALE009 and STALE010 read cites, not truth (lane record-claim-cites-code, 09:55 CST). agents/reviewer.md already tells the reviewer to read each cited name against its claim, and here the fix check did that job. First act: say what a check would add beyond that reviewer step; ideas: map a decision's grammar claims for a guard to that guard's tested cases, or a reviewer probe per claim. Unverified: the lane's word that a ruling leaves truth to the reviewer; trace it with git log --full-history -S on the record before building. Goes to lane record-claim-cites-code after #1893 (coordinator, 09:55 CST).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
+  "lane": "session_013NEJL33wvLc6xtDnBTJDAw",
   "status": "todo",
   "order": 713,
-  "updatedAt": "2026-11-08T09:55:00-06:00"
+  "updatedAt": "2026-11-08T09:57:00-06:00"
 }
