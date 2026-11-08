@@ -11051,6 +11051,8 @@ CMK_LONE = os.path.join(CMKROOT, "lone")        # a lone apostrophe in text, the
 CMK_TPL = os.path.join(CMKROOT, "tpl")          # a staged triplet inside a multi-line template literal
 CMK_OPEN = os.path.join(CMKROOT, "open")        # a string holding comment openers, then a staged triplet
 CMK_UT = os.path.join(CMKROOT, "untracked")     # a triplet in an untracked file, nothing staged
+CMK_TWO_STAGED = os.path.join(CMKROOT, "twostaged")  # a lone marker line in src/a.txt, a triplet in src/b.txt, both staged
+CMK_TWO_UT = os.path.join(CMKROOT, "twountracked")   # a clean untracked src/a.txt, a triplet in untracked src/b.txt
 
 
 def _cmk_run(where, *args):
@@ -11118,10 +11120,16 @@ def _build_conflict_markers():
     stage(CMK_OPEN, "src/opener.py", 'x = 1\nNOTE = "/* // #"\n' + CM_TRIPLET)
     _cmk_topic(CMK_UT, {"src/app.py": "x = 1\n"})
     write(os.path.join(CMK_UT, "src", "new.py"), "x = 1\n" + CM_TRIPLET)   # untracked: never added
+    _cmk_topic(CMK_TWO_STAGED, {"src/a.txt": "x = 1\n", "src/b.txt": "y = 1\n"})
+    stage(CMK_TWO_STAGED, "src/a.txt", "x = 1\n" + CM_MID)
+    stage(CMK_TWO_STAGED, "src/b.txt", "y = 1\n" + CM_TRIPLET)
+    _cmk_topic(CMK_TWO_UT, {"base.txt": "base\n"})
+    write(os.path.join(CMK_TWO_UT, "src", "a.txt"), "x = 1\n")                # untracked, clean
+    write(os.path.join(CMK_TWO_UT, "src", "b.txt"), "y = 1\n" + CM_TRIPLET)   # untracked, a triplet
 
 
 lazy_fixture([CMK_MERGE, CMK_STAGED, CMK_AM, CMK_CLEAN, CMK_WS, CMK_MDOK, CMK_MDFENCE, CMK_NOHEAD,
-              CMK_LONE, CMK_TPL, CMK_OPEN, CMK_UT], _build_conflict_markers)
+              CMK_LONE, CMK_TPL, CMK_OPEN, CMK_UT, CMK_TWO_STAGED, CMK_TWO_UT], _build_conflict_markers)
 
 
 def cmk_refuse(name, command, cwd):
@@ -11676,6 +11684,35 @@ cmk_unread_merge_continue_case = _cmk_unread_case(
     "rev-parse --show-toplevel, on git merge --continue", lambda args: "--show-toplevel" in args,
     command=VCS + " merge --continue", fixture=CMK_STAGED, plain=("commit", "src/app.py"))
 
+# A read that answers None beside a triplet another read finds: the triplet's deny stands, and the None read
+# holds rather than stopping the reads after it. Each case nulls the one read its `what` names.
+cmk_none_index_case = _cmk_verdict_case(
+    "the cat-file read of the first staged file", VCS + " commit -m x", (CMK_TWO_STAGED,), ("commit", "src/b.txt"),
+    lambda args: args[:2] == ("cat-file", "-p") and args[-1:] == (":src/a.txt",), None)
+cmk_none_untracked_case = _cmk_verdict_case(
+    "the no-index read of the first untracked file", CMK_STAGED_COMMIT, (CMK_TWO_UT,), ("commit", "src/b.txt"),
+    lambda args: "--no-index" in args and args[-1:] == ("src/a.txt",), None)
+cmk_none_commit_marker_case = _cmk_verdict_case(
+    "the commit's first marker read, with an add of the triplet file",
+    VCS + " add src/app.py && " + VCS + " commit -m x", (CMK_AM,), ("commit", "src/app.py"),
+    lambda args: "--check" in args and args[-1:] == ("--cached",), None)
+cmk_none_untracked_marker_case = _cmk_verdict_case(
+    "the commit's first marker read, after add -A", CMK_STAGED_COMMIT, (CMK_UT,), ("commit", "src/new.py"),
+    lambda args: "--check" in args and args[-1:] == ("HEAD",), None)
+cmk_none_first_add_case = _cmk_verdict_case(
+    "the marker read of the first add", VCS + " add a.txt && " + VCS + " add b.txt && " + VCS + " commit -m x",
+    (CMK_SEQB,), ("commit", "b.txt"), lambda args: "--check" in args and args[-1:] == ("a.txt",), None)
+cmk_none_source_ref_case = _cmk_verdict_case(
+    "the ref read of the source, topic", VCS + " push origin topic:fresh", (CMK_PU,), ("push", "src/app.py"),
+    lambda args: args[-1:] == ("topic^{commit}",), None)
+cmk_none_checked_out_case = _cmk_verdict_case(
+    "the checked-out branch read, for a push of HEAD", VCS + " push origin HEAD", (CMK_PU,), ("push", "src/app.py"),
+    lambda args: "symbolic-ref" in args and args[-1:] == ("HEAD",), None)
+cmk_none_clean_push_case = _cmk_verdict_case(
+    "the add's toplevel read, before a push of a clean range", VCS + " add -A && " + VCS + " push", (CMK_CL,),
+    ("", ""), lambda args: "--show-toplevel" in args, CMK_CL)
+
+
 # The conflict-markers checks, each beside its rows. Each materializes only the fixture it names.
 CMK_CHECKS = (
     ("conflict-markers: a staged triplet, add -A and commit, with rev-parse --show-toplevel unreadable is not allowed",
@@ -11720,6 +11757,22 @@ CMK_CHECKS = (
      cmk_fold_add_only_case),
     ("conflict-markers: git merge --continue, with rev-parse --show-toplevel unreadable, is asked as unread",
      cmk_unread_merge_continue_case),
+    ("conflict-markers: a commit of two staged files, with a read that answers None on the first file and a triplet in "
+     "the second, is refused", cmk_none_index_case),
+    ("conflict-markers: add -A and commit of two untracked files, with a read that answers None on the first file and a "
+     "triplet in the second, is refused", cmk_none_untracked_case),
+    ("conflict-markers: add of a triplet file then commit, with a read that answers None on the commit's first marker "
+     "read and the add's read finding the triplet, is refused", cmk_none_commit_marker_case),
+    ("conflict-markers: add -A and commit, with a read that answers None on the commit's first marker read and an "
+     "untracked triplet, is refused", cmk_none_untracked_marker_case),
+    ("conflict-markers: two adds then a commit, with a read that answers None on the first add and a triplet in the "
+     "second add's file, is refused", cmk_none_first_add_case),
+    ("conflict-markers: a push of topic to a new destination, with a read that answers None on the source ref and a "
+     "triplet in the upstream range, is refused", cmk_none_source_ref_case),
+    ("conflict-markers: a push of HEAD, with a read that answers None on the checked-out branch and a triplet in the "
+     "upstream range, is refused", cmk_none_checked_out_case),
+    ("conflict-markers: add -A then a push of a clean range, with a read that answers None on the add's toplevel, is "
+     "no hit", cmk_none_clean_push_case),
 )
 FIXTURELESS_CHECKS.update(check for _label, check in CMK_CHECKS)
 
