@@ -14365,6 +14365,25 @@ class ReviewStampSince(unittest.TestCase):
             else:
                 self.fail("review_stamp_since returned %r while the merge tool's checkout has no salt commit, instead of stopping" % (got,))
 
+    def test_a_tool_read_stop_names_the_source_checkout_and_says_to_repair_it(self):
+        # launch.py runs merge.py from a temporary worktree that it removes when the run ends, so a Stop that names only that copy names no
+        # folder left to repair. launch.py passes the checkout it started from in MERGE_TOOL_SOURCE, and the tool-read Stop names that one.
+        root = self.repo(salt_at=None, branch="fixture")
+        source = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))  # the checkout launch.py started from
+        self.addCleanup(shutil.rmtree, source, True)
+        env = unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": source})
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout(salt_at=None), env:
+            tool = self.tool_root()
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn("lacks the review stamp salt", str(stop), "the Stop is not the tool checkout's salt Stop, so the naming checks below prove nothing:\n" + str(stop))
+                self.assertIn(source, str(stop), "the Stop does not name the source checkout launch.py started from:\n" + str(stop))
+                self.assertIn("repair " + source, str(stop), "the Stop does not say to repair the source checkout:\n" + str(stop))
+                self.assertNotIn("repair " + tool, str(stop), "the Stop says to repair the temporary copy, which is gone once the run ends:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since returned %r while the merge tool's checkout has no salt commit, instead of stopping" % (got,))
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":

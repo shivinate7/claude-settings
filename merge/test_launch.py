@@ -36,10 +36,11 @@ class Launch(unittest.TestCase):
         os.makedirs(self.home)
         self.tmp = os.path.join(self.t, "tmp")  # TMPDIR for the code under test: must be empty after a run
         os.makedirs(self.tmp)
+        self.source_file = os.path.join(self.t, "source.txt")  # where the stub records the MERGE_TOOL_SOURCE it was started with
         self.rewrite(self.bare)
         self.env = {**os.environ, "GIT_CONFIG_GLOBAL": self.cfg, "GIT_CONFIG_SYSTEM": os.devnull,
                     "HOME": self.home, "TMPDIR": self.tmp, "TMP": self.tmp, "TEMP": self.tmp, "USERPROFILE": self.home, "CLAUDE_CONFIG_DIR": os.path.join(self.t, "cfg")}
-        for k in ("CLAUDE_SETTINGS_DIR",):
+        for k in ("CLAUDE_SETTINGS_DIR", "MERGE_TOOL_SOURCE"):  # an outer run's value must not read as this run's
             self.env.pop(k, None)
         sh(self.t, "git", "init", "-q", "--bare", "-b", "main", self.bare, env=self.env)
         self.work = os.path.join(self.t, "work")
@@ -65,9 +66,11 @@ class Launch(unittest.TestCase):
         put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[url "{target.replace(os.sep, "/")}"]\n\tinsteadOf = {URL}\n')
 
     def release(self, tag):
-        # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.
+        # The stub prints its tag. When ARGS_FILE is set, it records the arguments it received. When SOURCE_FILE is set, it records the
+        # MERGE_TOOL_SOURCE it was started with, as repr, so an unset variable reads None.
         put(os.path.join(self.work, "merge", "merge.py"), "import os, sys\nprint('RAN %s')\n"
-            "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag)
+            "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n"
+            "f = os.environ.get('SOURCE_FILE')\nif f: open(f, 'w').write(repr(os.environ.get('MERGE_TOOL_SOURCE')))\n" % tag)
         sh(self.work, "git", "add", "-A", env=self.env)
         sh(self.work, "git", "commit", "-q", "-m", tag, env=self.env)
         if tag != "v1":
@@ -81,9 +84,14 @@ class Launch(unittest.TestCase):
     def merge(self, *args, **env):
         e = {**self.env, **env}
         e.setdefault("CLAUDE_SETTINGS_DIR", self.co)
+        e.setdefault("SOURCE_FILE", self.source_file)
         r = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "merge"), *args], env=e,
                            capture_output=True, text=True, timeout=120)
         return r.returncode, r.stdout, r.stderr
+
+    def tool_source(self):
+        """-> the MERGE_TOOL_SOURCE the last merge() run started its merge.py with, as repr: 'None' when launch.py passed none."""
+        return Path(self.source_file).read_text()
 
     def head(self, d):
         return sh(d, "git", "rev-parse", "HEAD", env=self.env)
@@ -127,6 +135,7 @@ class Launch(unittest.TestCase):
         self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
         self.assertIn(self.head(self.work)[:12], err)  # prints the SHA it ran
         self.assertNotIn("WARNING", err)
+        self.assertEqual(self.tool_source(), repr(os.path.realpath(self.co)), "the fresh-worktree run did not get the checkout it started from in MERGE_TOOL_SOURCE")
 
     def test_dirty_checkout_untouched(self):
         self.release("v2")
@@ -176,6 +185,7 @@ class Launch(unittest.TestCase):
         self.assertIn("WARNING", err)
         self.assertIn(before[:12], err)
         self.assertIn("fetch of origin main failed", err)
+        self.assertEqual(self.tool_source(), repr(os.path.realpath(self.co)), "the failed-fetch run did not get the checkout it started from in MERGE_TOOL_SOURCE")
 
     def test_offline_after_earlier_fetch_names_distance(self):
         self.release("v2")
@@ -192,6 +202,7 @@ class Launch(unittest.TestCase):
         self.assertEqual((rc, out.strip()), (0, "RAN v1"), err)
         self.assertEqual(self.head(self.co), before)
         self.assertIn("--dev", err)
+        self.assertEqual(self.tool_source(), repr(os.path.realpath(self.co)), "the --dev run did not get the checkout it started from in MERGE_TOOL_SOURCE")
 
     def test_dev_is_not_forwarded_and_other_args_are(self):
         rec = os.path.join(self.t, "args.txt")
