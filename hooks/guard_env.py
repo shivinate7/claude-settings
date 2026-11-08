@@ -460,7 +460,8 @@ def _blank_code_prose(body: str, python: bool) -> str:
     be a path that code goes on to open, so it stays as written. Every other string stays as
     written, so a read of an env file there is still judged. A node template literal is left whole
     except for a line that starts with `//`, which the prose case needs and which the reader can
-    only read as shell words.
+    only read as shell words. In node a `//` or `/*` right after a backslash is the end of an
+    escaped slash in a regex literal, not a comment, so it opens nothing.
     """
     out, i, n = [], 0, len(body)
     while i < n:
@@ -469,10 +470,10 @@ def _blank_code_prose(body: str, python: bool) -> str:
         if python and char == "#":
             end = body.find("\n", i)
             i = n if end < 0 else end
-        elif not python and pair == "//":
+        elif not python and pair == "//" and body[i - 1:i] != "\\":
             end = body.find("\n", i)
             i = n if end < 0 else end
-        elif not python and pair == "/*":
+        elif not python and pair == "/*" and body[i - 1:i] != "\\":
             end = body.find("*/", i + 2)
             end = n if end < 0 else end + 2
             out.append("\n" * body.count("\n", i, end))
