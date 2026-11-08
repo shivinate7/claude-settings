@@ -26,13 +26,15 @@ holds the token's name as a whole name: its basename, or the folder before a `<p
 digit, `_`, `-` or `.`-and-name character beside it. A sentence that says "not pinned", "unpinned", "unmeasured" or
 "no test" pins nothing and flags nothing: the writer has said so.
 
-A count claim is a count word (one to six, single, or digits) with at most three words between it and a cost noun
-(read, call, process, spawn, `ps`, write, file, run, start, times, line, command, request, lookup, query; plural too).
-Once, twice, thrice and Nx ("2x") count only after a verb of work (read, run, call, start, spawn, write, fetch, stat)
-within two words, never before a noun. Code spans, dates (YYYY-MM-DD), times (HH:MM), decimals, a number with a time
-unit (s, ms, sec, seconds, min, minutes), line references (`name.ext:123`), "Round N of M", "PR N" and ids (`ruling`,
+A count claim is a count word (zero to six, ten, single, or digits) with at most three words between it and a cost
+noun (read, call, process, spawn, `ps`, write, file, run, start, times, line, command, request, lookup, query; plural
+too). Once, twice, thrice and Nx ("2x") count only after a verb of work (read, run, call, start, spawn, write, fetch,
+stat, check, open, scan, load, parse) with at most three words between, never before a noun. Code spans, dates
+(YYYY-MM-DD), times (HH:MM), versions (x.y.z), decimals, a number with a time unit (s, ms, sec, second, min, minute,
+hour) or a size unit (B, KB, MB, GB), line references (`name.ext:123`), "Round N of M", "PR N" and ids (`ruling`,
 `item`, `rule`, `step` or `decision` and a number; `#` and a number) are not read as part of a claim, and "one" before
-"of" is no count. A claim passes when its sentence holds a bound (at most, up to, no more than, fewer, at least), says
+"of" is no count. A claim passes when its sentence holds a bound (at most, up to, no more than, never more than, capped
+at, max, fewer, at least), says
 "not pinned", "unpinned", "unmeasured" or "no test", or holds a test-name candidate that exists under the root and
 holds, as a whole name, the code span nearest the count word. A test-name span is never the nearest span. A sentence
 with no other code span passes on no test: it needs a bound or a mark. A sentence with a claim that passes none of
@@ -71,16 +73,17 @@ CLOSERS = ")*\"'"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
 NO_READER = "count in a Cost sentence with no reader"
 WORD = re.compile(r"\w+(?:['\u2019-]\w+)*")
-COUNT_WORD = re.compile(r"(?:one|two|three|four|five|six|single|once|twice|thrice|\d+x?)", re.IGNORECASE)
-WORK_VERB = re.compile(r"(?:reads?|runs?|calls?|called|starts?|spawns?|writes?|fetch(?:es)?|stats?)", re.IGNORECASE)
+COUNT_WORD = re.compile(r"(?:zero|one|two|three|four|five|six|ten|single|once|twice|thrice|\d+x?)", re.IGNORECASE)
+WORK_VERB = re.compile(r"(?:reads?|runs?|calls?|called|starts?|spawns?|writes?|fetch(?:es)?|stats?|checks?|opens?|scans?|loads?|parses?)", re.IGNORECASE)
 TIMES_WORD = re.compile(r"(?:once|twice|thrice|\d+x)", re.IGNORECASE)
 COST_NOUN = re.compile(r"(?:reads?|calls?|process(?:es)?|spawns?|ps|writes?|files?|runs?|starts?|times|lines?|commands?"
                        r"|requests?|lookups?|quer(?:y|ies))", re.IGNORECASE)
-BOUND = re.compile(r"\b(?:at\s+most|up\s+to|no\s+more\s+than|fewer|at\s+least)\b", re.IGNORECASE)
+BOUND = re.compile(r"\b(?:at\s+most|up\s+to|no\s+more\s+than|never\s+more\s+than|capped\s+at|max|fewer|at\s+least)\b", re.IGNORECASE)
 # A number beside a cost noun that counts nothing: a line reference (`name.ext:123`), a date, a time, an id.
 NOT_COUNTS = [re.compile(r"[\w/.-]+\.[A-Za-z]+(?::\d+)+"), re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
-              re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"), re.compile(r"\b\d+\.\d+\b"),
-              re.compile(r"\b\d+\s*(?:ms|sec|seconds|min|minutes|s)\b", re.IGNORECASE),
+              re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"), re.compile(r"\b\d+\.\d+\.\d+\b"), re.compile(r"\b\d+\.\d+\b"),
+              re.compile(r"\b\d+\s*(?:ms|sec|seconds?|min|minutes?|hours?|s)\b", re.IGNORECASE),
+              re.compile(r"\b\d+\s*[KMG]?B\b"),
               re.compile(r"\bRound\s+\d+\s+of\s+\d+\b", re.IGNORECASE), re.compile(r"\bPR\s+#?\d+\b"),
               re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
 # text, [(code span text, line)], line of the first character, text with code spans blanked, [(start, end)] of each span
@@ -280,7 +283,7 @@ def counts(sentence):
         leading = not TIMES_WORD.fullmatch(word.group()) and not (
             word.group().lower() == "one" and words[i + 1:i + 2] and words[i + 1].group().lower() == "of")
         after = leading and any(COST_NOUN.fullmatch(w.group()) for w in words[i + 1:i + 5])
-        before = TIMES_WORD.fullmatch(word.group()) and trailing(words[max(0, i - 3):i])
+        before = TIMES_WORD.fullmatch(word.group()) and trailing(words[max(0, i - 4):i])
         if after or before:
             found.append((word.start(), word.end()))
     return found
