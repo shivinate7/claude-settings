@@ -14056,6 +14056,7 @@ class ReviewFixSonnet(ReviewEnv):
     path runs through merge.main, so each case reaches the rule in the real code."""
 
     OTHER_MODEL = "haiku"  # a fix check model that is not merge.REVIEW_FIX_GUARD_MODEL, so it is refused on every record
+    MODEL_REFUSAL = f"must run on {merge.REVIEW_FIX_GUARD_MODEL}"  # the phrase review_state gives as the why of a model refusal
 
     def guard_yes_verdict(self, rounds, fix_model, net="not owed"):
         return record_verdict(self, record_text(rounds=rounds, guard="yes", net=net, fix=(fix_check_line(model=fix_model),)))
@@ -14075,10 +14076,15 @@ class ReviewFixSonnet(ReviewEnv):
                 state, why = self.guard_yes_verdict(rounds, self.OTHER_MODEL)
                 self.assertEqual(state, "open", f"a Haiku fix check PASS on a guard or check change must not read done: {why!r}")
 
-    def test_a_sonnet_fix_pass_on_a_guard_change_still_reads_done(self):
-        # control: a Sonnet fix check counts as it did before, so a first-round FAIL the fix PASSes reads done
-        state, why = self.guard_yes_verdict(("Round 1: reviewer, sonnet, FAIL",), merge.REVIEW_FIX_GUARD_MODEL)
-        self.assertEqual(state, "done", f"a Sonnet fix check PASS on a guard or check change must read done: {why!r}")
+    def test_a_sonnet_fix_pass_on_a_guard_change_is_not_refused_by_the_model_rule(self):
+        # Pins the model part only. Owner item 402 a (2026-11-08 06:08 CST) owes round 3 on a guard or check change, so the state is not
+        # asserted here. The haiku verdict is the control: it must carry the model refusal, or the sonnet check proves nothing.
+        for rounds in (("Round 1: reviewer, sonnet, FAIL",), ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")):
+            with self.subTest(rounds=rounds):
+                _, haiku_why = self.guard_yes_verdict(rounds, self.OTHER_MODEL)
+                self.assertIn(self.MODEL_REFUSAL, haiku_why, "the haiku control lost the model refusal, so this case proves nothing:\n" + haiku_why)
+                _, why = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)
+                self.assertNotIn(self.MODEL_REFUSAL, why, f"a sonnet fix check on a guard or check change gets the model refusal: {why!r}")
 
     def test_a_haiku_fix_pass_on_a_change_with_no_guard_reads_open_not_done(self):
         # owner item 444 a: Guard or check no owes the same sonnet fix check as yes, so a Haiku PASS reads open after each round
@@ -14123,12 +14129,13 @@ class ReviewFixSonnet(ReviewEnv):
     # The model in the spelling a person may type. Built from the constant, so the cases follow the model name when it changes.
     MIXED_CASE_MODEL = merge.REVIEW_FIX_GUARD_MODEL.capitalize()
 
-    def test_a_mixed_case_sonnet_fix_pass_on_a_guard_change_reads_done_like_lowercase(self):
+    def test_a_mixed_case_sonnet_fix_pass_on_a_guard_change_reads_like_lowercase(self):
+        # Pins letter case only. The state is not asserted: owner item 402 a (2026-11-08 06:08 CST) owes round 3 on a guard or check change.
         rounds = ("Round 1: reviewer, sonnet, FAIL",)
-        lower_state, lower_why = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)  # control: the lowercase model reads done
-        self.assertEqual(lower_state, "done", f"a lowercase fix check PASS on a guard or check change must read done: {lower_why!r}")
-        state, why = self.guard_yes_verdict(rounds, self.MIXED_CASE_MODEL)
-        self.assertEqual(state, "done", f"a {self.MIXED_CASE_MODEL} fix check PASS on a guard or check change must read done, as lowercase does: {why!r}")
+        lower = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)  # control: the lowercase model is not refused
+        self.assertNotIn(self.MODEL_REFUSAL, lower[1], f"the lowercase control is refused on the model, so the case proves nothing: {lower[1]!r}")
+        mixed = self.guard_yes_verdict(rounds, self.MIXED_CASE_MODEL)
+        self.assertEqual(mixed, lower, f"a {self.MIXED_CASE_MODEL} fix check PASS on a guard or check change reads differently from lowercase")
 
     def test_a_mixed_case_sonnet_fix_check_on_a_guard_change_is_accepted_and_printed(self):
         rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(self.MIXED_CASE_MODEL), host=self.earlier_host())
