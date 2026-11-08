@@ -510,23 +510,23 @@ class SessionTools(unittest.TestCase):
         code, out = verdict("agents/fixture.md", text=text)
         self.assertEqual((code, out), (0, ""), "%s is flagged: %r" % (what, out))
 
-    def test_agent_with_no_tools_or_deny_key_is_flagged(self):
+    def test_agent_with_no_tools_or_refuse_key_is_flagged(self):
         text = agent_with()
         self.scope(text, absent=("tools", "disallowedTools"))
         self.red(text, "an agent with no tools: and no disallowedTools: key")
 
-    def test_deny_list_without_the_server_is_flagged(self):
+    def test_refuse_list_without_the_server_is_flagged(self):
         self.red(agent_with("disallowedTools: Edit, Write, NotebookEdit"), "a deny list with no remote entry")
 
-    def test_empty_deny_list_is_flagged(self):
+    def test_empty_refuse_list_is_flagged(self):
         self.red(agent_with("disallowedTools:"), "an empty disallowedTools: that withholds nothing")
 
-    def test_deny_of_one_remote_tool_is_flagged(self):
+    def test_refuse_of_one_remote_tool_is_flagged(self):
         # The server is withheld whole. A deny of one remote tool leaves the other remote tools reachable.
         self.red(agent_with("disallowedTools: Edit, Write, mcp__claude-code-remote__create_session"),
                  "a deny of one remote tool, not the server")
 
-    def test_deny_of_another_server_is_flagged(self):
+    def test_refuse_of_another_server_is_flagged(self):
         self.red(agent_with("disallowedTools: Edit, Write, mcp__claude-code-remoteX__*"),
                  "a deny of another server, named by a prefix")
 
@@ -544,17 +544,17 @@ class SessionTools(unittest.TestCase):
     def test_allow_list_naming_the_bare_server_is_flagged(self):
         self.red(agent_with("tools: Bash, mcp__claude-code-remote"), "a tools: allow-list that names the bare server")
 
-    def test_deny_only_in_the_body_is_flagged(self):
+    def test_refuse_only_in_the_body_is_flagged(self):
         text = agent_with(body="disallowedTools: mcp__claude-code-remote__*\n")
         self.scope(text, absent=("tools", "disallowedTools"))
         self.red(text, "a deny written in the body, not the frontmatter")
 
-    def test_deny_only_in_the_description_is_flagged(self):
+    def test_refuse_only_in_the_description_is_flagged(self):
         text = agent_with('description: "Withheld with disallowedTools: mcp__claude-code-remote__* in its file."')
         self.scope(text, absent=("tools", "disallowedTools"), present=("description",))
         self.red(text, "a deny written in the description, not as a frontmatter key")
 
-    def test_deny_written_as_an_indented_block_line_is_flagged(self):
+    def test_refuse_written_as_an_indented_block_line_is_flagged(self):
         text = agent_with("description: |", "  disallowedTools: mcp__claude-code-remote__*")
         self.scope(text, absent=("tools", "disallowedTools"))
         self.red(text, "a deny indented under a block scalar, so it is not a key")
@@ -565,25 +565,25 @@ class SessionTools(unittest.TestCase):
         self.scope(text, absent=("disallowedTools",), present=("tools",))
         self.red(text, "a remote tool after a description with a lone quote and comment openers")
 
-    def test_deny_of_the_whole_server_passes(self):
+    def test_refuse_of_the_whole_server_passes(self):
         self.clean(agent_with("disallowedTools: Edit, Write, NotebookEdit, mcp__claude-code-remote__*"),
                    "a deny that names the whole server")
 
-    def test_deny_of_the_bare_server_passes(self):
+    def test_refuse_of_the_bare_server_passes(self):
         self.clean(agent_with("disallowedTools: Edit, Write, mcp__claude-code-remote"),
                    "a deny that names the bare server")
 
-    def test_yaml_list_deny_passes(self):
+    def test_yaml_list_refuse_passes(self):
         self.clean(agent_with("disallowedTools: [Edit, mcp__claude-code-remote__*]"), "a YAML-list deny of the server")
 
-    def test_deny_with_a_trailing_comment_passes(self):
+    def test_refuse_with_a_trailing_comment_passes(self):
         self.clean(agent_with("disallowedTools: Edit, Write, mcp__claude-code-remote__*  # the server is never needed"),
                    "a deny of the server with a trailing comment")
 
-    def test_full_size_deny_list_passes(self):
-        deny = ", ".join(["Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep", "WebFetch", "WebSearch",
+    def test_full_size_refuse_list_passes(self):
+        refuse = ", ".join(["Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep", "WebFetch", "WebSearch",
                          "Task", "TodoWrite", "mcp__claude-code-remote__*"])
-        self.clean(agent_with("disallowedTools: %s" % deny), "a full-size deny list that ends in the server")
+        self.clean(agent_with("disallowedTools: %s" % refuse), "a full-size deny list that ends in the server")
 
     def test_allow_list_without_a_remote_entry_passes(self):
         self.clean(agent_with("tools: Bash, Read, WebFetch, WebSearch, TaskStop"),
@@ -593,7 +593,7 @@ class SessionTools(unittest.TestCase):
         self.clean(agent_with("tools: Bash, Read, mcp__claude-code-remoteX__ping"),
                    "a tools: allow-list that names another server")
 
-    def test_lone_quote_in_another_key_does_not_hide_a_deny(self):
+    def test_lone_quote_in_another_key_does_not_hide_a_refuse(self):
         self.clean(agent_with("description: Don't use // or # here.", "disallowedTools: Edit, mcp__claude-code-remote__*"),
                    "a deny after a description with a lone quote and comment openers")
 
