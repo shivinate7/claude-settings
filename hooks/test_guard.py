@@ -16600,6 +16600,18 @@ mrf_case("PR (2500 lines) is big, with no #, is no PR and is allowed", "allow", 
 MRF_TWENTY_ONE_SHAS = "Shas: " + " ".join("d1e%04x" % number for number in range(1, 22))
 mrf_case("21 made-up shas are allowed, and the output names the 21st, d1e0015", "allow", MRF_TWENTY_ONE_SHAS,
          cwd=MRF_SHALLOW, carries=("d1e0015",), context=True)
+# Text that names another repo, or a quoted line, is not this repo's ref (decision send-message-refs-resolve, "Which
+# repo"; the quote rule of decision agent-report-shas-resolve, which a sha already follows). A PR label that links to
+# another repo's pull is that repo's PR, and a `> ` line or a double-quoted span is quoted text, which may come from
+# another repo. The controls: a bare PR and this repo's own link to the same PR are still refused.
+mrf_case("a PR label that links another repo's pull is not judged", "allow",
+         "Upstream fix: [PR #8](https://github.com/facebook/react/pull/8) merged.")
+mrf_case("a PR on a `> ` quoted line is not judged", "allow", "> lane says PR #8 merged")
+mrf_case("a PR in a double-quoted span is not judged", "allow",
+         'The other lane wrote "PR #8 is green" in its report.')
+mrf_case("PR #8 merged, bare, is refused and named", "deny", "PR #8 merged.", carries=("#8",))
+mrf_case("this repo's link to PR #8 merged is refused and named", "deny",
+         "[PR #8](https://github.com/o/r/pull/8) merged.", carries=("#8",))
 
 
 # =========================================================================== failing open
