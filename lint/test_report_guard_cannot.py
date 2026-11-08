@@ -158,10 +158,10 @@ class CannotClaimTests(unittest.TestCase):
     def assert_passes(self, out, case):
         self.assertIsNone(out, "%s was refused: %s" % (case, out and out.get("reason")))
 
-    # ---- red: each fails on the unchanged code, where no check exists. One case per method, so the red count is clean.
+    # ---- red cases: each fails on code that does not yet read its line. One case per method, so the red count is clean.
 
     def test_cc_red_notice_is_no_try_for_an_unlanded_claim(self):
-        # Catches: the incident. A connect-failure notice and a failed grep were read as tries of the PR, so the line
+        # Catches: a connect-failure notice and a failed grep read as tries of the PR, so the line
         # that says the PR cannot be opened passed. The turn never tried that act: the no-try variant.
         line = "I could not open the PR; open it from your computer."
         out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
@@ -201,9 +201,8 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_pass_other_act_with_no_failure_is_no_claim(self):
-        # Re-pointed from test_cc_red_other_act_with_no_failure_has_no_try by the narrowing ruling (23:50 CST Nov 7,
-        # decision guard-that-cries-wolf-is-spent): a rebase is outside the act table, so the line is no claim whether or
-        # not a call failed. The call here succeeded, and the line passes.
+        # The act table decides (decision guard-that-cries-wolf-is-spent). A rebase is outside the table, so the line is no
+        # claim whether or not a call failed. The call here succeeded, and the line passes.
         line = "I cannot rebase the branch."
         out = self.stop([trg.human("rebase the branch"), *ok_bash("git rebase origin/main", "tu_r"),
                          trg.assistant_text(line)])
@@ -254,7 +253,7 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_red_a_try_before_the_last_human_message_does_not_count(self):
         # Catches: a try of an earlier turn backing a claim of this one. The window is the turn after the last human
-        # message (the lane ruling on the window).
+        # message.
         line = "I can't open the PR: `mcp__github__create_pull_request` returned 422."
         out = self.stop([trg.human("open a PR"), *failed_pr_create(), trg.assistant_text("Opened nothing."),
                          trg.human("try again"), trg.assistant_text(line)])
@@ -284,9 +283,8 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_passes(out, "a curl to the pulls route, named with its 403")
 
     def test_cc_green_other_act_with_a_failure_and_its_check_passes(self):
-        # Re-pointed by the narrowing ruling (23:50 CST Nov 7, decision guard-that-cries-wolf-is-spent): a rebase is outside
-        # the act table, so the line passes with or without a failure. The two failure forms still pass, and the failure
-        # is no longer what clears the line.
+        # The act table decides (decision guard-that-cries-wolf-is-spent). A rebase is outside it, so the line passes with
+        # or without a failure. The two failure forms still pass; a failure is not what clears the line.
         line = "I cannot rebase the branch: `git rebase` returned exit code 1."
         for label, error in (("error flag", True), ("exit text only", False)):
             with self.subTest(failure=label):
@@ -410,19 +408,19 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_passes(out, "a transcript with no human message")
 
     def test_cc_control_incident_reply_with_no_claim_passes(self):
-        # The incident turn again, with a reply that claims nothing. The check stays quiet.
+        # A turn with a connect-failure notice and a reply that claims nothing. The check stays quiet.
         out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
                          *failed_bash("grep -r pulls ci/", "tu_g"),
                          trg.assistant_text("Opening the PR from the MCP route next.")])
         self.assert_passes(out, "the incident turn with a reply that claims nothing")
 
-    # ---- review round 1: each probe line below is a bypass the review found, or a false alarm. A red fails on the
-    # unchanged guard. The green controls keep a line the check must still leave alone.
+    # ---- probe lines: each is a bypass of the check or a false alarm. A red fails on the line the check misreads. The
+    # green controls keep a line the check must still leave alone.
 
     def test_cc_red_other_act_is_backed_only_by_a_try_sharing_a_word(self):
-        # Re-pointed by the narrowing ruling (23:50 CST Nov 7, decision guard-that-cries-wolf-is-spent): "reach GitHub" is
-        # the github-reach row, so only a failed GitHub route backs it. The failed grep is no GitHub route, and the notice
-        # is no try, so the claim still has no try. The routes that do back it are in the github-reach cases below.
+        # The act table decides (decision guard-that-cries-wolf-is-spent): "reach GitHub" is the github-reach row, so only a
+        # failed GitHub route backs it. The failed grep is no GitHub route, and the notice is no try, so the claim still has
+        # no try. The routes that do back it are in the github-reach cases below.
         line = "I can't reach GitHub from here; the MCP server failed to connect."
         out = self.stop([trg.human("reach GitHub"), notice("github: failed to connect"),
                          *failed_bash("grep -r pulls ci/", "tu_g"), trg.assistant_text(line)])
@@ -564,13 +562,13 @@ class CannotClaimTests(unittest.TestCase):
         self.assertIn("(route", remedy, "the remedy names no route cite: %s" % remedy)
         self.assertIn("(measured", remedy, "the remedy names no measured cite: %s" % remedy)
 
-    # ---- round 3 (lane ruling, 23:50 CST Nov 7, decision guard-that-cries-wolf-is-spent: narrow the check to the act
-    # table). A claim counts only when its act is a table act: pr-open, pr-merge, push, pr-edit or github-reach. A claim
-    # of any other act passes. Each probe line is a subTest, so a red names the line.
+    # ---- the act table (decision guard-that-cries-wolf-is-spent). A claim counts only when its act is a table act: pr-open,
+    # pr-merge, push, pr-edit or github-reach. A claim of any other act passes. Each probe line is a subTest, so a red
+    # names the line.
 
     def test_cc_red_r1_f1_false_alarms_pass(self):
-        # R1, F1: a claim of an act outside the table is no claim. The last line's subject is a third party (R2). None of
-        # the lines has a try in its turn, so only the narrowing can clear them.
+        # A claim of an act outside the table is no claim. The last line's subject is a third party. None of the lines has a
+        # try in its turn, so only the table can clear them.
         lines = ("I couldn't find any callers of that function.", "I can't run the tests here; `pytest` exited 2.",
                  "The read cannot stop the merge.", "I can't open the file in the editor.")
         for line in lines:
@@ -579,42 +577,42 @@ class CannotClaimTests(unittest.TestCase):
                 self.assert_passes(out, "a round 1 false alarm: %r" % line)
 
     def test_cc_red_r1_f2_failed_gh_api_backs_a_github_reach_claim(self):
-        # R1, F2: a failed gh call is a GitHub route, so it is a try of the github-reach act. The line names the call.
+        # A failed gh call is a GitHub route, so it is a try of the github-reach act. The line names the call.
         line = "I can't reach GitHub from here: `gh api` returned 403."
         out = self.stop([trg.human("reach GitHub"), *failed_bash("gh api repos/o/r", "tu_a"),
                          trg.assistant_text(line)])
         self.assert_passes(out, "a failed gh api is a GitHub route try")
 
     def test_cc_red_r1_f2_failed_ls_remote_backs_a_github_reach_claim(self):
-        # R1, F2: git ls-remote is a GitHub route when it reads the remote, so a failed one backs the claim.
+        # git ls-remote is a GitHub route when it reads the remote, so a failed one backs the claim.
         line = "I can't reach GitHub from here: `git ls-remote` failed."
         out = self.stop([trg.human("reach GitHub"), *failed_bash("git ls-remote origin", "tu_l"),
                          trg.assistant_text(line)])
         self.assert_passes(out, "a failed git ls-remote is a GitHub route try")
 
     def test_cc_red_r1_f2_a_grep_sharing_a_word_backs_no_github_reach_claim(self):
-        # R1, F2, the round 1 bypass again: a grep whose command holds the word github is no GitHub route, so it backs
-        # nothing. The claim names the grep, so the no-try variant is the one that fires.
+        # A grep whose command holds the word github is no GitHub route, so it backs nothing. The claim names the grep, so
+        # the no-try variant is the one that fires.
         line = "I can't reach GitHub from here: `grep -r github ci/` returned 1."
         out = self.stop([trg.human("reach GitHub"), *failed_bash("grep -r github ci/", "tu_g"),
                          trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_r1_f2_access_the_github_api_needs_a_github_route_try(self):
-        # R1, F2: "access the GitHub API" is the github-reach row. The failed grep shares the word github and is no route.
+        # "access the GitHub API" is the github-reach row. The failed grep shares the word github and is no route.
         line = "I can't access the GitHub API from here."
         out = self.stop([trg.human("reach GitHub"), *failed_bash("grep -r github ci/", "tu_g"),
                          trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_green_r1_f2_reach_github_with_only_a_notice_blocks(self):
-        # R1, F2, a control: a connect notice is no try, so the github-reach claim still has none.
+        # Control: a connect notice is no try, so the github-reach claim still has none.
         line = "I can't reach GitHub from here."
         out = self.stop([trg.human("reach GitHub"), notice("github: failed to connect"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_r2_a_draft_pr_subject_is_third_party(self):
-        # R2: the subject just before the phrase must be first person, or the phrase opens its clause. "A draft PR" is
+        # The subject just before the phrase must be first person, or the phrase opens its clause. "A draft PR" is
         # neither, so the line is no claim about this session.
         for line in ("The draft PR cannot be merged yet.", "A draft PR can't be merged here."):
             with self.subTest(line=line):
@@ -622,21 +620,21 @@ class CannotClaimTests(unittest.TestCase):
                 self.assert_passes(out, "a draft PR as the subject: %r" % line)
 
     def test_cc_green_r2_first_person_subjects_block(self):
-        # R2, a control: the cloud and this session are first person, so the claim blocks.
+        # Control: the cloud and this session are first person, so the claim blocks.
         for line in ("The cloud cannot open the PR.", "This session can't open the PR."):
             with self.subTest(line=line):
                 out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
                 self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_green_r2_a_builder_or_the_session_passes(self):
-        # R2, a control: a builder is a third party, and "the session" stays third party (only "this session" is first).
+        # Control: a builder is a third party, and "the session" stays third party (only "this session" is first).
         for line in ("The builder cannot open the PR.", "The session cannot open the PR."):
             with self.subTest(line=line):
                 out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
                 self.assert_passes(out, "a third-party subject: %r" % line)
 
     def test_cc_red_r3_a_later_success_on_another_target_does_not_cancel(self):
-        # R3: a later success cancels an earlier failure only for the same act, the same target and the same verb. Merge
+        # A later success cancels an earlier failure only for the same act, the same target and the same verb. Merge
         # 13 is another PR, so the failed merge of 12 still backs the claim about 12.
         line = "I cannot merge PR 12: `gh pr merge 12` failed."
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
@@ -644,35 +642,35 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_passes(out, "a success on PR 13 against a failure on PR 12")
 
     def test_cc_red_r3_a_later_success_with_another_verb_does_not_cancel(self):
-        # R3: a comment on PR 12 is the same act as a close of PR 12 (pr-edit), but another verb, so it cancels nothing.
+        # A comment on PR 12 is the same act as a close of PR 12 (pr-edit), but another verb, so it cancels nothing.
         line = "I cannot close PR 12: `gh pr close 12` failed."
         out = self.stop([trg.human("close PR 12"), *failed_bash("gh pr close 12", "tu_c1"),
                          *ok_bash("gh pr comment 12 --body done", "tu_c2"), landed_reply(line)])
         self.assert_passes(out, "a comment on PR 12 against a failed close of PR 12")
 
     def test_cc_red_r3_a_dry_run_success_does_not_cancel(self):
-        # R3: a call with --dry-run never cancels a failure, so a dry run that succeeded leaves the failed merge standing.
+        # A call with --dry-run never cancels a failure, so a dry run that succeeded leaves the failed merge standing.
         line = "I cannot merge PR 12: `gh pr merge 12` failed."
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
                          *ok_bash("gh pr merge 12 --dry-run", "tu_m2"), landed_reply(line)])
         self.assert_passes(out, "a dry run that succeeded against a failed merge")
 
     def test_cc_red_r3_a_failed_dry_run_is_no_try(self):
-        # R3: a call with --dry-run never counts as a try either, so a failed dry run backs no claim of the merge.
+        # A call with --dry-run never counts as a try either, so a failed dry run backs no claim of the merge.
         line = "I cannot merge PR 12: `gh pr merge 12 --dry-run` failed."
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12 --dry-run", "tu_d"),
                          landed_reply(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_green_r3_a_same_target_and_verb_success_cancels(self):
-        # R3, a control: the same act, target and verb, succeeding later, still cancels the failure.
+        # Control: the same act, target and verb, succeeding later, still cancels the failure.
         line = "I cannot merge PR 12: `gh pr merge 12` failed."
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
                          *ok_bash("gh pr merge 12", "tu_m2"), landed_reply(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_r4_rule_forms_and_the_cannot_suite_pass(self):
-        # R4: a sentence that names a rule or a decision is the rule's text, not the session's claim. "Cannot" directly
+        # A sentence that names a rule or a decision is the rule's text, not the session's claim. "Cannot" directly
         # before a noun used as a modifier (the cannot suite, the cannot cases) is no claim.
         lines = ("Rule: I cannot open the PR here.", "Per the decision, I cannot open the PR.",
                  "Decision: pr-open-needs-grant (I cannot open the PR).", "The cannot suite passes.",
@@ -683,26 +681,26 @@ class CannotClaimTests(unittest.TestCase):
                 self.assert_passes(out, "a rule form or a modifier: %r" % line)
 
     def test_cc_red_r5_a_cloud_session_after_a_skipped_phrase_blocks(self):
-        # R5: each phrase of a line is judged. The first phrase's subject is a third party. The second names the cloud
-        # session, which is first person (R2), so the line blocks on the second.
+        # Each phrase of a line is judged. The first phrase's subject is a third party. The second names the cloud
+        # session, which is first person, so the line blocks on the second.
         line = "The guard can't see the box, and the cloud session cannot open the PR."
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_r5_the_cloud_session_cannot_open_the_pr_blocks(self):
-        # R5: "the cloud session" is first person, so the line is a claim about this session.
+        # "the cloud session" is first person, so the line is a claim about this session.
         line = "The cloud session cannot open the PR."
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_green_r5_two_phrases_both_judged_block(self):
-        # R5, a control: a third-party first phrase does not clear the line, because the second phrase is a claim.
+        # Control: a third-party first phrase does not clear the line, because the second phrase is a claim.
         line = "The read cannot stop the merge, and I can't open the PR."
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_pin_r7_an_unreadable_refusals_file_fails_open_with_an_unknown_note(self):
-        # R7: a refusals file that cannot be read skips the check (fail open), and the Stop run says so on stderr as
+        # A refusals file that cannot be read skips the check (fail open), and the Stop run says so on stderr as
         # UNKNOWN. The claim is not refused, and the note is not silent. The path is a directory, so opening it fails.
         path = os.path.join(self.cfg, "state", "refusals", "cannot-sid-1.jsonl")
         os.makedirs(path)
@@ -719,8 +717,8 @@ class CannotClaimTests(unittest.TestCase):
         self.assertIn("cannot-claim guard: UNKNOWN", run.stderr, "no UNKNOWN note on stderr: %r" % run.stderr[-300:])
         self.assertFalse(run.stdout.strip(), "an unread refusals file refused the claim: %s" % run.stdout)
 
-    # ---- a claim after a bold report label. "**Input Needed** Could not open the PR" is the incident's own hand-off
-    # form. The label is no subject: the clause after it opens, so the phrase has an empty subject and is a claim.
+    # ---- a claim after a bold report label. "**Input Needed** Could not open the PR" is a hand-off form.
+    # The label is no subject: the clause after it opens, so the phrase has an empty subject and is a claim.
 
     def test_cc_red_a_claim_after_a_bold_input_needed_label_has_no_try(self):
         # Catches: the bold label read as the phrase's subject, so the line passed as no claim. The only evidence is a
@@ -731,7 +729,7 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_a_claim_in_an_input_needed_report_line_has_no_try(self):
-        # The same claim as the Input Needed line of a report, where the incident's hand-off form sits.
+        # The same claim as the Input Needed line of a report, the hand-off form the check must read.
         line = "**Input Needed** Could not open the PR."
         report = "\n".join(["> **Done** BUILT abc123", "> **Deviations** none", "> " + line, "> **Next** wait"])
         out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
