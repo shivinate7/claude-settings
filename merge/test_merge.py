@@ -13233,12 +13233,24 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
 class ReviewRoundCheckLiftedRead(ReviewRoundCheckEnv):
     """A failed dropped-lane read, lifted by the reason flag, leaves no lane tips to check. The round-3 check still runs on the pull request's
     own head (decision hold-unsafe-after-round-3): feat's guard record at second-round PASS owes the third round, and the refusal says the lane tips were unread.
-    The same holds for `merge 7` and for `merge 7 --confirm`."""
+    The same holds for `merge 7` and for `merge 7 --confirm`. A lane's record on its tip is still read by the stale-record rule, so a lane whose
+    third round is done with its net value zero must owe nothing either."""
 
-    def unread_tips_host(self):
+    def unread_tips_host(self, own=True, lane=None):
+        """Lane agent/lane1 is the batch's one lane, its tip unread. `own`: pull request 7's record on its own head at second-round PASS, which is
+        the default. `lane`: the keywords of a record on lane pull request 8's tip, as round_check_comment takes them, or None for no such record."""
         tips = lane_batch(self, "agent/lane1")
-        comments = [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))]
+        comments = [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))] if own else []
+        if lane is not None:
+            comments.append(round_check_comment(2, 8, tips["agent/lane1"], **lane))
         return tips, self.batch_host(tips, comments)
+
+    def lifted_confirm(self, host):
+        """`merge 7 --confirm` with the dropped-lane read failing and its reason flag lifting it. -> (rc, output, refs before the run)."""
+        with self.first_lane_log_fails():
+            rc, out, before = self.run_round_check(host, "--confirm", "--undo-check-unknown-ok", "octopus read it")
+        self.assertIn("dropped-lane check UNKNOWN", out, "the scope: the lane read failed and the reason flag lifted it:\n" + out)
+        return rc, out, before
 
     def test_confirm_still_refuses_on_the_pr_head_when_the_lane_tips_were_unread(self):
         tips, host = self.unread_tips_host()
@@ -13256,6 +13268,42 @@ class ReviewRoundCheckLiftedRead(ReviewRoundCheckEnv):
         self.assertIn("dropped-lane check UNKNOWN", out, "the scope: the lane read failed and the reason flag lifted it")
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("unread", out, "the preview does not say the lane tips were unread:\n" + out)
+
+    def test_a_lifted_lane_read_does_not_refuse_a_lane_whose_third_round_is_done_with_net_zero(self):
+        # the false alarm: the lanes are unread, so lane 8's record on its tip is read as stale. The tip is in the history of feat and not on main,
+        # and its third round is done with the net value zero, which owes nothing
+        round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        tips, host = self.unread_tips_host(own=False, lane=dict(guard="yes", rounds=round_three, net="zero"))
+        self.scope(tips, host)
+        self.assertEqual(self.history_exit(tips["agent/lane1"], self.head("feat")), 0, "the lane tip is not in the history of feat")
+        self.assertEqual(self.history_exit(tips["agent/lane1"], "origin/main"), 1, "the lane tip is on origin/main, so it is not new to the batch")
+        rc, out, _before = self.lifted_confirm(host)
+        self.assertNotIn("#8", out, "the round-3 check refuses for lane #8, whose third round is done with its net value zero:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_a_lifted_lane_read_does_not_refuse_a_lane_whose_guard_is_no(self):
+        # the control beside the false alarm above: the same fixture with Guard or check no, which owes nothing on any head
+        tips, host = self.unread_tips_host(own=False, lane=dict(guard="no", rounds=REVIEW_PASS))
+        self.scope(tips, host)
+        rc, out, _before = self.lifted_confirm(host)
+        self.assert_allowed(rc, out, host)
+
+    def test_a_lifted_lane_read_still_refuses_the_pr_own_head_beside_a_done_lane(self):
+        # the pin: the own head is still checked when the lanes are unread, and the lane whose third round is done is beside it, not instead of it
+        round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        tips, host = self.unread_tips_host(lane=dict(guard="yes", rounds=round_three, net="zero"))
+        self.scope(tips, host)
+        rc, out, before = self.lifted_confirm(host)
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("round 3", out, "the refusal does not say the third round is owed:\n" + out)
+        self.assertIn("unread", out, "the refusal does not say the lane tips were unread:\n" + out)
+
+    def test_an_unrelated_pr_guard_record_is_not_refused_when_the_lane_read_is_lifted(self):
+        # the pin beside the unrelated-pull-request cases above: a record on a head outside the batch's history owes nothing, lifted or not
+        _tips, host, _reviewed = self.unrelated_pr_case("yes")
+        rc, out, _before = self.lifted_confirm(host)
+        self.assertNotIn("#20", out, "the round-3 check refuses for pull request #20, which is no lane of this batch:\n" + out)
+        self.assert_allowed(rc, out, host)
 
 class ReviewRoundCheckCommentRead(ReviewRoundCheckEnv):
     """The round-3 check's own read of the repo's comments. A failed read refuses before any claim or push (unknown is red). The reason
@@ -13452,6 +13500,18 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
         _tips, host, _a = self.backdated_lane_batch("no")
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
+
+    def test_a_guard_record_on_the_pr_own_number_for_a_head_outside_its_history_still_refuses(self):
+        # the bypass: pull request 7 was amended and force-pushed after its first-round PASS, so the reviewed head is a commit off another branch, in no
+        # history of feat. A record on the pull request's own number is its own whatever its history, and it owes the third round. No record names the live head
+        reviewed = cut_branch(self.other, "agent/amended")[-1]
+        host = self.batch_host({}, [round_check_comment(1, 7, reviewed, guard="yes", rounds=REVIEW_PASS)])
+        self.assertEqual(self.history_exit(reviewed, self.head("feat")), 1, "the reviewed head is in the history of feat, so it is not outside it")
+        self.assertEqual(self.history_exit(reviewed, "origin/main"), 1, "the reviewed head is on origin/main")
+        self.assertNotEqual(reviewed, self.head("feat"), "the reviewed head is the live head of feat")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("round 3", out, "the refusal does not say the third round is owed:\n" + out)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
