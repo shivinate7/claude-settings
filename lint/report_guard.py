@@ -631,9 +631,11 @@ def done_models_problem(text, spawned, records=None):
     are unknown ('') needs just a name. A named pair passes when its model is in the set of any spawn of
     that role in `records`, the whole transcript (a reviewer in an earlier window may be named beside
     this window's), or when this window's set for that role holds '' (a spawn whose model is unknown).
-    A family that ran only in an earlier window may be named but is never required. A spawned role that
-    the Next label names is still running and is reported there, so its missing Done model is waived;
-    Next's pairs are never judged. An earlier unknown spawn excuses nothing. A named role with no spawn
+    A family that ran only in an earlier window may be named but is never required. A spawned role still
+    running is reported in Next, so its missing Done model is waived in one of two ways: Next names that
+    role with that model ("builder opus"), or Next names the role bare and Done names no model for that
+    role at all. A bare role word never excuses a model beside one Done already names, so a stray role
+    word cannot hide an unreported spawn. Next's pairs are never judged. An earlier unknown spawn excuses nothing. A named role with no spawn
     anywhere is skipped. `records` defaults to the window, so `spawned` alone is judged by itself.
     A code span that holds a role word counts in neither Done nor Next (word_runs.mask_code_spans); a span
     that holds only a model word stays readable, so "builder `sonnet`" names its run.
@@ -646,8 +648,10 @@ def done_models_problem(text, spawned, records=None):
     all_spawned = spawn_models(records) if records is not None else spawned
     block = block_text(text, keep_indent=True)
     done = " ".join(mask_code_spans(item, ROLE_RE) for item in label_items(block, "Done"))
-    running = {r.lower() for r in ROLE_RE.findall(
-        " ".join(mask_code_spans(item, ROLE_RE) for item in label_items(block, "Next")))}
+    next_text = " ".join(mask_code_spans(item, ROLE_RE) for item in label_items(block, "Next"))
+    running = {r.lower() for r in ROLE_RE.findall(next_text)}
+    running_pairs = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(next_text)
+                     for r in ROLE_RE.findall(roles)}
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles) if r.lower() in NAMED_ROLES}
     for role, model in sorted(named):
@@ -656,12 +660,16 @@ def done_models_problem(text, spawned, records=None):
             known = ", ".join(sorted(m for m in ran if m)) or "an unknown model"
             return f"'{role} {model}' matches no {role} spawn, which ran {known}"
     unnamed = []
-    for role in sorted(r for r in spawned if r not in running):
+    for role in sorted(spawned):
         families = sorted(m for m in spawned[role] if m)
-        gaps = [m for m in families if (role, m) not in named]
+        done_names_role = any(nr == role for nr, _ in named)
+        bare_waives = role in running and not done_names_role
+        gaps = [m for m in families if (role, m) not in named and (role, m) not in running_pairs]
+        if bare_waives:
+            gaps = []
         if gaps:
             unnamed += [f"{role} {m}" for m in gaps]
-        elif not families and not any(nr == role for nr, _ in named):
+        elif not families and not done_names_role and role not in running:
             unnamed.append(role)
     if unnamed:
         return "no model named for " + ", ".join(unnamed)
