@@ -13474,6 +13474,18 @@ sendto_allow("a green goal on a test, with no edit verb, is allowed to a builder
              SENDTO_BUILDER, "Make hooks/test_guard.py green.", T_SENDTO_BUILDER)
 sendto_allow("a check of a test-run verdict is allowed to a builder",
              SENDTO_BUILDER, "Check: verdict python3 merge/test_lane_lint.py PASS.", T_SENDTO_BUILDER)
+# A path a message runs, reads or waits on to go green is no edit, though an edit verb is in the message.
+sendto_allow("a fix to guard.py, with a test the message makes green, is allowed to a builder",
+             SENDTO_BUILDER, "Fix guard.py to make tests/x.py green.", T_SENDTO_BUILDER)
+# A bare path with no edit verb is no edit: the message names the path and says nothing is to change in it.
+sendto_allow("a fix already made for a test path, with no edit verb, is allowed to a builder",
+             SENDTO_BUILDER, "Here is the fix for tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("a test path said to be wrong, with no edit verb, is allowed to a builder",
+             SENDTO_BUILDER, "tests/x.py is wrong.", T_SENDTO_BUILDER)
+# A path leads its clause, and the edit verb after it governs it: refused to a builder, naming test-author.
+sendto_refuse("a test path before a colon, with replace after it, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "tests/x.py: replace the assert.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
 # Allowed to a test-author: its own test edits, and a product fix it hands to the builder.
 sendto_allow("a test edit to a test-author, with the product fix left to the builder, is allowed",
              SENDTO_AUTHOR, "Edit hooks/test_guard.py: add the case. The builder will fix guard.py.", T_SENDTO_AUTHOR)
