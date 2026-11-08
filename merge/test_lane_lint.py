@@ -342,6 +342,18 @@ class LaneLint(CiJobStub, tm.CloudSession):
         rc, out = self.lint_run("--lane-lint", "7", base="release")
         self.assertEqual(rc, 0, out)
 
+    def test_a_ref_target_gives_ci_job_an_empty_pr_body_whatever_the_run_holds(self):
+        """A commit or ref has no PR body, so lane_lint gives ci-job an empty CI_JOB_PR_BODY. The host body and the env of
+        the run are not empty here, so a body passed on from either source shows as a value."""
+        self.use_ci_job(PASSING, 0)
+        body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nhttps://claude.ai/code/session_X"
+        self.host.body = body
+        for target in ("feat", self.head("feat")):
+            with self.subTest(target=target), unittest.mock.patch.dict(os.environ, {"CI_JOB_PR_BODY": body, "PR_BODY": body}):
+                rc, out = self.lint_run("--lane-lint", target, head=self.head("feat"))  # asserts: one lint run, at this head
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(self.lint_calls()[0].get("pr_body"), "", "ci-job got a PR body for a ref target: %r" % (target,))
+
     def test_an_exception_in_the_lint_run_still_removes_the_worktree(self):
         self.use_ci_job(PASSING, 0)
         real_sh, seen = merge.sh, []
