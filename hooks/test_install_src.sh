@@ -3176,8 +3176,8 @@ pinned_wt1() {
 }
 
 # ---- pinoff cases: the pinned checkout <clone>-live is off-main only when it is not at main ----
-# Decision merge-reinstalls-from-main: the ~/.claude links point at <clone>-live,
-# a detached worktree at main's commit. session_start.sh must not print an off-main line for that
+# Decision merge-reinstalls-from-main ruling 1: the ~/.claude links point at <clone>-live,
+# a detached worktree at main's commit. Decision install-refuses-linked-tree: session_start.sh must not print an off-main line for that
 # checkout, and must print one for a pin at any other commit. pinoff1: at main's commit with
 # origin/main 2 ahead, the freshness line fires once and no off-main line. pinoff2: a pin one
 # commit behind main prints exactly one off-main line, and it names the pin. pinoff3: a full clone
@@ -3685,7 +3685,7 @@ logoffset1() {
 }
 
 # ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
-# Decision merge-reinstalls-from-main: the path <clone>-live is not enough. A linked
+# Decision install-refuses-linked-tree: the path <clone>-live is not enough. A linked
 # worktree at that path is allowed only when it is detached at the clone's local main commit.
 # pinlive1: a -live worktree on a lane branch is refused. pinlive2: a -live worktree detached at a
 # commit that is not main is refused. pinned_wt1 keeps the other side: detached at main passes.
@@ -5001,6 +5001,113 @@ caseM7() {
   ok "$name"
 }
 
+# ---- caseM11-M13: a cloud install leaves a clean, detached checkout alone while an operation is stopped on it ----
+# A rebase or a bisect stopped on the checkout holds HEAD there. The install must not move HEAD off that commit.
+# op_move_check NAME MARK: one cloud install in $co, which holds an operation's state. MARK is the state path under the
+# git dir (rebase-merge, BISECT_LOG, ...). The checkout must be clean and detached first, so the install's move is the only test.
+# With the state present the install leaves HEAD at $mid and takes its source from the mirror, not the stopped checkout.
+op_move_check() {
+  op_gd=$(git -C "$co" rev-parse --absolute-git-dir)
+  if [ ! -e "$op_gd/$2" ]; then bad "$1" "FIXTURE no $2 under the git dir: the operation did not stop"; return; fi
+  if [ -n "$(git -C "$co" status --porcelain)" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null; then
+    bad "$1" "FIXTURE the checkout is not clean and detached under the stopped operation"; return
+  fi
+  mid=$(git -C "$co" rev-parse HEAD)
+  move_install
+  if [ $rc -ne 0 ]; then bad "$1" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$mid" ]; then
+    bad "$1" "the install moved the clean, detached checkout from $mid to $(git -C "$co" rev-parse HEAD) while $2 was present"; return
+  fi
+  op_src=$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")
+  if [ "$op_src" != "$(normalize_path "$h/claude-settings-main")" ]; then
+    bad "$1" "the install took its source from [$op_src], not the mirror $h/claude-settings-main, while $2 was present"; return
+  fi
+  ok "$1"
+}
+
+# caseM11: control. With no operation stopped on it, the same clean, detached checkout moves to origin/main. Green on the old code.
+caseM11() {
+  name="caseM11: control: with no operation stopped on it, a clean, detached checkout moves to origin/main"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m11
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null \
+     || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    bad "$name" "FIXTURE the checkout is not a clean detached checkout at old"; return
+  fi
+  move_install
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "the checkout is not at origin/main [$want]: $(git -C "$co" rev-parse HEAD)"; return
+  fi
+  ok "$name"
+}
+
+# caseM12: a rebase stopped before its first pick. Its todo is one `break`, so HEAD sits on the rebase base (fixture main,
+# an ancestor of origin/main) with rebase-merge present and the tree clean.
+caseM12() {
+  name="caseM12: a clean, detached checkout with a rebase stopped on it is not moved to origin/main"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m12
+  printf 'break\n' > "$work/caseM12-todo"
+  rb_out=$(GIT_SEQUENCE_EDITOR="cp $work/caseM12-todo" git -C "$co" -c user.email=t@example.com -c user.name=t rebase -i HEAD~1 2>&1) \
+    || { bad "$name" "FIXTURE git rebase -i did not stop: $rb_out"; return; }
+  op_move_check "$name" rebase-merge
+}
+
+# caseM13: a bisect started with one bad commit (old) and no good one yet. The checkout stays at old, detached and clean,
+# with BISECT_LOG present, so the install must leave HEAD at old.
+caseM13() {
+  name="caseM13: a clean, detached checkout with a bisect stopped on it is not moved to origin/main"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m13
+  bs_out=$(git -C "$co" bisect start 2>&1 && git -C "$co" bisect bad HEAD 2>&1) \
+    || { bad "$name" "FIXTURE git bisect did not start: $bs_out"; return; }
+  op_move_check "$name" BISECT_LOG
+}
+
+# caseM14: a rebase-apply directory, which git makes for the apply backend. Written directly here: a clean stop of that
+# backend leaves no other file the installer reads.
+caseM14() {
+  name="caseM14: a clean, detached checkout with a rebase-apply in progress is not moved, and the install takes the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m14
+  mkdir "$(git -C "$co" rev-parse --absolute-git-dir)/rebase-apply" 2>/dev/null \
+    || { bad "$name" "FIXTURE could not make rebase-apply under the git dir"; return; }
+  op_move_check "$name" rebase-apply
+}
+
+# write_op_head NAME SHA: stop an operation by writing the pseudo-ref NAME into the checkout's git dir, the file git reads
+# for it. Written directly, not with update-ref: macOS git refuses update-ref on MERGE_HEAD ("refusing to update").
+write_op_head() {
+  oh_gd=$(git -C "$co" rev-parse --absolute-git-dir) && printf '%s\n' "$2" > "$oh_gd/$1"
+}
+
+# caseM15-M17: CHERRY_PICK_HEAD, REVERT_HEAD and MERGE_HEAD, each written into the git dir the way git names these
+# pseudo-refs. Each is a clean stop: the tree is clean and HEAD stays detached at old.
+caseM15() {
+  name="caseM15: a clean, detached checkout with a cherry-pick in progress is not moved, and the install takes the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m15
+  write_op_head CHERRY_PICK_HEAD "$old" || { bad "$name" "FIXTURE could not write CHERRY_PICK_HEAD under the git dir"; return; }
+  op_move_check "$name" CHERRY_PICK_HEAD
+}
+
+caseM16() {
+  name="caseM16: a clean, detached checkout with a revert in progress is not moved, and the install takes the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m16
+  write_op_head REVERT_HEAD "$old" || { bad "$name" "FIXTURE could not write REVERT_HEAD under the git dir"; return; }
+  op_move_check "$name" REVERT_HEAD
+}
+
+caseM17() {
+  name="caseM17: a clean, detached checkout with a merge in progress is not moved, and the install takes the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m17
+  write_op_head MERGE_HEAD "$old" || { bad "$name" "FIXTURE could not write MERGE_HEAD under the git dir"; return; }
+  op_move_check "$name" MERGE_HEAD
+}
+
 # m8_check LABEL: after the install named LABEL, the mirror is at main ($want), refreshed in place (the sentinel survives),
 # the install's source is the mirror, the installed files match main, and the checkout keeps its branch and head. Prints the
 # first failure and returns 1. Reads mirror, want, co_head and co_branch from caseM8.
@@ -5335,6 +5442,13 @@ run caseM7
 run caseM8
 run caseM9
 run caseM10
+run caseM11
+run caseM12
+run caseM13
+run caseM14
+run caseM15
+run caseM16
+run caseM17
 run pinmove1
 run pinmove2
 run pinmove3
