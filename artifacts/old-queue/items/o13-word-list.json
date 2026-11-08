@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "Your gripe was that too many overlapping words (gates, harnesses, steps, checks, tests) make the rules hard to read. Measured on main 3b96ce8. Nothing is renamed yet. The proposal has nine groups:\n1. Stopping a bad act: 'guard' for any hook that refuses or asks; 'check' for any lint, test or CI job. Retire 'gate' (222 uses in prose).\n2. Proving code: test, suite, 'mutation test' (retires 'harness'), 'red run' (retires 'proof').\n3. Units of work: 'step' only for roadmap steps; 'CI step' always says CI; 'command' for one part of a shell chain.\n4. Who works: 'session' and 'agent'. Retire 'worker' and 'subagent'.\n5. Your say: 'ruling' for your answers, 'grant' for leave to act (retires 'my word' and 'approval'), 'override' for the typed pass.\n6 to 9: 'record', not 'entry'; finding, defect, 'safety hole' and debt (retires 'gap'); 'refuse', not block or deny; 'round', not 'try'.\nIds, slugs, file names and hook API values stay. Changing the 'Try 3 of 3' marker touches guard code, so it gets its own reviewed lane.",
+  "home": "plans/o13-one-word-per-meaning.md on the roadmap branch (b12fbc1)",
+  "id": "o13-word-list",
+  "kind": "decision",
+  "n": 24,
+  "options": [
+    {
+      "gain": "The whole gripe is fixed at once, and the glossary check keeps the old words out.",
+      "how": "A prose lane renames the words in rules and docs, then a code lane handles the 'Try 3 of 3' marker.",
+      "key": "a",
+      "label": "Yes to all nine",
+      "lose": "A large rename that touches most rule text; sessions read the new words from the next install."
+    },
+    {
+      "gain": "Covers the words you named, with a smaller change.",
+      "how": "Rename only the guard and check words, the testing words, the work-unit words and the who-works words.",
+      "key": "b",
+      "label": "Groups 1 to 4 only",
+      "lose": "'Approval', 'entry', 'gap' and 'try' keep their overlaps."
+    },
+    {
+      "gain": "The names are exactly yours.",
+      "how": "Write your changes in the note; the lane revises the plan and brings it back.",
+      "key": "c",
+      "label": "Edit the list first",
+      "lose": "One more round before anything changes."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "o13 (one name per thing), your vocab gripe",
+  "status": "closed",
+  "title": "Approve one word per meaning across the rules",
+  "why": "Doing half leaves the same kind of overlap you complained about, and one rename is cheaper than two."
+}

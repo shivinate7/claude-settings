@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-27T16:55:00Z",
+  "context": "Your question: does the token give the nicer bars? Not as far as I know, but it is unchecked. The token only lets the plugin's own GitHub tools run on your PC and Mac. The PR and CI cards in the Claude app most likely come from the app's own GitHub connection, which already works (not checked on your machines). Every PR step also works through gh, so a token buys no step we lack today. What it would show on screen is unknown until one session tries it.",
+  "home": "roadmap step c87",
+  "id": "c87-plugin-token-try",
+  "kind": "decision",
+  "n": 35,
+  "options": [
+    {
+      "gain": "Nothing fails, and there is no extra token to keep.",
+      "how": "A local session finds where it is switched on and turns it off; claude-settings records that it stays off.",
+      "key": "a",
+      "label": "Turn the plugin off",
+      "lose": "Nothing that gh does not already do, as far as I know."
+    },
+    {
+      "gain": "You see the difference instead of taking my word.",
+      "how": "You make a read-only token; a Mac session sets it for one session, shows you what the plugin adds, then you pick a or keep it.",
+      "key": "b",
+      "label": "Try a token once on the Mac",
+      "lose": "About 5 minutes of yours, and one token to delete afterwards."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "c87 (local sessions stop failing on the GitHub plugin's empty token)",
+  "status": "closed",
+  "title": "GitHub plugin: turn it off, or try a token once to see what it adds?",
+  "why": "The cards you see come from the app's own connection, so the plugin most likely adds nothing you would notice."
+}

@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "The stall watch flagged merge.py as stuck on Oct 26 while it was working. Its output went to a log file, so the screen stayed quiet past 300 seconds. The recorded decision says the watcher never changes; quiet tools print a line every 120 seconds instead. PR #598 is built, red-first, reviewed and green.",
+  "home": "PR #598 (draft, head 481eda6); decision stall-watch",
+  "id": "c60-stall-watch",
+  "kind": "decision",
+  "n": 4,
+  "options": [
+    {
+      "gain": "Every command that logs to a file stops raising false alarms, with no change to each tool.",
+      "how": "The watcher also checks whether a log file the command names is growing (one file check a second).",
+      "key": "a",
+      "label": "Merge #598 and rewrite the decision",
+      "lose": "A file that something else writes could hide a real stall. Claude is unlikely to cause that by mistake."
+    },
+    {
+      "gain": "The watcher stays simple.",
+      "how": "merge.py already prints 'merge: waiting on ...'; the Mac merge hand now runs it without the redirect.",
+      "key": "b",
+      "label": "Keep the decision and close #598",
+      "lose": "Each tool that logs to a file needs its own fix; until then it cries wolf."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "c60 (the stall watch does not cry wolf), PR #598",
+  "status": "closed",
+  "title": "Stop the stall watch's false alarm on a command that writes to its own log",
+  "why": "Sending output to a log is a normal way to run a long job; fixing one tool at a time leaves the alarm crying wolf elsewhere."
+}

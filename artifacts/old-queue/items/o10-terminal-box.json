@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "Today a session asks you in its own question box. With this page, the same question also shows here.",
+  "home": "plans/o10-session-questions-page.md, Deferred item 4",
+  "id": "o10-terminal-box",
+  "kind": "decision",
+  "n": 3,
+  "options": [
+    {
+      "gain": "Nothing is lost if the page or its store fails.",
+      "how": "The session asks as now and adds the item here.",
+      "key": "a",
+      "label": "Keep both; the box links here",
+      "lose": "The question shows twice."
+    },
+    {
+      "gain": "One place.",
+      "how": "The session adds the item here and does not ask in the box.",
+      "key": "b",
+      "label": "This page only",
+      "lose": "No way to answer if publishing fails."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "o10 (a page per session for questions), choice 4",
+  "status": "closed",
+  "title": "Keep the in-terminal question box as well, with a link to this page",
+  "why": "A recovery path must not depend on the thing it recovers."
+}

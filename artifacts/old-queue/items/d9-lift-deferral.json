@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-27",
+  "closedNote": "Answered by your gripe about banchi's item 30 (Oct 27): design picks show pictures inline. d9 starts now.",
+  "context": "d9 was parked because its pictures come from the designer (d1). d1 is done, so that reason is gone. The rule: when a session asks you a question about how something looks, each option comes with a picture, as home-app already does with HTML mockups. Your rule says a parked step starts only on your word.",
+  "home": "roadmap step d9",
+  "id": "d9-lift-deferral",
+  "kind": "decision",
+  "n": 34,
+  "options": [
+    {
+      "gain": "Visual questions arrive with pictures in every repo.",
+      "how": "A build lane adds the rule to the reply-style rules and points it at the designer's mockups.",
+      "key": "a",
+      "label": "Start it",
+      "lose": "One more lane in the queue."
+    },
+    {
+      "gain": "Nothing.",
+      "how": "Nothing changes.",
+      "key": "b",
+      "label": "Keep it parked",
+      "lose": "Visual questions stay text only."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "d9 (visual questions come with a picture of each option)",
+  "status": "closed",
+  "title": "Start the rule that visual questions come with a picture of each option?",
+  "why": "Its only blocker is gone, and it needs nothing else from you."
+}

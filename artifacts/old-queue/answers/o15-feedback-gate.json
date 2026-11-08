@@ -1,0 +1,7 @@
+{
+  "at": "2026-10-26T16:04:42.887Z",
+  "choice": "a",
+  "item": "o15-feedback-gate",
+  "n": 9,
+  "note": "I thought I had already established something like disallowing memory/handoffs to hold evergreen information, memory/handoffs are for temp stuff while stuff that's not in flight ie things that will be debts not addressed in that session, things that are decided FROM that session etc all go to tangible places keeping what's in \"RAM\" in a sense tight?"
+}

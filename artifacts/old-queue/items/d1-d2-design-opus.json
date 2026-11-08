@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "Your rules cap agents at Sonnet except Plan, the advisor and a builder's third try. Both design agents were proposed on Opus, since visual judgment is where the strongest model earns its cost. A proof run would send a few past design-review screenshots through Haiku, Sonnet and Opus first.",
+  "home": "roadmap steps d1 and d2",
+  "id": "d1-d2-design-opus",
+  "kind": "decision",
+  "n": 15,
+  "options": [
+    {
+      "gain": "You decide on evidence.",
+      "how": "A lane runs the comparison and reports the differences with pictures.",
+      "key": "a",
+      "label": "Run the proof, then decide",
+      "lose": "Design agents wait one more step."
+    },
+    {
+      "gain": "Design work starts sooner.",
+      "how": "A standing exception for d1 and d2.",
+      "key": "b",
+      "label": "Allow Opus now for both",
+      "lose": "An exception with no measured benefit yet."
+    },
+    {
+      "gain": "No change to the cap.",
+      "how": "No exception.",
+      "key": "c",
+      "label": "Sonnet for both",
+      "lose": "Possibly weaker visual judgment."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "d1 (a designer agent) and d2 (a design-reviewer agent)",
+  "status": "closed",
+  "title": "Allow Opus for the designer and design reviewer, after a proof run",
+  "why": "Measure before you widen a cap."
+}

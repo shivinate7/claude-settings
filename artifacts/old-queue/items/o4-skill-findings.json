@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "On Oct 12/13 you ruled that two small fixes to the compliance-check skill wait. The debt's own exit line says to land them the next time the skill changes, and #620 (the o4 rework, reviewed twice and clear) changes it now. The lane left them alone because the two records disagree.\nThe two fixes: (1) the probes call python3, and some machines have only python or only python3. The Mac has no 'python', which is the same failure that kept the decision watch from ever judging a Mac turn (c29). (2) The cite probe misses one way of citing a decision: D plus a slug in backticks.",
+  "home": "PR #620 body, 'Parked for shiv'; debts/three-skill-findings.md",
+  "id": "o4-skill-findings",
+  "kind": "decision",
+  "n": 23,
+  "options": [
+    {
+      "gain": "Both fixes land, and #620 keeps its clear review.",
+      "how": "#620 merges as reviewed. A follow-up lane makes the probes try python3 then python and adds the slug form to the cite probe, then closes the debt.",
+      "key": "a",
+      "label": "Land them in a small lane right after #620",
+      "lose": "One more small lane and review."
+    },
+    {
+      "gain": "One PR.",
+      "how": "The o4 lane adds both fixes to #620 before it joins a batch.",
+      "key": "b",
+      "label": "Fold them into #620",
+      "lose": "#620's review starts over, which delays the rework."
+    },
+    {
+      "gain": "No work now.",
+      "how": "Nothing changes. The debt stays open.",
+      "key": "c",
+      "label": "Keep waiting",
+      "lose": "The python mismatch can still break a probe on a machine like your Mac."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "o4 (rework compliance-check), PR #620; debt three-skill-findings",
+  "status": "closed",
+  "title": "Land the two waiting compliance-check fixes now",
+  "why": "The reason to wait has passed, since the skill is changing now. A separate lane keeps #620's finished review intact."
+}

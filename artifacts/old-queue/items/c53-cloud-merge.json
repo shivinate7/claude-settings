@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "merge.py now uses REST calls that work through the cloud proxy (landed in batch #603). It has never run live from the cloud. Your instructions say the Mac merge hand merges until c53 works, and the build advisor reads that as not yet granted. Until you answer, every batch waits for the Mac.",
+  "home": "roadmap step c53",
+  "id": "c53-cloud-merge",
+  "kind": "decision",
+  "n": 5,
+  "options": [
+    {
+      "gain": "Merges stop depending on your Mac being awake.",
+      "how": "The build advisor runs merge.py from a cloud thread for the next green batch; if it fails, the Mac merge hand merges it.",
+      "key": "a",
+      "label": "Yes: the next batch merges from the cloud, the Mac stays as fallback",
+      "lose": "The first live run might stop partway; merge.py refuses a moved head, so the risk is a retry, not a bad merge."
+    },
+    {
+      "gain": "Proof before a real merge.",
+      "how": "A cloud session runs merge.py's preview (no --confirm) on a batch and reports.",
+      "key": "b",
+      "label": "Not yet: one dry run first",
+      "lose": "One more batch waits on the Mac."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "c53 (the merge tool works from a cloud session)",
+  "status": "closed",
+  "title": "Let a cloud session run merge.py for a batch",
+  "why": "merge.py's own checks (green CI, unmoved head) already guard the merge, and the Mac stays as fallback."
+}

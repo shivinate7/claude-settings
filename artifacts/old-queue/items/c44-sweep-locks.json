@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "The cleanup sweep can now free the calling session's own agent lock on a work tree that is clean, merged into main and quiet for 30 minutes. It ships this way (merged in batch #586). The reviewer worried that a mid-session sweep could free a still-running agent's tree under those conditions.",
+  "home": "PR #590 body, 'Parked for the owner'",
+  "id": "c44-sweep-locks",
+  "kind": "decision",
+  "n": 6,
+  "options": [
+    {
+      "gain": "The offered fast cleanup after a merge actually cleans.",
+      "how": "Any sweep, mid-session or at session end, may free its own session's lock under the clean, merged, idle-30-minutes test.",
+      "key": "a",
+      "label": "Yes, keep it as built",
+      "lose": "A quiet agent's tree can go; it is clean and merged, so no work is lost."
+    },
+    {
+      "gain": "No tree goes while its session runs.",
+      "how": "A follow-up lane limits the own-lock rule to the sweep that runs at session end.",
+      "key": "b",
+      "label": "Only the session-end sweep",
+      "lose": "Trees stay until the session ends, which is the leftover-tree problem c44 set out to fix."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "c44 (merged work leaves no worktrees behind), PR #590",
+  "status": "closed",
+  "title": "Let a mid-session cleanup sweep free its own session's locks",
+  "why": "The tree must be clean and merged, so nothing can be lost; the cost is at most a rebuild of a work tree."
+}

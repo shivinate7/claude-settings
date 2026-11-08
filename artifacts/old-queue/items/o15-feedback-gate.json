@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "The feedback_gate hook sends tasks and rulings a session catches to its handoff file, which lives outside git and dies with the session. The audit proposes sending them to the repo's own todo and decision records, then trimming the handoff's two rulings sections.",
+  "home": "roadmap step o15; plans/o5b-memory-hooks-audit.md",
+  "id": "o15-feedback-gate",
+  "kind": "decision",
+  "n": 9,
+  "options": [
+    {
+      "gain": "Rulings survive the session and reach every later one.",
+      "how": "A lane changes feedback_gate's homes to tracked files and trims the handoff template.",
+      "key": "a",
+      "label": "Yes, re-point it",
+      "lose": "More small commits per session."
+    },
+    {
+      "gain": "No new commits.",
+      "how": "Nothing changes.",
+      "key": "b",
+      "label": "No, keep the handoff",
+      "lose": "A ruling caught late in a session can be lost with it."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "o15 (tasks and rulings land in tracked files), from o5b's audit",
+  "status": "closed",
+  "title": "Have sessions file tasks and rulings into tracked files, not only the handoff",
+  "why": "It matches your rule that an answer has a home before the work it governs merges."
+}

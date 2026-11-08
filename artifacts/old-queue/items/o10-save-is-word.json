@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "Your rules say approval comes only from a message you typed. A saved answer on a page is a new kind of approval, so it needs a rule. This page is private to your account, so only you can save to it.",
+  "home": "plans/o10-session-questions-page.md, Deferred item 3",
+  "id": "o10-save-is-word",
+  "kind": "decision",
+  "n": 2,
+  "options": [
+    {
+      "gain": "Answers work without a paste. The page does its job.",
+      "how": "A session treats a saved answer here exactly like your typed reply.",
+      "key": "a",
+      "label": "Yes, for your own save on a page only you can write",
+      "lose": "One new rule to guard."
+    },
+    {
+      "gain": "No new rule.",
+      "how": "The page builds a text block that you paste into a thread.",
+      "key": "b",
+      "label": "No, only a typed message counts",
+      "lose": "A copy and paste every time."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "o10 (a page per session for questions), choice 3",
+  "status": "closed",
+  "title": "An answer you save on this page counts as your word",
+  "why": "Without it, this page is only a reading aid. The page is private, so the save can only be yours."
+}

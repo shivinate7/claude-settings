@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "Corrected options, checked on main 2ad85de. Your rule says each layer proves a change once, and the batch's CI run is the one full run. The builder instructions add one exception: a lane that touches lint/, hooks/ or actions/ runs the whole CI job locally first, which takes about 90 minutes. The reason was test fixtures that copied a hand-picked list of files, so a change in one suite broke another. PR #633 removed that cause, because fixtures now copy whatever git lists. Whether those cross-suite reds still happen is unmeasured.",
+  "home": "PR #633; rule roles-each-layer-proves-once",
+  "id": "c69-lane-ci-run",
+  "kind": "decision",
+  "n": 27,
+  "options": [
+    {
+      "gain": "Saves about 90 minutes per lane. No false reds from the container that teach lanes to scroll past failures.",
+      "how": "The batch CI run is the only full run, as your rule says.",
+      "key": "a",
+      "label": "Drop the exception",
+      "lose": "A cross-suite break shows up in the batch. That lane is dropped, and the rest merge after one re-run (about 45 minutes)."
+    },
+    {
+      "gain": "Catches cross-suite breaks early, cheaply.",
+      "how": "A new tool maps files to the suites that read them.",
+      "key": "b",
+      "label": "Run only the suites that read the files the lane touched",
+      "lose": "The mapping tool doesn't exist yet."
+    },
+    {
+      "gain": "Fewest red batches.",
+      "how": "The rule text names this one exception.",
+      "key": "c",
+      "label": "Keep it, as a named exception in the rule",
+      "lose": "The same suites run twice, plus the 90 minutes and the container noise."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "c69 (test fixtures stop listing files; a lane can run a whole CI job), PR #633",
+  "status": "closed",
+  "title": "Should a lane still run the full CI job (about 90 minutes) before it sends?",
+  "why": "The cause of the exception is fixed, and a red batch already has a cheap, ruled recovery. If batches start going red on cross-suite breaks again, that incident would justify (b)."
+}

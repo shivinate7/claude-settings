@@ -1,0 +1,456 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Waiting Page Frame</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,600&family=Manrope:wght@700;800&display=swap">
+<style>
+/* Layout: one shared frame (masthead strip, summary, three queues, sticky answer bar). A repo changes
+   only its identity block: wordmark face, monogram, and one accent pair. Everything else is fixed. */
+:root {
+  --bg: #f4f5f7; --surface: #ffffff; --ink: #161b22; --muted: #57606b; --line: #dbe0e6; --chip: #eef1f4;
+  --good: #1f7a45; --good-soft: #e2f3e8; --warn: #9a5b00; --warn-soft: #fbf0dc;
+  --frame: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --on-acc: #ffffff;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1318; --surface: #171c23; --ink: #e7ebf0; --muted: #9aa5b1; --line: #2b333d; --chip: #212831;
+  --good: #6cc990; --good-soft: #15301f; --warn: #f2b45a; --warn-soft: #33260f; --on-acc: #0f1318; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1318; --surface: #171c23; --ink: #e7ebf0; --muted: #9aa5b1; --line: #2b333d; --chip: #212831;
+  --good: #6cc990; --good-soft: #15301f; --warn: #f2b45a; --warn-soft: #33260f; --on-acc: #0f1318; color-scheme: dark }
+
+/* The repo identity: --a is the brand fill as the repo ships it, --ai the text-safe ink (4.5:1 on white),
+   --ad the dark-theme value. The frame never uses --a for text. */
+.wp { --acc: var(--ai); --fill: var(--a); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .wp { --acc: var(--ad); --fill: var(--ad); } }
+:root[data-theme="dark"] .wp { --acc: var(--ad); --fill: var(--ad); }
+.wp { --soft: color-mix(in srgb, var(--fill) 11%, var(--surface)); --ground: color-mix(in srgb, var(--fill) 4%, var(--bg)); }
+
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--frame); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.shell { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 64px; display: grid; gap: 40px; }
+.shell > * { min-width: 0; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+.intro { display: grid; gap: 12px; max-width: 70ch; }
+.intro h1 { font: 600 2rem/1.15 var(--frame); letter-spacing: -0.01em; }
+.intro p { margin: 0; color: var(--muted); }
+.kicker { font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pickers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rchip { display: inline-flex; align-items: center; gap: 8px; font: 500 14px var(--frame); padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; min-height: 40px; }
+.rchip i { width: 12px; height: 12px; border-radius: 3px; background: var(--sw); display: block; }
+.rchip[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.themes { margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.themes button { font: 500 13px var(--frame); padding: 8px 12px; background: var(--surface); color: var(--muted); border: 0; cursor: pointer; min-height: 40px; }
+.themes button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+button:focus-visible, input:focus-visible, summary:focus-visible, .opt:focus-within { outline: 2px solid var(--acc, var(--ink)); outline-offset: 2px; }
+.sec-h { display: grid; gap: 6px; }
+.sec-h h2 { font: 600 1.35rem/1.25 var(--frame); }
+.sec-h p { margin: 0; color: var(--muted); max-width: 70ch; }
+
+/* ---------- The waiting page itself ---------- */
+.device { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--ground); max-width: 800px; position: relative; }
+.wp { color: var(--ink); background: var(--ground); }
+.wp .band { height: 4px; background: var(--a); }
+.wp .page { padding: 22px 20px 0; display: grid; gap: 20px; }
+.mast { display: flex; gap: 14px; align-items: center; }
+.mono { width: 44px; height: 44px; border-radius: 10px; background: var(--a); color: var(--mk, #fff); display: grid; place-items: center; font: 700 20px/1 var(--wm); flex: none; }
+.mast .who { display: grid; gap: 0; min-width: 0; }
+.mast .repo { font: var(--wmw, 700) 15px/1.2 var(--wm); color: var(--acc); letter-spacing: var(--wmls, 0); }
+.mast h3 { font: 600 1.6rem/1.15 var(--frame); letter-spacing: -0.01em; }
+.summary { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.summary b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+.summary .blk b { color: var(--warn); }
+.summary .chk { font: 12px var(--mono); }
+.q { display: grid; gap: 10px; }
+.q > h4 { font: 600 12px var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0; display: flex; gap: 8px; align-items: center; }
+.q > h4 .ct { font-variant-numeric: tabular-nums; background: var(--chip); color: var(--ink); border-radius: 999px; padding: 0 7px; letter-spacing: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; display: grid; grid-template-columns: 44px 1fr; min-width: 0; }
+.card.blocking { box-shadow: inset 3px 0 0 var(--warn); }
+.card .n { font: 600 1.15rem/1 var(--mono); color: var(--acc); padding: 18px 0 0 14px; font-variant-numeric: tabular-nums; }
+.card .body { padding: 14px 16px 14px 4px; display: grid; gap: 10px; min-width: 0; }
+.card .title { font: 600 16px/1.35 var(--frame); text-wrap: balance; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--muted); }
+.meta span + span::before { content: ""; display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .6; margin-right: 12px; vertical-align: middle; }
+.meta .holds { color: var(--warn); font-weight: 500; }
+.ctx { margin: 0; font-size: 14.5px; max-width: 66ch; }
+details.more summary { cursor: pointer; font-size: 13px; color: var(--acc); list-style: none; width: max-content; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more[open] summary { margin-bottom: 6px; }
+details.more p { margin: 0; font-size: 14px; color: var(--muted); }
+.rec { font-size: 14px; margin: 0; padding: 8px 12px; border-radius: 8px; background: var(--soft); }
+.rec b { color: var(--acc); }
+.opts { display: grid; gap: 6px; }
+.opt { display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; align-items: start; }
+.opt:hover { border-color: var(--muted); }
+.opt.on { border-color: var(--acc); background: var(--soft); }
+.opt input { margin: 3px 0 0; accent-color: var(--acc); width: 16px; height: 16px; }
+.opt .lab { font-weight: 600; font-size: 14.5px; }
+.opt .key { font: 500 12px var(--mono); color: var(--muted); margin-right: 6px; }
+.opt .tag { font: 600 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--on-acc); background: var(--acc); border-radius: 4px; padding: 1px 6px; margin-left: 8px; vertical-align: 2px; }
+.opt .how { grid-column: 2; font-size: 13.5px; color: var(--muted); }
+.opt .gl { grid-column: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 13.5px; margin-top: 2px; }
+.opt .gl div { min-width: 0; }
+.opt .gl em { font-style: normal; font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; display: block; color: var(--muted); }
+.opt.none .how { font-style: normal; }
+ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14.5px; }
+.links a { color: var(--acc); font-size: 14px; }
+.foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
+.foot input { flex: 1 1 200px; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: 14px var(--frame); }
+.btn { font: 600 14px var(--frame); min-height: 40px; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--acc); background: var(--acc); color: var(--on-acc); cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--acc); }
+.btn:disabled { opacity: .45; cursor: default; }
+.drafted { font-size: 12.5px; color: var(--muted); }
+.receipt { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 12px 16px; font-size: 14px; }
+.receipt .ok { color: var(--good); font-weight: 600; }
+.receipt .t { color: var(--muted); }
+.receipt button { margin-left: auto; background: none; border: 0; color: var(--acc); font: 500 14px var(--frame); cursor: pointer; min-height: 40px; }
+.card.done { background: var(--good-soft); border-color: transparent; }
+.parked { margin: 0; padding-left: 18px; font-size: 14px; color: var(--muted); display: grid; gap: 4px; }
+.bar { position: sticky; bottom: 0; margin-top: 20px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px); border-top: 1px solid var(--line); padding: 10px 20px calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bar .st { font-size: 13.5px; color: var(--muted); margin-right: auto; }
+.bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.sample { font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding: 8px 20px 0; }
+
+/* Compare row */
+.compare { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 16px; }
+.compare .opt .gl { grid-template-columns: 1fr; }
+.compare .device { max-width: none; }
+.compare .wp .page { padding: 16px 14px 16px; gap: 14px; }
+.compare .mast h3 { font-size: 1.25rem; }
+.compare .mono { width: 36px; height: 36px; font-size: 17px; }
+.compare figcaption { font-size: 13px; color: var(--muted); padding: 8px 2px 0; }
+
+/* Write-up */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px 28px; }
+.cols > div { min-width: 0; }
+.cols h3, .prose h3 { font: 600 16px/1.35 var(--frame); margin-bottom: 4px; }
+.cols p, .prose p, .prose li { margin: 0; font-size: 14.5px; max-width: 68ch; }
+.prose { display: grid; gap: 14px; }
+.prose ol, .prose ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.tw { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 760px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font: 600 12px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--chip); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td.gold { background: color-mix(in srgb, #c9a961 12%, var(--surface)); }
+th.gold { background: color-mix(in srgb, #c9a961 26%, var(--chip)); color: var(--ink); }
+.sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); }
+.ok-y { color: var(--good); font-weight: 600; }
+.ok-n { color: var(--warn); font-weight: 600; }
+.callout { border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: 10px; background: var(--surface); padding: 16px 18px; display: grid; gap: 8px; }
+.callout h2 { font: 600 1.2rem/1.3 var(--frame); }
+.callout p { margin: 0; max-width: 72ch; }
+@media (max-width: 560px) {
+  .card { grid-template-columns: 34px 1fr; }
+  .card .n { padding-left: 10px; font-size: 1rem; }
+  .opt .gl { grid-template-columns: 1fr; }
+  .themes { margin-left: 0; }
+  .wp .page { padding-inline: 14px; }
+}
+@media (prefers-reduced-motion: no-preference) { .opt, .card { transition: border-color .15s, background-color .15s; } }
+</style>
+
+<div class="shell">
+  <header class="intro">
+    <div class="kicker">Mockup · waiting page · Oct 26, 19:45 CDT · template at claude-settings 2ad85de</div>
+    <h1>One frame for every repo, with the repo's own colour as the accent</h1>
+    <p>Every repo's waiting page has the same structure, the same type and the same controls, so you learn it once. The repo shows in one place: a 4px brand band, a monogram, the repo's wordmark face and one accent colour. Pick a repo to see the same page change identity and nothing else. The items are samples.</p>
+    <div class="pickers" id="pickers" role="group" aria-label="Repo"></div>
+    <div class="pickers"><div class="themes" role="group" aria-label="Theme"><button type="button" data-t="" aria-pressed="true">Auto</button><button type="button" data-t="light" aria-pressed="false">Light</button><button type="button" data-t="dark" aria-pressed="false">Dark</button></div></div>
+  </header>
+
+  <section class="sec-h" aria-label="Full page">
+    <div class="device" id="main"></div>
+  </section>
+
+  <section style="display:grid;gap:14px">
+    <div class="sec-h"><h2>The same decision in four repos</h2><p>Identical content and layout. Only the band, monogram, wordmark and accent change. Q Max's orange and the Home app's blue fail 4.5:1 as text on white, so the frame uses a darker ink of the same hue for text and keeps the true brand colour for the band and monogram.</p></div>
+    <div class="compare" id="compare"></div>
+  </section>
+
+  <section class="callout">
+    <h2>Is it too late? No. One template change fixes every repo at once.</h2>
+    <p>Each repo's page is the same <code>page.html</code> from the claude-settings waiting-page skill, published unchanged. All content lives in each page's database, not in the page. So a new template means republishing that one file to each repo's existing URL: the links stay the same, and the items and answers stay in place. The only repo with a page today is the Home app. With this design the repo's identity also lives in its database (one <code>meta/page</code> record), so the template stays one file and never forks per repo.</p>
+    <p>One thing to check before the roll-out: that a republish keeps the database. The Artifact tool says the database lives with the artifact's URL, but nobody has measured it on a waiting page. One republish of the Home app's page and a read of its items settles it. Unmeasured until then.</p>
+  </section>
+
+  <section style="display:grid;gap:16px">
+    <div class="sec-h"><h2>What is shared and what each repo sets</h2><p>Each repo sets its colour in its own record, and the page checks its contrast, so a repo cannot make its page hard to read.</p></div>
+    <div class="tw"><table>
+      <thead><tr><th>Repo</th><th>Source read</th><th>Brand fill</th><th>Text ink (light)</th><th>Ink on white</th><th>Dark accent</th><th>Wordmark face</th></tr></thead>
+      <tbody id="ids"></tbody>
+    </table></div>
+    <div class="cols">
+      <div><h3>Shared by every repo</h3><p>Layout and order of sections. Body and heading type (IBM Plex Sans, Plex Mono for numbers). Neutrals, text colours and semantic colours: green for saved, amber for "holds up work". Card, option, note and button shapes. Every word on the page except the repo's name.</p></div>
+      <div><h3>Set by each repo</h3><p>A brand fill for the band and monogram. A text-safe ink of the same hue for numbers, links, the pick tag, the primary button and the focus ring. A dark-theme value. A wordmark face, used for the repo name only. A one-letter monogram. The page title, so each repo's page has its own name in the gallery.</p></div>
+      <div><h3>Never set by a repo</h3><p>Body font, text colour, background, spacing or contrast. A repo's own ground colour (Mail Day Ledger's parchment, for example) bleeds in only as a 4% tint, so all eight pages read the same at a glance. Three repos are blue, so colour alone cannot tell them apart. The name and monogram do that job.</p></div>
+    </div>
+  </section>
+
+  <section class="prose">
+    <div class="sec-h"><h2>The choices, and why</h2></div>
+    <ol>
+      <li><b>Uniform frame, accent identity.</b> You move between eight repos' pages. If each looked different you would relearn where the Save button is each time. A fixed frame turns answering into a habit, while the band and wordmark tell you at once which repo you are in. This is how GitHub, Linear and Stripe theme a workspace: one product, a per-workspace colour and logo.</li>
+      <li><b>What holds up work goes first.</b> The current page sorts by number only. Here, items that block a running lane come first, with an amber edge and a "Holds up" line that names what waits. Decisions come next, then hands-on tasks.</li>
+      <li><b>The recommendation sits above the options.</b> You read "My pick: a, because…" before the choices, so a fast yes takes one look. Gain and lose sit side by side under each option, so you compare across options without reading a paragraph each.</li>
+      <li><b>Long context folds.</b> The first two sentences show. The rest opens under "More context". The current cards show every line, which makes a page of 20 items very long on a phone.</li>
+      <li><b>One Save for the whole page.</b> Pick on several cards, then "Save 3 answers" in the bar. Each card keeps its own Save as well. The bar always says how many picks are not saved yet, so nothing is lost by leaving.</li>
+      <li><b>An answered card becomes a receipt.</b> One green line: what you chose, when (CDT), where it goes, and Change. It stays in place until you reload, so the list does not jump under your finger.</li>
+      <li><b>Time and age, in CDT.</b> Each card says how long it has waited ("2 days") and the summary names the oldest. The current page shows the browser's local time with no zone.</li>
+      <li><b>Legibility floors.</b> Text at 4.5:1 or more in both themes, measured for each repo's ink. Every control is 40px or taller. Numbers in a mono face with tabular figures, so 9 and 19 line up.</li>
+    </ol>
+  </section>
+
+  <section style="display:grid;gap:14px">
+    <div class="sec-h"><h2>Current template, this mockup, and the gold standard</h2><p>Gold standard: the best practice I would hold the page to, from WCAG 2.2, Apple's Human Interface Guidelines and the review screens of GitHub and Linear.</p></div>
+    <div class="tw"><table>
+      <thead><tr><th>Aspect</th><th>Current template</th><th>This mockup</th><th class="gold">Gold standard</th></tr></thead>
+      <tbody>
+        <tr><td>Repo identity</td><td>None. Every page is amber and titled "Waiting on Shiv".</td><td>Band, monogram, wordmark face and accent from the repo's own tokens.</td><td class="gold">You know which workspace you are in within one glance, with no extra reading.</td></tr>
+        <tr><td>Name in the gallery</td><td>The same title for every repo.</td><td>"Banchi: waiting on you", one per repo.</td><td class="gold">Each page has a unique, specific name.</td></tr>
+        <tr><td>Accent contrast</td><td>Fixed amber, 5.5:1 on white. Fine for one colour.</td><td>Brand for fills, a darker ink of the same hue for text. Q Max and Home pass only because of this.</td><td class="gold">4.5:1 for text, 3:1 for controls and focus rings, in both themes (WCAG 2.2, 1.4.3 and 1.4.11).</td></tr>
+        <tr><td>Order</td><td>By number, decisions then tasks.</td><td>Holds up work, then decisions, then tasks.</td><td class="gold">Sorted by cost of waiting. The blocking item is first.</td></tr>
+        <tr><td>Option layout</td><td>Three stacked lines per option: how, gain, lose.</td><td>Pick above the options. Gain and lose side by side.</td><td class="gold">You can compare options without scrolling between them.</td></tr>
+        <tr><td>Long context</td><td>Always shown in full.</td><td>Two sentences, then "More context".</td><td class="gold">Summary first, detail on demand.</td></tr>
+        <tr><td>Saving</td><td>One Save per card.</td><td>Per card, plus "Save N answers" in the bar.</td><td class="gold">Batch commit, with a count of unsaved work always visible.</td></tr>
+        <tr><td>After saving</td><td>Green border. The card hides on the next render.</td><td>A one-line receipt in place, with Change.</td><td class="gold">Confirmation in place. Nothing moves under the pointer.</td></tr>
+        <tr><td>Time</td><td>Browser local time, no zone. No age.</td><td>CDT named, and age ("waited 2 days").</td><td class="gold">Times in the reader's named zone. Age shown where it changes priority.</td></tr>
+        <tr><td>Touch targets</td><td>About 36px buttons.</td><td>40px or more.</td><td class="gold">44pt (Apple HIG). 24px is the WCAG 2.2 minimum.</td></tr>
+        <tr><td>Phone bar</td><td>Two long buttons and a hidden text box. Wraps to three rows at 390px.</td><td>A status line and up to three short buttons.</td><td class="gold">One row on a phone. The main action is at the right, under the thumb.</td></tr>
+        <tr><td>Fix all repos at once</td><td>Yes, through one page.html.</td><td>Yes. Identity lives in the database, so the template stays one file.</td><td class="gold">One source. Per-tenant config is data, never a fork.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="prose">
+    <div class="sec-h"><h2>What I would change in the template</h2><p>In priority order. Nothing in claude-settings is changed by this mockup.</p></div>
+    <ol>
+      <li><b>Add an identity record.</b> <code>meta/page.identity</code>: <code>{name, mark, fill, ink, dark, face}</code>. The page reads it, sets the four colour tokens and the title, and falls back to a neutral slate when it is missing. The page computes the ink's contrast on load and darkens it until it reaches 4.5:1, so a bad value cannot ship.</li>
+      <li><b>Add a <code>holds</code> field to items.</b> Free text, such as "lane c44 is parked". The page sorts items that have it first and draws the amber edge. The skill's "Add an item" step asks the session to fill it when a lane is waiting.</li>
+      <li><b>Move the pick above the options and put gain and lose side by side.</b> A layout change only. The database shape does not change.</li>
+      <li><b>Fold long context</b> after the first two sentences.</li>
+      <li><b>Add "Save N answers" to the bar</b>, and show the unsaved count. It writes the same <code>answers/&lt;id&gt;</code> records as each card's Save, one by one.</li>
+      <li><b>Keep answered cards in place as a receipt</b> until the next load, instead of removing them while you read.</li>
+      <li><b>Name the time zone and show age.</b> Format every time with <code>timeZone: "America/Chicago"</code> and "CDT" or "CST".</li>
+      <li><b>Raise targets to 40px and shorten the bar</b> to fit one row at 390px.</li>
+      <li><b>Change the skill's "Make a repo's page" step</b>: step 3 also writes <code>identity</code>, with the values from this table. Add a step "Update every page": republish page.html to each URL in the repos' extras files.</li>
+    </ol>
+    <p>Portability: yes, port to every repo. The point of the page is that it is the same in each one.</p>
+  </section>
+</div>
+
+<script>
+const REPOS = {
+  "claude-settings": { name: "claude-settings", mark: "C", a: "#b45f06", ai: "#a15405", ad: "#f0a14a", wm: '"Newsreader", Georgia, serif', wmw: 600, src: "the waiting-page template's own amber", face: "Newsreader (template)" },
+  banchi: { name: "Banchi", mark: "B", a: "#3d5af1", ai: "#3d5af1", ad: "#8e9cff", wm: '"Manrope", system-ui, sans-serif', wmw: 800, wmls: "-0.01em", src: "app/src/tokens.css, --bn-accent", face: "Manrope (its display face)" },
+  home: { name: "Home", mark: "H", a: "#0a84ff", ai: "#0067d6", ad: "#64b5ff", wm: 'system-ui, -apple-system, "SF Pro Display", sans-serif', wmw: 700, src: "web/style.css, --accent (iOS blue)", face: "SF Pro (system)" },
+  mailaudit: { name: "MANIFEST", mark: "M", a: "#6f5ca6", ai: "#6f5ca6", ad: "#b3a4e6", wm: 'Cochin, "Iowan Old Style", Georgia, serif', wmw: 600, wmls: "0.12em", src: "shared/tokens.json, accent", face: "Cochin (masthead face)" },
+  joyous: { name: "Joyous Montessori", mark: "J", a: "#27553f", ai: "#27553f", ad: "#86c7a3", wm: '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif', wmw: 600, src: "src/layouts/Base.astro, --green", face: "Iowan Old Style (its serif)" },
+  q_max: { name: "Agent Q", mark: "Q", a: "#f47820", ai: "#b4520a", ad: "#f69a52", wm: '"IBM Plex Sans", system-ui, sans-serif', wmw: 600, mk: "#141e27", src: "src/index.css, --color-aq-accent", face: "IBM Plex Sans (its face)" },
+  degen: { name: "Degen", mark: "D", a: "#0b5fff", ai: "#0b5fff", ad: "#7aa8ff", wm: 'system-ui, -apple-system, sans-serif', wmw: 800, src: "tokens.json, light.accent", face: "System (no display face)" },
+  "ios-adblock": { name: "Dame Dayo", mark: "D", a: "#4b5a6b", ai: "#4b5a6b", ad: "#9fb0c2", wm: 'system-ui, -apple-system, sans-serif', wmw: 700, src: "none found in DESIGN.md: frame default slate", face: "System" },
+};
+const CONTRAST = { "claude-settings": 5.55, banchi: 5.34, home: 5.37, mailaudit: 5.59, joyous: 8.55, q_max: 5.06, degen: 5.13, "ios-adblock": 7.06 };
+const RAW = { home: 3.65, q_max: 2.78 };
+
+const SHARED = {
+  id: "cloud-merge", n: 5, kind: "decision", title: "Let a cloud session run merge.py for a batch",
+  owner: "Build advisor", home: "roadmap step c53", age: "2 days", holds: "the integration batch is green and waiting",
+  context: "The cloud merge tool works since Oct 26, 19:18 CDT. Today the Mac merge hand runs each integration merge. The proposal makes the cloud the main path and keeps the Mac as the fallback.",
+  more: "The Mac hand stays allowed. A cloud merge still needs green checks and the review round, as now.",
+  options: [
+    { key: "a", label: "Cloud merges, Mac is the fallback", how: "The build advisor runs merge.py from its own session.", gain: "Merges no longer wait for the Mac to be awake.", lose: "One more place that can merge." },
+    { key: "b", label: "Keep the Mac as the only merger", how: "Nothing changes.", gain: "One merge path to watch.", lose: "A batch waits whenever the Mac sleeps." },
+  ], pick: "a", why: "The Mac is the main reason green batches wait overnight.",
+};
+
+const ITEMS = {
+  "claude-settings": [
+    SHARED,
+    { id: "opus-pass", n: 14, kind: "decision", title: "Add an Opus-only pass word, such as \"opus 2h\"", owner: "Triage the roadmap", home: "roadmap step c41", age: "1 day",
+      context: "To let one session use Opus today you approve each spawn, type an override that lifts every guard, or set a repo grant that needs a fresh session.", more: "The proposal is a second pass word that lifts only the Opus cap for this session and its subagents until it expires.",
+      options: [{ key: "a", label: "Build the pass word", how: "A lane adds it to the one override-pass home.", gain: "Opus when you want it, every other guard still on.", lose: "One more word to remember." }, { key: "b", label: "Keep the three ways", how: "Nothing changes.", gain: "No new code.", lose: "Opus stays clumsy or too broad." }], pick: "a", why: "It closes the gap between asking each time and lifting everything." },
+    { id: "close-551", n: 17, kind: "decision", title: "Close the stale draft PR #551 (old roadmap filter)", owner: "Build advisor", home: "PR #551", age: "3 days",
+      context: "The draft has had no push for five days, and batch #586 replaced its change.",
+      options: [{ key: "a", label: "Close it as replaced", how: "Close with a note that names #586.", gain: "One less open draft.", lose: "Nothing. The branch stays in the archive." }, { key: "b", label: "Leave it open", how: "Nothing changes.", gain: "None.", lose: "It keeps showing in the open list." }], pick: "a", why: "Its change already merged in another form." },
+    { id: "idle-desktop", n: 22, kind: "task", title: "Archive the idle desktop sessions that spin a CPU core each", owner: "Triage the roadmap", home: "roadmap step c40", age: "3 days", minutes: "5 min",
+      context: "On Oct 23, 17 idle Claude Desktop sessions used 19 of 24 cores.", steps: ["In Claude Desktop, archive the sessions you are not using.", "Optional: report it with Claude Desktop 3.1623.0.0."] },
+  ],
+  banchi: [
+    { ...SHARED, n: 3, id: "phone-specs", title: "Turn the phone-width specs back on", owner: "Banchi screens lane", home: "DEBT77, every phone-width spec is off", age: "4 days", holds: "the Inventory phone pass",
+      context: "Every spec that asserts a 390px layout is off by your word. The Inventory lane wants them on to prove its phone layout.", more: "One switch turns them on: PHONE_SPECS_ON in app/tests/phoneSwitch.ts. About 40 specs come back, and 6 are red today.",
+      options: [{ key: "a", label: "Turn them on and fix the 6 reds", how: "One lane flips the switch and fixes the reds.", gain: "Phone layout is tested again.", lose: "A lane of work before Inventory can merge." }, { key: "b", label: "Keep them off", how: "Nothing changes.", gain: "No extra lane.", lose: "Phone breaks show only on your phone." }], pick: "a", why: "You list cards from the phone, and today nothing checks it." },
+    { id: "floor", n: 4, kind: "decision", title: "Raise the sub-threshold floor from $0.49 to $0.59", owner: "Pricing lane", home: "D9, threshold and floor", age: "1 day",
+      context: "The fee on a $0.49 sale now takes most of the sale. 212 unsent copies sit under $0.59.",
+      options: [{ key: "a", label: "Raise to $0.59", how: "Change policy.threshold in prices.json.", gain: "No sale at a loss.", lose: "212 copies list higher and may sell slower." }, { key: "b", label: "Keep $0.49", how: "Nothing changes.", gain: "Low cards move fast.", lose: "Some sales lose money after fees." }], pick: "a", why: "A sale under cost is worse than a slow sale." },
+    { id: "backup-agent", n: 7, kind: "task", title: "Arm the nightly backup on the Mac", owner: "Store lane", home: "DEBT67, photos exist in one place", age: "6 days", minutes: "2 min",
+      context: "Capture photographs exist only on the Mac.", steps: ["In the main checkout, run make backup-agent.", "Check the iCloud folder Banchi backup has a dated copy tomorrow."] },
+  ],
+  home: [
+    { ...SHARED, n: 2, id: "ha-restart", title: "Restart Home Assistant tonight for the AdGuard update", owner: "HA session", home: "records/adguard-home.md", age: "5 hours", holds: "the DNS filter update",
+      context: "The update needs an HA restart. DNS on your phone drops for about a minute while AdGuard Home restarts.", more: "No other session is using HA now. After the restart the session runs the checks in records/adguard-home.md.",
+      options: [{ key: "a", label: "Restart at 23:30 CDT", how: "The HA session restarts and runs the checks.", gain: "The update lands tonight.", lose: "About a minute with no DNS at 23:30." }, { key: "b", label: "Wait for the weekend", how: "The update waits.", gain: "No drop on a weeknight.", lose: "Four more days on the old filter." }], pick: "a", why: "23:30 is after your usual phone use." },
+    { id: "split-thermo", n: 6, kind: "decision", title: "Split the thermostat view out of HomeApp before Climate", owner: "Home app session", home: "records/family-apps.md", age: "1 day",
+      context: "The Climate side app needs the thermostat screen. The shared-screens rule says split it out first, then build the side app as a thin shell.",
+      options: [{ key: "a", label: "Split first", how: "One lane moves the view, then Climate uses it.", gain: "Your feedback lands in both apps.", lose: "Climate starts a day later." }, { key: "b", label: "Copy the view once", how: "Climate gets its own copy.", gain: "Climate starts now.", lose: "Two copies drift apart." }], pick: "a", why: "Your standing rule asks for it, and the cost is one day." },
+    { id: "sim-token", n: 9, kind: "task", title: "Remove the simulator's Home Assistant sign-in", owner: "Home app session", home: "SPEC.md, sign-in", age: "2 days", minutes: "1 min",
+      context: "The simulator check is finished.", steps: ["In HA, open Profile, then Security.", "Under Refresh tokens, delete \"iPhone 18 Pro simulator\"."] },
+  ],
+  mailaudit: [
+    { ...SHARED, n: 1, id: "chip-gap", title: "Re-measure the chip gap at 12px, or close the debt", owner: "Ledger lane", home: "debt chip-gap-tolerance-at-12px", age: "2 days", holds: "the Tally screen batch",
+      context: "The chip gap test allows 2px of drift, measured at 14px type. At 12px nobody measured it.", more: "A real-browser measure takes one run at 320, 375 and 760px.",
+      options: [{ key: "a", label: "Measure it in a real browser", how: "One run at three widths, then set the tolerance.", gain: "The test means what it says.", lose: "About 20 minutes of a lane." }, { key: "b", label: "Close the debt as accepted", how: "Mark it accepted in the debt file.", gain: "No work.", lose: "A 12px layout break can pass." }], pick: "a", why: "A claim with no measure is the gap this repo keeps paying for." },
+    { id: "vendor-toggle", n: 4, kind: "decision", title: "Decide the vendor toggle on Tally", owner: "Ledger lane", home: "open thread vendor-toggle-undecided", age: "9 days",
+      context: "Tally pools one product name across every seller. A toggle would split each row by seller.",
+      options: [{ key: "a", label: "No toggle", how: "Rows stay pooled.", gain: "One answer per card.", lose: "Seller detail stays in Packages." }, { key: "b", label: "Add the toggle", how: "A switch in the Ledger tab.", gain: "Seller detail in Tally.", lose: "Two meanings for one row." }], pick: "a", why: "Packages already answers the per-seller question." },
+    { id: "n11", n: 8, kind: "task", title: "Run the native device check on your phone", owner: "Native lane", home: "debt n11-device-check-not-run", age: "4 days", minutes: "10 min",
+      context: "The TestFlight build is up.", steps: ["Install the latest TestFlight build.", "Check in one card, then check it is received on the web."] },
+  ],
+  joyous: [
+    { ...SHARED, n: 2, id: "tuition", title: "Show tuition on the tour page", owner: "Website lane", home: "record tour-page", age: "1 day", holds: "the tour page redesign",
+      context: "Parents ask about cost on most tour calls. Other Keller schools show a range.", more: "Phase 0 measures tour requests first, so the change can be measured.",
+      options: [{ key: "a", label: "Show a monthly range", how: "One line under the tour button.", gain: "Fewer tours from parents who cannot afford it.", lose: "Some parents stop before they visit." }, { key: "b", label: "Keep it for the tour", how: "Nothing changes.", gain: "Parents meet you before the price.", lose: "Tours that end at the price." }], pick: "a", why: "Cost per real tour is one of the two numbers to beat." },
+    { id: "photos", n: 3, kind: "task", title: "Approve three classroom photos for the October post", owner: "Social lane", home: "record photo-consent", age: "6 hours", minutes: "3 min",
+      context: "Each child in them has a signed consent form.", steps: ["Open the shared album \"October post\".", "Star the three to post."] },
+  ],
+  q_max: [
+    { ...SHARED, n: 4, id: "browser-batch", title: "Run the browser checks on each batch, not only on main", owner: "Arbiter", home: "D-748, the arbiter runs a batch's browser checks", age: "2 days", holds: "batch oct26-b",
+      context: "The arbiter runs each changed screen's checks before a batch goes ready. The full suite runs only on main, by dispatch.", more: "14-FLOSS took 11 minutes on the last run.",
+      options: [{ key: "a", label: "Keep it as is", how: "Changed screens per batch, full suite on main.", gain: "Batches stay fast.", lose: "A cross-screen break shows only on main." }, { key: "b", label: "Full suite per batch", how: "The arbiter runs everything.", gain: "Breaks found before merge.", lose: "About 11 minutes per batch." }], pick: "a", why: "Main has caught each cross-screen break so far within a day." },
+    { id: "rates", n: 6, kind: "task", title: "Upload the Q3 vendor rate sheet", owner: "Corpus lane", home: "docs/rules/corpus-and-quarantine.md", age: "3 days", minutes: "2 min",
+      context: "Benchmarks still read Q2 rates.", steps: ["Open Agent Q, then Corpus.", "Drop in the Q3 rate workbook."] },
+  ],
+  degen: [
+    { ...SHARED, n: 2, id: "batch-ship", title: "Ship the server load fixes as their own batch", owner: "Degen orchestrator", home: "rule tests-once-per-batch", age: "1 day", holds: "TestFlight build 41",
+      context: "Every lane of the server load objective has landed its review. The native lanes are two days out.", more: "One batch means one deploy and one TestFlight upload.",
+      options: [{ key: "a", label: "Ship the load fixes now", how: "One batch PR, then deploy.", gain: "Faster pages this week.", lose: "Two TestFlight uploads this week." }, { key: "b", label: "Wait and ship together", how: "Hold for the native lanes.", gain: "One upload.", lose: "Two more days on the slow server." }], pick: "a", why: "The load fixes do not touch native code." },
+  ],
+  "ios-adblock": [
+    { ...SHARED, n: 1, id: "fanboy", title: "Drop or replace the fanboy list source", owner: "Lists lane", home: "DESIGN.md, Fanboy source down", age: "2 days", holds: "the next list publish",
+      context: "fanboy.co.nz has not resolved since Oct 11. The check on Oct 25 found it still down. The build uses a vendored copy.", more: "uBlock's own mirror of the list is current.",
+      options: [{ key: "a", label: "Switch to uBlock's mirror", how: "Point the pin at the mirror.", gain: "The list stays fresh.", lose: "A second source to trust." }, { key: "b", label: "Drop the list", how: "Remove it from the build.", gain: "Smaller blockers.", lose: "Some annoyance rules go." }], pick: "a", why: "It keeps the rules with no new risk to the build." },
+    { id: "testflight", n: 2, kind: "task", title: "Upload a new TestFlight build before day 90", owner: "Lists lane", home: "ios/README.md, TestFlight", age: "1 day", minutes: "5 min",
+      context: "The current build expires on Jan 10.", steps: ["On the Mac, run tools/testflight.", "Install it from TestFlight on the phone."] },
+  ],
+};
+ITEMS.degen.push(ITEMS["claude-settings"][3]);
+
+const $ = (s, r = document) => r.querySelector(s);
+function h(tag, attrs = {}, ...kids) { const n = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === "class") n.className = v; else if (k === "style") n.style.cssText = v; else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else if (v !== false && v != null) n.setAttribute(k, v === true ? "" : v); } for (const c of kids.flat()) if (c != null && c !== false) n.append(c.nodeType ? c : document.createTextNode(c)); return n; }
+function applyRepo(node, key) { const r = REPOS[key]; node.dataset.repo = key; node.style.setProperty("--a", r.a); node.style.setProperty("--ai", r.ai); node.style.setProperty("--ad", r.ad); node.style.setProperty("--wm", r.wm); node.style.setProperty("--wmw", r.wmw); if (r.wmls) node.style.setProperty("--wmls", r.wmls); if (r.mk) node.style.setProperty("--mk", r.mk); }
+
+const state = { repo: "banchi", draft: {}, saved: {} };
+try { const s = localStorage.getItem("wf.repo"); if (s && REPOS[s]) state.repo = s; } catch (e) {}
+
+function card(it, ctx) {
+  const k = ctx.key + ":" + it.id;
+  const saved = ctx.live && state.saved[k];
+  const c = h("article", { class: "card" + (it.holds ? " blocking" : "") + (saved ? " done" : "") });
+  if (saved) {
+    c.append(h("div", { class: "receipt" }, h("span", { class: "ok" }, it.n + ". Saved"), h("span", {}, it.kind === "task" ? "Done" : "Chose " + saved), h("span", { class: "t" }, "19:52 CDT, goes to " + it.owner), h("button", { type: "button", onclick: () => { delete state.saved[k]; renderMain(); } }, "Change")));
+    return c;
+  }
+  const b = h("div", { class: "body" });
+  b.append(h("div", { class: "title" }, it.title));
+  b.append(h("div", { class: "meta" }, it.holds ? h("span", { class: "holds" }, "Holds up " + it.holds) : null, h("span", {}, "Waited " + it.age), h("span", {}, "Goes to " + it.owner), it.minutes ? h("span", {}, "About " + it.minutes) : null));
+  b.append(h("p", { class: "ctx" }, it.context));
+  if (it.more && !ctx.compact) b.append(h("details", { class: "more" }, h("summary", {}, "More context"), h("p", {}, it.more)));
+  if (it.kind === "decision") {
+    b.append(h("p", { class: "rec" }, h("b", {}, "My pick: " + it.pick + ". "), it.why));
+    const opts = h("div", { class: "opts", role: "radiogroup", "aria-label": it.title });
+    const chosen = ctx.live ? state.draft[k] : (ctx.preset || null);
+    [...it.options, { key: "none", label: "None of these", how: "Say in the note what you want instead. The session comes back with new options." }].forEach((o) => {
+      if (ctx.compact && o.key === "none") return;
+      const id = "r-" + ctx.key + "-" + it.id + "-" + o.key + (ctx.compact ? "-c" : "");
+      const inp = h("input", { type: "radio", name: "g-" + ctx.key + "-" + it.id + (ctx.compact ? "-c" : ""), id, value: o.key, checked: chosen === o.key, onchange: () => { if (ctx.live) { state.draft[k] = o.key; renderMain(); } } });
+      const lab = h("span", { class: "lab" }, o.key !== "none" ? h("span", { class: "key" }, o.key) : null, o.label, o.key === it.pick ? h("span", { class: "tag" }, "my pick") : null);
+      const row = h("label", { class: "opt" + (chosen === o.key ? " on" : "") + (o.key === "none" ? " none" : ""), for: id }, inp, lab);
+      if (o.how && !ctx.compact) row.append(h("div", { class: "how" }, o.how));
+      if (o.gain) row.append(h("div", { class: "gl" }, h("div", {}, h("em", {}, "You gain"), o.gain), h("div", {}, h("em", {}, "You lose"), o.lose)));
+      opts.append(row);
+    });
+    b.append(opts);
+  } else {
+    b.append(h("ol", { class: "steps" }, it.steps.map((s) => h("li", {}, s))));
+  }
+  if (!ctx.compact) {
+    const has = ctx.live && state.draft[k];
+    b.append(h("div", { class: "foot" },
+      h("input", { type: "text", id: "note-" + ctx.key + "-" + it.id, placeholder: it.kind === "task" ? "Optional note, such as what you saw" : "Optional note, or your own answer", "aria-label": "Note for item " + it.n }),
+      h("button", { class: "btn", type: "button", disabled: it.kind === "decision" && !has, onclick: () => { state.saved[k] = it.kind === "task" ? "done" : state.draft[k]; delete state.draft[k]; renderMain(); } }, it.kind === "task" ? "Mark done" : "Save"),
+      has ? h("span", { class: "drafted" }, "Picked, not saved") : null));
+  }
+  c.append(h("div", { class: "n" }, String(it.n)), b);
+  return c;
+}
+
+function page(key, opts = {}) {
+  const r = REPOS[key];
+  const items = opts.items || ITEMS[key];
+  const ctx = { key, live: !!opts.live, compact: !!opts.compact, preset: opts.preset };
+  const wp = h("div", { class: "wp" }); applyRepo(wp, key);
+  wp.append(h("div", { class: "band" }));
+  const pg = h("div", { class: "page" });
+  pg.append(h("div", { class: "mast" }, h("div", { class: "mono", "aria-hidden": "true" }, r.mark), h("div", { class: "who" }, h("div", { class: "repo" }, r.name), h("h3", {}, "Waiting on you"))));
+  const openN = items.filter((i) => !(ctx.live && state.saved[key + ":" + i.id]));
+  if (!ctx.compact) {
+    pg.append(h("div", { class: "summary" },
+      h("span", { class: "blk" }, h("b", {}, String(openN.filter((i) => i.holds).length)), " holding up work"),
+      h("span", {}, h("b", {}, String(openN.filter((i) => i.kind === "decision").length)), " decisions"),
+      h("span", {}, h("b", {}, String(openN.filter((i) => i.kind === "task").length)), " tasks"),
+      h("span", {}, "Oldest waited ", h("b", {}, items.slice().sort((a, b) => parseAge(b.age) - parseAge(a.age))[0].age)),
+      h("span", { class: "chk" }, "Checked Oct 26, 19:40 CDT")));
+  }
+  const groups = [["Holding up work", items.filter((i) => i.holds)], ["Decisions", items.filter((i) => !i.holds && i.kind === "decision")], ["Things only you can do", items.filter((i) => !i.holds && i.kind === "task")]];
+  for (const [label, list] of groups) {
+    if (!list.length) continue;
+    const q = h("section", { class: "q" }, h("h4", {}, label, h("span", { class: "ct" }, String(list.length))));
+    list.slice().sort((a, b) => a.n - b.n).forEach((it) => q.append(card(it, ctx)));
+    pg.append(q);
+  }
+  if (!ctx.compact) pg.append(h("section", { class: "q" }, h("h4", {}, "Parked by you"), h("ul", { class: "parked" }, h("li", {}, "Phone profiling design: after the Mac move."))));
+  wp.append(pg);
+  if (opts.live) {
+    const drafted = Object.keys(state.draft).filter((k) => k.startsWith(key + ":")).length;
+    const unans = items.filter((i) => i.kind === "decision" && !state.saved[key + ":" + i.id] && !state.draft[key + ":" + i.id]).length;
+    wp.append(h("div", { class: "bar" },
+      h("span", { class: "st" }, drafted ? [h("b", {}, String(drafted)), " picked, not saved"] : "Nothing unsaved"),
+      h("button", { class: "btn ghost", type: "button", disabled: !unans, onclick: () => { items.forEach((i) => { if (i.kind === "decision" && !state.saved[key + ":" + i.id] && !state.draft[key + ":" + i.id]) state.draft[key + ":" + i.id] = i.pick; }); renderMain(); } }, "Pick all my picks"),
+      h("button", { class: "btn", type: "button", disabled: !drafted, onclick: () => { Object.keys(state.draft).filter((k) => k.startsWith(key + ":")).forEach((k) => { state.saved[k] = state.draft[k]; delete state.draft[k]; }); renderMain(); } }, drafted ? "Save " + drafted + (drafted === 1 ? " answer" : " answers") : "Save")));
+  } else if (!ctx.compact) {
+    wp.append(h("div", { style: "height:16px" }));
+  }
+  return wp;
+}
+function parseAge(s) { const n = parseFloat(s); return /day/.test(s) ? n * 24 : n; }
+
+function renderMain() {
+  const m = $("#main"); m.replaceChildren(h("div", { class: "sample" }, "Sample items, " + REPOS[state.repo].name), page(state.repo, { live: true }));
+  document.querySelectorAll(".rchip").forEach((b) => b.setAttribute("aria-pressed", b.dataset.k === state.repo ? "true" : "false"));
+}
+
+const pk = $("#pickers");
+Object.entries(REPOS).forEach(([k, r]) => { const b = h("button", { class: "rchip", type: "button", "data-k": k, style: "--sw:" + r.a, onclick: () => { state.repo = k; try { localStorage.setItem("wf.repo", k); } catch (e) {} renderMain(); } }, h("i", {}), k); pk.append(b); });
+
+const cmp = $("#compare");
+["home", "mailaudit", "q_max", "joyous"].forEach((k) => {
+  const d = h("div", { class: "device" }, page(k, { compact: true, items: [{ ...SHARED, n: 5 }], preset: "a" }));
+  cmp.append(h("figure", { style: "margin:0" }, d, h("figcaption", {}, REPOS[k].name + ". Brand " + REPOS[k].a + (RAW[k] ? " (" + RAW[k] + ":1 as text), ink " + REPOS[k].ai : ""))));
+});
+
+const tb = $("#ids");
+Object.entries(REPOS).forEach(([k, r]) => {
+  const c = CONTRAST[k];
+  tb.append(h("tr", {}, h("td", {}, k), h("td", {}, r.src), h("td", {}, h("span", { class: "sw", style: "background:" + r.a }), r.a, RAW[k] ? h("span", { class: "ok-n" }, " (" + RAW[k] + ":1, fails as text)") : null), h("td", {}, h("span", { class: "sw", style: "background:" + r.ai }), r.ai), h("td", {}, h("span", { class: c >= 4.5 ? "ok-y" : "ok-n" }, c.toFixed(2) + ":1")), h("td", {}, h("span", { class: "sw", style: "background:" + r.ad }), r.ad), h("td", {}, r.face)));
+});
+
+document.querySelectorAll(".themes button").forEach((b) => b.addEventListener("click", () => {
+  const t = b.dataset.t; if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  document.querySelectorAll(".themes button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+}));
+renderMain();
+</script>
+
+</body></html>

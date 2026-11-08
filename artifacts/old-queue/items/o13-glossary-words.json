@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "The new glossary found 'step' and 'gate' each used for several things (a roadmap step and a step of a procedure; a merge gate and a CI check). 'Batch branch' and 'deferred item' also appear in rule prose without a glossary entry.",
+  "home": "roadmap step o13; parked in PR #597's body",
+  "id": "o13-glossary-words",
+  "kind": "decision",
+  "n": 10,
+  "options": [
+    {
+      "gain": "One name per thing, the point of the glossary.",
+      "how": "A lane drafts the split names and glossary rows; you approve the names before any rule text changes.",
+      "key": "a",
+      "label": "A lane proposes one word per meaning, for your yes",
+      "lose": "One more short decision for you later."
+    },
+    {
+      "gain": "No churn in rule text.",
+      "how": "Nothing changes.",
+      "key": "b",
+      "label": "Leave them as they are",
+      "lose": "The words stay ambiguous for every session."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "o13 (one name per thing: a glossary in every repo)",
+  "status": "closed",
+  "title": "Split 'step' and 'gate' into separate words, and fix 'batch branch' and 'deferred item'",
+  "why": "The ambiguity is in the words sessions read most, and you still approve the names."
+}

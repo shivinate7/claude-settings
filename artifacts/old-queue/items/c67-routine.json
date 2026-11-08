@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "Your note: a push grant for the routine is fine with you. That changes my pick to (a).\n\nThe scheduled routine stops on every run because it writes phase numbers to the page's old database, which is off. The numbers now live in roadmap/data/meta/phases.json.",
+  "home": "roadmap step c67",
+  "id": "c67-routine",
+  "kind": "decision",
+  "n": 12,
+  "options": [
+    {
+      "gain": "Fully automatic.",
+      "how": "Its prompt changes to edit the file, run build.py and push; triage republishes.",
+      "key": "a",
+      "label": "The routine edits phases.json and pushes",
+      "lose": "The routine needs push rights to the roadmap branch."
+    },
+    {
+      "gain": "Triage stays the one writer and page publisher; no new push right.",
+      "how": "Its prompt changes to measure and message the triage thread, which files and republishes.",
+      "key": "b",
+      "label": "The routine sends its counts to triage",
+      "lose": "Each run costs a triage turn."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "c67 (the roadmap-refresh routine updates the phase numbers it reads)",
+  "status": "closed",
+  "title": "Fix the stopped roadmap-refresh routine",
+  "why": "You're fine with the grant, so (b)'s main gain is gone. Phase numbers are not a step, a merge or an order, so the routine may write them without breaking triage's role. Triage still republishes the page."
+}

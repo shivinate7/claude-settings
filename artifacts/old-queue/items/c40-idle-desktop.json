@@ -1,0 +1,20 @@
+{
+  "added": "2026-10-26",
+  "context": "How to check whether it still happens (Windows): open Task Manager (Ctrl+Shift+Esc), go to Details, and sort by CPU. On your 24-core PC, a session spinning one full core shows about 4% CPU on a claude.exe line. Several claude.exe lines sitting near 4% while you're not using them means it's still happening. Nobody knows the cause yet; it looks like a Claude Desktop issue, not claude-settings.",
+  "home": "roadmap step c40",
+  "id": "c40-idle-desktop",
+  "kind": "task",
+  "links": [],
+  "minutes": "5 min",
+  "n": 22,
+  "owner": "Triage the roadmap",
+  "ref": "c40 (idle desktop sessions each burn a full CPU core)",
+  "status": "closed",
+  "steps": [
+    "Open Task Manager, Details tab, and sort by CPU.",
+    "Count the claude.exe lines near 4% each.",
+    "If there are several, archive the Claude Desktop sessions you're not using, then check again.",
+    "Optional: report it to Anthropic (Claude Desktop 3.1623.0.0, claude-code 2.1.304)."
+  ],
+  "title": "Archive the idle desktop sessions that spin a CPU core each"
+}

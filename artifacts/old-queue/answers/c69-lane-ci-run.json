@@ -1,0 +1,7 @@
+{
+  "at": "2026-10-27T00:30:44.971Z",
+  "choice": "a",
+  "item": "c69-lane-ci-run",
+  "n": 27,
+  "note": "Not only drop the exception, I merge so arbitrarily and can merge so often that frankly I still find the amount of CI used to be preposterous. I think there may be something in this roadmap already of essentially wanting \"milestone-style\" reviews of CI -- I think my Q_Max repo might have some examples of that where I got so sick of my CI bill that I was like look orchestrator after u see a ton has landed then yes run a check but not every merge. That could be me not doing best practices, and I'm eager to learn, and/but I want some help here "
+}

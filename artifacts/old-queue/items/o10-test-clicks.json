@@ -1,0 +1,25 @@
+{
+  "added": "2026-10-26",
+  "context": "A local Mac session published a test page. Your clicks show whether a local session hears a page save or a comment. This decides whether item 1 works for local sessions without a paste. The Mac session reports by 09:45 CDT on Oct 27.",
+  "home": "roadmap step o10",
+  "id": "o10-test-clicks",
+  "kind": "task",
+  "links": [
+    {
+      "label": "o10 test page",
+      "url": "https://claude.ai/artifact/5YrejFue3ocB1PfRNobNsR"
+    }
+  ],
+  "minutes": "3 min",
+  "n": 19,
+  "owner": "Local liaison",
+  "ref": "o10 (a page per session for questions), local test part 2",
+  "status": "closed",
+  "steps": [
+    "Open the test page.",
+    "Press Copy, then Save.",
+    "Leave one plain comment.",
+    "Leave one comment sent to Claude."
+  ],
+  "title": "Try the four answer paths on the o10 test page"
+}

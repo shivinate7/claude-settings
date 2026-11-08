@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "The bottom bar of this page has a button that saves my pick for every decision you haven't answered. Under your item 2 ruling (a save counts as your word), one press therefore answers many items. The reviewer of the rule for every session asked whether that's what you want. The button already needs a second press, and as of now the first press lists exactly which items and picks it will save.",
+  "home": "PR #636 review",
+  "id": "c71-accept-all",
+  "kind": "decision",
+  "n": 28,
+  "options": [
+    {
+      "gain": "Fastest way to clear the page.",
+      "how": "Two presses save every open pick.",
+      "key": "a",
+      "label": "Keep it as it was",
+      "lose": "You might accept an item you didn't read."
+    },
+    {
+      "gain": "Every answer is a deliberate choice.",
+      "how": "Remove the button. Each pick needs its own Save.",
+      "key": "b",
+      "label": "One tap per item",
+      "lose": "Slower when you agree with most picks."
+    },
+    {
+      "gain": "Fast, and you see exactly what you're agreeing to.",
+      "how": "The first press lists each item number and pick, and the second press saves them. This is live on the page now.",
+      "key": "c",
+      "label": "Keep it, with the list shown first",
+      "lose": "You can still skim past the list."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "c",
+  "ref": "c71 (one waiting page for every session), PR #636",
+  "status": "closed",
+  "title": "Should 'Accept every pick' count as your answer on every open item at once?",
+  "why": "It keeps the speed, and you see the list before anything saves. It's already built, so (c) needs no further work."
+}

@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "Today, to let one session use Opus you either approve each spawn, type an override that lifts every guard, or set a repo grant that needs a fresh session. The proposal: a second pass word, such as 'opus 2h' or 'opus builders 2h', that lifts only the Opus cap for this session and its subagents until it expires.",
+  "home": "roadmap step c41",
+  "id": "c41-opus-pass",
+  "kind": "decision",
+  "n": 14,
+  "options": [
+    {
+      "gain": "Opus when you want it, with every other guard still on.",
+      "how": "A lane adds it to the one override-pass home.",
+      "key": "a",
+      "label": "Yes, build the pass word",
+      "lose": "One more word to remember."
+    },
+    {
+      "gain": "No new code.",
+      "how": "Nothing changes.",
+      "key": "b",
+      "label": "No, keep the three ways",
+      "lose": "Getting Opus stays clumsy or too broad."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "c41 (Opus for one session or one run, without lifting other guards)",
+  "status": "closed",
+  "title": "Add an Opus-only pass word, such as 'opus 2h'",
+  "why": "It closes the gap between 'ask each time' and 'lift everything'."
+}

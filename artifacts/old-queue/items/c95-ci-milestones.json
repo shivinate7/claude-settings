@@ -1,0 +1,57 @@
+{
+  "added": "2026-10-27T00:55:00Z",
+  "context": "Your gripe: CI runs far too often for how you merge. Your note on the first ask: every option gives up a lot while you are not yet sure merges don't cause regressions, or that the tests pin anything that matters. So option (e) below is new: it earns that trust first, then cuts runs in steps, each step only when a measured bar is met.\nMeasured: about 16,800 CI minutes a week (Oct 27). Full runs since Oct 25: 21 green, 17 red, 6 cancelled (checked 11:58 CDT, gates workflow); many reds were time caps, not breaks. A batch run takes 26 to 36 minutes. Not measured yet: how often a merge broke something that a later fix had to repair. The options doc has the first four options in full.",
+  "home": "roadmap step c95; options doc linked below",
+  "id": "c95-ci-milestones",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Options doc",
+      "url": "https://claude.ai/artifact/XMDQP1nVCuq3u35qvwE8eV"
+    }
+  ],
+  "n": 31,
+  "options": [
+    {
+      "gain": "A proven pattern from your own repo.",
+      "how": "Quick checks on each branch, full suite on main, no nightly run.",
+      "key": "a",
+      "label": "q_max's shape",
+      "lose": "Still about 14,300 minutes a week, a small saving."
+    },
+    {
+      "gain": "About 8,200 minutes a week, roughly half.",
+      "how": "The batch PR's run is the only full run; main doesn't re-run it.",
+      "key": "b",
+      "label": "No run on main after a merge",
+      "lose": "Nothing re-checks main after a merge, so a break that slips through shows up in the next batch."
+    },
+    {
+      "gain": "About 2,400 minutes a week, the biggest cut. This is the 'milestone-style' CI you described.",
+      "how": "A batch is cut at about 4 waiting lanes or 3 hours, and the full suite runs at milestones the build advisor names.",
+      "key": "c",
+      "label": "(b), plus fewer, larger batches and full runs at milestones",
+      "lose": "Breaks are found later and cover more lanes at once. It only works once the full run is trustworthy."
+    },
+    {
+      "gain": "What large teams use: safest ordering, few surprises.",
+      "how": "GitHub's merge queue tests each group before it lands, then a batched full run checks main.",
+      "key": "d",
+      "label": "The industry standard: a merge queue plus a batched full run after landing",
+      "lose": "About 9,000 to 10,000 minutes a week, and more setup."
+    },
+    {
+      "gain": "You cut CI only when the numbers say merges are safe and the tests mean something, and you see those numbers each week.",
+      "how": "Step 1, now: make the full run trustworthy (split or re-cap the jobs that time out, so red means broken), and measure test value: a mutation check on the guards and hooks shows which tests catch a planted bug and which pin nothing; tests that pin nothing get fixed or deleted. Also count merges that a later fix had to repair. Step 1 costs today's CI (about 16,800 a week) plus three or four build lanes. Step 2, once the full run is green on 9 of its last 10 runs and no merge needed a repair for a week: stop the re-run on main, as in (b), about 8,200 a week. Step 3, after two more such weeks: milestone runs, as in (c), about 2,400 a week. A missed bar sends it back one step.",
+      "key": "e",
+      "label": "Trust first, then cut in steps",
+      "lose": "The big saving comes weeks later, not now. Step 1 adds lane work before any minutes are saved."
+    }
+  ],
+  "owner": "The c95 thread (CI at milestones), then the build advisor",
+  "pick": "e",
+  "ref": "c95 part 2 (CI runs at milestones, not on every merge)",
+  "status": "closed",
+  "title": "Which CI rule should claude-settings adopt, so CI runs far less often?",
+  "why": "It answers your worry directly: each cut waits for a measured bar, and the test-value work is useful whichever CI rule wins."
+}

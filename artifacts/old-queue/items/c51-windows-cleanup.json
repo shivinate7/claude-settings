@@ -1,0 +1,19 @@
+{
+  "added": "2026-10-26",
+  "context": "The terminal advisor is retired. Three leftovers remain on your PC. Nothing depends on them.",
+  "home": "roadmap step c51",
+  "id": "c51-windows-cleanup",
+  "kind": "task",
+  "links": [],
+  "minutes": "1 min",
+  "n": 21,
+  "owner": "Triage the roadmap",
+  "ref": "c51 (retire the terminal advisor)",
+  "status": "closed",
+  "steps": [
+    "Delete the Start Advisor shortcut.",
+    "Delete C:\\advisor\\start-advisor.ps1 if it is still there.",
+    "Delete the folder %USERPROFILE%\\.claude-advisor."
+  ],
+  "title": "Delete the old advisor leftovers on Windows"
+}

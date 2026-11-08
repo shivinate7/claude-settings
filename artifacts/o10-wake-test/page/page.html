@@ -1,0 +1,57 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>*,*::before,*::after{box-sizing:border-box}</style></head><body><title>o10 wake test</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#e2e1dc;--accent:#2f5bd3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--fg:#ecebe6;--muted:#9a9993;--card:#1f1f1d;--line:#33322f;--accent:#7f9ef0}}
+:root[data-theme="dark"]{--bg:#161615;--fg:#ecebe6;--muted:#9a9993;--card:#1f1f1d;--line:#33322f;--accent:#7f9ef0}
+body{background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif;margin:0;padding:24px 16px}
+main{max-width:560px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+p.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.q{font-weight:600;margin:0 0 12px}
+button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent)}
+textarea{width:100%;box-sizing:border-box;min-height:80px;font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.row{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.status{color:var(--muted);font-size:14px}
+</style>
+<script type="application/json" id="state">{"answer":"o10 wake test: copy works","savedAt":"2026-10-26T16:12:24.591Z"}</script>
+<main>
+<h1>o10 wake test</h1>
+<p class="sub">A test page. Copy the line, save an answer, and leave a comment.</p>
+<div class="card">
+<p class="q">Sample question: should the profile job wait for "available", or retry the recording?</p>
+<div class="row"><button class="ghost" id="copy">Copy</button><span class="status" id="copied"></span></div>
+</div>
+<div class="card">
+<label for="answer">Your answer</label>
+<textarea id="answer"></textarea>
+<div class="row"><button id="save">Save</button><span class="status" id="saved"></span></div>
+</div>
+</main>
+<script>
+const SOURCE = document.documentElement.outerHTML; // captured before this script changes the page
+const LINE = "o10 wake test: copy works";
+const state = JSON.parse(document.getElementById("state").textContent);
+const answer = document.getElementById("answer");
+answer.value = state.answer;
+document.getElementById("saved").textContent = state.savedAt ? "Last saved " + state.savedAt : "Not saved yet";
+document.getElementById("copy").onclick = async () => {
+  const out = document.getElementById("copied");
+  try { await navigator.clipboard.writeText(LINE); out.textContent = "Copied"; }
+  catch { out.textContent = "Copy failed"; }
+};
+const esc = s => s.replace(/</g, "\\u003c");
+document.getElementById("save").onclick = async () => {
+  const out = document.getElementById("saved");
+  const artifact = await claude.use("artifact");
+  if (!artifact) { out.textContent = "Saving is not available in this view"; return; }
+  const next = {answer: answer.value, savedAt: new Date().toISOString()};
+  const page = SOURCE;
+  const start = page.indexOf("<title>"), end = page.lastIndexOf("</body>");
+  let body = page.slice(start, end).replace(/<script type="application\/json" id="state">[\s\S]*?<\/script>/, '<script type="application/json" id="state">' + esc(JSON.stringify(next)) + "<\/script>");
+  const html = '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>*,*::before,*::after{box-sizing:border-box}</style></head><body>' + body + "</body></html>";
+  out.textContent = "Saving...";
+  try { await artifact.publish(html); } catch (e) { out.textContent = "Save failed: " + (e.code || e.message); }
+};
+</script></body></html>

@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-26",
+  "context": "Several ready steps change other repos: each repo's own glossary (o13), the shared screenshot command's config per repo and banchi's 1280px viewport (d6), shrinking long CLAUDE.md files (o3), compliance checks and token clean-ups in q_max and home-app (r1 to r4), a small CI for home (c33), and a two-line fix so home-app's merge tool finds its checks (c42). This project may not push to those repos, so local sessions do the work from briefs.",
+  "home": "roadmap steps o13, d6, o3, r1, r2, r3, r4, c33, c42",
+  "id": "other-repo-rollout",
+  "kind": "decision",
+  "n": 16,
+  "options": [
+    {
+      "gain": "Each repo is touched once, on the new layout.",
+      "how": "The liaison writes one brief per repo that bundles its items; c42 goes now because it blocks home-app merges.",
+      "key": "a",
+      "label": "One visit per repo, after o2's layout move, with c42 first",
+      "lose": "Most roll-outs wait for o2."
+    },
+    {
+      "gain": "Earlier progress on some items.",
+      "how": "Briefs go out step by step.",
+      "key": "b",
+      "label": "Each step as it comes",
+      "lose": "Many visits per repo, and work on the old layout that o2 then moves."
+    },
+    {
+      "gain": "No change in other repos.",
+      "how": "Nothing goes out.",
+      "key": "c",
+      "label": "Keep all parked",
+      "lose": "The gaps stay."
+    }
+  ],
+  "owner": "Triage the roadmap",
+  "pick": "a",
+  "ref": "o13 and d6 roll-outs, o3, r1 to r4, c33, c42",
+  "status": "closed",
+  "title": "Choose how claude-settings work rolls out to your other repos",
+  "why": "o2 moves folders in every repo anyway; bundling saves repeat visits. c42 is tiny and unblocks merges now."
+}

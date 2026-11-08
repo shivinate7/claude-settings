@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26",
+  "context": "Following your answer on item 9, the feedback gate now accepts a task only when the task's home is the repo's todo list or its debts. It finds those places through the shared layout file. The layout has no standard todo entry, so q_max's specs/todo.md doesn't count as a home yet. A repo can add one itself, but doing that also starts its whole layout move. Nothing waits on this: PR #632 can merge either way.",
+  "home": "PR #632",
+  "id": "o15-todo-kind",
+  "kind": "decision",
+  "n": 26,
+  "options": [
+    {
+      "gain": "Tasks in q_max and similar repos count right away, with no folder move.",
+      "how": "The layout gets a 'todo' kind, docs/todo.md by default, and maps each repo's current todo file to it until that repo moves.",
+      "key": "a",
+      "label": "Add a standard todo entry now",
+      "lose": "One more kind in the layout to keep."
+    },
+    {
+      "gain": "No layout change now.",
+      "how": "Until a repo moves, tasks there go to its debts or debt notes.",
+      "key": "b",
+      "label": "Wait for each repo's layout move",
+      "lose": "Tasks in repos that haven't moved end up in debts, which is the wrong place for a to-do."
+    }
+  ],
+  "owner": "Build advisor",
+  "pick": "a",
+  "ref": "o15 (tasks and rulings land in tracked files), PR #632; o2 (one layout for every repo)",
+  "status": "closed",
+  "title": "Give the shared layout a standard place for a repo's todo list",
+  "why": "A to-do filed as a debt is the misfiling you wanted to stop, and the legacy map already handles repos that haven't moved."
+}
