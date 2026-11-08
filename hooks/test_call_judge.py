@@ -1433,14 +1433,17 @@ def stop_hook_timeout():
 
 def case_past_ruling_budget_leaves_stop_headroom():
     import call_judge  # the one home of item 8's model and its time limit (PAST_RULING_TIMEOUT)
+    import question_form  # the one home of the git read's limit (STEP_GIT_TIMEOUT), which runs before the model call
     stop = stop_hook_timeout()
     check("past ruling budget: one Stop hook in settings.json runs report_guard.py, and it has a timeout",
           stop is not None, "Stop hooks naming report_guard.py in settings.json: none, or more than one")
     check("past ruling budget: the past-ruling model call is given at least 30 s",
           call_judge.PAST_RULING_TIMEOUT >= 30, "PAST_RULING_TIMEOUT is %r" % (call_judge.PAST_RULING_TIMEOUT,))
-    check("past ruling budget: the model call ends at least 5 s before the Stop hook's timeout",
-          stop is not None and call_judge.PAST_RULING_TIMEOUT <= stop - 5,
-          "PAST_RULING_TIMEOUT %r, Stop hook timeout %r" % (call_judge.PAST_RULING_TIMEOUT, stop))
+    need = call_judge.PAST_RULING_TIMEOUT + question_form.STEP_GIT_TIMEOUT + 5
+    check("past ruling budget: the model call, the git read and 5 s fit under the Stop hook timeout",
+          stop is not None and need <= stop,
+          "PAST_RULING_TIMEOUT %r + STEP_GIT_TIMEOUT %r + 5 = %r, Stop hook timeout %r"
+          % (call_judge.PAST_RULING_TIMEOUT, question_form.STEP_GIT_TIMEOUT, need, stop))
 
 
 # ------------------------------------------------------------------ unvetted marker and docs/debts

@@ -4307,8 +4307,8 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         """One model run wrote one run line, which names the outcome `result`. Returns the match of the line's text."""
         rows = self.run_lines(cfg)
         self.assertEqual(len(rows), 1, "expected one past-ruling-run line for one model run, found %d" % len(rows))
-        self.assertNotIn(rows[0][2], ("deny", "ask"),
-                         "a past-ruling run is no refusal and no prompt, but its line reads decision %r" % rows[0][2])
+        self.assertEqual(rows[0][2], "noted",
+                         "a past-ruling run writes a noted line, but its line reads decision %r" % rows[0][2])
         match = self.RUN_TEXT.search(rows[0][4])
         self.assertIsNotNone(match, "the run line carries no ms, chars, cands and result: %r" % rows[0][4])
         self.assertEqual(match.group(4), result,
