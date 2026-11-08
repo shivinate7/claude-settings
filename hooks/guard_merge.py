@@ -355,8 +355,7 @@ REVIEW_REASON = (
 REVIEW_FORM_REASON = (
     "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record; the parse broke at %s. "
     "`merge --reviewed` cannot read a body that does not parse. "
-    "Remedy: run `%s` and post its output as it is. If you add a footer, put a line exactly `---` before it, "
-    "with no text between the CI line and `---`. "
+    "Remedy: run `%s` and post its output as it is. If you add a footer, %s. "
     "(decision pr-review-record, a review record must parse)"
 )
 REVIEW_EDIT_REASON = (
@@ -449,7 +448,7 @@ def _form_reason(module, selector, broke):
     two callers, so the rule audit reads its reason within its depth limit."""
     named = str(selector).strip()
     return "review record that does not parse", REVIEW_FORM_REASON % (broke, _review_render(
-        module, named if named.isdigit() else "<pr>", "<live head>"))
+        module, named if named.isdigit() else "<pr>", "<live head>"), module.REVIEW_RULE_STEP)
 
 
 def _edit_reason(module):
