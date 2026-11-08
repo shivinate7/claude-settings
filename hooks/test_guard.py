@@ -7159,6 +7159,139 @@ sh("push: lane branch, origin under autoSetupRemote is silent",
 sh("push: lane branch, -u origin under autoSetupRemote is silent",
    VCS + " -c push.autoSetupRemote=true push -u origin", "allow", cwd=PUSHFEAT, silent=True)
 
+# ASK, push-unbriefed-branch (rule id below). A non-forced, non-delete, non-dry-run push from a builder
+# or test-author asks when the agent's spawn brief does not name each branch the push writes. Incident:
+# a haiku test-author whose brief named no branch pushed `origin HEAD` on shell-tests-2. The brief is the
+# FIRST record of `<transcript minus .jsonl>/subagents/agent-<agent_id>.jsonl`; a later record counts for
+# nothing. A brief the guard cannot read is allowed, silently.
+PUSH_UNBRIEFED_RULE = "push-unbriefed-branch"
+UNB_REPO = os.path.join(ROOT, "unb-repo")                  # a checkout on shell-tests-2, no upstream
+UNB_REMOTE = os.path.join(ROOT, "unb-remote.git")          # the origin that checkout names
+UNB_TRANSCRIPTS = os.path.join(ROOT, "unb-transcripts")    # the payload transcript folder
+UNB_SESSION = "unbriefed-session-0001"
+UNB_TRANSCRIPT = os.path.join(UNB_TRANSCRIPTS, UNB_SESSION + ".jsonl")
+UNB_SUBAGENTS = os.path.join(UNB_TRANSCRIPTS, UNB_SESSION, "subagents")
+UNB_MISSING_TRANSCRIPT = os.path.join(UNB_TRANSCRIPTS, "unbriefed-gone-0002.jsonl")
+UNB_BRIEF_NONE = ("Write the shell tests for the stop hook in the test folder. Keep product code as it is. "
+                  "Commit the tests and report back.")
+UNB_BRIEF_LANE_X = "Work on lane-x: write the shell tests for the stop hook. Commit the tests and report back."
+UNB_BRIEF_SHELL = "Write the shell tests for the stop hook. Push your commit to shell-tests-2 and report back."
+UNB_BRIEF_NEAR = "Write the shell tests for the stop hook. Push your commit to shell-tests-2x and report back."
+UNB_STANDING = "Push only with: git push origin HEAD:<branch>. The branch for this lane is shell-tests-2."
+UNB_BIG_BRIEF = "Work through the stop-hook notes. " * 6000 + UNB_BRIEF_SHELL   # about 200 KB, branch last
+
+
+def unb_id(n):
+    """An agent id in the harness shape: `a` and 16 hex characters."""
+    return "a%016x" % n
+
+
+def unb_record(content):
+    return json.dumps({"type": "user", "message": {"role": "user", "content": content}})
+
+
+def unb_blocks_record(text):
+    return json.dumps({"type": "user", "message": {"role": "user",
+                                                    "content": [{"type": "text", "text": text}]}})
+
+
+# agent id -> the lines of its subagent file. unb_id(13) has no file (a missing brief), and unb_id(15)
+# belongs to a call that names no transcript at all.
+UNB_AGENTS = {
+    unb_id(1): [unb_record(UNB_BRIEF_NONE)],
+    unb_id(2): [unb_record(UNB_BRIEF_NONE)],
+    unb_id(3): [unb_record(UNB_BRIEF_LANE_X)],
+    unb_id(4): [unb_record(UNB_BRIEF_NONE), unb_record(UNB_STANDING)],
+    unb_id(5): [unb_record(UNB_BRIEF_NONE)],
+    unb_id(6): [unb_record(UNB_BRIEF_NONE)],
+    unb_id(7): [unb_record(UNB_BRIEF_SHELL)],
+    unb_id(8): [unb_blocks_record(UNB_BRIEF_SHELL)],
+    unb_id(10): [unb_record(UNB_BRIEF_NONE)],
+    unb_id(11): [unb_record(UNB_BRIEF_NONE)],
+    unb_id(12): [unb_record(UNB_BRIEF_NONE)],
+    unb_id(14): [unb_record(UNB_BRIEF_NEAR)],
+    unb_id(16): [unb_record("")],
+    unb_id(17): [unb_record(UNB_BIG_BRIEF)],
+}
+
+
+def _build_unbriefed():
+    """The fixture checkout (shell-tests-2 cut from main, origin named, no upstream) and the transcript
+    folders the cases name. Every file is under this run's ROOT."""
+    os.makedirs(UNB_REMOTE, exist_ok=True)
+    if run_vcs(UNB_REMOTE, "init", "--bare", "-q").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: the bare origin %r did not init" % UNB_REMOTE)
+    make_repo(UNB_REPO, {"base.txt": "base\n"})
+    if run_vcs(UNB_REPO, "remote", "add", "origin", slash(UNB_REMOTE)).returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: UNB_REPO needs an origin remote")
+    run_vcs(UNB_REPO, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(UNB_REPO, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    if run_vcs(UNB_REPO, "checkout", "-q", "-b", "shell-tests-2").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: UNB_REPO needs a branch shell-tests-2")
+    if run_vcs(UNB_REPO, "config", "--get", "branch.shell-tests-2.remote").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: shell-tests-2 must have no upstream")
+    write(UNB_TRANSCRIPT, unb_record("Run the shell tests.") + "\n")
+    for agent, lines in UNB_AGENTS.items():
+        write(os.path.join(UNB_SUBAGENTS, "agent-" + agent + ".jsonl"), "\n".join(lines) + "\n")
+
+
+lazy_fixture([UNB_REPO, UNB_TRANSCRIPT], _build_unbriefed)
+
+
+def unb_ask(name, command, agent_id, agent_type, transcript=UNB_TRANSCRIPT):
+    sh("push-unbriefed: " + name, command, "ask", PUSH_UNBRIEFED_RULE, cwd=UNB_REPO,
+       agent_id=agent_id, agent_type=agent_type, transcript=transcript)
+
+
+def unb_allow(name, command, agent_id=None, agent_type=None, transcript=UNB_TRANSCRIPT):
+    sh("push-unbriefed: " + name, command, "allow", cwd=UNB_REPO, agent_id=agent_id,
+       agent_type=agent_type, transcript=transcript, silent=True)
+
+
+# ASK: an agent push whose brief names no branch the push writes.
+unb_ask("incident: test-author, brief names no branch, push -u origin HEAD asks",
+        VCS + " push -u origin HEAD", unb_id(1), "test-author")
+unb_ask("builder, brief names no branch, push -u origin HEAD asks",
+        VCS + " push -u origin HEAD", unb_id(2), "builder")
+unb_ask("brief names lane-x, push origin HEAD:other-y asks",
+        VCS + " push origin HEAD:other-y", unb_id(3), "test-author")
+unb_ask("brief names no branch, a later record names shell-tests-2: only the first counts, asks",
+        VCS + " push -u origin HEAD", unb_id(4), "test-author")
+unb_ask("plugin-prefixed test-author, brief names no branch, asks",
+        VCS + " push -u origin HEAD", unb_id(5), "my-plugin:test-author")
+unb_ask("plugin-prefixed builder, brief names no branch, asks",
+        VCS + " push -u origin HEAD", unb_id(6), "x:builder")
+unb_ask("brief names shell-tests-2x, push to shell-tests-2 asks (token boundary)",
+        VCS + " push origin HEAD:shell-tests-2", unb_id(14), "test-author")
+unb_ask("empty brief content names no branch, asks",
+        VCS + " push -u origin HEAD", unb_id(16), "test-author")
+
+# SILENT allow: the brief names the branch, or the push is not this rule's push.
+unb_allow("brief names shell-tests-2, push origin HEAD:shell-tests-2 is silent",
+          VCS + " push origin HEAD:shell-tests-2", unb_id(7), "test-author")
+unb_allow("brief names shell-tests-2, push -u origin HEAD is silent",
+          VCS + " push -u origin HEAD", unb_id(7), "test-author")
+unb_allow("brief as a list of text blocks names shell-tests-2, push -u origin HEAD is silent",
+          VCS + " push -u origin HEAD", unb_id(8), "test-author")
+unb_allow("a brief of about 200 KB names shell-tests-2 last, push -u origin HEAD is silent",
+          VCS + " push -u origin HEAD", unb_id(17), "test-author")
+unb_allow("no agent fields (the lane orchestrator's push), push -u origin HEAD is silent",
+          VCS + " push -u origin HEAD", transcript=None)
+unb_allow("reviewer push, brief names no branch, is silent",
+          VCS + " push -u origin HEAD", unb_id(10), "reviewer")
+unb_allow("Explore push, brief names no branch, is silent",
+          VCS + " push -u origin HEAD", unb_id(11), "Explore")
+unb_allow("dry-run push, brief names no branch, is silent",
+          VCS + " push --dry-run -u origin HEAD", unb_id(12), "test-author")
+unb_allow("a delete of shell-tests-2 by flag, brief names no branch, is silent",
+          VCS + " push --delete origin shell-tests-2", unb_id(12), "test-author")
+unb_allow("a delete of shell-tests-2 by a colon refspec, brief names no branch, is silent",
+          VCS + " push origin :shell-tests-2", unb_id(12), "test-author")
+unb_allow("brief file missing, push -u origin HEAD is silent",
+          VCS + " push -u origin HEAD", unb_id(13), "test-author")
+unb_allow("a test-author Bash call that is not a push, with a missing transcript, is silent",
+          VCS + " status", unb_id(15), "test-author", transcript=UNB_MISSING_TRANSCRIPT)
+
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
 push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
