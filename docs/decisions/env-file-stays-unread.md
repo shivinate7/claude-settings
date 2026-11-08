@@ -50,14 +50,15 @@ ag regex:
 Folder walk:
 
 - With a hidden flag, rg and ag reach each env file in a folder they walk, whatever its name. The hidden flags are `--hidden`, rg's `-.`, and `-u` (`--unrestricted`). ag needs one `-u`. rg needs two.
-- rg also walks for a positive `-g` or `--iglob` glob that could name an env file, even with no hidden flag. Such a glob overrides the ignore rules.
+- rg also walks for any positive `-g` or `--iglob` glob, even with no hidden flag. The walk judges the glob against each env file it finds. Such a glob overrides the ignore rules, and rg enters an ignored folder that the glob picks.
+- rg matches a glob with a `/` against the path from the working folder. So `rg -g 'sub/*' K sub` reads each file in `sub`.
 - A recursive grep reaches them with no flag. `grep`, `egrep` and `fgrep` recurse with `-r`, `-R`, `-d recurse`, `--directories=recurse`, `--recursive` or `--dereference-recursive`. `rgrep` always recurses.
 - The guard refuses a search when a path word is a folder that holds an env file on disk. It also refuses when no path is named, because the working folder is walked.
 - For rg and ag, a pipe or `<` into the search clears the no-path case. For grep it does not.
 - A folder with no env file stays allowed. So does `rg --files`, which lists names and reads nothing.
 - Grep decides each file by its last matching `--include` or `--exclude` glob, so an exclude before an include re-includes the env file. An exclude glob or `--exclude-dir` that skips the env file clears the search. The refusal names `--exclude` and `--exclude-dir` as the remedy, and prints no file name.
 - `--include`, `-g`, `--glob` and `--exclude-from` stay judged, since each can name the file.
-- The walk is `_env_walk`. It expands a glob in a path word as the shell does, with no dotfile match. A path word that starts with `$PWD`, `${PWD}` or a `pwd` substitution is the working folder.
+- The walk is `_env_walk`. It expands an unquoted brace list in each word, as bash does. It expands a glob in a path word as the shell does, with no dotfile match. A path word that starts with `$PWD`, `${PWD}` or a `pwd` substitution is the working folder.
 - For rg and ag with no flag that turns the ignore rules off, an ignored file or folder is not read or counted. The walk does not enter an ignored folder. The list is git's own, read once per walk. grep reads ignored files, so they count for grep.
 - The ignore rules are off with `-u` (any count), `--no-ignore` and its variants. For ag, `-U`, `-a`, `--skip-vcs-ignores` and `--all-types` also turn them off. A tracked file is never ignored.
 - The walk stops at 50000 entries, `node_modules` included. It then refuses with a reason that says the folder is too large to check, never that it holds an env file.
@@ -69,10 +70,9 @@ Known limits:
 - rg fails closed. An rg flag in neither of its flag tables might take a value, so the guard may walk the working folder too.
 - ag and grep do not fail closed. An unknown flag there is read as a switch, so the walk can miss a folder the search reads.
 - An rg `!` glob is not read.
-- A brace list in a path word, as in `rg --hidden K {a,b}`, is not expanded.
 - A `cd` earlier in the command is not followed. Other variables and substitutions in a path word are not resolved.
 - A search in a heredoc body is not walked.
-- The walk sees a search behind a subshell paren, `command`, `env` or `nice`. A search behind `sudo`, `xargs` or `env -C` is not walked.
+- The walk sees a search behind a subshell paren, a `{ ...; }` group, `command`, `env` (with `--` too) or `nice` (with any form of its adjustment flag). A search behind `sudo`, `xargs` or `env -C` is not walked.
 - An ignore file other than the checkout's own is not read. So a search of a folder with an env file is refused, even when such a file skips it.
 - Accepted limit: a regex with no `.env` prefix of its own, such as `prod$`, is judged on the sample names only. Rewriting `\.py$` as the names it could pick would refuse every extension filter.
 
