@@ -83,7 +83,7 @@ With `barsBlockedPage`, at 390 and 1280, light and dark, for the three bars in `
 
 ## Critique (impeccable, single context)
 
-Degraded: single context, no sub-agent tool in a designer, and the context launcher is refused here. The detector found
+Degraded: single context, no agent tool in a designer, and the context launcher is refused here. The detector found
 nothing; it reads the harness, not the screen in the frames.
 - Open: one screen can show one phase two ways. At 1280 the Now card and rail chip draw 30 cells while the phase head
   draws runs. The same question as the roadmap notes: is that acceptable, or should all of a phase's bars go to runs

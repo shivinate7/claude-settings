@@ -87,7 +87,7 @@ and the phase head bar:
 
 ## Critique (impeccable, single context)
 
-Degraded: single context, no sub-agent tool in a designer, and the context launcher is refused here. The detector found
+Degraded: single context, no agent tool in a designer, and the context launcher is refused here. The detector found
 nothing in either mockup; it reads the harness, not the screen in the frames.
 - Open: one screen can show one phase two ways. At 390 the Now card draws 30 cells while the rail chip draws runs. CSS
   cannot make one bar follow another's width. A question for the owner, not blocking: is that acceptable, or should a
