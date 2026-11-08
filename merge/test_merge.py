@@ -14170,8 +14170,8 @@ def controls(text):
 # main's newest lint-step change. A red lint leaves it out and posts one comment, `Lint: red <head> <steps>`, which the ledger reads as
 # `lane lint red`. A merge-after target outside origin/<base> and the batch is read once (`pulls/<n>`, only when it is not in the open list),
 # so a merged one counts as on main. Every GitHub call goes through PullsHost, every lint run through merge.ci_job_run, which BuildEnv replaces.
-# On the old code --build-batch is an argparse error: it exits 2 and runs nothing. So each case asserts that the build ran (rc 0, and its last
-# line `batch: N PRs`) before any claim that something did not happen, and a usage error is told by OLD_PARSER_ERRORS.
+# Each case asserts that the build ran (rc 0, and its last line `batch: N PRs`) before it claims that something did not happen: a run that
+# exits 2 and prints nothing would pass a claim of absence alone. OLD_PARSER_ERRORS matches a usage error.
 
 BUILD_LINT_FILE = "lint/steps.txt"  # a path the lint steps read: a main commit that touches it is main's lint-step change
 BUILD_STEPS = {"check invariants", "lint prose"}  # the steps the fake plan lists
