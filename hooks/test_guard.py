@@ -13020,6 +13020,11 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# ---- the `testing` folder is a test folder: it holds the shared fixtures (testing/shallow_clone.py, which
+# hooks/test_guard.py imports), so a builder may not write there. Case folds, as TEST_DIRS does.
+for _tool in ("Write", "Edit"):
+    add("builder-test: %s of testing/x.py is refused" % _tool, "deny", rule=BT, tool=_tool,
+        file_path="testing/x.py", carries=("test-author", "Report"), **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
@@ -13033,6 +13038,17 @@ add("test-author: Edit of package.json passes the early warning (the diff judges
 for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml", "conftest.py",
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
+# The `testing` folder is a test folder for a test-author too, at any depth and in any case. A name
+# that only contains `testing` (testing_utils/, src/testing.py) is no test folder, so it stays refused.
+add("test-author: Write of testing/shallow_clone.py is allowed", "allow", tool="Write",
+    file_path="testing/shallow_clone.py", **A)
+add("test-author: Write of lib/testing/x.py is allowed", "allow", tool="Write",
+    file_path="lib/testing/x.py", **A)
+add("test-author: Write of Testing/x.py is allowed (case folds)", "allow", tool="Write",
+    file_path="Testing/x.py", **A)
+for _path in ("hooks/guard.py", "merge/merge.py", "testing_utils/x.py", "src/testing.py"):
+    add("test-author: Write of %s is refused" % _path, "deny", rule=TA, tool="Write",
+        file_path=_path, carries=("builder", "Report"), **A)
 # ---- mutation tests are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
 # by, so a test-author edits them. The builder case pins the rule to the test-author: agent_brief.py
 # tells a builder to add mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
