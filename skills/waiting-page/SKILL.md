@@ -131,8 +131,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
     with `waits` and `lastAnswer` reads as answered on the page.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
-  - Before writing `reply`, `replied`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
-    check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the five.
+  - Before writing `reply`, `replied`, `lastAnswer`, `lane`, `waits` or `recommended`, the writer checks that the page is current with `stale_pages.py`, the same
+    check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the six. A page published before the `recommended` change reads only `pick`, so it shows no star for `recommended`: after the change merges, the writer republishes the page.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged.
@@ -428,6 +428,7 @@ live page.
      and a one-sentence `why`. Set `group` on both items.
    - Set `multi: true` whenever the options are not mutually exclusive. Set `ranked: true` when their order matters.
      Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
+     Write `recommended` only on a page that `stale_pages.py` reports current too: an older page reads only `pick` and shows no star for `recommended`.
      The page stars no option when `recommended` is not valid.
    - Set `stands: true` only on a decision that changes no rule and has a `recommended`. Never set it on
      an item in a group. The page shows it in the last section, and `recommended` goes with the owner's
@@ -568,7 +569,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    note in this same turn (a `multi` item's new `recommended` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
    `answers/<id>` (pinned to its version), and
-   leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
+   leave the item open. Ask the chat question again with the new options, citing `Page item: <id>` and writing one `a) <label>` line per new option: the earlier chat question still cites the id, and the guard (rule `option-labels-match-chat`) compares the new labels to its old lines. Say in the terminal that the item has new options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
    ready. A `none` answer with a clear direction never takes this fallback: the busy-lane rule sorts it. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.

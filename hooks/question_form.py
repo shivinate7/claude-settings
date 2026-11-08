@@ -316,8 +316,9 @@ def _write_data(entry, cwd=""):
 # never carries (Recommended). Read at the same ArtifactData call.
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
-                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make the pick an option "
-                 "where the repo changes to match the shared format, or leave pick out.")
+                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make `recommended` (or `pick`, "
+                 "its old name, where the item still uses it) an option where the repo changes to match the "
+                 "shared format, or leave recommended out.")
 CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
@@ -1287,7 +1288,7 @@ def option_letter_hit(op: str, data) -> str:
 # in a line "Page item: <id>" and writes each option as "a) <text>". A write of that item whose option label for
 # a letter differs from the chat's text for that letter is refused. Letters are positions, as in
 # option_letter_hit.
-PAGE_ITEM_CITE = re.compile(r"^[ \t>*_`-]*Page item:[ \t*_`]*([^\s*_`]+)", re.I | re.M)
+PAGE_ITEM_CITE = re.compile(r"Page item:[ \t*_`]*([^\s*_`]+)", re.I)  # anywhere in a line: a cite may end a sentence
 CHAT_OPTION_LINE = re.compile(r"^[ \t>*-]*\**\(?([A-Za-z])[).:]\**[ \t]+(\S.*)$", re.M)
 CHAT_TAIL_BYTES = 1 << 20  # how far back from the transcript's end the cited chat question is looked for
 LABELS_REASON = ("A question sent to the chat and the page carries the same option text in the same order, so "
@@ -1303,8 +1304,26 @@ def _fold(text) -> str:
 
 
 def _cited_ids(text) -> set:
-    """The page item ids a text cites, each in a line "Page item: <id>"."""
+    """The page item ids a text cites with "Page item: <id>"."""
     return {m.group(1).rstrip(".,;:)") for m in PAGE_ITEM_CITE.finditer(text)}
+
+
+def _own_option_lines(text, item_id) -> dict:
+    """{letter: text} of the option lines that belong to page item `item_id` in `text`: the lines after each cite
+    of that id, up to the next "Page item:" cite of any item, so two questions in one reply read apart."""
+    cites = list(PAGE_ITEM_CITE.finditer(text))
+    lines = {}
+    for i, cite in enumerate(cites):
+        if cite.group(1).rstrip(".,;:)") != item_id:
+            continue
+        end = cites[i + 1].start() if i + 1 < len(cites) else len(text)
+        # The rest of the cite's own line is no option line: start at the next line.
+        start = text.find("\n", cite.end(), end)
+        if start < 0:
+            continue
+        for m in CHAT_OPTION_LINE.finditer(text, start + 1, end):
+            lines.setdefault(m.group(1).lower(), m.group(2))
+    return lines
 
 
 def chat_page_label_hit(item_id, options, chat_text) -> str:
@@ -1315,11 +1334,7 @@ def chat_page_label_hit(item_id, options, chat_text) -> str:
     text pass."""
     if not isinstance(chat_text, str) or not isinstance(options, list) or not isinstance(item_id, str):
         return ""
-    if item_id not in _cited_ids(chat_text):
-        return ""
-    lines = {}
-    for m in CHAT_OPTION_LINE.finditer(chat_text):
-        lines.setdefault(m.group(1).lower(), m.group(2))
+    lines = _own_option_lines(chat_text, item_id)
     for i, option in enumerate(options):
         letter = _letter_of(i)
         label = option.get("label") if isinstance(option, dict) else None
@@ -1334,7 +1349,8 @@ def chat_page_label_hit(item_id, options, chat_text) -> str:
 
 
 def chat_text_citing(transcript_path, item_id) -> str:
-    """The newest assistant text in the transcript's last CHAT_TAIL_BYTES that cites page item `item_id`, else "".
+    """The newest assistant text in the transcript's last CHAT_TAIL_BYTES that cites page item `item_id` and writes
+    option lines for it, else "". A later text that only mentions the item is no question and is passed over.
     Raises OSError when the file cannot be read."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
@@ -1346,7 +1362,7 @@ def chat_text_citing(transcript_path, item_id) -> str:
         blocks = (rec.get("message") or {}).get("content")
         for b in blocks if isinstance(blocks, list) else []:
             text = b.get("text") if isinstance(b, dict) and b.get("type") == "text" else None
-            if isinstance(text, str) and item_id in _cited_ids(text):
+            if isinstance(text, str) and _own_option_lines(text, item_id):
                 return text
     return ""
 
