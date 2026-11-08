@@ -174,7 +174,7 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
         if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
             if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
                 return None
-            got = cite
+            return Finding(slug, cite[0], "debt %s: %s" % (slug, cite[1]))
         if got:
             return Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text))
         return None
@@ -248,10 +248,8 @@ def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False
 
 
 def reason(finding):
-    """Why a Finding refused a cite: its first line, without the `debt <slug>: ` lead (the caller names the slug itself)."""
-    text = finding.text.split("\n")[0]
-    lead = "debt %s: " % finding.slug
-    return text[len(lead):] if text.startswith(lead) else text
+    """Why a Finding refused a cite: its first line, with its `debt <slug>: ` lead."""
+    return finding.text.split("\n")[0]
 
 
 def say(line):

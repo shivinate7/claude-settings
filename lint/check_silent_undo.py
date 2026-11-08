@@ -29,12 +29,12 @@ Blank lines and whitespace never count. The escape is a trailer in a commit mess
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
 excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
-(check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
+(check_debt_retire.judged) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
 the debts folder. The merge tool passes a PR body and a run reader. The CLI reads the body only with `--pr-body-env NAME` (the
 body is env NAME; unset or empty is no body); CI passes it. The flag also gives the run reader, merge.Host.cited_run, built
-only when a cite is read, and judges the cite against --head. A cite that does not excuse its debt prints `cite for <slug> not accepted:
-<why>`, and the finding stays. Without the flag the CLI reads no body. Each use prints
+only when a cite is read, and judges the cite against --head. A cite for a whole delete that does not excuse its debt prints `cite for <slug> not accepted:
+<why>`, and the finding stays. A rename out of the folder is refused with no such line. Without the flag the CLI reads no body. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
@@ -615,14 +615,15 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
         if run_state is None:  # no judgment: a green test could excuse a close it has no reader to confirm
             got, todo = check_debt_retire.cited_deletes(cwd, upstream, head, pr_body, paths)
             cited = check_debt_retire.cites(pr_body)
-            return {}, [note(slug, check_debt_retire.judge_run(cwd, head, cited[slug], None)[1]) for _, _, slug in todo]
+            return {}, [note(slug, "debt %s: %s" % (slug, check_debt_retire.judge_run(cwd, head, cited[slug], None)[1])) for _, _, slug in todo]
         res = check_debt_retire.judged(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths)
-    except Exception as e:  # its Unknown, any failed read: a finding stays, and says the read failed
-        why = " ".join(str(e).split()) or type(e).__name__
-        try:
+    except Exception as e:  # its Unknown, any other error: a finding stays, and the note names the cause
+        text = " ".join(str(e).split())
+        why = "the debt read failed: " + text if isinstance(e, check_debt_retire.Unknown) else "%s: %s" % (type(e).__name__, text)
+        try:  # a whole delete only, as the judgment reads it; a status read that fails too gives no note
             debt, cited = check_debt_retire.records.debt_file(cwd), check_debt_retire.cites(pr_body)
-            return {}, [note(os.path.basename(p)[:-3], "the debt read failed: " + why) for p in sorted(paths)
-                        if debt(p) and os.path.basename(p)[:-3] in cited]
+            deleted = {old for status, old, new in check_debt_retire.records.changes(cwd, upstream, head)[1] if status == "D" and debt(old)}
+            return {}, [note(os.path.basename(p)[:-3], why) for p in sorted(paths) if p in deleted and os.path.basename(p)[:-3] in cited]
         except Exception:
             return {}, []
     cited = check_debt_retire.cites(pr_body)
@@ -704,21 +705,17 @@ def say(line):
 class RunReader:
     """The merge tool's Host.cited_run for `repo`, the one home of the run read, built on the first read: a branch with no
     unexcused finding and a cite never imports merge. A failed import, Host build or read raises to the caller, which reads it
-    as an unreadable run, and is kept in `failed` (url -> why)."""
+    as an unreadable run, whose reason the debt-close judgment prints."""
 
     def __init__(self, repo):
-        self.repo, self.read, self.failed = repo, None, {}
+        self.repo, self.read = repo, None
 
     def __call__(self, url):
-        try:
-            if self.read is None:
-                sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "merge"))
-                import merge  # lazy: the merge tool imports this module
-                self.read = merge.Host(cwd=self.repo).cited_run
-            return self.read(url)
-        except Exception as e:
-            self.failed[url] = " ".join(str(e).split()) or type(e).__name__
-            raise
+        if self.read is None:
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "merge"))
+            import merge  # lazy: the merge tool imports this module
+            self.read = merge.Host(cwd=self.repo).cited_run
+        return self.read(url)
 
 
 def main(argv):
