@@ -699,9 +699,10 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
+    mains = [r for r in refs[1:] if default or r != "main"]  # pushed main only: an unpushed local merge never passed main's gate
     items = []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
-        if any(git(cwd, "merge-base", "--is-ancestor", m, r, ok=(0, 1))[0] == 0 for r in refs[1:]):
+        if any(git(cwd, "merge-base", "--is-ancestor", m, r, ok=(0, 1))[0] == 0 for r in mains):
             continue  # main's own merge, already gated when it landed on main
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
@@ -710,7 +711,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     else:  # a conflict leaves no result to read: the branch's own diff off the merge base
         old, new = git(cwd, "merge-base", upstream, h)[1].strip(), h
     files = raw_files(cwd, old, new)
-    held = main_state(cwd, h, upstream, new, refs[1:])
+    held = main_state(cwd, h, upstream, new, mains)
     files = {p: v for p, v in files.items() if p not in held}
     base =git(cwd, "merge-base", upstream, h)[1].strip()
     own = git(cwd, "rev-list", "--first-parent", "%s..%s" % (upstream, h))[1].split()
