@@ -11701,6 +11701,32 @@ sh("frozen word: an echo of an rm of a frozen file, teed to a script that sh the
    "echo 'rm " + CFG_HOOK + "' | tee /tmp/s.sh && sh /tmp/s.sh", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen word: an echo of an rm of a frozen file, with no script run, is allowed",
    "echo 'rm " + CFG_HOOK + "'", "allow", cwd=NOGIT)
+# A WRITER THAT NAMES A SCRIPT, THEN A SHELL RUNS IT. sort -o and uniq write their last file word, so a frozen
+# text piped into either and then run by sh is a write, as the redirect form is. Each DENIES.
+sh("frozen word: an echo of an rm of a frozen file, sorted into s.sh by sort -o that sh then runs, is refused",
+   "echo 'rm " + CFG_HOOK + "' | sort -o s.sh && sh s.sh", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: an echo of an rm of a frozen file, written to s.sh by uniq that sh then runs, is refused",
+   "echo 'rm " + CFG_HOOK + "' | uniq - s.sh && sh s.sh", "deny", "frozen-path", cwd=NOGIT)
+# A TEST FILE THAT NAMES A FROZEN PATH, THEN A RUNNER RUNS IT. A runner loads conftest.py, so a frozen write in the
+# text the same call writes into conftest.py is run. Each DENIES, whichever runner follows the write.
+sh("frozen word: an echo of an os.system rm of a frozen file into conftest.py, then pytest, is refused",
+   "echo \"import os; os.system('rm " + CFG_HOOK + "')\" > conftest.py && pytest", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen word: an echo of an os.system rm of a frozen file into conftest.py, then python3 -m pytest, is refused",
+   "echo \"import os; os.system('rm " + CFG_HOOK + "')\" > conftest.py && python3 -m pytest test_x.py",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: an echo of an os.system rm of a frozen file into conftest.py, then uv run pytest, is refused",
+   "echo \"import os; os.system('rm " + CFG_HOOK + "')\" > conftest.py && uv run pytest", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen word: an echo of an os.system rm of a frozen file into conftest.py, then npm test, is refused",
+   "echo \"import os; os.system('rm " + CFG_HOOK + "')\" > conftest.py && npm test", "deny", "frozen-path",
+   cwd=NOGIT)
+# A TEXT FILTER THAT PRINTS A `>` INSIDE ITS PROGRAM. awk reads the quoted "a>b" as printed text, so the frozen path
+# after grep is only read, and the call is allowed. CONTROL: awk's own print > onto the frozen file still writes it.
+sh("frozen word: grep -n mkdir naming a hook piped to awk that prints a quoted a>b and a field is allowed",
+   "grep -n mkdir " + CFG_HOOK + " | awk '{print \"a>b\", $1}'", "allow", cwd=NOGIT)
+sh("frozen word: grep -n mkdir naming a hook piped to awk whose print > writes the hook is refused",
+   "grep -n mkdir " + CFG_HOOK + " | awk '{print > \"" + CFG_HOOK + "\"}'", "deny", "frozen-path", cwd=NOGIT)
 # CONTROL, ALLOWED. An interpreter run on a file with no inline program reads its path words, so a
 # frozen path after `-k copy` is an argument, as the builder's own test run is.
 sh("frozen word: python3 -m pytest -k copy naming a frozen file is allowed",
