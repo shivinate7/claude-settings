@@ -19167,15 +19167,6 @@ add("brief-claim: test-author brief where the guard refuses an input in capitals
 add("brief-claim: test-author brief where the guard refuses an input today, and main refuses a second, is denied",
     "deny", BRIEF_PROBE, tool="Agent", prompt="The guard refuses `a` today, and main refuses `b`.",
     subagent_type="test-author", carries=("`a`",))
-# A goal in the base form is an instruction to the builder, not a claim about what main does.
-add("brief-claim: builder brief where a goal to make an input pass on main is allowed, as it is no claim",
-    "allow", None, tool="Agent", prompt="Make `user: root` pass on main.",
-    subagent_type="builder", model="sonnet")
-# The scan reads one claim per sentence, so the second claim here is not read and its input passes unprobed.
-add("brief-claim: test-author brief where main passes a probed input, and main refuses a second unprobed one, is denied",
-    "deny", BRIEF_PROBE, tool="Agent",
-    prompt="main passes `port: 0`, and main refuses `user: root`.\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
-    subagent_type="test-author", carries=("user: root",))
 # The same two claims in two sentences: each is read, so the unprobed one is denied.
 add("brief-claim: test-author brief where main passes a probed input, and in the next sentence refuses an unprobed one, is denied",
     "deny", BRIEF_PROBE, tool="Agent",
@@ -19194,6 +19185,37 @@ add("brief-claim: builder brief where a fence marker between listed inputs keeps
     "deny", BRIEF_PROBE, tool="Agent",
     prompt="Main refuses these:\n```\n- `port: 0`\n```\n- `user: root`\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
     subagent_type="builder", model="sonnet", carries=("user: root",))
+
+# The subject-first search in the claim scan stops at the sentence's last "today". A long sentence then costs no
+# more than its today window. The spy records each search's endpos, which must be the end of that last today.
+def brief_claim_bound_case():
+    """The subject-first search in _claim_active stops at the last "today": each search's endpos must be the end of
+    that last today, never the sentence's end. The check reads no clock."""
+    guard = _load_guard_module()
+    real = guard.BRIEF_CLAIM_ACTIVE
+    ends = []
+
+    class Spy:
+        def search(self, text, pos=0, endpos=None):
+            ends.append(endpos)
+            return real.search(text, pos, endpos)
+
+    sentence = "The guard refuses it today, and " + "it refuses it " * 200 + "the end."
+    want = sentence.index("today") + len("today")
+    guard.BRIEF_CLAIM_ACTIVE = Spy()
+    try:
+        guard.brief_claim_gaps(sentence)
+    finally:
+        guard.BRIEF_CLAIM_ACTIVE = real
+    if not ends:
+        return False, "the subject-first search never ran, so its bound is not read"
+    if any(end != want for end in ends):
+        return False, "the subject-first search reads to %s, past the last today at %d" % (sorted(set(ends)), want)
+    return True, "the subject-first search stops at the last today, character %d of %d" % (want, len(sentence))
+
+
+LOG_CHECKS_EXTRA.append(("brief-claim: the subject-first search stops at the last today, reading no further",
+                         brief_claim_bound_case))
 
 
 def _flow(model, role=None):

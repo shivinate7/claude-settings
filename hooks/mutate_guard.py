@@ -2506,11 +2506,15 @@ MUTATIONS = [
      '\\b(?:today|now)\\b)*"',
      '\\b(?:today)\\b)*"',
      "guard", 'brief-claim: test-author brief where an input before main refuses now is denied'),
-    # The count word, the pronoun tail and today in _claim_active. The two whole-sentence searches in _claim_active
-    # (the leading-claim search and the today-bounded subject search) have no mutant here: they are time-only, per the
-    # brief. Equivalent mutants change no verdict, so none is listed: "<=" for "<" and taking a subject whenever one is
-    # found. A today pattern without the word boundary is not equivalent: "The guard refuses `x` todays." is allowed
-    # on the guard and denied with that pattern. No mutant pins it yet.
+    # The count word, the pronoun tail and today in _claim_active. The leading-claim search has no mutant here: it is
+    # time-only. The today-bounded subject search changes no verdict, so its mutant is pinned by the endpos spy case,
+    # not by a verdict. Equivalent mutants change no verdict, so none is listed: "<=" for "<" and taking a subject
+    # whenever one is found. A today pattern without the word boundary is not equivalent: "The guard refuses `x`
+    # todays." is allowed on the guard and denied with that pattern. No mutant pins it yet.
+    ('brief-claim: the subject-first search reads to the sentence end, past the last today',
+     'subject = BRIEF_CLAIM_ACTIVE.search(sentence, 0, late.end())',
+     'subject = BRIEF_CLAIM_ACTIVE.search(sentence, 0, len(sentence))',
+     "guard", "brief-claim: the subject-first search stops at the last today, reading no further"),
     ('brief-claim: a count word does not refer, so refuses all three today hides from the refers test',
      'return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))',
      'return bool(BRIEF_CLAIM_REFERENT.search(text))',
