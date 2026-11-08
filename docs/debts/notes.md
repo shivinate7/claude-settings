@@ -2188,5 +2188,5 @@
 - lint-slot-orphan-run: on POSIX, a timed-out ci-job's children run on after the slot frees, so the next lint shares the CPU with them (merge/merge.py `sh`). Decision: none.
 - lint-slot-count-uncased: no case pins the default count, `os.cpu_count()`, and it ignores a cgroup CPU limit (merge/merge.py `lint_slots`). Decision: none.
 - lint-slot-fallback-uncased: an unusable slot folder runs the lint ungated with one stderr line; no case covers it (merge/merge.py `take_lint_slot`). Decision: none.
-- session-start-fetch-load-flaky: `hooks/test_session_start.py` caseF4 and caseF6 (origin fetch timeouts) FAILed in 3 of 8 identical lane lints run at once on 4 CPUs, and passed at 4 or fewer. Decision: none.
+- session-start-fetch-load-flaky: `hooks/test_install_src.sh` caseF4 (no reachable origin) and caseF6 (a fetch killed by its timeout) FAILed in 3 of 8 identical lane lints run at once on 4 CPUs, and passed at 4 or fewer. Decision: none.
 - lane-lint-shared-clone-race: one of over 300 parallel lane lints in a shared clone failed its `git fetch origin main` with `bad object worktrees/tree2/HEAD`, before its slot; not reproduced (merge/merge.py `lane_head_and_base`). Decision: none.
