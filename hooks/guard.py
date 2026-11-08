@@ -4763,7 +4763,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
     refused the same way; the clone check spawns no git. A git verb that changes files
     (OTHER_CHECKOUT_GIT_VERBS) run as `git -C <path>`, or after a `cd`, in another checkout or a
-    separate clone is refused by that same `elsewhere()` test, so each `cd` exemption holds for it;
+    separate clone is refused by that same `elsewhere()` test, and the red-run exemption reads the
+    resolved folder, as the `cd` form reads its target;
     `git -C <primary> status` passes and spends no git. Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
@@ -4836,8 +4837,9 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
 
             def in_clone(folder, _at):
                 # As the `cd` loop above: the folder's own root counts as the red-run folder, since a
-                # git verb run there writes its files, not the folder's name.
-                if elsewhere(folder, folder) and not _own_red_run(payload, roots[0], folder):
+                # git verb run there writes its files, not the folder's name. The test reads the
+                # resolved folder, as elsewhere() does, so a `..` climb out of it cannot pass.
+                if elsewhere(folder, folder) and not _own_red_run(payload, roots[0], _resolved(folder, folder)):
                     flagged.append(folder)
                     return True
                 return False
@@ -4871,8 +4873,8 @@ SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "reba
 # The verbs other-checkout refuses in another checkout or clone: the session-home verbs plus the verbs
 # that change that checkout's files or index without moving a branch (`add`, `rm`, `mv`, `update-index`,
 # `read-tree`, `checkout-index`). Every form of these counts as a write, `rm --cached` and `rm -n`
-# included, since each touches the index. session-home leaves them out, so this set extends the
-# tuple rather than copying it.
+# included: the guard does not parse each verb's flags, so a dry run is refused too. session-home
+# leaves them out, so this set extends the tuple rather than copying it.
 OTHER_CHECKOUT_GIT_VERBS = SESSION_HOME_GIT_VERBS + (
     "add", "rm", "mv", "update-index", "read-tree", "checkout-index")
 SESSION_HOME_REASON = (
