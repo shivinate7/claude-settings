@@ -477,13 +477,6 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.co, self.host.root = dest, dest  # the lane run and the host's head read name the checkout
         return pin
 
-    def make_shallow_origin(self):
-        """A bare copy of origin with every branch cut at depth 1: a remote that is itself shallow, so a fetch from it cannot
-        deepen the lane clone past the cut. -> its path."""
-        dest = os.path.join(self.t, "shallow-origin.git")
-        tm.sh(self.t, "git", "clone", "-q", "--bare", "--depth", "1", "--no-single-branch", "--no-local", self.bare, dest)
-        return dest
-
     def is_shallow_lane(self, pin):
         return shallow_clone.facts(self.co, pin)["shallow"]
 
@@ -608,7 +601,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
 
     def test_a_shallow_lane_that_stays_shallow_after_the_unshallow_fetch_ends_unknown_and_lints_nothing(self):
         # origin is itself shallow, so `git fetch --unshallow origin` succeeds and has no more history to send: the lane stays shallow.
-        pin = self.make_shallow_lane(source=self.make_shallow_origin())
+        pin = self.make_shallow_lane(source=shallow_clone.origin(self.bare, os.path.join(self.t, "shallow-origin.git")))
         self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
         self.use_ci_job(PASSING, 0)
         with self.traced_git() as trace:
