@@ -1,11 +1,11 @@
 {
   "title": "A test fuzzes every deny check in the guard, so no input makes a check raise and the guard let the call through",
   "why": "Decision guard-hooks-fail-closed keeps a crashing guard fail-open (a guard that crashes lets the call through). A builder's fix on notes-guard-c2 raised ValueError on an unclosed `${`, so the guard allowed the call; a fix check caught it before merge (lane notes-fix-guard-1, session_013NEJL3G6vFtN2TjNZrMETW; coordinator, 04:09 CST Nov 8).",
-  "note": "Fix: add a test that feeds random strings to every deny check in hooks/guard_core.py and hooks/guard.py and fails on any exception; the crash behaviour in decision guard-hooks-fail-closed stays as it is. Red case first: the notes-guard-c2 input (an unclosed `${`) raises on that fix's head; control: main's checks raise on none of the fixed seed set. Owner: lane notes-fix-guard-1, after notes-guard-c3. Queue fix (coordinator, 04:09 CST Nov 8). Filed 04:13 CST Nov 8. Doing (lane notes-fix-guard-1, 04:21 CST Nov 8), branch checks-never-raise. PR #1926, in round 1 fixes (lane, 05:36 CST Nov 8).",
+  "note": "Fix: add a test that feeds random strings to every deny check in hooks/guard_core.py and hooks/guard.py and fails on any exception; the crash behaviour in decision guard-hooks-fail-closed stays as it is. Red case first: the notes-guard-c2 input (an unclosed `${`) raises on that fix's head; control: main's checks raise on none of the fixed seed set. Owner: lane notes-fix-guard-1, after notes-guard-c3. Queue fix (coordinator, 04:09 CST Nov 8). Filed 04:13 CST Nov 8. Doing (lane notes-fix-guard-1, 04:21 CST Nov 8), branch checks-never-raise. PR #1926, in round 1 fixes (lane, 05:36 CST Nov 8). Built: PR #1926 (head b3b934d52) with runner 8, round 3 net value positive, lane lint PASS (lane notes-fix-guard-1, 07:08 CST Nov 8). Done when #1926 merges. Follow-up checks-never-raise-2 in progress: it widens the fuzz to the 143 functions it does not yet run.",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 589,
   "owner": "triage",
   "lane": "session_013NEJL3G6vFtN2TjNZrMETW",
-  "updatedAt": "2026-11-08T05:36:00-06:00"
+  "updatedAt": "2026-11-08T07:08:00-06:00"
 }
