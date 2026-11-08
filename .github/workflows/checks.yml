@@ -1197,12 +1197,12 @@ jobs:
     # The step grew from 193 s to 400 s (batch 4), then ran 580 s or more before the 10 min cap cut it (run 41786084869).
     # Faster slow kills cut the local run 710 s to 651 s (4 jobs). Batch 7's lanes add mutants. On main, the coordinator
     # measured lane PR 1163 alone at 946 s locally (+236 s) and lane PR 1157 at 768 s (+58 s). If those add up and the
-    # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound, so the cap is a stopgap
-    # (ci-job-caps) until the split (debt mutate-guard-split); the next green run gives the figure.
+    # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound. Debt mutate-guard-split holds the split.
     # The run now also makes one clean-layout control per target, a full suite on the unmutated layout, in the same pool as the
     # mutants and under the same job cap. The guard, override and simlease targets each run the guard suite (about 870 s alone,
     # measured with seven controls at once). Spread over 4 jobs that is about +650 s, so the run nears 1600 s (27 min);
-    # unmeasured in CI. The cap rises to 45 min under the owner's stopgap (ci-job-caps); the next green run gives the figure.
+    # unmeasured in CI. The cap is 45 min under the owner's stopgap (ci-job-caps), which holds until time-pinned tests are gone;
+    # the next green run gives the figure.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
