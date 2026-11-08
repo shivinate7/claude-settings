@@ -20,8 +20,9 @@ Check: `lint/check_record_slugs.py` fails a lane only when the lane's diff raise
 its count at the merge base of origin/main and HEAD. The slug must then have two or more rows. Slugs compare
 without case. Duplicates already on main do not fail a lane. With file names given, or when git cannot read
 the diff, any duplicate in the file fails. `--list` prints every duplicate in the checkout's notes file,
-main's included, and exits 0 (1 only when the layout cannot be read). It names slugs, not lanes, and
-nothing calls it yet. A rewrite that union keeps twice goes red when the lane raises the count. A deleted
+main's included, and exits 0 (1 only when the layout cannot be read). It names slugs, not lanes. The
+batch runner calls it under ci-hygiene step 8 (Batch lanes).
+A rewrite that union keeps twice goes red when the lane raises the count. A deleted
 row that union restores has one slug; the silent-undo check catches it (decision silent-undo-check-design,
 the check for undone work). Incidents: the #1449 main merge left 9 slugs twice on main. Union merges into
 #1863, #2081 and #2108 each kept two copies of a note. PR #1920 was dropped from batch 65 for a duplicate
