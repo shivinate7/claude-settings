@@ -1,0 +1,11 @@
+{
+  "title": "The merge prose judge gets a readable verdict, or says why not",
+  "order": 103.6,
+  "why": "On mailaudit #222, the merge-time prose judge returned UNKNOWN on both lines with \"no readable verdict\" (runner 9, 23:08 CST Nov 7).",
+  "note": "No step owned verdict parsing (triage searched, 23:12 CST). First find the cause: the model reply, the parser or the excerpt. Related: steps prose-judge-exception-count (lines not judged after an exception) and judge-sees-named-code. Slug and title by triage; no source gave one. Waits under the item 384 hold unless the coordinator counts it as a queue fix.",
+  "phase": "now",
+  "status": "todo",
+  "owner": "coordinator",
+  "lane": null,
+  "updatedAt": "2026-11-07T23:10:00-06:00"
+}

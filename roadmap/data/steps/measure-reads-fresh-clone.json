@@ -1,0 +1,11 @@
+{
+  "title": "A cross-repo measure fetches the child clone first, or refuses and names the stale ref",
+  "order": 103.59,
+  "why": "Runner 9's 22:54 CST Nov 7 measure ran `ci-job --lint` against stale child clones, and started lane lane-lint-reads-child-workflows on a false premise. Fresh clones of degen, joyous and ios-adblock already had the checks job. ste-changed already exits 3 with \"pull claude-settings\" on its own copy, and that note did not stop runner 9.",
+  "note": "Covers `ci-job --lint` run against a child clone, and ste-changed. Done check: a red test where a measure on a clone behind its origin fetches first, or refuses and names the stale ref. Waits under the item 384 hold. Slug from the coordinator, 23:10 CST; title by triage.",
+  "phase": "now",
+  "status": "todo",
+  "owner": "coordinator",
+  "lane": null,
+  "updatedAt": "2026-11-07T23:10:00-06:00"
+}
