@@ -13,7 +13,7 @@ Judge the result, not the commands. The act is a test path in a change the build
 
 An unreadable state logs `role-diff-unread` and is allowed. A merge path whose bytes git could not read logs `role-diff-unread` too, and is still judged: a failed read never drops a path. A second stop with an unreadable state logs `role-diff-unresolved`.
 
-**Ruling.** Coordinator, 2026-11-01 20:32 CST, restored the refusal. Coordinator, 2026-11-01 21:40 CST, narrowed the refused act to the test changes the builder wrote itself: a tree rebuilt from the reflog broke wherever git combines other people's commits. Incident 95b4348b (lane page-item-checked-at-write, 2026-11-01) is pinned by the first `builder-refuse` case.
+**Ruling.** Coordinator, 2026-11-01 20:32 CST, restored the refusal. Coordinator, 2026-11-01 21:40 CST, narrowed the refused act to the test changes the builder wrote itself: a tree rebuilt from the reflog broke wherever git combines other people's commits. Incident 95b4348b (lane page-item-checked-at-write, 2026-11-01) is pinned by the first `builder-refuse` case. Owner, 2026-11-08 12:16 CST, page item 437 a (builder-test-edit-scope): keep "builders never write test content". Measure a builder's test changes against main after the merge, not against the branch base. Main's own test changes then pass. Conflicts inside test files still go to a test-author (PR #1521). The guard meets it: a merge is judged against git's own merge of its parents (the `merge_resolved` check), and a test file left with conflict markers is refused by the `conflict-markers` rule.
 
 ## What the builder wrote
 
@@ -29,7 +29,7 @@ An unreadable state logs `role-diff-unread` and is allowed. A merge path whose b
 
 **Named limit.** On a checkout that converts files (`core.autocrlf`, `.gitattributes` text, eol or ident, an LFS smudge), an open merge's untouched conflicted test file is still refused: the working-tree bytes differ from git's merge blob. That is a refusal, never a pass; debt `merge-resolved-worktree-convert` (open merge refused on a converting checkout) holds it. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 94 of 94 `builder-refuse` cases pass on this tip.
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 101 of 101 `builder-refuse` cases pass on this tip.
 
 ## Roles
 
