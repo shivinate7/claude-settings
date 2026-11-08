@@ -1612,12 +1612,15 @@ def hand_off_problem(hook, text):
 # create-PR tool opens on its first call. Record: decision claims-carry-backing.
 _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
 _ADVERB = r"(?:even|yet|currently|actually|really|still|also|just|now|directly|simply|unfortunately)"  # one home of the adverbs
+_BE_NT = r"(?:is|are|was|were)n['’]t"  # every be-form with n't: one home, shared by the phrase list and the past-tense read
+_ABLE_TO = r"(?:able|allowed|permitted|going\s+to\s+be\s+able)\s+to"  # the phrases that follow "not" or a be-form with n't
 CANNOT_RE = re.compile(
     _NOT_NAME + r"(?:%(c)s|can not|could(?:n['’]t| not)|no way (?:to|I can|we can)"
-    r"|not\s+(?:%(a)s\s+)*(?:able|allowed|permitted) to|not\s+going\s+to\s+be\s+able to"
+    r"|(?:not|%(b)s)\s+(?:%(a)s\s+)*%(t)s"
     r"|do(?:es)?(?:n['’]t| not)\s+have\s+(?:the\s+)?(?:permission|authori[sz]ation|authority|ability) to"
-    r"|wasn['’]t\s+(?:%(a)s\s+)*able to|(?:won['’]t|will not) be able to"
-    r"|ha(?:ve|s)(?:n['’]t| not)\s+(?:%(a)s\s+)*been able to)(?![\w-])" % {"c": _CANT, "a": _ADVERB}, re.I)
+    r"|(?:won['’]t|will not) be able to"
+    r"|ha(?:ve|s)(?:n['’]t| not)\s+(?:%(a)s\s+)*been able to)(?![\w-])"
+    % {"c": _CANT, "a": _ADVERB, "b": _BE_NT, "t": _ABLE_TO}, re.I)
 CANNOT_BREAK_RE = re.compile(r"\.(?!\w)|[;:!?—–]|\s-{1,2}\s")  # a clause ends here; a dot inside a token (api.github.com) does not
 CANNOT_BEFORE_BREAK_RE = re.compile(r"[.;:!?,—–]|\s-{1,2}\s|\bbut\b", re.I)  # and before it, a comma or but too
 CANNOT_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
@@ -1686,8 +1689,8 @@ CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
 # The past-ruling guard's own remedy says why its check could not run. A line or a sentence that starts with its label is
 # that form; the guard lets the label follow a question on the same line.
 CANNOT_UNVETTED_RE = re.compile(r"^(?:[-*+]|\d+[.)])?\s*(?:\*\*)?Unvetted:", re.I)
-# A phrase in the past tense reports a failure: could not, wasn't able, or any phrase right after was or were ("was unable to").
-CANNOT_PAST_RE = re.compile(r"^(?:could|wasn['’]t)", re.I)
+# A phrase in the past tense reports a failure: could not, wasn't or weren't able, or any phrase right after was or were ("was unable to").
+CANNOT_PAST_RE = re.compile(r"^(?:could|(?:was|were)n['’]t)", re.I)
 CANNOT_WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADVERB, re.I)
 CANNOT_WINDOW = 6  # words after the phrase, in its clause, that may name the act
 CANNOT_ADVERB_RE = re.compile(r"^(?:%s\s+)+" % _ADVERB, re.I)
