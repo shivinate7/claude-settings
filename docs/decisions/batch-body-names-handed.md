@@ -2,14 +2,20 @@
 
 ## The ruling
 
-The roadmap step that adds this check (`runner-drops-handed-lane`, order 768) sets the rule. No owner ruling is on file for it.
+Owner, 2026-11-08 11:57 CST, typed in degen lane session_013NEJKzoN2eD5oih2K39Be8, answering where the lane-drop guard goes: "2. it would go in claude-settings".
+
+The merge tool as the home, and the refusal at the merge confirm as well as at the draft step, are this lane's design. They come from the degen lane's suggestion, relayed by the coordinator. They are not the owner's words. A PR marked ready by hand skips the draft step, so the merge confirm checks again.
+
+The guard refuses the merge when a lane PR handed for the batch is not named in the integration PR body as merged or held, with a reason.
+
+The roadmap step that builds it is `runner-drops-handed-lane` (order 768).
 
 Before an integration PR goes ready, its body names every handed lane. A lane is named in one of two ways:
 
-- On the `Lanes:` line, when it is in the batch.
-- On a left-out line with a reason, when it is not.
+- Merged: on the `Lanes:` line, when it is in the batch.
+- Held: on a left-out line with a reason, when it is not.
 
-The draft step refuses a handed PR that the body does not name.
+The draft step and a ready `merge <pr> --confirm` refuse a handed PR that the body does not name.
 
 ## The mistake and the harm
 
@@ -23,7 +29,7 @@ The harm: a reviewed lane was lost without a word.
 
 - A handed lane is an open lane PR on the integration PR's base. Its newest review record reads done. The base does not hold its head yet.
 - An integration PR has a `Lanes:` line in its body, or its head holds the head of a handed lane. A lone lane is not an integration PR. This check skips it and says nothing.
-- Each handed lane is either in the batch or left out. In the batch, it is on `Lanes:`, and the integration head holds its head. Left out, it is on a left-out line with a reason.
+- Each handed lane is either merged or held. Merged: it is on `Lanes:`, and the integration head holds its head. Held: it is on a left-out line with a reason.
 
 ## The body grammar
 
@@ -36,33 +42,36 @@ The harm: a reviewed lane was lost without a word.
 
 ## Verdicts
 
-Each refusal names every PR it finds, one line each. It stops the draft step.
+Each refusal names every PR it finds, one line each. It stops the run.
 
 1. A handed PR is in the batch but not on `Lanes:`.
 2. A handed PR is not in the batch and is on no left-out line.
 3. A PR is on a left-out line with no reason.
 4. A PR is on `Lanes:`, and the integration head does not hold its head.
-5. A failed read stops the step. Unknown is never a pass.
+5. A failed read stops the run. Unknown is never a pass.
 6. Every handed lane is named. One line prints: `merge: handed-lane check: N lanes in the batch, M named as left out.`
 
 ## The one departure
 
-Departs from: the batch bodies so far, which took a left-out line with no reason. Such a line now refuses. `Dropped earlier: #n`, used in claude-settings PR #2046, is the case that changes.
+Departs from: the batch bodies so far, which took a left-out line with no reason. Such a line now refuses. Claude-settings PR #2046's body has `Dropped earlier: #1552 ...` with no reason. That line is the case that changes.
 
 ## Where it runs
 
-- `merge/merge.py`, `draft_step`: the path that `merge <pr> --confirm` takes on a draft PR.
-- It runs first. That is before the records page rebuild, the push and the ready mark. A refusal pushes nothing, and the PR stays a draft.
+- `merge/merge.py` runs the check on three paths:
+  - The draft step: `merge <pr> --confirm` on a draft PR. It runs first, before the records page rebuild, the push and the ready mark.
+  - `merge <pr> --confirm` on a ready PR. It runs before the lock is taken.
+  - The preview: `merge <pr>` with no `--confirm`. It prints BLOCKED when the check refuses.
+- A refusal pushes nothing and merges nothing. A draft stays a draft.
 - It reads with the merge tool's own review-record read (`reviewed_read`) and head compare (`holds_head`). It adds no second reader.
 
 ## Cost
 
-- Per draft step only. The review-record read costs 2 list reads, and 3 gh calls per ready PR with a record. Then one compare per handed PR against the integration head, and one against the base.
-- Process starts: none. Files written: none. Timers: none.
+- Per run: each preview, each draft step and each ready `--confirm`. The review-record read costs 2 list reads, and 3 gh calls per ready PR with a record. Then one compare per handed PR against the integration head, and one against the base.
+- No new process starts, file is written or timer is set.
 
 ## Status
 
-Not built. The roadmap step `runner-drops-handed-lane` builds it. Its refusals cite this decision.
+Not built. The roadmap step `runner-drops-handed-lane` builds it on all three paths. Its refusals cite this decision.
 
 Kind: process
 Home: merge/merge.py
