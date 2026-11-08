@@ -128,9 +128,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
                        call, no subprocess, no network. An override lifts it. (pr-review-record)
   resume-finished-reviewer
-                       deny. A built-in `SendMessage` from a call with no `agent_id` whose `to` names a `reviewer` or
-                       `design-reviewer` Agent or Task spawn that has finished, so its isolated worktree is gone and a
-                       resume runs with no tree. `to` matches the launch result's `toolUseResult.agentId` or the
+                       deny. A built-in `SendMessage` from a call with no `agent_id` whose `to` names an Agent or Task
+                       spawn that has finished and ran with `isolation: "worktree"` (any role), so its worktree is
+                       gone and a resume runs with no tree. A `reviewer` or `design-reviewer` is refused with no
+                       worktree too: a resume runs on the parent's model, which can give a wrong verdict. `to` matches the launch result's `toolUseResult.agentId` or the
                        spawn call's `name`; the latest spawn with that name wins. The state is read by
                        `_transcript.agent_state`: a foreground result, or a background launch closed by a terminal
                        notice or a TaskStop result, is finished; an async_launched result with no close is running.
@@ -138,10 +139,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        is stripped before matching. A state the read cannot place asks, and so does a parsed
                        transcript record with the wrong shape (noted as `resume-finished-reviewer-unparsed`); a
                        line that is not JSON is dropped by the reader and does not ask. A send to `main`, a
-                       name with no spawn, a running spawn, a spawn of another role, and a send with an agent_id
-                       pass. A missing or unreadable
+                       name with no spawn, a running spawn, a finished spawn with no worktree that is not a
+                       reviewer, and a send with an agent_id pass. A missing or unreadable
                        transcript passes and is noted as `resume-finished-reviewer-unread`. The reason says to spawn a
-                       fresh reviewer and pass it the prior report. One transcript read per judged send, shared with
+                       fresh agent of the same role (named in it) and pass it the prior report. One transcript read per judged send, shared with
                        review-record-after-round, no subprocess, no network. An override lifts it. (roles-resume-by-name)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
@@ -4921,7 +4922,7 @@ def judge(payload) -> None:
     if record_reason:
         refuse(tool, "deny", "review-record-after-round", record_reason, record_matched)
 
-    # A SendMessage to a reviewer or design-reviewer spawn that has finished (rule resume-finished-reviewer).
+    # A SendMessage to a spawn that has finished and ran in a worktree, or to a finished reviewer (rule resume-finished-reviewer).
     resume_decision, resume_reason, resume_matched, resume_note = resume_finished_hit(
         tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))
     if resume_note:

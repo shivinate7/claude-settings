@@ -1275,18 +1275,25 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
     return RECORD_REASON, matched, False
 
 
-# ---- a resume of a finished reviewer (rule resume-finished-reviewer, rule roles-resume-by-name)
+# ---- a resume of a finished agent (rule resume-finished-reviewer, rule roles-resume-by-name)
 RESUME_TOOL = "SendMessage"  # the built-in send: it resumes a named spawn. The remote send_message names a session.
 RESUME_MAIN = "main"
+RESUME_ISOLATION = "worktree"  # the Agent input `isolation` whose worktree is gone once the agent finishes
 RESUME_REASON = (
     "resume-finished-reviewer: a reviewer or design-reviewer that has finished has no worktree any more, so a resume "
-    "runs with no tree. Spawn a fresh reviewer and pass it the prior report. "
-    "(rule roles-resume-by-name: resume a dead agent by name, never fresh; a finished reviewer's worktree is gone)"
+    "runs with no tree, and it runs on the parent's model, which can give a wrong verdict. "
+    "Spawn a fresh reviewer and pass it the prior report. "
+    "(rule roles-resume-by-name: when a finished agent's worktree is gone, send a fresh agent of the same role the prior report)"
+)
+RESUME_WORKTREE_REASON = (
+    "resume-finished-reviewer: this %(role)s ran in a worktree and has finished, so its worktree is gone and a resume "
+    "runs with no tree. Spawn a fresh %(role)s and pass it the prior report. "
+    "(rule roles-resume-by-name: when a finished agent's worktree is gone, send a fresh agent of the same role the prior report)"
 )
 RESUME_ASK_REASON = (
-    "resume-finished-reviewer: the guard cannot tell whether this reviewer or design-reviewer has finished. A finished "
-    "one has no worktree, so a resume runs with no tree; then spawn a fresh reviewer and pass it the prior report. "
-    "Allow this send only if the reviewer is still running. (rule roles-resume-by-name)"
+    "resume-finished-reviewer: the guard cannot tell whether this %(role)s has finished. A finished one that ran in a "
+    "worktree has no worktree, so a resume runs with no tree; then spawn a fresh %(role)s and pass it the prior report. "
+    "Allow this send only if the %(role)s is still running. (rule roles-resume-by-name)"
 )
 
 
@@ -1294,20 +1301,23 @@ RESUME_UNREAD_NOTE = "resume-finished-reviewer-unread"      # the guard.log rule
 RESUME_UNPARSED_NOTE = "resume-finished-reviewer-unparsed"  # the guard.log rule of a send whose records could not be parsed
 RESUME_UNPARSED_REASON = (
     "resume-finished-reviewer: the guard read a record in this session's transcript that has the wrong shape, so it "
-    "cannot tell whether this reviewer or design-reviewer has finished. A finished one has no worktree, so a resume runs with no tree; then "
-    "spawn a fresh reviewer and pass it the prior report. Allow this send only if the reviewer is still running. "
+    "cannot tell whether this agent has finished. A finished one that ran in a worktree has no worktree, so a resume runs "
+    "with no tree; then spawn a fresh agent of the same role and pass it the prior report. "
+    "Allow this send only if the agent is still running. "
     "(rule roles-resume-by-name)"
 )
 
 
 def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = False):
-    """(decision, reason, matched, note): "deny" when this built-in SendMessage from the main session names a
-    reviewer or design-reviewer spawn that has finished, "ask" when the spawn's state is unknown or a parsed transcript
+    """(decision, reason, matched, note): "deny" when this built-in SendMessage from the main session names a spawn
+    that has finished and ran with isolation "worktree" (any role: its worktree is gone), or is a reviewer or
+    design-reviewer (refused with no worktree too: a resume runs on the parent's model), "ask" when the spawn's state is unknown or a parsed transcript
     record has the wrong shape (a line that is not JSON is dropped by the reader, so a half-written last line passes), else ("", "", "", ...).
     `to` names the spawn by its launch result's toolUseResult.agentId or by its call's `name`; the latest spawn with
     the name wins. One trailing ` [<ref>]` is stripped from `to` first: SendMessage writes `name [ref]` when a name is
     ambiguous, and the ref is an opaque listing ref that cannot be mapped to a spawn, so the name alone is judged. A spawn whose result is an error ran no agent and is skipped, as review_record_hit skips it. A send
-    to main, a name no spawn holds, a spawn of any other role, a running spawn and a call with an agent_id pass.
+    to main, a name no spawn holds, a finished spawn with no worktree that is not a reviewer, a running spawn and a
+    call with an agent_id pass.
     `note` is the guard.log rule the caller writes as a `noted` line, or "": RESUME_UNREAD_NOTE when a send that would
     be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when a parsed record has the wrong shape
     (it asks). The state read is _transcript.agent_state, the one reader of a spawn's finish. Cost: one transcript
@@ -1332,16 +1342,20 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
                   if use.get("name") in RECORD_SPAWN_TOOLS and isinstance(use.get("input"), dict)
                   and use.get("id") not in failed]
         named = [use for use in spawns if use["input"].get("name") == target or agents.get(use.get("id")) == target]
-        if not named or named[-1]["input"].get("subagent_type") not in RECORD_REVIEWER_ROLES:
+        if not named:
+            return "", "", "", ""
+        spawn = named[-1]["input"]
+        role = spawn.get("subagent_type") if isinstance(spawn.get("subagent_type"), str) else "agent"
+        if role not in RECORD_REVIEWER_ROLES and spawn.get("isolation") != RESUME_ISOLATION:
             return "", "", "", ""
         state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)
     except Exception:
         return "ask", RESUME_UNPARSED_REASON, "%s with a transcript record the read cannot parse" % tool, RESUME_UNPARSED_NOTE
-    role = named[-1]["input"]["subagent_type"]
     if state == reader.FINISHED:
-        return "deny", RESUME_REASON, "%s to a finished %s" % (tool, role), ""
+        reason = RESUME_REASON if role in RECORD_REVIEWER_ROLES else RESUME_WORKTREE_REASON % {"role": role}
+        return "deny", reason, "%s to a finished %s" % (tool, role), ""
     if state == reader.UNKNOWN:
-        return "ask", RESUME_ASK_REASON, "%s to a %s of unknown state" % (tool, role), ""
+        return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""
     return "", "", "", ""
 
 
