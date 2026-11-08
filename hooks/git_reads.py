@@ -111,19 +111,23 @@ def git_common_dir(where: str):
     return _common_dir(where)
 
 
-def _has_git_above(where: str) -> bool:
-    """True when `where` or a folder above it holds a `.git` entry. A stat walk, no git spawn, so a
-    call outside every repository spends no git read. `GIT_DIR` set in the environment counts."""
-    if os.environ.get("GIT_DIR"):
-        return True
+def repo_top(where: str):
+    """The nearest folder at or above `where` (symlinks resolved) that holds a `.git` entry, else None. A stat walk, no git spawn.
+    The one home of the repo-top walk: lint/report_guard.repo_root and merge's review cutover read call it."""
     folder = os.path.realpath(where)
     while True:
         if os.path.exists(os.path.join(folder, ".git")):
-            return True
+            return folder
         parent = os.path.dirname(folder)
         if parent == folder:
-            return False
+            return None
         folder = parent
+
+
+def _has_git_above(where: str) -> bool:
+    """True when `where` or a folder above it holds a `.git` entry (`repo_top`), so a call outside every
+    repository spends no git read. `GIT_DIR` set in the environment counts."""
+    return bool(os.environ.get("GIT_DIR")) or repo_top(where) is not None
 
 
 def clone_checkouts(where: str):

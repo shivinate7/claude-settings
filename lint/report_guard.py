@@ -958,15 +958,10 @@ def recovered_problem(records, text):
 
 
 def repo_root(cwd):
-    """The nearest folder at or above `cwd` that holds a git entry, else None."""
-    here = os.path.realpath(cwd or os.getcwd())
-    while True:
-        if os.path.exists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+    """The nearest folder at or above `cwd` that holds a git entry, else None. The walk is hooks/git_reads.repo_top."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import git_reads
+    return git_reads.repo_top(cwd or os.getcwd())
 
 
 def departs_problem(text):
@@ -1713,7 +1708,9 @@ def review_record_problem(hook, text):
     """(refusal, note) for a lane reply that claims a review PASS. A reply with no claim, or a session that is not a lane,
     reads nothing. A claim with no PR is refused. Else two REST reads (the PR's live head, its issue comments); the newest
     review record must name the PR, and merge's review_state must call it done for the live head. A read that could not
-    run, or a merge tool that could not load, is a note with UNKNOWN, never a block."""
+    run, or a merge tool that could not load, is a note with UNKNOWN, never a block. The cutover read is the one exception to "skip the check": when it
+    fails, a claim with no record at all is still refused, since no record exists whatever the cutover. A record that exists but only the cutover
+    could place (no Stamp line) gets the UNKNOWN note and no refusal. The failed read itself never refuses."""
     claims = review_claims(text)
     if not claims:
         return "", ""
@@ -1738,14 +1735,25 @@ def review_record_problem(hook, text):
                               "--paginate", "--slurp"], cwd)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
             default = (pull["base"].get("repo") or {}).get("default_branch")  # the pull carries it, so no repo read
-            cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"], default=default) if cwd else None
-            rec = _newest_record(n, comments, merge_mod, cutover)
             newest = _newest_marked(comments, merge_mod)
-            unstamped = (not cutover and newest is not None
-                         and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
+        cutover, cutover_known = None, True
+        try:
+            cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"], default=default) if cwd else None
+        except Exception as err:  # the cutover read failing never refuses by itself, and it never hides the record check below
+            cutover_known = False
+            notes.append("Review-record guard: UNKNOWN, the review cutover could not be read for PR #%d (%s)." % (n, type(err).__name__))
+        try:
+            rec = _newest_record(n, comments, merge_mod, cutover)
+        except Exception as err:
+            notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
+            continue
+        if not cutover_known and rec is None and newest is not None:
+            continue  # a record exists that only the cutover could place (no Stamp line): the note above stands, no refusal
+        unstamped = (not cutover and newest is not None
+                     and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))
         if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
             reasons.append(REVIEW_NO_RECORD % (n, n, n) + (REVIEW_NO_STAMP if unstamped else ""))
     return " ".join(reasons), " ".join(notes)
