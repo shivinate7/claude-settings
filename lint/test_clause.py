@@ -357,6 +357,19 @@ class LexiconTests(unittest.TestCase):
         self.assertNotIn("zqxvnoun", report_guard._CI_CHECKS, "control: the shared report_guard reads the sentinel")
         self.assertIn("zqxvnoun", probe._CI_CHECKS, "_CI_CHECKS is not built from _clause.OUTAGE_NOUNS")
 
+    def test_report_guard_keeps_no_cant_of_its_own(self):
+        # Catches: _CANT, a copy of the can't forms that the hand-off cite reads, kept in report_guard beside the shared
+        # CANNOT_FORMS, so a form added to one list does not reach the other.
+        self.assertFalse(hasattr(report_guard, "_CANT"), "report_guard keeps its own _CANT, a copy of the can't forms")
+
+    def test_capability_re_is_built_from_the_shared_cannot_forms(self):
+        # Catches: CAPABILITY_RE built from its own list of the can't forms, so a form added to _clause.CANNOT_FORMS does not
+        # read as a capability.
+        probe = self.fresh_report_guard("CANNOT_FORMS", ("zqxvform",))
+        self.assertEqual(probe._clause.CANNOT_FORMS, ("zqxvform",), "scope: the probe does not read the sentinel list")
+        self.assertNotIn("zqxvform", report_guard.CAPABILITY_RE.pattern, "control: the shared report_guard reads the sentinel")
+        self.assertIn("zqxvform", probe.CAPABILITY_RE.pattern, "CAPABILITY_RE is not built from _clause.CANNOT_FORMS")
+
     def test_conditionals_are_the_words_that_make_a_clause_conditional(self):
         # Catches: a conditional word dropped from CONDITIONALS.
         self.assertEqual(set(clause.CONDITIONALS), {"if", "unless", "whether", "would"}, "CONDITIONALS")
@@ -385,6 +398,20 @@ class ReasonTests(unittest.TestCase):
                          "reasons: one because clause gives no reason")
         self.assertEqual(clause.reasons("I can't merge PR 12 because the branch is protected. Also because the CI is red."),
                          ["the branch is protected", "the CI is red"], "reasons: the second sentence's reason is lost")
+
+
+class IsReasonTests(unittest.TestCase):
+    def test_a_weren_t_form_is_a_verb_of_a_reason(self):
+        # Catches: "weren't" missing from VERBS, so "the tests weren't green" reads as no reason while "aren't green" reads as
+        # one. The curly apostrophe reads the same.
+        self.assertTrue(clause.is_reason("the tests weren't green"), "is_reason: weren't is not a verb")
+        self.assertTrue(clause.is_reason("the tests weren’t green"), "is_reason: curly weren’t is not a verb")
+
+    def test_an_aren_t_form_stays_a_verb_and_a_noun_phrase_stays_no_reason(self):
+        # Control: aren't is a verb already, and "a protected branch" holds no verb, since a determiner makes protected an
+        # adjective.
+        self.assertTrue(clause.is_reason("the tests aren't green"), "is_reason: aren't is not a verb")
+        self.assertFalse(clause.is_reason("a protected branch"), "is_reason: a noun phrase reads as a reason")
 
 
 class LinearTests(unittest.TestCase):

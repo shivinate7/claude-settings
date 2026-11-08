@@ -844,6 +844,20 @@ class CannotClaimTests(unittest.TestCase):
                          landed_reply(line)])
         self.assert_passes(out, "a failed push, with the remote's reason after a colon")
 
+    def test_cc_red_a_werent_reason_after_a_colon_names_the_check_after_a_failed_merge(self):
+        # Catches: "weren't" missing from the verbs of a reason, so "the tests weren't green" named no check and blocked a
+        # failed merge that its own reason explained. The curly apostrophe reads the same.
+        for line in ("I couldn't merge PR 12: the tests weren't green.", "I couldn’t merge PR 12: the tests weren’t green."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_passes(out, "a failed merge, with a weren't reason after the colon: %r" % line)
+
+    def test_cc_green_an_aren_t_reason_after_a_colon_passes_after_a_failed_merge(self):
+        # Control: the same failed merge, with aren't in the reason. aren't is a verb of a reason already, so it passes.
+        line = "I couldn't merge PR 12: the tests aren't green."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_passes(out, "a failed merge, with an aren't reason after the colon")
+
     def test_cc_red_a_later_push_success_makes_a_past_failure_no_claim(self):
         # Catches: a push that failed and was then pushed again read as a present claim that the push cannot be done.
         # The later success of the same push makes the failed one a past failure, so the line is no claim.
