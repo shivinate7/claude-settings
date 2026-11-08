@@ -39,6 +39,7 @@
 //   N17      a notes.md directly in decisionsDir is no record: a file only it names needs no map line.
 //   N18      README and notes under a slug-style decisionIdPattern: an id of either names no record, and MAP10 fails on each by name.   [green]
 //   N19      map-show README and notes name no record: exit 1, nothing on stdout, and no record file printed.                          [green]
+//   N20      a tracked .svg inside decisionsDir, and no record, that a decision record names needs a map line: MAP1 fails and names it.
 //   DB1      a .svg a debt record names needs a map line: MAP1 fails and names it.
 //   DB2      its map line needs a Debts line with the slug: the failure names the file and the slug.
 //   DB3      control: a map line with `  - Debts: ` naming the slug: no check fails.                     [green]
@@ -50,6 +51,7 @@
 //   DB9      control: a debt that names a code file adds no requirement.                                 [green]
 //   DB10     empty state: no debts folder at all, no check fails, and nothing reads a missing folder.    [green]
 //   DB11     full size: two debt records name one .svg, and its map line must hold both slugs.
+//   DB12     a tracked .svg inside the debts folder, and no debt, that a debt names needs a map line: MAP1 fails and names it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -323,6 +325,21 @@ test('N19. map-show README and notes name no record: each exits 1 with nothing o
   }
 });
 
+// A file inside the decisions folder that is no record: a decision record names it, so it needs a map line.
+const DIAGRAM = `${RECORDS}/diagram.svg`;
+const DIAGRAM_RECORD = `${RECORDS}/D031-diagram.md`;
+
+test('N20. a tracked .svg inside decisionsDir, and no record, that a decision record names needs a map line: MAP1 fails and names it', () => {
+  const dir = scratch();
+  addFile(dir, DIAGRAM, SVG);
+  addFile(dir, DIAGRAM_RECORD, record('D031 Diagram', [DIAGRAM]));
+  // The scope first: the svg has no map line, and D031 names it by its backticked path.
+  assert.doesNotMatch(readIn(dir, MAP), /diagram\.svg/, 'scope: the map page has no line for the svg');
+  assert.ok(readIn(dir, DIAGRAM_RECORD).includes(`\`${DIAGRAM}\``), 'scope: D031 names the svg by its backticked path');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP1', DIAGRAM), `MAP1 must fail on the svg inside the decisions folder that D031 names, with no map line\n${tail(out)}`);
+});
+
 // ---- Debt records: a non-code file that a debt record names needs a map line, and the debt's slug on a Debts line.
 
 test('DB1. a .svg that a debt record names needs a map line: MAP1 fails and names the file', () => {
@@ -439,4 +456,17 @@ test('DB11. full size: two debt records name one .svg, and its map line must hol
   assert.deepEqual(subLineIds(dir, MAP, SVG_PATH, 'Debts'), ['retry-backoff'], 'scope: the Debts line holds retry-backoff only');
   const out = run([CHECK], dir).out;
   assert.ok(failLines(out).some((l) => l.includes(SVG_PATH) && l.includes('cache-warm')), `a check must fail naming the .svg and the missing slug cache-warm\n${tail(out)}`);
+});
+
+test('DB12. a tracked .svg inside the debts folder, and no debt, that a debt record names needs a map line: MAP1 fails and names it', () => {
+  const dir = scratch();
+  const debts = debtsDirOf(dir);
+  const svg = `${debts}/diagram.svg`;
+  addFile(dir, svg, SVG);
+  addFile(dir, `${debts}/retry-backoff.md`, record('Retry backoff', [svg]));
+  // The scope first: the svg has no map line, and the debt names it by its backticked path.
+  assert.ok(!readIn(dir, MAP).includes(`\`${svg}\``), 'scope: the map page has no line for the svg');
+  assert.ok(readIn(dir, `${debts}/retry-backoff.md`).includes(`\`${svg}\``), 'scope: retry-backoff names the svg by its backticked path');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP1', svg), `MAP1 must fail on the svg inside the debts folder that retry-backoff names, with no map line\n${tail(out)}`);
 });
