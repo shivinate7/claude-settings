@@ -119,7 +119,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its record, and a marker brief with no record of the target, are refusals. A brief to a lane that
                        clears those checks is refused unless its text names `Triage: session_<id>` and
                        `Batch runner: session_<id>` (label without case, optional number and parenthetical gloss, anywhere
-                       in the message). A message without the marker reads no transcript. An
+                       in the message; the id holds a digit; markdown may surround the label, colon and id). A message without the marker reads no transcript. An
                        override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
