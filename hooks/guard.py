@@ -93,10 +93,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
   env-file             deny. Any read or write of an environment file.
+  auto-merge           deny, in every repo. `gh pr merge --auto`, a `gh api graphql` call whose `query=` field holds
+                       enablePullRequestAutoMerge, and the enable_pr_auto_merge tool. It runs before merge-checks
+                       and bare-merge. (owner, page item 369 a, 2026-11-07 19:03 CST)
   merge-checks         deny. A merge while the head has a check pending or red, while another
-                       ready PR on the base runs CI, or when the read could not run. `--auto` too, and the MCP
-                       merge_pull_request and enable_pr_auto_merge tools.
-                       The same two MCP tools ask (bare-merge) on a green head in a repo that uses the merge tool.
+                       ready PR on the base runs CI, or when the read could not run. A `gh api` PUT of a pull
+                       request's merge route too, and the MCP merge_pull_request tool.
+                       The same call forms ask (bare-merge) on a green head in a repo that uses the merge tool.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
@@ -384,12 +387,12 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
+            AUTO_MERGE_REASON, AUTO_MERGE_TOOLS, BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            auto_merge_call_of, conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target,
-            FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
+            FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request, GH_API_FIELD_FLAGS,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1459,7 +1462,6 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
 
 
 # ---- a review record posted as a comment (rule pr-review-record; the judge is guard_merge.review_record_hit)
-GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 _COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/(\d+)/comments/?")
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
 _CAT_BODY = re.compile(r"\$\(\s*cat\s+([^|;&<>()]+?)\s*\)")
@@ -3656,6 +3658,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
+    # 6. Auto-merge, in every repo, before merge-checks and bare-merge read anything: it is refused outright, so
+    # a pending head or a repo with no merge tool changes nothing. Own loop, so a plain merge ahead of it in the
+    # command line cannot end the walk first.
+    for segment in split_segments(stripped):
+        if segment.strip() and auto_merge_call_of(segment):
+            refuse(tool, "deny", "auto-merge", AUTO_MERGE_REASON, "gh auto-merge")
+
     # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
     # could not run. Judged per segment from the command word, so quoted text never fires it.
     for segment in split_segments(stripped):
@@ -4991,6 +5000,10 @@ def judge(payload) -> None:
                   if opus_unread else ""),
                opus_model,
                spawn_role=opus_role or "general-purpose")
+
+    # The host's auto-merge tool is refused as the shell forms are (rule auto-merge), before the merge guard reads the head.
+    if tool in AUTO_MERGE_TOOLS:
+        refuse(tool, "deny", "auto-merge", AUTO_MERGE_REASON, "auto-merge tool")
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
