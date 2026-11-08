@@ -795,8 +795,9 @@ def _child_starts(words, i: int, flags):
     option ends the scan, so a program's own arguments (`docker run --rm myimage serve env`,
     `uv run -q pytest -k env`) are never starts. FEWEST FALSE ALARMS: a start that is no child
     costs nothing, since `_child_prints` reads only env, printenv, shells, python and inline
-    runners. One false alarm stays: a program's own word right after an option of its own, once
-    an unlisted option came first (`uv run --foo pytest -k env` has starts `pytest` and `env`).
+    runners. One false alarm stays: an unlisted bool before a program, then `env` or `printenv` as
+    the program's first word or after its own option (`uv run --exact pytest -k env` has starts
+    `pytest` and `env`; so does `uv run --foo pytest env`).
     `--` ends the runner's options, so the word after it is the one start."""
     while i < len(words):
         word = words[i]
