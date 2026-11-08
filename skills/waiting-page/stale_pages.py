@@ -41,7 +41,7 @@ saves main's page with the live designData and roadmap blocks kept (splice.carry
 --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
---items names the items the session saved with `ArtifactData list items`: a JSON list file, or the folder of
+--items names the items the session saved with `ArtifactData list items`: a JSON list file (bare data objects, or {id, data} entries), or the folder of
 <id>.json files that call saves. A folder without the .complete marker reads every wait `unknown`, with no gh call.
 --items needs hooks/_nowindow.py to start gh; without it every wait reads `unknown`. A `run` or `pr` is a whole
 number above zero, or a string of digits with no leading zero; anything else reads `unknown`. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
@@ -55,10 +55,11 @@ An item with `waits` keeps its one line. The word is
 `waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
 malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). The exit code stays the page verdict's.
 --answers, with --items, names the answers the session saved with `ArtifactData list answers`, in the same two shapes, read by the same
-loader (a list entry names its item in `item`; a folder doc by its file name). After the wait and lane lines, one line per closed item,
+loader (a list entry names its item in `item`, or is {"id", "data"}; a folder doc by its file name). After the wait and lane lines, one line per closed item,
 in item order, whose answer is still kept: `kept-answer: item <n> (<id>) is closed and answers/<id> is kept`, then the remedy (delete
-the answer, or reopen the item with `lane` and `lastAnswer`). Never named: an open item or one with no status, an item with `waits` or `arbiter`,
-a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
+the answer, or reopen the item with `lane` and `lastAnswer`). A closed item with `waits` prints `kept-answer: item <n> (<id>) is closed with waits and
+answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and delete the answer; no gh call. Never named: an open item or one with no status,
+an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
@@ -414,7 +415,9 @@ def session_line(root, main_checkout=None):
 def load_docs(path, what="items", keyed=False):
     """(docs, complete): the saved `what` ("items" or "answers") as a list from a JSON list file, or the folder `ArtifactData list` saves. `complete` is False
     for a folder without the marker the session leaves after the last list page, since a stopped fetch may lack docs. With `keyed`, each doc is
-    (doc id, data): the file name of a folder doc, None for a list entry, whose data alone says which item it answers. Raises ValueError with the cause."""
+    (doc id, data): the file name of a folder doc, None for a bare list entry, whose data alone says which item it answers. A list entry shaped
+    {"id": str, "data": dict} (what `ArtifactData list` returns) unwraps to (id, data), as a folder doc does, with or without `keyed`; so `--items`
+    reads that shape's data, where it once read the wrapper. Raises ValueError with the cause."""
     from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --items and --answers read a folder
     try:
         if os.path.isdir(path):
@@ -422,8 +425,12 @@ def load_docs(path, what="items", keyed=False):
             data = list(found.items()) if keyed else list(found.values())
         else:
             data = load_json(path, path)
-            if keyed and isinstance(data, list):
-                data = [(None, doc) for doc in data]
+            if isinstance(data, list):
+                wrapped = [isinstance(doc, dict) and isinstance(doc.get("id"), str) and isinstance(doc.get("data"), dict) for doc in data]
+                if keyed:
+                    data = [(doc["id"], doc["data"]) if w else (None, doc) for doc, w in zip(data, wrapped)]
+                else:
+                    data = [doc["data"] if w else doc for doc, w in zip(data, wrapped)]
     except Stop as err:
         raise ValueError(str(err))
     except OSError as err:
@@ -520,8 +527,9 @@ def wait_lines(items, complete=True):
 
 def kept_answer_lines(items, answers, complete=True, answers_complete=True):
     """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it or reopens the item
-    (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. Never an open item, an item with `waits` (no delete
-    happens during a wait), an arbiter ruling (its overturn answer is meant to stay), a park answer or an answer with no item.
+    (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. A closed item with `waits` and a kept answer (a chat
+    answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end; no gh call. Never an open
+    item, an arbiter ruling (its overturn answer is read by its own route), a park answer or an answer with no item.
     With `complete` or `answers_complete` False (that folder may be cut short), one unknown line naming it."""
     if not (complete and answers_complete):
         return ["kept-answer: unknown (the %s folder has no .complete marker, so its list may be cut short)"
@@ -539,7 +547,12 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
         if not isinstance(item, dict):
             continue
         item_id = doc_id if doc_id is not None else item.get("id")  # the file name is the doc id, as for the answers
-        if item.get("status") == "closed" and "waits" not in item and not item.get("arbiter") and item_id in kept:
+        if item.get("status") != "closed" or item.get("arbiter") is True or item_id not in kept:
+            continue
+        if "waits" in item:
+            lines.append('kept-answer: item %s (%s) is closed with waits and answers/%s is kept; when its wait has ended, drop waits and delete '
+                         'answers/%s (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
+        else:
             lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; re-read answers/%s, then delete it, or reopen the item with '
                          'lane and lastAnswer (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
     return lines

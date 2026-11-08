@@ -123,15 +123,16 @@ if pull:
     if number not in state["prs"]:
         not_found()
     print(json.dumps({"number": int(number), "state": "open", "draft": False,
-                      "head": {"sha": state["prs"][number]["head"], "ref": "feat-" + number}, "base": {"ref": "main"}}))
+                      "head": {"sha": state["prs"][number]["head"], "ref": "feat-" + number}, "base": {"ref": state.get("base", "main")}}))
 elif issue:
     if state["fail_comments"]:
         fail(state["fail_comments"])
     number = issue.group(1)
     if number not in state["prs"]:
         not_found()
-    comments = [{"id": k + 1, "body": body, "issue_url": "https://api.github.com/repos/example-owner/example-repo/issues/" + number}
-                for k, body in enumerate(state["prs"][number]["comments"])]
+    comments = [{"id": k + 1, "issue_url": "https://api.github.com/repos/example-owner/example-repo/issues/" + number,
+                 **(item if isinstance(item, dict) else {"body": item})}
+                for k, item in enumerate(state["prs"][number]["comments"])]
     size = min(int(fields.get("per_page", 30)), 100)
     pages = [comments[k:k + size] for k in range(0, len(comments), size)] or [[]]
     if "--slurp" in flags and "--paginate" not in flags:
@@ -176,6 +177,21 @@ def record(head=LIVE, n=PR, rounds=ROUNDS, fix=None):
     return merge_mod.review_body(n, head, "normal", "no", rounds, "not owed", fix)
 
 
+def unstamped(text):
+    """The record with its Stamp line taken out: the shape of a body typed by hand, or of one made before the stamp's merge."""
+    return "\n".join(line for line in text.splitlines() if not line.startswith("Stamp: ")) + "\n"
+
+
+# The cutover history: origin/fixture holds merge/merge.py without the salt line, then with it, at CUTOVER. A record created before
+# CUTOVER may carry no Stamp line; one created after it must carry one. Times are fixed, so no case reads the clock.
+BEFORE = "2026-10-02T00:00:00Z"   # a comment created before the cutover
+AFTER = "2026-11-01T00:00:00Z"    # a comment created after the cutover
+CUTOVER = "2026-10-21T15:04:05Z"  # the committer time of the commit that adds the salt line
+CUTOVER_GIT_DATE = "2026-10-21 15:04:05 +0000"
+PRE_SALT_SOURCE = "def f():\n    return 1\n"
+SALT_SOURCE = 'REVIEW_STAMP_SALT = "claude-settings review record stamp v1"\n' + "def f():\n    return 2\n"
+
+
 def setUpModule():
     trg.setUpModule()
 
@@ -202,15 +218,30 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIsNotNone(shutil.which("gh", path=self.gh_dir), "the stand-in gh is not on its own PATH")
         self.serve()
 
-    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None):
-        """The stand-in's answers: each PR's live head and its comments, oldest first, and any read to break.
-        `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without it, PR 12 has `comments`."""
+    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None, base="main"):
+        """The stand-in's answers: each PR's live head and its comments, oldest first, and any read to break. `base` is the branch
+        the pull requests name as their base. `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without it, PR 12 has
+        `comments`. A comment is its body, or a dict with body, created_at and updated_at, as the comment list gives them."""
         if prs is None:
             prs = {PR: {"head": LIVE, "comments": list(comments)}}
         state = {"prs": {str(n): {"head": p["head"], "comments": list(p["comments"])} for n, p in prs.items()},
-                 "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments}
+                 "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments, "base": base}
         with open(os.path.join(self.gh_dir, "state.json"), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
+
+    def cutover_history(self, base):
+        """origin/<base> holds merge/merge.py without the salt line, then the commit that adds it, at CUTOVER. update-ref sets the
+        remote-tracking ref, so nothing is pushed. Then merge's review_stamp_since reads this repo's own history."""
+        path = os.path.join(self.repo, "merge", "merge.py")
+        os.makedirs(os.path.dirname(path))
+        for text, date in ((PRE_SALT_SOURCE, "2026-10-20 10:00:00 +0000"), (SALT_SOURCE, CUTOVER_GIT_DATE)):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            env = dict(os.environ, GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date)
+            subprocess.run(["git", "-C", self.repo, "add", "merge/merge.py"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", self.repo, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com",
+                            "commit", "-q", "-m", "fixture"], check=True, capture_output=True, env=env)
+        subprocess.run(["git", "-C", self.repo, "update-ref", "refs/remotes/origin/" + base, "HEAD"], check=True, capture_output=True)
 
     def gh_calls(self):
         """The argv of each stand-in call of the last Stop run."""
@@ -344,6 +375,40 @@ class ReviewRecordTests(unittest.TestCase):
         self.serve(comments=[record(), record(head=OLD)])
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
+    def test_marker_line_with_trailing_spaces_is_a_record_as_merge_reads_it(self):
+        # Catches: _newest_record's raw first-line test, which reads a record whose marker line has trailing spaces as no
+        # record, so a lane's PASS claim on a PR that merge --reviewed reads as done is refused. merge's review_marked and
+        # parse_review both strip a line's trailing whitespace.
+        body = record().replace(merge_mod.REVIEW_MARKER + "\n", merge_mod.REVIEW_MARKER + "  \n", 1)
+        self.assertTrue(merge_mod.review_marked(body), "fixture: merge does not read the marker line with trailing spaces as the marker")
+        self.assert_record_satisfies_claim(body)
+
+    def test_an_unstamped_done_record_created_before_the_cutover_satisfies_a_pass_claim(self):
+        # Catches: a record made before the stamp's merge, with no Stamp line, read as no record, so a lane's PASS claim on its
+        # pull request is refused. merge --reviewed reads the same record as done.
+        self.cutover_history("fixture")
+        self.assertEqual(merge_mod.review_stamp_since(self.repo, "fixture"), CUTOVER,
+                         "fixture: the cutover is not the time of the commit that adds the salt line")
+        body = unstamped(record())
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body, BEFORE, CUTOVER), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call this record done")
+        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture")
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertIsNone(out, out)
+
+    def test_an_unstamped_record_created_after_the_cutover_blocks_a_pass_claim(self):
+        # Catches: the cutover letting a record made after the stamp's merge through with no Stamp line.
+        self.cutover_history("fixture")
+        self.serve(comments=[{"body": unstamped(record()), "created_at": AFTER}], base="fixture")
+        self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
+
+    def test_an_unstamped_record_created_before_and_edited_after_the_cutover_blocks_a_pass_claim(self):
+        # Catches: a record created before the cutover and edited after it, with no Stamp line, read as made before the cutover.
+        self.cutover_history("fixture")
+        self.serve(comments=[{"body": unstamped(record()), "created_at": BEFORE, "updated_at": AFTER}], base="fixture")
+        self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
+
     def test_record_whose_rounds_hold_no_pass_does_not_satisfy_a_pass_claim(self):
         # Catches: a record for the live head read as satisfying a PASS claim when none of its rounds passed.
         for verdict in ("FAIL", "PARTIAL"):
@@ -403,6 +468,18 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIn("merge 12 --review-record", out["reason"], out)
         self.assertNotIn(LIVE, out["reason"], out)
         self.assertNotIn(LIVE[:7], out["reason"], out)
+
+    def test_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
+        # Catches: the refusal of an unstamped record in a repo with no cutover, whose text names no Stamp line, so the
+        # reviewer is not told what the record lacks. The render command stays in the remedy.
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        body = unstamped(record())
+        self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the unstamped record with no cutover")
+        self.serve(comments=[body])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_blocked(out)
+        self.assertIn("merge 12 --review-record", out["reason"], out)
+        self.assertIn("Stamp", out["reason"], "the refusal names no Stamp line for a record that has none:\n" + out["reason"])
 
     def test_full_size_comment_list_without_a_record_blocks(self):
         # Full size: 101 comments, none a record. The check reads them all, then blocks.

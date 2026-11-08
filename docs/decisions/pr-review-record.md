@@ -33,7 +33,7 @@ CI: read live by merge --reviewed
 
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
-- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
+- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A fix check PASS counts as its round passing in any round when Guard or check is `no`. When Guard or check is `yes`, a fix check PASS before round 3 does not end review (item 402 a, owner, 2026-11-08 06:08 CST). After round 3, a PASS keeps the net value round 3 gave; with no round recorded it reads open.
 - The `Stamp` line comes once, after Net value and just above the CI line. It is the first 16 hex digits of sha256 over `REVIEW_STAMP_SALT` and every line above it, marker included (`review_stamp`). Each line counts without its trailing whitespace, so a body that the MCP tool re-spaced or gave CRLF ends keeps its stamp. `review_body` writes it, and `parse_review` returns None for a body with no Stamp line (a record created before the cutover may have none; see "The cutover"), a Stamp that does not match, or a line above it that was edited. Mistakes it catches: a record typed by hand, or copied from another PR's record and edited (incidents PR #1512, PR #1472, PR #1494, PR #1812, PR #1839). It is no secret: a forger can compute it, and this record does not defend against one (record `guard-guards-mistakes-only`).
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
@@ -50,7 +50,7 @@ CI: read live by merge --reviewed
 
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
-- round 1 or 2 is its last round, that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent;
+- round 1 or 2 is its last round, and that round is PASS (or, for Guard or check `no`, a fix check PASSes after its FAIL), and the last `design-reviewer` line (across all rounds) is PASS or absent;
 - round 3 is done, and Guard or check is `no`;
 - round 3 is done, Guard or check is `yes`, and Net value is zero or positive;
 - Kind is `delete-only`, Guard or check is `no`, and round 1 is done;
@@ -58,7 +58,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 - A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
-- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
+- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open until round 3 is done, even after a fix check PASSes (item 402 a, owner, 2026-11-08 06:08 CST). The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
 ## The cost
@@ -103,7 +103,7 @@ Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
 
 ## The cutover
 
-A record created before the stamp's merge commit reads as it did before: with no Stamp line, it still parses. A Stamp line that is there must match. A record created at or after that commit needs the stamp, so an unstamped one reads `bad`. The cutover is `review_stamp_since`: the committer time of the first first-parent commit on `origin/<base>` whose `merge/merge.py` holds `REVIEW_STAMP_SALT =`. When no such commit is found, or the read fails, every record reads as before. `Host.review_comments` gives each body with its created time. `merge --reviewed` and the `--fix-check` earlier read pass that time and the cutover to `parse_review`. A new post has no created time, so the guard always needs the stamp. Open PRs keep their old records. Each record a lane renders after the cutover carries the stamp.
+A record last edited before the stamp's merge commit reads as it did before: with no Stamp line, it still parses. A Stamp line that is there must match. A record last edited at or after that commit needs the stamp, so an unstamped one reads `bad`. The cutover dates a record by its last edit because GitHub keeps `created_at` through an edit. A body typed by hand after the cutover, into an older comment, would otherwise read as old. The cutover is `review_stamp_since`: the committer time of the first first-parent commit on `origin/<base>` whose `merge/merge.py` holds `REVIEW_STAMP_SALT =`. When no such commit is found, or the read fails, there is no cutover. `Host.review_comments` gives each body with its last edit time (`updated_at`, else `created_at`). `merge --reviewed` and the `--fix-check` earlier read pass that time and the cutover to `parse_review`. Without a cutover, `merge --reviewed` and `--fix-check` accept an unstamped record. The report guard reads the cutover for the PR's base, when it has a cwd: one `git log` per distinct base per Stop, cached for the process. Without a cutover, the report guard still requires the Stamp line, so its strictness stops a hand-typed record. A new post has no time, so the guard always needs the stamp. Open PRs keep their old records for `merge --reviewed` only. The report guard with no cutover refuses an old unstamped record, and its refusal names the Stamp line. Each record a lane renders after the cutover carries the stamp.
 
 ## Lane picks
 
