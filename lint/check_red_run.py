@@ -10,11 +10,13 @@ records that run as a trailer on the commit that adds the test:
     Red-run: <command> -> <N> failed on <sha>       N is 1 or more, sha is 7 or more hex digits
     Red-run: mutant: <mutation> -> <N> failed on <sha>
                                                     for a claim only a mutation shows red: <mutation> is non-empty, and
-                                                    sha is a commit HEAD reaches
+                                                    sha has the same shape as the failed form's
     Red-run: none: <reason>                         a change that adds no new claim, such as a re-pointed fixture
 
-A line that starts `Red-run: mutant:` is judged by the mutant form alone, never by the command form. The check proves
-the sha is reachable from HEAD, and never that the mutation was made: that part is claimed.
+A line whose keyword reads `mutant` (any case, a space allowed before the colon: `Mutant:`, `mutant :`, `MUTANT:`)
+is judged by the mutant form alone, never by the command form. The check reads the sha's shape only, as it does for the
+failed form, and never that the sha exists or that the mutation was made: those parts are claimed. A rebase or a
+cherry-pick rewrites the commit a sha names, so a reach check raised false alarms.
 
 The check reads each non-merge commit in <base>..HEAD. When HEAD's tree holds lint/check_red_run.py (this repo),
 it judges a commit only when that commit's parent tree holds the file too, so a commit from before the check landed
@@ -37,8 +39,9 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 import guard  # noqa: E402  is_test_rel is the one home of what a test path is (hooks/guard.py)
 
 SELF_REL = "lint/check_red_run.py"
-RED = re.compile(r"^Red-run: (?!mutant:)\S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
-MUTANT = re.compile(r"^Red-run: mutant: \s*\S.*? -> (\d+) failed on ([0-9a-fA-F]{7,64})\s*$")
+RED = re.compile(r"^Red-run: \S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
+MUTANT_KEY = re.compile(r"^Red-run:\s*(?i:mutant)\s*:")  # routes a line to the mutant form
+MUTANT = re.compile(r"^Red-run:\s*(?i:mutant)\s*: \s*\S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
 REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILINE)
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
 FIELD = "\x1f"
@@ -57,41 +60,21 @@ def git(root, *args):
 
 
 def trailer_verdict(message):
-    """(verdict, mutant shas) for a commit message. The verdict is "absent" (no Red-run line), "valid" (a line with
-    1 or more failures, or none with a reason) or "malformed" (Red-run lines, none valid). The shas come from the
-    valid mutant lines. Pure: it reads no repo."""
-    seen, valid, shas = False, False, []
+    """"absent" (no Red-run line), "valid" (a line with 1 or more failures, or none with a reason) or "malformed"
+    (Red-run lines, none valid). Pure: it reads no repo."""
+    seen, valid = False, False
     for line in message.splitlines():
         if not line.startswith("Red-run:"):
             continue
         seen = True
-        if line.startswith("Red-run: mutant:"):
+        if MUTANT_KEY.match(line):
             mutant = MUTANT.match(line)
-            if mutant and int(mutant.group(1)) >= 1:
-                valid = True
-                shas.append(mutant.group(2))
+            valid = valid or bool(mutant and int(mutant.group(1)) >= 1)
             continue
         red = RED.match(line)
         if (red and int(red.group(1)) >= 1) or NONE.match(line.rstrip()):
             valid = True
-    return ("valid" if valid else "malformed" if seen else "absent"), shas
-
-
-def has_trailer(message):
-    """True when the message holds a valid Red-run line."""
-    return trailer_verdict(message)[0] == "valid"
-
-
-def unreachable_mutant(root, shas):
-    """The reason for the first mutant sha HEAD does not reach, else None. One git child per sha."""
-    for sha in shas:
-        r = _nowindow.run(["git", "merge-base", "--is-ancestor", sha, "HEAD"], cwd=root,
-                          capture_output=True, encoding="utf-8", errors="replace")
-        if r.returncode == 1:
-            return "mutant sha %s not reachable from HEAD" % sha
-        if r.returncode:  # 128: the sha names no commit
-            return "mutant sha %s names no commit" % sha
-    return None
+    return "valid" if valid else "malformed" if seen else "absent"
 
 
 def commits(root, base):
@@ -134,11 +117,9 @@ def gaps(root, base):
         paths = added_test_paths(root, parent, sha)
         if not paths:
             continue
-        verdict, shas = trailer_verdict(message)
-        why = unreachable_mutant(root, shas) if verdict == "valid" else "no valid Red-run trailer"
-        if why:
+        if trailer_verdict(message) != "valid":
             shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
-            lines.append("check_red_run: FAIL: %s %s: adds lines to %s with %s" % (sha[:7], subject, shown, why))
+            lines.append("check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer" % (sha[:7], subject, shown))
     return lines
 
 
@@ -166,8 +147,7 @@ def main(args):
         print(line)
     if bad:
         print("check_red_run: add `Red-run: <command> -> <N> failed on <sha>` (N 1 or more), "
-              "`Red-run: mutant: <mutation> -> <N> failed on <sha>` (a claim only a mutation shows red; "
-              "the sha is a commit HEAD reaches), or "
+              "`Red-run: mutant: <mutation> -> <N> failed on <sha>` (a claim only a mutation shows red), or "
               "`Red-run: none: <reason>` for a change that adds no new claim, to the commit message.")
         print("check_red_run: the last commit, not yet pushed: reword it with "
               "`git commit --amend -m <subject> -m \"Red-run: ...\"`, then `git push`.")
