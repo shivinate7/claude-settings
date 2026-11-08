@@ -37,7 +37,7 @@ holds a qualifying act (`questions-reach-page`: every question goes to the page 
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
 starts no turn. Owner-facing session: a send to
-the page writer (the `writer` in the newest meta/page read), or an ArtifactData set, update or batch under
+the page writer (the `writer` in the newest meta/page read; a label such as `Triage (session_X)` counts only through the id it names), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
 parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
@@ -132,7 +132,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses, writer_ids)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -958,15 +958,17 @@ def question_problem(records, turn, text, hook):
     Owner-facing: a send to the page writer, or an items write to this repo's page. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
+    A labelled writer (`Triage (session_X)`) counts only through the id it names (writer_ids).
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
     turn with no counted send reads it once."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
-    acks = {writer: {writer}} if writer else {}
+    named = writer_ids(writer)
+    acks = {i: {i} for i in named}
     uses, sends = _turn_acts(records, turn, acks)
-    if writer and any(writer in t for t in sends):
+    if any(x in named for t in sends for x in t):
         return "", ""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     from override import remote_session_id
@@ -976,7 +978,7 @@ def question_problem(records, turn, text, hook):
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
-        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
+        wanted = ({parent} if parent else set()) | named | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
@@ -989,7 +991,7 @@ def question_problem(records, turn, text, hook):
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
-    route = ("send_message to the writer " + writer if writer else
+    route = ("send_message to the writer " + ", ".join(sorted(named)) if named else
              "read meta/page on " + page + " with ArtifactData get, then send_message the question to its writer")
     return OWNER_REFUSAL % route, ""
 
