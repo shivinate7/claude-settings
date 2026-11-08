@@ -71,6 +71,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
+from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 from workflow_steps import job_block, job_workflow, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
