@@ -7905,16 +7905,47 @@ NM_ALIASES = ("npm clean-install", "npm install-clean", "npm ic", "npm cit",
 for _command in NM_ALIASES:
     nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
 
+# THE ALIAS `r`. npm reads `r` as uninstall, and `rebuild` also starts with `r`, so the abbreviation match must
+# not read `r` as rebuild. A dry run of uninstall changes nothing, so it is allowed, as `uninstall` is.
+nm_case("linked-nm: npm r x --dry-run (Bash) in a linked folder is allowed, r is uninstall",
+        "npm r x --dry-run", "allow", NMLINKED)
+nm_case("linked-nm: npm uninstall x --dry-run (Bash) in a linked folder is allowed, a control",
+        "npm uninstall x --dry-run", "allow", NMLINKED)
+
 # THE VALUE FLAGS. A global flag that takes a value, placed before the subcommand, runs the same install.
 nm_case("linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder",
         "npm --loglevel error ci", "deny", NMLINKED)
 nm_case("linked-nm: refuse npm --prefix . ci (Bash) in a linked folder",
         "npm --prefix . ci", "deny", NMLINKED)
 
-# THE --loglevel VALUE. Under a mutant that drops --loglevel from the value flags, `error` becomes the subcommand
-# and this allowed `ls` is refused. The case passes on the current guard; the mutant is its only red.
+# THE --loglevel VALUE. `--loglevel` takes the word after it, so `error` is not the subcommand, and the `ls` after
+# it is the word judged.
 nm_case("linked-nm: npm --loglevel error ls (Bash) in a linked folder is allowed",
         "npm --loglevel error ls", "allow", NMLINKED)
+
+# THE DASH WORD AFTER A STRING FLAG. A String option does not take a word that starts with a dash as its value
+# (nopt), so the `-g` after `--tag`, `--scope` or `-c` is the global flag. Each of these is judged as `npm -g ci` is.
+nm_case("linked-nm: npm -g ci (Bash) in a linked folder is allowed, a control",
+        "npm -g ci", "allow", NMLINKED)
+nm_case("linked-nm: npm --tag -g ci (Bash) in a linked folder is allowed, as npm -g ci is",
+        "npm --tag -g ci", "allow", NMLINKED)
+nm_case("linked-nm: npm --scope -g ci (Bash) in a linked folder is allowed, as npm -g ci is",
+        "npm --scope -g ci", "allow", NMLINKED)
+nm_case("linked-nm: npm -c -g ci (Bash) in a linked folder is allowed, as npm -g ci is",
+        "npm -c -g ci", "allow", NMLINKED)
+
+# THE LAST --location. npm reads the last value of a repeated option, so the last `--location` decides whether the
+# install is global. The two controls put one `--location` alone after the subcommand.
+nm_case("linked-nm: npm ci --location project (Bash) in a linked folder is refused, a control",
+        "npm ci --location project", "deny", NMLINKED)
+nm_case("linked-nm: npm ci --location global (Bash) in a linked folder is allowed, a control",
+        "npm ci --location global", "allow", NMLINKED)
+nm_case("linked-nm: npm ci --location global --location project (Bash) in a linked folder is refused, "
+        "the last value is project",
+        "npm ci --location global --location project", "deny", NMLINKED)
+nm_case("linked-nm: npm ci --location project --location global (Bash) in a linked folder is allowed, "
+        "the last value is global",
+        "npm ci --location project --location global", "allow", NMLINKED)
 
 # THE VALUE FLAGS THE GUARD DOES NOT KNOW. --depth, --package, --location and its short -L take a value, so the
 # word after them is not the subcommand. The guard refuses each today. The controls put the same flag after the
