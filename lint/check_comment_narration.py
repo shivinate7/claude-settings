@@ -56,9 +56,10 @@ class ReviewRound:
     ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
                        r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
                        r"|\breview\s+(?:round|finding|points?)\b", re.I)
-    ID = r"(`?)([a-z0-9][a-z0-9-]*)\1"
-    OPENS = re.compile(r"\s*(?:decision\s+)?" + ID + r"\s*,", re.I)
-    BEFORE = re.compile(r"(?<![\w`-])" + ID + r"\s*$", re.I)
+    ID = r"(?P<id>[a-z0-9][a-z0-9-]*)"
+    # Form (i) needs a marker: "decision" with optional backticks, or backticks alone.
+    OPENS = re.compile(r"\s*(?:decision\s+(?P<q>`?)|`)" + ID + r"(?(q)(?P=q)|`)\s*,", re.I)
+    BEFORE = re.compile(r"(?<![\w`-])(`?)" + ID + r"\1\s*$", re.I)
 
     def __init__(self):
         self.top, self.known = None, {}
@@ -91,7 +92,7 @@ class ReviewRound:
         """The ids the parentheses at lo gloss: the one they open with, and the one right before them."""
         for m in (self.OPENS.match(text, lo + 1), self.BEFORE.search(text[:lo])):
             if m:
-                yield m.group(2)
+                yield m.group("id")
 
     def finditer(self, text):
         spans = self.paren_spans(text)
