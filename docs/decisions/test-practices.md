@@ -32,7 +32,7 @@ P5. A timed test is allowed, but first ask whether it is needed. A test whose ve
 - claude-settings plan c95-step2-escapes (roadmap branch) — 24 of 34 red runs on main were timing or load asserts.
 - q_max b14be7a95 — a fixed wait went false-green under load.
 - mailaudit 99bc9df — cases that waited real seconds moved to a virtual clock, asserts unchanged.
-- joyous PR 68 — main went red from 2026-11-01 22:30 CST (per that PR's title; the joyous repo is not readable here) because a test read the real clock; the fix pins the tour test's clock. Its merge was the one a stale schedule run blocked (decision `no-merge-onto-red-main`).
+- joyous PR 68, titled "Pin the tour test clock (main red since Nov 1 22:30 CST)" — main went red from 2026-11-01 22:30 CST because a test read the real clock; the fix pins the tour test's clock. Its merge was the one a stale schedule run blocked (decision `no-merge-onto-red-main`).
 - degen branch `l4-row-wait` — a test counted rows before they rendered; wait on the rendered condition, then count.
 Applies to: every test.
 
