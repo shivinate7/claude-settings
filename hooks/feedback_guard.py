@@ -1225,7 +1225,8 @@ def export_check(cwd, transcript_path, session_id):
     exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
     branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (verdict
     `same`, or `<page id>: same` under --all). This session is the writer when the newest meta/page get names
-    `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
+    `session_id` or the id the remote env names (override.remote_session_id). Only a get whose url is the repo's
+    waiting page counts (layout.is_waiting_page_url); a get of any other page names no writer. A writer named there decides
     alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write
     make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
     with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
@@ -1240,15 +1241,15 @@ def export_check(cwd, transcript_path, session_id):
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
         return None, None  # nothing is read from the repo before a write is found
-    is_writer = writer_is(records, session_id)
-    if is_writer is None:
-        is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
-    if not is_writer:
-        return None, None  # receipts and answers are not this session's to export
     try:
         root = Homes(cwd)._cwd_root()
         if root is None:
             return None, None
+        is_writer = writer_is(records, session_id, lambda url: layout.is_waiting_page_url(root, url))
+        if is_writer is None:
+            is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
+        if not is_writer:
+            return None, None  # receipts and answers are not this session's to export
         is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes}}
         wrote = [w[0] for w in writes if is_page[w[2]]]
         if not wrote:
