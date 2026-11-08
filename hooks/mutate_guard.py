@@ -1716,6 +1716,11 @@ MUTATIONS = [
      '            if not builder or (kind == OWN and rel not in {r for _o, _n, p, k in changes if k == KEPT for r in p}):',
      "guard",
      "builder-refuse: after a rebase, main's bytes written back over a test file are denied at commit"),
+    ("role-diff: every merge commit reachable from HEAD is read, not only the reflog's",
+     '    lost = set()\n    if kinds:',
+     '    for sha in guard_core._git(root, "rev-list", "--merges", "HEAD").stdout.split():\n'
+     '        kinds.setdefault(sha, OWN)\n    lost = set()\n    if kinds:', "guard",
+     "builder-refuse: a builder in a fresh worktree that checks out a test-author's merge commit is allowed at commit"),
     ("role-diff: untracked files are never read",
      '    return tracked + sorted(fresh)', '    return tracked', "guard",
      "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
