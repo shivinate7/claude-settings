@@ -1523,9 +1523,11 @@ def hand_off_problem(hook, text):
 # Why: a notice alone can make a reply hand the owner an act the session can do, such as a PR that the GitHub MCP
 # create-PR tool opens on its first call. Record: decision claims-carry-backing.
 _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
+_ADVERB = r"(?:even|yet|currently|actually|really|still|also|just|now|directly|simply|unfortunately)"  # one home of the adverbs
 CANNOT_RE = re.compile(
-    _NOT_NAME + r"(?:%s|can not|could(?:n['’]t| not)|no way (?:to|I can|we can)|not able to|wasn['’]t able to"
-    r"|(?:won['’]t|will not) be able to|ha(?:ve|s)(?:n['’]t| not) been able to)(?![\w-])" % _CANT, re.I)
+    _NOT_NAME + r"(?:%(c)s|can not|could(?:n['’]t| not)|no way (?:to|I can|we can)|not\s+(?:%(a)s\s+)*able to"
+    r"|wasn['’]t\s+(?:%(a)s\s+)*able to|(?:won['’]t|will not) be able to"
+    r"|ha(?:ve|s)(?:n['’]t| not)\s+(?:%(a)s\s+)*been able to)(?![\w-])" % {"c": _CANT, "a": _ADVERB}, re.I)
 CANNOT_BREAK_RE = re.compile(r"\.(?!\w)|[;:!?—–]|\s-{1,2}\s")  # a clause ends here; a dot inside a token (api.github.com) does not
 CANNOT_BEFORE_BREAK_RE = re.compile(r"[.;:!?,—–]|\s-{1,2}\s|\bbut\b", re.I)  # and before it, a comma or but too
 CANNOT_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
@@ -1536,7 +1538,7 @@ CANNOT_NEGATOR_GAP = 3  # words before the phrase a negator may sit in and still
 # guard, the lane, the session, a draft PR) is another party, so the sentence is no claim about this session.
 CANNOT_SUBJECT_RE = re.compile(
     r"(?:^|\b(?:I|we)(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re|\bthe\s+cloud(?:\s+session)?"
-    r"|\bthis\s+session|\bhere|\bthere(?:\s+(?:is|was)|['’]s))(?:\s+(?:still|also|just|really|now))?\s*$", re.I)
+    r"|\bthis\s+session|\bhere|\bthere(?:\s+(?:is|was)|['’]s))(?:\s+" + _ADVERB + r")*\s*$", re.I)
 CANNOT_LEAD_RE = re.compile(r"^\W*(?:(?:and|but|so|then)\b\W*)?", re.I)  # a joining word before the subject
 # A passive act whose clause says where it runs ("can't be merged from here") is a claim whatever its subject.
 CANNOT_FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|the\s+cloud|this\s+session)\b", re.I)
@@ -1602,7 +1604,11 @@ CANNOT_UNVETTED_RE = re.compile(r"^(?:[-*+]|\d+[.)])?\s*(?:\*\*)?Unvetted:", re.
 CANNOT_PAST_RE = re.compile(r"^(?:could|wasn['’]t)", re.I)
 CANNOT_WAS_RE = re.compile(r"\b(?:was|were)(?:\s+(?:still|also|just|really|now))?\s*$", re.I)
 CANNOT_WINDOW = 6  # words after the phrase, in its clause, that may name the act
-CANNOT_ADVERB_RE = re.compile(r"^(?:(?:even|yet|currently|actually|really|still|also|just|now|directly)\s+)+", re.I)
+CANNOT_ADVERB_RE = re.compile(r"^(?:%s\s+)+" % _ADVERB, re.I)
+# Emphasis marks around a word (**merge**, _push_) are no part of the word; an underscore inside a name stays.
+CANNOT_EMPHASIS_RE = re.compile(r"(?<!\w)(?:\*\*|__|\*|_)(?=\w)|(?<=\w)(?:\*\*|__|\*|_)(?!\w)")
+# A code span of one act verb (`push`) names the act like the bare word.
+CANNOT_VERB_SPAN_RE = re.compile(r"^`(open|create|make|raise|file|submit|merge|push|close|comment|mark|edit|update)`", re.I)
 _PR = r"(?:PRs?|pull[- ]requests?)"
 # A preposition ends the pr-open object: "open the logs for PR 12" opens the logs, not a PR.
 _PREPOSITION = r"(?:for|of|in|on|to|from|with|about|against|at|by|per)"
@@ -1670,11 +1676,29 @@ CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
 CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push|merge)\b")
 CANNOT_CHECK_RE = re.compile(
     r"`[^`\n]+`|\bmcp__\w+|\b(?:tried|ran|returned|refused|denied|failed|errored"
-    r"|returns|refuses|denies|rejects|fails|errors)\b|\b[45]\d\d\b|\bexit(?: code)? [1-9]",
+    r"|returns|refuses|denies|rejects|fails|errors)\b|\bexit(?: code)? [1-9]"
+    r"|(?:\b(?:HTTP(?:/[\d.]+)?|status|returned|code|error)\s+|\(\s*)[45]\d\d\b(?![-\w])",
     re.I)
-# With a failed try of the act in the turn, the line may name its check as a reason instead: three words or more in
-# parentheses, after a colon, or after because. A bare claim has none of these.
-CANNOT_REASON_RE = re.compile(r"\([^()\s]+(?:\s+[^()\s]+){2,}\)|:\s+\S+(?:\s+\S+){2,}|\bbecause\s+\S+(?:\s+\S+){2,}", re.I)
+# With a failed try of the act in the turn, the line may name its check as a reason instead. A reason is a clause of three
+# words or more with a verb (is, was, not, rejected ...): in parentheses, after a colon, a semicolon, a comma or a dash, after
+# because, or the sentence next to the claim. A bare claim has none of these, and neither has a noun phrase such as
+# "the 450-line diff".
+CANNOT_REASON_RE = re.compile(
+    r"\(([^()]+)\)|[:;,—–]\s+([^.;:!?]+)|\s-{1,2}\s+([^.;:!?]+)|\bbecause\s+([^.;:!?]+)", re.I)
+CANNOT_VERB_RE = re.compile(
+    r"^(?:is|are|was|were|has|have|had|does|do|did|can|cannot|isn['’]t|aren['’]t|wasn['’]t|doesn['’]t|didn['’]t|won['’]t"
+    r"|not|no|needs|requires|\w+ed)$", re.I)
+
+
+def _is_reason(clause):
+    """True when `clause` is a reason: three words or more, one of them a verb (CANNOT_VERB_RE)."""
+    words = clause.split()
+    return len(words) >= 3 and any(CANNOT_VERB_RE.match(w.strip(".,;:()\"'")) for w in words)
+
+
+def _gives_reason(sentence, following):
+    """True when `sentence` carries a reason (CANNOT_REASON_RE), or the sentence that `following` names is one."""
+    return any(_is_reason(g) for m in CANNOT_REASON_RE.finditer(sentence) for g in m.groups() if g) or _is_reason(following)
 CANNOT_HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
 CANNOT_NO_TRY = (
     CANNOT_HEAD + "this turn shows no failed try of it. A notice is no try. Remedy: run the act on one route; if it "
@@ -1694,7 +1718,9 @@ def _mask(text):
 def _window_act(window, clause):
     """The table act the verb at the start of `window` names, else None. `clause` is the phrase's whole clause, where a
     passive form looks for the PR. A code span at the start is read as a route: `gh pr create` is pr-open."""
-    window = CANNOT_ADVERB_RE.sub("", window)
+    window = CANNOT_ADVERB_RE.sub("", CANNOT_EMPHASIS_RE.sub("", window))
+    span = CANNOT_VERB_SPAN_RE.match(window)
+    window = span.group(1) + window[span.end():] if span else window
     if window.startswith("`"):
         acts = sorted(_text_acts(window[1:].split("`", 1)[0]))
         return acts[0] if acts else GITHUB_REACH if CANNOT_GITHUB_SPAN_RE.match(window) else None
@@ -1824,7 +1850,7 @@ def _report_label_end(body):
 
 
 def cannot_lines(text):
-    """(sentence, act, window, past) for each phrase of the reply's prose that claims a table act cannot be done. The text is
+    """(sentence, act, window, past, prior, following) for each phrase of the reply's prose that claims a table act cannot be done. The text is
     read a sentence at a time: a sentence that ends in `?` asks and claims nothing, one that starts with Unvetted: (the
     past-ruling guard's form) is not read, and neither is a line that starts with it or a Why yours line (the hand-off
     guard's). Every phrase of a sentence is judged."""
@@ -1835,12 +1861,13 @@ def cannot_lines(text):
         if CANNOT_UNVETTED_RE.match(body) or not CANNOT_RE.search(_mask(body)):
             continue
         if hand_off is None:
-            hand_off = set(hand_off_lines(text))
+            hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_RE.search(line)}
         if body in hand_off:
             continue
         mask = _mask(body)
         bounds = [0] + [m.end() for m in CANNOT_SENTENCE_RE.finditer(mask)] + [len(body)]
-        for begin, stop in zip(bounds, bounds[1:]):
+        spans = list(zip(bounds, bounds[1:]))
+        for k, (begin, stop) in enumerate(spans):
             piece, shadow = body[begin:stop], mask[begin:stop]
             sentence = piece.strip()
             if sentence.rstrip("*_)\"' ").endswith("?") or CANNOT_UNVETTED_RE.match(sentence):
@@ -1850,7 +1877,9 @@ def cannot_lines(text):
                 claim = _claim(piece, shadow, hit, floor)
                 floor = hit.end()
                 if claim:
-                    found.append((sentence, claim[0], claim[1], claim[2]))
+                    prior = body[spans[k - 1][0]:spans[k - 1][1]].strip() if k else ""
+                    following = body[spans[k + 1][0]:spans[k + 1][1]].strip() if k + 1 < len(spans) else ""
+                    found.append((sentence, claim[0], claim[1], claim[2], prior, following))
     return found
 
 
@@ -1894,6 +1923,17 @@ def _script_tries(tokens):
     return {(act, ("script", name, target)) for act, rx in CANNOT_SCRIPT_ACTS if rx.search(name)}
 
 
+def _gh_target(verb, args):
+    """The target of a `gh pr <verb>` call: the PR number or URL wherever it sits among the flags, else the first plain
+    argument. A create names no PR, so its target is empty."""
+    if verb == ["create"]:
+        return ""
+    for token in args:
+        if re.fullmatch(r"#?\d+", token) or "/pull/" in token:
+            return token.lstrip("#")
+    return next((t for t in args if not t.startswith("-")), "")
+
+
 def _segment_tries(segment):
     """{(act, key)} for the routes one shell segment is a try of: gh (every gh call reaches GitHub; gh pr and gh api
     name table acts), git push, merge, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
@@ -1907,7 +1947,7 @@ def _segment_tries(segment):
     rest = guard.gh_call_of(segment)
     if rest is not None:
         pr = rest[:1] == ["pr"]
-        key = ("gh " + " ".join(rest[:2] if pr else rest[:1]), " ".join(rest[2:3] if pr else rest[1:2]))
+        key = ("gh " + " ".join(rest[:2] if pr else rest[:1]), _gh_target(rest[1:2], rest[2:]) if pr else " ".join(rest[1:2]))
         tries.add((GITHUB_REACH, key))
         if pr and rest[1:2]:
             tries.add((CANNOT_GH_PR_ACTS.get(rest[1], ""), key))
@@ -2015,10 +2055,10 @@ def refused_tools(hook):
     return tuple(row["tool_name"] for _, row in refusal_rows(path))
 
 
-def _cited(line, refused):
-    """True when the claim `line` carries a hand-off cite: a dated measurement, a tool the classifier refused, or a route
-    row that says refused or asks."""
-    if _measured(line) == "ok" or any(names_tool(line, tool) for tool in refused):
+def _cited(line, refused, act):
+    """True when the claim `line` of `act` carries a hand-off cite: a dated measurement, a tool the classifier refused that
+    is a route of that act, or a route row that says refused or asks."""
+    if _measured(line) == "ok" or any(act in _tool_acts(tool) and names_tool(line, tool) for tool in refused):
         return True
     ids = ROUTE_CITE_RE.findall(line)
     return bool(ids) and _route_verdict(ids)[0] == "ok"
@@ -2059,14 +2099,15 @@ def cannot_problem(records, text, refused=()):
     recovered = set()
     tries = failed_tries(records, refused, recovered)
     no_try, no_check = [], []
-    for sentence, act, _, past in claims:
+    for sentence, act, _, past, prior, following in claims:
         backed = _backed(tries, act, sentence)
         if past and not backed and act in recovered:  # the try failed once and a later call of it worked
             continue
-        if not backed and not _cited(sentence, refused):
+        if not backed and not _cited(sentence, refused, act):
             if sentence not in no_try:
                 no_try.append(sentence)
-        elif not (CANNOT_CHECK_RE.search(sentence) or backed and CANNOT_REASON_RE.search(sentence)) \
+        elif not (CANNOT_CHECK_RE.search(sentence) or backed and (CANNOT_CHECK_RE.search(prior)
+                                                                  or _gives_reason(sentence, following))) \
                 and sentence not in no_check:
             no_check.append(sentence)
     return " ".join(head + "".join("\n- " + line for line in lines)
@@ -2562,7 +2603,7 @@ def main():
     cannot = ""
     if last_human_idx is not None and cannot_refused is not None:
         try:
-            cannot = cannot_problem(after, text, cannot_refused)
+            cannot = cannot_problem(turn, text, cannot_refused)  # a try backs a claim only in this turn: after the last message, a peer's included
         except Exception as exc:
             print("cannot-claim guard: UNKNOWN, the check did not run (%s), so the claims went unchecked."
                   % type(exc).__name__, file=sys.stderr)
