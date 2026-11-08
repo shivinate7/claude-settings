@@ -14,6 +14,8 @@ files under hooks/, lint/, bin/, actions/ and .github/ (no touched or untouched 
 with the decisions whose Home names it and the rows that name it.
 STALE005 (range mode only) reports an added governed line that states a capability by route with no backing. It is
 report only: the exit code does not change (RouteClaimTests).
+STALE009 (range mode only) reports an added decision line that states what code does or does not do (a code subject
+and a behaviour verb) with no bound cite. It is report only too (CodeClaimTests).
 
 
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
@@ -2817,6 +2819,198 @@ class ValueCiteTests(StaleCase):
         self.assertEqual([(p, n, c) for p, n, c, _ in found], [(NOTES, 3, "STALE008")], out)
         self.assertIn("no JSON literal", found[0][3], "a set cite that is no JSON literal must print that reason: %s" % found[0][3])
         self.assertEqual(rc, 1, out)
+
+
+DECISION = "docs/decisions/pr-ledger.md"
+GUIDE = "docs/guide.md"
+MERGE_PY = "merge/merge.py"
+LANE_LINT = "def lane_lint(lane):\n    return lane\n"  # the one name merge/merge.py binds at base
+INCIDENT = ("The ledger reads no CI state; a batch line is a done record for the live head; "
+            "`merge --lane-lint` gates the join, and the integration PR's CI run gates the merge.")
+CITED_PAREN = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/merge.py lane_lint);")
+CITED_TICK = INCIDENT.replace("reads no CI state;", "reads no CI state, as `merge/merge.py` `lane_lint` shows;")
+NEW_CITED = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/merge.py new_lane);")
+DEAD_PAREN = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/merge.py no_such_name);")
+DEAD_TICK = INCIDENT.replace("reads no CI state;", "reads no CI state, as `merge/merge.py` `no_such_name` shows;")
+GONE_FILE = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/gone.py lane_lint);")
+CLAIM = re.compile(r"^stale-cites: report, (?P<path>[^\s:]+):(?P<line>\d+): STALE009 (?P<text>.*)$", re.M)
+
+
+def code_claims(out):
+    """(path, line, text) of each report line the check printed for STALE009, in output order."""
+    return [(m.group("path"), int(m.group("line")), m.group("text")) for m in CLAIM.finditer(out)]
+
+
+class CodeClaimTests(StaleCase):
+    """STALE009, range mode only, report only. An ADDED line of a decision record that states what code does or does
+    not do (a code subject and a behaviour verb) must cite a name bound in its file at head, in a STALE002 form.
+    The exit code never changes (decision source-prose-lint-ships-dark)."""
+
+    def rows_range(self, rows, head_extra=None):
+        """A range that rewrites DECISION as `rows` ((text, flagged) pairs) over a base of a heading and the
+        merge/merge.py fixture. `head_extra` ({path: text}) is written at head too. Returns (range, flagged lines)."""
+        text, flagged = rows_text(rows)
+
+        def change(repo):
+            write(repo, DECISION, text)
+            for path, body in (head_extra or {}).items():
+                write(repo, path, body)
+            commit(repo)
+        return self.make_range(base_files(extra={DECISION: "# Heading\n", MERGE_PY: LANE_LINT}), change), flagged
+
+    def assert_code_claims(self, rng, expected):
+        """The exit is 0, the verdict is PASS and no finding prints. The STALE009 report lines are exactly `expected`,
+        as (path, line) pairs. Returns the output."""
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(sorted((p, n) for p, n, _ in code_claims(out)), sorted(expected), out)
+        return out
+
+    def test_incident_sentence_on_an_added_decision_line_is_reported_stale009(self):
+        rng, flagged = self.rows_range([(INCIDENT, True)])
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_bound_name_cited_in_either_form_silences_its_sentence_and_the_uncited_twin_still_fires(self):
+        rows = [("- " + INCIDENT, True), ("- " + CITED_TICK, False), ("- " + CITED_PAREN, False)]
+        rng, _ = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, 1)])
+
+    def test_a_name_the_range_adds_to_its_file_is_bound_at_head_so_a_cite_to_it_is_silent(self):
+        rows = [("- " + INCIDENT, True), ("- " + NEW_CITED, False)]
+        rng, _ = self.rows_range(rows, head_extra={MERGE_PY: LANE_LINT + "\ndef new_lane(lane):\n    return lane\n"})
+        self.assertIn(MERGE_PY, touched(rng))
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, 1)])
+
+    def test_a_cite_to_a_name_unbound_in_its_file_at_head_is_reported_as_a_dead_symbol(self):
+        cited = [(DEAD_PAREN, "no_such_name"), (DEAD_TICK, "no_such_name"), (GONE_FILE, "lane_lint")]
+        rng, flagged = self.rows_range([("- " + text, True) for text, _ in cited])
+        self.assertIn(DECISION, touched(rng))
+        out = self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+        for (_, _, text), (_, name) in zip(code_claims(out), cited):
+            self.assertIn(name, text, out)
+
+    def test_sentences_with_no_code_subject_or_no_behaviour_verb_are_not_reported(self):
+        rows = [
+            ("- The coordinator measures the real ages after the label rollout.", False),
+            ("- Triage disposes a stalled line the way it disposes a stalled step.", False),
+            ("- The owner decides.", False),
+            ("- " + INCIDENT, True),
+        ]
+        rng, flagged = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_code_claim_in_a_file_outside_the_decisions_folder_is_not_reported(self):
+        guide_text, _ = rows_text([("- The ledger reads no CI state.", False)])
+        decision_text, flagged = rows_text([("- The ledger reads no CI state.", True)])
+
+        def change(repo):
+            write(repo, GUIDE, guide_text)
+            write(repo, DECISION, decision_text)
+            commit(repo)
+        rng = self.make_range(base_files(extra={GUIDE: "# Guide\n", DECISION: "# Heading\n", MERGE_PY: LANE_LINT}), change)
+        self.assertIn(GUIDE, touched(rng))
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_code_claim_line_marked_ste_disable_line_stale009_is_left_out_and_a_mark_for_another_code_is_not(self):
+        rows = [
+            ("- " + INCIDENT + " <!-- ste-disable-line STALE009 -->", False),
+            ("- " + INCIDENT + " <!-- ste-disable-line STALE005 -->", True),
+            ("- " + INCIDENT, True),
+        ]
+        rng, flagged = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_sentence_on_a_line_the_range_does_not_add_is_not_reported_even_in_the_same_paragraph(self):
+        base = INCIDENT + "\n"  # no bullet: the old line and the added line are one paragraph
+        head = base + "The hook refuses a push to main.\n"
+
+        def change(repo):
+            write(repo, DECISION, head)
+            commit(repo)
+        rng = self.make_range(base_files(extra={DECISION: base, MERGE_PY: LANE_LINT}), change)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, 2)])
+
+    def test_report_lines_leave_the_exit_code_at_zero_and_the_verdict_at_pass(self):
+        rng, flagged = self.rows_range([("- " + INCIDENT, True), ("- " + DEAD_PAREN, True)])
+        self.assertIn(DECISION, touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(sorted(n for _, n, _ in code_claims(out)), flagged, out)
+
+    def test_each_code_subject_with_a_behaviour_verb_is_reported(self):
+        sentences = [
+            "The tool reads the lane file.",
+            "The ledger writes the lane row.",
+            "The script prints one line.",
+            "The hook calls the guard.",
+            "The guard refuses a push to main.",
+            "The check counts the rows.",
+            "build.py runs the lint.",
+            "`hooks/guard.py` refuses a push to main.",  # a backticked .py path is a subject, and its span is no mention
+        ]
+        rng, flagged = self.rows_range([("- " + s, True) for s in sentences])
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_each_behaviour_verb_with_or_without_a_negator_is_reported(self):
+        sentences = [
+            "The hook writes the lane row.",
+            "The script prints one line.",
+            "The hook calls the guard.",
+            "The ledger counts the lanes.",
+            "The guard refuses a push to main.",
+            "build.py runs the lint.",
+            "The check checks the lane.",
+            "The hook never writes the ledger.",
+            "The script only prints a count.",
+            "The guard does not check the lane.",
+            "The ledger reads no CI state.",
+        ]
+        rng, flagged = self.rows_range([("- " + s, True) for s in sentences])
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_comment_opener_in_a_code_span_does_not_hide_a_claim_on_a_later_line_or_the_same_line(self):
+        rows = [
+            ("- Open a comment with `<!--`.", False),
+            ("- The ledger reads no CI state.", True),
+            ("- Open a comment with `<!--`. The ledger reads no CI state.", True),
+        ]
+        rng, flagged = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_lone_apostrophe_in_text_does_not_hide_the_claim_in_its_sentence_or_the_next(self):
+        rows = [
+            ("- Don't count on it: the ledger reads no CI state.", True),
+            ("- Don't read `hooks/guard.py`. The guard refuses a push to main.", True),
+        ]
+        rng, flagged = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_claim_inside_a_fenced_block_is_not_reported_and_the_same_claim_after_the_fence_is(self):
+        rows = [
+            ("```", False),
+            ("The ledger reads no CI state.", False),  # an example inside a fence: a mention, as STALE005 reads it
+            ("```", False),
+            ("", False),
+            ("- The ledger reads no CI state.", True),
+        ]
+        rng, flagged = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
 
 
 if __name__ == "__main__":
