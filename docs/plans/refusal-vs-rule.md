@@ -160,14 +160,14 @@ Notes: owner-judge also fires on prose "Problem statement:" (wrong id only). gh-
 | `merge:ready-never-sent` | records-index-at-merge | "so the batch runner marks the PR ready" | exact | exact | the tool never marks a PR ready (1073) | - |
 | `merge:blocked-or-behind` | none | - | uncited | exact | a PR GitHub reads BLOCKED (for example, by a missing review) or BEHIND gets no merge call (1085) | rule rewrite: add to standing-merge-grant that a BLOCKED PR never merges |
 | `merge:merged-other-head` | standing-merge-grant | "Only a proven refusal reverts the claim" | exact | exact | the PR merged at another head (1103); no revert | - |
-| `merge:outcome-unproven` | standing-merge-grant | "Only a proven refusal reverts the claim" | exact | exact | state unread (1098), network loss (1105), or exit 0 still open (1107) | - |
+| `merge:outcome-unproven` | standing-merge-grant | "Only a proven refusal reverts the claim" | exact | exact | state unread (1098), network loss (1105), or exit 0 still open (1107); after the claim push, a read that could not run (a failed wait read, the wait deadline with a check pending, a base read, a small-move read such as the lint listing, the workflow, a suite file or a merge that names no conflict, a debt check with only unknown findings) | - |
 | `merge:refused-reply` | standing-merge-grant | "a refusal reply with the pull request still OPEN" | exact | exact | GitHub refuses the merge call (1111); the claim reverts | - |
 | `merge:claim-refused` | records-index-at-merge (nearest) | "claims record numbers under the merge lock" | uncited | exact | the claim exits non-zero (1173) or prints two claim lines (1176) | - |
 | `merge:stamp-config-unreadable` | standing-merge-grant (nearest) | "reads the switch from the base branch on origin" | uncited | exact | the base config cannot be read or parsed (1135, 1141, 1144) | - |
 | `merge:records-commit-failed` | records-index-at-merge | "Only the merge tool rebuilds the page." | unverified | exact | the generator or its commit fails (1189, 1202, 1226) | - |
 | `merge:records-conflict-beyond-page` | merge-needs-current-base | "The head and the base tip merge cleanly." | exact | exact | the base conflicts on a file other than the records page (1215) | - |
 | `merge:records-no-page-to-heal` | records-index-at-merge | "The heal stops when the generator writes no page for a conflicted page." | exact | exact | (1221) | - |
-| `merge:small-move-unproved` | merge-needs-current-base | "A small move is the one exception: ... any read that fails refuses." | exact | exact | a suite or lint read fails, so the base move is not proved small (1422-1556) | - |
+| `merge:small-move-unproved` | merge-needs-current-base | "A small move is the one exception: ... any read that fails refuses." | exact | exact | a suite or lint read fails, so the base move is not proved small (1422-1556); after the claim push it is `merge:outcome-unproven`: the claim stays | - |
 | `merge:holds-base-behind` | merge-needs-current-base | "The merge tool refuses a head that does not hold the base tip." | exact | exact | the head lacks the base tip with no small-move proof (1577-1579) | - |
 | `merge:push-refused` | none | - | uncited | exact | the plain push of the PR branch is refused (1584) | - |
 | `merge:ff-main-skipped` | shared-trees-no-destructive-git | "No destructive git." | exact | exact | the local main is not moved when a fetch, ancestry or ff-only fails (1617-1631) | - |
@@ -203,14 +203,14 @@ Notes: batch_running (726-753) computes the blockers; area F rows its refusal. T
 | `merge:claim-off-default-base` | one-shared-record-stamp (nearest) | "The claim runs before the merge, on the pull request branch" | uncited | exact | a claimed head on a base that is not the default (2239) | rule rewrite: one line in one-shared-record-stamp |
 | `merge:confirm-head-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | the head checks are red before the claim (2258) | - |
 | `merge:confirm-required-names` | no-merge-during-batch-ci | "The tool refuses a base with no protection and no pinned list." | exact | exact | no protection and no pin (2210, 2220) | - |
-| `merge:confirm-wait-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | a check goes red or the deadline passes; the claim reverts (2287) | - |
-| `merge:claim-proof-stale` | merge-needs-current-base | "A base that moved during the wait, and is not a small move, reverts the claim." | exact | exact | the base fetch fails or the claimed number is now taken (2295-2310) | - |
+| `merge:confirm-wait-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | a check goes red; the claim reverts (2287). The deadline with a check pending is `merge:outcome-unproven`: the claim stays | - |
+| `merge:claim-proof-stale` | merge-needs-current-base | "A base that moved during the wait, and is not a small move, reverts the claim." | exact | exact | the claimed number is now taken (2295-2310). A base fetch that fails, or an UNKNOWN stamp or undo read, is `merge:outcome-unproven`: the claim stays | - |
 | `merge:records-stale` | records-index-at-merge | "A stale page ... gets the rebuild commit" | exact | exact | the base gained a record outside the tool (2317, 2321) | - |
 | `merge:base-moved-in-wait` | merge-needs-current-base | "a batch merges only after a green run that holds for the current main." | exact | exact | main moved during the wait, not small (2324) | - |
 | `merge:heal-push-failed` | records-index-at-merge | "When only the page conflicts with the base, the tool rebuilds it on the merged tree." | exact | exact | the heal commit push fails; the claim reverts (2334) | - |
 | `merge:heal-not-green` | merge-needs-current-base | "A heal merge commit ... Its own checks wait before the merge." | exact | exact | the heal commit is red, or the base moved again (2343-2349) | - |
 | `merge:host-refused` | none | - | uncited | exact | the merge call is refused, for example the head moved; the claim reverts (2366) | - |
-| `merge:confirm-unexpected-error` | none | - | uncited | exact | an error after the claim push; the claim reverts (2266-2277, 2370) | - |
+| `merge:confirm-unexpected-error` | none | - | uncited | exact | an error after the claim push that is no read (not a timeout, OS or value error); the claim reverts (2266-2277, 2370) | - |
 | `merge:role-write-failed` | session-tiers | "Local sessions: unchanged." | uncited | exact | `--role` outside the cloud, with no session id, or on an unwritable file (2422, 2424, 2436) | - |
 | `merge:role-tier-invalid` | session-tiers | "The merge tool refuses any other tier, and the refusal lists no tier." | exact | exact | `--role lane` (2426) | - |
 | `merge:no-merge-role` | session-tiers | "Only a coordinator or batch runner gains a way to merge" | exact | exact | a cloud --confirm with no role file (2461, 2403-2415) | - |
