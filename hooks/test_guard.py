@@ -13791,7 +13791,22 @@ def flag_builder_case():
     make_repo(where, {"hooks/test_seed.py": "x = 1\n"})
     stripped = guard.strip_heredoc_bodies(FLAG_BUILD_TEXT)
     return _flag_pin("builder shell-write caller", guard, where,
-                     lambda: guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where))
+                     lambda: guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="PowerShell"))
+
+
+def flag_builder_bash_case():
+    """A Bash-tool call on the same text reads it by bash rules, even after a PowerShell call set the flag."""
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-builder-bash")
+    make_repo(where, {"hooks/test_seed.py": "x = 1\n"})
+    stripped = guard.strip_heredoc_bodies(FLAG_BUILD_TEXT)
+    # The PowerShell call first leaves the flag set, so only the Bash call's own reset can make it read by bash rules.
+    guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="PowerShell")
+    bash = guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where, tool="Bash")
+    if bash != "":
+        return False, "builder shell-write caller: the Bash-tool call read the text by PowerShell rules and saw %r" % (
+            bash,)
+    return True, "builder shell-write caller: the Bash-tool call reads the text by bash rules and sees no write"
 
 
 def flag_session_home_case():
@@ -13819,6 +13834,8 @@ def flag_never_lifted_case():
 for _label, _check in (
     ("frozen: a builder's shell write, read after a Bash call, is the same as with the PowerShell flag",
      flag_builder_case),
+    ("frozen: a Bash-tool call on a builder's shell-write text reads it by bash rules, after a PowerShell call",
+     flag_builder_bash_case),
     ("frozen: the session-home caller, read after a Bash call, is the same as with the PowerShell flag",
      flag_session_home_case),
     ("frozen: the never-lifted settings clause, read after a Bash call, is the same as with the PowerShell flag",
