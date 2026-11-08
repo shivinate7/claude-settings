@@ -22541,9 +22541,8 @@ def session_home_lost_home_path_case():
 
 def session_home_git_verbs_case():
     """Rule session-home: while the record is lost, a git verb that changes the primary's files or
-    branch is refused from the primary. A read, a fetch, a branch and a worktree add under
-    `.claude/worktrees` pass. A commit run with -C into a live worktree is other-checkout's, not
-    session-home's."""
+    branch is refused from the primary. A read, a fetch, a branch, a worktree add under
+    `.claude/worktrees`, and a commit run with -C into a live worktree pass."""
     primary = sh_new_primary("verbs")
     lane, branch = sh_add_lane(primary, "lane-verbs")
     session = sh_session()
@@ -22564,14 +22563,13 @@ def session_home_git_verbs_case():
         got, reason = _decide_full("Bash", primary, session=session, command=command)
         if got != "allow":
             problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
-    # other-checkout owns a file-changing -C into another checkout, so this case checks only that session-home does not name it.
     command = VCS + " -C " + slash(live) + " commit -m x"
     got, reason = _decide_full("Bash", primary, session=session, command=command)
-    if "session-home" in reason:
-        problems.append("%s: named session-home: %s" % (command, reason[:120]))
+    if got != "allow":
+        problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
     if problems:
         return False, "; ".join(problems)
-    return True, "the primary's file and branch verbs are refused; reads, fetch, branch and worktree add pass; a live -C commit is not session-home's"
+    return True, "the primary's file and branch verbs are refused; reads, fetch, branch, worktree add and a live -C commit pass"
 
 
 LOG_CHECKS_EXTRA.append(("session-home: an ExitWorktree from the primary checkout leaves a lost session's "
@@ -22579,7 +22577,7 @@ LOG_CHECKS_EXTRA.append(("session-home: an ExitWorktree from the primary checkou
 LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused; a write into a live "
                          "worktree is not named session-home", session_home_lost_home_path_case))
 LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
-                         "refused; reads, fetch, branch and worktree add pass; a live -C commit is not session-home's",
+                         "refused; reads, fetch, branch, worktree add and a live -C commit pass",
                          session_home_git_verbs_case))
 
 
