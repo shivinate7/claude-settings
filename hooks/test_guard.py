@@ -10156,6 +10156,16 @@ PFR_LINES = {
     "gh-heredoc-sh": pfr_bash("toolu_pr1", "sh <<EOF\ngh pr create --draft --title t\nEOF",
                               "https://github.com/shivinate7/claude-settings/pull/1467\n")
                      + pfr_call("toolu_rev1", PFR_FAIL),
+    # A command substitution runs its gh pr create, so the PR it opens is known to the session.
+    "gh-subst-assign": pfr_bash("toolu_pr1", "URL=$(gh pr create --draft --title t)",
+                                "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-subst-dquote": pfr_bash("toolu_pr1", 'echo "PR: $(gh pr create --draft --title t)"',
+                                "PR: https://github.com/shivinate7/claude-settings/pull/1467\n")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    # Single quotes make the substitution text, so no PR opens.
+    "gh-subst-squote": pfr_bash("toolu_g1", "echo '$(gh pr create)'", "$(gh pr create)")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
     # A verdict in backticks or with a verdict word is still the Done verdict.
     "fail-backtick": pfr_pr() + pfr_call("toolu_rev1", pfr_report("`%s`" % pfr_verdict("FAIL", 1, "claude-haiku-5-5"),
                                                                   PFR_FINDING)),
@@ -10296,6 +10306,12 @@ pfr_refuse("a bash heredoc whose body is a gh pr create --draft, then an unrecor
            pfr_path("gh-heredoc-bash"))
 pfr_refuse("an sh heredoc whose body is a gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
            pfr_path("gh-heredoc-sh"))
+pfr_refuse("a gh pr create --draft in an assigned command substitution, then an unrecorded FAIL, then the push",
+           PFR_PUSH, pfr_path("gh-subst-assign"))
+pfr_refuse("a gh pr create --draft in a double-quoted command substitution, then an unrecorded FAIL, then the push",
+           PFR_PUSH, pfr_path("gh-subst-dquote"))
+pfr_allow("a single-quoted $(gh pr create) in an echo, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-subst-squote"))
 # A Done line in backticks, or with a verdict word, reads as its verdict: a FAIL with no record denies.
 pfr_refuse("a FAIL Done line in backticks with no record, then the push", PFR_PUSH, pfr_path("fail-backtick"))
 pfr_refuse("a FAIL Done line with a verdict word and no record, then the push", PFR_PUSH, pfr_path("fail-bold-verdict"))
