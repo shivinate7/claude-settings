@@ -901,6 +901,59 @@ def case_invoke_model_prompt_bytes_reach_child_exact():
           received == BYTE_PROMPT.encode("utf-8"), received)
 
 
+# --------------------------------------------------------------------------- the no-tools note
+# invoke_model runs `claude -p --tools ""`, and a real call can still answer with tool-call text
+# instead of the JSON (7 of 20 prose judge calls on one PR). The note goes on the claude argv as
+# --append-system-prompt for every call, and the stdin stays the caller's prompt, unchanged.
+NO_TOOLS_TEXT = "You have no tools and cannot read files. Never call a tool. Reply with the JSON only."
+
+
+def _invoke_capture(prompt, shape, result_text):
+    """invoke_model(prompt, shape=shape) with `claude -p` stubbed at _nowindow.run, whose envelope carries `result_text`.
+    -> (the argv the child was started with, the bytes it was given on stdin, the error invoke_model returned)."""
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = list(argv)
+        captured["stdin"] = kwargs.get("input")
+        return _FakeCompletedProcess(0, json.dumps({"result": result_text}), "")
+
+    real_run = dw._nowindow.run
+    dw._nowindow.run = fake_run
+    try:
+        with scratch_config("notools"):
+            verdict, error = dw.invoke_model(prompt, shape=shape)
+    finally:
+        dw._nowindow.run = real_run
+    return captured.get("argv") or [], captured.get("stdin"), error
+
+
+def _check_no_tools_note(label, prompt, argv, stdin, error):
+    note = getattr(dw, "NO_TOOLS_NOTE", None)
+    if note is None:
+        check("no-tools (%s): decision_watch has NO_TOOLS_NOTE" % label, False,
+              "decision_watch has no NO_TOOLS_NOTE, so the call cannot tell the model it has no tools")
+    else:
+        check("no-tools (%s): NO_TOOLS_NOTE is the no-tools text" % label, note == NO_TOOLS_TEXT, note)
+    check("no-tools (%s): invoke_model returns no error" % label, error is None, error)
+    check("no-tools (%s): argv carries --append-system-prompt immediately followed by the note" % label,
+          ("--append-system-prompt", NO_TOOLS_TEXT) in list(zip(argv, argv[1:])), argv)
+    check("no-tools (%s): stdin is the caller's prompt, unchanged" % label,
+          stdin == prompt.encode("utf-8"), stdin)
+
+
+def case_no_tools_note_rides_the_argv_of_a_default_shape_call():
+    prompt = "JUDGE THIS PROMPT"
+    argv, stdin, error = _invoke_capture(prompt, dw.VERDICT_SHAPE, json.dumps({"verdict": "ALLOW"}))
+    _check_no_tools_note("default shape", prompt, argv, stdin, error)
+
+
+def case_no_tools_note_rides_the_argv_of_a_line_verdicts_call():
+    prompt = "JUDGE THESE LINES"
+    argv, stdin, error = _invoke_capture(prompt, dw.LINE_VERDICTS, json.dumps({"verdicts": []}))
+    _check_no_tools_note("line verdicts", prompt, argv, stdin, error)
+
+
 # --------------------------------------------------------------------------- case 10
 # main() itself, invoked as the harness invokes it: a real subprocess, JSON on stdin,
 # stdout and exit code read back. Every other case stubs model_call, so this one exercises
@@ -1967,6 +2020,8 @@ def main():
     for case in (
         case_invoke_model_long_prompt_reaches_child_whole,
         case_invoke_model_prompt_bytes_reach_child_exact,
+        case_no_tools_note_rides_the_argv_of_a_default_shape_call,
+        case_no_tools_note_rides_the_argv_of_a_line_verdicts_call,
         case_invoke_model_return_shape_pinned,
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,

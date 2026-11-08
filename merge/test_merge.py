@@ -12713,8 +12713,26 @@ UNKNOWN_CAUSES = ("timed out", "model error", "no readable verdict", "past the c
 
 
 def prose_unknown_lines(out):
-    """The merge's prose-judge UNKNOWN lines. Other steps of a merge print UNKNOWN too, so a case reads only these."""
-    return [line for line in out.splitlines() if "prose judge" in line and "UNKNOWN" in line]
+    """The merge's prose-judge UNKNOWN count line and its plan-level lines. Other steps of a merge print UNKNOWN too, and the named lines
+    (named_unknown_lines) are not counted here, so a case reads only these."""
+    return [line for line in out.splitlines() if line.startswith("merge: #7 prose judge UNKNOWN:")]
+
+
+NAMED_UNKNOWN = re.compile(r"^merge: #7 prose judge UNKNOWN \(")  # a named UNKNOWN line opens its cause in parentheses
+
+
+def named_unknown_lines(out):
+    """The merge's named prose-judge UNKNOWN lines: `merge: #7 prose judge UNKNOWN (<cause>): <path>:<a>,<b>`, one per file per cause."""
+    return [line for line in out.splitlines() if NAMED_UNKNOWN.match(line)]
+
+
+def named_line(cause, path, numbers):
+    """The named UNKNOWN line of `cause` for `path`: its line numbers ascending, comma-joined, with no spaces."""
+    return "merge: #7 prose judge UNKNOWN (%s): %s:%s" % (cause, path, ",".join(str(n) for n in numbers))
+
+
+FAKE_TOOL_REPLY = ("I'll check the cited file before judging.\n\n\n<invoke name=\"Read\">\n"
+                   "<parameter name=\"file_path\">/tmp/x/harness/a.mjs</parameter>\n</invoke>")  # the reply 7 of 20 real judge calls gave: tool-call text, no JSON
 
 
 def timed_out(prompt):
@@ -13133,6 +13151,90 @@ class ProseJudge(Env):
         claude_calls, rc, out = self.real_judge(claude=raises(subprocess.TimeoutExpired(["claude"], 1)))
         self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
         self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    # Each unjudged line is named by path and line: one named line per file per cause, whatever the bucket. The count line still prints as
+    # before. A named line carries no text of the reply or of the error.
+    def assert_named(self, out, expected):
+        """The named UNKNOWN lines of `out` are `expected`, in any order: one per file per cause, and none for a cause that holds no line."""
+        self.assertEqual(sorted(named_unknown_lines(out)), sorted(expected), "the named UNKNOWN lines are not the unjudged lines\n" + out)
+
+    def test_an_unread_reply_names_its_line_by_path_and_line(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(FAKE_TOOL_REPLY)
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_named(out, [named_line("no readable verdict", PROSE, [3])])
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unread_call_over_two_files_names_one_line_per_file(self):
+        self.setup_range({PROSE: TWO_CITE_DOC, OTHER_PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(FAKE_TOOL_REPLY)
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1: the three selected lines of two files share one call" % len(claude_calls))
+        self.assert_named(out, [named_line("no readable verdict", PROSE, [3, 5]), named_line("no readable verdict", OTHER_PROSE, [3])])
+        self.assert_unknown_count(out, 3, [(3, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_the_named_unread_line_carries_no_reply_text(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(FAKE_TOOL_REPLY)
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_named(out, [named_line("no readable verdict", PROSE, [3])])  # scope: the line is named, so the text checks read a named line
+        self.assertNotIn("<invoke", out, "the report prints the reply's tool-call text\n" + out)
+        self.assertNotIn("/tmp/", out, "the report prints a path out of the reply\n" + out)
+
+    def test_a_timed_out_line_is_named_by_path_and_line(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_named(out, [named_line("timed out", PROSE, [3])])
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_raised_model_error_is_named_by_path_and_line(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(raises(RuntimeError("model host unreachable")))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertNotIn("model host unreachable", out, "the report prints the raised error's text, not a cause\n" + out)
+        self.assert_named(out, [named_line("model error", PROSE, [3])])
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_model_answer_of_none_is_named_as_a_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(lambda prompt: None)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_named(out, [named_line("model error", PROSE, [3])])
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_line_the_reply_skips_is_named_by_path_and_line(self):
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_named(out, [named_line("skipped by the reply", PROSE, [5])])
+        self.assert_unknown_count(out, 1, [(1, "skipped by the reply")])
+        self.assertEqual(rc, 0, out)
+
+    def test_lines_past_the_call_cap_are_named_by_path_and_line(self):
+        # Packed: three files of 100 cited lines each (lines 3 to 102) are more than the cap's two calls hold. The lines past the cap are
+        # named per file, and the count line still prints their total.
+        names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md")
+        self.setup_range({p: tagged_doc(["%s-l%03d" % (x, n) for n in range(1, 101)]) for p, x in zip(names, "abc")}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line)
+        self.assertEqual(len(stub.prompts), PROSE_CAP, "model calls: %d, want the cap %d" % (len(stub.prompts), PROSE_CAP))
+        held = {(p, n) for prompt in stub.prompts for p, n in judged_rows(prompt)}
+        every = {(p, n) for p in names for n in range(3, 103)}  # tagged_doc puts one cited line on each of lines 3 to 102
+        self.assertTrue(held <= every, "scope: a call holds a line that is not one of the three files' lines")
+        past = every - held
+        self.assertTrue(past, "scope: every line went into the calls, so none is past the cap")
+        expected = []
+        for p in names:
+            numbers = sorted(n for q, n in past if q == p)
+            if numbers:
+                expected.append(named_line("past the call cap", p, numbers))
+        self.assert_named(out, expected)
+        self.assert_unknown_count(out, len(past), [(len(past), "past the call cap")])
         self.assertEqual(rc, 0, out)
 
     def test_a_system_exit_from_the_model_leaves_the_merge_whole(self):
