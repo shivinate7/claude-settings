@@ -528,43 +528,53 @@ def answered_problem(text):
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
-# pre-existing-needs-main-run: a reply line that calls a failure pre-existing, calls it already red on main, or
-# says it fails on a commit "too" or "also" must name a run on main on the same line: "on main at <sha>",
-# "on origin/main", or a CI run URL on a line that says "on main". Quoted text and code spans are no claim. A
-# negator in the same clause before the claim (the answered check's list) exempts it. A line that ends in `?`
-# asks and claims nothing. Fenced blocks are skipped.
-PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre-?existing(?![\w-])", re.I)
-ALREADY_RED_RE = re.compile(r"\balready\s+(?:red|failing|failed|broken)\s+on\s+(?:origin/)?main\b", re.I)
-SHA_WORD = r"\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b"
-FAIL_WORD = r"\b(?:fail(?:s|ed|ing)?|red|broken|breaks?)\b"
-FAIL_SHA_TOO_RE = re.compile(
-    r"%s[^.;!?\n]{0,60}?%s[^.;!?\n]{0,30}?\b(?:too|also)\b|\balso\b[^.;!?\n]{0,30}?%s[^.;!?\n]{0,60}?%s"
-    % (FAIL_WORD, SHA_WORD, FAIL_WORD, SHA_WORD), re.I)
-MAIN_RUN_RE = re.compile(
-    r"\bon\s+(?:origin/)?main\s+at\s+" + SHA_WORD + r"|\bon\s+origin/main\b", re.I)
+# pre-existing-needs-main-run: a reply sentence that calls a failure pre-existing, says it was already red or
+# already there, or says it fails on a commit or on the base "too", "also" or "as well" must name a run on the
+# base branch's tip on the same line: "on <base> at <sha>", or a CI run URL on a line that says "on <base>". The
+# base is main, master or origin/<branch>. A bare base name is no run. The word forms count only in a sentence that
+# holds a failure word. Quoted text and code spans are no claim. A negator in the same clause before the claim
+# (the answered check's list) exempts it; a clause ends at a conjunction as well as at the answered check's
+# breaks. A sentence that ends in `?` asks and claims nothing. Fenced blocks are skipped.
+PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre[- ]?existing(?![\w-])", re.I)
+ALREADY_RE = re.compile(r"\balready\s+(?:red|fail\w*|broken|there|present)\b", re.I)
+FAILURE_RE = re.compile(r"\b(?:fail\w*|red|broken|breaks?|errors?|regress\w*|flak\w*)\b", re.I)
+SHA_WORD = r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
+BASE_REF = r"(?:origin/\w[\w./-]*|main|master)"
+FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
+TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
+PRE_CLAUSE_BREAK_RE = re.compile(
+    ANSWERED_CLAUSE_BREAK_RE.pattern + r"|\b(?:and|but|so|while|because|since|although)\b", re.I)
+SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
+MAIN_RUN_RE = re.compile(r"\bon\s+%s\s+at\s+%s" % (BASE_REF, SHA_WORD), re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
-ON_MAIN_RE = re.compile(r"\bon\s+(?:origin/)?main\b", re.I)
+ON_BASE_RE = re.compile(r"\bon\s+%s\b" % BASE_REF, re.I)
 PRE_EXISTING_REASON = (
     "Pre-existing guard (rule pre-existing-needs-main-run): each line below calls a failure pre-existing, or "
-    "says it fails on a commit too, and names no run on main. Run it on the base branch's tip and say so on "
-    "the same line (\"on main at <sha>\", \"on origin/main\", or a CI run URL on main), or say the failure "
-    "comes from this change. Lines: ")
+    "says it fails on a commit or on main too, and names no run on the base branch's tip. Run it there and say so "
+    "on the same line (\"on main at <sha>\", or a CI run URL on main; master or origin/<branch> may be the base), "
+    "or say the failure comes from this change. A bare \"on origin/main\" is no run. Lines: ")
 
 
-def _claims_pre_existing(plain):
-    """True when `plain` holds a pre-existing claim with no negator in its clause before it."""
-    for rx in (PRE_EXISTING_RE, ALREADY_RED_RE, FAIL_SHA_TOO_RE):
-        for m in rx.finditer(plain):
-            clause = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
-            if not ANSWERED_NEGATOR_RE.search(clause):
-                return True
+def _claims_pre_existing(sentence):
+    """True when `sentence` holds a pre-existing claim with no negator in its clause before it."""
+    plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
+    failing = bool(FAILURE_RE.search(plain))
+    for clause in PRE_CLAUSE_BREAK_RE.split(plain):
+        for rx in (PRE_EXISTING_RE, ALREADY_RE):
+            for m in rx.finditer(clause):
+                if failing and not ANSWERED_NEGATOR_RE.search(clause[:m.start()]):
+                    return True
+        fail = FAILURE_RE.search(clause)
+        if (fail and TOO_RE.search(clause) and FAIL_REF_RE.search(clause)
+                and not ANSWERED_NEGATOR_RE.search(clause[:fail.start()])):
+            return True
     return False
 
 
 def _names_main_run(kept):
     if MAIN_RUN_RE.search(kept):
         return True
-    return bool(MAIN_RUN_URL_RE.search(kept) and ON_MAIN_RE.search(MAIN_RUN_URL_RE.sub(" ", kept)))
+    return bool(MAIN_RUN_URL_RE.search(kept) and ON_BASE_RE.search(MAIN_RUN_URL_RE.sub(" ", kept)))
 
 
 def pre_existing_problem(text):
@@ -576,9 +586,10 @@ def pre_existing_problem(text):
         if marker and (not fence or marker == fence):
             fence = "" if fence else marker
             continue
-        if fence or body.rstrip("*_)\"' ").endswith("?"):
+        if fence:
             continue
-        if not _claims_pre_existing(QUOTED_RE.sub(" ", body)):
+        sentences = [s for s in SENTENCE_BREAK_RE.split(body) if not s.rstrip("*_)\"' ").endswith("?")]
+        if not any(_claims_pre_existing(s) for s in sentences):
             continue
         if _names_main_run(CODE_SPAN.sub(lambda m: m.group(2), body)):
             continue

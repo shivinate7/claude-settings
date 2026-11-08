@@ -1512,3 +1512,4 @@
 - ci-retire-token-in-tests: GH_TOKEN, a read-only token, reaches the Retire test subprocesses of the PR head through the inherited env (lint/check_debt_retire.py `run_span`). Decision: silent-undo-check-design.
 - ci-cited-read-rate-wait: a rate-limited read of the cited run can wait up to 900 s per retry inside the CI job (merge/merge.py `retry_net`). Decision: silent-undo-check-design.
 - retire-excuse-green-test-no-run-read: a cited debt whose Retire test runs green is excused without a read of the cited run, because the test on the head is the proof (lint/check_debt_retire.py `retired`). Decision: debt-close-runs-retire.
+- pre-existing-run-sha-not-checked: the pre-existing check reads the form "on main at <sha>", not that the sha is the tip of main (lint/report_guard.py `_names_main_run`). A wrong sha passes. Decision: pre-existing-needs-main-run.
