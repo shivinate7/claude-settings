@@ -1,0 +1,11 @@
+{
+  "title": "The guard refuses a push that moves a branch another worktree has checked out",
+  "why": "Lane review-record-post-check (session_013NEJKzmHFbqZ9QC2TAupBc, #2219), relayed by the coordinator 13:49 CST Nov 8: a test-author agent pushed to a branch that the lane's own worktree had checked out, and that worktree was left with a stale index. Step one-worktree-per-branch (#1583) refuses only `git checkout -B` or `switch -C` of a held branch, not a push that moves one. The harm is the same: a later commit from the stale index silently undoes pushed work.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 812,
+  "updatedAt": "2026-11-08T13:47:00-06:00"
+}

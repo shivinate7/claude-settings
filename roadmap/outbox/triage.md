@@ -64,3 +64,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
   5. `merge --reviewed` counts plain links with no tree reads, so it reads a carry chain as one link where the write step counts the cap.
   6. The body match needs "replaces #N"; "replaces PR #N" is refused (safe; the remedy names the form).
   7. A notes-only commit on the replacement breaks tree equality, so it gets full rounds where the same-PR path accepts notes diffs.
+- review-record-post-check (#2219, lane session_013NEJKzmHFbqZ9QC2TAupBc, Nov 8 13:49 CST), notes: (a) REASON_MAY_NAME["pr-review-record"] = ("haiku",) exempts the whole rule, not only the echoed line. (b) The comment at hooks/guard_merge.py:333 still calls parse_review the one home.
