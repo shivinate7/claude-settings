@@ -373,12 +373,12 @@ def preamble_marked(body, shell):
     The marker prints only when the shell reaches the suite line, so a failure with no marker in the log is the preamble's
     (a failed `[ -d x ] || npm ci`), and one after it is the suite's, even when a preamble block is skipped. None, so the
     CI step's failure reads as the suite's, when no command line precedes the suite line; when the suite line is indented,
-    not plainly at the script's top level; when the line before it ends in `\\`, so a marker would join that command; and
+    not plainly at the script's top level; when the line before it ends in `\\`, `&&`, `||` or `|`, so a marker would join that command list; and
     under pwsh, where a native command that fails does not stop the script, so a marker cannot show the preamble passed."""
     lines = body.splitlines()
     first = next((i for i, ln in enumerate(lines) if SUITE_LINE.fullmatch(ln.strip())), None)
     before = [ln for ln in lines[:first or 0] if ln.strip() and not ln.strip().startswith("#")]
-    if shell == "pwsh" or not before or lines[first][:1].isspace() or before[-1].rstrip().endswith("\\"):
+    if shell == "pwsh" or not before or lines[first][:1].isspace() or before[-1].rstrip().endswith(("\\", "&&", "|")):  # "|" also ends "||"
         return None
     return "\n".join(lines[:first] + [PREAMBLE_DONE] + lines[first:]) + "\n"
 
@@ -577,7 +577,7 @@ def main(argv):
             if unstarted:
                 first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
         tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
-        blocker = blocker or (name if (kind[n - 1] == "install" or not preamble_ran) and state == "unknown" else None)
+        blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)  # a suite step's failed preamble blocks no later step
         print("%-15s %s: %s" % (state, name, first))
     if lint and not ran_lint and not tally["FAIL"] and not tally["unknown"]:  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
         tally["unknown"] += 1
