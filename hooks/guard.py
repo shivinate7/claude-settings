@@ -2028,22 +2028,33 @@ MESSAGE_ROLE_AUTHOR_REASON = (
 # in _message_edits.
 MESSAGE_EDIT_VERBS = {"edit", "change", "fix", "update", "modify", "replace", "rewrite", "add", "remove", "delete",
                       "drop", "re-point", "write", "make"}
-# A verb that only looks at a path or runs it. The nearest verb before a path says whether the path is edited.
-MESSAGE_READ_VERBS = {"run", "rerun", "re-run", "read", "check", "show", "see", "view", "open", "cat",
-                      "verify", "inspect", "execute", "report", "look", "compare", "diff", "grep", "list"}
-# A path a read verb names can still be the object of a later `fix it`. A path a run verb names cannot.
-MESSAGE_RUN_VERBS = {"run", "rerun", "re-run", "execute", "check", "verify", "report", "grep"}
-# A word before a verb that turns it into a prohibition.
-MESSAGE_NEGATIONS = {"not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
-# A path right after one of these is the target the edit must reach, and a path after one of the SPEC_NOUNS and `in`,
-# `of` or `from` is the spec it follows: neither is the object of the edit.
-MESSAGE_TARGET_VERBS = {"pass", "passes", "match", "matches", "satisfy", "satisfies"}
-MESSAGE_SPEC_NOUNS = {"rule", "rules", "spec", "behaviour", "behavior"}
 # A word before a verb that makes it a noun (`the fix`), and a word that makes the verb another agent's act.
 MESSAGE_NOT_VERB_BEFORE = {"the", "a", "an", "this", "that", "these", "those", "your", "my", "its", "their", "our",
                            "one", "no", "any", "each", "every", "some"}
 MESSAGE_OTHER_ACTORS = {"builder", "test-author", "reviewer", "orchestrator", "designer", "record-writer",
                         "coordinator", "i", "i'll", "we", "we'll", "they", "he", "she"}
+# A verb that only looks at a path or runs it. The nearest verb before a path says whether the path is edited.
+MESSAGE_READ_VERBS = {"run", "rerun", "re-run", "read", "check", "show", "see", "view", "open", "cat",
+                      "verify", "inspect", "execute", "report", "look", "compare", "diff", "grep", "list"}
+# A path a read verb names carries only to an anaphor (`fix it`). A path a run verb names never carries.
+MESSAGE_RUN_VERBS = {"run", "rerun", "re-run", "execute", "check", "verify", "report", "grep"}
+# A word right before an edit verb that makes it a prohibition, and an adverb that may sit between (`don't just fix`).
+MESSAGE_NEGATIONS = {"not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
+MESSAGE_NEGATED_ADVERBS = {"just", "simply", "only", "ever", "even"}
+# A path right after one of these is the target the edit must reach, not its object.
+MESSAGE_TARGET_VERBS = {"pass", "passes", "match", "matches", "satisfy", "satisfies"}
+# The head noun of an edit verb's object, read before the first preposition. A note governs no path
+# (`make a note of ... in X`). A test noun makes the path a spec for a test-author (`add cases for ... in X`).
+MESSAGE_NOTE_NOUNS = {"note", "notes", "report", "summary"}
+MESSAGE_TEST_NOUNS = {"case", "cases", "test", "tests", "assert", "asserts"}
+# A path that does not follow its verb is its object only after one of the LOCATIONS (`the failing case in X`, `add
+# a case to X`). After another preposition it is a spec (`fix the bug for X`, `agree with X`).
+MESSAGE_LOCATIONS = {"in", "at", "of", "to", "into"}
+MESSAGE_PREPOSITIONS = MESSAGE_LOCATIONS | {"for", "from", "with", "on", "by", "as", "about"}
+# A word that may sit between an edit verb and the path it takes directly (`edit the file X`).
+MESSAGE_DIRECT = MESSAGE_NOT_VERB_BEFORE | {"file", "files"}
+# The word right after an edit verb that points back to a path a read verb named (`Read X. Replace it.`).
+MESSAGE_ANAPHORS = {"it", "that", "them"}
 # What follows ` and ` inside one clause: another edit, or a thing to edit. Anything else starts a new clause.
 MESSAGE_AND_KEEPS = MESSAGE_EDIT_VERBS | MESSAGE_NOT_VERB_BEFORE
 MESSAGE_GREEN = {"green", "pass", "passes", "passing", "passed", "red", "fails", "failing"}
@@ -2088,41 +2099,83 @@ def _message_words(clause: str):
     return words
 
 
+def _message_edit_verb(words, at: int) -> str:
+    """'edit' when the word at `at` is an edit verb the receiver is told to do, 'void' when a prohibition clears it
+    (`not`, `don't` or `never` right before it, or one adverb between), else ''."""
+    word, before = words[at][0], words[at - 1][0] if at else ""
+    ahead = words[at + 1][0] if at + 1 < len(words) else ""
+    if (word not in MESSAGE_EDIT_VERBS or before in MESSAGE_NOT_VERB_BEFORE
+            or (word == "make" and ahead in ("sure", "certain"))):
+        return ""
+    negator = words[at - 2][0] if at > 1 else ""
+    if before in MESSAGE_NEGATIONS or (before in MESSAGE_NEGATED_ADVERBS and negator in MESSAGE_NEGATIONS):
+        return "void"
+    return "edit"
+
+
+def _message_goal(words, at: int) -> bool:
+    """True when the path at `at` is a goal, not an object: it goes green or passes, or follows `pass`, `match` or
+    `satisfy`."""
+    return ((at > 0 and words[at - 1][0] in MESSAGE_TARGET_VERBS)
+            or any(w in MESSAGE_GREEN and words[at + k][0] != "to" for k, (w, _) in enumerate(words[at + 1:at + 4])))
+
+
 def _message_edits(words):
-    """(governed, named) for one clause. `governed` is None when the clause has no edit verb, else the paths its edit verb
-    governs: those after the verb, else one that leads the clause. `named` is every path the clause names that a later
-    `fix it` may mean: not a path that goes green, one a run verb takes, or a target or spec path."""
-    named, followed, led = [], [], []
-    edit_seen = actor_seen = negated = False
-    verb_at, kind, verb = -1, "", ""
+    """(governed, named, anaphor) for one clause. `governed` is None when the clause has no edit verb, else
+    (path, test_object) per path its edit verbs govern. An edit verb governs the first path after it, and a path joined
+    to that one by `and`, `or` or a comma; a later path is a spec or a target. With no edit verb's path, a path that
+    leads the clause is governed. `named` is (path, kind, test_object) per path a later pathless clause may mean: kind
+    'read' carries only to an anaphor. `anaphor` is True when an edit verb is followed by it, that, them or
+    the/that + a test noun."""
+    named, governed, led = [], [], []
+    edit_seen = actor_seen = anaphor = False
+    kind = verb = ""
+    slot = head_open = note = test_object = False
+    verb_at = last_object = -1
     for at, (word, path) in enumerate(words):
         before = words[at - 1][0] if at else ""
-        ahead = words[at + 1][0] if at + 1 < len(words) else ""
-        if (word in MESSAGE_EDIT_VERBS and before not in MESSAGE_NOT_VERB_BEFORE and not actor_seen and not negated
-                and not (word == "make" and ahead in ("sure", "certain"))):
-            verb_at, kind, verb, edit_seen = at, "edit", word, True
-        elif word in MESSAGE_READ_VERBS:
-            verb_at, kind, verb = at, "read", word
+        act = "" if actor_seen else _message_edit_verb(words, at)
+        if act:
+            kind, verb, verb_at, slot, head_open, note, test_object = act, word, at, act == "edit", True, False, False
+            if act == "edit":
+                edit_seen = True
+                ahead = [w for w, _ in words[at + 1:at + 3]]
+                anaphor = anaphor or (bool(ahead) and ahead[0] in MESSAGE_ANAPHORS) or (
+                    len(ahead) == 2 and ahead[0] in ("the", "that") and ahead[1] in MESSAGE_TEST_NOUNS)
+            continue
+        if word in MESSAGE_READ_VERBS:
+            kind, verb, slot = "read", word, False
         actor_seen = actor_seen or word in MESSAGE_OTHER_ACTORS
-        negated = negated or word in MESSAGE_NEGATIONS
-        if (not path or before in MESSAGE_TARGET_VERBS
-                or any(w in MESSAGE_GREEN and words[at + k][0] != "to" for k, (w, _) in enumerate(words[at + 1:at + 4]))
-                or (before in ("in", "of", "from") and at > 1 and words[at - 2][0] in MESSAGE_SPEC_NOUNS)):
+        if not path:
+            if kind == "edit" and head_open:
+                head_open = word not in MESSAGE_PREPOSITIONS
+                note = note or (head_open and word in MESSAGE_NOTE_NOUNS)
+                test_object = test_object or (head_open and word in MESSAGE_TEST_NOUNS)
             continue
-        if verb_at < 0:
-            led.append(path)
-        elif kind == "edit":
-            followed.append(path)
-        elif verb in MESSAGE_RUN_VERBS:
-            continue
-        named.append(path)
-    return (followed or led if edit_seen else None), named
+        joined = last_object >= 0 and (at - 1 == last_object or (before in ("and", "or") and at - 2 == last_object))
+        if kind == "edit" and (slot or joined):
+            slot = False
+            direct = joined or all(w in MESSAGE_DIRECT for w, _ in words[verb_at + 1:at])
+            if note or _message_goal(words, at) or not (direct or before in MESSAGE_LOCATIONS):
+                continue
+            governed.append((path, test_object and not direct))
+            named.append((path, "edit", test_object and not direct))
+            last_object = at
+        elif not kind:
+            if not _message_goal(words, at):
+                led.append((path, False))
+                named.append((path, "led", False))
+        elif kind == "read" and verb not in MESSAGE_RUN_VERBS and not _message_goal(words, at):
+            named.append((path, "read", False))
+    return (governed or led if edit_seen else None), named, anaphor
 
 
 def message_edit_paths(message: str):
-    """Every path a message asks its receiver to edit. A path counts when an edit verb governs it: the path follows the
-    verb in its clause, or leads the clause, or the verb's clause names no path at all and an earlier clause of the
-    sentence (`Look at X, then fix it`), else the sentence right before, names it (`X.py ~683: ... . Replace it ...`)."""
+    """(path, test_object) per path a message asks its receiver to edit. A path counts when an edit verb governs it
+    (_message_edits), or the verb's clause names no path at all and an earlier clause of the sentence (`Look at X, then
+    fix it`), else the sentence right before, names it (`X.py ~683: ... . Replace it ...`). A path a read verb named
+    carries only when the verb is followed by an anaphor. `test_object` marks a path a test noun object makes a spec
+    for a test-author (`Add red cases for ... in X`)."""
     text = MESSAGE_SPAN.sub(lambda m: m.group(1) if len(m.group(1).split()) == 1 else MESSAGE_SPAN_MASK,
                             MESSAGE_FENCE.sub(MESSAGE_SPAN_MASK, message))
     hits, before = [], []
@@ -2138,12 +2191,12 @@ def message_edit_paths(message: str):
         named, earlier = [], []
         for clause in clauses:
             words = _message_words(clause)
-            governed, seen = _message_edits(words)
+            governed, seen, anaphor = _message_edits(words)
             named += seen
             if governed:
                 hits += governed
             elif governed is not None and not any(path for _, path in words):
-                hits += earlier or before
+                hits += [(path, test) for path, kind, test in earlier or before if kind != "read" or anaphor]
             earlier = seen or earlier
         before = named
     return hits
@@ -2193,7 +2246,7 @@ def message_role_hit(tool: str, tool_input, transcript):
         role = _message_spawn_role(transcript, to)
     except Exception:
         return None
-    for path in paths:
+    for path, test_object in paths:
         slashed = norm(path)
         rooted = slashed.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:/", slashed))
         rel = repo_rel(path, "", outside=role == BUILDER_ROLE) if rooted else slashed.removeprefix("./")
@@ -2202,7 +2255,7 @@ def message_role_hit(tool: str, tool_input, transcript):
         if role == BUILDER_ROLE and is_test_rel(rel):
             return path, MESSAGE_ROLE_BUILDER_REASON
         ext = os.path.splitext(norm(rel).rstrip("/"))[1].lower()
-        if (role == AUTHOR_ROLE and ext and ext != ".md" and not norm(rel).startswith("../")
+        if (role == AUTHOR_ROLE and ext and ext != ".md" and not test_object and not norm(rel).startswith("../")
                 and not author_path_ok(rel) and not is_workflow_rel(rel)):
             return path, MESSAGE_ROLE_AUTHOR_REASON
     return None
