@@ -867,9 +867,9 @@ class ItemCiteTests(unittest.TestCase):
         if number is not None:
             self.assertEqual(got, number, "the refused cite must be item %s: %r gave %r" % (number, text, got))
 
-    def assert_passes(self, text):
+    def assert_passes(self, text, why="item cite with its short name must pass"):
         got = rg.bare_cite(text)
-        self.assertEqual(got, "", "item cite with its short name must pass: %r gave %r" % (text, got))
+        self.assertEqual(got, "", "%s: %r gave %r" % (why, text, got))
 
     # refused: a number with no name beside it, on a reply that names triage (the scope ruling)
     def test_icite_red_bare_item_number_is_refused(self):
@@ -911,19 +911,24 @@ class ItemCiteTests(unittest.TestCase):
 
     # the scope ruling: a bare item cite on a reply is read only when the reply names page or triage outside code
     def test_icite_red_bare_item_in_a_cart_sentence_passes(self):
-        self.assert_passes("Fixed the cart so item 2 no longer renders twice.")
+        self.assert_passes("Fixed the cart so item 2 no longer renders twice.",
+                           "no page or triage word on the reply, so a bare item is not read")
 
     def test_icite_red_bare_item_in_a_list_sentence_passes(self):
-        self.assert_passes("Reordered the list so item 1 comes first.")
+        self.assert_passes("Reordered the list so item 1 comes first.",
+                           "no page or triage word on the reply, so a bare item is not read")
 
     def test_icite_red_scope_word_in_a_code_span_does_not_turn_scope_on(self):
-        self.assert_passes("Run `triage` first; item 46 waits.")
+        self.assert_passes("Run `triage` first; item 46 waits.",
+                           "a scope word inside a code span does not name triage")
 
     def test_icite_red_scope_word_in_a_fence_does_not_turn_scope_on(self):
-        self.assert_passes("```\ntriage\n```\nitem 46 waits.")
+        self.assert_passes("```\ntriage\n```\nitem 46 waits.",
+                           "a scope word inside a fence does not name triage")
 
     def test_icite_red_homepage_does_not_turn_scope_on(self):
-        self.assert_passes("The homepage shows item 46 waiting.")
+        self.assert_passes("The homepage shows item 46 waiting.",
+                           "homepage is not the word page, so it does not turn the scope on")
 
     def test_icite_green_page_word_refuses_a_bare_item(self):
         self.assert_refused("page item 46 is open.", "46")
@@ -943,10 +948,12 @@ class ItemCiteTests(unittest.TestCase):
 
     # a list tail joins a number only to a plural head: a year or a count after a singular item is not a cite
     def test_icite_red_year_after_a_named_item_is_not_a_cite(self):
-        self.assert_passes("Triage owner: item 137 (pick a), 2026-11-01 18:38 CST.")
+        self.assert_passes("Triage owner: item 137 (pick a), 2026-11-01 18:38 CST.",
+                           "a list tail joins a number only to a plural head, so 2026 after a singular item is not a cite")
 
     def test_icite_red_tail_of_a_singular_item_is_not_a_cite(self):
-        self.assert_passes("page item 46 (search pill clear), 3 times")
+        self.assert_passes("page item 46 (search pill clear), 3 times",
+                           "a list tail joins a number only to a plural head, so 3 after a singular item is not a cite")
 
     def test_icite_green_plural_list_tail_joins_a_bare_number(self):
         self.assert_refused("Triage left items 46 (search pill clear), 47 open.", "47")
