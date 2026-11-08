@@ -95,6 +95,16 @@ def flow_paths_workflow(spread):
     return checks_workflow("    paths: [\n" + lines + "    ]\n")
 
 
+def sequence_workflow(events):
+    """A `checks` workflow whose `on:` is a block sequence of `events`: `on:`, then one `  - event` line each."""
+    return ("name: checks\non:\n" + "".join("  - %s\n" % e for e in events) + "jobs:\n  unit:\n"
+            "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
+
+
+# GitHub reads `?` as zero or one of the character before it, so this filter matches fil.txt and file.txt only.
+QUESTION_MARK_WORKFLOW = checks_workflow("    paths:\n      - 'file?.txt'\n")
+
+
 def pr_entry(draft=False, branch=BRANCH, sha=HEAD, number=1430):
     return {"number": number, "isDraft": draft, "headRefName": branch, "headRefOid": sha,
             "state": "OPEN", "url": "https://github.com/shivinate7/claude-settings/pull/%d" % number}
@@ -385,8 +395,8 @@ class PushCheckTests(unittest.TestCase):
         head = git_commit(folder, remote_branch=None, files={"docs/guide.md": "guide v2\n"})
         return folder, base, head
 
-    # The path-filter reader (ci_wake.workflow_runs_for, push_may_start_run). Each finding has one red case, which
-    # names the defect, and green controls beside it. Each red case checks its scope first.
+    # The path-filter reader (ci_wake.workflow_runs_for, push_may_start_run). Each finding has red cases that name the
+    # defect, and green controls beside them. Each red case checks its scope first.
 
     def test_multi_line_flow_paths_list_keeps_a_run_due_for_a_matching_file(self):
         # Eight patterns as one flow line, then spread over lines. src/a.py matches the last one. A list the reader
@@ -481,6 +491,64 @@ class PushCheckTests(unittest.TestCase):
         self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]), "the on: block's own filter was lost")
         self.assertFalse(ci_wake.workflow_runs_for(text, ["docs/guide.md"]),
                          "text in a run script widened the push filter to docs/")
+
+    # An on: block written as a block sequence (`- push`). The reader skips `- ` lines, so it reads no event at all.
+
+    def test_block_sequence_on_with_push_and_pull_request_keeps_a_run_due_for_a_push(self):
+        text = sequence_workflow(["push", "pull_request"])
+        self.assertIn((2, "- push"), ci_wake._workflow_lines(text), "scope: the on: block holds no `- push` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "an on: block sequence holding push owes no run for a push")
+
+    def test_block_sequence_on_with_push_alone_keeps_a_run_due_for_a_push(self):
+        text = sequence_workflow(["push"])
+        self.assertIn((2, "- push"), ci_wake._workflow_lines(text), "scope: the on: block holds no `- push` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "an on: block sequence of push alone owes no run for a push")
+
+    def test_block_sequence_on_with_pull_request_alone_keeps_a_run_due_for_a_push(self):
+        # A push to a PR's branch starts a pull_request run. The mapping form (`pull_request:`) and the inline form
+        # (`on: pull_request`) both keep a run due, so the block form must too.
+        text = sequence_workflow(["pull_request"])
+        self.assertIn((2, "- pull_request"), ci_wake._workflow_lines(text),
+                      "scope: the on: block holds no `- pull_request` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "an on: block sequence of pull_request alone owes no run for a push to its PR's branch")
+
+    def test_block_sequence_on_with_workflow_dispatch_alone_owes_no_run_for_a_push(self):
+        # Control: a non-push event owes no run on push, read from the block sequence as from the other forms.
+        text = sequence_workflow(["workflow_dispatch"])
+        self.assertIn((2, "- workflow_dispatch"), ci_wake._workflow_lines(text),
+                      "scope: the on: block holds no `- workflow_dispatch` line")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                         "an on: block sequence of workflow_dispatch alone kept a run due for a push")
+
+    # The `?` of a path filter: GitHub reads it as zero or one of the character before it. Each red case first checks
+    # that the filter is read, by a file it does not match (file.md), which keeps no run due only when the list parses.
+
+    def test_question_mark_filter_owes_no_run_for_files_it_does_not_match(self):
+        # Control: neither file matches file?.txt, so no run is due.
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.md", "other.txt"]),
+                         "a path filter of file?.txt kept a run due for a file it does not match")
+
+    def test_question_mark_keeps_a_run_due_for_the_zero_character_match(self):
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.md"]),
+                         "scope: the filter file?.txt was not read, so file.md kept a run due")
+        self.assertTrue(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["fil.txt"]),
+                        "file?.txt read its ? as one required character, so fil.txt (the e taken as zero) owes no run")
+
+    def test_question_mark_keeps_a_run_due_for_the_one_character_match(self):
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.md"]),
+                         "scope: the filter file?.txt was not read, so file.md kept a run due")
+        self.assertTrue(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.txt"]),
+                        "file?.txt read its ? as one required character after file, so file.txt (one e) owes no run")
+
+    def test_question_mark_owes_no_run_for_a_file_with_an_extra_character(self):
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["file.md"]),
+                         "scope: the filter file?.txt was not read, so file.md kept a run due")
+        self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["fileA.txt"]),
+                         "file?.txt read its ? as any one character, so fileA.txt, which it does not match, "
+                         "kept a run due")
 
     def test_rewrite_that_still_lacks_the_ci_line_is_blocked(self):
         # The first reply holds a report but no CI line, so the Stop blocks for the CI line alone. Its rewrite, the
