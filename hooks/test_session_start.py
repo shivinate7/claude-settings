@@ -768,8 +768,8 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
 
 
 TMPDIR_LINE = re.compile(r"^\s*export\s+TMPDIR=", re.MULTILINE)
-# Any line that sets TMPDIR, with or without `export`. The Windows cases refuse every form, so a hook that
-# writes a plain assignment fails them the same as one that writes an export.
+# A line that sets TMPDIR, with or without `export`. The Windows cases refuse a line-start `export TMPDIR=`
+# or a plain `TMPDIR=`, so a hook that writes either one fails them.
 TMPDIR_ASSIGN_LINE = re.compile(r"^\s*(?:export\s+)?TMPDIR=", re.MULTILINE)
 # The env file a case starts from: empty, and one that already holds another hook's export.
 FIXTURES = {"empty": "", "one_export": "export FOO=bar\n"}
