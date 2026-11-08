@@ -5462,6 +5462,15 @@ sh("stream: a combined short flag", "tail -fn 20 app.log", "deny", "live-stream"
 sh("stream: Get-Content -Wait never ends", "Get-Content app.log -Wait", "deny", "live-stream",
    tool="PowerShell", cwd=NOGIT)
 
+# The remedy names the Monitor tool, the tool that follows a log (decision agents-wait-with-monitor). The
+# refusal itself does not move: the Bash foreground follow stays denied as live-stream, above. The remedy
+# must not tell a Bash caller to run Monitor from Bash, so the phrasings that would say so are pinned absent.
+sh("stream: the live-stream remedy names the Monitor tool for a followed log", "tail -f app.log", "deny",
+   "live-stream", cwd=NOGIT, carries=("Monitor",))
+sh("stream: the live-stream remedy does not tell a Bash caller to run Monitor from Bash", "tail -f app.log",
+   "deny", "live-stream", cwd=NOGIT,
+   lacks=("Monitor from Bash", "Monitor in Bash", "Monitor through Bash", "Monitor via Bash", "Bash Monitor"))
+
 sh("stream: an ordinary line count", "tail -n 50 app.log", "allow", cwd=NOGIT)
 sh("stream: a short line count", "tail -5 app.log", "allow", cwd=NOGIT)
 sh("stream: a pipe into a bounded tail", "python x.py | tail -5", "allow", cwd=NOGIT)
@@ -6348,6 +6357,9 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
 MON_STREAM = "tail -f /tmp/x.log | grep --line-buffered ERROR"
 MON_LOOP = "while true; do gh pr checks 1; sleep 30; done"
 monitor("Monitor: a followed log piped to grep is allowed", MON_STREAM, "allow", silent=True)
+# The Monitor tool follows a log. The allow is pinned on an app log as well as on /tmp/x.log above.
+monitor("Monitor: tail -f app.log piped to grep is allowed", "tail -f app.log | grep --line-buffered ERROR",
+        "allow", silent=True)
 sh("Bash twin of the Monitor case: the followed log is refused", MON_STREAM, "deny", "live-stream",
    cwd=NOGIT)
 monitor("Monitor: a polling loop with a pause is allowed", MON_LOOP, "allow", silent=True)
