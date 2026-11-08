@@ -7,12 +7,13 @@ A Cost sentence may name a file or state a count only when the same sentence bac
 - For a file: a test file that exists and holds the file's name.
 - For a count: a code span in the sentence that a test file holds as a whole name, or a bound ("at most", "up to", "no more than", "fewer", "at least"), or a mark.
 - For either: a mark, "not pinned", "unpinned", "unmeasured" or "no test".
+- A count in a debt note is `among N` or `N of M`. It passes on a bound, a mark, a date (YYYY-MM-DD), `run` and a number, or a test named in the sentence that holds its nearest code span. A note's count is a dated past observation, not a standing fact. An undated count in a note went stale at once, as in work item #2063.
 
 A check refuses any Cost sentence that does none of these. A count with no code span needs a bound or a mark.
 
 Use "(not pinned)" only where a figure was measured. Use "(unmeasured)" where it was not.
 
-- The check is `lint/check_cost_pins.py`. It reads the decision records only (kind `decisions` in `lint/layout.json`). A debt's Cost line is not read. Each test file is read once per run.
+- The check is `lint/check_cost_pins.py`. It reads the decision records (kind `decisions` in `lint/layout.json`) and the debt notes file (kind `debt-notes`). A debt record's Cost line is not read. Each test file is read once per run.
 - A Cost paragraph starts at a line whose first word is `Cost` followed by a character that is not a letter: `Cost:`, `Cost.`, `Cost, per`, `Cost of`, `**Cost**:`. The line may follow a list marker (`-`, `*`, `8.`, `3)`) or bold marks. `Costs` and `Costly` start none. A sentence that starts in one of those forms after the stop of an earlier sentence on its line starts a paragraph too, from that sentence. The stop is the sentence rule's stop, so a stop inside a code span or after `e.g.` counts for nothing. A `Cost:` inside a sentence starts none.
 - A paragraph ends at a blank line, a heading, a code fence, or a list item at the same or a lesser indent than the Cost line. A deeper line or list item stays in it. Fenced code is not read. A heading is one to six `#`, a space, then text. A line of `#` alone, or `#` with no space such as `#1850`, is text.
 - A heading of any level whose text starts with `Cost` before a non-letter (`## Cost`, `### Cost per call`) opens a cost section. Its body up to the next heading is cost text, and each paragraph in it is read as a Cost paragraph. The heading line itself is not read.
@@ -21,7 +22,7 @@ Use "(not pinned)" only where a figure was measured. Use "(unmeasured)" where it
 - A file token is a backticked name that ends in a known extension in any case, or starts with `~/` or `.git/`. A trailing `:<digits>` is dropped before the test, and the token is reported as written. A test file name (`test_*`, `*_test.*`, `*.test.*`, `*Tests.swift`, and `*.spec.*` ending in js, jsx, ts, tsx, mjs, cjs, mts or cts) is a pin, not a file token. A token is flagged whether or not its file exists.
 - A file token is pinned when a test file named in the same sentence exists and holds the token's name as a whole name: its basename, or for a `<placeholder>` basename the folder before it. `box.json` does not pin `x.json`, and `HEADER` does not pin `HEAD`.
 - A count is a count word: one to six, digits, once, twice or thrice. It needs a cost noun with at most three words between it and the noun: read, call, process, spawn, `ps`, write, file, run, start, times, line, command, request, lookup or query, plural too. Once, twice and thrice count only after a verb of work (read, run, call, start, spawn, write, fetch) within two words. "one" before "of" is no count. "a single", "Nx" and the verb "stat" are counts.
-- A count passes on a test only through a code span in the same sentence that the test holds as a whole name.
+- A count passes on a test only when the test is named in the same sentence and holds, as a whole name, the code span nearest the count word. A test-name span is never the nearest span.
 - Code spans, dates (YYYY-MM-DD), times (HH:MM), line references (`name.ext:123`) and ids (ruling, item, rule, step or decision with a number; `#` with a number) are not read as part of a count. Decimals, numbers with a time unit, "Round N of M" and "PR N" are not counts.
 - A finding is one line on the token's own line: `<record>:<line>: <token> named in a Cost sentence with no pin`. A count with no backing is one finding per sentence, on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`. Exit 1 when there is a finding.
 
@@ -37,7 +38,7 @@ Source: step `cost-line-pinned` (file pins) and step `cost-line-has-reader` (cou
 
 Corpus: coordinator, 09:47 CST: mark the flagged sentences "unmeasured", or "(not pinned)" where a measured figure stands. This lane checks counts only; refusal reasons are a separate finding.
 
-Cost: one python start per CI run, and no file written (unmeasured). It reads `lint/layout.json` through `lint/layout.py`, which opens that file many times inside one call to find the record folder (not pinned: no test counts the reads; about 50 opens measured with strace on 2026-11-08). It reads each decision record at most once. It reads each test file that a Cost sentence names once per run, from a cache (unmeasured: no test counts the reads). `lint/test_check_cost_pins.py` proves the flag and the pin.
+Cost: one python start per CI run, and no file written (unmeasured). It reads the debt notes file once per run (not pinned: one open of `docs/debts/notes.md` in a strace run on 2026-11-08). `lint/layout.py` reads `lint/layout.json` and the repo's extras file again on each record-kind lookup, with no cache (not pinned: no test counts these reads). It also reads git files to name the repo. The strace run on 2026-11-08 opened `lint/layout.json` 108 times and the extras file 10 times (not pinned). It reads each decision record at most once. It reads each test file that a Cost sentence or a debt note names once per run, from a cache (unmeasured: no test counts the reads). `lint/test_check_cost_pins.py` proves the flag and the pin.
 
 ## Known limits
 
