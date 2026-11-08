@@ -2432,7 +2432,7 @@ def ci_job_run(wt, *args):
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
-    # CI sets no HOOK_CATALOG_ROOT; set, lint/hook_catalog.py checks that other tree and the lint passes falsely (measured on #1687 head db9a31f).
+    # CI sets no HOOK_CATALOG_ROOT; set, lint/hook_catalog.py checks that other tree and the lint passes falsely.
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != "HOOK_CATALOG_ROOT"}  # as the merge's own lint run reads it
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
@@ -2457,14 +2457,19 @@ def lint_run(root, head, base, make_tree):
     finally:
         drop_worktree(root, tmp, wt)
 
-def lane_lint(root, target, host, base="", unknown_ok=""):
+REVIEW_LINT_REMEDY = "Fix it on the lane, push, review the new head, and run `merge --review-record` again. " + REVIEW_CITE
+
+def lane_lint(root, target, host, base="", unknown_ok="", info=None, record=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
-    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
-    if target.isdigit():
+    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
+    The review record (decision pr-review-record) calls it with `info`, the PR read it already made, and `record=True`: the PASS line goes to stderr so
+    stdout holds the record alone, a FAIL or any unknown stops with no record printed, and no flag lifts an unknown."""
+    if info is None and target.isdigit():
         info = (host or Host()).pr(int(target))
+    if info is not None:
         head, base = info["head"], info["base"]
         make_tree = lambda: open_worktree(root, info, base)
     else:
@@ -2473,34 +2478,22 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     state, lines, log, liftable = lint_run(root, head, base, make_tree)
     short = head[:9]
     if state == "pass":
-        say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
+        if record:
+            print(f"PASS: lint of {short} against {base} passes.", file=sys.stderr)
+        else:
+            say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
         return 0
+    remedy, no_record = (REVIEW_LINT_REMEDY, ", so no review record was printed:") if record else (LANE_LINT_REMEDY, ":")
     if state == "fail":
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
-    if liftable and unknown_ok.strip():
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs{no_record}", *lines, *log, remedy]))
+    if liftable and unknown_ok.strip() and not record:
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
         return 0
-    head_line = f"the lint of {short} against {base} is unknown, not a pass:"
-    if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
-        raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
+    head_line = f"the lint of {short} against {base} is unknown, not a pass{no_record}"
+    if record or not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
+        raise Stop("\n".join([head_line, *lines, remedy]))
     raise Liftable("\n".join([head_line, *lines, *log,
-                              'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
-
-REVIEW_LINT_REMEDY = "Fix it on the lane, push, review the new head, and run `merge --review-record` again. " + REVIEW_CITE
-
-def review_lint(root, info):
-    """The lint the review record owes, on the reviewed head (decision pr-review-record): the lane lint's run (lint_run) on `info`, the PR read the
-    record already made. Returns on a PASS, with its one line on stderr so stdout holds the record alone. A FAIL or any unknown raises Stop, so no
-    record prints; no flag lifts an unknown here."""
-    head, base = info["head"], info["base"]
-    state, lines, log, _liftable = lint_run(root, head, base, lambda: open_worktree(root, info, base))
-    short = head[:9]
-    if state == "pass":
-        print(f"PASS: lint of {short} against {base} passes.", file=sys.stderr)
-        return
-    if state == "fail":
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs, so no review record was printed:", *lines, *log, REVIEW_LINT_REMEDY]))
-    raise Stop("\n".join([f"the lint of {short} against {base} is unknown, not a pass, so no review record was printed:", *lines, REVIEW_LINT_REMEDY]))
+                              'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + remedy]))
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
@@ -3404,7 +3397,7 @@ def main(argv, host=None, lock=None):
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             with release_on_signals():  # the lint runs on every kind, docs-only too; a signal ends the run through lint_run's `finally`
-                review_lint(root, info)
+                lane_lint(root, str(a.pr), host, info=info, record=True)
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
