@@ -3066,6 +3066,20 @@ sh("per-file kill: a quoted refspec keeps its quotes, so a force push asks",
 sh("per-file kill: false alarm: --force quoted in a commit message stays allowed",
    VCS + " commit -m \"release git push --force notes\" \"x", "allow", cwd=GITWT)
 
+# NORMAL COMMITS WITH AN ANSI-C MESSAGE ALLOW. The guard decodes a bash `$'...'` word before it reads a
+# command (guard_core.decode_ansi_c), so each of these commits must still read as a plain commit.
+sh("per-file allow: an ANSI-C commit message with an escaped quote allows",
+   VCS + " commit -m $'it\\'s fine'", "allow", cwd=GITWT)
+sh("per-file allow: an ANSI-C commit message over two lines allows",
+   VCS + " commit -m $'line one\\nline two'", "allow", cwd=GITWT)
+sh("per-file allow: an ANSI-C commit message naming git push --force as text allows",
+   VCS + " commit -m $'release git push --force notes'", "allow", cwd=GITWT)
+# THE FORM THAT ASKS, PINNED. A commit message whose quote never closes does not parse, so git_calls falls
+# back to a whitespace split (guard_core.git_calls) and reads the quoted `git push --force` as a push. The
+# force-push rule then asks at its unreadable-target arm (PUSH_ASK_REASON, guard_push_delete.py).
+sh("per-file ask: a commit message whose quote never closes names git push --force, asks",
+   VCS + " commit -m \"release git push --force notes", "ask", "force-push", cwd=GITWT)
+
 # THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decision agent-worktree-discard-is-noted, section "Agent-owned worktree").
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
 # not asked (checked as a log/noted case below, since an allow prints nothing to assert on here).
@@ -18343,8 +18357,9 @@ def subject_unread_log_case(command=None, expect_note=True):
 
 
 def per_file_quoted_force_noted_case():
-    """KILL CASE for a mutate_guard entry removed in 78e8446: a quoted force on a worktree remove.
-    The base reads the quoted `--force`, so the unread subject is noted, not silent."""
+    """KILL CASE for the mutate_guard entry `subject: a quoted force flag reads as unforced`
+    (hooks/mutate_guard.py). A quoted `--force` on a worktree remove reads as forced, so the unread
+    subject is noted, not silent. The abbreviated entry is killed by the `log:` check, not this one."""
     return subject_unread_log_case(VCS + " worktree remove \"--force\" \"x'y /x")
 
 
