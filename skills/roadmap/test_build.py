@@ -2355,6 +2355,34 @@ class PickClaims(UpkeepFixture):
         self.publish(items=[], answers=[["junk", None], None, {"n": "9", "choice": "a"}])
         self.assertEqual(self.flagged(self.out_with_live()), (1, ['c153 (claim "item 9 b")']))
 
+    def test_a_claim_in_brackets_with_text_after_the_bracket_is_a_claim(self):
+        self.commit_step("c153", note="Ruling: (item 9 a) kept.")  # the text after ) is what the end check must see
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), [])  # control: a matching letter reads clean
+        self.publish(items=[], answers=[self.answer(9, "b")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), ["c153"])
+
+    def test_a_claim_naming_a_page_item_in_brackets_with_text_after_is_a_claim(self):
+        self.commit_step("c153", note="Ruling: (page item 16 a) for every repo.")
+        self.publish(items=[], answers=[self.answer(16, "a")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), [])  # control: a matching letter reads clean
+        self.publish(items=[], answers=[self.answer(16, "b")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), ["c153"])
+
+    def test_a_claim_in_backticks_with_text_after_the_backtick_is_a_claim(self):
+        self.commit_step("c153", note="Ruling: `item 9 a` kept.")  # the text after ` is what the end check must see
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), [])  # control: a matching letter reads clean
+        self.publish(items=[], answers=[self.answer(9, "b")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), ["c153"])
+
+    def test_a_claim_in_bold_with_text_after_the_bold_is_a_claim(self):
+        self.commit_step("c153", note="Ruling: **item 9 a** kept.")  # the text after ** is what the end check must see
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), [])  # control: a matching letter reads clean
+        self.publish(items=[], answers=[self.answer(9, "b")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), ["c153"])
+
 
 class DatedClaims(UpkeepFixture):
     """The upkeep row for each doing or active step whose note's newest dated claim is STALE_DAYS or more
