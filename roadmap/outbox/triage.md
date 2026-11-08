@@ -92,3 +92,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - page-replyseen-fill-untested (lane answered-section-folded, #2317): the first replySeen fill in page.html freezeSunk (about lines 1186-1190) has no test; mutant `state.replySeen = {}` survives. Reachable: a group with one answered-with-reply card at load and one open card; a Send of the open card sinks both, and the closed head shows a false New reply.
 - page-sinksent-hides-late-reply (lane answered-section-folded, #2317): sinkSent (about line 1199) marks a reply seen on a Send, so a reply that lands on an open card after the owner's last look and before the Send click hides in the closed section with no head mark.
 - page-fitpad-overscroll-uncapped (lane answered-section-folded, #2317): fitPad (about line 1850) has no cap on rubber-band overscroll (Safari); only Chromium desktop was run.
+- mixed-roles-control-comment-overstates (lane merge-conflict-mixed-roles, #2313): the control test's comment claims more proof than the test gives.
+- mixed-roles-no-edit-write-second-path (lane merge-conflict-mixed-roles, #1521): #1521 has no Edit or Write case for the second product path.
