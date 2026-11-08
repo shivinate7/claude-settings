@@ -31,7 +31,7 @@ class of its own, so it keeps the tint and the `--acc` edge of an in-progress ro
 3. **Paused row, option Grey edge.** No tint, a 3px `--muted` edge.
    Gain: the row reads in the paused band's grey.
    Loss: with the default brand, `--muted` and `--acc` are close (1.09:1 light, 1.02:1 dark). So a
-   paused row differs from an in-progress row by the tint, the title weight, the mark and the tag,
+   paused row differs from an in-progress row by the tint, the mark and the tag,
    not by the edge colour. `--chip` cannot be the paused tint: it is 1.02:1 against `--acc-soft` in
    light and the same hex in dark.
    Pick: yes.
@@ -42,9 +42,8 @@ class of its own, so it keeps the tint and the `--acc` edge of an in-progress ro
 
 5. **Paused title weight.** Option Normal weight sets 400. Option Bold, as today, keeps the 700 of
    `.rsteps .active .ttl`. A stalled title stays bold in both.
-   Pick: Normal weight, as on the roadmap.
-   Departs from: `.rsteps .active .ttl { font-weight: 700; }` in `skills/waiting-page/page.html`,
-   which makes a paused title bold today. Not blocking: option Bold, as today keeps it.
+   Pick: Bold, as today, as on the roadmap. A port keeps the existing behaviour by default (rule
+   building-port-keeps-behaviour).
 
 ## Builder changes, `skills/waiting-page/page.html` (the picks)
 
@@ -53,7 +52,6 @@ class of its own, so it keeps the tint and the `--acc` edge of an in-progress ro
   - `.rsteps .stl-row > .rrow { background: color-mix(in srgb, var(--holds) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--holds); }`
   - `.rsteps .pzd-row > .rrow { background: none; box-shadow: inset 3px 0 0 var(--muted); }`
   - `.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }`
-  - `.rsteps .pzd-row .ttl { font-weight: 400; }`
 - No new token. The tags need no change: `.tag` has no fill, only a `currentColor` border.
 
 ## Contrast (measured, WCAG 2 ratio, default brand, light / dark)

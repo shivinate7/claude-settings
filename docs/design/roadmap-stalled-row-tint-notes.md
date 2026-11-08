@@ -42,9 +42,7 @@ Today: `stepRow` writes `class="st ${s.status}"`. A stalled or paused step keeps
    `.st.active .ttl`. A stalled title stays bold in both.
    Gain: a stalled step asks for triage, so it stays bold. A paused step waits, so it is not bold.
    Loss: none seen.
-   Pick: Normal weight.
-   Departs from: `.st.active .ttl{font-weight:600}` in `skills/roadmap/page/index.html`, which makes
-   a paused title bold today. Not blocking: option Bold, as today keeps it.
+   Pick: Bold, as today. A port keeps the existing behaviour by default (rule building-port-keeps-behaviour).
 
 6. **Feed label.** No change. On 12e3ea1a1, `.kind.stalled{color:var(--bad)}` is there (the rule of
    the #1635 notes, item 1). `.kind.paused` has no rule, so it is `--muted` from `.kind`. That is the
@@ -61,7 +59,6 @@ Today: `stepRow` writes `class="st ${s.status}"`. A stalled or paused step keeps
   - `.st.stl-row .tag.stl{background:var(--surface)}`
   - `.st.pzd-row .rw{background:none;box-shadow:inset 3px 0 0 var(--muted)}`
   - `.st.pzd-row .rw:hover{background:var(--surface-2)}`
-  - `.st.pzd-row .ttl{font-weight:400}`
 - Optional: `.kind.paused{color:var(--muted)}` (item 6).
 - No new token.
 - The row CSS and `stepRow` are outside the build blocks, so re-pin `TODAY_TEMPLATE_SHA256` in
