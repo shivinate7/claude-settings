@@ -105,6 +105,21 @@ class Matcher(unittest.TestCase):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                                 "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_guard_matcher_covers_auto_merge_tools(self):
+        # Rule auto-merge refuses a call that turns auto-merge on, so a guard matcher must see each such tool by its full
+        # name. The names are read from guard_merge, their one home (AUTO_MERGE_TOOLS). getattr, so a missing constant
+        # fails this case by name instead of by a crash.
+        sys.path.insert(0, GUARD_DIR)
+        import guard_merge
+        tools = tuple(getattr(guard_merge, "AUTO_MERGE_TOOLS", ()))
+        self.assertTrue(tools, "guard_merge names no AUTO_MERGE_TOOLS")
+        matchers = guard_matchers()
+        self.assertTrue(matchers, "settings.json has no guard matcher")
+        for tool in tools:
+            with self.subTest(tool=tool):
+                self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                                "no guard matcher covers %s: %r" % (tool, matchers))
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
