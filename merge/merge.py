@@ -21,8 +21,10 @@
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. FAIL counts as the next
                           round; WIDE (a diff wider than its finding) counts none and needs a new lane at the first round. It refuses (exit 2)
-                          unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened.
+                          unless the newest earlier record on the PR has no Fix check line or a PASS one, and HEAD is that record's Head
+                          (or differs from it only by record or notes files; after a PASS, HEAD must also be an ancestor of the live head),
+                          read from the PR's issue comments since the PR opened. A chained fix check (after a PASS) on a record whose last
+                          round is 3 must carry that record's Net value.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -3550,8 +3552,11 @@ def main(argv, host=None, lock=None):
                     problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"] and not a.fix_base_record:  # a chained fix diff must start inside the live head's history
                     found = h.compare_files(a.fix_check[0], info["head"])
-                    if found["behind_by"] or not found["ahead_by"]:
-                        problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if found['behind_by'] and not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
+                    if found["behind_by"]:
+                        problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
+                if not problem and last["fix"] and not a.fix_base_record and max((i for i, *_ in last["rounds"]), default=0) >= REVIEW_LAST_ROUND \
+                        and a.net_value != last["net"]:  # a passing fix keeps the net value round 3 gave (decision hold-unsafe-after-round-3); a chain may not relaunder it
+                    problem = f"the newest earlier review record is at round {REVIEW_LAST_ROUND} with Net value {last['net']}, and a chained fix check keeps it, so --net-value may not be {a.net_value}"
                 if problem:
                     print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
                     return 2
