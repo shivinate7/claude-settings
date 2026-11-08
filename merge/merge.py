@@ -27,7 +27,8 @@
                           stderr. A FAIL stops with the failing step lines and the log, and prints no record. An unknown (ci-job exit 2,
                           a timeout, any odd exit) stops as "unknown, not a pass", prints no record, and takes no --lint-unknown-ok.
                           Cost per printed record: one ci-job run (691 s measured once, on #1687's head), one worktree and two git
-                          fetches; none on a usage error or an earlier refusal.
+                          fetches; none on a usage error or an earlier refusal. The run can pass a 600 s foreground call: run
+                          the command in the background and read its verdict when it ends.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -2450,7 +2451,7 @@ def ci_job_run(wt, *args):
 
 def lint_run(root, head, base, make_tree):
     """The one home of the lane lint's run: `ci-job checks --lint --base origin/<base>` in the detached tree `make_tree()` makes at `head`, removed on
-    every exit. lane_lint and the review record call it. -> ci_job_run's (state, lines, log, liftable)."""
+    every exit. Its one caller is lane_lint, which the review record also calls. -> ci_job_run's (state, lines, log, liftable)."""
     tmp, wt = make_tree()
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         return ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
@@ -2459,13 +2460,13 @@ def lint_run(root, head, base, make_tree):
 
 REVIEW_LINT_REMEDY = "Fix it on the lane, push, review the new head, and run `merge --review-record` again. " + REVIEW_CITE
 
-def lane_lint(root, target, host, base="", unknown_ok="", info=None, record=False):
+def lane_lint(root, target, host, base="", unknown_ok="", info=None, review_record=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
-    The review record (decision pr-review-record) calls it with `info`, the PR read it already made, and `record=True`: the PASS line goes to stderr so
+    The review record (decision pr-review-record) calls it with `info`, the PR read it already made, and `review_record=True`: the PASS line goes to stderr so
     stdout holds the record alone, a FAIL or any unknown stops with no record printed, and no flag lifts an unknown."""
     if info is None and target.isdigit():
         info = (host or Host()).pr(int(target))
@@ -2478,19 +2479,21 @@ def lane_lint(root, target, host, base="", unknown_ok="", info=None, record=Fals
     state, lines, log, liftable = lint_run(root, head, base, make_tree)
     short = head[:9]
     if state == "pass":
-        if record:
+        if review_record:
             print(f"PASS: lint of {short} against {base} passes.", file=sys.stderr)
         else:
             say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
         return 0
-    remedy, no_record = (REVIEW_LINT_REMEDY, ", so no review record was printed:") if record else (LANE_LINT_REMEDY, ":")
+    remedy, no_record = (REVIEW_LINT_REMEDY, ", so no review record was printed:") if review_record else (LANE_LINT_REMEDY, ":")
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs{no_record}", *lines, *log, remedy]))
-    if liftable and unknown_ok.strip() and not record:
+    if liftable and unknown_ok.strip() and not review_record:
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
         return 0
     head_line = f"the lint of {short} against {base} is unknown, not a pass{no_record}"
-    if record or not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
+    if review_record and liftable:  # the same hint as the lane lint's, with no --lint-unknown-ok: the record flag takes none
+        raise Stop("\n".join([head_line, *lines, *log, "Run it where the missing tool is present. " + remedy]))
+    if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
         raise Stop("\n".join([head_line, *lines, remedy]))
     raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + remedy]))
@@ -3397,7 +3400,7 @@ def main(argv, host=None, lock=None):
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             with release_on_signals():  # the lint runs on every kind, docs-only too; a signal ends the run through lint_run's `finally`
-                lane_lint(root, str(a.pr), host, info=info, record=True)
+                lane_lint(root, str(a.pr), host, info=info, review_record=True)
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
