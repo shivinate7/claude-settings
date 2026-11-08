@@ -13,7 +13,7 @@
 # line (preamble_marked; not under pwsh) and reads a failure with no marker in the log as the preamble's. A selector that
 # cannot run, or runs past its 60 s limit (SELECTOR_LIMIT), is unknown on each such CI step, exit 2. With no base or no
 # pick, the CI step is `not run`. The job scope is the linted job only: the suites picked for the CI steps of another job
-# print one `not run` line per job, naming the job and those suites, and run nowhere here; merge --lane-lint reads that line (NOT_RUN_JOB in
+# print one `not run` line per job, naming the job and those suites, and this run does not run them; merge --lane-lint reads that line (NOT_RUN_JOB in
 # lint/workflow_steps.py) and runs each such CI step of a Linux job through `ci-job <job> --step NAME`. Cost: one selector process per
 # lane lint (one git diff, one git ls-files, one parse of each tracked test_*.py and of each module they reach, once for
 # the whole diff), plus one process per picked CI step. A mutation script (a name with "mutate")
@@ -51,9 +51,10 @@
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.workspace }} is the top folder of the tree under test, as the
 # runner's workspace is the checkout. Any other expression makes the step unknown.
-# An env NODE_PATH entry that is no folder here reads unknown, naming it: the step that installs it is a uses: that never runs here (checks-guard's
-# Playwright). Cost: one stat per entry. A step whose shell or verdict a signal killed, and a step whose verdict printed no verdict line
-# with a nonzero exit, read unknown, never FAIL: the run was cut, so the tree is not shown at fault.
+# An env NODE_PATH entry that is no folder here reads unknown, naming it: the CI step that installs it is a uses: that never runs here (checks-guard's
+# Playwright). Cost: one stat per entry. A CI step whose verdict printed no verdict line with a nonzero exit (the time-limit cut, a kill of
+# verdict itself) reads unknown, never FAIL: the run was cut, so the tree is not shown at fault. A CI step whose own shell a signal kills
+# prints a FAIL line naming the signal and reads FAIL, as on main.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
@@ -83,7 +84,6 @@ from workflow_steps import MISSING_INSTALL, NOT_RUN_JOB, SUITE_LINE, job_block, 
 
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 7 s on this repo's 118 suites) before it reads unknown
 NO_VERDICT_LINE = "(verdict printed no verdict line)"  # the verdict line's default, when verdict printed none
-SIGNALED = re.compile(r" rc=\d+ killed by signal (\d+) \(")  # the note bin/verdict puts on its FAIL line when a signal killed the step's shell
 PREAMBLE_DONE = "echo ci-job-preamble-done"  # the line preamble_marked adds right before a CI step's first suite line
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -553,16 +553,14 @@ def main(argv):
         first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))),
                      NO_VERDICT_LINE)
         no_verdict = first == NO_VERDICT_LINE
-        killed = m.group(1) if (m := SIGNALED.search(first)) else None
         if known_action(step) == "code-check":
             first += " (code_check.py: %s)" % code_check(top, step)[0]
         if rc == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
-        elif killed is not None or (rc and no_verdict):  # a signal cut the step's shell or the verdict: the run was cut, so the tree is not shown at fault
+        elif rc and no_verdict:  # the run was cut before verdict could say what failed (a time limit, a kill of verdict): the tree is not shown at fault. A step whose own shell a signal kills prints a FAIL line and reads FAIL.
             state = "unknown"
-            first = ("the step's shell was killed by signal %s; %s" % (killed, first)) if killed is not None else (
-                "verdict ended with no verdict line (exit %s)%s" % (rc, " by signal %d" % -rc if rc < 0 else ""))
+            first = "verdict ended with no verdict line (exit %s)%s" % (rc, " by signal %d" % -rc if rc < 0 else "")
         elif unstarted and only:
             state = "unknown"
             first = "tool missing (%s); %s" % ("; ".join(unstarted), first)
