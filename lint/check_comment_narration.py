@@ -80,7 +80,7 @@ class ReviewRound:
     ID = r"(?P<id>[a-z0-9][a-z0-9-]*)"
     # The opening form needs a marker: "decision" with optional backticks, or backticks alone.
     OPENS = re.compile(r"\s*(?:(?:see\s+)?decision\s+(?P<q>`?)|`)" + ID + r"(?(q)(?P=q)|`)\s*,", re.I)
-    BEFORE = re.compile(r"(?<![\w`-])(`?)" + ID + r"\1\s*$", re.I)
+    BEFORE = re.compile(r"(?:\b(?:see\s+)?decision\s+(?P<q>`?)|(?<![\w`-])`)" + ID + r"(?(q)(?P=q)|`)\s*$", re.I)
     NUMBER_AFTER = re.compile(r"\s*(\d+)")
 
     def __init__(self):
