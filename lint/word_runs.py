@@ -69,7 +69,7 @@ def mask_code_spans(text, only=None):
     nothing, a span stops at a blank line (SPANS), and a comment opener inside a span stays inside it. An HTML comment is
     left as it is: it is no code span. `only` is a compiled pattern: when given, a span is masked only if its inner text
     matches it, and any other span stays readable.
-    Cost: one pass of SPANS over `text`; no file read, no state."""
+    Cost: one pass of SPANS over `text`, plus one more pass over each gloss after a span; no file read, no state."""
     def mask(match):
         span = match.group(0)
         if not match.group("tick"):
