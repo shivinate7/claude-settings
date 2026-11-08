@@ -4,6 +4,10 @@
 
 Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked
 link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands).
+Coordinator rulings: 2026-11-08 07:48 CST (the step that guards git reset, checkout and restore on a
+path, `guard-git-reset-path`, is in the background-tail lane, `bg-tail-loses-verdict`; the agent-owned
+worktree discard ruling stands), 2026-11-08 07:50 CST (the shared-checkout unstage must be judged
+explicitly; the path reset section judges it allow, by measurement).
 
 The shared-tree rule refuses a discarding git command in the shared checkout. In a hand-made
 worktree it asks for `git reset --hard`. It asks for `git checkout -- <path>` or `git restore` too,
