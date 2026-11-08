@@ -240,13 +240,17 @@ def job_env(**extra):
     return env
 
 
-def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2", own_group=False):
+def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2", own_group=False,
+                  prepare=None):
     """Run the rewritten command in the given shell, with `env` as its environment (default: job_env()).
     Return (rc or None, text, seconds, cmd).
     The mark is the shell's $0, so ps shows it on the job and reap() finds a job that no report
     names. Text added to the command would change it, for one ending in a backslash.
-    own_group: start the command in a session of its own, so a case can kill that group and no other."""
+    own_group: start the command in a session of its own, so a case can kill that group and no other.
+    prepare: called with the rewritten command before the job starts, for a case that plants a file the wrapper reads."""
     cmd, _hso = rewrite(command, quiet=quiet)
+    if prepare is not None:
+        prepare(cmd)
     mark = mark or new_mark()
     d = new_dir()
     out_path = os.path.join(d, "harness.out")
@@ -1217,25 +1221,31 @@ def job_that_never_stalls_removes_its_log_and_beat():
 
 @posix_case
 def hook_prunes_kept_logs_older_than_seven_days():
-    """Prune. Before a background call, the hook removes a kept stall-watch log older than 7 days from its log
-    folder. A log 6 days old stays, and so does a file that is not a stall-watch log, even at 8 days old. Only
-    the hook runs here, so no job starts and no process is left to stop."""
+    """Prune. Before a background call, the hook removes a stalled job's kept log older than 7 days from its log
+    folder, with its marker (LOG + ".stalled"). A marked log 6 days old stays. So does an unmarked stall-watch log
+    aged 8 days, which may be a live job's log, and a file that is not a stall-watch log. Only the hook runs
+    here, so no job starts and no process is left to stop."""
     folder = os.path.realpath(new_dir())  # the hook names its folder by the realpath of TMPDIR
     now = time.time()  # fixture ages sit a day either side of the 7-day line, so clock drift cannot move one across it
     fixtures = {
-        "old": ("stall-watch-%s.log" % ("8" * 32), 8),
-        "young": ("stall-watch-%s.log" % ("6" * 32), 6),
-        "other": ("other-job.log", 8),
+        "old": ("stall-watch-%s.log" % ("8" * 32), 8, True),
+        "young": ("stall-watch-%s.log" % ("6" * 32), 6, True),
+        "unmarked": ("stall-watch-%s.log" % ("4" * 32), 8, False),
+        "other": ("other-job.log", 8, False),
     }
-    paths = {}
-    for key, (name, days) in fixtures.items():
+    paths, markers, written = {}, {}, []
+    for key, (name, days, marked) in fixtures.items():
         path = os.path.join(folder, name)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("kept\n")
-        os.utime(path, (now - days * 86400, now - days * 86400))
+        names = [path, path + ".stalled"] if marked else [path]
+        for p in names:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("kept\n")
+            os.utime(p, (now - days * 86400, now - days * 86400))
+            written.append(p)
         paths[key] = path
+        markers[key] = path + ".stalled" if marked else None
     # Scope: every fixture exists before the hook runs, so a removal below proves something.
-    problems = expect(all(os.path.exists(p) for p in paths.values()), "a fixture is missing before the hook runs")
+    problems = expect(all(os.path.exists(p) for p in written), "a fixture is missing before the hook runs")
     rc, out, err = hook("echo hi", tmpdir=folder)
     problems += expect(rc == 0, f"hook exit {rc}: {err.strip()[:200]}")
     try:
@@ -1243,10 +1253,48 @@ def hook_prunes_kept_logs_older_than_seven_days():
     except (ValueError, KeyError, TypeError):
         command = None
     problems += expect(isinstance(command, str), "the hook printed no updatedInput command")
-    problems += expect(not os.path.exists(paths["old"]), "a kept log aged 8 days is still there after the hook ran")
-    problems += expect(os.path.exists(paths["young"]), "a kept log aged 6 days was removed; only older than 7 days go")
+    problems += expect(not os.path.exists(paths["old"]), "a marked log aged 8 days is still there after the hook ran")
+    problems += expect(not os.path.exists(markers["old"]), "the marker of a log aged 8 days is still there after the hook ran")
+    problems += expect(os.path.exists(paths["young"]), "a marked log aged 6 days was removed; only older than 7 days go")
+    problems += expect(os.path.exists(markers["young"]), "the marker of a kept log aged 6 days was removed")
+    problems += expect(os.path.exists(paths["unmarked"]), "an unmarked stall-watch log aged 8 days was removed")
     problems += expect(os.path.exists(paths["other"]), "a file that is not a stall-watch log, aged 8 days, was removed")
     return problems
+
+
+@posix_case
+def job_ending_with_a_stall_marker_keeps_its_log():
+    """A stalled job's log is kept when its marker (LOG + ".stalled") is there at the end, even though the job
+    ends normally. The watcher writes that marker before it exits 3; a watcher that exits some other way may leave
+    it too. The case plants the marker before the job starts, then runs a job that ends at once, so the wrapper's
+    own removal after wait is the one under test."""
+    planted = {}
+
+    def plant(cmd):
+        log, _beat = job_files(cmd)
+        planted["log"] = log
+        if log is not None:
+            with open(log + ".stalled", "w", encoding="utf-8"):
+                pass
+
+    rc, text, _secs, _cmd = run_rewritten("echo FINAL-VERDICT", prepare=plant)
+    log = planted.get("log")
+    if log is None:
+        reap()
+        return ["the rewrite names no --log"]
+    marker = log + ".stalled"
+    try:
+        problems = expect(rc == 0, f"exit {rc}, want 0")
+        problems += expect("FINAL-VERDICT" in text.splitlines(), f"the job's line is not relayed: {text!r}")
+        # Scope: the marker is still there once the job has ended, so the log's survival below is about it.
+        problems += expect(os.path.exists(marker), f"marker {marker} is gone after the job ended")
+        problems += expect(os.path.exists(log), f"LOG {log} was removed at job end, though its marker was there")
+        return problems
+    finally:
+        reap()
+        for p in (log, marker):
+            if os.path.exists(p):
+                os.remove(p)  # kept by the wrapper; the case removes it, as the run's cleanup would
 
 
 @posix_case
