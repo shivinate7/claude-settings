@@ -140,6 +140,7 @@ FAMILIES = {
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "review-rounds": "review rounds in order: a reviewer for round 2 or 3 of a pull request is refused while an earlier round's reviewer on that pull request still runs in this session, with the running, finished, refused and foreground readings, the same-pull-request match, and a builder's round 3",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -22278,6 +22279,138 @@ def worktree_home_cwd_builder_scratch_case():
 FIXTURELESS_CHECKS.update((
     worktree_home_cwd_builder_refuse_case, worktree_home_cwd_builder_src_case,
     worktree_home_cwd_builder_scratch_case))
+
+
+# ------------------------------------------------------------------ review-rounds: a later round waits for an earlier one
+#
+# A reviewer spawn for round 2 or 3 of a pull request is refused while an earlier round's reviewer on that
+# pull request still runs in this session (rule review-rounds-in-order). The round is the brief's `Round N of 3`
+# first line; a brief with no marker is round 1. The pull request is the `PR #<n>` (or `#<n>`) the brief names,
+# matched as a whole number. The transcript is the spawn payload's transcript_path, one record per line: each
+# tool_use is its own assistant record, and each result is a user record that comes after it.
+#
+# An earlier reviewer still runs when its call has no result yet, or when it launched in the background and no
+# completion notice has arrived for its agentId. A reviewer whose call returned a plain result finished. A
+# reviewer that a hook refused (an error result) never started. These shapes are the ones the session
+# transcripts carry.
+#
+# Each row is its own case, so a failure names one cause. A refusal pins deny, as the other spawn refusals do.
+FAMILY = "review-rounds"
+RR_RULE = "review-rounds-in-order"
+RR_DIR = os.path.join(ROOT, "review-rounds")
+RR_R1 = "Review PR #2038 for correctness."                    # round 1: no marker
+RR_R2 = "Round 2 of 3. Re-check PR #2038 after the fix."
+RR_R3 = "Round 3 of 3. Re-check PR #2038 after the second fix."
+
+
+def rr_use(cid, prompt, subagent="reviewer", model="haiku"):
+    """An Agent tool_use: the assistant's call. Its result comes in a later record, or not yet."""
+    return {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": cid, "name": "Agent",
+         "input": {"description": "review", "prompt": prompt, "subagent_type": subagent, "model": model}}]}}
+
+
+def rr_result(cid, text, tur, is_error=False):
+    """The user record that carries one call's result, with its toolUseResult."""
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": cid, "content": text, "is_error": is_error}]},
+        "toolUseResult": tur}
+
+
+def rr_background(aid, prompt, subagent="reviewer", model="haiku"):
+    """A background agent: its tool_use, then the async launch result, which names the agentId."""
+    cid = "toolu_" + aid
+    return [rr_use(cid, prompt, subagent, model), rr_result(
+        cid, "Async agent launched successfully. agentId: %s." % aid,
+        {"isAsync": True, "status": "async_launched", "agentId": aid, "description": "review",
+         "outputFile": "/nonexistent/%s.output" % aid})]
+
+
+def rr_finished(cid, prompt, model="haiku"):
+    """A foreground reviewer whose call has returned: the result is the reviewer's final text."""
+    text = "No findings in the diff."
+    return [rr_use(cid, prompt, model=model), rr_result(cid, text, text)]
+
+
+def rr_refused(cid, prompt, model="haiku"):
+    """A spawn that a PreToolUse hook refused: it never started, and its result is an error."""
+    text = "PreToolUse:Agent hook error: agent-model-floor: Rule (agent model): this spawn is refused."
+    return [rr_use(cid, prompt, model=model), rr_result(cid, text, "Error: " + text, is_error=True)]
+
+
+def rr_notice(aid, form):
+    """The completion notice of the background agent aid, as a transcript carries it: a user message whose
+    content is the text, or a queued_command attachment whose prompt is the text. Its task-id is the agentId."""
+    text = ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>toolu_%s</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Agent \"review\" completed</summary>\n</task-notification>"
+            % (aid, aid))
+    if form == "user":
+        return {"type": "user", "message": {"role": "user", "content": text}}
+    return {"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}}
+
+
+def rr_filler(n):
+    """n Bash calls, each with its result: the later records of a long session."""
+    out = []
+    for k in range(n):
+        cid = "toolu_bash%04d" % k
+        out.append({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": cid, "name": "Bash", "input": {"command": "ls", "description": "list"}}]}})
+        out.append(rr_result(cid, "a.txt", {"stdout": "a.txt", "stderr": "", "interrupted": False}))
+    return out
+
+
+def rr_transcript(slug, records):
+    """The session transcript of one case, one JSON record per line, under the run folder. Returns its path."""
+    path = os.path.join(RR_DIR, slug + ".jsonl")
+    write(path, "".join(json.dumps(rec) + "\n" for rec in records))
+    return path
+
+
+def rr_case(name, expected, slug, records, prompt, subagent="reviewer", model="sonnet", carries=()):
+    """One case: the spawn of prompt, judged in a session whose transcript holds records. A refusal names its
+    rule, so it reads the rule; an allow prints no reason, so it reads none."""
+    add(name, expected, rule=RR_RULE if expected == "deny" else None, tool="Agent",
+        transcript=rr_transcript(slug, records), carries=carries, prompt=prompt, subagent_type=subagent,
+        model=model)
+
+
+# A refusal: the earlier round still runs, so the later round is refused and the reason names that round.
+rr_case("review-rounds: round 2 on PR #2038 is refused while round 1 runs, its launch with no notice", "deny",
+        "red-round1-open", rr_background("rr-a1", RR_R1), RR_R2, carries=(("round 1", "Round 1"),))
+rr_case("review-rounds: round 3 on PR #2038 is refused while round 2 runs, round 1 has completed", "deny",
+        "red-round2-open", rr_background("rr-b1", RR_R1) + [rr_notice("rr-b1", "user")]
+        + rr_background("rr-b2", RR_R2), RR_R3, carries=(("round 2", "Round 2"),))
+rr_case("review-rounds: round 3 on PR #2038 is refused while round 1 runs, its marker reads Round 1 of 3", "deny",
+        "red-round1-marked", rr_background("rr-c1", "Round 1 of 3. Review PR #2038 for correctness.")
+        + rr_background("rr-c2", RR_R2) + [rr_notice("rr-c2", "attachment")], RR_R3,
+        carries=(("round 1", "Round 1"),))
+rr_case("review-rounds: round 2 on PR #2038 is refused while round 1 has a call with no result yet", "deny",
+        "red-round1-no-result", [rr_use("toolu_rr-d1", RR_R1)], RR_R2, carries=(("round 1", "Round 1"),))
+rr_case("review-rounds: round 2 on PR #2038 is refused while round 1 runs in a long session", "deny",
+        "red-long-session", rr_background("rr-e1", RR_R1) + rr_filler(1000), RR_R2,
+        carries=(("round 1", "Round 1"),))
+
+# Controls: each passes on the guard as it stands, and each is a spawn the rule must not refuse.
+rr_case("review-rounds: round 2 on PR #2038 is allowed once round 1's notice (user form) has come", "allow",
+        "ok-notice-user", rr_background("rr-f1", RR_R1) + [rr_notice("rr-f1", "user")], RR_R2)
+rr_case("review-rounds: round 2 on PR #2038 is allowed once round 1's notice (attachment form) has come", "allow",
+        "ok-notice-attachment", rr_background("rr-g1", RR_R1) + [rr_notice("rr-g1", "attachment")], RR_R2)
+rr_case("review-rounds: round 2 on PR #2038 is allowed when round 1 was a foreground reviewer that returned",
+        "allow", "ok-foreground", rr_finished("toolu_rr-h1", RR_R1), RR_R2)
+rr_case("review-rounds: round 2 on PR #2038 is allowed when round 1 was refused by a hook and never ran",
+        "allow", "ok-refused", rr_refused("toolu_rr-i1", RR_R1), RR_R2)
+rr_case("review-rounds: round 2 on PR #2038 is allowed while round 1 runs on PR #20380", "allow",
+        "ok-prefix-pr", rr_background("rr-j1", "Review PR #20380 for correctness."), RR_R2)
+rr_case("review-rounds: round 2 on PR #2038 is allowed while round 1 runs on PR #2039", "allow",
+        "ok-other-pr", rr_background("rr-k1", "Review PR #2039 for correctness."), RR_R2)
+rr_case("review-rounds: a second round 1 reviewer on PR #2038 is allowed while the first runs", "allow",
+        "ok-two-round-1", rr_background("rr-l1", RR_R1), RR_R1, model="haiku")
+rr_case("review-rounds: a builder's round 3 is not refused by this rule while a round 2 reviewer runs", "allow",
+        "ok-builder-round-3", rr_background("rr-m1", RR_R2), "Round 3 of 3. Finish the fix for PR #2038.",
+        subagent="builder", model="opus")
+rr_case("review-rounds: round 2 on PR #2038 is allowed when the transcript holds no spawn", "allow",
+        "ok-empty", [], RR_R2)
 
 
 # ------------------------------------------------------------------ other-checkout: a separate clone
