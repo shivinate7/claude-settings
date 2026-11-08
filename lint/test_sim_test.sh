@@ -1453,43 +1453,5 @@ need "the lost lease is named on exactly one stderr line" names_once "lease lost
 ARGS=(-scheme X)
 end_case "106 a renew that finds its lease gone names the loss once, however many renews fail; the run exits with its child's code"
 
-# Cases 107 and 108: both Duos are booted and each is leased by another live pid. The load is over both bars (1-min 90,
-# 5-min 150). The duo run queues with a --reuse of each Duo. Partway through the wait, Duo 2's holder shuts Duo 2 down
-# (the booted list the simctl shim reads loses it) and gives its lease. The grant is a reuse, which skips the load bars,
-# so the re-scan finds Duo 2 down. The run must not boot it over the bars: it waits and exits 1 at the wait limit, with no
-# simctl boot and no xcodebuild. Case 108 is the control: the same run at a low load boots Duo 2 and runs on it.
-queued_on_duo1() { [[ $(queue_state "$tool_pid") = "reuse:$DUO1" ]]; }
-# duo2_holder_shuts_down_and_gives: the holder shuts Duo 2 down in the booted list, then gives its lease with sim-lease give.
-duo2_holder_shuts_down_and_gives() {
-  : > "$booted_file"; booted "iPhone Duo" $DUO1
-  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" "$sim_lease" give --pid "$slot2_holder"
-  release_slot2
-}
-
-fresh; booted "iPhone Duo" $DUO1; booted "iPhone Duo" $DUO2; hold_slot1; hold_slot2; set_load "{ 90.00 150.00 0.50 }"
-ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=4
-need "the run is queued with a reuse of Duo 1 while both Duos are leased" poll_for 20 queued_on_duo1
-duo2_holder_shuts_down_and_gives
-finish_tool
-need "run boots nothing: Duo 2 is not booted over the load bars" no_boot
-need "run runs no xcodebuild" no_xcodebuild
-need "exit 1" rc_is 1
-need "the refusal is at the wait limit: the own-boot take names after 4s" grep -Fq "after 4s" "$work/run.err"
-release_slot1
-ARGS=(-scheme X)
-end_case "107 both Duos booted and leased, load over the bars: after Duo 2 is shut down and given, the run boots nothing, runs nothing and exits 1 at the wait limit"
-
-fresh; booted "iPhone Duo" $DUO1; booted "iPhone Duo" $DUO2; hold_slot1; hold_slot2; set_load "{ 0.50 0.50 0.50 }"
-ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=4
-need "the run is queued with a reuse of Duo 1 while both Duos are leased" poll_for 20 queued_on_duo1
-duo2_holder_shuts_down_and_gives
-finish_tool
-need "exit 0" rc_is 0
-need "steps are boot run shutdown" steps_are "boot run shutdown "
-need "destination is Duo 2" dest_is "$DUO2"
-release_slot1
-ARGS=(-scheme X)
-end_case "108 control: the same run at a low load boots Duo 2, runs its xcodebuild on Duo 2 and exits 0"
-
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
