@@ -672,6 +672,17 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.push_ref("feat", lane)
         return {"P1": p1, "P2": p2, "S": s, "L": lane}
 
+    def merged_history(self):
+        """Parent #1785's head P, pushed as its branch and then merged: origin's main is P. The branch is deleted on origin, and the lane is built on P. -> {"P", "L"}, the shas."""
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        p = self.commit_in_other(self.head("main"), "parent.txt", "parent head")
+        self.push_ref(PARENT_BRANCH, p)
+        self.push_ref("main", p)
+        tm.sh(self.other, "git", "push", "-q", "origin", ":refs/heads/%s" % PARENT_BRANCH)
+        lane = self.commit_in_other(p, "lane.txt", "lane commit")
+        self.push_ref("feat", lane)
+        return {"P": p, "L": lane}
+
     def test_review_range_refuses_a_start_below_the_parent_head_before_ci_job_runs(self):
         """#1969's own body, with its start at a real commit two commits below the parent head that the lane contains."""
         self.use_ci_job(PASSING, 0)
@@ -825,6 +836,28 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertIn("Merge after: #1676, #1742", body, "the fixture did not take the two-number line")
         parents = {FIRST_PARENT_PR: (first, FIRST_PARENT_BRANCH), LAST_PARENT_PR: (last, LAST_PARENT_BRANCH)}
         self.assert_review_range_passes(body, "a Merge after line that names #1676 and #1742", parents)
+
+    def test_review_range_passes_a_start_at_a_merged_parent_head_whose_branch_is_gone(self):
+        """The parent PR is merged: its head is origin's main, and its branch is deleted. The fake host still names that head and branch,
+        and the lane holds the head, so a range that starts there passes."""
+        self.use_ci_job(PASSING, 0)
+        h = self.merged_history()
+        self.assertEqual(self.head("main"), h["P"], "the fixture's parent head is not origin's main")
+        self.assertEqual(self.head(PARENT_BRANCH), "", "the fixture's parent branch is still on origin")
+        self.assert_review_range_passes(body_at(h["P"][:9]), "a range that starts at a parent head merged to main, whose branch is gone", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_parent_head_that_is_on_no_remote(self):
+        """The parent's branch is gone and its head was never pushed: the start is on no remote, so the check refuses before ci-job runs."""
+        self.use_ci_job(PASSING, 0)
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        unpushed = self.commit_in_other(self.head("main"), "unpushed.txt", "parent head never pushed")
+        self.assertEqual(tm.sh(self.other, "git", "branch", "-r", "--contains", unpushed), "", "the fixture's parent head is on origin")
+        self.push_ref("feat", self.commit_in_other(self.head("main"), "lane.txt", "lane commit"))
+        rc, text, runs = self.review_range_run(body_at(unpushed[:9]), one_parent(unpushed))
+        self.assertNotIn("Traceback", text, "the check crashed, which is not a refusal:\n%s" % text)
+        self.assertEqual(rc, 1, "the check passed a start that is on no remote:\n%s" % text)
+        self.assertEqual(runs, [], "ci-job ran for a start that is on no remote: %s" % runs)
+        self.assertEqual(self.worktrees(), 1, "the refused lint left a tree behind")
 
     def test_review_range_refuses_a_start_below_a_bold_merge_after_line(self):
         self.use_ci_job(PASSING, 0)
