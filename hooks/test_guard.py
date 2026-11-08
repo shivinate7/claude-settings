@@ -8916,6 +8916,20 @@ for _cmd in (
 # A set glued to the `}` of an empty if block, with no space between them, still denies.
 sh("git env set: PowerShell, a value set glued after an empty if block, denies",
    r'if($x){}$env:GIT_DIR="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# A null set inside an if block does not stop a set glued after its `}` from running. Main refuses the
+# glued form with no `;`. The try form, glued the same way, is refused on this head too.
+sh("git env set: PowerShell, a value set glued after an if block that nulls GIT_DIR, denies",
+   r'if($x){$env:GIT_DIR=$null}$env:GIT_WORK_TREE="x"', "deny", GIT_ENV_RULE, tool="PowerShell",
+   cwd=NOGIT)
+sh("git env set: PowerShell, a value set glued after a try block that nulls GIT_DIR, denies",
+   r'try{$env:GIT_DIR=$null}catch{}$env:GIT_WORK_TREE="x"', "deny", GIT_ENV_RULE, tool="PowerShell",
+   cwd=NOGIT)
+# Main allows these two forms, and this head allows them too. They are pinned as main judges them. The
+# spaced form sets the same variable after the same block, so a change that refuses it must move this pin.
+sh("git env set: PowerShell, a glued if block that sets nothing, then GIT_DIR set, allowed as on main",
+   r'if($x){1}$env:GIT_DIR="x"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a null set in an if block, a space, then GIT_WORK_TREE set, allowed as on main",
+   r'if($x){$env:GIT_DIR=$null} $env:GIT_WORK_TREE="x"', "allow", tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a call operator on a block that sets, denies",
    "& { $env:GIT_DIR=1 }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # Each form below runs the block it prints, through `.Invoke()`, a `%` pipe into `& $_`, or Invoke-Expression,
