@@ -640,7 +640,7 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
-# Owner ruling 432 a. PUSHOWNREF is `lane-x`, tracking origin/batch-1, and origin/lane-x exists too. The stray rule
+# PUSHOWNREF is `lane-x`, tracking origin/batch-1, and origin/lane-x exists too. The stray rule
 # reads that ref as a destination already on the remote, so an implied push to its own name is silent there.
 PUSHOWNREF = os.path.join(ROOT, "pushownref")
 # Rule push-main reads the remote a push names (ruling 207 a, judged on its URL). Every push fixture's origin is
@@ -2019,7 +2019,7 @@ def _build_push():
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
 
-    # Owner ruling 432 a. Its own name is on origin, so the implied pushes to it are silent. Built by git itself.
+    # Its own name is on origin, so the implied pushes to it are silent. Built by git itself.
     make_repo(PUSHOWNREF, {"base.txt": "base\n"})
     run_vcs(PUSHOWNREF, "remote", "add", "origin", PUSHREMOTE)
     run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/batch-1", "HEAD")
@@ -7847,7 +7847,8 @@ sh("push: stacked lane, a bare -u under push.default current writes the local na
    VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
 push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
           cwd=PUSHSTRAY, silent=True)
-# Owner ruling 432 a. A destination already on origin (refs/remotes/origin/<name>) is no stray. PUSHOWNREF is
+# Decision plain-push-asks, item 432 a.
+# A destination already on origin (refs/remotes/origin/<name>) is no stray. PUSHOWNREF is
 # `lane-x`, tracking origin/batch-1, with origin/lane-x present: each implied push to its own name is silent.
 push_case("own ref on origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHOWNREF, silent=True)
 push_case("own ref on origin, @ is silent", "origin @", "allow", cwd=PUSHOWNREF, silent=True)
