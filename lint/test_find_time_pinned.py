@@ -650,6 +650,27 @@ class PythonCalendarTest(FinderCase):
             "t_date_fixed = timezone.localdate(fixed_dt)",
         ])
 
+    def test_date_library_zone_argument_reads_are_listed_and_fixed_ones_are_not(self):
+        text = src(
+            "import arrow",
+            "import pandas as pd",
+            "import pendulum",
+            "from django.utils import timezone",
+            "",
+            "def test_zone(tz, fixed_dt):",
+            "    t_pendulum_zone = pendulum.today('UTC')",
+            "    t_pd_today = pd.Timestamp.today()",
+            "    t_arrow_tz = arrow.get(tzinfo=tz)",
+            "    t_local_tz = timezone.localtime(timezone=tz)",
+            "    t_arrow_fixed = arrow.get(0)",
+            "    t_local_fixed = timezone.localtime(fixed_dt)",
+        )
+        self.put("tests/test_zone_argument.py", text)
+        calendar_judge(self, "tests/test_zone_argument.py", text, listed=[
+            "t_pendulum_zone = pendulum.today('UTC')", "t_pd_today = pd.Timestamp.today()",
+            "t_arrow_tz = arrow.get(tzinfo=tz)", "t_local_tz = timezone.localtime(timezone=tz)",
+        ], clean=["t_arrow_fixed = arrow.get(0)", "t_local_fixed = timezone.localtime(fixed_dt)"])
+
     def test_freeze_time_decorator_suppresses_calendar_not_elapsed_assert(self):
         text = src(
             "import datetime",
@@ -717,6 +738,62 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_sibling_scope.py", text,
                        listed=["t_plain = datetime.datetime.now()"],
                        clean=["t_frozen = datetime.datetime.now()"])
+
+    def test_freeze_time_class_decorator_hides_calendar_in_its_methods(self):
+        text = src(
+            "import datetime",
+            "from freezegun import freeze_time",
+            "",
+            "@freeze_time('2024-01-01')",
+            "class TestFrozen:",
+            "    def test_method(self, stamp):",
+            "        t_method = datetime.datetime.now()",
+        )
+        self.put("tests/test_class_frozen.py", text)
+        calendar_judge(self, "tests/test_class_frozen.py", text,
+                       clean=["t_method = datetime.datetime.now()"])
+
+    def test_fake_clock_argument_in_a_decorator_is_still_listed(self):
+        text = src(
+            "import datetime",
+            "from freezegun import freeze_time",
+            "",
+            "@freeze_time(datetime.datetime.now().isoformat())",
+            "def test_decorator_argument(stamp):",
+            "    t_body = datetime.datetime.now()",
+        )
+        self.put("tests/test_decorator_argument.py", text)
+        calendar_judge(self, "tests/test_decorator_argument.py", text,
+                       listed=["@freeze_time(datetime.datetime.now().isoformat())"],
+                       clean=["t_body = datetime.datetime.now()"])
+
+    def test_fake_clock_argument_in_a_with_is_still_listed(self):
+        text = src(
+            "import datetime",
+            "from freezegun import freeze_time",
+            "",
+            "def test_with_argument(stamp):",
+            "    with freeze_time(datetime.datetime.now()):",
+            "        t_body = datetime.datetime.now()",
+        )
+        self.put("tests/test_with_argument.py", text)
+        calendar_judge(self, "tests/test_with_argument.py", text,
+                       listed=["with freeze_time(datetime.datetime.now()):"],
+                       clean=["t_body = datetime.datetime.now()"])
+
+    def test_fake_clock_does_not_hide_zone_attribute_reads(self):
+        text = src(
+            "import time",
+            "from freezegun import freeze_time",
+            "",
+            "@freeze_time('2024-01-01')",
+            "def test_zone(stamp):",
+            "    z_name = time.tzname",
+            "    z_offset = time.timezone",
+        )
+        self.put("tests/test_zone_attr.py", text)
+        calendar_judge(self, "tests/test_zone_attr.py", text,
+                       listed=["z_name = time.tzname", "z_offset = time.timezone"])
 
     def test_freeze_time_in_a_comment_or_a_string_does_not_suppress_calendar(self):
         text = src(
@@ -1249,6 +1326,16 @@ class JsCalendarTest(FinderCase):
         calendar_judge(self, "tests/utc_fixed.test.js", text, clean=[
             "const u_day_fixed = dayjs.utc(0);", "const u_moment_fixed = moment.utc(EPOCH);",
         ])
+
+    def test_new_dayjs_with_a_fixed_time_is_not_listed(self):
+        text = src(
+            "const EPOCH = 0;",
+            "const n_fixed = new dayjs(0);",
+            "const n_epoch = new dayjs(EPOCH);",
+        )
+        self.put("tests/new_dayjs_fixed.test.js", text)
+        calendar_judge(self, "tests/new_dayjs_fixed.test.js", text,
+                       clean=["const n_fixed = new dayjs(0);", "const n_epoch = new dayjs(EPOCH);"])
 
     def test_new_date_in_a_template_interpolation_is_listed(self):
         text = src(
