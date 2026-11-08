@@ -1,0 +1,11 @@
+{
+  "title": "Re-point the merge.py line cites in decision claims-carry-backing",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.7,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3pjhuGumnmrJ5gvqd",
+  "why": "#1634 moved merge.py lines, so the merge judge flagged 7 lines of decision claims-carry-backing (54, 56-60, 88) as unbacked.",
+  "note": "Coordinator 21:33 CST Nov 7; filed 21:33 CST.",
+  "updatedAt": "2026-11-07T21:33:00-06:00"
+}

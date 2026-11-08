@@ -1,11 +1,11 @@
 {
   "title": "The merge tool pages open PRs by number, so a cloud merge works with many PRs open",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 259.0,
   "owner": "coordinator",
   "lane": "session_013NEJL3cAuRwLPtZvTxdoh8",
   "why": "Blocker (coordinator, 15:33 CST Nov 7): every claude-settings merge fails in the cloud. With 194 open PRs, the merge tool's --paginate follows a Link with a numeric id, and the proxy refuses it with a 403.",
-  "note": "Done check: a cloud merge with more than one page of open PRs succeeds, and a red test shows the old paging fail.",
-  "updatedAt": "2026-11-07T15:33:00-06:00"
+  "note": "Done check: a cloud merge with more than one page of open PRs succeeds, and a red test shows the old paging fail. Done: #1634 merged in batch 61 (#1734), merge commit 394ad4863, 21:30 CST Nov 7; main's merge tool pages in the cloud now (coordinator 21:33 CST; updated 21:33 CST).",
+  "updatedAt": "2026-11-07T21:33:00-06:00"
 }

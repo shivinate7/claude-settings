@@ -1,10 +1,11 @@
 {
   "title": "Session mailbox: Mac and Windows auth, settings default, and the trial",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 3,
   "why": "The git mailbox (#1371) works from the cloud. The owner's Mac and PC still need auth before every session can use it.",
-  "note": "WAITS: #1371 merges. Lane session-messaging-plan, 16:53 CST Nov 6. After the merge, three things stay open. (1) Build step 2: Mac and Windows auth for git ls-remote; this needs a Mac session. (2) Then MAILBOX_REPO gets a settings.json default. (3) The 20-message cloud-to-Mac trial. Also re-ask Q4 after #1346 lands. Read 21:30 CST Nov 7 (owner's ask ask-mw79xeveem): #1371 is still an open draft, round 3 PASS since Nov 6, never batched. Coordinator told it is idle. Across accounts: the store is the private repo shivinate7/session-mailbox, so a session under another GitHub account needs read and write access to it; no step covers that yet.",
+  "note": "WAITS: #1371 merges. Lane session-messaging-plan, 16:53 CST Nov 6. After the merge, three things stay open. (1) Build step 2: Mac and Windows auth for git ls-remote; this needs a Mac session. (2) Then MAILBOX_REPO gets a settings.json default. (3) The 20-message cloud-to-Mac trial. Also re-ask Q4 after #1346 lands. Read 21:30 CST Nov 7 (owner's ask ask-mw79xeveem): #1371 is still an open draft, round 3 PASS since Nov 6, never batched. Coordinator told it is idle. Across accounts: the store is the private repo shivinate7/session-mailbox, so a session under another GitHub account needs read and write access to it; no step covers that yet. Coordinator 21:30-21:31 CST: lane session-messaging-plan restarted as session_013NEJL17rm8W23ZHRaHy9ZH to drive the PRs to merge. #1371 holds all of #1326, which closes; #1371 merges main in, re-checks, then goes to runner 8. The decision record stays a draft while Q4 (timed check-in) is open. Cross-account and cross-model reach rides on the same mailbox; no separate work filed. Updated 21:33 CST.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T21:30:00-06:00"
+  "updatedAt": "2026-11-07T21:33:00-06:00",
+  "lane": "session_013NEJL17rm8W23ZHRaHy9ZH"
 }
