@@ -776,7 +776,8 @@ def _conflict_markers_hit(stripped: str, cwd: str):
     whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
-    unread = None                       # the first push whose read could not run, answered at the end if nothing is refused
+    unread = None                       # the first read that could not run, answered at the end if nothing is refused
+    add_unread = None                   # the same for an add: it counts only once a later commit may take what it staged
     ends = []
     segments = split_segments(stripped, ends)
     for number, segment in enumerate(segments):
@@ -799,59 +800,74 @@ def _conflict_markers_hit(stripped: str, cwd: str):
             readable = readable and _chain_safe(segment)
             conflict_step = conflict_step or (call is not None and _makes_conflict(call))
             continue
-        c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
-        if c_target is not None:
-            where = _absolute(c_target, where or "")
-            where = where if os.path.isabs(where) else None
-        tree = GIT_WORK_TREE_RE.search(segment)
-        if tree and where:
-            where = _absolute(tree.group(2), where)
-        done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
-        if done is None and where and os.path.isdir(where):
-            raise _GitUnread(where)
-        if done is None or done.returncode != 0 or not done.stdout.strip():
-            continue
-        top = os.path.normpath(done.stdout.strip())
-        if call[0] == "add":
-            whole, specs = _add_shape(call[1])
-            if whole or _unresolved(specs):
-                whole_tops.add(top)
-            elif specs:
-                add_specs.append((where, top, specs))
-            continue
-        wholes, adds = whole_tops, add_specs   # this commit takes the adds so far; the next starts clean
-        whole_tops, add_specs = set(), []
-        all_flag, specs = _commit_shape(call[1]) if call[0] == "commit" else (False, [])
-        head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
-        if head is None:
-            raise _GitUnread(top)
-        if head.returncode != 0:
-            continue
-        later = None   # a read after the first that could not run: a triplet already found is still refused
-        if specs:
-            found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
-        else:
-            if all_flag or top in wholes:
-                found = _marker_findings(top, top, ["HEAD"], None)
+        if call[0] != "add":
+            unread = unread or add_unread   # an earlier add the guard could not read may have staged for this commit
+        judged = False   # the reads got past HEAD, where main judges the commit even on an empty read
+        try:
+            c_target = _segment_git_c_target(segment_tokens(segment) or [])
+            where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
+            if c_target is not None:
+                where = _absolute(c_target, where or "")
+                where = where if os.path.isabs(where) else None
+            tree = GIT_WORK_TREE_RE.search(segment)
+            if tree and where:
+                where = _absolute(tree.group(2), where)
+            done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
+            if done is None and where and os.path.isdir(where):
+                raise _GitUnread(where)
+            if done is None or done.returncode != 0 or not done.stdout.strip():
+                continue
+            top = os.path.normpath(done.stdout.strip())
+            if call[0] == "add":
+                whole, specs = _add_shape(call[1])
+                if whole or _unresolved(specs):
+                    whole_tops.add(top)
+                elif specs:
+                    add_specs.append((where, top, specs))
+                continue
+            wholes, adds = whole_tops, add_specs   # this commit takes the adds so far; the next starts clean
+            whole_tops, add_specs = set(), []
+            all_flag, specs = _commit_shape(call[1]) if call[0] == "commit" else (False, [])
+            head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
+            if head is None:
+                raise _GitUnread(top)
+            if head.returncode != 0:
+                continue
+            judged = True
+            later = None   # a read after the first that could not run: a triplet already found is still refused
+            if specs:
+                found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
             else:
-                found = _marker_findings(top, top, ["--cached"], "")
-            try:
-                if top in wholes:
-                    found.update(_untracked_findings(top, top, None))
-                for add_where, add_top, add_paths in adds:
-                    if add_top != top:
-                        continue
-                    if not (all_flag or top in wholes):
-                        for name in _covered_by(add_where, add_paths):
-                            found.pop(name, None)
-                        found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
-                    found.update(_untracked_findings(add_where, top, add_paths))
-            except _GitUnread as caught:
-                later = caught
-        name = _triplet_file(found)
-        if later and not name:
-            raise later
+                if all_flag or top in wholes:
+                    found = _marker_findings(top, top, ["HEAD"], None)
+                else:
+                    found = _marker_findings(top, top, ["--cached"], "")
+                try:
+                    if top in wholes:
+                        found.update(_untracked_findings(top, top, None))
+                    for add_where, add_top, add_paths in adds:
+                        if add_top != top:
+                            continue
+                        if not (all_flag or top in wholes):
+                            for name in _covered_by(add_where, add_paths):
+                                found.pop(name, None)
+                            found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
+                        found.update(_untracked_findings(add_where, top, add_paths))
+                except _GitUnread as caught:
+                    later = caught
+            name = _triplet_file(found)
+            if later and not name:
+                raise later
+        except _GitUnread as caught:
+            # Held, so a later segment's triplet or chain is still refused. An add carries nothing into
+            # history, so its unread counts only once a later commit may take what it staged.
+            if call[0] == "add":
+                add_unread = add_unread or caught
+                continue
+            unread = unread or caught
+            if judged and not readable:
+                blind_commit = True   # main judged it blind on an empty read; a conflict step still makes a push a chain
+            continue
         if readable:
             if name:
                 return "commit", name
