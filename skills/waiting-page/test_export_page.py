@@ -102,6 +102,8 @@ API_VALUE = "abcdefgh" + "12345678"
 SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
+# Two hundred letters, one 16-letter block repeated 12 times and 8 more: a digit after them sits at offset 200, past a lookahead of 20 characters.
+LETTERS_200 = LETTERS_16 * 12 + "xKqPzLmR"
 NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
 PROSE_SECRET = "correcthorsebatterystaple"  # letters only, no digit, symbol or hump: only the prose rule can refuse it
 # A digit at index 256 of a credential value: refused, and it must stay refused.
@@ -292,7 +294,7 @@ RED = [
     ("adHocKey with a value of letters and digits", "adHocKey: " + GLUED_VALUE, GLUED_VALUE),
     ("returnKey with a value of letters and digits", "returnKey: " + GLUED_VALUE, GLUED_VALUE),
     # A letters-only secret after a plain word and prose is one. The prose after the plain word must not hide it.
-    ("letters-only secret after a plain word and a semicolon",
+    ("letters-only secret after a plain word, a semicolon and `is`",
      "password: required to log in; default is swordfish", "swordfish"),
     ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
     # Each separator word or mark before a non-function word starts a second value, so the password value is refused.
@@ -301,15 +303,28 @@ RED = [
     ("letters-only secret after a plain word and `is`", "password: none is swordfish", "swordfish"),
     ("letters-only secret after a plain word and `are`", "password: none are swordfish", "swordfish"),
     ("letters-only secret right after a plain word and a semicolon", "password: none; swordfish", "swordfish"),
-    ("letters-only secret after prose and a comma", "password: none for the guest, swordfish", "swordfish"),
+    ("one-word letters-only secret after a plain word, prose and a comma","password: none for the guest, swordfish", "swordfish"),
     # A comma does not end the prose: a letters-only secret after a comma, with prose before it, is one.
-    ("letters-only secret after prose and a comma", "password: none for the admin account, " + PROSE_SECRET, PROSE_SECRET),
+    ("25-letter letters-only passphrase after a plain word, prose and a comma","password: none for the admin account, " + PROSE_SECRET, PROSE_SECRET),
     # The digit counts wherever it sits in the value: at 256, and at 257 and 1000 past it.
     ("digit at index 256 of a credential value", "API_KEY=" + CAP_LAST_DIGIT, CAP_LAST_DIGIT),
     ("digit at index 257 of a credential value", "API_KEY=" + DIGIT_AT_257, DIGIT_AT_257),
     ("digit at index 1000 of a credential value", "API_KEY=" + DIGIT_AT_1000, DIGIT_AT_1000),
     # The letter at index 300 is past the short shape's window, so only the long-value shape can see it. It refuses.
     ("API_KEY of 300 digits then a letter", "API_KEY=" + DIGITS_300_THEN_LETTER, DIGITS_300_THEN_LETTER),
+    # A semicolon after prose starts a second value as a comma does. Only the `;` in the separator check refuses this.
+    ("letters-only secret after prose and a semicolon", "password: none for the guest; swordfish", "swordfish"),
+    # A prose tail after a plain value passes only as a function word first, then letter words. A letter word with no
+    # function word first, a digit in a later word, and a symbol inside a later word each refuse.
+    ("password none then a letter word with no function word first", "password: none " + "swordfish", "swordfish"),
+    ("password none then a function word and a word with a digit", "password: none for " + "hunter2", "hunter2"),
+    ("password none then a function word and a word with a trailing mark and a digit",
+     "password: none for " + "hunter2!", "hunter2!"),
+    ("password none then a function word and a symbol inside a word", "password: none for " + "hunter&co", "hunter&co"),
+    # VALUE_LOOKAHEAD_MAX pin: a value whose digit sits past the first 20 characters is refused only at the full cap.
+    ("api_key of 200 letters, one 16-letter block repeated, then a digit", "api_key: " + LETTERS_200 + "7", LETTERS_200 + "7"),
+    # Control for the pin above: the same 200 letters with no digit are refused by the letters-only branch at any cap.
+    ("api_key of 200 letters, one 16-letter block repeated, with no digit", "api_key: " + LETTERS_200, LETTERS_200),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -380,6 +395,11 @@ GREEN = [
     ("donkey with a value", "donkey: Kong1981"),
     ("whiskey with a value", "whiskey: Jameson12"),
     ("jockey with a value", "jockey: Rider123"),
+    # Each word of EVERYDAY_KEY_WORDS has its own row with a random-looking value. Dropping a word from the list
+    # turns that row red.
+    ("turnkey with a random value", "turnkey=" + "Xq7Zt2Lm" + "9Qw4"),
+    ("hockey with a random value", "hockey: " + "Rk4Ps8Vn" + "2Tz6"),
+    ("lackey with a random value", "lackey=" + "Wm3Bq9Jd" + "5Hx7"),
     ("a keyboard label with a number", "keyboard: 104 keys"),
     # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
     ("password word with optional", "password: " + "optional"),
