@@ -13859,7 +13859,7 @@ def _load_guard_frozen():
     return module
 
 
-# The most predicate calls the scan makes on a `for` list one word past the cap: 45 on a22cd37ec. It is a bound, not an
+# The most predicate calls the scan makes on a `for` list one word past the cap: 45, the scan size of the literal reading. It is a bound, not an
 # exact count, so a change that makes fewer calls still passes. The cap is what stops a long list from costing one scan
 # per word it expands to, and a list over the cap keeps the scan within this bound.
 SHELL_SCAN_OVER_CAP_CALLS = 45
