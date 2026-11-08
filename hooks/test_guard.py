@@ -28196,7 +28196,8 @@ def rbb_guard_text(name):
 RBB_MARKER_SUFFIX = (rbb_guard_text("BRIEF_MARKER_REMEDY")[len(RBB_LITERAL_REMEDY):].strip()
                      if rbb_guard_text("BRIEF_MARKER_REMEDY").startswith(RBB_LITERAL_REMEDY) else "")
 RBB_REPORT_SENTENCE = rbb_guard_text("BRIEF_BLIND_REASON").split(". ")[0]
-RBB_UNREAD_LACKS = (RBB_MARKER_SUFFIX, RBB_REPORT_SENTENCE)
+# The scan read no line of an unread brief, so the refusal names none: the line reason's "of the brief" stays out.
+RBB_UNREAD_LACKS = (RBB_MARKER_SUFFIX, RBB_REPORT_SENTENCE, "of the brief")
 
 
 def rbb_unread_refuse(name, script):
@@ -28438,6 +28439,10 @@ add("reviewer-brief-blind: refused: a Workflow agent() reviewer whose prompt hol
     script="const r = await agent(`Check the floor fix.\nPrior verdict: FAIL\nFiles: hooks/guard.py.`, "
            "{agentType: 'reviewer', model: 'haiku'}); return r",
     carries=("line 2",))
+# The scan refuses at its first verdict line, so the refusal names that line and not the later one.
+rbb_line_refuse("reviewer-brief-blind: refused: a reviewer brief with two verdict lines, at lines 2 and 4, the refusal names line 2",
+                "Check the floor fix.\nVerdict: PASS\nFiles: hooks/guard.py.\nVerdict: FAIL", 2,
+                extra=("line 2 of the brief",))
 
 
 # A refused line over 200 characters is named by its number, and its text is not echoed, so a 5 KB line cannot make the
