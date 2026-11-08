@@ -33,7 +33,7 @@ a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
-When the report is there, each of these blocks asks for only the corrected lines, never the report again.
+When the report is there, no refusal holds correction text; the step lives in decision guard-remedy-not-to-owner.
 
 On any turn whose reply holds an Input Needed item that asks the owner a question (a pick with
 options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
@@ -263,11 +263,11 @@ BLOCK_REASON = owner_line(
     "Report-shape guard",
     "this turn landed a commit, push, or merge, and the reply does not end with the report in one blockquote "
     "with the bold labels Done, Deviations, Input Needed, Next")
-# The owner has read the report before a block lands, so a resent report doubles it. The missing-report block
-# asks for the report itself; every other block asks for a short correction. Both asks live in the record.
+# The owner has read the report before a refusal lands, so a resent report doubles it. The missing-report refusal
+# asks for the report itself; every other refusal asks for a short correction. Both asks live in the record.
 # A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
-# set, so this guard stays quiet on it. The rewrite after a missing-report block is the one
-# exception: rewrite_problems() checks it once, and its own block leaves no marker.
+# set, so this guard stays quiet on it. The rewrite after a missing-report refusal is the one
+# exception: rewrite_problems() checks it once, and its own refusal leaves no marker.
 
 MODELS_REASON = owner_line(
     "Model-name guard",
