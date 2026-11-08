@@ -12903,6 +12903,18 @@ class ReviewRecordAncestorHead(ReviewEnv):
         rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead", comments=(earlier,))
         self.assertEqual(rc, 0, "control: the same ancestor record without its fix check was refused:\n" + out + err)
 
+    def test_a_fail_record_on_an_ancestor_head_lists_as_stale_on_the_reviewed_listing(self):
+        # Pinned: `merge --reviewed` lists an open FAIL record on an ancestor of the live head as stale, and names the head it reviewed. No review
+        # read the live head, so the line never reads done. The compare is answered ahead, so the fixture holds the ancestry the record claims.
+        host = self.record_host(review_comment(1, 7, record_text(head=self.ANC, rounds=("Round 1: reviewer, sonnet, FAIL",))),
+                                diffs={(self.ANC, self.LIVE): compare_of("ahead")})
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, "the listing refused the ancestor-head record:\n" + out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {self.LIVE[:9]} stale: the record is for head {self.ANC[:9]}; ",
+                         "the ancestor-head FAIL record is not listed as stale, naming its head:\n" + out)
+        self.assertNotRegex(line, r" done: ", "the ancestor-head FAIL record reads done on the reviewed listing:\n" + out)
+
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
