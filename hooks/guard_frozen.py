@@ -535,15 +535,25 @@ _CP_LINK_LONG = ("link", "symbolic-link")
 _NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>" + _DESCRIPTOR, re.IGNORECASE)
 _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
+# A DEST that is one quoted variable (`"$f"`) stays one word, so it cannot split into `-t dir`. Its
+# value is unknown, but a DEST is only ever written, so the sources stay reads.
+_QUOTED_VAR = re.compile(r'"\$(?:\w+|\{\w+\})"')
+
+
+def _cp_start(raw) -> int:
+    """The index of the `cp` command word of a segment, past assignments, a loop keyword (`do`, `then`,
+    `else`, `{`) and a wrapper, by the one reader `resolve_command`; -1 when the segment runs no `cp`."""
+    start = resolve_command(tuple(raw))
+    return start if start is not None and _name(raw[start]) == "cp" else -1
 
 
 def _copy_reads(raw, predicate, cwd):
     """The indexes of the words of a `cp` segment that are only read, else an empty set."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    start = _cp_start(raw)
+    if start < 0:
         return set()
-    operands, target, index = [], None, start + 1
+    operands, target, index, shown = [], None, start + 1, ""
     while index < len(words):
         word = words[index]
         if _NULL_REDIRECT.fullmatch(word):
@@ -570,11 +580,12 @@ def _copy_reads(raw, predicate, cwd):
             target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
             if target is None:
                 return set()
+            shown = raw[index - 1]
             continue
         if word.startswith("--target-directory="):
-            target = word.split("=", 1)[1]
+            target, shown = word.split("=", 1)[1], ""
         elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
-            target = word[2:]
+            target, shown = word[2:], ""
         elif _CP_FLAGS.fullmatch(word):
             pass
         elif word.startswith("-") or ">" in word or "<" in word:
@@ -585,8 +596,9 @@ def _copy_reads(raw, predicate, cwd):
     if target is None:
         if len(operands) < 2:
             return set()
+        shown = raw[operands[-1]]
         target = words[operands.pop()]
-    if not operands or not target or _CP_DEST_UNSAFE.search(target):
+    if not operands or not target or (_CP_DEST_UNSAFE.search(target) and not _QUOTED_VAR.fullmatch(shown)):
         return set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
@@ -599,8 +611,8 @@ def _cp_link_source(raw, holds, cwd) -> str:
     new name the frozen file itself, so a later write there writes it. Every operand but a plain
     DEST is judged; with `-t` every operand is, which fails closed."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    start = _cp_start(raw)
+    if start < 0:
         return ""
     link = target = False
     operands = []
@@ -1027,6 +1039,13 @@ def _inline_scripts(command: str):
             if kind and flag.match(tokens[at]):
                 yield kind, str(tokens[at + 1]), number, segments, ends
                 break
+
+
+def interpreter_may_write(raw: str) -> bool:
+    """True when `raw` holds a heredoc or an inline flag and a write call an interpreter body could make:
+    the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
+    return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
+        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
