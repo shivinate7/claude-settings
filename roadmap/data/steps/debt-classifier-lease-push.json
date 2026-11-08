@@ -1,0 +1,11 @@
+{
+  "title": "A debt record holds the classifier's refusals of a lane's own lease push",
+  "phase": "next",
+  "status": "todo",
+  "order": 659,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "docs/debts/notes.md holds three classifier-refuses-lease-push notes (Nov 3-4) plus two lane-force-push-refused notes, and #1996 adds a fourth classifier-refuses-lease-push note. Rule roles-findings-are-debts-or-notes: a note becomes a debt after a real incident, and no debt record exists on main (triage read, 07:52 CST Nov 8; lane revive-1042 via coordinator).",
+  "note": "Done check: docs/debts/classifier-refuses-lease-push.md exists in the debt store's shape, points to decision stale-safe-force-push (which allows the push) and names step lease-push-c-and-d (PR #1316, the allow entries) as its Fix; the four notes and the two lane-force-push-refused notes are folded into it and leave notes.md. Records-only. Slug by triage.",
+  "updatedAt": "2026-11-08T07:52:00-06:00"
+}
