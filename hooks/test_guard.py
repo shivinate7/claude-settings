@@ -8924,10 +8924,25 @@ sh("git env set: PowerShell, a value set glued after an if block that nulls GIT_
 sh("git env set: PowerShell, a value set glued after a try block that nulls GIT_DIR, denies",
    r'try{$env:GIT_DIR=$null}catch{}$env:GIT_WORK_TREE="x"', "deny", GIT_ENV_RULE, tool="PowerShell",
    cwd=NOGIT)
-# Main allows these two forms, and this head allows them too. They are pinned as main judges them. The
-# spaced form sets the same variable after the same block, so a change that refuses it must move this pin.
-sh("git env set: PowerShell, a glued if block that sets nothing, then GIT_DIR set, allowed as on main",
-   r'if($x){1}$env:GIT_DIR="x"', "allow", tool="PowerShell", cwd=NOGIT)
+# Text glued after a block's `}` starts a new statement, so a set in it denies, whatever the block.
+sh("git env set: PowerShell, a glued set after an if-else block that nulls GIT_DIR, denies",
+   r'if($x){$env:GIT_DIR=$null}else{1}$env:GIT_WORK_TREE="x"', "deny", GIT_ENV_RULE,
+   tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a glued set after an if-elseif block that nulls GIT_DIR, denies",
+   r'if($x){$env:GIT_DIR=$null}elseif($y){1}$env:GIT_WORK_TREE="x"', "deny", GIT_ENV_RULE,
+   tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a glued set after a try-catch that nulls GIT_DIR in try, denies",
+   r'try{$env:GIT_DIR=$null}catch{1}$env:GIT_WORK_TREE="x"', "deny", GIT_ENV_RULE,
+   tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a glued set after a do-while that nulls GIT_DIR, denies",
+   r'do{$env:GIT_DIR=$null}while($x)$env:GIT_WORK_TREE="x"', "deny", GIT_ENV_RULE,
+   tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a glued Set-Content on env:GIT_DIR after an if block that nulls it, denies",
+   r'if($x){$env:GIT_DIR=$null}sc env:GIT_DIR x', "deny", GIT_ENV_RULE, tool="PowerShell",
+   cwd=NOGIT)
+sh("git env set: PowerShell, a glued if block that sets nothing, then GIT_DIR set, denies",
+   r'if($x){1}$env:GIT_DIR="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# The spaced null set after an if block is allowed, as on main, and is pinned as main judges it.
 sh("git env set: PowerShell, a null set in an if block, a space, then GIT_WORK_TREE set, allowed as on main",
    r'if($x){$env:GIT_DIR=$null} $env:GIT_WORK_TREE="x"', "allow", tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a call operator on a block that sets, denies",
