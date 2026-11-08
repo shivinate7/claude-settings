@@ -718,6 +718,18 @@ class Hook(unittest.TestCase):
                                 ['Blind designers: none, owner: "informed only"**'],
                                 "the owner form with trailing bold marks")
 
+    def test_bulleted_count_with_trailing_bold_marks_is_refused(self):
+        # A bulleted count line with a stray `**` after the number is no plain count. Alone, it is the one marked line, and it is refused.
+        self.assertCountRefused("Designer kind: informed\n- Blind designers: 2**\n\n" + DUO_BRIEF,
+                                ["- Blind designers: 2**"],
+                                "a bulleted count line with trailing bold marks")
+
+    def test_bulleted_count_without_stray_marks_passes(self):
+        # Green control, the refused case above without the stray `**`. A lone bulleted count line still counts as its number.
+        prompt = "Designer kind: informed\n- Blind designers: 2\n\n" + DUO_BRIEF
+        self.assertEqual(count_lines(prompt), ["- Blind designers: 2"], "scope: the control brief holds only the bulleted line")
+        self.assertEqual(self.spawn(prompt), "", "a lone bulleted count line must count as its number")
+
     def test_informed_spawn_with_owner_none_passes(self):
         self.assertEqual(self.spawn('Designer kind: informed\nBlind designers: none, owner: "informed only"\n\nDraw it.'), "")
 
