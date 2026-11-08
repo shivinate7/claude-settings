@@ -106,17 +106,45 @@ ENV_TEXT_COMMANDS = ("echo", "printf")
 # FILE of patterns or of a program (`-f`, `--file`) marks nothing: that file is read, so it is
 # judged. Once either one is met, every plain word is a file, and none is read as the pattern.
 ENV_PATTERN_LONG = ("--regexp", "--expression", "--source")
-ENV_FILE_LONG = ("--file",)
+ENV_FILE_LONG = ("--file", "--from-file")
 # A flag's own value stands before the pattern and is never it: a count, a glob, a file filter.
 ENV_VALUE_LONG = (
     "--max-count", "--context", "--after-context", "--before-context", "--include", "--exclude",
-    "--exclude-dir", "--glob", "--max-depth", "--max-filesize", "--type",
+    "--exclude-dir", "--exclude-from", "--glob", "--max-depth", "--max-filesize", "--type",
+    "--file-search-regex",
 )
+# The value of these flags is a glob that EXCLUDES files, so it reads nothing and is no path.
+# `--include`, `-g`, `--glob` and `--exclude-from` are not here: each names a file or a file of
+# names, or a glob that includes the file, and stays judged.
+ENV_EXCLUDE_LONG = ("--exclude", "--exclude-dir")
 ENV_VALUE_SHORT = "ABCmgd"
 # `sed` and `awk` read a script, and its first plain word is a regex, never a path. `awk -F` and
 # `-v` take a value of their own.
 ENV_SCRIPT_COMMANDS = ("sed", "awk", "gawk", "mawk", "nawk")
 ENV_SCRIPT_VALUE_SHORT = "Fv"
+# Per-command flag letters, for the letters that differ between the search tools. `-f` takes a file
+# of patterns in grep and rg, and is a plain switch in ag and ack. `-t` and `-T` take a file type in
+# rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path. The word
+# after rg `-t` or `-T` is a type name and no path, so it is skipped.
+ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
+# `ag -G` takes a regex that picks the files to search, and `ag -p` a file of ignore patterns. Each
+# value is judged as a path. In grep `-G` is a plain switch, so the letters are not shared.
+ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "ag": "Gp"}
+ENV_TYPE_SHORT_BY_COMMAND = {"rg": "tT"}
+# `jq`, `gojq` and `yq` take a program as the first plain word: a key path such as `.envs` is text.
+# Their file arguments stay judged. Their `-e` is an exit-status switch, not a pattern flag, and
+# `-f` / `--from-file` names a file of the program.
+ENV_PROGRAM_COMMANDS = ("jq", "gojq", "yq")
+# The program commands do not read flags as grep does: `-C` is a colour switch there, so a grep value
+# letter would swallow the next word and leave a file read as the program. Only jq's and gojq's `-L`
+# takes a value, a module directory, which is judged as a path. yq has no short value letter here.
+ENV_PROGRAM_VALUE_SHORT = {"jq": "L", "gojq": "L", "yq": ""}
+ENV_YQ_SUBCOMMANDS = ("e", "eval", "ea", "eval-all")
+# `mkdir` makes a folder and reads no contents, so an env-prefixed folder name (`.envs`) is no read.
+# `cd` and `pushd` stay refused: the shell keeps its folder between calls, so a later read in that
+# folder cannot be tied to the move. `git add` and `cat` stay refused: they cannot tell a folder
+# from a file. Not merged into ENV_EXISTENCE_COMMANDS, which ENV_RELAY_SAFE reuses.
+ENV_FOLDER_COMMANDS = ("mkdir",)
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
 # are read, so an env name in prose reads no contents. A substitution in the value is cut out
@@ -463,7 +491,10 @@ def _pattern_words(words, position: int, command: str):
     which stays judged as a path, so an error here only ever judges a word and never hides one.
     """
     skip, glued, plain, given, ended = set(), {}, [], False, False
-    value_short = ENV_VALUE_SHORT + (ENV_SCRIPT_VALUE_SHORT if command in ENV_SCRIPT_COMMANDS else "")
+    program = command in ENV_PROGRAM_COMMANDS
+    value_short = (ENV_PROGRAM_VALUE_SHORT[command] if program
+                   else ENV_VALUE_SHORT + ENV_VALUE_SHORT_BY_COMMAND.get(command, "")
+                   + (ENV_SCRIPT_VALUE_SHORT if command in ENV_SCRIPT_COMMANDS else ""))
     i = position + 1
     while i < len(words):
         word = words[i]
@@ -485,16 +516,20 @@ def _pattern_words(words, position: int, command: str):
                 skip.update({i} if attached else {i + 1})
             elif name in ENV_FILE_LONG:
                 given = True
+            elif name in ENV_EXCLUDE_LONG:
+                skip.update({i} if attached else {i + 1})
             i += 1 if attached or name not in ENV_PATTERN_LONG + ENV_FILE_LONG + ENV_VALUE_LONG else 2
             continue
         step = 1
         for k, letter in enumerate(word[1:], 1):
             rest = word[k + 1:]
-            if letter == "e":
+            if letter == "e" and not program:
                 given = True
                 skip.update({i} if rest else {i + 1})
                 step = 1 if rest else 2
                 break
+            if letter == "f" and command in ENV_BOOLEAN_F_COMMANDS:
+                continue  # a switch: the cluster goes on, and no pattern file is named
             if letter == "f":
                 given = True
                 if rest:
@@ -502,10 +537,18 @@ def _pattern_words(words, position: int, command: str):
                 step = 1 if rest else 2
                 break
             if letter in value_short:
+                if not rest and letter in ENV_TYPE_SHORT_BY_COMMAND.get(command, ""):
+                    skip.add(i + 1)  # a file type name, never a path
                 step = 1 if rest else 2
                 break
         i += step
-    if not given and plain:
+    if program and not given and plain:
+        # A yq subcommand leads the program, and is no path either. The program is skipped only
+        # when a file word follows it: a lone word reads stdin or is the file, so it is judged.
+        lead = 1 if command == "yq" and words[plain[0]] in ENV_YQ_SUBCOMMANDS else 0
+        if len(plain) > lead + 1:
+            skip.update(plain[:lead + 1])
+    elif not given and plain:
         skip.add(plain[0])
     return skip, glued
 
@@ -726,7 +769,8 @@ def _env_flat(cmd: str, text_ok: bool = False):
             if command.lower() in ENV_TEXT_COMMANDS + ENV_POWERSHELL_TEXT_COMMANDS:
                 not_paths = set(range(len(words)))
             patterns, glued = (_pattern_words(words, position, command)
-                               if command in ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
+                               if command in (ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
+                                              + ENV_PROGRAM_COMMANDS)
                                else (set(), {}))
             # An awk `-v name=value` value that holds a glob is a regex, as a pattern is. A plain
             # env name there stays judged: awk can open it. ACCEPTED LIMIT: a glob value that
@@ -766,6 +810,8 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     continue  # the name is data, and no contents are read or written
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
+                if command in ENV_FOLDER_COMMANDS:
+                    continue  # a folder is made, and none of it is read
                 actor = "'%s'" % command if command else "this command"
                 return (ENV_CONTENTS_REASON,
                         "%s would read, write or commit the contents of '%s'" % (actor, named))
