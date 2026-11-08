@@ -24,16 +24,18 @@ done < <([ -f .ste-lint-exclude ] && cat .ste-lint-exclude; echo; printf '%s\n' 
 
 RAW_FILES=()
 FILES=()
+NO_BASE=0
 if [ "$SCOPE" = "all" ]; then
   # ':(glob)' turns on real double-star matching. Without it, git's default
   # pathspec needs a literal '/' for '**/', so a root file such as README.md
   # never matches '**/*.md' (measured).
-  while IFS= read -r f; do
-    [ -n "$f" ] && RAW_FILES+=("$f")
-  done < <(git ls-files -- ":(glob)$PATHS_GLOB")
-  while IFS= read -r f; do
-    [ -n "$f" ] && FILES+=("$f")
-  done < <(git ls-files -- ":(glob)$PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+  # -z on every list of names: git quotes a non-ASCII name ("caf\303\251.md") in a newline list.
+  while IFS= read -r -d '' f; do
+    RAW_FILES+=("$f")
+  done < <(git ls-files -z -- ":(glob)$PATHS_GLOB")
+  while IFS= read -r -d '' f; do
+    FILES+=("$f")
+  done < <(git ls-files -z -- ":(glob)$PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
 else
   if [ -n "$BASE_REF" ]; then
     BASE="$BASE_REF"
@@ -49,23 +51,37 @@ else
     FROM="HEAD~1"
   else
     RANGE="origin/$BASE...HEAD"
-    FROM="$(git merge-base "origin/$BASE" HEAD)"
+    FROM="$(git merge-base "origin/$BASE" HEAD 2>/dev/null)" || FROM=""
   fi
-  # Files and lines are read against FROM, the range's start, so one diff holds the commits and the working
-  # tree: a tracked file edited or staged and not yet committed counts, with its working-tree line numbers.
-  # A new file that git does not track and .gitignore does not match is all new lines (UNTRACKED).
-  # A clean tree, as in CI, adds nothing.
   UNTRACKED=()
-  while IFS= read -r f; do
-    [ -n "$f" ] && UNTRACKED+=("$f")
-  done < <(git ls-files --others --exclude-standard -- "$CHANGED_PATHS_GLOB")
-  while IFS= read -r f; do
-    [ -n "$f" ] && RAW_FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$FROM" -- "$CHANGED_PATHS_GLOB"; printf '%s\n' ${UNTRACKED[@]+"${UNTRACKED[@]}"})
-  while IFS= read -r f; do
-    [ -n "$f" ] && FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$FROM" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"}
-           git ls-files --others --exclude-standard -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+  WORK=""
+  if [ -z "$FROM" ]; then
+    # No merge base (an unrelated history, or a shallow clone): the base is unknown, not a finding (decision
+    # stale-cites-at-merge, rule verification-report-unknown-reads). No changed file is read and the exit stays 0.
+    NO_BASE=1
+    echo "ste-lint: unknown, no merge base between origin/$BASE and HEAD, so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there."
+  else
+    # The one changed set, for both steps below: the diff from FROM to WORK, plus the files git does not track.
+    # WORK is the commit `git stash create` builds from the tracked files as they are now, staged or not. It stores
+    # no ref, leaves the index and the working tree alone, and writes only unreachable objects. For a clean tree,
+    # as in CI, it prints nothing and WORK is HEAD. So one diff holds the commits and the working tree: a tracked
+    # file edited, staged or removed and not yet committed counts, with its working-tree line numbers.
+    # A new file that git does not track and .gitignore does not match is all new lines (UNTRACKED). The stale-cites
+    # step reads committed trees, so it sees the removals in WORK but never reads an untracked file.
+    WORK="$(git -c user.name=ste-lint -c user.email=ste-lint@localhost stash create)"
+    [ -n "$WORK" ] || WORK="$(git rev-parse HEAD)"
+    while IFS= read -r -d '' f; do
+      UNTRACKED+=("$f")
+    done < <(git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB")
+    while IFS= read -r -d '' f; do
+      [ -n "$f" ] && RAW_FILES+=("$f")
+    done < <(git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB"
+             printf '%s\0' ${UNTRACKED[@]+"${UNTRACKED[@]}"})
+    while IFS= read -r -d '' f; do
+      FILES+=("$f")
+    done < <(git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"}
+             git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+  fi
 fi
 
 # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
@@ -123,7 +139,10 @@ STALE_EXIT=0
 if [ "$SCOPE" != "all" ]; then
   STALE_OUT="$(mktemp)"
   set +e
-  python3 "$STALE_CITES" --range "$RANGE" > "$STALE_OUT"
+  # FROM..WORK is the changed set the STE step reads (above). With no merge base there is no FROM, and the
+  # committed range makes stale_cites print its own unknown line.
+  if [ "$NO_BASE" -eq 1 ]; then STALE_RANGE="$RANGE"; else STALE_RANGE="$FROM..$WORK"; fi
+  python3 "$STALE_CITES" --range "$STALE_RANGE" > "$STALE_OUT"
   STALE_EXIT=$?
   set -e
   cat "$STALE_OUT"
@@ -151,7 +170,8 @@ fi
 [ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
 
 if [ ${#FILES[@]} -eq 0 ]; then
-  echo "ste-lint: no markdown changed"
+  # An unknown merge base already printed its own line, and "no markdown changed" would be false: none was read.
+  [ "$NO_BASE" -eq 1 ] || echo "ste-lint: no markdown changed"
   {
     echo "### STE lint"
     echo
@@ -237,7 +257,7 @@ print("\n".join(out))
 PYEOF
 
 HUNKS="$(mktemp)"
-git diff -U0 "$FROM" -- ${FILES[@]+"${FILES[@]}"} | python3 "$HUNK_MAP_PY" ${UNTRACKED[@]+"${UNTRACKED[@]}"} > "$HUNKS"
+git -c core.quotepath=off diff -U0 "$FROM" "$WORK" -- ${FILES[@]+"${FILES[@]}"} | python3 "$HUNK_MAP_PY" ${UNTRACKED[@]+"${UNTRACKED[@]}"} > "$HUNKS"
 
 # Split findings into in-hunk (can fail the job) and out-of-hunk (pre-existing, report only).
 # A finding without a line number counts as in-hunk.
@@ -245,7 +265,7 @@ SPLIT_PY="$(mktemp)"
 cat > "$SPLIT_PY" <<'PYEOF'
 import json, sys
 from ste_emit import emit
-json_path, hunks_path, excluded, fail, log_path = sys.argv[1:6]
+json_path, hunks_path, excluded, fail, log_path, failed_path = sys.argv[1:7]
 d = json.load(open(json_path))
 added = set()
 with open(hunks_path, encoding="utf-8") as f:
@@ -295,14 +315,29 @@ with open(log_path, "w") as o:
     print("ste-lint: %s, %d error(s), %d warning(s) on changed lines"
           % ("FAIL" if failing else "PASS", sev_count(in_hunk, "error"),
              sev_count(in_hunk, "warning")), file=o)
+# The paths with an error on a changed line, NUL-separated, so the caller can tell which of them are untracked.
+with open(failed_path, "w", encoding="utf-8") as o:
+    o.write("".join(p + "\0" for p in sorted({f["path"] for f in in_hunk if f["severity"] == "error"})))
 sys.exit(1 if failing else 0)
 PYEOF
 
+FAILED_PATHS="$(mktemp)"
 set +e
-python3 "$SPLIT_PY" "$JSON_OUT" "$HUNKS" "$EXCLUDED_COUNT" "$FAIL" "$LOG_OUT" >> "$SUMMARY"
+python3 "$SPLIT_PY" "$JSON_OUT" "$HUNKS" "$EXCLUDED_COUNT" "$FAIL" "$LOG_OUT" "$FAILED_PATHS" >> "$SUMMARY"
 CHECK_EXIT=$?
 set -e
 cat "$LOG_OUT"
+# An untracked file that fails the lint may be a scratch file. One line names the way out, once.
+if [ "$CHECK_EXIT" -ne 0 ] && [ ${#UNTRACKED[@]} -gt 0 ]; then
+  while IFS= read -r -d '' failed; do
+    for u in "${UNTRACKED[@]}"; do
+      if [ "$failed" = "$u" ]; then
+        echo "ste-lint: $failed is untracked. A scratch file that is not for the repo goes in .gitignore or .ste-lint-exclude, and is then not linted."
+        break 2
+      fi
+    done
+  done < "$FAILED_PATHS"
+fi
 
 [ "$STALE_EXIT" -ne 0 ] && CHECK_EXIT="$STALE_EXIT"
 exit "$CHECK_EXIT"
