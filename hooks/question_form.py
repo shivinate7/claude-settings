@@ -1442,18 +1442,21 @@ def _page_repo(cwd):
 CROSS_REPO_FIELDS = ("repo", "checked_with")
 CROSS_REPO_EDIT_REASON = ("A str_replace on `repo` or `checked_with` changes the cross-repo check, which a "
                           "str_replace cannot show. Send an update that carries both `repo` and `checked_with`.")
+CROSS_REPO_UPDATE_REASON = ("An update that carries `checked_with` and no `repo` cannot be judged: the stored `repo` "
+                            "is unseen. Send an update that carries both `repo` and `checked_with`.")
 
 
 def cross_repo_hit(op, data, page_repo, session_id=None):
     """The reason when this write of an open decision or task names no repo, a repo that is not owner/name, a repo
     off the page's own without a session-shaped `checked_with`, or a `checked_with` that is the session in its
     `owner` or the writer's own `session_id`; else None. `repo` is required whether or not the page's repo is
-    known; with it unknown only the compare is skipped. An update is judged only when it carries `repo`; a
-    str_replace (item_hit judges its field) and a closed item pass."""
+    known; with it unknown only the compare is skipped. An update is judged only when it carries `repo`, and one
+    that carries `checked_with` without `repo` is refused; a str_replace (item_hit judges its field) and a closed
+    item pass. `session_id` is the writer's session record id (session_<x>), None for a local session."""
     if op not in ("set", "update") or not _open_decision(data, ("decision", "task")):
         return None
     if op == "update" and "repo" not in data:
-        return None
+        return CROSS_REPO_UPDATE_REASON if "checked_with" in data else None
     if _WAITING_PAGE_DIR not in sys.path:
         sys.path.append(_WAITING_PAGE_DIR)
     from stale_pages import REPO_NAME

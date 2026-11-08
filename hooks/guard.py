@@ -5190,7 +5190,8 @@ def judge(payload) -> None:
         return
 
     if tool == DATA_TOOL:
-        (rule, matched), item_writes = data_tool_judge(tool_input, cwd, session_id_of(payload))
+        import override  # the writer's record id (cse_<x> read as session_<x>); the payload's id is a local UUID
+        (rule, matched), item_writes = data_tool_judge(tool_input, cwd, override.remote_session_id())
         if rule:
             import question_form
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
