@@ -356,7 +356,7 @@ while True:
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             CD_WORDS, _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
-            _compound_delta, _exits_on_failure, is_print_step, subshell_depth,
+            _compound_delta, _exits_on_failure, subshell_depth,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -4847,13 +4847,13 @@ def git_push_after_check_hit(command: str) -> str:
     group, so neither it nor an exit tail inside one clears anything. Any other command refuses, a subshell
     included. The walk ends and passes at the start of the command line.
     A `||` or `|` before the start of the push's chain is no `;` join and passes, except `A || echo x && push`
-    (`_push_hidden_by_print`): the print succeeds when the check A fails, so the chain runs on to the push. A dry run
+    (`_push_hidden_by_tail`): the tail after the `||` runs when the check A fails, and may succeed, so the chain runs on to the push. A dry run
     (`git_write_verb`) and an unreadable segment pass."""
     ends = []
     segments = split_segments(command, ends)
     if len(ends) < len(segments):
         return ""
-    kept = [at for at, segment in enumerate(segments) if segment_tokens(segment) != []]
+    kept =[at for at, segment in enumerate(segments) if segment_tokens(segment) != []]
     segments, ends = [segments[at] for at in kept], [ends[at] for at in kept]
     tails = _push_exit_tails(segments, ends)
     for number, segment in enumerate(segments):
@@ -4880,7 +4880,7 @@ def git_push_after_check_hit(command: str) -> str:
                 break
             if ends[start - 1] not in (";", "\n"):
                 if first:
-                    if ends[start - 1] == "||" and _push_hidden_by_print(segments, ends, start, position):
+                    if _push_hidden_by_tail(segments, ends, start, position):
                         return "push"
                     break
                 return "push"
@@ -4894,28 +4894,77 @@ def git_push_after_check_hit(command: str) -> str:
             elif start - 1 in tails and not subshell_depth(segments, start - 1):
                 covered = tails[start - 1]
             if covered is not None:
-                checked = covered
-                while covered > 0 and ends[covered - 1] in ("&&", "||", "|"):
-                    covered -= 1   # the exit guards the whole `A || B` or `A | B` list, and no check before it
-                if any(_runs_substitution(segment_tokens(part) or []) for part in segments[covered:checked + 1]):
-                    return "push"   # `echo $(make x) || exit 1`: the exit reads echo's status, never make's
+                covered, hides = _exit_hides_check(segments, ends, covered)
+                if hides:
+                    return "push"
                 position, first = covered, True
                 continue
             position, first = start - 1, False
     return ""
 
 
-def _push_hidden_by_print(segments, ends, start: int, position: int) -> bool:
-    """True for `A || echo x && ... && push`: the `||` before the push's `&&` chain runs a print step first
-    (`is_print_step`), so when the check A fails the print runs, succeeds, and the `&&` chain goes on to the
-    push, whatever steps stand between them. A is a check when its `&&` and `||` list holds a command that is
-    not inert."""
-    if start >= position or not is_print_step(segments[start], True):
+def _push_hidden_by_tail(segments, ends, start: int, position: int) -> bool:
+    """True for `A || T && ... && push`, where `segments[start]` starts the push's `&&` chain and a `||` stands
+    before it. T is the first step after the `||` (the head of its `|` pipeline): when T is no exit, T runs on a
+    failed check A, may succeed (`echo x`, `command echo x`, `(echo x)`, `echo x | cat`, `cat log`), and the `&&`
+    chain goes on to the push whatever stands between them. A is a check when its list holds a command that is
+    not inert. A bare `exit` as T stops the shell on A's failure, and hides only a substitution it cannot read
+    (`_exit_hides_check`). A `{` group as T is not read, and neither is a push that is T itself."""
+    head = start
+    while head > 0 and ends[head - 1] in ("&&", "|"):
+        head -= 1
+    if head == 0 or ends[head - 1] != "||" or head >= position:
         return False
-    left = start - 1
-    while left > 0 and ends[left - 1] in ("&&", "||"):
+    words = [word.lstrip("(") for word in segment_tokens(segments[head]) or []]
+    words = [word for word in words if word]
+    if words[:1] == ["{"]:
+        return False
+    if words[:1] == ["exit"]:
+        return _exit_hides_check(segments, ends, head - 1)[1]
+    left = head - 1
+    while left > 0 and ends[left - 1] in ("&&", "||", "|"):
         left -= 1
-    return any(_push_segment_inert(part) is False for part in segments[left:start])
+    return any(_push_segment_inert(part) is False for part in segments[left:head])
+
+
+def _status_is_own(segment: str) -> bool:
+    """True when the status of SEGMENT is the status of the substitution it holds, or the substitution's output
+    is only what a test reads: a bare assignment (`out=$(make x)`) and a `[`, `[[` or `test` command. An `exit`
+    on its failure then reads the check's own status."""
+    tokens = segment_tokens(segment) or []
+    if tokens[:1] in (["["], ["[["], ["test"]):
+        return True
+    assignment = r"[A-Za-z_]\w*=(?:\"?\$\([^()]*\)\"?|\"?`[^`]*`\"?|[^\s$`()]*)"
+    return bool(re.fullmatch(r"\s*(?:%s\s*)+" % assignment, segment))
+
+
+def _exit_hides_check(segments, ends, checked: int):
+    """For a bare `exit` run on the failure of `segments[checked]`: the index where the list the exit guards
+    starts, and whether that exit hides a check. The exit guards the whole `A && B` or `A | B` list before it,
+    and no check before that list. It hides a check when it reads another command's status: a substitution in a
+    covered command (`echo $(make x) || exit 1`: the exit reads echo's status, never make's) unless the command
+    holds its status (`_status_is_own`), and a check before a `||` step that cannot fail (`make a || echo bad ||
+    exit 1`: the exit runs only when the echo fails too, which it never does). A step that can fail is a
+    fallback (`make a || make b || exit 1`), and the exit reads it."""
+    covered = checked
+    while covered > 0 and ends[covered - 1] in ("&&", "||", "|"):
+        covered -= 1
+    parts = segments[covered:checked + 1]
+    dead = any(ends[covered + at - 1] == "||" and _cannot_fail(part)
+               and any(_push_segment_inert(earlier) is False for earlier in parts[:at])
+               for at, part in enumerate(parts) if at)
+    return covered, dead or any(_runs_substitution(segment_tokens(part) or []) and not _status_is_own(part)
+                                for part in parts)
+
+
+def _cannot_fail(segment: str) -> bool:
+    """True when SEGMENT is an `echo`, `true` or `:`, bare or behind `command`, `builtin` or a path, or in a `( )`
+    group: it exits 0 whatever the check before it did."""
+    words = [word.lstrip("(") for word in segment_tokens(segment) or []]
+    words = [word for word in words if word]
+    while words[:1] in (["command"], ["builtin"]):
+        words = words[1:]
+    return bool(words) and basename(words[0]) in ("echo", "true", ":") and not _runs_substitution(words)
 
 
 def _push_exit_tails(segments, ends):
