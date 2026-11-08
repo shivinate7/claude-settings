@@ -2796,6 +2796,14 @@ class LostSentence(unittest.TestCase):
     DROP_TRAILER = "Drops-lines: docs/debts/notes.md -- the fake-timer sentence is retired - drop-note"
     FOLD_TRAILER = "Drops-lines: docs/debts/notes.md -- fold-source folded into fold-target"
     PLAN_TRAILER = "Drops-lines: docs/debts/notes.md -- time-pinned-plan-stale reworded into short sentences"
+    THREE_OLD = ("- three-sentence-note: The sweep lists each stale fixture in the folder. The fixture cache keeps every run folder "
+                 "for a day. Decision: test-practices (P5).")
+    THREE_TARGET = "- fold-target-tag-only: The finder reads the calendar column of the plan. Decision: test-practices (P5)."
+    TAG_OLD = ("- layout-probe-note: Its layout probe cannot run. Other repos' extras files were not read. "
+               "Decision: one-layout-every-repo.")
+    TAG_NEW = "- probe-unrelated-note: The probe reads each lint warning once. Decision: one-layout-every-repo."
+    NUMBER_OLD = "- count-note: The finder checks 3 files. Decision: test-practices (P5)."
+    NUMBER_NEW = "- count-note: The finder checks files. Decision: test-practices (P5)."
 
     def start(self, lines):
         """The notes file holds the filler and `lines` on main, then an unrelated main commit, so the fork point is that commit and
@@ -2893,6 +2901,41 @@ class LostSentence(unittest.TestCase):
         self.assertEqual(sum(line.startswith("- retire-note:") for line in self.body(head)), 0, "premise: the head holds retire-note")
         self.assertNotIn("old sweep no longer runs", "\n".join(self.body(head)), "premise: the head holds a sentence of retire-note")
         self.assertEqual(self.r.verdict(), [], "a plain retire of a whole note added a finding")
+
+    def test_a_fold_of_three_sentences_into_a_tag_only_target_is_refused_for_both_lost_sentences(self):
+        self.start([self.THREE_OLD])
+        head = self.rewrite("Fold the three-sentence note into a new note", [self.THREE_TARGET])
+        self.assertIn(self.THREE_OLD, self.notes_at("main"), "premise: main does not hold the folded note")
+        self.assertEqual(sum(line.startswith("- three-sentence-note:") for line in self.body(head)), 0,
+                         "premise: the fold left three-sentence-note in the head")
+        self.assertEqual(sum(line.startswith("- fold-target-tag-only:") for line in self.body(head)), 1,
+                         "premise: the head does not hold the fold target once")
+        self.assertNotIn("sweep lists each stale fixture", "\n".join(self.body(head)), "premise: the head holds a lost sentence")
+        self.assertNotIn("keeps every run folder", "\n".join(self.body(head)), "premise: the head holds a lost sentence")
+        self.assertTrue(self.named(self.r.verdict(), "three-sentence-note", "sweep lists each stale fixture", "keeps every run folder"),
+                        "a fold that lost two sentences of three-sentence-note, into a target that shares only its Decision tag, was "
+                        "not refused by a problem that names the note and both sentences")
+
+    def test_a_deliberate_retire_beside_an_unrelated_note_with_the_same_tag_is_not_refused(self):
+        # The smallest shape of the false alarm in 6a5465ea9. The tag's word `layout` and one topic word, `probe`, hold half of
+        # the deleted note's first clause, so the unrelated note reads as its fold target and the next clause reads as lost.
+        self.start([self.TAG_OLD])
+        head = self.rewrite("Drop the layout probe note and add an unrelated note", [self.TAG_NEW])
+        self.assertIn(self.TAG_OLD, self.notes_at("main"), "premise: main does not hold layout-probe-note")
+        self.assertEqual(sum(line.startswith("- layout-probe-note:") for line in self.body(head)), 0,
+                         "premise: the retire left layout-probe-note in the head")
+        self.assertEqual(sum(line.startswith("- probe-unrelated-note:") for line in self.body(head)), 1,
+                         "premise: the head does not hold the unrelated note once")
+        self.assertEqual(self.r.verdict(), [], "a deliberate retire was refused because an unrelated note shares the tag and one "
+                         "topic word with the retired note")
+
+    def test_a_rewrite_that_drops_only_a_number_from_a_short_clause_is_refused(self):
+        self.start([self.NUMBER_OLD])
+        head = self.rewrite("Drop the file count from the count note", [self.NUMBER_NEW])
+        self.premises(head, self.NUMBER_OLD, "count-note", "checks 3 files")
+        self.assertTrue(self.named(self.r.verdict(), "count-note", "checks 3 files"),
+                        "a rewrite that dropped only the 3 from `The finder checks 3 files.` in count-note was not refused by a problem "
+                        "that names the note and that clause")
 
 
 if __name__ == "__main__":
