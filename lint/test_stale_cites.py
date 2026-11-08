@@ -862,6 +862,15 @@ class UnknownTests(StaleCase):
     def test_a_root_commit_range_with_its_parent_spelled_zero_padded_exits_zero_as_on_main(self):
         self.assert_root_range_exits_zero(self.root_repo(), "HEAD~01..HEAD")
 
+    def test_a_root_commit_range_with_its_parent_spelled_bare_tilde_or_caret_exits_zero_as_on_main(self):
+        """A bare `~` or `^` is the first parent, as `~1` and `^1` are. A first-parent suffix that needs its digit
+        exits 2 here, while the digit forms above stay green."""
+        rng = self.root_repo()
+        for spec in ("HEAD~..HEAD", "HEAD^..HEAD"):
+            with self.subTest(spec=spec):
+                self.assertFalse(has_object(rng.repo, spec.split("..")[0]), "scope: the root commit has no parent")
+                self.assert_root_range_exits_zero(rng, spec)
+
     def test_a_root_commit_range_whose_base_is_two_back_exits_two(self):
         rng = self.root_repo()
         self.assertFalse(has_object(rng.repo, "HEAD~2"), "scope: the root commit has no grandparent")
