@@ -20,9 +20,10 @@
 # and actions/zizmor as its run.sh with the step's `with: paths` in ZIZMOR_PATHS. The first two need a base; zizmor
 # needs none, and with no pipx it is unknown ("tool missing: pipx"). The step's uses: picks which checkout, as CI
 # does. A local uses: (`$/actions/...`, `./actions/...`) runs the repo under test's own code_check.py or run.sh,
-# never another's: missing or failing, it FAILs. A remote uses: (`owner/repo/actions/code-check@ref`) runs the copy
-# beside ci-job, else (code-check, zizmor) the one in the checkout the global rules file names, else the step is
-# unknown and names the paths it looked at. The code-check step's line names
+# never another's: missing or failing, it FAILs. A remote uses: (`owner/repo/actions/code-check@ref`) with no pin
+# runs the copy beside ci-job, else (code-check, zizmor) the one in the checkout the global rules file names, else the
+# step is unknown and names the paths it looked at. Under a pin (--step or --lint), a pinned claude-settings action reads
+# its own pin's tree only: a file missing there makes the step unknown, never a fallback to another copy. The code-check step's line names
 # the code_check.py that ran. When every failure code_check.py reports is a pinned tool that could not start, the
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
@@ -294,7 +295,7 @@ def could_not_start(log, start):
 
 def plan(step, pr, values, top, pinned=None):
     """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown. `pinned` is the claude-settings
-    tree a --step run pins: a remote action's files are read from it."""
+    tree a --step or --lint run pins: a remote action's files are read from it."""
     if step_key(step, "continue-on-error") not in (None, "false"):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
     action = known_action(step)
