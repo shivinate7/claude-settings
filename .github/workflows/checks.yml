@@ -1227,6 +1227,15 @@ jobs:
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/mutate_guard.py
 
+      # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not checks-guard, which sits at 84%
+      # of its cap (decision ci-job-caps); this job is projected at 64% of 25 min, and this step adds 101 s locally (16 tests, about 1.7 min,
+      # so about 71%, past the 70% warn line of the merge tool).
+      # Same `guard` scope flag as the guard mutation test above. Own 5 min cap (3x the local time), so a hang reads red here.
+      - name: Guard progress beat suite
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        timeout-minutes: 5 # provisional: no CI run yet; 101 s measured locally
+        run: python3 hooks/test_guard_beat.py
+
   # The mutation report of a batch (decision mutation-report-scores-suites, owner item mutation-ci-job, 2026-11-05). It runs on
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
   # A pull request from any other branch skips its steps, so the job reads passed. A push or a schedule reaches the action,
