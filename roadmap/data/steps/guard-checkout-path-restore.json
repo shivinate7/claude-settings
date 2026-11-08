@@ -1,11 +1,11 @@
 {
   "title": "The guard refuses a `git checkout <path>` or `git restore <path>` over an uncommitted change",
   "why": "About 04:30 CST Nov 8, a builder's `git checkout hooks/guard_frozen.py` in its own worktree was not refused. It would have dropped an uncommitted change. Nothing was lost, because a backup existed (lane bg-tail-loses-verdict, 04:41 CST).",
-  "note": "Fix: the guard refuses the path form of checkout and restore when the path has an uncommitted change. Red rows first, from a test-author who also finds the cause. Branch guard-checkout-path-restore from main, as a follow-up PR with `Merge after:` naming the other-checkout-read PR. Related, not a duplicate: step builder-checkout-test-path (#1732) covers a test path restored from an old sha. The coordinator folded it into lane bg-tail-loses-verdict (04:38 CST Nov 8). Queue fix (owner item 386). Filed 04:40 CST Nov 8.",
+  "note": "Fix: the guard refuses the path form of checkout and restore when the path has an uncommitted change. Red rows first, from a test-author who also finds the cause. Branch guard-checkout-path-restore from main, as a follow-up PR with `Merge after:` naming the other-checkout-read PR. Related, not a duplicate: step builder-checkout-test-path (#1732) covers a test path restored from an old sha. The coordinator folded it into lane bg-tail-loses-verdict (04:38 CST Nov 8). Queue fix (owner item 386). Filed 04:40 CST Nov 8. Sighting (lane handoff-sections-kept, #2320, via the coordinator 17:20 CST Nov 8): a builder discarded its own edit with `git checkout -- <path>`.",
   "phase": "now",
   "status": "doing",
   "order": 604,
   "owner": "triage",
   "lane": "session_013NEJL3ZjZdzrS8tBezxY85",
-  "updatedAt": "2026-11-08T04:39:00-06:00"
+  "updatedAt": "2026-11-08T17:22:00-06:00"
 }

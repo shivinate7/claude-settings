@@ -109,3 +109,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - tag-base-ref-unknown (lane ste-lint-fetch-base, #2270): a tag BASE_REF reads as UNKNOWN.
 - scope-all-ls-files-exit (lane ste-lint-fetch-base, from #2262; #1330 has a finding plus an unread case): `scope all` drops git ls-files' exit code.
 - pr-body-powershell-session-unmeasured (lane pr-body-placeholder-check): unmeasured whether a PowerShell call keeps variables from an earlier call.
+- (debt) handoff-guard-bash-edits (lane handoff-sections-kept, #2320, Decision: precompact-handoff item 14): the handoff-sections guard judges only Write, Edit and MultiEdit, so a Bash edit of a handoff (python, sed, a redirect) is caught only by the Stop flag after the turn.
+- handoff-guard-any-md (lane handoff-sections-kept, #2320): guard.py judges any dot-free X.md in handoffs/, not only session ids.
+- handoff-guard-dotted-id (lane handoff-sections-kept, #2320): a session id with a dot is skipped.
+- handoff-guard-cost-untested (lane handoff-sections-kept, #2320): no test pins the one-prompt-read cost claim.

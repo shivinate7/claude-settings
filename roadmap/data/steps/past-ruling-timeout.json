@@ -1,11 +1,11 @@
 {
   "title": "The past-ruling check logs its duration and prompt size, and its time limit is set from those measures",
   "why": "Owner ask ask-mw8bz5rj1f, 15:14 CST Nov 8: the past-ruling check (lint/report_guard.py, call_judge.PAST_RULING_MODEL, PAST_RULING_TIMEOUT = 15 s) timed out on every Home coordinator question on 2026-11-08, so each went to the owner unchecked. Likely cause, unmeasured: one `claude -p` cold start plus a long candidate-rulings prompt under Mac load 11-16 does not fit in 15 s. Done when: the check logs its duration and prompt size per run, and its time limit (or the candidate list size) is set from those measures, so a normal question gets a verdict. Related: step judge-timeout-retries-once (ready) retries once, which does not help when every run overruns.",
-  "note": "Owner picked 446 a on the page (17:19 CST Nov 8): raise the Stop hook limit from 35 to 50 s for #2306. A page pick is no grant for a settings.json write in another session (P43): the guard may still ask the acting session for the owner's typed words.",
+  "note": "Owner picked 446 a on the page (17:19 CST Nov 8): raise the Stop hook limit from 35 to 50 s for #2306. A page pick is no grant for a settings.json write in another session (P43): the guard may still ask the acting session for the owner's typed words. Home of owner item 446 a: PR #2306, whose lane cites it; #2306 is released to the batch runner (coordinator 17:20 CST). Item 446 closed 17:23 CST.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKypkpzqdbSUr7rAwAn",
   "status": "doing",
   "order": 824,
-  "updatedAt": "2026-11-08T17:20:00-06:00"
+  "updatedAt": "2026-11-08T17:22:00-06:00"
 }

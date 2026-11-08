@@ -1,0 +1,11 @@
+{
+  "title": "The spawn guard's model refusal names every accepted reviewer form, and says round 1 and the test-author run on their role's model",
+  "why": "Coordinator 17:21 CST Nov 8 (lane guard-fix-check-sonnet's pick 2); Merge after: #2296 (the spawn guard accepts a `Fix check` brief). Incident: lane merge-ready-uses-pin (#2303) had Sonnet refused for its test-author, its round 1 and its fix checks, fell back to Haiku against owner item 444 a, and #2303 now needs a fresh chain. Fix: the refusal names each accepted form (a reviewer brief whose first line is `Round 2 of 3`, `Round 3 of 3` or `Round N of 3 (fix check)`) and says that round 1 and the test-author run on their role's model. Red case: the refusal text for a Sonnet round-1 reviewer names those forms.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 846,
+  "updatedAt": "2026-11-08T17:22:00-06:00"
+}
