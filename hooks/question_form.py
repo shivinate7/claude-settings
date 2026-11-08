@@ -25,7 +25,7 @@ chat `Gain:` and `Lose:` in the option's description. Only a line at a line star
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
-`gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
+`gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
 Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
@@ -820,29 +820,81 @@ TASK_REASON = ("A task is yours to hand over only when no session can do it. If 
                "<the check that showed no session could do it>\".")
 
 
-def task_check_hit(op: str, data) -> str:
-    """The matched text when this write of a waiting-page task has no Why yours line. An update that
-    carries no `context` cannot change the line and passes, as does one with no `kind`."""
-    if not isinstance(data, dict) or data.get("kind") != "task":
+WHY_RULE = "task-why-cited"
+WHY_CITED_REASON = ("A Why yours line that says a session cannot do the act must cite what shows it. End the line with "
+                    "\"(route <id>)\", an id from the route rows file whose row on this surface says refused or asks, or "
+                    "with \"(measured <YYYY-MM-DD>, <the check and its result>)\". A row that says the act works, an "
+                    "id no row holds, and a measurement with no date do not count. The page reads no refusals file, so "
+                    "a tool name in backticks is no cite. (decision claims-carry-backing, part (v), rule task-why-cited)")
+# lint/report_guard.py why_yours_verdict kinds that refuse on the page, with the cause the refusal's `matched` carries.
+# "unknown" (a file or row that did not read) and "unread" never refuse: a read that could not run is not a finding.
+WHY_CAUSES = {"none": "no cite", "undated": "undated measured", "works": "works row", "dead": "unknown id"}
+
+
+def _report_guard():
+    """lint/report_guard.py, loaded here and not at import, as hooks/reply_judge.py loads it."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import report_guard
+    return report_guard
+
+
+def why_cited_hit(text: str, fragments: bool = False) -> str:
+    """The cause when a Why yours line of `text` gives a capability reason its cite does not back, else "". The page
+    accepts a route cite and a dated measured cite, and reads no refusals file. A line with no route cite never reads
+    the rows file. With `fragments`, each other line of `text` has its cite tokens judged on their own: a str_replace
+    that swaps only a cite carries no Why yours line, and `new_str` must still hold a cite that backs."""
+    lines = text.splitlines()
+    labelled = [line for line in lines if WHY_YOURS_LINE.match(line)]
+    # A plain substring gate, so report_guard (which holds the cite regexes) loads only for a line that may hold a cite.
+    # A Based on line is the form's own premise line: "Based on (measured): ..." names a kind, not a dated cite.
+    loose = [line for line in lines if fragments and not WHY_YOURS_LINE.match(line) and not BASED_LABEL.match(line)
+             and ("(route" in line.casefold() or "(measured" in line.casefold())]
+    if not (labelled or loose):
         return ""
-    if (op == "set" or "context" in data) and not WHY_YOURS_LINE.search(str(data.get("context") or "")):
-        return "task with no Why yours line"
+    guard = _report_guard()
+    for line in labelled:
+        cause = WHY_CAUSES.get(guard.why_yours_verdict(None, line.strip())[0])
+        if cause:
+            return cause
+    for line in loose:
+        cause = WHY_CAUSES.get(guard.cite_tokens_verdict(line.strip())[0])
+        if cause:
+            return cause
     return ""
 
 
-def task_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Why yours line or its label. It carries
-    no `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it judges a
-    context edit that touches the line, whatever the item's kind. An edit that removes only the reason
-    after the label passes: the stored line is unseen, so old_str is no different from any prose."""
+def task_check_hit(op: str, data):
+    """(rule, matched) when this write of a waiting-page task has no Why yours line, or a line whose capability reason
+    its cite does not back. An update that carries no `context` cannot change the line and passes, as does one with
+    no `kind`."""
+    if not isinstance(data, dict) or data.get("kind") != "task":
+        return PASS
+    if not (op == "set" or "context" in data):
+        return PASS
+    context = str(data.get("context") or "")
+    if not WHY_YOURS_LINE.search(context):
+        return "task-names-check", "task with no Why yours line"
+    cause = why_cited_hit(context)
+    return (WHY_RULE, cause) if cause else PASS
+
+
+def task_str_replace_hit(entry):
+    """(rule, matched) when a str_replace on `context` removes the Why yours line or its label, or adds one whose
+    capability reason its cite does not back. It carries no `data`, so it is read from old_str and new_str; the
+    guard cannot see the stored kind, so it judges a context edit that touches the line, whatever the item's kind.
+    An edit that removes only the reason after the label passes: the stored line is unseen, so old_str is no
+    different from any prose."""
     if entry.get("field") != "context":
-        return ""
+        return PASS
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
-        return "context edit that removes the Why yours line"
+        return "task-names-check", "context edit that removes the Why yours line"
     if len(WHY_YOURS_LABEL.findall(old)) > len(WHY_YOURS_LABEL.findall(new)):
-        return "context edit that removes the Why yours label"
-    return ""
+        return "task-names-check", "context edit that removes the Why yours label"
+    cause = why_cited_hit(new, fragments=True)
+    return (WHY_RULE, cause) if cause else PASS
 
 
 # ------------------------------------------------------------------ a page decision states the form
@@ -922,8 +974,8 @@ def item_hit(op, entry, cwd=""):
         return "item-field-rendered", hit
     if op == "str_replace":
         hit = task_str_replace_hit(entry)
-        if hit:
-            return "task-names-check", hit
+        if hit[0]:
+            return hit
         if entry.get("field") == "command":
             # The stored command is unseen: gh_edit_hit judges new_str, less an edit that only changes
             # a gh command old_str held.
@@ -958,8 +1010,8 @@ def item_hit(op, entry, cwd=""):
     if hit:
         return "gh-login-switch", hit
     hit = task_check_hit(op, data)
-    if hit:
-        return "task-names-check", hit
+    if hit[0]:
+        return hit
     hit = decision_form_hit(op, data)
     if hit[0]:
         return hit
@@ -1360,7 +1412,7 @@ def _chat_question_hit(question, options):
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
-                "task-names-check": TASK_REASON,
+                "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
