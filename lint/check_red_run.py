@@ -77,8 +77,13 @@ REFUSED_NONE_WORDS = frozenset(("none", "non"))
 UPPER_ENV_WORD = re.compile(r"^[A-Z_][A-Z0-9_]*=")
 # Any assignment as the lead word. It is exempt from the colon refusal only (`lint_mode=on:`).
 ENV_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-LEAD_WRAPPERS = "([{<\"'`*- \t"
-TRAILING_CLOSERS = ")]}>\"'`,:"
+# Characters stripped before the lead word: brackets, quotes (straight and curly), `*`, `#`, `-` and blanks. An underscore
+# is not here: `_build/run.sh` and `__main__.py` are real commands, so `lead_word` strips it only as a wrapper.
+LEAD_WRAPPERS = "([{<\"'`*#-“”‘’ \t"
+TRAILING_CLOSERS = ")]}>\"'`*#_,:”’"
+# A word wrapped in underscores: a bare letters word (`_mutant`, from `_mutant A_`) or one that also closes with an
+# underscore (`_mutant_`). `_build/run.sh` and `__main__.py` match neither, so they stay real commands.
+UNDERSCORE_WRAPPED = re.compile(r"^_+(?:[A-Za-z]+|\S*_[)\]}>\"'`*#,:”’]*)$")
 MUTANT_WORDS = ("mutant", "mutation")
 FIELD = "\x1f"
 MAX_PATHS = 5
@@ -99,7 +104,10 @@ def lead_word(line):
     """The first word of a failed-form line's command as written, with leading wrappers dropped. The one home of what
     the word rule reads. Pure."""
     words = line[len("Red-run:"):].lstrip(LEAD_WRAPPERS).split()
-    return words[0] if words else ""
+    if not words:
+        return ""
+    word = words[0]
+    return word.lstrip("_") if UNDERSCORE_WRAPPED.match(word) else word
 
 
 def normalized(word):
