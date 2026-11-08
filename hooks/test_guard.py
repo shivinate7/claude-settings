@@ -5044,6 +5044,9 @@ sh("git-after-cd: set -e, then a failed cd, then ; a git push, passes, the shell
    "set -e; cd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: set -e on its own line, then a failed cd, then ; a git push, passes, the shell exits first",
    "set -e\ncd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+# set +e turns the exit off again, so the failed cd leaves the shell running and the push after ; runs.
+sh("git-after-cd: set -e then set +e, then a failed cd, then ; a git push is refused",
+   "set -e; set +e; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
