@@ -2506,15 +2506,36 @@ MUTATIONS = [
      '\\b(?:today|now)\\b)*"',
      '\\b(?:today)\\b)*"',
      "guard", 'brief-claim: test-author brief where an input before main refuses now is denied'),
-    # The count word, the pronoun tail and today in _claim_active. The leading-claim search has no mutant here: it is
-    # time-only. The today-bounded subject search changes no verdict, so its mutant is pinned by the endpos spy case,
-    # not by a verdict. Equivalent mutants change no verdict, so none is listed: "<=" for "<" and taking a subject
-    # whenever one is found. A today pattern without the word boundary is not equivalent: "The guard refuses `x`
-    # todays." is allowed on the guard and denied with that pattern. No mutant pins it yet.
+    # The three lines of _claim_active each have a mutant. The bound on the subject-first search changes a verdict:
+    # "The guard lets `port: 0` today through." is no claim with the bound and a claim without it. That form is an
+    # accepted limit (decision brief-claim-has-probe), so no verdict case pins it: the endpos spy case pins the bound.
+    # Equivalent mutants change no verdict, so none is listed: "<=" for "<". A today pattern without the word boundary
+    # is not equivalent: "The guard refuses `x` todays." is allowed on the guard and denied with that pattern. No mutant
+    # pins it yet.
     ('brief-claim: the subject-first search reads to the sentence end, past the last today',
      'subject = BRIEF_CLAIM_ACTIVE.search(sentence, 0, late.end())',
      'subject = BRIEF_CLAIM_ACTIVE.search(sentence, 0, len(sentence))',
      "guard", "brief-claim: the subject-first search stops at the last today, reading no further"),
+    ('brief-claim: the leading claim search is off, so a main claim that leads a sentence is no claim',
+     '    clause = BRIEF_CLAIM_ACTIVE_LEAD.search(sentence)',
+     '    clause = None',
+     "guard", 'brief-claim: builder brief that says main allows an input, with no probe, is denied'),
+    ('brief-claim: a later subject claim wins over an earlier main claim in the sentence',
+     '        if subject is not None and (clause is None or subject.start() < clause.start()):',
+     '        if subject is not None:',
+     "guard", 'main lets an input today, and the guard refuses another today through'),
+    ('brief-claim: only the first sentence of a line is read',
+     '        sentences.append(([item for _, item in marks], _claim_clause(sentence, marks)))',
+     '        sentences.append(([item for _, item in marks], _claim_clause(sentence, marks)))\n        break',
+     "guard", 'in the next sentence refuses an unprobed one'),
+    ('brief-claim: a blank line closes a claimed list',
+     '        if not text:\n            continue\n        command = text if fenced',
+     '        if not text:\n            waiting = None\n            continue\n        command = text if fenced',
+     "guard", 'brief where a blank line'),
+    ('brief-claim: a fence marker closes a claimed list',
+     '            rows.append(("fence", None))\n            continue',
+     '            rows.append(("fence", None))\n            waiting = None\n            continue',
+     "guard", 'a fence marker between listed inputs'),
     ('brief-claim: a count word does not refer, so refuses all three today hides from the refers test',
      'return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))',
      'return bool(BRIEF_CLAIM_REFERENT.search(text))',

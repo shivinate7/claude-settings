@@ -19167,6 +19167,11 @@ add("brief-claim: test-author brief where the guard refuses an input in capitals
 add("brief-claim: test-author brief where the guard refuses an input today, and main refuses a second, is denied",
     "deny", BRIEF_PROBE, tool="Agent", prompt="The guard refuses `a` today, and main refuses `b`.",
     subagent_type="test-author", carries=("`a`",))
+# The reverse order: main's claim leads and the guard's refusal follows. Only main's input is claimed, so the guard's
+# input is not named.
+add("brief-claim: test-author brief where main lets an input today, and the guard refuses another today through, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Main lets `x` today, and the guard refuses `y` today through.",
+    subagent_type="test-author", carries=("`x`",), lacks=("`y`",))
 # The same two claims in two sentences: each is read, so the unprobed one is denied.
 add("brief-claim: test-author brief where main passes a probed input, and in the next sentence refuses an unprobed one, is denied",
     "deny", BRIEF_PROBE, tool="Agent",
