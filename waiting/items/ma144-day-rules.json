@@ -28,8 +28,10 @@
     "b"
   ],
   "ref": "mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices",
+  "replied": "2026-11-08T04:25:00Z",
+  "reply": "Withdrawn. You said at 22:24 CST that these were already handled on your Mac. Triage filed them from a relay without checking with mailaudit's own sessions first. The guard is step child-question-checks-home. Triage, 22:25 CST.",
   "short": "Duo mail-day rules",
-  "status": "open",
+  "status": "closed",
   "title": "Duo mail day: grant these two rules?",
   "why": "The design lane picks both."
 }

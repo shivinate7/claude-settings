@@ -58,8 +58,10 @@
   "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "pick": "a",
   "ref": "mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices",
+  "replied": "2026-11-08T04:25:00Z",
+  "reply": "Withdrawn. You said at 22:24 CST that these were already handled on your Mac. Triage filed them from a relay without checking with mailaudit's own sessions first. The guard is step child-question-checks-home. Triage, 22:25 CST.",
   "short": "Duo tab bar place",
-  "status": "open",
+  "status": "closed",
   "title": "Duo tab bar: where does it sit?",
   "why": "The design lane picks a: it never moves, and it shows while you type."
 }
