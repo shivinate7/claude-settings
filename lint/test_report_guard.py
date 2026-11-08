@@ -957,6 +957,16 @@ class DoneNamesModelsTests(unittest.TestCase):
             [{"subagent_type": "builder", "model": "sonnet", "prompt": "build it"}],
             before_human=[{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}]))
 
+    def test_dm_green_spaced_design_reviewer_name_is_not_a_reviewer(self):
+        # "design reviewer opus", with a space, names design-reviewer, which is no named role. The round 1
+        # reviewer ran haiku before the last human message, and the turn's reviewer ran sonnet.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet, design reviewer opus)\n"
+            "> **Next** Unstarted: none",
+            [{"subagent_type": "builder", "model": "sonnet", "prompt": "build it"},
+             {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}],
+            before_human=[{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}]))
+
     def test_dm_green_out_of_window_spawns_need_no_name_or_unstarted(self):
         # Naming and the Unstarted line stay on the in-turn spawns: spawns before the last human
         # message add no required name and no required Unstarted line to this turn's Done.
