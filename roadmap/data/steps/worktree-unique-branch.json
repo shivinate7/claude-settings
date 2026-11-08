@@ -4,7 +4,7 @@
   "status": "doing",
   "order": 103.5,
   "why": "Agents in a lane are not blocked or lose work through a shared branch or a pruned worktree.",
-  "note": "Coordinator 22:21 CST Nov 6, from lane qmax-browser-main-red: 3 agents were blocked because two worktrees held one local branch, and 2 agent worktrees were pruned mid-task (cause unknown). Find the cause first: who names the branch, and what prunes a live worktree. 14:15 CST Nov 7: branch merge-keeps-live-lock (6577019c9) removes the merge's free of an agent's own lock. Page item 357 a is built.",
-  "updatedAt": "2026-11-07T14:15:00-06:00",
+  "note": "Coordinator 22:21 CST Nov 6, from lane qmax-browser-main-red: 3 agents were blocked because two worktrees held one local branch, and 2 agent worktrees were pruned mid-task (cause unknown). Find the cause first: who names the branch, and what prunes a live worktree. 14:15 CST Nov 7: branch merge-keeps-live-lock (6577019c9) removes the merge's free of an agent's own lock. Page item 357 a is built. Sightings (lane draft-pr-guard-text-false-alarm (session_013NEJL232Ko7dmr4v3fmrvF), 08:44 CST Nov 8): three times on Nov 8, two agent worktrees on one local branch name left a stale index when the other moved the ref; the agents recovered with `checkout -f` and `update-index` after a backup. Its proposed step agent-worktree-shared-branch is this step.",
+  "updatedAt": "2026-11-08T08:45:00-06:00",
   "lane": "session_013NEJL3WkjDpDX48MYiGdbs"
 }
