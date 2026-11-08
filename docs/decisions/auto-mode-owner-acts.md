@@ -62,7 +62,7 @@ Left to the coordinator: pull request 1372's blanket `permissions.allow` line fo
 Grant: owner, page item 278, pick c, 2026-11-06 12:41 CST. Typed go, in lane lease-push-c-and-d, 2026-11-07 14:45 CST: `go: add the own CI run cancel and own check-in delete entries to settings.json autoMode.allow, as drafted in PR #1316 (items 278 c and d)`.
 
 - Incident: refused on 2026-11-01 22:57 CST as "Interfere With Workloads": `gh api -X POST repos/shivinate7/q_max/actions/runs/41377928751/cancel`.
-- Undo: re-run the cancelled run with `gh run rerun <id>`, or `mcp__github__actions_run_trigger` with method `rerun_workflow_run`, as the entry names. The entry does not cover that re-run: "any other method of that tool" in its Never covers includes it, so the classifier judges each re-run as usual.
+- Undo: re-run the cancelled run with `gh run rerun <id>`, or `mcp__github__actions_run_trigger` with method `rerun_workflow_run`, as the entry names. The entry covers neither re-run, so the classifier judges each one as usual. `gh run rerun` is not among the three cancel forms the entry lists. `rerun_workflow_run` falls under "any other method of that tool" in its Never covers.
 - Guard that still covers the mistake form: none.
 
 ### Own Check-in Delete
