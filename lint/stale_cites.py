@@ -111,10 +111,11 @@ when a row id is gone it also lists the tree once and reads each tracked .md onc
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
-look for. STALE010 starts no process of its own. It reads the added lines the one diff already carries, and for each .py file an
-added line cites, one blob at head through the same `cat-file`, once per range (one `git cat-file` read per cited .py
-file). That `cat-file` opens only when an added line cites a .py file, and no Markdown blob is read. CostTests pins no
-range that adds such a cite, so no test pins the starts for one; the ranges it does pin add none and keep their counts.
+look for. STALE010 reads the added lines the one diff already carries, and for each .py file an added line cites, one blob
+at head through the one `cat-file` the run opens, once per range. That `cat-file` is one start, and it opens only when an
+added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a .py name cite and
+removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
+(NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it.
 A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
 when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
@@ -517,12 +518,18 @@ def disabled(line):
     return codes
 
 
+def cite_path(text):
+    """A cited path in its tracked form: `./lint/x.py` is `lint/x.py`. The one home both STALE001 and STALE010 (and the
+    STALE002 name match) read a cite's path through."""
+    return posixpath.normpath(text)
+
+
 def path_cites(line, gone, exotic):
     """Each removed path the line names, at a path boundary."""
     hits = []
     for run in RUN_RE.finditer(line):
         text = run.group(0)
-        candidate = text.rstrip(".-")
+        candidate = cite_path(text.rstrip(".-"))
         if candidate in gone and candidate not in hits:
             hits.append(candidate)
     for path in exotic:
@@ -539,7 +546,7 @@ class Range:
         self.added_lines = lines or {}  # the .md lines the range adds, by path
         self.unknowns = []
         self.bound_names = {}  # path -> names bound at head (`head_names`), read once
-        self.removed_names = {}  # file at base -> names the range unbound there (NameReader.prepare)
+        self.removed_names = {}  # file (base and head path) -> names the range unbound there (NameReader.prepare)
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
@@ -582,7 +589,7 @@ class NameReader:
     code = "STALE002"
 
     def prepare(self, rng):
-        removed_names = {}  # file at base -> names the range removed
+        removed_names = {}  # file, by base path and by head path -> names the range removed
         for path in sorted(rng.py_files):
             old_src = rng.batch.get("%s:%s" % (rng.base, path))
             new_src = rng.batch.get("%s:%s" % (rng.head, rng.py_files[path]))
@@ -593,7 +600,7 @@ class NameReader:
                 rng.unknowns.append("%s does not parse at %s; the names it removed were not checked"
                                     % (path, " and ".join(bad)))
             elif before - after:
-                removed_names[path] = before - after
+                removed_names[path] = removed_names[rng.py_files[path]] = before - after  # base path and head path
         rng.removed_names = removed_names  # STALE010 leaves these names to STALE002
         return removed_names or None
 
@@ -603,11 +610,11 @@ class NameReader:
         messages = []
         for pair in PAIR_RES:
             for match in pair.finditer(text):
-                path, name = match.group(1), match.group(2)
+                path, name = cite_path(match.group(1)), match.group(2)
                 if path not in claimed and name in state.get(path, ()):
                     messages.append("%s no longer defines %s at head; find its new home" % (path, name))
         for match in NODE_RE.finditer(text):
-            path = match.group(1)
+            path = cite_path(match.group(1))
             for name in match.group(2).split("::"):
                 if path not in claimed and name in state.get(path, ()):
                     messages.append("%s no longer defines %s at head; find its new home" % (path, name))
@@ -1251,6 +1258,9 @@ def dead_name_cites(rng):
             if ".py" not in line or ("ste-disable-line" in line and CODE_NAME_CITE in disabled(line)):
                 continue
             for path, name in python_cites(line):
+                path = cite_path(path)
+                if not FILE_CITE.match(path):
+                    continue  # no folder part: no path cite, the STALE003 test
                 names = None if path in gone else head_names(rng, path)
                 if names is None or name in names or name in rng.removed_names.get(path, ()):
                     continue
