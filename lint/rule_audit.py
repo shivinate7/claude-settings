@@ -526,15 +526,18 @@ def _module_values(tree):
     return {n: v for n, v in out.items() if seen[n] == 1}
 
 
-def _rows_of(expr, values):
-    """The items of a literal collection: the elements of a tuple or list, the values of a dict. `expr` may
-    be a module-level name bound once to one. None for anything else."""
+def _rows_of(expr, values, indexed=False):
+    """The items of a literal collection: the elements of a tuple or list. A dict gives the rows a loop walks,
+    its keys, or with `indexed` the rows a `TABLE[key]` read gives, its values. `expr` may be a module-level
+    name bound once to one. None for anything else, and for a loop over a dict that splats another (`**x`)."""
     if isinstance(expr, ast.Name):
         expr = values.get(expr.id)
     if isinstance(expr, (ast.Tuple, ast.List)):
         return list(expr.elts)
     if isinstance(expr, ast.Dict):
-        return list(expr.values)
+        if indexed:
+            return list(expr.values)
+        return None if None in expr.keys else list(expr.keys)
     return None
 
 
@@ -542,14 +545,22 @@ def _params(fn):
     return fn.args.posonlyargs + fn.args.args
 
 
+_UNREAD = object()  # a def named like a guard call whose rule id the reader cannot place at its call
+
+
 def _def_emitters(tree):
     """{name: (position, parameter name, default value node or None)} for each module-level def whose
-    call takes a rule id, or {name: None} for a def named like a guard call that takes none.
-    A def named refuse, record or ask_command that has a `rule` parameter takes it there; one with none
-    (blind_brief's refuse(payload, tool, reason, matched)) takes its id from a constant in its own body,
-    so a call to it names nothing here. Any other def whose body hands one of its parameters to such a
-    call as the rule forwards that parameter (call_judge's refuse(payload, tool, args, rule, reason),
-    and unvetted() that calls it); its calls name an id where the parameter sits."""
+    call takes a rule id, {name: None} for a def named like a guard call that takes none, or
+    {name: _UNREAD} for one whose call takes an id the reader cannot place.
+    A def named refuse, record or ask_command that has a `rule` parameter takes it there. One with none
+    takes it where it hands the id to a known sink: a parameter by name or through a local copy
+    (`rule = name`), its `*args` at the sink's own position (`def refuse(*a): guard_core.refuse(*a)`), or
+    its `**kwargs` by the sink's keyword. One whose sink calls each name their own id (blind_brief's
+    refuse(payload, tool, reason, matched) takes a constant in its own body) takes none, so a call to it
+    names nothing here. One that hands the id on in any other way is _UNREAD. Any other def whose body
+    hands one of its parameters to such a call as the rule forwards it in the same ways (call_judge's
+    refuse(payload, tool, args, rule, reason), and unvetted() that calls it); its calls name an id where
+    the parameter sits."""
     defs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     out = {}
 
@@ -565,18 +576,59 @@ def _def_emitters(tree):
                 return None, pname, default
         return None
 
-    def forwards(fn, spot_of):  # the entry of the parameter fn hands to a known sink as the rule, or None
+    def forwards(fn, spot_of):
+        """The entry of the argument fn hands to a known sink as the rule. None when each sink call names fn's
+        own id, or fn makes none; _UNREAD when a sink call takes its id from fn's arguments in a way the reader
+        cannot place."""
         params = {p.arg for p in _params(fn) + fn.args.kwonlyargs}
+        star = fn.args.vararg.arg if fn.args.vararg else None
+        kwstar = fn.args.kwarg.arg if fn.args.kwarg else None
+        own = _scope_bindings(fn)
+
+        def carried(expr, depth=0):  # the parameter `expr` carries, "" for fn's own id, None when unclear
+            if depth > 20:
+                return None
+            if isinstance(expr, ast.Name) and isinstance(expr.ctx, ast.Load):
+                if expr.id in params:
+                    return expr.id
+                found = {carried(b, depth + 1) if isinstance(b, ast.expr) else "" for b in own.get(expr.id, [])}
+                if found <= {""}:
+                    return ""
+                return found.pop() if len(found) == 1 and len(own[expr.id]) == 1 else None  # one copy of a parameter
+            if isinstance(expr, ast.IfExp):
+                return "" if {carried(expr.body, depth + 1), carried(expr.orelse, depth + 1)} == {""} else None
+            return ""  # a constant, a store target or any other expression: the main walk reads it in place
+
+        unread = False
         for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
             spot = spot_of(call)
             if spot is None:
                 continue
             at, kw = spot
-            got = call.args[at] if at is not None and len(call.args) > at else next(
-                (k.value for k in call.keywords if k.arg == kw), None)
-            if isinstance(got, ast.Name) and got.id in params:
-                return entry(fn, got.id)
-        return None
+            starred = [i for i, a in enumerate(call.args) if isinstance(a, ast.Starred)]
+            if at is not None and starred and starred[0] <= at:  # the id sits inside a `*x` the call passes
+                j = starred[0]
+                last = call.args[j].value
+                if j == len(call.args) - 1 and isinstance(last, ast.Name) and last.id == star:
+                    return len(_params(fn)) + at - j, kw, None  # fn's own `*args`, passed last: a known position
+                unread = True
+                continue
+            if at is not None and len(call.args) > at:
+                got = call.args[at]
+            else:
+                got = next((k.value for k in call.keywords if k.arg == kw), None)
+            if got is None:
+                splat = [k.value for k in call.keywords if k.arg is None]
+                if splat and all(isinstance(v, ast.Name) and v.id == kwstar for v in splat):
+                    return None, kw, None  # fn's own `**kwargs`: its caller names the id by the sink's keyword
+                unread = unread or bool(splat)
+                continue
+            name = carried(got)
+            if name is None:
+                unread = True
+            elif name:
+                return entry(fn, name)
+        return _UNREAD if unread else None
 
     def sink_spot(call, skip=None):  # (position or None, keyword) a call to a known rule taker puts the id at
         if isinstance(call.func, ast.Name):
@@ -584,12 +636,12 @@ def _def_emitters(tree):
                 return None
             if call.func.id in out:
                 got = out[call.func.id]
-                return None if got is None else (got[0], got[1])
+                return None if got is None or got is _UNREAD else (got[0], got[1])
         callee = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
         return (GUARD_RULE_ARG[callee], "rule") if callee in GUARD_RULE_ARG else None
 
-    for name, fn in defs.items():  # a def named like a guard call: its `rule` parameter, else the parameter
-        if name in GUARD_RULE_ARG:  # it forwards to a known sink (`def refuse(.., rule_id, ..)`), else none
+    for name, fn in defs.items():  # a def named like a guard call: its `rule` parameter, else where it hands
+        if name in GUARD_RULE_ARG:  # the id to a known sink (`def refuse(.., rule_id, ..)`), else none
             out[name] = entry(fn, "rule") or forwards(fn, lambda c, n=name: sink_spot(c, n))
     changed = True
     while changed:
@@ -597,20 +649,10 @@ def _def_emitters(tree):
         for name, fn in defs.items():
             if name in out:
                 continue
-            params = [p.arg for p in _params(fn) + fn.args.kwonlyargs]
-            for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
-                callee = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
-                if callee == name:
-                    continue
-                spot = sink_spot(call)
-                if spot is None:
-                    continue
-                got = call.args[spot[0]] if spot[0] is not None and len(call.args) > spot[0] else next(
-                    (k.value for k in call.keywords if k.arg == spot[1]), None)
-                if isinstance(got, ast.Name) and got.id in params:
-                    out[name] = entry(fn, got.id)
-                    changed = True
-                    break
+            got = forwards(fn, lambda c, n=name: sink_spot(c, n))
+            if isinstance(got, tuple):
+                out[name] = got
+                changed = True
     return out
 
 
@@ -660,16 +702,16 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
                 imported[name] = _module_bindings(ast.parse(read(src)), base_dir, {src})
         return imported[name]
 
-    def rows_of(expr, defs):  # (the rows of a literal collection or a module table it names, the scope their
-        # elements read in): a literal written in the def reads in the def, a module table at module level
-        rows = _rows_of(expr, values)
+    def rows_of(expr, defs, indexed=False):  # (the rows of a literal collection or a module table it names, the
+        # scope their elements read in): a literal written in the def reads in the def, a module table at module level
+        rows = _rows_of(expr, values, indexed)
         return rows, (defs if isinstance(expr, (ast.Tuple, ast.List, ast.Dict)) else ())
 
     def rows_for(src, defs):  # the rows an unpack or a loop reads and their scope, or (None, ())
         if isinstance(src, _Each):
             return rows_of(src.iter, defs)
         if isinstance(src, ast.Subscript):
-            return rows_of(src.value, defs)
+            return rows_of(src.value, defs, indexed=True)
         if isinstance(src, ast.Name) and defs:
             own = bindings(defs[0]).get(src.id, [])
             if len(own) == 1 and isinstance(own[0], _Each):
@@ -750,6 +792,10 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
                 spot = (GUARD_RULE_ARG[name], "rule", None) if name in GUARD_RULE_ARG else None
             if spot is None:
                 continue
+            if spot is _UNREAD:
+                raise ValueError(f"{path}:{node.lineno}: {name}() takes a rule id the reader cannot resolve; its "
+                                 "def hands the id on in a way the reader cannot place: take it as a `rule` "
+                                 "parameter, so the id can be listed")
             at, pname, default = spot
             args = [kw.value for kw in node.keywords if kw.arg == pname]
             if at is not None and len(node.args) > at:
