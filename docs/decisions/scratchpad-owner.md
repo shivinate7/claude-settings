@@ -14,15 +14,15 @@ The rule `scratchpad-owner` in `hooks/guard.py` asks when an agent runs or overw
 
 - Record at write. A call with a valid `agent_id` that writes a file under this session's scratchpad records that `agent_id` as the file's writer. The record is a small sidecar under the scratchpad. The writes it covers are the Write, Edit, MultiEdit and NotebookEdit targets, and a shell write target as `_shell_write_hit` (`hooks/guard_frozen.py`) reads it.
 - Judge at write. A call with a valid `agent_id` that writes over a scratchpad file whose record names another agent gets "ask". Write tools and shell write targets both count. Appends count too, such as `>>`. A write that passes records its writer as the latest.
-- An `rm` or `mv` of another agent's file asks too (lane ruling, 2026-11-08). It is judged, not recorded: a removed or moved file is no agent's text.
-- The record is written before the overwrite ask, because an approval in the UI never reaches the guard again. A denied ask leaves the asker as the recorded writer, so the first writer gets one ask on its next write or run of that file.
+- An `rm` or `mv` of another agent's file asks too (lane ruling, 2026-11-08). It is judged, not recorded: a removed or moved file is no agent's text. Only `rm` and `mv` are judged; `unlink`, `rmdir` and `shred` are being dropped from the list.
+- The record is written before the overwrite ask, because an approval in the UI never reaches the guard again. A denied ask still moves the record to the asker. So B's later run of A's content passes, and A is asked on each run until A rewrites the file (debt `scratchpad-owner-record-flip`, the record moves on a denied ask).
 - Judge at run. A Bash call with a valid `agent_id` that runs a scratchpad file gets "ask" when the record names another agent. A run is an interpreter word (`python*`, `bash`, `sh`, `node`, `perl`, `ruby`), `source` or `.`, or the path as the command word. The path may be absolute, or follow a `cd`.
 - Passes:
   - a first write, to a file with no record; the write then records its writer;
   - a rewrite of the agent's own file, where the record names the same `agent_id`;
   - a call with no `agent_id`, since the top-level session may hand a script to its agent on purpose;
   - a read, which runs no code.
-- Ceiling: a file written by a route the guard cannot see (`python -c`, a variable path) has no record, so it passes. The same holds for an overwrite by such a route. An ask there would be a false alarm. The scratchpad false alarm in trial `other-checkout-scratch-false-alarm` is the precedent: a guard refused a session's own scratchpad. A guard that goes red when nothing is wrong is spent (`guard-that-cries-wolf-is-spent`).
+- Ceiling: a file written by a route the guard cannot see (`python -c`) has no record, so it passes. The same holds for an overwrite by such a route. An ask there would be a false alarm. A `cp` or `mv` destination, a `touch`, `dd of=`, `curl -o` or `>|` target is not recorded yet either (debt `scratchpad-owner-cp-mv-dest`, the copy and move destinations). The scratchpad false alarm in trial `other-checkout-scratch-false-alarm` is the precedent: a guard refused a session's own scratchpad. A guard that goes red when nothing is wrong is spent (`guard-that-cries-wolf-is-spent`).
 - Why a guard, not one scratch folder per agent: an agent cannot know its own `agent_id` to name a folder, and a folder rule in a brief has no check.
 
 ## Cost
