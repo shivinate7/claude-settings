@@ -261,11 +261,11 @@ class Scope(unittest.TestCase):
         self.assertEqual(run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"]),
                          run(["hooks/guard.py"], existing=["hooks/guard.py"]))
 
-    # hooks/override.py and hooks/_nowindow.py load in the guard set (the guard arm of ci-scope.sh, which lists both),
-    # so a change to either runs the Windows job and the sweep job, as a change to guard.py does. Each path is a
-    # new file and an edit.
-    def test_override_and_nowindow_change_turns_on_the_windows_and_sweep_jobs(self):
-        for p in ("hooks/override.py", "hooks/_nowindow.py"):
+    # hooks/override.py, hooks/_nowindow.py, hooks/proc_env.py and hooks/reread_check.py load in the guard set (the guard
+    # arm of ci-scope.sh lists all four), so a change to any runs the Windows job and the sweep job, as a change to
+    # guard.py does. Each path is a new file and an edit.
+    def test_guard_set_module_change_turns_on_the_windows_and_sweep_jobs(self):
+        for p in ("hooks/override.py", "hooks/_nowindow.py", "hooks/proc_env.py", "hooks/reread_check.py"):
             for existing in ([], [p]):
                 with self.subTest(path=p, edit=bool(existing)):
                     self.assertFlags(run([p], existing=existing),
