@@ -8460,7 +8460,8 @@ for (const scheme of ["light", "dark"]) test(`control: --muted and --holds, read
 });
 // ---------------------------------------------------------------- the narrow rule (lane nfp-narrow-paused-cell)
 // A bar draws one cell per step while it is at least steps x 5px - 2px wide. Under that, it draws one run per kind, in the order done,
-// in progress, stalled, paused, blocked, to do, with no empty run and no cell. Each drawn part is at least 3px. The cells stay in the DOM at 0 width.
+// in progress, stalled, paused, blocked, to do, with no empty run and no cell. Each drawn part is at least 3px, the floor this test checks.
+// A run gets RUN_MIN_PX (4px) once the bar is 6k - 2px or more (k kinds), as the run floor cases below check. The cells stay in the DOM at 0 width.
 const RULE_PX = 30 * 5 - 2;
 // The bar's layers from the layout: its own width, and its cells and runs with their widths (a cell at 0 width is not drawn).
 // A run keeps its 4px minimum past a 0px runs layer, and the layer clips it, so a run counts as drawn only in a drawn layer.
@@ -8553,7 +8554,8 @@ test("edge width: a 6-step bar with all five kinds, set to 20px, shows every run
 });
 
 // ---------------------------------------------------------------- one layer at every scale (lane nfp-npc-r3-red)
-// The cells draw above steps x 5px - 2.01px, and the runs layer draws below steps x 5px - 2px, so a width between the two draws both.
+// The cells draw at steps x 5px - 2px and above, and the runs layer draws below it. Both switch at that one edge: the cells take the bar less
+// the runs layer's width (`.bar>i` and `.bar>.runs` in the page CSS), so no width draws both, and the sweep below checks that.
 // Chromium lays a box out in 1/64 of the px its scale maps to: under a page zoom z the grid is 1/(64z) CSS px, and a sweep in that step
 // reaches every grid unit near the edge. In this browser a device scale does not move the grid, so the device-scale cases stay green
 // here. The sweep runs 0.05px either side of steps x 5px - 2px, and reads the layers in the grid's own px (zoomed px under a zoom).
