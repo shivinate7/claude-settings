@@ -13312,6 +13312,46 @@ add("test-author: a new whole test step after a conflict closer and a blank line
     file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE) + "\n",
     new_string=WORD_RUNS + ROUTE_JUDGE + "\n" + TEST_LINUX, **A)
 
+# A shared key that sits in the FILE below the closer is not in the edit's own text, so the fragment judge never sees it.
+# The guard judges the file on disk too. Each fixture is a real checkout whose workflow file holds the text, uncommitted,
+# as git leaves a conflicted file. The lazy build runs only for a case that names its checkout as cwd.
+def _workflow_file_repo(slug, text):
+    where = os.path.join(ROOT, slug)
+
+    def build():
+        make_repo(where, {WF: LINT})
+        write(os.path.join(where, WF), text)
+    lazy_fixture([where], build)
+    return where
+
+
+KEEP = "      # keep\n"
+CONFLICT_T = conflict(WORD_RUNS + TEST_LINUX, ROUTE_JUDGE)  # ours: W then T; theirs: R
+REPO_EDIT_KEY = _workflow_file_repo("wf-edit-key", CONFLICT_T + SHARED_COE)
+REPO_MULTI_KEY = _workflow_file_repo("wf-multi-key", CONFLICT_T + SHARED_COE)
+REPO_COMMENT_KEY = _workflow_file_repo("wf-comment-key", CONFLICT_T + KEEP + SHARED_COE)
+REPO_NEW_STEP = _workflow_file_repo("wf-new-step", CONFLICT_T + "\n" + TEST_WINDOWS)
+REPO_BETWEEN = _workflow_file_repo("wf-between", LINT + conflict(WORD_RUNS, ROUTE_JUDGE) + TEST_LINUX)
+
+add("test-author: a shared continue-on-error in the file below a conflict closer, landing on a kept step, is refused",
+    "deny", rule=TA, tool="Edit", file_path=WF, old_string=CONFLICT_T, new_string=WORD_RUNS,
+    carries=("builder", "Report"), **dict(A, cwd=REPO_EDIT_KEY))
+add("test-author: the same shared key in the file, reached by a second MultiEdit edit, is refused", "deny", rule=TA,
+    tool="MultiEdit", file_path=WF,
+    edits=[{"old_string": CONFLICT_T, "new_string": WORD_RUNS}, {"old_string": SHARED_COE, "new_string": SHARED_COE}],
+    carries=("builder", "Report"), **dict(A, cwd=REPO_MULTI_KEY))
+# A comment line does not end a mapping: the key after it still continues the kept step, so it is refused too.
+add("test-author: a shared continue-on-error after a conflict closer and a comment line is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=CONFLICT_T + KEEP + SHARED_COE, new_string=WORD_RUNS + KEEP + SHARED_COE,
+    carries=("builder", "Report"), **dict(A, cwd=REPO_COMMENT_KEY))
+# Control: a closer, a blank line, then a new whole test step in the file. Nothing continues a kept step.
+add("test-author: a new whole test step in the file after a conflict closer and a blank line is allowed", "allow",
+    tool="Edit", file_path=WF, old_string=CONFLICT_T, new_string=WORD_RUNS, **dict(A, cwd=REPO_NEW_STEP))
+# Control: the both-kept conflict Edit, in a file where it sits between whole test steps.
+add("test-author: a conflict between two whole test steps, both kept, sits between whole steps in the file and is allowed",
+    "allow", tool="Edit", file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE),
+    new_string=WORD_RUNS + "\n" + ROUTE_JUDGE, **dict(A, cwd=REPO_BETWEEN))
+
 # Builder: an edit to a workflow stays allowed unless its added lines disable tests in a test-runner line.
 for _name, _old, _new in (
     ("a lint step's run is changed", LINT, LINT_RUN_CHANGED),
