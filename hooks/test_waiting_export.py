@@ -683,6 +683,46 @@ def case_n21_label_holding_this_id_as_a_substring_passes():
                                 writer=label, session=OWN_SESSION))
 
 
+def case_n22_bare_word_writer_takes_the_export_run_fallback_blocks():
+    """The page writer is the bare word `Triage`, which names no session id. The word is no named writer, so the
+    export-run fallback decides: an export run before the write makes this session the writer, and its stale
+    write blocks. Its control is N23."""
+    label = "Triage"
+    check("N22 scope: the transcript holds the bare word as the writer", writer_seen(label) == label,
+          writer_seen(label))
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
+    expect_block("N22", run_stop("n22", base_repo("n22"), records, writer=label), (SCRIPT,))
+
+
+def case_n23_bare_word_writer_without_an_export_run_passes():
+    """The control for N22: the same bare word, and no export run before the write. No run made this session the
+    writer, and the word names no id, so the check passes."""
+    records = [owner(at(18, 50))] + page_write(at(19))
+    expect_pass("N23", run_stop("n23", base_repo("n23"), records, writer="Triage"))
+
+
+def case_n24_label_with_a_remote_id_and_punctuation_blocks():
+    """The remote env names session_5b9e, and the page writer label holds that id followed by punctuation: a
+    period inside the parentheses, or a comma and a period after the name. The punctuation ends no id, so this
+    session is the writer and its stale write blocks."""
+    for tag, label in (("N24a", labelled("session_5b9e.")), ("N24b", "Triage, session_5b9e.")):
+        check(tag + " scope: the transcript names the labelled writer", writer_seen(label) == label,
+              writer_seen(label))
+        records = [owner(at(18, 50))] + page_write(at(19))
+        expect_block(tag, run_stop(tag.lower(), base_repo(tag.lower()), records, writer=label,
+                                   extra_env={REMOTE_ENV: "cse_5b9e"}), (SCRIPT,))
+
+
+def case_n25_cse_label_with_the_remote_env_blocks():
+    """The remote env names this session as cse_5b9e, and the page writer label names it the same way. The label
+    names this session, so its stale write blocks."""
+    label = labelled("cse_5b9e")
+    check("N25 scope: the transcript names the labelled writer", writer_seen(label) == label, writer_seen(label))
+    p = run_stop("n25", base_repo("n25"), [owner(at(18, 50))] + page_write(at(19)), writer=label,
+                 extra_env={REMOTE_ENV: "cse_5b9e"})
+    expect_block("N25", p, (SCRIPT,))
+
+
 def case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script():
     """The page names another writer. Earlier shell runs that only mention export_page.py do not make this
     session the writer: the grep is no export run, and the test file's name ends in export_page.py."""
@@ -806,6 +846,10 @@ CASES.extend((
     case_n19_labelled_writer_with_this_local_session_blocks,
     case_n20_labelled_writer_naming_another_id_passes,
     case_n21_label_holding_this_id_as_a_substring_passes,
+    case_n22_bare_word_writer_takes_the_export_run_fallback_blocks,
+    case_n23_bare_word_writer_without_an_export_run_passes,
+    case_n24_label_with_a_remote_id_and_punctuation_blocks,
+    case_n25_cse_label_with_the_remote_env_blocks,
     case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
     case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
     case_n15_writer_set_of_receipts_passes,
