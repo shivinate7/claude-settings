@@ -24,7 +24,8 @@ the desktop app has none.
   characters. A "## Refused acts" section ends it: the first line (200 characters at most) of
   the newest 50 refused tool results in that span, oldest first. Cost: no extra file read, no
   process start, no file written beyond the digest. The Claude config file (~/.claude.json) is
-  read at each Stop only.
+  read at each Stop only. It writes nothing when cwd is a `.claude/worktrees/agent-<17 hex>`
+  worktree: that is an agent's PreCompact, which carries the parent's session_id.
 
   SessionStart --reorient (stdin: session_id) -- reads that state and prints a short
   message: follow the installed prompt file, rewrite the session's own handoff at
@@ -282,6 +283,10 @@ def run_precompact(payload):
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     cwd = payload.get("cwd") or os.getcwd()
+    # Claude Code gives an agent's PreCompact the parent's session_id and no agent_id, and a worktree agent's cwd is its own worktree.
+    parts = re.split(r"[/\\]", cwd)
+    if any(re.fullmatch(r"agent-[0-9a-f]{17}", a) and parts[i - 2:i] == [".claude", "worktrees"] for i, a in enumerate(parts)):
+        return 0
     repo_top = _repo_top_level(cwd)
     ensure_handoff_dir(session_id)
 

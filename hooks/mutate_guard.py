@@ -2424,6 +2424,11 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    # ---- agent-handoff-write (decision precompact-handoff, item 14): the refusal never fires.
+    ("agent-handoff-write: the refusal is never printed",
+     '            refuse(tool, "deny", "agent-handoff-write", AGENT_HANDOFF_WRITE_REASON, target)',
+     '            pass',
+     "guard", "agent-handoff-write: an agent's Write to its session's handoff is refused"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",
