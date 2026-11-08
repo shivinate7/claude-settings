@@ -12678,9 +12678,10 @@ class ReviewEnv(Env):
         """This checkout's origin is GitHub repo `name` (owner/name). The layout reads a repo's GitHub name from its origin."""
         sh(self.co, "git", "remote", "set-url", "origin", f"https://github.com/{name}.git")
 
-    def roll_out(self):
-        """This checkout's repo has rolled out to the layout: its extras file says so, and it keeps no kind at a legacy place."""
-        put(os.path.join(self.co, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
+    def roll_out(self, extras=None):
+        """This checkout's repo has rolled out to the layout: its extras file says so, and it keeps no kind at a legacy place. `extras`, when given,
+        is the file's body instead, so a case can write an extras file the layout cannot read."""
+        put(os.path.join(self.co, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True} if extras is None else extras))
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
@@ -13575,8 +13576,9 @@ class ReviewFixRemedies(ReviewChainFixture):
     """A refused fix check names the remedy for its own cause. The head remedy, "The reviewed head must be the Head of the newest earlier review
     record", fits only a head refusal: a fix base that is not the newest earlier record's Head, refused by its compare (fix_base_problem). Every other
     refusal names its own remedy and prints no head remedy: the round floor, a copy that drops a Round line, a failed fix slot with no FAIL line, the
-    net value, guard and kind freeze, the ancestor read, the FAIL or WIDE chain, a missing review record, each refused --fix-base-record, and
-    fix_base_problem's unreadable layout, which names the layout. Every case asserts the refusal (assert_refused), then the cause it names, then the subject: the head remedy absent and the
+    net value, guard and kind freeze, the ancestor read, the FAIL or WIDE chain, a missing review record, an unparsable newest record, each refused
+    --fix-base-record (the own-records one too), fix_base_problem's unreadable layout, which names the layout, and its unreadable extras file, which names
+    that file. Every case asserts the refusal (assert_refused), then the cause it names, then the subject: the head remedy absent and the
     remedy's text present. Each remedy's text is written out in its case, so a remedy that is blanked or swapped for another fails the case."""
 
     HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier review record"
@@ -13586,6 +13588,9 @@ class ReviewFixRemedies(ReviewChainFixture):
     WIDE_REMEDY = "Start a new lane at round 1."
     FAIL_FINAL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
     MISSING_REMEDY = "Post the round's review record first."
+    PROSE_REMEDY = "Keep prose below the --- line, then post the record again."
+    LAYOUT_EXTRAS_REMEDY = "Fix the file the error names, then run the fix check again."
+    OWN_RECORD_REMEDY = "Drop --fix-base-record: this pull request's own record takes the fix check."
     DROPPED_REMEDY = "Copy every Round line of that record unchanged and in its order, then add the new lines after them."
     ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # every round of a record passed
     ALL_PASS_ARGS = round_args(ALL_PASS)
@@ -13700,6 +13705,65 @@ class ReviewFixRemedies(ReviewChainFixture):
         rc, out, err, _ = self.run_chain(self.NEWEST)
         self.assert_own_remedy(rc, out, err, "must exist", self.MISSING_REMEDY)
 
+    def incident(self):
+        """The record of incident PR 1983: reviewer prose between its CI line and its rule. -> (the record as posted, the same text cut after its CI
+        line). The cut parses, so the prose is the one difference between the two."""
+        bad = record_text(head=self.NEWEST, rounds=REVIEW_PASS) + "\nReviewer prose.\n" + REVIEW_FOOTER
+        cut = bad[:bad.index(REVIEW_CI_LINE) + len(REVIEW_CI_LINE)] + "\n"
+        return bad, cut
+
+    def test_an_unparsable_newest_record_is_refused_as_unparsable_with_the_prose_remedy(self):
+        # the newest record exists but does not parse, so the refusal says it does not parse, not that no record exists, and its remedy says where
+        # the prose goes. The control below runs the cut text, which parses
+        bad, _ = self.incident()
+        self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the incident record parses, so the case tests nothing")
+        rc, out, err, _ = self.run_chain(self.NEWEST, (review_comment(1, 7, bad),))
+        self.assert_refused(rc, out, err)
+        self.assertRegex(err, r"newest review record[^\n]*does not parse", "the refusal does not say the newest review record does not parse:\n" + err)
+        self.assertNotIn("must exist", err, "the refusal says no record exists, though one is posted:\n" + err)
+        self.assertNotIn(self.MISSING_REMEDY, err, "the refusal prints the missing-record remedy, though a record is posted:\n" + err)
+        self.assertIn(self.PROSE_REMEDY, err, "the refusal does not hold the remedy that keeps prose below the rule:\n" + err)
+
+    def test_the_same_record_cut_after_its_ci_line_parses_and_its_fix_check_is_written(self):
+        # the control for the unparsable case: the text cut after its CI line parses, prose below the rule parses the same way (the remedy's placement),
+        # and the fix check is written on the posted record
+        _, cut = self.incident()
+        parse = review_fn(self, "parse_review")
+        self.assertIsNotNone(parse(cut), "control: the record cut after its CI line does not parse")
+        self.assertEqual(parse(cut + "---\nReviewer prose.\n"), parse(cut), "control: prose below the rule changes the record")
+        rc, out, err, _ = self.run_chain(self.NEWEST, (review_comment(1, 7, cut),))
+        self.assertEqual(rc, 0, "control: the record cut after its CI line was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.NEWEST, "reviewer", "haiku", "PASS"),
+                         "control: the fix check was not written on the posted record:\n" + out)
+
+    def test_a_fix_base_whose_extras_file_has_no_kinds_names_that_error_and_its_file_as_its_remedy(self):
+        # the repo's extras file reads but holds no "kinds" object, so rolled_out raises LayoutError inside record_places, which fix_base_problem reads.
+        # The refusal carries that error's own text, and its remedy names the file the error names, not lint/layout.json, which cannot reach this refusal
+        import layout  # lint/layout.py, the module fix_base_problem imports
+        self.roll_out({"rolled-out": True})
+        with self.assertRaises(layout.LayoutError) as scope:
+            layout.record_places(layout.layout(), self.co)
+        text = str(scope.exception)
+        self.assertIn(".claude/layout-extras.json", text, "scope: the layout error does not name the extras file:\n" + text)
+        rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"))
+        self.assert_refused(rc, out, err)
+        self.assertEqual(host.compare_reads, [], "scope: a compare was read before the layout, so the refusal is not the layout's")
+        self.assertIn(text, err, "the refusal does not carry the LayoutError's own text:\n" + err)
+        self.assertNotIn("lint/layout.json", err, "the refusal names lint/layout.json, which cannot reach this refusal:\n" + err)
+        self.assertIn(self.LAYOUT_EXTRAS_REMEDY, err, "the refusal does not hold the remedy for the file the error names:\n" + err)
+        self.assertNotIn(self.HEAD_REMEDY, err, "the extras-file refusal prints the head remedy:\n" + err)
+
+    def test_a_fix_base_whose_extras_file_reads_reaches_the_base_rule(self):
+        # the control for the extras file: with its kinds object, the layout reads, the base is compared with the newest record's Head, and the base
+        # rule refuses the code file with the head remedy. The layout is not the cause here
+        self.roll_out()
+        diffs = {(self.NEWEST, self.OTHER): compare_of("ahead", self.CODE)}
+        rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"), diffs=diffs)
+        self.assert_refused(rc, out, err)
+        self.assertTrue(self.compared(host, self.NEWEST, self.OTHER), "control: the base was not compared with the newest record's Head")
+        self.assertIn("are not all record or notes files", err, "control: the readable extras file did not reach the base rule:\n" + err)
+        self.assertIn(self.HEAD_REMEDY, err, "control: the base rule's refusal lost the head remedy:\n" + err)
+
     def test_each_refused_fix_base_record_names_its_own_remedy(self):
         # the source record is refused for its own cause, and each cause names its own remedy
         self.set_origin("o/r")
@@ -13708,6 +13772,7 @@ class ReviewFixRemedies(ReviewChainFixture):
         newer = review_comment(6, 9, record_text(n=9, head=self.NOTES, rounds=REVIEW_PASS))
         other_pr = review_comment(5, 9, record_text(n=10, head=self.NEWEST, rounds=REVIEW_PASS))
         with_fix = review_comment(5, 9, record_text(n=9, head=self.NEWEST, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.EARLIER),)))
+        own = review_comment(1, 7, record_text(head=self.NEWEST, rounds=REVIEW_PASS))  # its control is the rc 0 run of test_a_pull_request_with_its_own_record_refuses_the_flag_without_the_head_remedy
         for label, comments, url, cause, remedy in (
                 ("a link to another repo", (source,), "https://github.com/x/r/pull/9#issuecomment-5",
                  "names x/r, not this repo", "Name a review record on this repo."),
@@ -13718,7 +13783,9 @@ class ReviewFixRemedies(ReviewChainFixture):
                 ("a record that is not the newest on its pull request", (source, newer), link,
                  "that record is not the newest on #9", "Name the newest review record on that pull request."),
                 ("a record with a fix check line", (with_fix,), link,
-                 "a chain never runs through --fix-base-record", "Post this pull request's own review records from round 1: for a normal guard or check change, rounds 1 to 3 with the net-value test at round 3.")):
+                 "a chain never runs through --fix-base-record", "Post this pull request's own review records from round 1: for a normal guard or check change, rounds 1 to 3 with the net-value test at round 3."),
+                ("a pull request with its own record", (own, source), link,
+                 "has a review record of its own", self.OWN_RECORD_REMEDY)):
             with self.subTest(label=label):
                 host = self.record_host(*comments, head=self.LIVE)
                 rc, out, err = self.run_args("7", "--review-record", "--head", self.LIVE, "--kind", "normal", "--guard", "no",
