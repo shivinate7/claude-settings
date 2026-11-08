@@ -461,8 +461,11 @@ def sh_heredoc_bodies(src, i, pending):
     return i
 
 
-SH_BOUNDARY = r"(?![^\s;&|()<>])"
+SH_BOUNDARY = r"(?![^\s;&|()<>`])"
 SH_CMD_WORD = re.compile(r"(?:case|esac|then|do|else|elif|if|while|until|time)" + SH_BOUNDARY + r"|[!{](?=\s)")
+SH_FUNCTION = re.compile(r"function[ \t]+[^\s;&|()<>`]+")
+SH_TEST_OPEN = re.compile(r"\[\[(?=\s)")
+SH_TEST_CLOSE = re.compile(r"\]\]" + SH_BOUNDARY)
 SH_IN_WORD = re.compile(r"in" + SH_BOUNDARY)
 SH_ESAC_WORD = re.compile(r"esac" + SH_BOUNDARY)
 
@@ -471,10 +474,17 @@ def sh_code_end(src, i, spans, pending, close=None):
     """Scan shell code from i, adding each comment as (start, end) to spans. With close `)` or a backtick, stop after
     the one that ends the command substitution. `ws` is True where a word may start, the only place a `#` opens a
     comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment. `cmd` is
-    True where a command may start, the only place `case` and `esac` are reserved words. Each open `case` is one
-    entry in `cases`, [state, paren depth in a pattern]: word0 and word1 before `in`, pat for the arm patterns, body
-    for an arm's commands. A pattern's `)` ends the pattern, never the substitution."""
-    depth, ws, cmd, cases = 0, True, True, []
+    True only at command position, the only place `case`, `esac` and the other reserved words count: after a newline,
+    `;`, `&`, `|`, `$(`, a backtick, `{`, `then` or `do`, or a `(` that opens a subshell. `parens` holds one kind per
+    open `(`: cmd for a subshell or a process substitution, list for an array, an extglob or a regex group, where a
+    newline or `|` starts no command. Inside `[[ ... ]]` (`test`) nothing starts a command either. Each open `case`
+    is one entry in `cases`, [state, paren depth in a pattern]: word0 and word1 before `in`, pat for the arm
+    patterns, body for an arm's commands. A pattern's `)` ends the pattern, never the substitution."""
+    ws, cmd, test, parens, cases = True, True, False, [], []
+
+    def starts_cmd():
+        return not test and (not parens or parens[-1] == "cmd")
+
     while i < len(src):
         c = src[i]
         st = cases[-1] if cases else None
@@ -495,6 +505,17 @@ def sh_code_end(src, i, spans, pending, close=None):
                 cases.pop()
                 i, ws, cmd = i + 4, False, False
                 continue
+        if test and ws and (m := SH_TEST_CLOSE.match(src, i)):
+            test = False
+            i, ws, cmd = m.end(), False, False
+            continue
+        if cmd and (not st or st[0] == "body") and (m := SH_TEST_OPEN.match(src, i)):
+            test = True
+            i, ws, cmd = m.end(), True, False
+            continue
+        if cmd and (not st or st[0] == "body") and (m := SH_FUNCTION.match(src, i)):
+            i, ws = m.end(), False  # the name is read: `{` after it opens the body
+            continue
         if cmd and (not st or st[0] == "body") and (m := SH_CMD_WORD.match(src, i)):
             word = m.group(0)
             if word == "case":
@@ -542,7 +563,7 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             if pending:
                 i = sh_heredoc_bodies(src, i, pending)
-            ws = cmd = True
+            ws, cmd = True, starts_cmd()
         elif src.startswith("<<<", i):
             i += 3  # a here-string, not a heredoc
             ws = True
@@ -554,13 +575,14 @@ def sh_code_end(src, i, spans, pending, close=None):
             i = j
             ws = cmd = False
         elif c == "(":
-            i += 1
             if st and st[0] == "pat":
                 st[1] += 1  # an extglob group in a pattern
                 ws = False
             else:
-                depth += 1
-                ws = cmd = True
+                subshell = not test and (cmd or (i > 0 and src[i - 1] in "<>"))
+                parens.append("cmd" if subshell else "list")
+                ws, cmd = True, subshell
+            i += 1
         elif c == ")":
             i += 1
             if st and st[0] == "pat":
@@ -569,18 +591,21 @@ def sh_code_end(src, i, spans, pending, close=None):
                     ws = False
                 else:
                     st[0], ws, cmd = "body", True, True
-            elif depth == 0 and (cases or close == ")"):
-                if cases:
-                    raise Unread("case arm ends with a lone )")
+            elif parens:
+                parens.pop()
+                ws, cmd = True, starts_cmd()  # starts_cmd keeps `f() {` a function body
+            elif cases:
+                raise Unread("case arm ends with a lone )")
+            elif close == ")":
                 return i
             else:
-                depth -= 1
-                ws = cmd = True
+                ws = cmd = True  # a stray `)` at top level closes nothing
         else:
+            redirect = c in "&|" and i > 0 and src[i - 1] in "<>"  # `>&2` and `>|` are redirections
             i += 1
             ws = c in " \t;&|<>"
-            if c in ";&|":
-                cmd = True
+            if c in ";&|" and not redirect:
+                cmd = starts_cmd()
             elif c not in " \t":
                 cmd = False
     if close:
