@@ -2098,7 +2098,7 @@ def owed_round(num, bodies, sha):
     "held" (net value negative: the owner decides, no more rounds), "net" (the third round is done and its net-value test is owed), "round" (the third round is owed,
     or the record is bad), "unreviewed" (the newest record for the head has Guard or check no and is not done), "unnamed" (no record of `bodies` names `sha`: the caller
     makes it an "unreviewed" finding only when no pull request holds a done record for the head). `bodies`: its record bodies, oldest first. The newest one whose Head
-    line is `sha` decides (decision pr-review-record, Q1, owner pick a, page item 382, 21:26 CST 2026-11-07: a lane tip with no done record for its head does not
+    line is `sha` decides (decision pr-review-record, Q1: a lane tip with no done record for its head does not
     merge, whatever its Guard or check value). A record that names `sha` and fails to parse, or whose PR line is not `num`, is bad and refuses: its Guard or check
     value is unknown, never read as no."""
     mine = [b for b in bodies if re.search(rf"^Head: {sha}$", b.split("\n---\n")[0], re.M)]
@@ -2176,8 +2176,7 @@ def unreviewed_lane(host, sha, num=None):
     return f"#{num} (tip {sha[:9]})"
 
 def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread=False):
-    """The round-3 check (decision hold-unsafe-after-round-3; owner item 359 pick b) and the review check (decision pr-review-record, Q1; owner pick a, page item 382,
-    21:26 CST 2026-11-07). A lane is one of `tips`, the batch's lane tips, or the pull request's own head (`info["head"]`, pull request `n`). Each is matched to a record by
+    """The round-3 check (decision hold-unsafe-after-round-3; owner item 359 pick b) and the review check (decision pr-review-record, Q1). A lane is one of `tips`, the batch's lane tips, or the pull request's own head (`info["head"]`, pull request `n`). Each is matched to a record by
     the record's Head line, and the PR number comes from the comment's issue. Refuse before anything is claimed when a lane tip has no done record for its head, whatever
     its Guard or check value (no record names it, or its newest record is not done and has Guard or check no: kind "unreviewed"), or when a lane's newest record for its
     head has Guard or check yes and is not done. An integration pull request is read through its lane tips: its own head needs no record, and is checked for one only when
@@ -2237,8 +2236,9 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
         lifted = unknown_ok.strip()
     if found:  # a lane found owing still refuses when the stale-record read was lifted
         kinds = [k for k in ROUND_REMEDY if any(k == f[0] for f in found)]
-        cites = ([ROUND3_CITE] if any(f[0] != "unreviewed" for f in found) else []) + ([UNREVIEWED_CITE] if any(f[0] == "unreviewed" for f in found) else [])
-        raise RoundOwed(" ".join(f[1] for f in found) + "\n" + " ".join(ROUND_REMEDY[k] for k in kinds) + " " + " ".join(cites))
+        only_unreviewed, none_unreviewed = all(f[0] == "unreviewed" for f in found), all(f[0] != "unreviewed" for f in found)
+        raise RoundOwed(" ".join(f[1] for f in found) + "\n" + " ".join(ROUND_REMEDY[k] for k in kinds) + " "
+                        + (UNREVIEWED_CITE if only_unreviewed else ROUND3_CITE if none_unreviewed else f"{ROUND3_CITE} {UNREVIEWED_CITE}"))
     return lifted
 
 def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropped=()):
