@@ -1208,8 +1208,8 @@ def case_none_choice_with_note_holds_rule_once():
 
 def case_done_answer_is_not_reask():
     # A task's answer carries `done` and no choice: "Marked done." or "Not marked done." (docs/design/last-answer-notes.md,
-    # section 4). It gives no "none of these" direction, so the one prompt lacks the rule. The call still makes its one
-    # model call, so an early exit cannot pass this check.
+    # section 4). It gives no "none of these" direction, so the one form prompt lacks the rule. The form judge still runs,
+    # so an early exit cannot pass this check. The dedicated past-ruling call is not a form call, so form_calls skips it.
     import question_form  # the one form check (hooks/question_form.py)
     rule = none_direction_rule()
     for done in (False, True):
@@ -1218,10 +1218,10 @@ def case_done_answer_is_not_reask():
         check("done=%s fixture: the update passes question_form.item_hit, so a refusal below is the judge's" % done,
               got == ("", ""), got)
         r = run_hook(page_input("update", fixture), answer=ALLOW)
-        prompt = r.calls[0]["prompt"] if r.calls else ""
-        check("done=%s answer: one model call, and no deny" % done,
-              len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
-        check("done=%s answer: the prompt lacks NONE_DIRECTION_RULE" % done,
+        prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+        check("done=%s answer: one form-judge call, and no deny" % done,
+              len(form_calls(r)) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+        check("done=%s answer: the form prompt lacks NONE_DIRECTION_RULE" % done,
               bool(rule) and prompt.count(rule) == 0, rule_detail(rule, r))
 
 
@@ -1748,7 +1748,7 @@ from shared_names import SEND_TOOLS  # noqa: E402  the one home of the send tool
 SEND_MCP, SEND_BUILTIN = SEND_TOOLS
 SEND_TARGET = "session_lane07"  # a lane, not the page writer: a send with the form is judged all the same
 REPORT_GUARD = os.path.join(REPO, "lint", "report_guard.py")
-# The two page items of 2026-11-07, verbatim. Inline on purpose: a test run reads no file outside the repo.
+# The two page items the past-ruling cases use, verbatim. Inline on purpose: a test run reads no file outside the repo.
 INCIDENT_357 = "\n".join([
     "Page item for the owner (from coordinator). Title: How should a merge free disk without losing a running agent's work?",
     "Goal: a merge frees disk without losing a running agent's work.",
@@ -2023,17 +2023,16 @@ def case_non_item_and_non_judged_writes_make_no_model_call():
         check("non-judged write (%s): not refused" % label, r.code == 0 and r.deny() is None, detail(r))
 
 
-# ------------------------------------------------------------------ round 2: the review's holes on the builder's branch
+# ------------------------------------------------------------------ past-ruling cases: batches, form errors, send forms
 #
-# Each case below is red on d56a649c2, the builder's head, for the cause its message names. Cases 1 to 6 are the
-# reviewer's findings: a page batch cut from the front, one Unvetted line passing a whole batch, a form error on a page
-# write failing open, the send gate's markdown and bullet forms, a send cut from the front, and a quote in a fence.
-# Case 7 holds the one home of the send tool names, hooks/shared_names.py.
+# The cases below cover a page batch cut from the front, a batch whose one question no check reached, a form error that
+# must refuse, the send check's markdown and bullet forms, a send cut from the front, a send whose form sits only in a
+# code fence, and the send tool names, which come from hooks/shared_names.py.
 PAGE_FILLER = "Background sentence for the owner. " * 200  # about 8,000 characters, past ASK_TEXT_MAX
 
 
 def case_page_batch_passes_every_write_to_the_dedicated_call():
-    # Case 1. A batch past ASK_TEXT_MAX joined characters. Its first write is short and its second is long, so a front
+    # A batch past ASK_TEXT_MAX joined characters. Its first write is short and its second is long, so a front
     # cut drops the first write, whose mark PAGE_MARK sits in option a's gain. Both writes must reach the dedicated call.
     cap = guard_constant(REPORT_GUARD, "ASK_TEXT_MAX")
     long_context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, PAGE_FILLER))
@@ -2052,7 +2051,7 @@ def case_page_batch_passes_every_write_to_the_dedicated_call():
 
 
 def case_page_batch_with_one_unvetted_line_is_refused_when_a_check_cannot_run():
-    # Case 2. Two questions in one batch. Only the second carries `Unvetted:`, and the dedicated call fails. The first
+    # Two questions in one batch. Only the second carries `Unvetted:`, and the dedicated call fails. The first
     # question was never checked, so the batch is refused with the Unvetted remedy: each question needs its own marker.
     marked = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, UNVETTED_LINE))
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
@@ -2068,7 +2067,7 @@ def case_page_batch_with_one_unvetted_line_is_refused_when_a_check_cannot_run():
 
 
 def case_page_form_error_refuses_as_unvetted():
-    # Case 3. The dedicated call passes and only the form call errors. The form judge is the check that could not run,
+    # The dedicated call passes and only the form call errors. The form judge is the check that could not run,
     # so the write is refused with the Unvetted remedy, as on main. A form error is not a pass.
     page_item_passes_the_form("3")
     r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, past=ALLOW, form_fail=True)
@@ -2084,8 +2083,8 @@ def replace_line(text, prefix, line):
     return "\n".join(line if part.startswith(prefix) else part for part in text.split("\n"))
 
 
-def case_send_gate_catches_the_markdown_and_bullet_forms():
-    # Case 4. The send gate reads a Goal line and a stake Problem line in the forms owners' pages use: bold, a bullet and
+def case_send_check_catches_the_markdown_and_bullet_forms():
+    # The send check reads a Goal line and a stake Problem line in the forms owners' pages use: bold, a bullet and
     # a blockquote. Each variant makes one dedicated call, and the incident ruling refuses it.
     goal = "a merge frees disk without losing a running agent's work."
     problem = "freeing a running agent's worktree loses its uncommitted files."
@@ -2097,7 +2096,7 @@ def case_send_gate_catches_the_markdown_and_bullet_forms():
     )
     for label, message in variants:
         for tool in SEND_TOOLS:
-            name = "send gate, %s via %s" % (label, tool)
+            name = "send check, %s via %s" % (label, tool)
             r = run_hook(send_input(tool, message), answer=ruled(WORKTREE_SLUG))
             check(name + ": one model call before the send", len(r.calls) == 1, detail(r))
             check(name + ": the send is denied as past-ruling",
@@ -2106,7 +2105,7 @@ def case_send_gate_catches_the_markdown_and_bullet_forms():
 
 
 def case_send_over_the_cap_keeps_the_goal_and_problem():
-    # Case 5. A send past ASK_TEXT_MAX whose form lines sit at the top, where a front cut would drop them. Both lines must
+    # A send past ASK_TEXT_MAX whose form lines sit at the top, where a front cut would drop them. Both lines must
     # reach the prompt that the dedicated call reads.
     cap = guard_constant(REPORT_GUARD, "ASK_TEXT_MAX")
     lines = INCIDENT_357.split("\n")
@@ -2123,7 +2122,7 @@ def case_send_over_the_cap_keeps_the_goal_and_problem():
 
 
 def case_send_with_the_form_only_in_a_fence_makes_no_call():
-    # Case 6. The Goal and Problem lines sit inside a code fence, quoted as text. The send is no owner question, so it
+    # The Goal and Problem lines sit inside a code fence, quoted as text. The send is no owner question, so it
     # makes no model call and is not refused.
     import question_form  # the one form check (hooks/question_form.py)
     message = ("A quote from an earlier message, for reference only:\n```\n" + INCIDENT_357 + "\n```\n"
@@ -2176,7 +2175,7 @@ def imports_send_tools(path):
 
 
 def case_send_tool_names_come_from_shared_names():
-    # Case 7. The send tool names have one home, hooks/shared_names.py. Each of the two test files imports SEND_TOOLS
+    # The send tool names have one home, hooks/shared_names.py. Each of the two test files imports SEND_TOOLS
     # from it and binds no literal copy of the names at module level.
     names = defined_send_tools(os.path.join(HERE, "shared_names.py"))
     check("hooks/shared_names.py binds SEND_TOOLS at module level", names is not None,
@@ -2229,7 +2228,7 @@ def main():
                  case_non_item_and_non_judged_writes_make_no_model_call,
                  case_page_batch_passes_every_write_to_the_dedicated_call,
                  case_page_batch_with_one_unvetted_line_is_refused_when_a_check_cannot_run,
-                 case_page_form_error_refuses_as_unvetted, case_send_gate_catches_the_markdown_and_bullet_forms,
+                 case_page_form_error_refuses_as_unvetted, case_send_check_catches_the_markdown_and_bullet_forms,
                  case_send_over_the_cap_keeps_the_goal_and_problem,
                  case_send_with_the_form_only_in_a_fence_makes_no_call,
                  case_send_tool_names_come_from_shared_names):
