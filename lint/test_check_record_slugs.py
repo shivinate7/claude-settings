@@ -208,6 +208,22 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertTrue(self.failed_about(out, "scope-note"), out)
         self.assertEqual(len(fail_lines(out)), 1, out)
 
+    def refused_notes(self, notes):
+        """Add each {slug: text} of `notes` as a none note, and assert the check refuses each one and no other line."""
+        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for slug in notes:
+            self.assertTrue(self.failed_about(out, slug), out)
+        self.assertEqual(len(fail_lines(out)), len(notes), out)  # one refusal per note, no other cause
+
+    def passed_notes(self, notes):
+        """Add each {slug: text} of `notes` as a none note beside the scope note, and assert the check refuses none."""
+        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()], SCOPE_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
+
     def base_sha(self):
         return subprocess.run(["git", "-C", self.tree, "rev-parse", "origin/main"], check=True,
                               capture_output=True, text=True).stdout.strip()
@@ -760,58 +776,34 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertTrue(self.failed_about(out, "commit-note", DEBT_NOTES), out)
 
     def test_each_cost_unit_after_a_none_reason_is_red(self):
-        notes = {
+        self.refused_notes({
             "unit-seconds": "rare and harmless: the call takes 1.3 s",
             "unit-millis": "rare and harmless: the call takes 200 ms",
             "unit-lines": "owner decides: the fix is 40 lines",
             "unit-kilobytes": "owner decides: the file is 3 KB",
             "unit-characters": "rare and harmless: 8,000 characters",
-        }
-        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
-        rc, out = self.lint()
-        self.assertEqual(rc, 1, out)
-        for slug in notes:
-            self.assertTrue(self.failed_about(out, slug), out)
-        self.assertEqual(len(fail_lines(out)), len(notes), out)  # one refusal per note, no other cause
+        })
 
     def test_each_complexity_word_after_a_none_reason_is_red(self):
-        notes = {
+        self.refused_notes({
             "complex-linear": "owner decides: the scan is linear",
             "complex-quadratic": "rare and harmless: the scan is quadratic",
             "complex-big-o": "owner decides: the scan is O(n^2)",
             "complex-n-log-n": "rare and harmless: the sort is O(n log n)",
-        }
-        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
-        rc, out = self.lint()
-        self.assertEqual(rc, 1, out)
-        for slug in notes:
-            self.assertTrue(self.failed_about(out, slug), out)
-        self.assertEqual(len(fail_lines(out)), len(notes), out)
+        })
 
     def test_commit_of_seven_or_forty_hex_characters_after_a_none_reason_is_red(self):
-        notes = {
+        self.refused_notes({
             "commit-seven": "owner decides: the fix is in %s" % SEVEN,
             "commit-forty": "owner decides: the fix is in %s" % FORTY,
-        }
-        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
-        rc, out = self.lint()
-        self.assertEqual(rc, 1, out)
-        for slug in notes:
-            self.assertTrue(self.failed_about(out, slug), out)
-        self.assertEqual(len(fail_lines(out)), len(notes), out)
+        })
 
     def test_check_output_without_its_verdict_word_is_red(self):
         # A backticked command alone is no check output, and a verdict word alone is none either.
-        notes = {
+        self.refused_notes({
             "check-no-verdict": "owner decides: 1.3 s per call, %s" % CHECK,
             "check-plain-verdict": "owner decides: 1.3 s per call, PASS",
-        }
-        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
-        rc, out = self.lint()
-        self.assertEqual(rc, 1, out)
-        for slug in notes:
-            self.assertTrue(self.failed_about(out, slug), out)
-        self.assertEqual(len(fail_lines(out)), len(notes), out)
+        })
 
     def test_comment_opener_in_the_reason_text_does_not_hide_a_cost(self):
         # The "#" and "/*" are text. A checker that stops reading at a comment opener would miss the cost after them.
@@ -923,6 +915,68 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assert_only_the_scope_note_fails(out)
+
+    # Round 2 of the cite rule. Each case sits in the text after a listed reason. The refused cases name a cost the
+    # digit form misses: spelled numbers, count units, unit gaps and case, and linear or quadratic in other forms.
+    # The passing cases are honest check output and words that only look like a cost.
+
+    def test_spelled_number_with_a_time_unit_after_a_none_reason_is_red(self):
+        # "a second" is left out on purpose: it is ambiguous, as in "a second level".
+        pairs = (("one", "hour"), ("two", "seconds"), ("three", "minutes"), ("four", "hours"), ("five", "seconds"),
+                 ("six", "minutes"), ("seven", "hours"), ("eight", "seconds"), ("nine", "minutes"), ("ten", "minutes"))
+        self.refused_notes({"spelled-%s" % word: "rare and harmless: the call takes %s %s" % (word, unit)
+                            for word, unit in pairs})
+
+    def test_count_unit_after_a_none_reason_is_red(self):
+        self.refused_notes({
+            "count-queries": "owner decides: the page runs 40 queries",
+            "count-times": "rare and harmless: it runs 3 times",
+            "count-calls": "owner decides: 12 calls per page",
+            "count-x": "rare and harmless: the path is 2x slower",
+        })
+
+    def test_unit_gap_or_upper_case_unit_after_a_none_reason_is_red(self):
+        self.refused_notes({
+            "gap-milliseconds": "rare and harmless: the call takes 10 milliseconds",
+            "gap-days": "owner decides: the job waits 3 days",
+            "gap-hrs": "owner decides: the job takes 2 hrs",
+            "gap-lower-kb": "rare and harmless: the file is 5 kb",
+            "gap-mixed-kB": "rare and harmless: the file is 5 kB",
+            "gap-mib": "owner decides: the cache is 5 MiB",
+            "gap-upper-milliseconds": "rare and harmless: the call takes 10 MILLISECONDS",
+        })
+
+    def test_linear_or_quadratic_in_any_case_or_ly_form_after_a_none_reason_is_red(self):
+        self.refused_notes({
+            "word-scales-linearly": "owner decides: the scan scales linearly",
+            "word-linear-capital": "rare and harmless: Linear in the note count",
+            "word-quadratic-capital": "owner decides: Quadratic in the note count",
+            "word-scales-quadratically": "rare and harmless: the scan scales quadratically",
+        })
+
+    def test_check_output_in_its_honest_forms_after_a_cost_passes(self):
+        self.passed_notes({
+            "honest-dash-pass": "rare and harmless: the call takes 1.3 s; `verdict bench` — pass",
+            "honest-arrow-red": "owner decides: the call takes 1.3 s; `x` → red",
+            "honest-colon-count": "owner decides: the run takes 1.3 s; `pytest -q`: 12 passed",
+        })
+
+    def test_a_second_level_and_a_linearizable_word_after_a_none_reason_pass(self):
+        self.passed_notes({
+            "word-second-level": "owner decides: a second level of cache",
+            "word-linearizable": "rare and harmless: a linearizable store",
+        })
+
+    def test_long_digit_comma_reason_is_read_to_its_end(self):
+        # The input shape only. P5 forbids a wall-clock assert, so the speed is not timed here. A run of "1," 8000 times
+        # ends in a cost, so the check must read to the end and refuse. The same run with no cost must pass.
+        run = "1," * 8000
+        self.add_notes(none_note("long-red", "owner decides: %s then the call takes 1.3 s" % run),
+                       none_note("long-pass", "owner decides: %s" % run))
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "long-red"), out)  # the scope: the long note is read to its end
+        self.assertEqual(len(fail_lines(out)), 1, out)  # only the note with the cost is refused
 
 
 class ImportTests(unittest.TestCase):
