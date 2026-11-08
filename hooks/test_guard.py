@@ -133,6 +133,7 @@ FAMILIES = {
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
+    "agent-handoff-write": "an agent's Write, Edit or MultiEdit to its session's own handoff is refused: the parent's writes, another session's handoff, a Read, and the ~ spelling of the handoff path",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -25480,6 +25481,59 @@ for _label, _check in (
      hu_import_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# =========================================================================== agent-handoff-write
+# An agent carries its parent session's session_id, so an agent's Write, Edit or MultiEdit to the session's
+# own handoff overwrites the parent's handoff. The guard refuses that: a payload with a valid agent_id whose
+# file_path is the session's handoff, matched by names_handoff (reread_check.py), the one home of that path.
+# The controls stay allowed: the parent's own write, an agent_type with no agent_id, another session's
+# handoff, and a Read of the handoff.
+FAMILY = "agent-handoff-write"
+AH_RULE = "agent-handoff-write"
+AH_AGENT = "a7f3c9e10b2d4e581"                         # an agent's id as the harness sends it: 17 hex characters
+AH_OTHER_SID = "3c6e1f2a-0000-4000-8000-00000000b0b0"  # another session, with a handoff of its own
+AH_HOME = os.path.join(ROOT, "ah-home")                # HOME, for the ~/.claude/handoffs spelling
+AH_CFG = os.path.join(AH_HOME, ".claude")              # CLAUDE_CONFIG_DIR: the same folder as ~/.claude
+AH_HANDOFF = os.path.join(AH_CFG, "handoffs", HU_SID + ".md")   # the session's own handoff
+AH_TILDE = "~/.claude/handoffs/%s.md" % HU_SID         # the same file, spelled from HOME
+AH_OTHER = os.path.join(AH_CFG, "handoffs", AH_OTHER_SID + ".md")
+
+
+def _build_ah_cfg():
+    """The parent's handoff and another session's, in the config folder every case here names."""
+    hu_files(AH_CFG, flag=False, handoff=True)
+    write(AH_OTHER, HU_TEXT)
+
+
+lazy_fixture([AH_CFG], _build_ah_cfg)
+
+# A deny names the rule and not the handoff: each deny below forbids the handoff path in its reason.
+add("agent-handoff-write: an agent's Write to its session's handoff is refused", "deny", AH_RULE,
+    tool="Write", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
+    file_path=AH_HANDOFF, content="x", lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+add("agent-handoff-write: an agent's Edit to its session's handoff is refused", "deny", AH_RULE,
+    tool="Edit", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
+    file_path=AH_HANDOFF, old_string="# Handoff", new_string="x", lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+add("agent-handoff-write: an agent's MultiEdit to its session's handoff is refused", "deny", AH_RULE,
+    tool="MultiEdit", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
+    file_path=AH_HANDOFF, edits=[{"old_string": "# Handoff", "new_string": "x"}],
+    lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+add("agent-handoff-write: an agent's Write to the handoff, spelled ~/.claude/handoffs, is refused", "deny", AH_RULE,
+    tool="Write", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT, env={"HOME": AH_HOME},
+    file_path=AH_TILDE, content="x", lacks=(AH_TILDE, AH_HANDOFF))
+
+# The controls: each is allowed, and the rule refuses none of them.
+add("agent-handoff-write: the parent's Write to its own handoff, with no agent_id, is allowed", "allow",
+    tool="Write", cwd=NOGIT, session=HU_SID, config=AH_CFG, file_path=AH_HANDOFF, content="x")
+add("agent-handoff-write: an agent_type with no agent_id (a session started with --agent) is allowed", "allow",
+    tool="Write", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_type="builder",
+    file_path=AH_HANDOFF, content="x")
+add("agent-handoff-write: an agent's Write to another session's handoff is allowed by this rule", "allow",
+    tool="Write", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
+    file_path=AH_OTHER, content="x")
+add("agent-handoff-write: an agent's Read of its session's handoff is allowed", "allow",
+    tool="Read", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT, file_path=AH_HANDOFF)
 
 
 # =========================================================================== the machine-load brake
