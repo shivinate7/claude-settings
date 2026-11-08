@@ -13424,7 +13424,7 @@ class ReviewFixRemedies(ReviewChainFixture):
     FAIL_FINAL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
     MISSING_REMEDY = "Post the round's review record first."
     DROPPED_REMEDY = "Copy every Round line of that record unchanged and in its order, then add the new lines after them."
-    ALL_PASS =("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # every round of a record passed
+    ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # every round of a record passed
     ALL_PASS_ARGS = round_args(ALL_PASS)
     FAIL_ONE = ("Round 1: reviewer, sonnet, FAIL",)
     FAIL_THEN_PASS = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")  # the slot a failed fix check fills holds a PASS
