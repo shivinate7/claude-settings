@@ -32,6 +32,12 @@ set_override_veto and session_home_keep):
                        unread. The reason names the handoff and says to Read it. A payload with
                        `agent_id` passes. An override lifts it. A failed import allows.
                        (precompact-handoff, item 9)
+  agent-handoff-write  deny. An agent's (valid `agent_id`) Write, Edit, MultiEdit or NotebookEdit of its
+                       session's own handoff, which the orchestrator owns, and its Bash or PowerShell
+                       command that writes it (redirect, tee, sed -i, cp, mv, or a python or node script;
+                       read by `_shell_write_hit` and `interpreter_write_hit`; a variable such as
+                       `$CLAUDE_CONFIG_DIR` in the path is expanded).
+                       The reason names no path. An override lifts it. A failed import allows. (precompact-handoff, item 14)
 
 Shell tools (Bash, PowerShell), in judge_shell order:
   builder-diff         deny. A builder commit or push whose diff holds a test path, judged
@@ -972,6 +978,12 @@ WORKTREE_HOME_REASON = (
 HANDOFF_UNREAD_REASON = (
     "Rule (handoff unread): context was compacted and this session has not read its handoff. "
     "Remedy: Read %s now. The Read clears this check. Then repeat the call."
+)
+
+AGENT_HANDOFF_WRITE_REASON = (
+    "An agent never writes its session's handoff; the orchestrator owns it. "
+    "Report what you would have written to your orchestrator. "
+    "(decision precompact-handoff, the orchestrator owns the session's handoff)"
 )
 
 OTHER_CHECKOUT_REASON = (
@@ -4784,6 +4796,34 @@ def judge(payload) -> None:
     unread = unread_handoff(payload) if unread_handoff else ""
     if unread:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
+    # 0, agent-handoff-write. An agent carries its parent's session_id, so its write of that handoff would overwrite the parent's.
+    # A file tool names the path; a shell command's write targets come from _shell_write_hit and interpreter_write_hit, the readers of them.
+    agent_id = payload.get("agent_id")
+    if (tool in ("Write", "Edit", "MultiEdit", "NotebookEdit") or tool in SHELL_TOOLS) and isinstance(agent_id, str) and AGENT_ID.match(agent_id):
+        try:
+            from reread_check import names_handoff
+        except Exception:
+            names_handoff = None
+        sid = payload.get("session_id")
+        target = ""
+        try:
+            if names_handoff and isinstance(sid, str) and sid:
+                if tool in SHELL_TOOLS:
+                    raw = str(tool_input.get("command", "") or "")
+
+                    def on_handoff(path, where):
+                        return bool(path) and bool(names_handoff(_expanded(path, where or cwd), sid))
+
+                    target = (_shell_write_hit(strip_heredoc_bodies(raw), cwd, on_handoff, follow_cd=True)
+                              or interpreter_write_hit(raw, cwd, on_handoff))
+                else:
+                    target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+                    if not (isinstance(target, str) and target and names_handoff(target, sid)):
+                        target = ""
+        except Exception:
+            target = ""  # any failure of the path check allows, so a broken helper never ends in guard-crash
+        if target:
+            refuse(tool, "deny", "agent-handoff-write", AGENT_HANDOFF_WRITE_REASON, target)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:

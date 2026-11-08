@@ -40,6 +40,8 @@ except Exception as e:
 
 
 def names_handoff(file_path, session_id):
+    if ph is None:
+        return False
     return any(ph.same_dir(os.path.expanduser(file_path), want) for want in (
         ph.handoff_path(session_id),
         os.path.expanduser("~/.claude/handoffs/%s.md" % session_id)))

@@ -301,6 +301,96 @@ def case_precompact_error_is_ok_false():
 # --------------------------------------------------------------------------- reorient
 
 
+# --------------------------------------------------------------------------- PreCompact in an agent
+# An agent's PreCompact carries the parent's session_id, no agent_id, and the agent's own cwd (Claude Code
+# 2.1.319). Its digest and state would overwrite the parent's, so the hook writes nothing when cwd sits
+# under <repo>/.claude/worktrees/agent-<17 lowercase hex>. Cases 8-10 are the controls that must still write.
+
+AGENT_WORKTREE = "agent-0123456789abcdef0"   # an agent's worktree folder: 17 lowercase hex characters
+PARENT_STATE = '{"digest": null, "ok": true, "time": "2026-10-03T09:00:00+00:00"}\n'
+PARENT_DIGEST = "PARENT DIGEST, written before the agent ran\n"
+
+
+def read_bytes(path):
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def pre_compact_from(c, cwd):
+    """One PreCompact run for the case's session, from `cwd`, over a real transcript."""
+    tpath = os.path.join(c.root, "transcript.jsonl")
+    write_transcript(tpath, [
+        transcript_line("user", [{"type": "text", "text": "AGENTRUNMARKER the agent's own text"}]),
+        transcript_line("assistant", [{"type": "text", "text": "a reply"}]),
+    ])
+    payload = {"session_id": c.session_id, "transcript_path": tpath,
+               "cwd": cwd, "hook_event_name": "PreCompact"}
+    return c.run([], payload)
+
+
+def case_precompact_skips_agent_worktree():
+    """An agent's PreCompact writes nothing: the parent's state and digest stay byte-equal."""
+    variants = (
+        ("the agent's worktree folder",
+         lambda c: os.path.join(c.repo, ".claude", "worktrees", AGENT_WORKTREE), True),
+        ("a subfolder of the agent's worktree",
+         lambda c: os.path.join(c.repo, ".claude", "worktrees", AGENT_WORKTREE, "src"), True),
+        # The Windows form is text on this machine: the hook matches it as a string, and no folder is made.
+        ("the Windows form of the agent's worktree",
+         lambda c: "C:\\repo\\.claude\\worktrees\\" + AGENT_WORKTREE, False),
+    )
+    for label, cwd_of, make_folder in variants:
+        c = Case("agent_skip")
+        try:
+            cwd = cwd_of(c)
+            if make_folder:
+                os.makedirs(cwd, exist_ok=True)
+            put(c.state_path(), PARENT_STATE)
+            put(c.digest_path(), PARENT_DIGEST)
+            before_state = read_bytes(c.state_path())
+            before_digest = read_bytes(c.digest_path())
+            proc = pre_compact_from(c, cwd)
+            check("agent-skip: %s, the hook exits 0" % label, proc.returncode == 0,
+                  "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
+            check("agent-skip: %s, the parent's state file is left as it was" % label,
+                  read_bytes(c.state_path()) == before_state,
+                  "state file changed from the parent's content")
+            check("agent-skip: %s, the parent's digest file is left as it was" % label,
+                  read_bytes(c.digest_path()) == before_digest,
+                  "digest file changed from the parent's content")
+        finally:
+            c.cleanup()
+
+
+def case_precompact_writes_outside_agent_worktree():
+    """Controls: a PreCompact from the repo, from a main session's worktree, and from a worktree folder
+    whose name is not an agent's id, still writes the digest and the state."""
+    controls = (
+        ("the repo itself (8)", "", False),
+        ("a main session's worktree, my-lane (9)", os.path.join(".claude", "worktrees", "my-lane"), True),
+        ("a worktree folder named agent-xyz, not 17 hex (10)",
+         os.path.join(".claude", "worktrees", "agent-xyz"), True),
+    )
+    for label, sub, make_folder in controls:
+        c = Case("agent_ctrl")
+        try:
+            cwd = os.path.join(c.repo, sub) if sub else c.repo
+            if make_folder:
+                os.makedirs(cwd, exist_ok=True)
+            proc = pre_compact_from(c, cwd)
+            check("agent-control: %s, the hook exits 0" % label, proc.returncode == 0,
+                  "returncode=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
+            check("agent-control: %s, the digest file is written" % label, c.read_digest() is not None,
+                  "no digest file at %s" % c.digest_path())
+            state = c.read_state()
+            check("agent-control: %s, the state file is written with ok=true" % label,
+                  state is not None and state.get("ok") is True, "state: %r" % (state,))
+        finally:
+            c.cleanup()
+
+
 def case_reorient_ok_names_prompt_and_digest():
     c = Case("reorient_ok")
     try:
@@ -1990,6 +2080,8 @@ def case_precompact_digest_without_handoff():
 def main() -> int:
     case_precompact_writes_digest_and_state()
     case_precompact_error_is_ok_false()
+    case_precompact_skips_agent_worktree()
+    case_precompact_writes_outside_agent_worktree()
     case_reorient_ok_names_prompt_and_digest()
     case_reorient_no_state_says_digest_missing()
     case_reorient_failed_state_says_digest_missing()
