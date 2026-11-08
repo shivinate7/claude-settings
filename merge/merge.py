@@ -77,6 +77,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
+from git_reads import lists_refs, listing_text  # noqa: E402  the one home of the ls-remote stdout-only read (hooks/git_reads.py); the janitor reads through it too
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 
 class Stop(Exception):
@@ -167,12 +168,6 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def lists_refs(args):
-    """True for `git -C <dir> ls-remote ...`, the only call `sh` reads stdout-only on success: its stdout is a ref list, and a stderr line (a trace, a warning) is no ref.
-    Other git calls whose stdout is the answer, such as commit-tree and mktree, still join stderr. Keyed on the
-    args, so each caller and each stand-in for `sh` that passes the args on gets it."""
-    return args[:2] == ["git", "-C"] and args[3:4] == ["ls-remote"]
-
 def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     stdout_only = lists_refs(args)
     args = [resolve_program(args[0], env), *args[1:]]
@@ -182,8 +177,8 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
         r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         return r.returncode, r.stdout.strip()
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
-    if stdout_only and r.returncode == 0:  # a failure keeps both streams, for the network-error read
-        return r.returncode, r.stdout.strip()
+    if stdout_only:  # a failure keeps both streams, for the network-error read
+        return listing_text(r.returncode, r.stdout, r.stderr)
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -578,7 +573,7 @@ class Lock:
             self.until = None  # no lock is held after this: a later rate wait extends nothing
         say(f"merge: the lock release failed: {why}.{left} Run merge --unlock only if no run holds it.")
 
-SHA_HEX = r"[0-9a-f]{40}"  # a full git object id; GitLock.listed and REVIEW_SHA check against it
+SHA_HEX = r"[0-9a-f]{40}"  # a full 40-hex git object id; one home for that pattern (an abbreviated sha has its own pattern where it is read)
 
 class GitLock(Lock):
     """Any git remote. Tests use a local bare origin. Each push is leased on the sha it read (empty: create only), so a ref that moved since the read refuses the push."""
@@ -2078,7 +2073,7 @@ def read_lanes(wt, base_ref, sha):
         if len(parts) != 3:
             continue
         h, parents, body = parts
-        for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
+        for r in re.findall(rf"This reverts commit ({SHA_HEX})", body):
             undone[r] = h
         for t in parents.split()[1:]:
             took.setdefault(t, []).append(h)

@@ -254,6 +254,7 @@
 - sendmessage-wording-judge-unrun: no logged real SendMessage shows the wording judge's `claude -p` call answering inside its 30 s timeout; a timeout fails open (hooks/sendmessage_state.py)
 - sendmessage-wording-judge-clip: the wording judge sees only the first 4000 characters of a plain message (MESSAGE_MAX), so a breach after them is not judged; unmeasured (hooks/sendmessage_state.py)
 - sendmessage-wording-judge-always: the SendMessage wording judge makes a model call on every send, and one under an override too; the busy judge removes none (hooks/sendmessage_state.py)
+- sha256-remote-lock-stops: a SHA-256 remote lists a 64-hex lock sha, so GitLock.listed raises Stop (merge/merge.py SHA_HEX). Fix: none — no SHA-256 remote in use. Until: 2026-11-21. Decision: merge-lock.
 - shell-config-disable-unrefused: a shell write that adds a test-disabling line to test config, such as `echo "addopts = --deselect x" >> pytest.ini`, is not refused, though the Edit path refuses it (hooks/guard.py builder_shell_test_hit)
 - shell-write-miss-dq-substitution: a write inside "$( ... > P)" to a frozen path is not seen (hooks/guard_frozen.py _shell_write_hit)
 - shell-write-miss-eval-heredoc: an eval of a heredoc body that writes a frozen path is not seen; the body is stripped first (hooks/guard_core.py)

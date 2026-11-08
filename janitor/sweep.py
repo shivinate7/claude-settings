@@ -534,17 +534,12 @@ def _live_remote_heads(path: str):
         shas = None
     else:
         for remote in remotes.stdout.split():
-            try:  # prompts off: an unattended run never waits on a login window
-                listed = _nowindow.run(
-                    ["git", "-C", path, "ls-remote", "--heads", remote], capture_output=True,
-                    text=True, encoding="utf-8", errors="replace", timeout=10,
-                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
-            except Exception:
-                listed = None
-            if listed is None or listed.returncode != 0:
+            # prompts off: an unattended run never waits on a login window
+            listed = git_reads.ls_remote(path, "--heads", remote, env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
+            if listed is None or listed[0] != 0:
                 shas = None
                 break
-            shas.update(line.split("\t", 1)[0] for line in listed.stdout.splitlines() if "\t" in line)
+            shas.update(line.split("\t", 1)[0] for line in listed[1].splitlines() if "\t" in line)
     if shas:
         try:
             held = _nowindow.run(
