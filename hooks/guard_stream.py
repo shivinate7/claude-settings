@@ -12,6 +12,7 @@ from guard_core import (
     bare_words, command_indexes, inline_script, inner_commands, resolve_command, segment_tokens,
     split_segments,
 )
+from merge_options import MERGE_OPTIONS
 
 
 # ------------------------------------------------------------------ a stream that never ends
@@ -101,31 +102,53 @@ INTERPRETER_VALUE_FLAGS = ("-W", "-X")
 
 
 def _script_operand(tokens, index: int) -> str:
-    """The script an interpreter at `index` runs: its first word that is no flag. '' for `-m <module>`
-    and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
+    """The script an interpreter at `index` runs: its first word that is no flag, or the path a `-m <module>`
+    names (`lint.ste_lint` is `lint/ste_lint.py`). '' for `-c <code>`, which runs no script, and for a
+    module word that holds a `/`. A short-flag cluster is read letter by letter, so `-Im` is `-m`."""
     at = index + 1
     while at < len(tokens) and tokens[at].startswith("-"):
         flag = tokens[at]
-        if flag in ("-m", "-c"):
-            return ""
-        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
+        if flag.startswith("--"):
+            at += 1
+            continue
+        at += 1
+        for i, letter in enumerate(flag[1:], 1):
+            rest = flag[i + 1:]
+            if letter == "c":
+                return ""
+            if letter == "m":
+                module = rest or (tokens[at] if at < len(tokens) else "")
+                return module.replace(".", "/") + ".py" if module and "/" not in module else ""
+            if "-" + letter in INTERPRETER_VALUE_FLAGS:
+                at += 0 if rest else 1
+                break
     return tokens[at] if at < len(tokens) else ""
+
+
+def _script_run(tokens, index: int) -> str:
+    """The script the command at `index` runs, else ''. An interpreter runs its script operand
+    (`_script_operand`). A command word that ends `.py` is the script itself: `uv run lint/ste_lint.py` and
+    `./merge/merge.py` run it by its path. The one reader of both forms."""
+    word = basename(tokens[index])
+    if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")):
+        return _script_operand(tokens, index)
+    return tokens[index] if word.endswith(".py") else ""
 
 
 def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
     NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
-    both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER) and the path
-    to its script operand: the check rule needs it, so `grep -n x merge/merge.py` and
+    both match. `interpreter_only` keeps the word to a command that runs a script (`_script_run`) and the
+    path to that script: the check rule needs it, so `grep -n x merge/merge.py` and
     `python3 -m pytest -k merge/merge.py` are no run of the script."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
     if interpreter_only:
-        script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+        script = _script_run(tokens, index)
         if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
-            return word + " " + basename(script)
+            return word if script == tokens[index] else word + " " + basename(script)
         return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
@@ -209,6 +232,21 @@ def _skip_uv_run(tokens, index: int) -> int:
     return index
 
 
+def _merge_flag(tokens, flag: str) -> bool:
+    """True when a token is the merge tool's option `flag` or an argparse prefix that names it alone.
+    argparse takes an exact name first, else a prefix that matches one option (`--lane` is `--lane-lint`).
+    A prefix that matches two or more is an error and runs nothing, so it is no flag (`--l`). The option
+    names are MERGE_OPTIONS, the list the merge parser is checked against."""
+    for token in tokens:
+        if len(token) > 2 and token.startswith("--") and token not in MERGE_OPTIONS:
+            named = [name for name in MERGE_OPTIONS if name.startswith(token)]
+            if named == [flag]:
+                return True
+        elif token == flag:
+            return True
+    return False
+
+
 def _through_verdict(tokens) -> bool:
     """True when a segment runs its command through `verdict`, behind any wrapper or `uv run`.
     resolve_command skips `verdict` like any wrapper, and the wrapper walk skips the `verdict` after
@@ -235,10 +273,9 @@ def check_stage(segment: str, background: bool) -> str:
     index = _skip_uv_run(tokens, index)
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
-    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
-            tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
+    if _script_run(tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
         return CHECK_COMMANDS[0] if background else ""
-    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
+    if "--confirm" in tokens or not any(_merge_flag(tokens, flag) for flag in CHECK_FLAGS):
         return ""
     return _roster_word(tokens, index, interpreter_only=True)
 
@@ -326,15 +363,14 @@ def _lint_stage(tokens) -> str:
         return ""
     index = _skip_uv_run(tokens, index)
     word = basename(tokens[index])
-    interpreter = SCRIPT_INTERPRETER.match(word.removesuffix(".exe"))
-    script = _script_operand(tokens, index).replace("\\", "/") if interpreter else ""
+    script = _script_run(tokens, index).replace("\\", "/")
     if script.endswith(LINT_SCRIPT_TAIL):
         return "ste_lint"
     if word in STE_CHANGED_COMMANDS:
         return word
     if "--lint" in tokens and (word in CHECK_COMMANDS or script.endswith(CHECK_SCRIPT_TAIL)):
         return CHECK_COMMANDS[0]
-    if "--lane-lint" in tokens:
+    if _merge_flag(tokens, "--lane-lint"):
         return _roster_word(tokens, index, interpreter_only=True)
     return ""
 

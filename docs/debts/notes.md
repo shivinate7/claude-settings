@@ -1515,7 +1515,6 @@
 - verdict-pipe-if: `if verdict ... | tail` with `then` on the next line is not read by `verdict-pipe-exit`, and the `then` branch runs after a red check (hooks/guard_stream.py). Decision: background-check-through-verdict
 - verdict-pipe-newline: `set -e; verdict a | tail -3; git commit` passes, though `set -e` without pipefail does not stop at a red verdict (hooks/guard_stream.py). Decision: background-check-through-verdict. Fix: none — Claude does not chain set -e with verdict pipes on one line. Until: 2026-11-21
 - verdict-pipe-grep-q: `verdict a | grep -q PASS && git push` is refused, though grep's exit does gate the push (hooks/guard_stream.py). Decision: background-check-through-verdict
-- check-tail-uv-script: `uv run merge/merge.py --lane-lint 7 | tail` and `uv run lint/ste_lint.py x | tail -3 && git push` pass, because uv runs a `.py` operand as a script (hooks/guard_stream.py). Decision: background-check-through-verdict
 - verdict-pipe-substitution: `$(verdict ... | tail)` is not read by `verdict-pipe-exit` (hooks/guard_stream.py). Decision: background-check-through-verdict
 - narrated-tail-no-uv: `uv run merge --confirm | tail` passes, because the narrated rule (`live-stream`, `narrated_tail_hit`) does not read through `uv run` (hooks/guard_stream.py). Decision: background-check-through-verdict
 - check-tail-trailing-amp: a trailing `& echo $!` passes, while a plain `... | tail &` is already caught by `detached-launch` (hooks/guard_stream.py). Decision: background-check-through-verdict

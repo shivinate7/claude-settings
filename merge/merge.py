@@ -66,6 +66,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+from merge_options import MERGE_OPTIONS  # noqa: E402  the one home of the long option names, which the guard reads too (hooks/merge_options.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -3293,6 +3294,9 @@ def main(argv, host=None, lock=None):
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
+    named = tuple(o for act in p._actions for o in act.option_strings if o.startswith("--"))
+    if named != MERGE_OPTIONS:  # the guard reads MERGE_OPTIONS to name an argparse prefix, so a parser that differs would misname it
+        raise SystemExit(f"merge: the parser's options {named} differ from MERGE_OPTIONS in hooks/merge_options.py")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if (a.head or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
