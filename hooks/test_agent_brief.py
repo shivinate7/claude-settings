@@ -68,13 +68,17 @@ STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-dif
 # Non-scope lines in hook order, after the scope line. Builder, test-author, record-writer, designer and any
 # unknown type commit and push; reviewer, Explore, Plan, claude-code-guide and design-reviewer do not, so they
 # get the shorter set. The staged-diff line is not in this list: line_set_check(staged=True) leaves it out.
+# The commit-trailer line is matched by its phrases, not its wording (step commit-trailer-model: a commit names
+# the agent's own model). It must hold every phrase, and it must not carry the bare placeholder.
+PLACEHOLDER = "<model>"
+TRAILER_PHRASES = ("End each commit message with", "your own model", "brief")
 WRITER_RULES = [
     "Standing rules for this agent:",
     STASH_LINE,
     "- Push only with: git push origin HEAD:<branch>.",
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
-    "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>",
+    TRAILER_PHRASES,
     "- Name no record path in a commit message. The only exception is the Drops-lines: trailer.",
     "- Before you end, stop each server you started, by the $! from the same call or through the harness.",
 ]
@@ -271,13 +275,27 @@ RULES = [
      ("Make no gh call", "unless your brief names it")),
     ("rule: report cap of 25 lines, then the label order Done, Deviations, Input Needed, Next",
      ("25 lines or fewer", "Done,", "Deviations,", "Input Needed,", "Next.")),
-    ("rule: each commit message ends with the Co-Authored-By trailer",
-     ("End each commit message with", "Co-Authored-By: <model> <noreply@anthropic.com>")),
+    ("rule: each commit message ends with a Co-Authored-By trailer that names the agent's own model",
+     ("End each commit message with", "your own model")),
     ("rule: no record path in a commit message, except the Drops-lines trailer",
      ("Name no record path in a commit message", "Drops-lines:")),
 ]
 for _label, _parts in RULES:
     add(_label, "context", payload("builder"), rule_check(_parts))
+
+
+def trailer_placeholder_check(text):
+    """The commit-trailer line never carries the bare `<model>` placeholder: the agent names its own model."""
+    lines = [line for line in text.split("\n") if TRAILER_KEY in line]
+    if not lines:
+        return "no line holds %r" % TRAILER_KEY
+    if any(PLACEHOLDER in line for line in lines):
+        return "the trailer line holds %r: %r" % (PLACEHOLDER, lines[0][:90])
+    return None
+
+
+add("rule: the commit trailer line carries no bare <model> placeholder", "context", payload("builder"),
+    trailer_placeholder_check)
 
 
 def line_set_check(expected, staged=False):
@@ -292,6 +310,10 @@ def line_set_check(expected, staged=False):
         if len(rules) != len(expected):
             return "%d non-scope lines, want %d" % (len(rules), len(expected))
         for got, want in zip(rules, expected):
+            if isinstance(want, tuple):  # a phrase matcher: the line holds every phrase and no placeholder
+                if all(phrase in got for phrase in want) and PLACEHOLDER not in got:
+                    continue
+                return "line is %r, want one that holds %r and no %r" % (got[:90], want, PLACEHOLDER)
             if got != want:
                 return "line is %r, want %r" % (got[:90], want[:90])
         return None
