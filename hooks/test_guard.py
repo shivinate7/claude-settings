@@ -27474,6 +27474,41 @@ for _label, _command in ENC_PLAIN:
     sh("encoded retry: %s is allowed after a fresh refusal row" % _label, _command, "allow",
        cwd=NOGIT, session=ENC_SID, config=E_PLAIN_FRESH, env=ENC_CLOCK, silent=True)
 
+# Further forms that run a decoded or escaped command: a shell fed by a substitution, a process substitution, a
+# herestring, a variable, an ANSI-C string or a subshell. Each is refused after a fresh refusal row, after a fresh
+# guard.log row, and allowed with no refusal.
+ENC_R2_RUN = (
+    ("bash -c of a base64 decode", 'bash -c "$(echo ZWNobyBoaQ== | base64 -d)"'),
+    ("sh -c of an escaped command", "sh -c \"$(printf '\\x63d /x')\""),
+    ("bash reading a base64 decode through a process substitution", "bash <(echo ZWNobyBoaQ== | base64 -d)"),
+    ("sh reading a base64 decode through a herestring", 'sh <<< "$(echo ZWNobyBoaQ== | base64 -d)"'),
+    ("bash reading an escaped command through a herestring", "bash <<< $(printf '\\x63d /x')"),
+    ("eval of a variable set from a base64 decode", 'CMD=$(echo ZWNobyBoaQ== | base64 -d); eval "$CMD"'),
+    ("an ANSI-C string piped into sh", "echo $'\\x63d /x' | sh"),
+    ("an ANSI-C string piped into bash", "echo $'\\x63d' | bash"),
+    ("an escaped printf piped into a subshell running sh, then ls", "(printf '\\x63d /x' | sh) && ls"),
+    ("an escaped printf piped into a parenthesised sh", "printf '\\x63d /x' | (sh)"),
+)
+# Calls that do not run a decoded or escaped command: allowed after a fresh refusal row, and reading no refusal state.
+ENC_R2_PLAIN = (
+    ("a base64 decode into a variable that is echoed", 'TOKEN=$(echo ZWNobyBoaQ== | base64 -d); echo "$TOKEN"'),
+    ("a base64 decode of a file into a variable that is echoed", "X=$(base64 -d f); echo $X"),
+    ("eval of ssh-agent output", 'eval "$(ssh-agent)"'),
+    ("bash -c of a plain command", "bash -c 'echo hi'"),
+    ("an ANSI-C tab piped into cat", "echo $'a\\tb' | cat"),
+    ("a subshell printing into cat", "(printf '%s' hi | cat)"),
+)
+for _label, _command in ENC_R2_RUN:
+    sh("encoded retry: %s is refused after a fresh refusal row" % _label, _command, "deny", rule=ENC_RULE,
+       cwd=NOGIT, session=ENC_SID, config=E_ROW_FRESH, env=ENC_CLOCK, carries=("report",), lacks=ENC_LACKS)
+    sh("encoded retry: %s is refused after a fresh guard.log deny row" % _label, _command, "deny", rule=ENC_RULE,
+       cwd=NOGIT, session=ENC_SID, config=E_LOG_FRESH, env=ENC_CLOCK, carries=("report",), lacks=ENC_LACKS)
+    sh("encoded retry: %s is allowed with no refusal" % _label, _command, "allow",
+       cwd=NOGIT, session=ENC_SID, config=E_NONE, env=ENC_CLOCK, silent=True)
+for _label, _command in ENC_R2_PLAIN:
+    sh("encoded retry: %s is allowed after a fresh refusal row" % _label, _command, "allow",
+       cwd=NOGIT, session=ENC_SID, config=E_PLAIN_FRESH, env=ENC_CLOCK, silent=True)
+
 
 def enc_judge(command, folder):
     """Judge one Bash call in this process, with `folder` as its config and ENC_SID as its session. Returns (decision,
@@ -27509,13 +27544,13 @@ def enc_no_read_case():
     fresh refusal row."""
     folder = enc_fresh_folder("spy-plain")
     enc_refusal(folder, ENC_SID, ENC_FRESH)
-    for label, command in ENC_PLAIN:
+    for label, command in ENC_PLAIN + ENC_R2_PLAIN:
         decision, opened = enc_judge(command, folder)
         if decision != "allow":
             return False, "%s got %s, want allow" % (label, decision)
         if any("refusals" in path for path in opened):
             return False, "%s read the refusal state, which only a decode-and-run call reads" % label
-    return True, "%d calls that do not decode and run read no refusal state" % len(ENC_PLAIN)
+    return True, "%d calls that do not decode and run read no refusal state" % len(ENC_PLAIN + ENC_R2_PLAIN)
 
 
 def enc_reads_case():
