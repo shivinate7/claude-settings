@@ -9289,11 +9289,23 @@ def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
 
 
 def role_tag_call(tool_id, session=ROLE_OWN, add=("cs-build:coordinator",), remove=None):
-    """One paired set_session_tags call on `session`: it adds `add`, and removes `remove` when one is given."""
-    tool_input = {"session_ids": [session], "add": list(add)}
+    """One paired set_session_tags call on `session`: it adds `add`, and removes `remove` when one is given. A string
+    `add` is sent as one string, the way a caller may send a single tag."""
+    tool_input = {"session_ids": [session], "add": add if isinstance(add, str) else list(add)}
     if remove is not None:
         tool_input["remove"] = list(remove)
     return [role_use(tool_id, SET_SESSION_TAGS, tool_input), role_result(tool_id, "ok")]
+
+
+def role_batch(calls):
+    """Calls made in one assistant message, and their results in one user message. Each of `calls` is
+    (tool_id, tool name, tool input, result text), in the order the message makes them."""
+    uses = [{"type": "tool_use", "id": tool_id, "name": name, "input": tool_input}
+            for tool_id, name, tool_input, _text in calls]
+    results = [{"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": text}]}
+               for tool_id, _name, _input, text in calls]
+    return [json.dumps({"type": "assistant", "message": {"role": "assistant", "content": uses}}),
+            json.dumps({"type": "user", "message": {"role": "user", "content": results}})]
 
 
 # How a read of another session's text comes back: an opening tag with a nonce, a preamble line, the JSON indented
@@ -9412,6 +9424,22 @@ ROLE_LINES = {
     "tags-only": role_tag_call("t1"),
     "tags-then-removed": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1")
     + role_tag_call("t2", add=(), remove=["cs-build:coordinator"]),
+    # A self-tag whose add is one string, not a list: it adds that one tag, as the tool reads it.
+    "string-add-only": role_tag_call("t1", add="cs-build:coordinator"),
+    "string-add-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", add="cs-build:coordinator"),
+    "string-add-other-tag": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", add="cs-topic:icons"),
+    "string-add-other-session": role_call("g1", ["cs-repo:o/r"])
+    + role_tag_call("t1", session=ROLE_OTHER, add="cs-build:coordinator"),
+    # A get_session call and a set_session_tags call in one assistant message: the set's add binds after the record.
+    "same-message-coordinator": role_batch([
+        ("g1", GET_SESSION, {}, role_record(["cs-repo:o/r"])),
+        ("t1", SET_SESSION_TAGS, {"session_ids": [ROLE_OWN], "add": ["cs-build:coordinator"]}, "ok")]),
+    "same-message-other-tag": role_batch([
+        ("g1", GET_SESSION, {}, role_record(["cs-repo:o/r"])),
+        ("t1", SET_SESSION_TAGS, {"session_ids": [ROLE_OWN], "add": ["cs-topic:icons"]}, "ok")]),
+    "same-message-other-session": role_batch([
+        ("g1", GET_SESSION, {}, role_record(["cs-repo:o/r"])),
+        ("t1", SET_SESSION_TAGS, {"session_ids": [ROLE_OTHER], "add": ["cs-build:coordinator"]}, "ok")]),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
@@ -25414,6 +25442,22 @@ for _where, _cwd, _root in (("repo root", GITMAIN, GITMAIN), ("repo folder", os.
                               ("mv %s %s" % (CS_OUT, _from("hooks/a.py")), "a.py"),
                               ("mv %s %s" % (_from("src/app.py"), CS_OUT), "app.py")):   # an mv removes its source
         cs_shell("cp_mv_destination_denied (%s)" % _where, "deny", _command, _target, cwd=_cwd)
+    # A loop over cp destinations. The list stands in for "$f" and each item is a destination of its own iteration, so a
+    # product item is refused in any place of the list. A cp in a nested `while` or `until` keeps the literal "$f"
+    # (LOOPS AND BRACES): the product item is then reached through that body alone.
+    _cp_items = "%s %s" % (_from("src/app.py"), _from("docs/decisions/x.md"))
+    _cp_records = "%s %s" % (_from("docs/decisions/x.md"), _from("docs/todo.md"))
+    for _command in ("for f in %s; do cp %s \"$f\"; done" % (_cp_items, CS_OUT),
+                     "for f in %s; do cp %s \"$f\"; while read l; do echo \"$l\"; done; done" % (_cp_items, CS_OUT),
+                     "for f in %s; do while read l; do cp %s \"$f\"; done; done" % (_cp_items, CS_OUT),
+                     "for f in %s; do until false; do cp %s \"$f\"; done; done" % (_cp_items, CS_OUT)):
+        cs_shell("cp_loop_product_destination_denied (%s)" % _where, "deny", _command, "app.py", cwd=_cwd)
+    for _command in ("for f in %s; do cp %s \"$f\"; done" % (_cp_records, CS_OUT),
+                     "for f in %s; do cp %s \"$f\"; while read l; do echo \"$l\"; done; done" % (_cp_records, CS_OUT)):
+        cs_shell("cp_loop_record_destination_allowed (%s)" % _where, "allow", _command, cwd=_cwd)
+# A nested `while` in a `for` body that writes only a record is allowed: the literal reading judges that record alone.
+cs_shell("nested_while_loop_record_sed_allowed", "allow",
+         'for f in docs/decisions/a.md; do while read l; do sed -i "s/a/b/" docs/todo.md; done; done')
 
 # 2. The record branch. skills/project-ops (SKILL.md, "The record branch") keeps the coordinator's briefs, hand-off
 # notes and roadmap on an orphan branch `roadmap`, in a worktree beside the repo, laid out by scaffold.py. That
@@ -25811,6 +25855,22 @@ cs_write("no_role_file_untagged_then_other_tags_write_passes", "allow", CS_CODE,
          transcript=role_path("untagged-then-other-tags"))
 cs_write("no_role_file_tags_then_removed_write_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
          transcript=role_path("tags-then-removed"))
+# A self-tag whose add is a string adds that one tag, as a list add does: a coordinator tag so added makes a coordinator.
+cs_write("no_role_file_string_tag_only_write_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("string-add-only"))
+cs_write("no_role_file_string_tag_after_untagged_write_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("string-add-untagged"))
+cs_write("no_role_file_string_tag_other_tag_write_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("string-add-other-tag"))
+cs_write("no_role_file_string_tag_other_session_write_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("string-add-other-session"))
+# A set_session_tags add in the same assistant message as the get_session call binds: the record's result does not drop it.
+cs_write("no_role_file_same_message_tag_write_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("same-message-coordinator"))
+cs_write("no_role_file_same_message_other_tag_write_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("same-message-other-tag"))
+cs_write("no_role_file_same_message_other_session_write_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("same-message-other-session"))
 
 # ---- what needs more than one verdict runs as a check
 # Each refused input is a row: (what, tool, tool input, cwd, text its refusal must not name).
