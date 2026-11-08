@@ -135,7 +135,17 @@ BLOCK_CLOSERS = ("}", "fi", "done", "esac")
 
 # A quoted `&&` or `|` is a word. It gets this prefix so no check reads it as an operator.
 QUOTED_WORD = "\0"
-QUOTE_CHARS = ("'", '"', "\\")
+
+
+def _is_operator(raw, tok):
+    """True when tok, a token of only punctuation, is an unquoted operator. raw is the text read for
+    it: shlex strips quotes and escapes, so a quoted `&&` is the same token as an operator. An operator
+    is the first text of raw once the whitespace and comments before it are gone (the comment after
+    it may also be in raw)."""
+    raw = raw.lstrip(" \t\r")
+    while raw.startswith("#"):
+        raw = raw[raw.find("\n"):].lstrip(" \t\r") if "\n" in raw else ""
+    return bool(tok) and raw.startswith(tok)
 
 
 def expand_home(path):
@@ -224,11 +234,8 @@ def read_named_logs(command):
             if tok is None:
                 break
             end = lex.instream.tell() - len(lex._pushback_chars)  # shlex reads one char ahead of a token
-            if set(tok) <= set(lex.punctuation_chars):
-                raw = text[seen:end].rstrip(" \t\r")  # shlex also eats the space after a token
-                # Quotes and escapes are gone from tok. An operator is the last text of its raw span.
-                if not tok or not raw.endswith(tok) or raw[:-len(tok)].endswith(QUOTE_CHARS):
-                    tok = QUOTED_WORD + tok
+            if set(tok) <= set(lex.punctuation_chars) and not _is_operator(text[seen:end], tok):
+                tok = QUOTED_WORD + tok
             tokens.append(tok)
             seen = end
     except Exception:
