@@ -31,6 +31,10 @@ any suite runs and checks every mutant before a shard runs, and a suite child ne
 
 The seventh part pins the guard target's suite list: guard_suites(folder) globs every test_guard*.py, sorted with
 test_guard.py first, and run_suite starts one process per listed file, a FAIL from any of them reaching the red lines.
+
+The eighth part pins the split guard-suite control: CONTROL_SPLIT sub-runs of test_guard.py at GUARD_SHARD i/CONTROL_SPLIT,
+and each other guard file once unsharded. A red or timed-out sub-run reads its target's mutants UNKNOWN, a mutant run never
+carries GUARD_SHARD, and the controls of the other targets stay one unsharded run.
 """
 import contextlib
 import glob
@@ -1097,6 +1101,176 @@ class GuardSuiteListTests(unittest.TestCase):
         listed = {os.path.normcase(os.path.abspath(path)) for path in listing()}
         left_out = [os.path.basename(path) for path in on_disk if os.path.normcase(os.path.abspath(path)) not in listed]
         self.assertEqual(left_out, [], "test_guard*.py on disk that the guard target never runs: %s" % ", ".join(left_out))
+
+
+def guard_entry():
+    """The first guard mutation this platform runs: a mutant that its own platform check does not skip."""
+    return next(entry for entry in mutate_guard.MUTATIONS
+                if target_of(entry) == "guard" and not mutate_shared.skip_reason(mutate_guard.mutation_parts(entry)[5]))
+
+
+def passing(name, shard):
+    return 0, "PASS  %s shard %s: holds\n" % (name, shard)
+
+
+def red_at(bad):
+    """A behaviour: the sub-run at GUARD_SHARD `bad` prints one FAIL line and exits 1; every other sub-run passes."""
+    def behaviour(name, shard):
+        if shard == bad:
+            return 1, "FAIL  %s shard %s: a rule broke\n" % (name, shard)
+        return passing(name, shard)
+    return behaviour
+
+
+def exit_at(bad):
+    """A behaviour: the sub-run at GUARD_SHARD `bad` exits 1 with no FAIL line; every other sub-run passes."""
+    def behaviour(name, shard):
+        if shard == bad:
+            return 1, ""
+        return passing(name, shard)
+    return behaviour
+
+
+def timeout_at(bad):
+    """A behaviour: the sub-run at GUARD_SHARD `bad` times out; every other sub-run passes."""
+    def behaviour(name, shard):
+        if shard == bad:
+            raise subprocess.TimeoutExpired(name, 1200)
+        return passing(name, shard)
+    return behaviour
+
+
+class SubRunStub:
+    """Stands in for `_nowindow.run`. Records each child's file name, its GUARD_SHARD (None when unset) and its env,
+    then answers with `behaviour(name, shard)`, which returns (exit code, stdout) or raises."""
+
+    def __init__(self, behaviour):
+        self.behaviour = behaviour
+        self.calls = []
+        self.lock = threading.Lock()
+
+    def __call__(self, argv, **kwargs):
+        env = dict(kwargs.get("env") or {})
+        name, shard = os.path.basename(argv[-1]), env.get("GUARD_SHARD")
+        with self.lock:
+            self.calls.append((name, shard, env))
+        code, out = self.behaviour(name, shard)
+        return subprocess.CompletedProcess(argv, code, stdout=out, stderr="")
+
+    def started(self):
+        return [(name, shard) for name, shard, _env in self.calls]
+
+
+class GuardControlSplitTests(unittest.TestCase):
+    """The clean-layout control of a guard-suite target (guard, override, simlease) runs test_guard.py as CONTROL_SPLIT
+    sub-runs, GUARD_SHARD i/CONTROL_SPLIT, and each other guard file once unsharded. A red or timed-out sub-run makes the
+    target's mutants UNKNOWN. A mutant run never carries GUARD_SHARD. The other targets' controls stay one unsharded run.
+    No case runs a real suite: `_nowindow.run` is stubbed, and lay_out writes no copy."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        patch = mock.patch.dict(os.environ)
+        patch.start()
+        self.addCleanup(patch.stop)
+        os.environ.pop("GUARD_SHARD", None)
+
+    def lay_out_stub(self, sources, work, target, name, old, new):
+        return os.path.join(work, "copy.py")
+
+    def control(self, stub, target="guard"):
+        """Run `target`'s clean-layout control with `_nowindow.run` stubbed. Return run_control's result."""
+        with mock.patch.object(mutate_guard._nowindow, "run", side_effect=stub), \
+                mock.patch.object(mutate_guard, "lay_out", side_effect=self.lay_out_stub):
+            return mutate_guard.run_control({}, self.run, target)
+
+    def verdict_lines(self, stub):
+        """Run one guard mutant beside its target's control through run_mutants. The mutant alone would read KILLED.
+        Return the lines run_mutants printed."""
+        entry = guard_entry()
+        required = mutate_guard.mutation_parts(entry)[4]
+        controls = mutate_guard.run_controls({}, self.run, [entry])
+
+        def run_one(item):
+            return mutate_guard.mutation_parts(item)[0], 1, ["FAIL  %s: the mutant's own case" % required], required, None, []
+
+        out = io.StringIO()
+        with mock.patch.object(mutate_guard._nowindow, "run", side_effect=stub), \
+                mock.patch.object(mutate_guard, "lay_out", side_effect=self.lay_out_stub), \
+                contextlib.redirect_stdout(out):
+            mutate_shared.run_mutants([entry], run_one, controls=controls, control_of=target_of)
+        return out.getvalue().splitlines()
+
+    def test_the_guard_control_starts_test_guard_in_four_shards_and_each_other_file_once(self):
+        split = getattr(mutate_guard, "CONTROL_SPLIT", None)
+        self.assertEqual(split, 4, "mutate_guard.CONTROL_SPLIT is %r, want 4: the guard-suite control runs test_guard.py whole"
+                         % split)
+        others = [os.path.basename(path) for path in mutate_guard.guard_suites()
+                  if os.path.basename(path) != "test_guard.py"]
+        want = [("test_guard.py", "%d/4" % i) for i in range(1, 5)] + [(name, None) for name in others]
+        for target in ("guard", "override", "simlease"):
+            with self.subTest(target=target):
+                stub = SubRunStub(passing)
+                self.control(stub, target)
+                got = stub.started()
+                self.assertEqual(sorted(got, key=repr), sorted(want, key=repr),
+                                 "the %s control must start test_guard.py at GUARD_SHARD 1/4..4/4 once each and each other "
+                                 "guard file once with no GUARD_SHARD: started %r" % (target, got))
+
+    def test_a_red_sub_run_makes_the_control_red_and_its_mutants_unknown(self):
+        for label, behaviour in (("a FAIL line", red_at("2/4")), ("a nonzero exit with no FAIL line", exit_at("2/4"))):
+            with self.subTest(sub_run=label):
+                stub = SubRunStub(behaviour)
+                lines = self.verdict_lines(stub)
+                self.assertIn("2/4", [shard for _name, shard in stub.started()],
+                              "the control started no sub-run at GUARD_SHARD=2/4: %r" % stub.started())
+                self.assertFalse([line for line in lines if line.startswith("KILLED")],
+                                 "a red sub-run (%s) left its target's mutant KILLED: %r" % (label, lines))
+                self.assertTrue([line for line in lines if line.startswith("UNKNOWN")],
+                                "a red sub-run (%s) did not make its target's mutant UNKNOWN: %r" % (label, lines))
+
+    def test_a_timed_out_sub_run_makes_its_mutants_unknown_never_killed(self):
+        stub = SubRunStub(timeout_at("3/4"))
+        lines = self.verdict_lines(stub)
+        self.assertIn("3/4", [shard for _name, shard in stub.started()],
+                      "the control started no sub-run at GUARD_SHARD=3/4: %r" % stub.started())
+        self.assertFalse([line for line in lines if line.startswith("KILLED")],
+                         "a timed-out sub-run left its target's mutant KILLED: %r" % lines)
+        self.assertTrue([line for line in lines if line.startswith("UNKNOWN")],
+                        "a timed-out sub-run did not make its target's mutant UNKNOWN: %r" % lines)
+
+    def test_a_mutant_run_never_carries_guard_shard_even_from_the_parent_env(self):
+        entry = guard_entry()
+        required = mutate_guard.mutation_parts(entry)[4]
+        stub = SubRunStub(lambda name, shard: (0, "PASS  another case: holds\n"))
+        os.environ["GUARD_SHARD"] = "3/4"
+        with mock.patch.object(mutate_guard._nowindow, "run", side_effect=stub), \
+                mock.patch.object(mutate_guard, "lay_out", side_effect=self.lay_out_stub):
+            mutate_guard.run_mutant({}, self.run, entry)
+        self.assertTrue(stub.calls, "the mutant run started no suite process")
+        leaked = [(name, env["GUARD_SHARD"]) for name, _shard, env in stub.calls if "GUARD_SHARD" in env]
+        self.assertFalse(leaked, "a mutant run's suite carried GUARD_SHARD from the parent env: %r" % leaked)
+        self.assertTrue(any("MUTATE_ONLY" not in env for _name, _shard, env in stub.calls),
+                        "the mutant run never reached its full-suite stage (its required case %r ran alone)" % required)
+
+    def test_the_control_returns_only_after_all_four_sub_runs_finish(self):
+        stub = SubRunStub(passing)
+        _code, _red, ran, _seen = self.control(stub)
+        shards = sorted(shard for name, shard in stub.started() if name == "test_guard.py")
+        self.assertEqual(shards, ["1/4", "2/4", "3/4", "4/4"],
+                         "the guard-suite control must start test_guard.py at each of 1/4..4/4: started %r" % shards)
+        for i in range(1, 5):
+            self.assertTrue([line for line in ran if "%d/4" % i in line],
+                            "the control returned without the output of sub-run %d/4: ran %r" % (i, ran))
+
+    def test_the_other_targets_controls_stay_one_unsharded_run(self):
+        for target in ("watch", "decision", "ruling", "calljudge"):
+            with self.subTest(target=target):
+                stub = SubRunStub(passing)
+                self.control(stub, target)
+                self.assertEqual(len(stub.calls), 1,
+                                 "%s's control ran %d processes, want one unsharded run: %r" % (target, len(stub.calls), stub.started()))
+                self.assertIsNone(stub.calls[0][1], "%s's control carried GUARD_SHARD=%r" % (target, stub.calls[0][1]))
 
 
 if __name__ == "__main__":
