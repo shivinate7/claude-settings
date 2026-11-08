@@ -51,12 +51,27 @@ else
   fi
   # Each diff runs in an assignment, not a process substitution: set -e does not see the exit of a
   # process substitution, so a failing range (no merge base, a bad ref) would read as "no markdown changed".
+  # A history gap (decision stale-cites-at-merge) is unknown, not red: name it, treat the lists as empty, and
+  # let the stale_cites verdict decide the exit, as it does for the same gap. Any other diff failure stops the
+  # step, whatever FAIL is. git's own error is already on stderr.
   diff_failed() {
-    echo "ste-lint: UNKNOWN, git diff $RANGE failed (no base history: a shallow clone, or the repo's first commit); check out with fetch-depth 0" >&2
+    if [ "$(git rev-parse --is-shallow-repository)" = "true" ] ||
+       { [ "$RANGE" = "HEAD~1..HEAD" ] && ! git rev-parse --verify -q "HEAD~1" >/dev/null; } ||
+       { [ "$RANGE" != "HEAD~1..HEAD" ] && ! git merge-base "${RANGE%%...*}" HEAD >/dev/null 2>&1; }; then
+      echo "ste-lint: UNKNOWN, git diff $RANGE failed (no base history: a shallow clone, or the repo's first commit); check out with fetch-depth 0" >&2
+      return 0
+    fi
+    echo "ste-lint: UNKNOWN, git diff $RANGE failed" >&2
     exit 1
   }
-  RAW_LIST="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")" || diff_failed
-  FILE_LIST="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})" || diff_failed
+  RAW_LIST=""
+  FILE_LIST=""
+  if RAW_LIST="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")"; then
+    FILE_LIST="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})" || { diff_failed; FILE_LIST=""; }
+  else
+    diff_failed
+    RAW_LIST=""
+  fi
   while IFS= read -r f; do
     [ -n "$f" ] && RAW_FILES+=("$f")
   done <<< "$RAW_LIST"
