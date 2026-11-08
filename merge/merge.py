@@ -80,6 +80,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
+from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of what a session id looks like (hooks/own_session.py); a send-back line must name the id the Stop hold matches
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 
 class Stop(Exception):
@@ -3374,8 +3375,8 @@ def reviewed_read(h, now=time.time):
             else:
                 why = None
         if why and d.get("draft") and clock - review_created(d) > SEND_BACK_HOURS * 3600:
-            ids = re.findall(r"claude\.ai/code/session_([A-Za-z0-9]+)", d.get("body") or "")
-            lines.append(f"{REVIEW_SEND_BACK}#{n} {'session_' + ids[-1] if ids else 'no session'} ({why})")
+            ids = re.findall(rf"claude\.ai/code/({SESSION_ID.pattern})", d.get("body") or "")
+            lines.append(f"{REVIEW_SEND_BACK}#{n} {ids[-1] if ids else 'no session'} ({why})")
             continue
         if not bodies:
             bare.append(f"#{n}")
