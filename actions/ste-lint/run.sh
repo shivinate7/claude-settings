@@ -65,10 +65,14 @@ else
   # lock fails it. For a clean tree, as in CI, it prints nothing and WORK is HEAD. So one diff holds the commits and
   # the working tree: a tracked file edited, staged or removed and not yet committed counts, with its working-tree
   # line numbers. A new file that git does not track and .gitignore does not match is all new lines (UNTRACKED).
-  elif ! WORK="$(git -c user.name=ste-lint -c user.email=ste-lint@localhost stash create)"; then
+  elif LOCK="$(git rev-parse --git-path index.lock)"
+       WORK_RC=0
+       WORK="$(git -c user.name=ste-lint -c user.email=ste-lint@localhost stash create)" || WORK_RC=$?
+       # Exit 1 with no output is "no local changes" (a touched file, the same bytes): a clean tree. A held lock stays a failure.
+       [ "$WORK_RC" -eq 1 ] && [ -z "$WORK" ] && [ ! -e "$LOCK" ] && WORK_RC=0
+       [ "$WORK_RC" -ne 0 ]; then
     # The working tree was not read, so the committed range alone would be a false PASS: stale-cites is skipped too.
     STALE_RANGE=""
-    LOCK="$(git rev-parse --git-path index.lock)"
     WHY="git stash create failed"
     [ ! -e "$LOCK" ] || WHY="another git process holds $LOCK"
     UNKNOWN="$WHY, so the working tree was not read. Nothing was checked. Run again when no git process holds the index."
@@ -76,15 +80,15 @@ else
     if [ -n "$WORK" ]; then STALE_RANGE="$FROM..$WORK"; else WORK="HEAD"; fi
     while IFS= read -r -d '' f; do
       UNTRACKED+=("$f")
-    done < <(git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB")
+    done < <(git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
     while IFS= read -r -d '' f; do
       [ -n "$f" ] && RAW_FILES+=("$f")
     done < <(git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB"
-             printf '%s\0' ${UNTRACKED[@]+"${UNTRACKED[@]}"})
+             git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB")
     while IFS= read -r -d '' f; do
-      FILES+=("$f")
+      [ -n "$f" ] && FILES+=("$f")
     done < <(git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"}
-             git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+             printf '%s\0' ${UNTRACKED[@]+"${UNTRACKED[@]}"})
   fi
   [ -z "$UNKNOWN" ] || echo "ste-lint: unknown, $UNKNOWN"
 fi
