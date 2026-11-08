@@ -14030,15 +14030,18 @@ for _name, _command in SHELL_TEST_ALLOWS:
 # two folders down, so a root read one folder deep misses it.
 FINDTESTS = os.path.join(ROOT, "findtests")
 FINDDEEP = os.path.join(ROOT, "finddeep")
+# A colocated test sits beside the file it tests: src/a.test.ts beside src/a.ts, in one folder.
+COLOCATED = os.path.join(ROOT, "colocated")
 
 
 def _build_find_tests():
     make_repo(FINDTESTS, {"src/app.py": "x\n", "docs/DEBTS.md": "x\n", "tests/test_app.py": "x\n",
                           "test_top.py": "x\n"})
     make_repo(FINDDEEP, {"src/app.py": "x\n", "src/pkg/deep/test_deep.py": "x\n"})
+    make_repo(COLOCATED, {"src/a.ts": "x\n", "src/a.test.ts": "x\n"})
 
 
-lazy_fixture([FINDTESTS, FINDDEEP], _build_find_tests)
+lazy_fixture([FINDTESTS, FINDDEEP, COLOCATED], _build_find_tests)
 FIND_ROOT_WRITES = (
     ("find over . piped to xargs, sed -i", "find .|xargs sed -i s/a/b/"),
     ("find . -name test_*.py, -exec sed -i", "find . -name 'test_*.py' -exec sed -i s/a/b/ {} \\;"),
@@ -14068,9 +14071,9 @@ for _name, _command in FED_DATA_ALLOWS:
     sh("builder-test: shell %s is allowed, in a checkout that holds tests" % _name, _command, "allow",
        **dict(BR, cwd=FINDTESTS))
     sh("builder-test: shell %s is allowed, in a checkout with no test" % _name, _command, "allow", **BR)
-# The walk ignores -name, so a find with a name filter is judged on every file under its root. A filter that
-# matches no test path names no test, so the write to what it lists is allowed. The deny twin is the find of
-# 'test_*.py' in FIND_ROOT_WRITES.
+# The walk reads a find's -name filter: a file the filter does not accept is not judged, and a folder it accepts
+# is walked whole. A filter that matches no test path names no test, so the write to what it lists is allowed.
+# The deny twin is the find of 'test_*.py' in FIND_ROOT_WRITES.
 NAME_FILTER_ALLOWS = (
     ("find . -name *.pyc piped to xargs, rm -f", 'find . -name "*.pyc" | xargs rm -f'),
     ("find . -name __pycache__, -exec rm -rf", "find . -name __pycache__ -exec rm -rf {} +"),
@@ -14080,15 +14083,63 @@ for _name, _command in NAME_FILTER_ALLOWS:
     sh("builder-test: shell write, %s, in a checkout that holds tests, is allowed" % _name, _command, "allow",
        **dict(BR, cwd=FINDTESTS))
     sh("builder-test: shell write, %s, in a checkout with no test, is allowed" % _name, _command, "allow", **BR)
+# A narrowing primary the name filter does not read (`-mtime`, `-prune`, `-o`) leaves the walk plain, so every
+# test under the root is judged. Each command below lists only files that no test is. The `*.o` alone is the same
+# write with a filter the walk reads: it is allowed.
+NARROWED_ALLOWS = (
+    ("find . -name *.pyc -mtime +7 piped to xargs, rm -f", "find . -name '*.pyc' -mtime +7 | xargs rm -f"),
+    ("find . -name __pycache__ -type d -prune, -exec rm -rf",
+     "find . -name __pycache__ -type d -prune -exec rm -rf {} +"),
+    ("find . -name *.o -o -name *.a piped to xargs, rm -f", "find . -name '*.o' -o -name '*.a' | xargs rm -f"),
+)
+for _name, _command in NARROWED_ALLOWS:
+    sh("builder-test: shell write, %s, in a checkout that holds tests, is allowed" % _name, _command, "allow",
+       **dict(BR, cwd=FINDTESTS))
+sh("builder-test: shell write, find . -name *.o piped to xargs, rm -f, in a checkout that holds tests, is allowed",
+   "find . -name '*.o' | xargs rm -f", "allow", **dict(BR, cwd=FINDTESTS))
+# With colocated tests, src/a.test.ts is the test of src/a.ts. The deny pins that the walk judges it: the find
+# with the plain name filter lists it. The allows are the same find narrowed by `-not -name` and by its `!` form,
+# which the walk does not read, so the test is judged and the write to the source is refused.
+sh("builder-test: shell write, find src -name *.ts piped to xargs, sed -i, with colocated tests, is refused",
+   "find src -name '*.ts' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=COLOCATED))
+for _name, _command in (
+    ("find src -name *.ts -not -name *.test.ts piped to xargs, sed -i",
+     "find src -name '*.ts' -not -name '*.test.ts' | xargs sed -i s/a/b/"),
+    ("find src -name *.ts ! -name *.test.ts piped to xargs, sed -i",
+     "find src -name '*.ts' ! -name '*.test.ts' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, in a checkout with colocated tests, is allowed" % _name, _command, "allow",
+       **dict(BR, cwd=COLOCATED))
+# find's glob and Python's fnmatch read a bracket differently. find's `[^x]` negates, as POSIX `[!x]` does, so it
+# lists test_top.py. fnmatch reads `^` as a member of the set, and it has no `[[:alpha:]]` class, so neither pattern
+# matches test_top.py: the write is allowed. The denies pin the test the pattern names. `[!x]` and `[a-z]` read alike
+# in both dialects, so they stay denied.
+for _name, _command in (
+    ("find . -name [^x]*.py piped to xargs, sed -i", "find . -name '[^x]*.py' | xargs sed -i s/a/b/"),
+    ("find . -name [[:alpha:]]*.py piped to xargs, sed -i", "find . -name '[[:alpha:]]*.py' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, in a checkout with a test at its root, is refused" % _name, _command, "deny",
+       rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
+for _name, _command in (
+    ("find . -name [!x]*.py piped to xargs, sed -i", "find . -name '[!x]*.py' | xargs sed -i s/a/b/"),
+    ("find . -name [a-z]*.py piped to xargs, sed -i", "find . -name '[a-z]*.py' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, in a checkout with a test at its root, is refused" % _name, _command, "deny",
+       rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
 # A walk past its cap fails closed. FINDCAP holds more files at its top than the walk's cap (`_WALK_LIMIT` in
 # hooks/guard_frozen.py, 5000 entries) and a test under tests/. The top folder alone passes the cap, so the walk
 # stops before it reaches tests/, and the write is refused all the same. src/ holds no test: its find is allowed.
 FINDCAP = os.path.join(ROOT, "findcap")
 
 
+def _filler_files():
+    """5001 files, one more than the walk's cap, none of them a test."""
+    return {"filler_%04d.txt" % number: "x\n" for number in range(5001)}
+
+
 def _build_find_cap():
     files = {"tests/test_app.py": "x\n", "src/app.py": "x\n"}
-    files.update(("filler_%04d.txt" % number, "x\n") for number in range(5001))
+    files.update(_filler_files())
     make_repo(FINDCAP, files)
 
 
@@ -14097,8 +14148,48 @@ sh("builder-test: shell write, find . piped to xargs, sed -i, over a test past t
    "find . | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCAP))
 sh("builder-test: shell write, find src piped to xargs, sed -i, in a checkout with a test past the cap, is allowed",
    "find src | xargs sed -i s/a/b/", "allow", **dict(BR, cwd=FINDCAP))
-# A grep or rg with no path searches the working folder. A root-less grep feeds the writer no folder, so the
-# write to a test under cwd is missed. The GITMAIN twin holds no test under cwd, so it is allowed.
+# A walk past its cap is refused only where a test could sit under it. NOTEST is past the cap and holds no test,
+# and SCRATCHCAP is a plain tree past the cap, outside every checkout, that holds none either. The finds over them
+# list only files that no test is, so their writes are allowed. The controls run the same find over a tree under
+# the cap and over an empty folder: the walk completes there, so they are allowed too.
+NOTEST = os.path.join(ROOT, "notest")
+SCRATCHCAP = os.path.join(ROOT, "scratchcap")
+SCRATCHSMALL = os.path.join(ROOT, "scratchsmall")
+SCRATCHEMPTY = os.path.join(ROOT, "scratchempty")
+
+
+def _build_no_test_cap():
+    files = _filler_files()
+    files["src/app.py"] = "x\n"
+    make_repo(NOTEST, files)
+
+
+def _build_scratch_trees():
+    logs = {"sub/a.log": "x\n", "sub/b.log": "x\n"}
+    big = _filler_files()
+    big.update(logs)
+    for folder, files in ((SCRATCHCAP, big), (SCRATCHSMALL, logs)):
+        for name, text in files.items():
+            write(os.path.join(folder, name), text)
+    os.makedirs(SCRATCHEMPTY, exist_ok=True)
+
+
+lazy_fixture([NOTEST], _build_no_test_cap)
+lazy_fixture([SCRATCHCAP, SCRATCHSMALL, SCRATCHEMPTY], _build_scratch_trees)
+for _name, _command in (
+    ("find . -name *.pyc piped to xargs, rm -f", "find . -name '*.pyc' | xargs rm -f"),
+    ("find . -name *.pyc, -exec rm {} +", "find . -name '*.pyc' -exec rm {} +"),
+):
+    sh("builder-test: shell write, %s, in a checkout past the walk cap with no test, is allowed" % _name, _command,
+       "allow", **dict(BR, cwd=NOTEST))
+sh("builder-test: shell write, find over a tree past the walk cap outside the checkout, rm -f, is allowed",
+   "find %s -name '*.log' | xargs rm -f" % SCRATCHCAP, "allow", **BR)
+sh("builder-test: shell write, find over a tree under the cap outside the checkout, rm -f, is allowed",
+   "find %s -name '*.log' | xargs rm -f" % SCRATCHSMALL, "allow", **BR)
+sh("builder-test: shell write, find over an empty folder outside the checkout, rm -f, is allowed",
+   "find %s -name '*.log' | xargs rm -f" % SCRATCHEMPTY, "allow", **BR)
+# A grep or rg with no path searches the working folder, so the working folder is its root. The deny pins a test
+# under cwd in FINDTESTS; the allow pins the same write in a checkout with no test.
 for _name, _command in (
     ("grep -rl PAT piped to xargs, sed -i", "grep -rl PAT | xargs sed -i s/a/b/"),
     ("rg -l PAT piped to xargs, sed -i", "rg -l PAT | xargs sed -i s/a/b/"),
