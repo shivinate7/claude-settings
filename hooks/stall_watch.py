@@ -19,7 +19,7 @@ Hook: stall_watch.py --hook
     }
     ) >| LOG 2>&1 9<&- 8<&- & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --beat BEAT
       --log-fd 9 --beat-fd 8;
-    rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG BEAT; exit $rc
+    rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f BEAT; [ -e LOG.stalled ] || rm -f LOG; exit $rc
     } 9< LOG 8< BEAT
 
   The wrapper creates LOG and BEAT and opens both (fds 9 and 8) before the job starts; the watcher
@@ -28,9 +28,9 @@ Hook: stall_watch.py --hook
   (the job keeps running and writing until then) and for the original's `exit N`, whose code the wrapper
   keeps. On a stall the watcher writes LOG.stalled, a marker beside the log, before it exits 3, and the
   trap keeps a log that has one. The STALL report says the log is kept 7 days (item 405 a, owner,
-  2026-11-08 06:09 CST). Each --hook call removes, from the log folder, every stall-watch log not written
-  for 7 days, with its marker, and no other file: no timer runs. Limit: an original that execs or sets its own
-  EXIT trap drops the trap; the wrapper's `rm -f` after `wait` still cleans up a job that never stalled,
+  2026-11-08 06:09 CST). Each --hook call removes, from the log folder, every stall-watch log with a marker not
+  written for 7 days, and that marker, and no other file: no timer runs. Limit: an original that execs or sets its own
+  EXIT trap drops the trap; the wrapper's cleanup after `wait` (the trap's command) still cleans up a job that never stalled,
   and a stalled job of that kind leaves its log and marker for the 7-day prune.
 
   BEAT is stall-watch-<id>.beat next to LOG. A tool that is quiet by
@@ -250,7 +250,7 @@ def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None):
     except (OSError, ValueError):
         tail = []
     lines += ["Last %d output lines:" % TAIL_LINES] + ["  " + l for l in tail or ["(no output)"]]
-    lines.append("Log: %s (kept 7 days after the job ends)" % log)
+    lines.append("Log: %s (kept 7 days after its last write)" % log)
     lines += ["Named log, no growth either: " + os.path.abspath(p) for p in also]
     try:  # the wrapper creates the beat file empty: a heartbeat is a non-empty one
         beat_used = os.fstat(beatf.fileno()).st_size > 0 if beatf is not None else bool(beat and os.path.exists(beat))
@@ -342,17 +342,19 @@ def eof_backslash_literal():
 
 
 def prune_kept_logs(folder, now=None):
-    """Remove each stall-watch log in folder not written for KEEP_DAYS, with its marker. One folder
-    listing, in the hook process already running. No other file is touched. Errors are ignored."""
+    """Remove each stall-watch log in folder not written for KEEP_DAYS and having its marker, then the
+    marker. A log with no marker may belong to a live job and is never touched. One folder listing, in
+    the hook process already running. No other file is touched. Errors are ignored."""
     cutoff = (time.time() if now is None else now) - KEEP_DAYS * 86400
     try:
         with os.scandir(folder) as entries:
             for entry in entries:
                 try:
                     if (KEPT_LOG.match(entry.name) and entry.is_file(follow_symlinks=False)
-                            and entry.stat(follow_symlinks=False).st_mtime < cutoff):
+                            and entry.stat(follow_symlinks=False).st_mtime < cutoff
+                            and os.path.lexists(entry.path + STALLED_SUFFIX)):
                         os.remove(entry.path)
-                        os.remove(entry.path + STALLED_SUFFIX)  # absent for a log with no marker: caught below
+                        os.remove(entry.path + STALLED_SUFFIX)  # marker last: a failed log removal retries next call
                 except OSError:
                     pass
     except OSError:
@@ -389,10 +391,12 @@ def hook():
     # BEAT, and LOG unless the watcher left its stall marker, when the job ends, also after the watcher
     # gave up on a stall, and for the original's `exit N`.
     # Limit: an original that execs, or sets its own EXIT trap, drops that trap; the wrapper's own
-    # `rm -f` after `wait` still cleans up a job that never stalled.
+    # cleanup after `wait` still cleans up a job that never stalled.
     # The job group is `( )`: bash 3.2 (macOS /bin/sh) runs an EXIT trap only in a `( )` subshell.
-    cleanup = "rm -f " + q(log) + " " + q(beat)
+    # The cleanup after `wait` is the trap's own command: a marker written before report() ends keeps the
+    # log whatever the watcher's exit code, so a kill or pipe error in report() cannot remove it.
     trap = "rm -f " + q(beat) + "; [ -e " + q(log + STALLED_SUFFIX) + " ] || rm -f " + q(log)
+    cleanup = trap
     wrapped = (
         ": > " + q(log) + "; : > " + q(beat) + "; {\n(\ntrap " + q(trap) + " EXIT; export STALL_WATCH_BEAT=" + q(beat)
         + "\n{ " + original + "\n\n}\n) >| " + q(log) + " 2>&1 9<&- 8<&- & pid=$!; "
