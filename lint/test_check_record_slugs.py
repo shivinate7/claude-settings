@@ -978,6 +978,14 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertTrue(self.failed_about(out, "long-red"), out)  # the scope: the long note is read to its end
         self.assertEqual(len(fail_lines(out)), 1, out)  # only the note with the cost is refused
 
+    def test_check_output_with_a_double_hyphen_en_dash_or_fat_arrow_after_a_cost_passes(self):
+        # The "--" is the ASCII dash the Fix field uses. The en dash and the fat arrow are the other separators.
+        self.passed_notes({
+            "dash-ascii-pass": "rare and harmless: the call takes 1.3 s; `verdict bench` -- pass",
+            "dash-en-pass": "rare and harmless: the call takes 1.3 s; `verdict bench` – pass",
+            "arrow-fat-green": "owner decides: the call takes 1.3 s; `verdict bench` => green",
+        })
+
 
 class ImportTests(unittest.TestCase):
     """lint/compliance_probes.py imports the module and calls its functions on a child's root, so the command line
