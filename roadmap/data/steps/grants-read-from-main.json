@@ -1,0 +1,11 @@
+{
+  "title": "A session that cites a standing grant reads it from origin/main, not from its own checkout",
+  "why": "Coordinator 16:56 CST Nov 8, its own mistake: it read the standing grants from a stale checkout (.claude/CLAUDE.md on branch lane-hold-ends-on-cause) and told triage that a Mac session could close PRs. Main's grant \"acts the cloud refuses\" names only two acts. Triage caught it at 16:55 CST. Harm: a session acts, or asks another session to act, on a grant the owner never gave. Fix shape: when a session cites a standing grant, it reads it with `git show origin/main:.claude/CLAUDE.md`, or the session-start hook warns when the checkout's .claude/CLAUDE.md differs from origin/main's. Red case: a checkout whose .claude/CLAUDE.md differs from origin/main gets the warning.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 841,
+  "updatedAt": "2026-11-08T16:56:00-06:00"
+}
