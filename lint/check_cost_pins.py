@@ -74,8 +74,9 @@ TIMES_WORD = re.compile(r"(?:once|twice|thrice)", re.IGNORECASE)
 COST_NOUN = re.compile(r"(?:reads?|calls?|process(?:es)?|spawns?|ps|writes?|files?|runs?|starts?|times|lines?|commands?"
                        r"|requests?|lookups?|quer(?:y|ies))", re.IGNORECASE)
 BOUND = re.compile(r"\b(?:at\s+most|up\s+to|no\s+more\s+than|fewer|at\s+least)\b", re.IGNORECASE)
-# A number beside a cost noun that counts nothing: a date, a time, an id.
-NOT_COUNTS = [re.compile(r"\b\d{4}-\d{2}-\d{2}\b"), re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"),
+# A number beside a cost noun that counts nothing: a line reference (`name.ext:123`), a date, a time, an id.
+NOT_COUNTS = [re.compile(r"[\w/.-]+\.[A-Za-z]+(?::\d+)+"), re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
+              re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"),
               re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
 # text, [(code span text, line)], line of the first character, text with code spans blanked, [(start, end)] of each span
 Sentence = collections.namedtuple("Sentence", "text spans line blanked holes")
@@ -253,6 +254,17 @@ def pinned(token, candidates, root, texts):
     return False
 
 
+def trailing(words):
+    """True when a cost noun stands among `words`, the words before once, twice or thrice, with no code span between
+    it and the count: a count after a span counts the span ("`sed` once"), not the noun before it."""
+    for word in reversed(words):
+        if COST_NOUN.fullmatch(word.group()):
+            return True
+        if set(word.group()) == {"_"}:
+            return False
+    return False
+
+
 def counts(sentence):
     """(start, end) in the sentence text of each count word that makes a claim. A span, a date, a time and an id
     are blanked first, so none counts as a word of the claim; a span stays one word between count and noun."""
@@ -264,8 +276,11 @@ def counts(sentence):
     for i, word in enumerate(words):
         if not COUNT_WORD.fullmatch(word.group()):
             continue
-        after = any(COST_NOUN.fullmatch(w.group()) for w in words[i + 1:i + 5])
-        before = TIMES_WORD.fullmatch(word.group()) and any(COST_NOUN.fullmatch(w.group()) for w in words[max(0, i - 3):i])
+        # once, twice and thrice count only after the noun ("reads it once"); "one of" is a pronoun
+        leading = not TIMES_WORD.fullmatch(word.group()) and not (
+            word.group().lower() == "one" and words[i + 1:i + 2] and words[i + 1].group().lower() == "of")
+        after = leading and any(COST_NOUN.fullmatch(w.group()) for w in words[i + 1:i + 5])
+        before = TIMES_WORD.fullmatch(word.group()) and trailing(words[max(0, i - 3):i])
         if after or before:
             found.append((word.start(), word.end()))
     return found
