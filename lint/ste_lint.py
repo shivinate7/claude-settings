@@ -445,9 +445,10 @@ def load_config(start: str) -> dict:
 NUL = "\x00"
 _PH_RE = re.compile(r"\x00\d+\x00+")
 
-# A code span opens with a run of backticks and closes with a run of the same length (CommonMark),
-# so a backtick inside a double-backtick span stays inside it. Used by the linter and the fixer.
-INLINE_CODE_RE = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)")
+# A code span opens with a whole run of backticks and closes with a run of the same length, so a
+# backtick inside a double-backtick span stays inside it. The (?<!`) before the opener keeps an
+# unclosed run from opening a shorter span mid-run. Used by the linter and the fixer.
+INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 
 MASK_PATTERNS = [
     INLINE_CODE_RE,                                 # inline code
