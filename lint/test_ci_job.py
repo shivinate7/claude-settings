@@ -6,6 +6,7 @@ a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-re
 None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
+PinnedHarness: --pinned runs a remote claude-settings harness from the tree at its pinned sha, never the local copy.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
@@ -1321,6 +1322,102 @@ class ZizmorBranches(Job):
         rc, lines, out = self.run_job(self.REMOTE, args=self.LINT, script=ci_job, env=env)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("no run.sh: looked for", lines[0], out)
+
+
+HARNESS = '''import os, sys
+# Stands in for actions/code-check/code_check.py: its verdict is the rule that the tree's lint/rule.txt names.
+root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+with open(os.path.join(root, "lint", "rule.txt"), encoding="utf-8") as f:
+    rule = f.read().strip()
+print("fixture harness: " + rule)
+sys.exit(0 if rule == "lenient" else 1)
+'''
+UNFETCHABLE = "3c5a9e0b7d1f4824a6e9c0d5b7f1a2e4c8d6b9f0"  # 40 hex, in no clone of the fixture
+
+
+def git_in(repo, *args):
+    """One git call in `repo`, its output stripped. LintTools.git drives only the throwaway repo, so the source repo uses this."""
+    return subprocess.run(["git", "-C", repo, *args], check=True, env=ENV, capture_output=True, text=True).stdout.strip()
+
+
+def write_lf(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+class PinnedHarness(Job):
+    """--pinned: a remote claude-settings uses: pinned to a 40-hex sha runs that action's harness from a tree exported at
+    that sha, never the local copy. The source repo is the pointer checkout: commit A (the lenient rule), commit B (HEAD, the
+    strict rule) and commit N (B with no harness). The copied ci-job's local copy holds the strict rule, as a checkout at HEAD
+    does. Without the flag the local copy runs as before. A branch ref keeps the local copy under the flag too."""
+
+    git = LintTools.git  # the throwaway child repo's git, one home (LintTools)
+    lane = LintTools.lane
+    install = CodeCheckFromCopiedInstall.install  # the copied install: this class calls it, it does not copy it
+    LINT = ("--step", "Code check", "--base", "origin/main")
+
+    def setUp(self):
+        super().setUp()
+        self.lane({"a.py": 'print("fine")\n'})
+        self.source = tempfile.mkdtemp(prefix="claude-settings-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.source, True)
+        git_in(self.source, "init", "-q", "-b", "main")
+        write_lf(os.path.join(self.source, "actions", "code-check", "code_check.py"), HARNESS)
+        write_lf(os.path.join(self.source, "lint", "rule.txt"), "lenient\n")
+        git_in(self.source, "add", "-A")
+        git_in(self.source, "commit", "-qm", "lenient")
+        self.pin_a = git_in(self.source, "rev-parse", "HEAD")
+        write_lf(os.path.join(self.source, "lint", "rule.txt"), "strict\n")
+        git_in(self.source, "commit", "-qam", "strict")
+        git_in(self.source, "checkout", "-qb", "no-harness")
+        git_in(self.source, "rm", "-q", "actions/code-check/code_check.py")
+        git_in(self.source, "commit", "-qm", "no harness")
+        self.pin_n = git_in(self.source, "rev-parse", "HEAD")
+        git_in(self.source, "checkout", "-q", "main")
+        self.ci_job, self.cfg = self.install(self.source)
+        write_lf(os.path.join(self.cfg, "actions", "code-check", "code_check.py"), HARNESS)  # the local copy: strict
+        write_lf(os.path.join(self.cfg, "lint", "rule.txt"), "strict\n")
+        self.assertEqual(git_in(self.source, "show", "%s:lint/rule.txt" % self.pin_a), "lenient")  # the fixture's pin is lenient
+
+    def run_pinned(self, ref, *flags):
+        """One run of the step pinned to `ref` (a sha or a branch name). -> (rc, verdict lines, the output and the log)."""
+        step_text = step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % ref)
+        rc, lines, out = self.run_job(step_text, args=(*self.LINT, *flags), script=self.ci_job,
+                                      env={"CLAUDE_CONFIG_DIR": self.cfg})
+        log = ""
+        if os.path.exists(self.log):  # no step ran under a usage error, so no log exists then
+            with open(self.log, encoding="utf-8") as f:
+                log = f.read()
+        return rc, lines, out + log
+
+    def test_a_pinned_sha_runs_the_harness_at_that_commit(self):
+        rc, lines, text = self.run_pinned(self.pin_a, "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the step under --pinned did not PASS\n" + text)
+        self.assertIn("fixture harness: lenient", text, "the local strict copy ran, not the harness at the pin\n" + text)
+
+    def test_without_the_flag_the_local_copy_runs_as_before(self):  # the control
+        rc, lines, text = self.run_pinned(self.pin_a)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "the local copy did not FAIL without --pinned\n" + text)
+        self.assertIn("fixture harness: strict", text, "the local copy did not run without --pinned\n" + text)
+
+    def test_a_sha_no_clone_holds_reads_unknown_and_the_local_copy_never_runs(self):
+        rc, lines, text = self.run_pinned(UNFETCHABLE, "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "an unfetchable pin did not read unknown\n" + text)
+        self.assertIn("pin", lines[0], "the unknown line does not name the pin\n" + text)
+        self.assertIn("lane", lines[0], "the unknown line does not give the lane that moves the pin\n" + text)
+        self.assertNotIn("fixture harness", text, "the local copy ran for a sha it could not fetch\n" + text)
+
+    def test_a_tree_at_the_pin_without_the_harness_reads_unknown(self):
+        rc, lines, text = self.run_pinned(self.pin_n, "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a pin whose tree lacks the harness did not read unknown\n" + text)
+        self.assertIn("code_check.py", lines[0], "the unknown line does not name the harness it could not find\n" + text)
+        self.assertNotIn("fixture harness", text, "the local copy ran for a pin whose tree lacks the harness\n" + text)
+
+    def test_a_branch_ref_under_the_flag_keeps_the_local_copy(self):
+        rc, lines, text = self.run_pinned("main", "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "a branch ref under --pinned did not keep the local copy\n" + text)
+        self.assertIn("fixture harness: strict", text, "the local copy did not run for a branch ref under --pinned\n" + text)
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
