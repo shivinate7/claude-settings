@@ -27,9 +27,11 @@
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
                           then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
-                          `build next batch on the running head: ...` when a ready PR on that base has CI running. Each root's config is read
-                          from its base. Every block is built before any is printed: a failed read in any root prints nothing and exits 1.
-                          Cost: the gh calls of one --reviewed per root; no new process, file or timer.
+                          `build next batch on the running head: ...` when a ready PR on that base has CI running. The base is the root's
+                          default branch, and its config is read from it. A done PR that another open PR holds, or that is itself ready with
+                          CI running, is left off the batch line. A root whose read fails prints `repo DIR: unknown (REASON)`; the other roots
+                          print in full, and the run exits 1. Cost: the gh calls of one --reviewed per root, plus one CI read per ready PR on
+                          the base when it has a done PR; no new process, file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
