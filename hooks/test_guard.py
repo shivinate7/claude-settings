@@ -8177,6 +8177,22 @@ sh("env-child: allow, docker --pull takes a value, so the child is myimage",
    "docker run --pull always --env-file " + ENV + " myimage", "allow", cwd=NOGIT)
 sh("env-child: allow, uv --extra takes a value, so the child is pytest",
    "uv run --env-file " + ENV + " --extra dev pytest", "allow", cwd=NOGIT)
+# A flag that takes no value (-q, --reinstall, --verbose, --rm) is skipped alone, so the word after it is
+# the child. The words after the child are its own arguments: -k env and -m env are pytest's, and serve
+# env is the image's.
+sh("env-child: allow, uv -q takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " -q pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --reinstall takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " --reinstall pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so the child is pytest with -m env",
+   "uv run --env-file " + ENV + " --verbose pytest -m env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --rm takes no value, so the child is myimage with serve env",
+   "docker run --env-file " + ENV + " --rm myimage serve env", "allow", cwd=NOGIT)
+# A value flag that the list does not hold takes the word after it, so the child after exec is env.
+sh("env-child: deny, npm --registry takes a value, so exec -c runs env as the child",
+   "npm --env-file=" + ENV + " --registry x exec -c env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm --reporter takes a value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " --reporter silent exec env", "deny", "env-file", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
