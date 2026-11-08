@@ -5379,6 +5379,18 @@ sh("git-after-cd: the same if ! check over three lines, then a git push -u, pass
 # push after it passes.
 sh("git-after-cd: a check with -q protected by || a braced exit 1, then ; a git push -u, passes",
    "pytest -q || { echo bad; exit 1; }; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# AN EXIT THE CHECK'S FAILURE DOES NOT REACH, AND A ( ) SUBSHELL WITH NO SPACE AFTER THE (. An `if !` whose else body
+# is `exit 1` runs the push when the check fails, since the else runs when the test passes. A then body whose exit
+# follows `echo bad &&` is refused, since the && join is not read as leaving the body.
+sh("git-after-cd: a check, then ; a ( ) subshell with no space after ( holding an if with a push, is refused",
+   "pytest -q; (if true; then %s push -u origin b; fi)" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an if ! check whose else body is exit 1, then ; a git push -u, is refused",
+   "if ! pytest -q; then echo bad; else exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an if ! check whose then body is echo bad && exit 1, then ; a git push -u, is refused",
+   "if ! pytest -q; then echo bad && exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
