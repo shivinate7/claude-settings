@@ -1194,18 +1194,18 @@ def _inbound_pick(records, sender: str, names) -> bool:
     return bool(newest and newest[0] and newest[1])
 
 
-def _own_id(records, given: str) -> str:
-    """This session's id: the one the caller gives, else the newest `sessionId` the transcript holds, else the remote env's."""
-    if given:
-        return given
-    found = ""
+def _own_id(records, transcript: str, given: str) -> str:
+    """This session's remote id (session_<x>), the id a get_session record's ccr.id carries. The payload session_id
+    and each record's `sessionId` are the local UUID in a real run, so they come last: the remote env's id first,
+    then the ccr.id of the own no-argument get_session record, then `given`, then the newest `sessionId`."""
+    from override import remote_session_id
+    found = remote_session_id() or own_session.own_record_id(transcript) or given
+    if found:
+        return found
     for rec in records:
         if isinstance(rec.get("sessionId"), str) and rec["sessionId"]:
             found = rec["sessionId"]
-    if found:
-        return found
-    from override import remote_session_id
-    return remote_session_id() or ""
+    return found
 
 
 def _pick_unknown(why: str) -> None:
@@ -1239,7 +1239,7 @@ def pick_ack_hit(tool: str, tool_input, transcript: str, cwd: str = "", own_id: 
             records = _transcript_module().read_transcript(transcript)
             names = {target}
             if target in PARENT_TARGETS:
-                target = own_session.own_session_read(transcript, _own_id(records, own_id))[2]
+                target = own_session.own_session_read(transcript, _own_id(records, transcript, own_id))[2]
                 if not target:
                     _pick_unknown(PICK_NO_PARENT)
                     return None

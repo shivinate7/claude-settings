@@ -46,6 +46,39 @@ def _record_json(body):
     return record
 
 
+def own_record_id(transcript):
+    """The ccr.id of the newest get_session result whose call names no session_id, which get_session reads as this
+    session, else None. A call that names an id may read another session, so it never counts here. Used when the
+    remote env is unset: the hook payload and the transcript carry only the local UUID."""
+    uses, found = set(), None
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = json.loads(line)["message"]["content"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
+                    given = block.get("input")
+                    if not (isinstance(given, dict) and given.get("session_id")):
+                        uses.add(block.get("id"))
+                elif block.get("type") == "tool_result" and block.get("tool_use_id") in uses:
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    try:
+                        ccr_id = _record_json(body)["ccr"]["id"]
+                    except (ValueError, KeyError, TypeError, AttributeError):
+                        continue
+                    if isinstance(ccr_id, str) and ccr_id:
+                        found = ccr_id
+    return found
+
+
 def own_session_read(transcript, own_id, created=False):
     """(tags, tagged_after, parent): the tags and parent_session_id of the newest get_session result
     whose ccr.id is own_id, else None for each, and whether a set_session_tags call follows that
