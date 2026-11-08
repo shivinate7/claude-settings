@@ -104,7 +104,8 @@ CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 TIGHT_COMPACT = "tight-" + "compact"  # a plain option key: three vowels in twelve letters, and a run that joins at the hyphen
 ICON_COMPACT = "icon-" + "compact"  # a plain option key with four vowels
 MIXED_HYPHEN = "QwErTy-" + "UiOpAs"  # mixed case in each part: fails the word form alone
-CONSONANT_HYPHEN = "xkcdqwrt-" + "plmnvbz"  # lower case with no vowel: fails the vowel share and the run
+CONSONANT_HYPHEN = "xkcdqwrt-" + "plmnvbz"  # lower case with no vowel: on the hyphen path it fails the consonant run alone, not the vowel share
+UPPER_HYPHEN = "XKQ-ZVB-" + "WTR-PLS"  # upper-case parts with no vowel: the share and the joined run both refuse it today; the all-lower gate keeps it off the hyphen path, where each part passes the run
 RUN_PART = "aeixkcdo" + "-uaei"  # eight vowels, and a run of four consonants inside one part: fails the run alone
 SHORT_VOWELS = "bbabbab" + "bbabbb"  # three vowels in thirteen letters and no run: fails the vowel share alone
 
@@ -237,12 +238,15 @@ RED = [
     ("api_key set to twelve underscores and no letter", "api_key: " + "_" * 12, "_" * 12),
     # A `:` value of letters passes only when every words check passes. The mixed-case row fails the word form alone, the
     # vowel row fails the vowel share alone and the run row fails the consonant run alone, so removing one check turns its
-    # row red. The lower-case row fails the share and the run. The `=` row is refused whatever its value.
+    # row red. The lower-case row fails the run alone on the hyphen path. The upper-case row has no vowel, and the share
+    # and the joined run both refuse it today; without the all-lower gate the hyphen path's per-part run check passes it,
+    # so that row goes red. The `=` row is refused whatever its value.
     ("a key name set with = to a hyphenated word", "key = '" + TIGHT_COMPACT + "'", TIGHT_COMPACT),
     ("secret of mixed-case words joined by a hyphen", "secret: '" + MIXED_HYPHEN + "'", MIXED_HYPHEN),
     ("secret of thirteen letters with three vowels", "secret: '" + SHORT_VOWELS + "'", SHORT_VOWELS),
     ("secret of a consonant run inside one word", "secret: '" + RUN_PART + "'", RUN_PART),
     ("secret of lower-case letters with no vowel", "secret: '" + CONSONANT_HYPHEN + "'", CONSONANT_HYPHEN),
+    ("secret of upper-case three-letter parts joined by hyphens", "secret: '" + UPPER_HYPHEN + "'", UPPER_HYPHEN),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
