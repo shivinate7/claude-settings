@@ -1,0 +1,30 @@
+# A question on another repo is checked with that repo
+
+## The ruling
+
+An open decision or task on a repo's waiting page names the repo it is about, and a question about another repo is checked with a session of that repo before it reaches this page's owner.
+
+- Every open decision and task carries `repo` (`owner/name`). The compare folds case.
+- A `repo` other than the page's own repo needs `checked_with`: the session id of that repo's triage, coordinator or owner's-computer session that said the owner has not ruled on it.
+- A `checked_with` that equals the session id in the item's `owner` is refused. The owner's own session did not check.
+- Guard rule `question-checked-with-repo` (`hooks/question_form.py`, `cross_repo_hit`, called by `item_hit`) refuses a `set` of an open decision or task that breaks the three lines above, and an `update` that carries `repo` and breaks the last two.
+  - It keys on fields, never on words (rule `predicate-is-the-act`, in `docs/decisions/an-agent-outside-its-home-tree-must-stop.md`).
+  - The page's repo is the origin of the checkout the write is judged at (`lint/layout.py`, `repo_name`). With no origin, or no checkout, it passes.
+  - A `str_replace`, a closed item and an `update` with no `repo` pass.
+  - Both fields are in the `itemFields` block of `skills/waiting-page/page.html`, the one list the page and the guard read.
+  - The session id shape is `own_session._CREATED_ID` and the repo shape is `stale_pages.REPO_NAME`. This code holds no copy.
+  - The reason names the field. For a missing `repo` it names the page's own repo as the value to write, so one retry fixes it.
+
+## The mistake and the harm
+
+The mistake: triage filed another repo's design questions on this repo's page. The owner had already ruled on them. The harm: the owner answers a question twice, and the second answer can contradict the first.
+
+Incident: mailaudit item `ma144-tab-bar` (mailaudit #144, the Duo tab bar place), filed on this page by a batch runner session. The owner's ruling on the Card in Hand design already covered it.
+
+Cost: no process, no file written. One read of git's config file per waiting-page write (`lint/layout.py`, `repo_name`).
+
+Known limit: the guard sees that `checked_with` is session-shaped, not that the session checked. A made-up id passes. Review and the owner catch it.
+
+Kind: process
+Home: rule:questions-go-to-owner
+Landed 2026-11-08.

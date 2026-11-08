@@ -52,6 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
+from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of the session id shape
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the one home of the gh logins
 
 PASS = ("", "")
@@ -997,6 +998,9 @@ def item_hit(op, entry, cwd=""):
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
+    hit = cross_repo_hit(op, data, _page_repo(cwd))
+    if hit:
+        return CROSS_REPO_RULE, hit
     hit = widens_pick_hit(data)
     if hit:
         return "uniform-pick", hit
@@ -1408,11 +1412,63 @@ def _chat_question_hit(question, options):
     return (DEPARTS_RULE, miss) if miss else PASS
 
 
+# ------------------------------------------------------------------ a decision on another repo is checked with that repo
+#
+# docs/decisions/cross-repo-question-checked.md, rule `question-checked-with-repo`, built against a named incident
+# (incident in the record): triage filed another repo's design questions on this repo's page, ones the owner had
+# already ruled on. An open decision or task names its `repo` (owner/name). A repo other than the page's needs
+# `checked_with`, the session id of that repo's session that said the owner has not ruled, never the item's own owner.
+# The check keys on fields, never on words (decision predicate-is-the-act).
+CROSS_REPO_RULE = "question-checked-with-repo"
+CROSS_REPO_REASON = ("An open decision or task on the waiting page names its `repo` (owner/name). A repo other than "
+                     "the page's own needs `checked_with`: the session id of that repo's triage, coordinator or "
+                     "owner's-computer session that said the owner has not ruled. "
+                     "(decision cross-repo-question-checked, a question on another repo is checked with that repo)")
+_WAITING_PAGE_DIR = os.path.join(HERE, "..", "skills", "waiting-page")
+
+
+def _page_repo(cwd):
+    """`owner/name` of the origin of the checkout at cwd, lowercased, else None (no cwd, no checkout, no origin).
+    One read of git's config file, no process."""
+    root = _git_root_of(cwd) if cwd else None
+    return _layout().repo_name(root) if root else None
+
+
+def cross_repo_hit(op, data, page_repo):
+    """The reason when this write of an open decision or task names no repo, a repo off the page's own without a
+    session-shaped `checked_with`, or a `checked_with` that is the session in its `owner`; else None. An update is
+    judged only when it carries `repo`; a str_replace, a closed item and a page with no repo pass."""
+    if not page_repo or op not in ("set", "update") or not isinstance(data, dict):
+        return None
+    if data.get("kind", "decision" if op == "update" else None) not in ("decision", "task"):
+        return None
+    if data.get("status", "open") != "open" or (op == "update" and "repo" not in data):
+        return None
+    if _WAITING_PAGE_DIR not in sys.path:
+        sys.path.append(_WAITING_PAGE_DIR)
+    from stale_pages import REPO_NAME
+    repo = data.get("repo")
+    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo)):
+        return ("`repo` is missing or not owner/name. Add `repo`: \"%s\" for a question on this page's own repo, or "
+                "the repo the question is about." % page_repo)
+    if repo.lower() == page_repo.lower():
+        return None
+    checked = data.get("checked_with")
+    if not (isinstance(checked, str) and SESSION_ID.fullmatch(checked)):
+        return ("`repo` %s is not this page's repo, and `checked_with` is missing or not a session id. Ask that "
+                "repo's triage, coordinator or owner's-computer session whether the owner has ruled, then write its "
+                "session id in `checked_with`." % repo)
+    if checked in str(data.get("owner") or ""):
+        return ("`checked_with` is the session in this item's `owner`. Write the session id of the %s session that "
+                "checked, not the one that files the item." % repo)
+    return None
+
+
 # ------------------------------------------------------------------ the reasons, one table per surface
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
-                "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON,
+                "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
