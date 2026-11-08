@@ -687,8 +687,12 @@ def spawn_models(records):
     return found
 
 
-def done_models_problem(text, spawned):
-    """Name what Done gets wrong about the spawned roles' models, else ''."""
+def done_models_problem(text, spawned, every=None):
+    """Name what Done gets wrong about the spawned roles' models, else ''.
+
+    `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole
+    transcript's spawns: Done also reports a review round that ran before the turn's window.
+    """
     if not spawned:
         return ""
     done = " ".join(done_items(block_text(text, keep_indent=True)))
@@ -700,7 +704,7 @@ def done_models_problem(text, spawned):
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = spawned.get(role)
+        ran = (spawned if every is None else every).get(role)
         if ran is not None and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
@@ -1759,7 +1763,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned)
+        models = done_models_problem(text, spawned, spawn_models(records))
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
@@ -2228,7 +2232,7 @@ def main():
             "a Done line does not say BUILT, RECORDED or OTHER, or says BUILT or RECORDED with no PR or commit: "
             + repr(item)))
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned) if shape_ok else ""
+    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
