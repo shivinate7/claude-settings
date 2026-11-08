@@ -10307,7 +10307,7 @@ step_allow("role labels in lower case with no colons are allowed: a label is rea
            role_path("step-topic-lane"),
            ROLE_TOP + " coordinator session_C1; triage session_T2; batch runner 8 session_B3.")
 # Refused under the filler-word list: subtriage is a word, not a filler word, so the gap holds a word and the
-# Coordinator id is not read.
+# Coordinator id is not read; coordinator ruling effective 2026-11-08 09:21 CST.
 roles_refuse("Coordinator subtriage session_C1 is refused: subtriage is no filler word, so the gap holds a word",
              role_path("step-topic-lane"),
              ROLE_TOP + "\nCoordinator subtriage session_C1\nTriage: session_T1\nBatch runner 8: session_B1", ["Coordinator"])
@@ -10415,7 +10415,7 @@ step_allow("a lowercase batch runner label, batch runner: session_x8, passes", r
            ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nbatch runner: session_x8")
 
 # Refused under the filler-word list: Triagey is a word, not a filler word, so the gap holds a word and the
-# Coordinator id is not read.
+# Coordinator id is not read; coordinator ruling effective 2026-11-08 09:21 CST.
 roles_refuse("a Coordinator id after the word Triagey, Coordinator Triagey session_C1, is refused: Triagey is no filler word",
              role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator Triagey session_C1" + TRIAGE_LINE + RUNNER_LINE,
              ["Coordinator"])
