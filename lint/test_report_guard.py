@@ -1532,6 +1532,99 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
 
+    def test_dm_false_alarm_sonnet_rounds_in_earlier_turns_and_haiku_now_passes(self):
+        # Catches: "'reviewer sonnet' matches no reviewer spawn, which ran haiku". Rounds 2 and 3 ran sonnet in earlier
+        # landed turns, and the current turn's reviewer ran haiku. Done names the sonnet rounds too, so the session's
+        # spawns must back them.
+        round3 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 3 of 3"}
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: round 3 of #1913 passed, commit 1a2b3c4d. "
+            "(reviewer haiku round 1, reviewer sonnet rounds 2-3)\n>\n"
+            "> **Next:**\n> - Unstarted: none.",
+            [self.REVIEWER_R1],
+            lead=self.turn_one_then_wake(self.REVIEWER_R2) + self.turn_one_then_wake(round3)[1:])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_haiku_then_sonnet_then_haiku_turns_pass(self):
+        # Catches: the same refusal with the spawns in another order: a pinned haiku reviewer in turn 1, a sonnet
+        # reviewer in turn 2, and a pinned haiku reviewer in the current turn. The session's spawns back both names.
+        out = self.verdict(
+            "> **Done** BUILT: draft PR 1972, head fc9ab5afe. (builder sonnet, test-author haiku, "
+            "reviewer haiku round 1 FAIL, reviewer sonnet round 2 PASS)\n> **Next** Unstarted: none",
+            [self.REVIEWER_R1],
+            lead=self.turn_one_then_wake(self.REVIEWER_R1) + self.turn_one_then_wake(self.REVIEWER_R2)[1:])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_no_agent_item_with_a_builder_this_turn_blocks(self):
+        # Catches: a builder that ran this turn and that no Done or Next line names, on a Done whose only item is the
+        # session's own (no agent) line. The mark exempts the item, not the spawn window.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: pushed the handoff note at commit 9f8e7d6c (no agent).\n>\n"
+            "> **Next:**\n> - Unstarted: none.",
+            [self.BUILDER])
+        self.assertIsNotNone(out, "the report passed: a builder that ran this turn was not named")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_false_alarm_no_agent_item_builder_named_in_next_passes(self):
+        # Catches: the same report with the builder named with its model in Next, which must excuse the spawn.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: pushed the handoff note at commit 9f8e7d6c (no agent).\n>\n"
+            "> **Next:**\n> - Builder running (builder sonnet).\n> - Unstarted: none.",
+            [self.BUILDER])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_reviewer_running_named_in_next_with_builder_other_item_passes(self):
+        # Catches: "no model named for reviewer" on an OTHER item that names only the builder, while a reviewer spawned
+        # this turn still runs and Next names it with its model.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: the new check passes its own tests, commit 4d5e6f7a. (builder sonnet)\n>\n"
+            "> **Next:**\n> - Running: round 1 review (reviewer haiku).\n> - Unstarted: none.",
+            [self.REVIEWER_R1])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_running_test_author_named_in_next_passes(self):
+        # Catches: "no model named for test-author" on a Next line that names the test-author running with its
+        # pinned model, while Done names only the builder.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT: x, PR #7 (builder sonnet).\n>\n"
+            "> **Next:**\n> - Test-author running (test-author haiku).\n> - Unstarted: none.",
+            [self.BUILDER, {"subagent_type": "test-author", "prompt": "Add the red cases"}])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_own_commit_line_with_builder_and_test_author_blocks(self):
+        # Catches: a builder and a test-author that ran this turn and that no Done or Next line names, on a Done whose
+        # only item is the session's own commit.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: pushed the lint fix at commit 5a6b7c8d.\n>\n"
+            "> **Next:**\n> - Unstarted: none.",
+            [self.BUILDER, {"subagent_type": "test-author", "prompt": "Add the red cases"}])
+        self.assertIsNotNone(out, "the report passed: a builder and a test-author that ran this turn were not named")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder, test-author", out["reason"])
+
+    def test_dm_red_own_commit_line_builder_and_test_author_named_in_next_blocks(self):
+        # Catches: the own-commit item carries no (no agent) mark, so it is gated and names no builder pair. Next cannot
+        # excuse the builder and test-author that ran this turn, even when Next names them.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: pushed the lint fix at commit 5a6b7c8d.\n>\n"
+            "> **Next:**\n> - Builder and test-author running (builder sonnet, test-author haiku).\n"
+            "> - Unstarted: none.",
+            [self.BUILDER, {"subagent_type": "test-author", "prompt": "Add the red cases"}])
+        self.assertIsNotNone(out, "the report passed: a gated own-commit item let Next excuse the builder and test-author")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder, test-author", out["reason"])
+
+    def test_dm_false_alarm_own_commit_line_no_agent_named_in_next_passes(self):
+        # Catches: the same report with the own-commit item marked (no agent). The item is not gated, so Next's names
+        # with their models excuse the builder and test-author.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: pushed the lint fix at commit 5a6b7c8d (no agent).\n>\n"
+            "> **Next:**\n> - Builder and test-author running (builder sonnet, test-author haiku).\n"
+            "> - Unstarted: none.",
+            [self.BUILDER, {"subagent_type": "test-author", "prompt": "Add the red cases"}])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
