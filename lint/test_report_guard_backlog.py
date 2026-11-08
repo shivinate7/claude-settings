@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """The Backlog line: a coordinator's or batch runner's report gives three counts, each read from the ledger.
 
-Owner ruling (waiting-page item 386, merge-follows-review, pick c, saved 2026-11-07 22:25 CST): every runner and coordinator report gives
-reviewed PRs waiting past one batch cycle, open PRs with no next act, and finished lanes not archived. A count not
-read says `unknown`. The rules the cases pin:
+Every runner and coordinator report gives reviewed PRs waiting past one batch cycle, open PRs with no next act, and
+finished lanes not archived (rule reports-backlog-counts). A count not read says `unknown`. The rules the cases pin:
 
 - Who owes: only a session whose own newest get_session record carries cs-build:coordinator or cs-build:batch-runner,
   with no set_session_tags call after it (hooks/guard_merge.py _own_tier_proved). A lane, a triage session, an untagged
   session, a session with no own record and a session with no remote id owe nothing.
 - When: every Stop whose reply has the report shape (report_shape_ok), landed or not, and the rewrite after a
   missing-report block (rewrite_problems). A correction after a Backlog block is not checked again: a count blocks once.
-- What: the report holds a `Backlog:` item (at a line start, after a report label, or after "; " or ". ") with three
-  fields, each a whole number or `unknown`. The labels come from hooks/shared_names.py BACKLOG_FIELDS.
-- Check: counts 1 and 2 equal the newest `merge --reviewed` summary line read in the transcript after its newest
-  compact_boundary, and count 3 the newest `merge --idle-lanes` summary line. A read is found by its output line, not by
-  its command form. A run through verdict is read from the log its FAIL line names, at that log's last run. No read in
-  the window, or a failed read (no summary line), means `unknown`. `unknown` always passes.
-- The Stop starts no process and opens no network connection.
+- What: the report holds a Backlog item (at a line start, after a report label, or after "; " or ". "), plain or with the
+  colon inside the bold word, with three fields, each a whole number or `unknown`. The item word and the labels come from
+  hooks/shared_names.py (BACKLOG_ITEM, BACKLOG_FIELDS).
+- Check: counts 1 and 2 equal the newest `merge --reviewed` read in the transcript after its newest compact_boundary, and
+  count 3 the newest `merge --idle-lanes` read. A read is found by its output line, not by its command form. A failed run
+  has no output line, so it is found by its command: a merge or merge.py token must stand before the flag. A run through
+  verdict is read from the log its FAIL line names, at that log's last run. No read in the window, or a failed read, means
+  `unknown`. `unknown` always passes.
+- Cost: no process and no network connection. A run through verdict opens only the log of the newest run.
 
 The fixture, the own-record helpers and the Stop helper come from lint/test_report_guard.py and
 lint/test_report_guard_stalled.py, one home each, and are reused by name, never copied. Run with:
@@ -29,15 +30,22 @@ import re
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 sys.path.insert(0, os.path.join(HERE, "..", "skills", "roadmap"))
+import report_guard  # noqa: E402  the guard's own backlog read, called in process (lint/report_guard.py)
+import shared_names  # noqa: E402  the one home of the Backlog item word and labels (hooks/shared_names.py)
 import test_report_guard as trg  # noqa: E402  the fixture, helpers and run folder (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the own-record, tag and tool-call helpers (one home)
 import build  # noqa: E402  the idle-lanes row label, IDLE_LANES_LINE (one home, skills/roadmap/build.py)
-from shared_names import BACKLOG_FIELDS  # noqa: E402  the one home of the Backlog labels (hooks/shared_names.py)
+from shared_names import BACKLOG_FIELDS  # noqa: E402  the Backlog field labels, one home beside the item word
+try:
+    from shared_names import BACKLOG_ITEM  # noqa: E402  the Backlog item word, one home beside BACKLOG_FIELDS
+except ImportError:  # not built yet: this stand-in keeps the module importable, and each case fails on its own defect
+    BACKLOG_ITEM = "Backlog"
 
 human = trg.human
 assistant_text = trg.assistant_text
@@ -60,6 +68,12 @@ PARENT_ID = "session_parent1"
 REVIEWED_CMD = "merge --reviewed"
 IDLE_CMD = "merge --idle-lanes --live roadmap-live.json"
 REFUSED = "the hook tried to start a process or open a socket"
+# The forms a run of the merge script takes. Each has a merge or merge.py token before its flag, the mark of a merge run.
+REVIEWED_FORMS = ("python3 -I merge/merge.py --reviewed", "./merge/merge.py --reviewed", "timeout 300 merge --reviewed")
+IDLE_FORMS = ("python3 -I merge/merge.py --idle-lanes --live roadmap-live.json", "./merge/merge.py --idle-lanes --live roadmap-live.json",
+              "timeout 300 merge --idle-lanes --live roadmap-live.json")
+GREP_REVIEWED = "grep -n -- --reviewed merge/merge.py"
+GREP_IDLE = "grep -n -- --idle-lanes merge/merge.py"
 
 # The Stop run with a process start and a socket refused: each fails the run loudly instead of passing silently.
 NO_IO_CODE = (
@@ -118,14 +132,14 @@ def idle_read(lanes, command=IDLE_CMD):
     return read_run(command, ["c1 lane-c1 completed", idle_summary(lanes)])
 
 
-def failed_reviewed_read():
+def failed_reviewed_read(command=REVIEWED_CMD):
     """A `merge --reviewed` run whose pull list did not read: exit 2, and no summary line."""
-    return read_run(REVIEWED_CMD, ["merge: reading pulls from GitHub failed"], rc=2)
+    return read_run(command, ["merge: reading pulls from GitHub failed"], rc=2)
 
 
-def failed_idle_read():
+def failed_idle_read(command=IDLE_CMD):
     """A `merge --idle-lanes` run whose live file did not read: an unknown row, and no summary line."""
-    return read_run(IDLE_CMD, ["unknown (the live read failed)"], rc=1)
+    return read_run(command, ["unknown (the live read failed)"], rc=1)
 
 
 def verdict_reviewed(log_path):
@@ -139,9 +153,10 @@ def reads(past=2, none=1, lanes=3):
     return [reviewed_read(past=past, none=none), idle_read(lanes=lanes)]
 
 
-def backlog(past="unknown", none="unknown", lanes="unknown"):
-    """A Backlog item with its three fields, in item order."""
-    return "Backlog: %s %s; %s %s; %s %s" % (BACKLOG_FIELDS[0], past, BACKLOG_FIELDS[1], none, BACKLOG_FIELDS[2], lanes)
+def backlog(past="unknown", none="unknown", lanes="unknown", bold=False):
+    """A Backlog item with its three fields, in item order. `bold` puts the colon inside the bold word, as **Done:** reads."""
+    word = "**%s:**" % BACKLOG_ITEM if bold else "%s:" % BACKLOG_ITEM
+    return "%s %s %s; %s %s; %s %s" % (word, BACKLOG_FIELDS[0], past, BACKLOG_FIELDS[1], none, BACKLOG_FIELDS[2], lanes)
 
 
 def report(line=None, next_text="wait", done_text="BUILT abc123", carry=False):
@@ -219,6 +234,14 @@ class BacklogFixture(trg.SameTurnWriter):
         self.assertRegex(out["reason"], r"(?i)(?<![\w-])%s(?![\w-])" % re.escape(str(value)),
                          "the refusal does not name the value the read gives (%s): %r" % (value, out["reason"]))
 
+    def names_unknown_for(self, out, label):
+        """The Stop was refused as a block, and the clause that names `label` in the refusal says `unknown`, in either order.
+        A refusal for another cause names no such clause."""
+        self.owed(out)
+        name = re.escape(label)
+        self.assertRegex(out["reason"], r"(?i)(?:%s[^;.<]*\bunknown\b|\bunknown\b[^;.<]*%s)" % (name, name),
+                         "the refusal does not say unknown for %r: %r" % (label, out["reason"]))
+
     def released(self, out):
         """The Stop was not refused as a block."""
         self.assertFalse(out and out.get("decision") == "block", "the Stop was refused with no Backlog count owed: %r" % (out,))
@@ -227,7 +250,7 @@ class BacklogFixture(trg.SameTurnWriter):
 class BacklogCountTests(BacklogFixture, unittest.TestCase):
     """A coordinator or batch runner that owes the line: each count against its read."""
 
-    # Owed and refused. Each is red on the current head: no Backlog check exists yet.
+    # Owed and refused: each case names the refusal the check must give.
 
     def test_bk_red_coordinator_report_with_no_backlog_line_is_refused(self):
         # Catches: a coordinator's report with no Backlog line ends its turn.
@@ -324,16 +347,49 @@ class BacklogCountTests(BacklogFixture, unittest.TestCase):
     def test_bk_red_backlog_words_inside_a_sentence_are_no_item(self):
         # Catches: a Backlog phrase inside a sentence counts as the item, so a report that holds no item passes.
         records = [human("wake"), coordinator(), reviewed_read(past=2),
-                   assistant_text(report(next_text="wait; the old Backlog: 9 count is stale"))]
+                   assistant_text(report(next_text="wait; the old %s: 9 count is stale" % BACKLOG_ITEM))]
         self.owed(self.run_stop(records), "Backlog")
 
     def test_bk_red_a_malformed_backlog_item_is_refused(self):
         # Catches: a field that is neither a whole number nor `unknown`, or an item with two fields, passes.
-        lines = ("Backlog: %s many; %s 1; %s 2" % BACKLOG_FIELDS,
-                 "Backlog: %s 2; %s 1" % BACKLOG_FIELDS[:2])
+        lines = ("%s: %s many; %s 1; %s 2" % ((BACKLOG_ITEM,) + BACKLOG_FIELDS),
+                 "%s: %s 2; %s 1" % ((BACKLOG_ITEM,) + BACKLOG_FIELDS[:2]))
         for line in lines:
             with self.subTest(line=line):
                 self.owed(self.run_stop([human("wake"), coordinator(), assistant_text(report(line))]), "Backlog")
+
+    def test_bk_red_a_bold_backlog_item_that_matches_its_read_passes(self):
+        # Catches: a bold item, with the colon inside the bold word as **Done:** reads, is refused as malformed though its counts match.
+        records = [human("wake"), coordinator(), *reads(past=2, none=1, lanes=3),
+                   assistant_text(report(backlog(past=2, none=1, lanes=3, bold=True)))]
+        self.released(self.run_stop(records))
+
+    def test_bk_red_a_bold_backlog_item_that_differs_from_its_read_is_refused(self):
+        # Catches: a bold item is refused as malformed without its counts checked, so a count the read does not give goes unnamed.
+        records = [human("wake"), coordinator(), *reads(past=2, none=1, lanes=3),
+                   assistant_text(report(backlog(past=0, none=1, lanes=3, bold=True)))]
+        self.names_value(self.run_stop(records), 2)
+
+    def test_bk_red_a_failed_reviewed_read_in_any_form_expects_unknown(self):
+        # Catches: a failed merge --reviewed run in a form the guard does not take for a run (a script path after python3 -I, a
+        # relative path, a timeout wrapper) is passed over, so the good read before it still decides and its number passes.
+        for command in REVIEWED_FORMS:
+            with self.subTest(command=command):
+                good = [human("wake"), coordinator(), reviewed_read(past=2, none=1)]
+                self.released(self.run_stop(good + [assistant_text(report(backlog(past=2, none=1)))]))  # the precondition: the good read counts
+                out = self.run_stop(good + [failed_reviewed_read(command), assistant_text(report(backlog(past=2, none=1)))])
+                self.names_unknown_for(out, BACKLOG_FIELDS[0])
+                self.names_unknown_for(out, BACKLOG_FIELDS[1])
+
+    def test_bk_red_a_failed_idle_read_in_any_form_expects_unknown_for_lanes(self):
+        # Catches: a failed merge --idle-lanes run in a form the guard does not take for a run is passed over, so the lane count of
+        # the good read before it still passes.
+        for command in IDLE_FORMS:
+            with self.subTest(command=command):
+                good = [human("wake"), coordinator(), idle_read(lanes=3)]
+                self.released(self.run_stop(good + [assistant_text(report(backlog(lanes=3)))]))  # the precondition: the good read counts
+                out = self.run_stop(good + [failed_idle_read(command), assistant_text(report(backlog(lanes=3)))])
+                self.names_unknown_for(out, BACKLOG_FIELDS[2])
 
     def test_bk_red_rewrite_after_a_missing_report_block_checks_the_counts(self):
         # Catches: the rewrite after a missing-report block skips the counts, so a rewritten report passes a wrong one.
@@ -349,7 +405,7 @@ class BacklogCountTests(BacklogFixture, unittest.TestCase):
         self.names_value(self.run_stop(records), 2)  # the precondition: the first Stop is refused
         self.released(self.run_stop(records, stop_active=True))
 
-    # Controls: each passes on the current head too. They pin the release rules the check must keep.
+    # Controls: each is released. They pin the release rules the check must keep.
 
     def test_bk_green_counts_that_match_their_reads_pass(self):
         records = [human("wake"), coordinator(), *reads(past=2, none=1, lanes=3),
@@ -388,6 +444,15 @@ class BacklogCountTests(BacklogFixture, unittest.TestCase):
     def test_bk_green_an_unlanded_reply_with_no_report_owes_no_backlog(self):
         out = self.run_stop([human("wake"), coordinator(), *reads(), assistant_text("Status: waiting on the ledger.")])
         self.released(out)
+
+    def test_bk_green_a_grep_of_the_merge_script_does_not_reset_a_read(self):
+        # Control: a grep that names the merge script after its flag is no merge run, so a newer grep leaves the read before it in charge.
+        cases = ((reviewed_read(past=2, none=1), GREP_REVIEWED, "merge/merge.py:1204:    if args.reviewed:", backlog(past=2, none=1)),
+                 (idle_read(lanes=3), GREP_IDLE, "merge/merge.py:1311:    if args.idle_lanes:", backlog(lanes=3)))
+        for read, command, line, item in cases:
+            with self.subTest(command=command):
+                records = [human("wake"), coordinator(), read, read_run(command, [line]), assistant_text(report(item))]
+                self.released(self.run_stop(records))
 
 
 class OweNothingTests(BacklogFixture, unittest.TestCase):
@@ -457,6 +522,52 @@ class VerdictRunTests(BacklogFixture, unittest.TestCase):
         records = [human("wake"), coordinator(), idle_read(lanes=3), verdict_pass(IDLE_CMD),
                    assistant_text(report(backlog(lanes=3)))]
         self.names_value(self.run_stop(records), "unknown")
+
+
+class VerdictReadCostTests(BacklogFixture, unittest.TestCase):
+    """The reads a verdict run costs. The check opens the log of the newest run of a command, and no other."""
+
+    def opened_reads(self, records):
+        """(backlog_reads' result, the log paths it opened). The guard's log opener is counted in process, as the check calls it."""
+        opened = []
+        real = report_guard._verdict_log_text
+
+        def counting(path):
+            opened.append(path)
+            return real(path)
+
+        with mock.patch.object(report_guard, "_verdict_log_text", counting):
+            result = report_guard.backlog_reads(flat(records))
+        return result, opened
+
+    def test_bk_red_five_failed_verdict_runs_open_only_the_newest_log(self):
+        # Catches: each failed verdict run in the window has its log opened, so five runs cost five reads where the newest decides.
+        logs = [self.write_log("verdict-run-%d.log" % n, [(REVIEWED_CMD, [reviewed_summary(past=n)])]) for n in range(5)]
+        records = [human("wake"), coordinator(), [verdict_reviewed(log) for log in logs]]
+        result, opened = self.opened_reads(records)
+        self.assertEqual(result[0], (4, 0), "the newest run's count is not the one read: %r" % (result,))  # the scope: the newest run
+        self.assertEqual(opened, logs[-1:], "the guard opened %d logs for five runs; it reads the newest run's log only" % len(opened))
+
+    def test_bk_green_one_failed_verdict_run_opens_its_log(self):
+        # Control: the one run's log is opened and its count read, so the counter sees the read the check must count.
+        log = self.write_log("verdict-one.log", [(REVIEWED_CMD, [reviewed_summary(past=2)])])
+        result, opened = self.opened_reads([human("wake"), coordinator(), verdict_reviewed(log)])
+        self.assertEqual(result[0], (2, 0), "the one run's count is not read: %r" % (result,))
+        self.assertEqual(opened, [log], "the one run's log is not the one opened: %r" % (opened,))
+
+
+class ItemWordTests(unittest.TestCase):
+    """The Backlog item word has one home beside the field labels, and the guard reads that word."""
+
+    def test_bk_red_the_item_word_is_a_constant_beside_the_fields(self):
+        # Catches: the item word is a literal in the guard or in the report writer, so it has no one home beside BACKLOG_FIELDS.
+        self.assertEqual(getattr(shared_names, "BACKLOG_ITEM", None), "Backlog",
+                         "hooks/shared_names.py does not define BACKLOG_ITEM, so the item word has no one home beside BACKLOG_FIELDS")
+
+    def test_bk_green_the_guard_reads_an_item_written_with_the_constant(self):
+        # Control: a block written with the constant reads its three counts, so the word the report writer uses is the word the guard reads.
+        block = "%s: %s 1; %s 2; %s 3" % ((BACKLOG_ITEM,) + BACKLOG_FIELDS)
+        self.assertEqual(report_guard._backlog_item(block), (True, [1, 2, 3]))
 
 
 if __name__ == "__main__":
