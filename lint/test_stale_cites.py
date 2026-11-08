@@ -257,14 +257,17 @@ def unknown_lines(out):
     return [line for line in out.splitlines() if line.startswith("stale-cites: unknown, ")]
 
 
-def parser_script(flags, parents=(), table=()):
+def parser_script(flags, parents=(), table=(), rebound=False):
     """A Python script that declares each of `flags` with add_argument, as a CLI does. Each name in `parents` is a
     parent parser that COMMON defines: the script imports it and takes it as `parents=[name()]`. Each row of `table`
-    is a (flag, metavar, help) row of a CHECK_FLAGS tuple, which a loop declares, as a CLI's table does. Never run."""
+    is a (flag, metavar, help) row of a CHECK_FLAGS tuple, which a loop declares, as a CLI's table does. `rebound`
+    binds CHECK_FLAGS a second time, with a plain assignment, so no reader takes its rows. Never run."""
     module = os.path.splitext(os.path.basename(COMMON))[0]
     imports = "".join("from %s import %s\n" % (module, name) for name in parents)
     takes = "parents=[%s]" % ", ".join(name + "()" for name in parents) if parents else ""
-    constant = "CHECK_FLAGS = (%s\n)\n\n" % "".join('\n    ("%s", "%s", "%s"),' % row for row in table) if table else ""
+    rebind = "CHECK_FLAGS = CHECK_FLAGS[:]\n" if rebound else ""
+    constant = ("CHECK_FLAGS = (%s\n)\n%s\n" % ("".join('\n    ("%s", "%s", "%s"),' % row for row in table), rebind)
+                if table else "")
     loop = "for flag, _, text in CHECK_FLAGS:\n    parser.add_argument(flag, help=text)\n" if table else ""
     return ("import argparse\n" + imports + "\n" + constant + "parser = argparse.ArgumentParser(%s)\n" % takes
             + "".join('parser.add_argument("%s")\n' % flag for flag in flags) + loop)
@@ -1153,6 +1156,38 @@ class FlagTests(StaleCase):
         self.assert_control_fires_and_subject_does_not(
             self.make_range(base_files(notes, extra={REPORT: base_src, COMMON: helper_src}), change),
             control=4, subject=3, flag="--between")
+
+    def test_flag_named_as_a_constant_in_a_table_bound_twice_reads_unknown_not_removed(self):
+        """A removed flag that head still names as a string constant, in a table bound twice, is unknown for its cite.
+        No reader takes that table's rows, so the flag is never called removed. Control: the same shape with the flag
+        gone entirely still fires."""
+        base_src = parser_script(["--x"])
+        kept_src = parser_script([], table=(("--x", "<n>", "the x flag"),), rebound=True)
+        gone_src = parser_script([], table=(("--y", "<n>", "the y flag"),), rebound=True)
+        notes = "# Notes\n\n- report: `tools/report.py --x 5`\n"  # line 3 cites --x
+        self.assertEqual(argument_flags(base_src), {"--x"})  # scope: base declares --x as a literal
+        self.assertEqual(module_bindings(kept_src).count(("assign", "CHECK_FLAGS")), 2)  # scope: the table is bound twice
+        self.assertEqual(argument_flags(kept_src), set())  # scope: no reader takes the table's rows
+        self.assertIn('"--x"', kept_src)  # scope: head still names --x as a string constant
+        self.assertNotIn("--x", gone_src)  # scope: the control's head names --x nowhere
+
+        def change_to(head):
+            def change(repo):
+                write(repo, REPORT, head)
+                commit(repo)
+            return change
+
+        self.assert_flags(self.make_range(base_files(notes, extra={REPORT: base_src}), change_to(gone_src)),
+                          [(NOTES, 3, "STALE007")])  # control: --x gone entirely still fires
+        rc, out = self.run_check(self.make_range(base_files(notes, extra={REPORT: base_src}), change_to(kept_src)))
+        self.assertNotIn("Traceback", out, out)  # a crash is not a read
+        self.assertNotIn((NOTES, 3, "STALE007"), [(p, n, c) for p, n, c, _ in parse(out)],
+                         "line 3 cites --x, which head still names as a string constant in a table bound twice; "
+                         "the reader does not take that form, so the cite must read unknown, not removed:\n%s" % out)
+        self.assertEqual(rc, 0, out)
+        unknown = unknown_lines(out)
+        self.assertEqual(len(unknown), 1, "one cite, one unknown line:\n%s" % out)
+        self.assertTrue(unknown[0].startswith("stale-cites: unknown, %s:3: " % NOTES), out)
 
 
 class StepTests(StaleCase):
