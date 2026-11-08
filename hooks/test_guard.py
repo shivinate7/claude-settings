@@ -7521,14 +7521,12 @@ sh("push: nested quote, node -e console.log prints a forced push, allows",
    r'node -e "console.log(\"' + VCS + r' push -f\")"', "allow", cwd=PUSHFEAT)
 # NAME PINS. Each case goes red on a scratch guard with the name it pins removed, except System.out.print*,
 # which print\w* also matches. ruby and perl are read only by INTERPRETER_RUNNER, and `system` also matches
-# CALL_RUNNER, so their pins use `spawn` and `readpipe`. `deno eval` is read by SCRIPT_RUNNER's `eval`, not
-# by the deno entry of INTERPRETER_RUNNER, which needs a dash flag.
+# CALL_RUNNER, so their pins use `spawn` and `readpipe`. No pin names deno: SCRIPT_RUNNER's `eval` and
+# INTERPRETER_RUNNER's deno alternative both read `deno eval`, so removing one changes no deno case's verdict.
 sh("push: nested quote runner pin, ruby -e spawns a forced push, denies",
    r'ruby -e "spawn(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
 sh("push: nested quote runner pin, perl -e readpipe runs a forced push, denies",
    r'perl -e "readpipe(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
-sh("push: nested quote runner pin, deno eval spawns a forced push, denies",
-   r'deno eval "spawn(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
 sh("push: nested quote printer pin, ruby -e puts prints a forced push, allows",
    r'ruby -e "puts(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
 sh("push: nested quote printer pin, perl -e say prints a forced push, allows",
@@ -7546,12 +7544,68 @@ sh("push: nested quote printer pin, bash -c sudo echo prints a forced push, allo
    r'bash -c "sudo echo \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
 sh("push: nested quote printer pin, bash -c command printf prints a forced push, allows",
    r'bash -c "command printf \"%s\" \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
-# GAPS, red on this code. The guard allows each one today. php -r is in no runner list, and a Deno.Command
-# spawn names git as an argument, never as `git push` text on one line.
+# GAPS. php -r runs its string as a script, and a Deno.Command call names git as an argument. Each one
+# denies: php -r is an INTERPRETER_RUNNER runner, and the pairs of an argv call join into one command line.
 sh("push: nested quote gap, php -r shell_exec runs a forced push, denies",
    r'php -r "shell_exec(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
 sh("push: nested quote gap, deno eval spawns git through Deno.Command, denies",
    r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# ARGV CALLS. A Deno.Command call names its program and its arguments as separate strings, and the pairs
+# of one call are joined into one command line. The join keeps each argument's bounds: a quoted "my repo"
+# is one argument, so -C takes that whole path and push is the subcommand.
+sh("push: argv call, -C takes a quoted path with a space, then a forced push, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"-C\", \"my repo\", \"push\", \"-f\", '
+   r'\"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, -c takes a quoted value with a space, then a forced push, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"-c\", \"user.name=A B\", \"push\", \"-f\", '
+   r'\"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# The Deno permission flags come after `eval` here, before the script. No runner pattern reads a script
+# after them.
+sh("push: deno eval --allow-run after eval, argv forced push, denies",
+   r'deno eval --allow-run "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval -A after eval, argv forced push, denies",
+   r'deno eval -A "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: deno eval --allow-all after eval, argv forced push, denies",
+   r'deno eval --allow-all "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# The program is rg, so git and push are its search arguments, not a git call.
+sh("push: argv call runs rg with git and push as arguments, allows",
+   r'deno eval "new Deno.Command(\"rg\", {args: [\"' + VCS + r'\", \"push\", \".\"]}).outputSync()"',
+   "allow", cwd=PUSHFEAT)
+# Two calls: a git status, then an echo that prints push -f. Each call is its own command line.
+sh("push: argv calls run git status then echo push -f, allows",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"status\"]}).outputSync(); '
+   r'new Deno.Command(\"echo\", {args: [\"push\", \"-f\"]}).outputSync()"',
+   "allow", cwd=PUSHFEAT)
+# Scanner shapes on the argv path. An argument is string text, so a comment opener, a lone quote or a
+# template literal inside one does not hide the forced push that follows it. Each one denies.
+sh("push: argv call, // in a push argument with a space, then -f, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"// a\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, /* in a push argument with a space, then -f, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"/* a\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, # in a push argument with a space, then -f, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"# not\", \"-f\", \"origin\", '
+   r'\"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: argv call, a lone quote in a push argument with a space, then -f, denies",
+   r'deno eval "new Deno.Command(\"' + VCS + r'\", {args: [\"push\", \"it' + "'" + r's a\", \"-f\", '
+   r'\"origin\", \"x\"]}).outputSync()"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: a multi-line template literal before an argv forced push, denies",
+   'deno eval "const s = `line one\nline two`; new Deno.Command(\\"' + VCS + r'\", '
+   r'{args: [\"push\", \"-f\", \"origin\", \"x\"]}).outputSync()"',
    "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
 # The push text reader's scanner shapes. A comment opener or a multi-line string inside quotes is text, so
 # each is an allow control, green today. A lone quote in text opens no string that hides a push: nothing
@@ -23841,30 +23895,30 @@ def tick_safe_mean(run_once, cap):
     return True, total / runs, ""
 
 
-def rm_var_batch(cmd, must):
-    """Return tick_safe_mean of judging cmd. Every run must be a deny whose reason holds `must`.
+def rm_var_batch(cmd, must, cwd=NOGIT):
+    """Return tick_safe_mean of judging cmd in cwd. Every run must be a deny whose reason holds `must`.
 
     The reason is the rule name, so an empty `must` checks the deny alone.
     """
     def run_once():
-        got, reason, took = judge_in_process(cmd, NOGIT)
+        got, reason, took = judge_in_process(cmd, cwd)
         if got != "deny" or must not in reason:
-            return False, 0.0, "judged %s, not the rm-var refusal" % got
+            return False, 0.0, "judged %s, not the expected deny" % got
         return True, took, ""
     return tick_safe_mean(run_once, RM_VAR_BATCH_CAP)
 
 
-def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded"):
-    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n."""
+def rm_var_ratio(make, small_n, big_n, must="rm-var-unguarded", cwd=NOGIT):
+    """Return (ok, text) for make(big_n) against make(small_n) scaled by big_n / small_n, judged in cwd."""
     small, big = [], []
     for _ in range(RM_VAR_REPEATS):
-        ok, mean, text = rm_var_batch(make(small_n), must)
+        ok, mean, text = rm_var_batch(make(small_n), must, cwd)
         if not ok:
             return False, "small n=%d: %s" % (small_n, text)
         small.append(mean)
-        got, reason, took = judge_in_process(make(big_n), NOGIT)
+        got, reason, took = judge_in_process(make(big_n), cwd)
         if got != "deny" or must not in reason:
-            return False, "big n=%d judged %s, not the rm-var refusal" % (big_n, got)
+            return False, "big n=%d judged %s, not the expected deny" % (big_n, got)
         big.append(took)
     size = big_n / small_n
     base = sum(small) / len(small)   # each batch mean is positive: it spans RM_VAR_FLOOR
@@ -23918,6 +23972,25 @@ def rm_var_wide_case():
 
 LOG_CHECKS_EXTRA.append(("rm-var: 4000 assignments and 4000 targets with pwd scale linearly in CPU",
                          rm_var_wide_case))
+
+
+# The argv join reads each gap between quote pairs with ARGV_GAP. A run of spaces that ends in a
+# non-gap character backtracks as the square of its length. The push is forced at both sizes, so the
+# verdict stays deny and only the CPU ratio can fail. The label names no rm-var, so the family is set
+# to push-delete for this one append and restored after it.
+def argv_gap_cmd(n):
+    return ('deno eval "new Deno.Command(\\"' + VCS + '\\", {args: [\\"push\\", \\"-f\\"' + " " * n
+            + 'x, \\"origin\\", \\"x\\"]}).outputSync()"')
+
+
+def argv_gap_case():
+    return rm_var_ratio(argv_gap_cmd, 6000, 48000, must="", cwd=PUSHFEAT)
+
+
+_section_family = FAMILY
+FAMILY = "push-delete"
+LOG_CHECKS_EXTRA.append(("push: a failing ARGV_GAP over 48000 spaces stays linear in CPU", argv_gap_case))
+FAMILY = _section_family
 
 
 # Judge's CPU time (1 s), not wall-clock (flaky on macOS runners), bounds a run of apostrophes; a 30 s kill guard stops a hang.
