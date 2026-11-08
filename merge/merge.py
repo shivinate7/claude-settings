@@ -3173,7 +3173,7 @@ def tool_stamp_since():
             note = tool_source_note(tool)
             if not note:
                 raise
-            raise Stop(f"{note} {e}") from e
+            raise Stop(f"{note} {str(e).removesuffix(REVIEW_CITE).rstrip()} " + REVIEW_CITE) from e  # each tool-read Stop ends with this cite
         _tool_stamp_since[tool] = stamp
     return _tool_stamp_since[tool]
 
