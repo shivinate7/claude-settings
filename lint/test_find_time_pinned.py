@@ -2149,6 +2149,327 @@ class HangGuardTest(FinderCase):
                          "a hang guard with an unread file exits %d, not 2" % proc.returncode)
 
 
+# ---- a poll interval in a loop that waits on a condition with a cap is a hang guard (P5) ------
+
+POLL_PATH = "tests/test_poll.py"
+
+
+class PollLoopTest(FinderCase):
+    """A sleep in a loop that waits on a condition with a cap is a wait-cap: listed, never counted. A sleep
+    with no condition, or with no cap, is a fixed wait and stays sleep. Each case pins the sleep line, not
+    the loop line."""
+
+    def listed(self, text, needle):
+        """The categories the finder gives the sleep line, and the exit code. Scope first (P7): the fixture is
+        read and the line has a finding at all."""
+        self.put(POLL_PATH, text)
+        code, out = self.report()
+        line = lineno(text, needle)
+        cats = {cat for path, ln, cat in self.rows(out) if ln == line}
+        self.assertTrue(cats, "scope: the sleep at line %d is not listed at all" % line)
+        return code, cats
+
+    def assert_wait_cap(self, text, needle):
+        code, cats = self.listed(text, needle)
+        self.assertEqual(cats, {"wait-cap"},
+                         "the poll interval is listed as %s, not wait-cap (a hang guard)" % sorted(cats))
+        self.assertEqual(code, 0, "a poll interval listed as wait-cap is counted as time-pinned (exit %d)" % code)
+
+    def assert_sleep(self, text, needle):
+        _, cats = self.listed(text, needle)
+        self.assertEqual(cats, {"sleep"}, "the fixed wait is listed as %s, not sleep" % sorted(cats))
+
+    # The real shapes. Each names the site it copies, so the next reader can find it.
+
+    def test_deadline_in_the_while_test_and_an_if_return_in_the_body(self):
+        # janitor/test_sweep.py, _wait_for_pidport_file and _read_when_ready
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_file(path, timeout=10.0):",
+            "    deadline = time.time() + timeout",
+            "    while time.time() < deadline:",
+            "        if os.path.exists(path) and os.path.getsize(path) > 0:",
+            "            return path",
+            "        time.sleep(0.05)",
+            "    raise AssertionError('never written: %r' % path)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_deadline_and_a_condition_in_the_while_test_with_monotonic_and_a_multi_line_test(self):
+        # janitor/test_sweep.py, the trash-folder wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_trash_gone(names, is_trash):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline and any(",
+            "            is_trash(n) for n in names()):",
+            "        time.sleep(0.2)",
+            "    return not any(is_trash(n) for n in names())",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    def test_deadline_and_a_condition_in_the_while_test_with_time_time(self):
+        # janitor/test_sweep.py, the reap wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_reap(pid_alive, pid):",
+            "    deadline = time.time() + 5",
+            "    while time.time() < deadline and pid_alive(pid):",
+            "        time.sleep(0.2)",
+            "    return not pid_alive(pid)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    def test_a_negated_condition_and_a_stop_name_in_the_while_test(self):
+        # merge/test_merge.py, the held-call wait (the loop only)
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_marker(marker):",
+            "    stop = time.time() + 60",
+            "    while not os.path.exists(marker) and time.time() < stop:",
+            "        time.sleep(0.05)",
+            "    return os.path.exists(marker)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_three_terms_in_the_while_test(self):
+        # merge/test_lane_lint.py, the lint-start wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_lint(calls, proc):",
+            "    deadline = time.time() + 60",
+            "    while not calls() and proc.poll() is None and time.time() < deadline:",
+            "        time.sleep(0.05)",
+            "    return calls()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_condition_in_the_while_test_and_the_cap_in_an_if_that_fails(self):
+        # janitor/test_sweep.py, the holder start
+        text = src(
+            "import os",
+            "import subprocess",
+            "import time",
+            "import unittest",
+            "",
+            "class Holder(unittest.TestCase):",
+            "    def start_holder(self, ready):",
+            "        holder = subprocess.Popen(['sleep', '30'])",
+            "        deadline = time.time() + 30",
+            "        while not os.path.exists(ready):",
+            "            if holder.poll() is not None or time.time() > deadline:",
+            "                self.fail('the holder never took the lock')",
+            "            time.sleep(0.02)",
+            "        return holder",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.02)")
+
+    def test_for_range_with_a_direct_condition_that_returns(self):
+        # lint/test_sim_lease.py, queue_waiter
+        text = src(
+            "import time",
+            "",
+            "class Waiter:",
+            "    def queue_waiter(self, status, pid):",
+            "        for _ in range(100):",
+            "            if mentions(status(), pid):",
+            "                return pid",
+            "            time.sleep(0.05)",
+            "        raise AssertionError('not on the queue')",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_for_range_with_an_assign_before_the_condition_that_returns(self):
+        # lint/test_wait_pid.py, the child wait
+        text = src(
+            "import time",
+            "",
+            "def wait_for_child(stub, ps_parents):",
+            "    for _ in range(100):",
+            "        found = [p for p, parent in ps_parents().items() if parent == stub]",
+            "        if found:",
+            "            return found[0]",
+            "        time.sleep(0.05)",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.05)")
+
+    def test_for_range_with_a_condition_that_breaks(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_flag(flag):",
+            "    for _ in range(50):",
+            "        if flag.is_set():",
+            "            break",
+            "        time.sleep(0.1)",
+            "    return flag.is_set()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.1)")
+
+    def test_while_true_with_a_condition_return_and_a_deadline_return(self):
+        # hooks/test_stall_watch.py, wait_until
+        text = src(
+            "import time",
+            "",
+            "def wait_until(cond, secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while True:",
+            "        if cond():",
+            "            return True",
+            "        if time.monotonic() >= deadline:",
+            "            return False",
+            "        time.sleep(0.2)",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # The controls. Each must stay sleep, and each passes on the old code.
+
+    def test_a_bare_sleep_before_an_assert_stays_sleep(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class Settle(unittest.TestCase):",
+            "    def test_settles(self):",
+            "        time.sleep(1)",
+            "        self.assertTrue(ready())",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_loop_with_no_condition_and_no_cap_stays_sleep(self):
+        text = src("import time", "", "def test_forever():", "    while True:", "        time.sleep(1)")
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_condition_with_no_cap_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_ready():",
+            "    while not ready():",
+            "        time.sleep(0.05)",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(0.05)")
+
+    def test_an_in_body_condition_with_no_cap_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_ready(ready):",
+            "    while True:",
+            "        if ready():",
+            "            return True",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_fixed_count_with_no_condition_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def settle():",
+            "    for _ in range(10):",
+            "        time.sleep(0.1)",
+        )
+        self.assert_sleep(text, "time.sleep(0.1)")
+
+    def test_a_deadline_with_no_condition_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def pause(secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_sleep_after_the_loop_stays_sleep(self):
+        # merge/test_merge.py, the held call: the sleep follows the loop and its assert
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_then_settle(marker, out):",
+            "    stop = time.time() + 60",
+            "    while not os.path.exists(marker) and time.time() < stop:",
+            "        time.sleep(0.05)",
+            "    assert os.path.exists(marker), 'the held call never started'",
+            "    time.sleep(4)  # a human watching the terminal gets this long before anything is said",
+            "    return out.getvalue()",
+        )
+        self.assert_sleep(text, "time.sleep(4)")
+
+    def test_a_branch_that_does_not_end_the_wait_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def tick_for(secs, cond, log):",
+            "    deadline = time.monotonic() + secs",
+            "    while time.monotonic() < deadline:",
+            "        if cond():",
+            "            log.append('seen')",
+            "        time.sleep(0.2)",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_a_loop_shape_in_a_comment_or_a_string_stays_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "# while time.monotonic() < deadline: a loop named in a comment",
+            "NOTE = \"don't wait: for _ in range(100): if ready: break\"",
+            "",
+            "def test_settles():",
+            "    time.sleep(1)",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_a_file_of_only_poll_loops_exits_0_with_the_hang_guards_uncounted(self):
+        text = src(
+            "import os",
+            "import time",
+            "",
+            "def wait_for_file(path, timeout=10.0):",
+            "    deadline = time.time() + timeout",
+            "    while time.time() < deadline:",
+            "        if os.path.exists(path):",
+            "            return path",
+            "        time.sleep(0.05)",
+            "    return None",
+            "",
+            "def wait_until(cond, secs):",
+            "    deadline = time.monotonic() + secs",
+            "    while True:",
+            "        if cond():",
+            "            return True",
+            "        if time.monotonic() >= deadline:",
+            "            return False",
+            "        time.sleep(0.2)",
+            "",
+            "def wait_for_flag(flag):",
+            "    for _ in range(50):",
+            "        if flag.is_set():",
+            "            break",
+            "        time.sleep(0.1)",
+            "    return flag.is_set()",
+        )
+        self.put(POLL_PATH, text)
+        proc = run(self.root)
+        self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
+        self.assertEqual(proc.returncode, 0,
+                         "a file whose only findings are poll-loop hang guards exits %d, not 0" % proc.returncode)
+        assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=3))
+
+
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
 
 class HelperTaintTest(FinderCase):
