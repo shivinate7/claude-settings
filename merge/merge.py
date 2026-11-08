@@ -3289,8 +3289,8 @@ def review_state(rec, head):
     position, across all rounds) is PASS or absent; or the final allowed round is recorded; or Kind is delete-only and the first round is recorded;
     or Kind is docs-only with no round.
     Guard or check yes: done only when the final allowed round is recorded and Net value is zero or positive, whatever the verdicts and any fix check.
-    Before it the record is open. The one exemption is Kind delete-only with an all-PASS first round, which then follows the Guard or check no
-    rules (decision hold-unsafe-after-round-3).
+    Before it the record is open. The one exemption is Kind delete-only with every round line PASS and no fix check, which then follows the Guard or
+    check no rules (decision hold-unsafe-after-round-3).
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"]) is not a round and is read after the held rule. A FAIL is open, whatever the rounds say. A PASS counts as the last
     recorded round passing, even when that round failed; with no round recorded it is open. On the final round it keeps the net value that round
@@ -3317,8 +3317,8 @@ def review_state(rec, head):
         if rec["net"] in ("zero", "positive"):
             return "done", f"round 3 is done, net value {rec['net']}" + note
         return "open", "round 3 is done on a guard or check change, and its net value is owed"
-    # a guard or check change owes the final round and its net value; the one exemption is a delete-only change whose first round is all PASS
-    one_round = rec["kind"] == "delete-only" and rounds and all(v == "PASS" for i, _, _, v in rounds if i == 1)
+    # a guard or check change owes the final round and its net value; the one exemption is a delete-only change with every round line PASS and no fix check
+    one_round = rec["kind"] == "delete-only" and rounds and not fix and all(v == "PASS" for *_, v in rounds)
     if rec["guard"] == "yes" and not one_round:
         return "open", f"a guard or check change owes the final round and its net value; round {top} is recorded" if top else "no round is recorded"
     top_pass = all(v == "PASS" for i, _, _, v in rounds if i == top)
