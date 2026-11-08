@@ -83,8 +83,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    checks only that it changes pin lines alone, to a main commit that descends from the old pin.
    Put the fix on the lane branch, never on the integration branch. Run CI again, once, and merge the
    rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
-   (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
-   gets no fix lane until the owner decides.
+   (rule `roles-review-cap-three`, net-value hold after round 3) is the exception. Drop it and park it. It
+   gets no fix lane until the owner decides. That is the net-value hold only. A round-3 FAIL or PARTIAL hold is different: its finding starts a new lane at round 1. A passing fix check clears a round-3 hold. The lane's reading: a passing fix check does not clear a design reviewer's FAIL or PARTIAL. The coordinator's picks, not the owner's words: a fix check FAIL after round 3 holds, and so does a design-reviewer FAIL in round 3.
    No merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
