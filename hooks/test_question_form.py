@@ -1671,6 +1671,39 @@ def case_step_wrapper_flags_before_a_folder_or_prose_is_text():
              entry_of(task_item(["Check the output of `%s`" % span])), None)
 
 
+def case_step_loop_keyword_before_a_cmdlet_path_is_a_shell_line():
+    # A loop keyword (then, do, else) is skipped as a wrapper is, so a cmdlet path after it is a shell line. The
+    # forward-slash form is the control: it is refused by the shell reader, on head and on the old code.
+    refused = ("command-in-item", "shell line")
+    for span in (r"then C:\tools\Get-Thing", r"do C:\tools\Get-Thing", r"else C:\tools\Get-Thing"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+    page("a step holding `then C:/tools/Get-Thing` is refused as a shell line, a control", "set",
+         entry_of(task_item(["Check the output of `then C:/tools/Get-Thing`"])), refused)
+
+
+def case_step_quoted_wrapper_value_before_a_cmdlet_path_is_a_shell_line():
+    # A quoted wrapper value can hold a space. The prefix reader splits words on that space, so `-f "%E` takes the
+    # first half and `s"` is read as the command word; `-u "my` leaves `user"`. No path is found there, so the cmdlet
+    # path after the quoted value passes. The forward-slash forms are the controls: the shell reader reads a quoted
+    # value whole.
+    refused = ("command-in-item", "shell line")
+    for span in (r'time -f "%E s" C:\tools\Get-Thing', r'sudo -u "my user" C:\tools\Get-Thing'):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+    for span in ('time -f "%E s" C:/tools/Get-Thing', 'sudo -u "my user" C:/tools/Get-Thing'):
+        page("a step holding `%s` is refused as a shell line, a control" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+
+
+def case_step_quoted_wrapper_value_before_a_folder_is_text():
+    # The pass control: a folder whose path ends in a separator, after a quoted wrapper value, is text. The separator
+    # keeps the path check from matching, as it does after a bare value in
+    # case_step_wrapper_flags_before_a_folder_or_prose_is_text.
+    page(r'a step holding `sudo -u "my user" C:\Docs\Read-Me/` is text and passes, a control', "set",
+         entry_of(task_item([r'Check the output of `sudo -u "my user" C:\Docs\Read-Me/`'])), None)
+
+
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
 # `[ \t]+` form about 4. The limit sits between them.
 RATIO_LIMIT = 3.0
@@ -2397,6 +2430,9 @@ def main():
                  case_step_time_prefix_before_a_cmdlet_path_is_a_shell_line, case_step_prefixed_folder_path_is_text,
                  case_step_wrapper_flags_before_a_cmdlet_path_is_a_shell_line,
                  case_step_wrapper_flags_before_a_folder_or_prose_is_text,
+                 case_step_loop_keyword_before_a_cmdlet_path_is_a_shell_line,
+                 case_step_quoted_wrapper_value_before_a_cmdlet_path_is_a_shell_line,
+                 case_step_quoted_wrapper_value_before_a_folder_is_text,
                  case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
