@@ -2963,7 +2963,7 @@ def relayed_head_holds(root, branch, relayed, live):
             return False
     return True
 
-HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it. A new yes from the owner is needed. Nothing was claimed or pushed."
+HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it (decision auto-mode-owner-acts, a relayed yes binds to the head at relay time). A new yes from the owner is needed. Nothing was claimed or pushed."
 
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None):
     m = cfg.get("merge", {})

@@ -735,6 +735,49 @@ class ConfirmHead(Env):
         self.assertFalse(getattr(self.host, "merged", False), "the PUT merged a head that moved after the compare")
         self.assertEqual(self.claims(), 0, "a claim reached main")
 
+    def test_a_rival_commit_under_a_tool_claim_refuses_a_rerun_on_the_relayed_head(self):
+        relayed = self.head()
+        rival = self.competitor_push()  # a rival commit on the relayed head
+        self.network_drops_the_wait_after_the_claim()
+        rc, out, err = self.run_args("7", "--confirm", "--head", rival)  # the tool claims on the rival commit; the claim stays
+        self.assertNotEqual(rc, 0, out + err)
+        claim = self.head()
+        self.assertNotEqual(claim, rival, "the first run pushed no claim")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{claim}^"), rival, "the claim is not directly on the rival commit")
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is the tool's claim on top of a rival commit
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the rerun was not refused as a moved head")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim reached main")
+
+    def test_a_rival_commit_on_top_of_a_tool_claim_refuses_a_rerun_on_the_relayed_head(self):
+        relayed = self.head()
+        self.network_drops_the_wait_after_the_claim()
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the tool claims on the relayed head; the claim stays
+        self.assertNotEqual(rc, 0, out + err)
+        claim = self.head()
+        self.assertNotEqual(claim, relayed, "the first run pushed no claim")
+        self.competitor_push()  # a rival commit lands on top of the tool's claim
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is a rival commit above the claim
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the rerun was not refused as a moved head")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim reached main")
+
+    def test_a_live_head_behind_the_relayed_head_is_refused(self):
+        base = self.head()
+        relayed = self.competitor_push()  # the relayed head is one commit past base
+        sh(self.co, "git", "fetch", "-q", "origin")  # the relayed commit is local, so the walk's log runs and finds nothing above it
+        sh(self.other, "git", "push", "-q", "origin", ":feat")  # the branch is cut again at the earlier commit: the live head is behind
+        sh(self.other, "git", "push", "-q", "origin", f"{base}:refs/heads/feat")
+        self.assertEqual(self.head(), base, "the branch was not cut back to the earlier commit")
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the rerun was not refused as a moved head")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim reached main")
+
     def test_a_head_that_is_not_40_hex_is_refused_as_bad_input(self):
         out, err = self.assert_usage_error("7", "--confirm", "--head", self.head()[:7])
         self.assertFalse(getattr(self.host, "merged", False), out + err)
