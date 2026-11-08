@@ -41,7 +41,7 @@ saves main's page with the live designData and roadmap blocks kept (splice.carry
 --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
---items names the items the session saved with `ArtifactData list items`: a JSON list file, or the folder of
+--items names the items the session saved with `ArtifactData list items`: a JSON list file (bare data objects, or {id, data} entries), or the folder of
 <id>.json files that call saves. A folder without the .complete marker reads every wait `unknown`, with no gh call.
 --items needs hooks/_nowindow.py to start gh; without it every wait reads `unknown`. A `run` or `pr` is a whole
 number above zero, or a string of digits with no leading zero; anything else reads `unknown`. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
