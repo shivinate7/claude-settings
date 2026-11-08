@@ -74,14 +74,21 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
-The notification-markup check (rule `no-self-written-notification`): on every Stop, landed or not, with or without a human
-record, it refuses each line of the last reply that holds notification markup as an opening tag (NOTIFICATION_TAGS:
+The notification-markup check (rule `no-self-written-notification`): on every Stop that is not a stop_hook_active
+rewrite, landed or not, with or without a human record, it refuses each line of the last reply that holds notification
+markup as an opening tag (NOTIFICATION_TAGS:
 `<task-notification`, `<cross-session-message`, `<webhook-payload`, `<system-reminder`, `<local-command-caveat`,
 `<child-session-event`, `<wake` with `reason=`, `<event` with `source=`; any case, mid-line or in a blockquote), outside
-fences and inline code spans. An unclosed fence runs to the end of the reply. One refusal per turn lists the lines and
-joins any other reason. A rewrite after a missing-report refusal is checked too; a rewrite after this check's own refusal
-stays quiet. Risk kind and incident: decision no-self-written-notification. Cost: one regex read of the last reply at Stop;
-no file, no process, no log.
+fences and inline code spans, read as CommonMark: a fence closes at a bare run of its own character at least as long as
+its opener, and a backslash before a backtick makes it plain text. An unclosed fence runs to the end of the reply. One
+refusal per turn lists the lines and joins any other reason. It does not read a Stop when the hook is no Stop, its JSON is
+bad, the transcript is missing or unreadable, or stop_hook_active is set with no marker. A rewrite after a missing-report
+refusal is checked too. A refusal of this check leaves a marker (local_time.notification_marker_path, an empty file): the
+next stop_hook_active Stop consumes it and checks the rewrite once for the markup only, so a fake tag in the rewrite is
+refused, and the Stop after that is quiet. An error inside the check adds a systemMessage "Notification-markup guard:
+UNKNOWN, the check did not run". Risk kind and incident: decision no-self-written-notification. Cost: one read of the
+last reply at Stop, no process, no log; one empty file per refusal of this check, written at the block and deleted at the
+next Stop, with or without stop_hook_active.
 
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
@@ -604,7 +611,8 @@ def answered_problem(text):
 # no-self-written-notification: a reply that holds notification markup as an opening tag reads, to the session and
 # its reader, as an agent, a result or an owner event that never happened. One constant names the tags: the value
 # is the attribute the same tag must carry (None: the tag name alone is enough), so a plain `<wake up>` or `<event>`
-# is no markup. Fences, quotes and code spans are read as in answered_problem; an unclosed fence runs to the end.
+# is no markup. A quote prefix is stripped before the fence walk, as in answered_problem; an unclosed fence runs to
+# the end. The fence and code-span reads below follow CommonMark and are this check's own.
 NOTIFICATION_TAGS = {
     "task-notification": None,
     "cross-session-message": None,
@@ -627,6 +635,51 @@ NOTIFICATION_REASON = owner_line(
     "that never happened; a mention of the tag in an inline code span or a fence is no markup") + " Lines: "
 
 
+# CommonMark fences for this check's own walk: an opener is a run of 3 or more backticks or tildes (a backtick
+# opener's info string holds no backtick, so a span of three backticks at the line start opens nothing). A closer is
+# a bare run of the opener's character, at least as long as the opener, with no info string.
+FENCE_OPEN_RE = re.compile(r"(`{3,})[^`]*$|(~{3,}).*$")
+FENCE_CLOSE_RE = re.compile(r"(`{3,}|~{3,})[ \t]*$")
+
+
+def _fence_closes(body, opener):
+    m = FENCE_CLOSE_RE.match(body)
+    return bool(m) and m.group(1)[0] == opener[0] and len(m.group(1)) >= len(opener)
+
+
+def _outside_code_spans(body):
+    """The line with each inline code span blanked (CommonMark): a span opens at a run of backticks and closes at
+    the next run of the same length, a backtick or a backslash after a backslash opens nothing, and a run with no
+    closer is plain text. A backslash inside a span is a plain backslash."""
+    out, i, size = [], 0, len(body)
+    while i < size:
+        ch = body[i]
+        if ch == "\\" and body[i + 1:i + 2] in ("`", "\\"):
+            out.append("  ")
+            i += 2
+        elif ch == "`":
+            j = i
+            while j < size and body[j] == "`":
+                j += 1
+            ticks, close, k = j - i, -1, j
+            while close < 0 and k < size:
+                k = body.find("`", k)
+                if k < 0:
+                    break
+                e = k
+                while e < size and body[e] == "`":
+                    e += 1
+                if e - k == ticks:
+                    close = e
+                k = e
+            out.append(" " if close >= 0 else body[i:j])
+            i = close if close >= 0 else j
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def notification_markup_problem(text):
     """The refusal for reply lines that hold notification markup as an opening tag, else ''."""
     if "<" not in text:
@@ -634,13 +687,15 @@ def notification_markup_problem(text):
     bad, fence = [], ""
     for line in text.splitlines():
         body = QUOTE_PREFIX.sub("", line, count=1).strip()
-        marker = body[:3] if body[:3] in ("```", "~~~") else ""
-        if marker and (not fence or marker == fence):
-            fence = "" if fence else marker
-            continue
         if fence:
+            if _fence_closes(body, fence):
+                fence = ""
             continue
-        if NOTIFICATION_RE.search(CODE_SPAN.sub(" ", body)):
+        opened = FENCE_OPEN_RE.match(body)
+        if opened:
+            fence = opened.group(1) or opened.group(2)
+            continue
+        if NOTIFICATION_RE.search(body) and NOTIFICATION_RE.search(_outside_code_spans(body)):
             bad.append(body)
     return NOTIFICATION_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
@@ -1797,6 +1852,49 @@ def rewrite_problems(hook):
         return []
 
 
+def _notification_marker_path(hook):
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import local_time
+    return local_time.notification_marker_path(hook.get("session_id"))
+
+
+def write_notification_marker(hook):
+    """Arm one re-check of the next stop_hook_active rewrite for notification markup. The file holds nothing:
+    its existence is the signal, so a turn with no human record arms it too. Fails open."""
+    try:
+        marker = _notification_marker_path(hook)
+        if marker is not None:
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            with open(marker, "w", encoding="utf-8"):
+                pass
+    except Exception:
+        pass
+
+
+def clear_notification_marker(hook):
+    """True when a marker was there; it is deleted either way. Fails open."""
+    try:
+        marker = _notification_marker_path(hook)
+        if marker is None:
+            return False
+        os.remove(marker)
+        return True
+    except Exception:
+        return False
+
+
+def rewrite_notification_problem(hook):
+    """The refusal for a rewrite after this check's own block, or ''. The marker is consumed first, so a second
+    rewrite finds none and stays quiet. Only the markup check runs here: the models, Unstarted and answered checks
+    belong to rewrite_problems and a missing-report block. Fails open on any error."""
+    try:
+        if not clear_notification_marker(hook):
+            return ""
+        return notification_markup_problem(last_reply(hook))
+    except Exception:
+        return ""
+
+
 def write_marker(hook, idx):
     try:
         marker = _marker_path(hook)
@@ -2132,6 +2230,9 @@ def main():
     if active:
         pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
         reasons = rewrite_problems(hook)
+        marked = rewrite_notification_problem(hook)  # a block of the notification check armed this re-check
+        if marked and marked not in reasons:  # a missing-report block's rewrite checks the markup already
+            reasons.append(marked)
         reasons += rewrite_relay(hook)
         if hold and not reasons:
             print(json.dumps({"decision": "block", "reason": hold_reason(hold)}))
@@ -2147,6 +2248,7 @@ def main():
         os.remove(_marker_path(hook))
     except Exception:
         pass
+    clear_notification_marker(hook)
 
     # Route-row flags ride in the systemMessage of whichever line this Stop prints, and never change its decision.
     # The refusals file is read for them before pending_refusals settles it.
@@ -2205,7 +2307,12 @@ def main():
         review, review_note = review_record_problem(hook, text)
     except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
         review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
-    note = " ".join(filter(None, [note, hand_note, review_note]))
+    notification, notification_note = "", ""
+    try:
+        notification = notification_markup_problem(text)  # every Stop, with or without a human record
+    except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
+        notification_note = "Notification-markup guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
+    note = " ".join(filter(None, [note, hand_note, review_note, notification_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
@@ -2213,10 +2320,7 @@ def main():
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
             pass
-    try:
-        relay.append(notification_markup_problem(text))  # every Stop, with or without a human record
-    except Exception:
-        pass
+    relay.append(notification)
     if last_human_idx is None or not turn_landed(after):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
@@ -2238,6 +2342,8 @@ def main():
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + " (rule reports-order-of-labels)"
+                if notification:
+                    write_notification_marker(hook)
                 finish({"decision": "block", "reason": reason})
             else:
                 finish({"systemMessage": note} if note else None)
@@ -2301,6 +2407,8 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
+        if notification:
+            write_notification_marker(hook)
         finish({"decision": "block", "reason": reason})
     else:
         finish({"systemMessage": note} if note else None)

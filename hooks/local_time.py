@@ -132,6 +132,13 @@ def report_marker_path(session_id):
     return None if base is None else base + ".report-block"
 
 
+def notification_marker_path(session_id):
+    """The file report_guard.py writes when its notification-markup check blocks, or None. It holds nothing:
+    the file's existence arms one re-check of the next stop_hook_active rewrite. Beside report_marker_path."""
+    base = _session_base(session_id)
+    return None if base is None else base + ".notification-block"
+
+
 def repo_marker_path(session_id):
     """The sidecar that binds a session's inbox to the repo it worked in, or None. Beside the inbox:
     feedback_guard.py reads it to find other sessions' inboxes of the same repo."""

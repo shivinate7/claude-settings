@@ -36,7 +36,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       install.sh) on="$on $M $W $X $S code guard " ;;
       hooks/session_start.sh) on="$on $W $R $Z $X $S code guard " ;;
       hooks/test_mutate_shared.py|hooks/test_mutate_report.py|hooks/test_mutate_js.py|hooks/test_mutate_replay.py|hooks/test_mutate_ci.py|hooks/mutate_js.mjs) on="$on code guard " ;;
-      # Hook modules and suites that run on the rest and macOS jobs.
+      # Hook modules and suites that run on the rest and macOS jobs. lint/test_report_guard_notification.py is
+      # listed too but its suite runs on Linux only (the `checks` job); it is pure regex with no platform path.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
       hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_report_guard_route.py|lint/test_report_guard_landing.py|lint/test_report_guard_notification.py|lint/test_report_guard_remedy.py|lint/test_report_guard_refusal.py|lint/test_report_guard_handoff.py|lint/test_report_guard_review.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
         on="$on $R $Z $X code guard "; case "$f" in lint/_transcript.py|lint/guard_log_report.py) on="$on $M " ;; esac ;;
