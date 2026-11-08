@@ -13969,7 +13969,8 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 # was already used. The merge tool writes one fix check per record, so it can write no fix check for the new head, and
 # the lane hand-wrote one. A `git push` that would land on the head of an open pull request ASKS, when that head's
 # newest review record carries its fix check, whatever the record's state, or when it is held (net value negative),
-# fix check or not. Further work on such a head belongs on a new branch. The ask says to stack the change on a new branch.
+# fix check or not. The ask's reason follows the trigger. A fix check's ask says to stack the change on a new branch.
+# A held head's ask says the decision is the owner's and names no new branch: a new branch would carry on held work.
 # A pull request whose head comes from a fork never asks: its head is not this repo's branch.
 # The reader is guard_merge's helper, on the merge tool's own parser and state rule. Every record a case reads is
 # built by the tool's own review_body.
@@ -13980,6 +13981,8 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 
 RPUSH_RULE = "reviewed-head-push"
 RPUSH_ASK = "stack the change on a new branch"
+RPUSH_HELD_CARRIES = ("owner",)  # a held head's ask leaves the decision to the owner
+RPUSH_HELD_LACKS = ("new branch",)  # and names no new branch, the remedy a fix check's ask gives
 RPUSH_BRANCH = "reviewed-lane"
 RPUSH_PUSH = VCS + " push origin HEAD:" + RPUSH_BRANCH
 RPUSH_LIVE, RPUSH_PREFIX, RPUSH_OLD = "a" * 40, "b" * 40, "c" * 40  # the PR's head now, the head its round reviewed, an older head
@@ -14069,13 +14072,15 @@ def rpush_route(argv):
 
 
 def rpush_case(label, want, reads, lines=0, command=RPUSH_PUSH, cwd=STAMPREPO, origin=False, comments=(),
-               others=(RPUSH_OPEN,), fail=None, page_cap=100, no_tool=False, repo=None):
+               others=(RPUSH_OPEN,), fail=None, page_cap=100, no_tool=False, repo=None,
+               carries=(RPUSH_ASK,), lacks=()):
     """Register one check of reviewed-head-push. `want` is the decision, "ask", "allow" or "deny". `reads` are the gh routes the
     run makes, in order. `lines` is the stderr lines the run prints: 0, or 1 for a read that fails open, naming the rule.
     `origin` runs the push in rpush_repo(), a repo with an origin. `repo`, a callable that builds a checkout and returns
     its folder, names the checkout the push runs in instead. `comments` and `others` are a list, or a callable that
     builds one when the check runs, so a case can name a sha that only its checkout knows. The decision is judged first;
-    the reads after it, so an allow control proves its reads."""
+    the reads after it, so an allow control proves its reads. For an ask, `carries` are the fragments its reason must hold
+    and `lacks` the fragments it must not; each is checked alone, so a failure names its fragment."""
     folder = os.path.join(RPUSH_ROOT, re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:70])
 
     def check():
@@ -14095,8 +14100,14 @@ def rpush_case(label, want, reads, lines=0, command=RPUSH_PUSH, cwd=STAMPREPO, o
         if got != want:
             return False, "decision %s, wanted %s: %s" % (got, want, reason[:110])
         if want == "ask":
-            if RPUSH_RULE not in reason or RPUSH_ASK not in reason:
-                return False, "the ask does not name the rule and say to stack the change: %s" % reason[:110]
+            if RPUSH_RULE not in reason:
+                return False, "the ask does not name the rule: %s" % reason[:110]
+            missing = [fragment for fragment in carries if not carried(fragment, reason)]
+            if missing:
+                return False, "the ask does not carry %r: %s" % (missing[0], reason[:110])
+            present = [fragment for fragment in lacks if carried(fragment, reason)]
+            if present:
+                return False, "the ask carries %r, which it must not: %s" % (present[0], reason[:110])
             if names_the_target(reason, RPUSH_RULE):
                 return False, "the ask names a forbidden fragment %r" % names_the_target(reason, RPUSH_RULE)
         elif want == "deny":
@@ -14130,16 +14141,19 @@ rpush_case("reviewed-head-push: a newer fix check after an older record without 
 rpush_case("reviewed-head-push: a record on page two of the comments still asks",
            "ask", (RPUSH_PULLS, RPUSH_COMMENTS, RPUSH_COMMENTS), page_cap=2,
            comments=rpush_record_comments({"fix": RPUSH_FIX}, before=2))
-# A fix check asks on the live head in any state, and a held record asks with or without one: more work on either goes
-# on a new branch.
+# A fix check asks on the live head in any state, with the new-branch remedy. A held record asks with or without one,
+# with the owner's remedy instead: work on a held change waits for the owner, and a new branch would carry it on.
 rpush_case("reviewed-head-push: a newest record whose fix check failed on the live head asks, after both reads",
            "ask", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX_FAILED}))
 rpush_case("reviewed-head-push: a held record with a passed fix check on the live head asks, after both reads",
-           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, fix=RPUSH_FIX)))
+           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, fix=RPUSH_FIX)),
+           carries=RPUSH_HELD_CARRIES, lacks=RPUSH_HELD_LACKS)
 rpush_case("reviewed-head-push: a held record with a failed fix check on the live head asks, after both reads",
-           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, fix=RPUSH_FIX_FAILED)))
+           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, fix=RPUSH_FIX_FAILED)),
+           carries=RPUSH_HELD_CARRIES, lacks=RPUSH_HELD_LACKS)
 rpush_case("reviewed-head-push: a held record with no fix check asks, after both reads",
-           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD)))
+           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD)),
+           carries=RPUSH_HELD_CARRIES, lacks=RPUSH_HELD_LACKS)
 # An open record whose fix check passed still asks while its last design review is FAIL: the ask keys on the fix check,
 # not on the record's state.
 rpush_case("reviewed-head-push: an open record whose fix check passed but whose design review failed asks, after both reads",
