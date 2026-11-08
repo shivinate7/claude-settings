@@ -14201,7 +14201,7 @@ def closed_pull(number, sha, merged, base="main"):
     return pull
 
 
-class LintGate:
+class LintCheck:
     """A lint run that waits until `meet` runs are in flight, then lets them all go. A cap of `meet` shows as a peak of `meet`. A serial build
     never meets, and its wait ends after `guard` seconds, so the case fails on the peak. The case asserts the peak, never the time (P5)."""
 
@@ -14226,13 +14226,13 @@ class BuildEnv(ReviewEnv):
     """A local origin with PR branches (`lane`, `commit`) and a PullsHost for the GitHub reads. Each lint run is `lint_run`, which replaces
     merge.ci_job_run; lint_steps and hit_suites are replaced too, so no ci-job runs. The cpu count is 4, so the lint cap is 2 (cpu_count - 2)
     unless a case sets another. `verdicts` maps a branch to the lint result of a run whose tree holds that branch's file; a branch not listed
-    passes. `gate` (a LintGate) replaces the lint run for a case that needs the runs to overlap."""
+    passes. `check` (a LintCheck) replaces the lint run for a case that needs the runs to overlap."""
 
     cpus = 4
 
     def setUp(self):
         super().setUp()
-        self.lint_calls, self.verdicts, self.gate = [], {}, None  # lint_calls: the branch files each lint tree held, in call order
+        self.lint_calls, self.verdicts, self.check = [], {}, None  # lint_calls: the branch files each lint tree held, in call order
         for p in (unittest.mock.patch.object(merge, "ci_job_run", self.lint_run),
                   unittest.mock.patch.object(merge, "lint_steps", lambda *a, **k: set(BUILD_STEPS)),
                   unittest.mock.patch.object(merge, "hit_suites", self.suites_hit),
@@ -14243,8 +14243,8 @@ class BuildEnv(ReviewEnv):
     def lint_run(self, wt, *args):
         present = frozenset(name[:-len(".txt")] for name in os.listdir(wt) if name.endswith(".txt"))
         self.lint_calls.append(present)
-        if self.gate is not None:
-            return self.gate(wt, *args)
+        if self.check is not None:
+            return self.check(wt, *args)
         return next((verdict for branch, verdict in self.verdicts.items() if branch in present), ("pass", [], [], False))
 
     def suites_hit(self, root, paths, skip):
@@ -14599,12 +14599,12 @@ class BuildBatchLint(BuildEnv):
         self.assertRegex(cap[0], r"\b1\b", "the cap is not at least 1 when cpu_count - 2 is 0: " + cap[0])
 
     def test_three_candidates_with_a_cap_of_two_run_at_most_two_lints_at_once(self):
-        self.gate = LintGate(meet=2)
+        self.check = LintCheck(meet=2)
         heads = {n: self.lane(n) for n in (7, 8, 9)}
         rc, out, err = self.build(self.done_host(heads))
         self.assert_ran(rc, out, err, 3)
         self.assertEqual(len(self.lint_calls), 3, "want one lint run per candidate:\n" + out)
-        self.assertEqual(self.gate.peak, 2, f"the most lints in flight was {self.gate.peak}; the cap is 2, and two should overlap")
+        self.assertEqual(self.check.peak, 2, f"the most lints in flight was {self.check.peak}; the cap is 2, and two should overlap")
         self.assertEqual(joins_of(out), [f"joins: #{n} feat{n} {heads[n][:9]}" for n in (7, 8, 9)], out)
 
 
