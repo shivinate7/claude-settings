@@ -7,6 +7,7 @@ Owner, 2026-11-01 04:26 CST, waiting-page item 113 a. Source: the brief. The wai
 - Each PR carries a review record.
 - The batch runner finds reviewed, green PRs itself.
 - No merge message.
+- The owner may grant one round past round 3 to one change. The record then cites that grant. Owner, 2026-11-08 06:08 CST, waiting-page item 396 a, which granted a fourth round to the builder-probe fix (step `builder-probe-false-alarm`). The coordinator's brief for step `record-granted-round` makes the record able to hold it.
 
 ## The incident
 

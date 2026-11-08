@@ -13083,7 +13083,7 @@ class ReviewGrantRules(unittest.TestCase):
                 self.assert_names_round_four(why)
 
     def test_round_four_with_guard_yes_is_done_when_net_value_is_zero_or_positive(self):
-        # the fourth round's verdict is FAIL: a PASS would meet the PASS rule, which says done for any net value
+        # the fourth round's verdict is FAIL, so the net value alone decides done
         for net in ("zero", "positive"):
             with self.subTest(net=net):
                 state, why = self.granted_state("FAIL", guard="yes", net=net)
