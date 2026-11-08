@@ -78,8 +78,8 @@ ENV_RUNNER_VALUE_FLAGS = (
     "--env-file", "--env-file-if-exists", "-r", "--require", "--import", "--loader", "-C",
     "--conditions", "--input-type", "--experimental-loader", "--preload",
 )
-# A second copy of guard_frozen.py's `_NODE_EVAL_FLAG`, kept on purpose: this module reads the
-# `=` forms and the open rewrite of that one is not ours to touch.
+# A second copy of guard_frozen.py's `_NODE_EVAL_FLAG`, kept on purpose: this one also reads the
+# `=` forms (`--eval=code`), which that one does not.
 ENV_INLINE_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)(?:=.*)?$")
 
 # Commands that ask whether the file is THERE. They read no contents.
@@ -137,9 +137,12 @@ ENV_ADVICE = (
     "A listing and a test for existence are allowed."
 )
 
-# Runners that start a child command. Their option words that take the next word as a value (an
-# option not listed counts as a flag), by runner family. The lists are closed by design. `-c` of
-# npm is the child, so it is never a value flag.
+# Runners that start a child command. Their option words that take the next word as a value, by
+# runner family. DESIGN: the uv, docker and npm scans read an option off the list as a possible
+# value owner (`_child_starts`), so a missing value flag costs a false alarm at most; only the node
+# scan keeps a closed list. Two misses stay: an unlisted flag right after a missing value flag ends
+# the scan (`--pull always --rm img env`), and pnpm's `-r` reads as node's value flag
+# (`pnpm -r exec env`). `-c` of npm is the child, so it is never a value flag.
 ENV_NPM_RUNNERS = tuple(c for c in ENV_LOADER_COMMANDS if c.startswith(("npm", "npx", "pnpm")))
 _CONTAINER_FLAGS = (
     "-e", "--env", "--name", "-v", "--volume", "-p", "--publish", "-w", "--workdir", "--network",
@@ -554,6 +557,15 @@ def _assignment_end(words, position: int) -> int:
     return end + 1
 
 
+# Words that run the next word as a command and are no command themselves.
+ENV_COMMAND_PREFIXES = ("exec", "command", "builtin", "nohup")
+# Wrappers that take options and run the rest as a command, with the option words that own the next word.
+ENV_WRAPPER_VALUE_FLAGS = {
+    "nice": ("-n", "--adjustment"),
+    "sudo": ("-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "--user", "--group", "--host"),
+    "stdbuf": ("-i", "-o", "-e"),
+    "env": ("-u", "--unset", "-C", "--chdir", "-S"),
+}
 TIMEOUT_FLAG_GLUED = re.compile(r"^(--(kill-after|signal)=\S+|-[ks]\S+)$")
 PY_LAUNCHER_FLAG = re.compile(r"^-(\d(\.\d+)?(-\d+)?|u)$")  # `py -3`, `py -3.12`, `python -u`
 
@@ -598,18 +610,12 @@ def _quoted_words(segment: str, keep_newlines=False):
     return [w.replace("\0", " ").replace("\1", "\n") for w in "".join(chunks).split()]
 
 
-def _env_words(segment: str):
-    """Return (words, command word) of one segment, redirects spaced into words of their own."""
-    words = _quoted_words(_blank_messages(segment))
-    # The command is the first word that is not a `VAR=value` assignment.
-    # A `(` glued to the first assignment is a subshell paren, not part of the name.
-    if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
-        words[0] = words[0][1:]
-    position = 0
-    while position < len(words) and ASSIGNMENT.match(words[position]):
-        position = _assignment_end(words, position)
-    # Look through exactly these wrapper shapes, each by its exact form, so a flag value of some
-    # other wrapper (`env -u ls cat .env`) can never pose as the command word.
+def _skip_wrappers(words, position: int, runner_child: bool = False) -> int:
+    """Return the index of the command that the wrappers at `position` run. Looks through exactly
+    these wrapper shapes, each by its exact form, so a flag value of some other wrapper
+    (`env -u ls cat .env`) can never pose as the command word. `runner_child` adds the wrappers
+    that a runner's child or a shell-string segment may lead with (`nice`, `sudo`, `stdbuf`,
+    `env VAR=x`, and `exec`, `command`, `builtin`, `nohup`); the parent shell form leaves them."""
     while position < len(words):
         word = words[position].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         after = position + 1
@@ -632,8 +638,32 @@ def _env_words(segment: str):
                     words[after].rsplit("/", 1)[-1].rsplit("\\", 1)[-1]) == "verdict"):
                 break
             position = after + 1
+        elif runner_child and word in ENV_COMMAND_PREFIXES:
+            position = after
+        elif runner_child and word in ENV_WRAPPER_VALUE_FLAGS:
+            while after < len(words) and (words[after] in ENV_WRAPPER_VALUE_FLAGS[word]
+                                          or words[after].startswith("-")
+                                          or (word != "stdbuf" and ASSIGNMENT.match(words[after]))):
+                after += 2 if words[after] in ENV_WRAPPER_VALUE_FLAGS[word] else 1
+            if word == "env" and after >= len(words):
+                break  # `env VAR=x` alone prints the environment, so env is the command
+            position = after
         else:
             break
+    return position
+
+
+def _env_words(segment: str):
+    """Return (words, command word) of one segment, redirects spaced into words of their own."""
+    words = _quoted_words(_blank_messages(segment), keep_newlines=True)
+    # The command is the first word that is not a `VAR=value` assignment.
+    # A `(` glued to the first assignment is a subshell paren, not part of the name.
+    if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
+        words[0] = words[0][1:]
+    position = 0
+    while position < len(words) and ASSIGNMENT.match(words[position]):
+        position = _assignment_end(words, position)
+    position = _skip_wrappers(words, position)
     head = words[position] if position < len(words) else ""
     command = head.strip("'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     if command in ENV_TEXT_COMMANDS:
@@ -754,20 +784,40 @@ def _first_positional(words, i: int, flags) -> int:
     return min(i, len(words))
 
 
-def _shell_string_prints(text: str) -> bool:
-    """A shell string (`sh -c "<s>"`, `npm exec -c "<s>"`) prints the environment when, outside its
-    quote marks, its first word is env or printenv, or it expands a `$` variable."""
+
+
+def _shell_string_prints(text: str, depth: int = 0) -> bool:
+    """A shell string (`sh -c "<s>"`, `npm exec -c "<s>"`) is judged segment by segment, the way the
+    parent shell form reads a command: `_env_flat` is its one reader of a file name. A segment
+    prints the environment when its command is a printing child (`_child_prints`) or it prints a
+    `$` variable: its command is `echo` or `printf` and it expands a `$`. A `$` in any other
+    segment is an ordinary argument (`cd $APP_DIR && npm start`). A string nested past
+    ENV_MAX_DEPTH counts as printing."""
+    if depth > ENV_MAX_DEPTH:
+        return True
     text = text.strip()
     if len(text) > 1 and text[0] == text[-1] and text[0] in "'\"":
         text = text[1:-1]
-    first = text.split()[:1]
-    return "$" in text or bool(first and _base(first[0]) in ENV_PRINT_PROGRAMS)
+    if _env_flat(text, True)[0]:
+        return True
+    for piece in split_segments(text):
+        for segment in _env_parts(piece):
+            words, position, _ = _env_words(segment)
+            if position < len(words):
+                words[position] = words[position].lstrip("({").rstrip(")};")  # glued `(env)`, `{env;}` only
+                at = _skip_wrappers(words, position, True)
+                if "$" in segment and at < len(words) and _base(words[at]) in ENV_TEXT_COMMANDS:
+                    return True
+                if _child_prints(words, position, False, depth + 1):
+                    return True
+    return False
 
 
-def _child_prints(words, at: int, fed: bool = False) -> bool:
-    """True when the child command at words[at] prints its environment: env or printenv; a shell
-    string that does (`sh -c`); python `-c`; python or a shell with no script word and stdin fed;
-    or node, bun or deno inline code."""
+def _child_prints(words, at: int, fed: bool = False, depth: int = 0) -> bool:
+    """True when the child command at words[at], past its wrappers (`_skip_wrappers`), prints its
+    environment: env or printenv; a shell string that does (`sh -c`); python `-c`; python or a shell
+    with no script word and stdin fed; or node, bun or deno inline code."""
+    at = _skip_wrappers(words, at, True)
     if at >= len(words):
         return False
     name = _base(words[at])
@@ -778,73 +828,131 @@ def _child_prints(words, at: int, fed: bool = False) -> bool:
         hit, stdin = _runner_scan(words, at, fed, ENV_SHELL_C_FLAG.match)
         if hit < 0 or not shell or words[hit] == "-":
             return hit >= 0 or stdin
-        return hit + 1 >= len(words) or _shell_string_prints(words[hit + 1])
+        return hit + 1 >= len(words) or _shell_string_prints(words[hit + 1], depth)
     return _runner_inline_code(words, at, name, fed)
+
+
+# Options known to take no value. An unlisted option is read as a possible value owner, and these
+# are the common ones that are not, so `docker run --rm myimage serve env` has one start, not two.
+ENV_CHILD_BOOL_FLAG = re.compile(
+    r"^(-[ditqy]+|-v+|-P|--(rm|detach|interactive|tty|privileged|init|read-only|frozen|locked|isolated"
+    r"|offline|all-extras|quiet|verbose|yes|no-[a-z-]+))$")
+
+
+def _may_own_value(word: str) -> bool:
+    """True when an option word that is not in the runner's value-flag list may still own the next
+    word: it has no `=`, is not `--` and is not a known bool flag."""
+    return (word.startswith("-") and word != "--" and "=" not in word
+            and not ENV_CHILD_BOOL_FLAG.match(word))
+
+
+def _child_starts(words, i: int, flags):
+    """The indexes from `i` where a child command may start, past the runner's options. An option
+    in `flags` owns the next word. The first positional word is a start. When it sits right after
+    an unlisted option it may be that option's value, so the scan goes on past the listed options
+    to the next positional word, which is a start too: `--pull always --env-file F alpine env` starts at
+    `always` and `alpine`. An unlisted option there ends the scan, so a program's own arguments
+    (`docker run myimage serve env`, `uv run -q pytest -k env`) are never starts. FEWEST FALSE
+    ALARMS: a start that is no child costs nothing, since `_child_prints` reads only env, printenv,
+    shells, python and inline runners. The value-flag list is no closed list: an unlisted option
+    is read as a possible value owner. `--` ends the runner's options, so the word after it is
+    the one start."""
+    value = False
+    while i < len(words):
+        word = words[i]
+        if word == "--":
+            if i + 1 < len(words):
+                yield i + 1
+            return
+        if word in flags:
+            i += 2
+        elif word.startswith("-"):
+            if value:
+                return
+            i += 1
+        else:
+            yield i
+            if value or not (i and _may_own_value(words[i - 1])):
+                return
+            value = True
+            i += 1
 
 
 def _container_child_prints(words, at: int, fed: bool) -> bool:
     """words[at] is `run` or `exec`. The child is the `--entrypoint` program with the words after
-    the image, or just the words after the image or container word."""
+    the image, or just the words after the image or container word. Each start that `_child_starts`
+    finds is tried as the image."""
+    flags = ENV_CHILD_VALUE_FLAGS["docker"] + ("--entrypoint",)
+    starts = list(_child_starts(words, at + 1, flags))
     entry = ""
-    i = at + 1
-    while i < len(words):
-        word = words[i]
-        if word == "--entrypoint" or word.startswith("--entrypoint="):
-            entry = words[i + 1] if word == "--entrypoint" and i + 1 < len(words) else word[13:]
-            i += 2 if word == "--entrypoint" else 1
-        elif word in ENV_CHILD_VALUE_FLAGS["docker"]:
-            i += 2
-        elif word.startswith("-"):
-            i += 1
-        else:
-            break
-    child = words[i + 1:]
-    return _child_prints(([entry] if entry else []) + child, 0, fed)
+    for i in range(at + 1, starts[-1] if starts else len(words)):
+        if words[i] == "--entrypoint" and i + 1 < len(words):
+            entry = words[i + 1]
+        elif words[i].startswith("--entrypoint="):
+            entry = words[i][13:]
+    entry = entry.strip("'\"")  # `--entrypoint ""` is the image's own command
+    return any(_child_prints(([entry] if entry else []) + words[c + 1:], 0, fed) for c in starts)
 
 
 def _runner_child_prints(words, position: int, command: str, fed: bool = False) -> bool:
     """True when a runner given the file starts a child command that prints it: `uv run`,
     `docker`/`podman` `run`, `compose run` and `exec` (the child follows the image word), and
-    `npm exec -c`, `npx -c` and `pnpm exec`."""
+    `npm exec -c`, `npx -c` and `pnpm exec`. The npm walk reads `-c` up to `--` or the child; the
+    `pnpm exec` child is found by `_child_starts`."""
     name = _base(command)
     flags = ENV_CHILD_VALUE_FLAGS["node"]
     if name in ENV_INLINE_RUNNERS:  # `node --env-file=F npm-cli.js exec -c env`
         at = _first_positional(words, position + 1, flags)
+        if name.startswith("bun") and at < len(words) and words[at] == "x":  # `bun x node -e ...`
+            return any(_child_prints(words, c, fed)
+                       for c in _child_starts(words, at + 1, ENV_CHILD_VALUE_FLAGS["npm"]))
         if at >= len(words) or _base(words[at]) not in ENV_NPM_RUNNERS:
             return False
         position, name = at, _base(words[at])
     if name in ENV_NPM_RUNNERS:
         flags = ENV_CHILD_VALUE_FLAGS["npm"]
-        seen_exec = False
+        exec_at = position if name.startswith("npx") else -1  # npx's child follows its options
         i = position + 1
+
+        def child_prints() -> bool:
+            return exec_at >= 0 and any(
+                _child_prints(words, c, fed) for c in _child_starts(words, exec_at + 1, flags))
+
         while i < len(words):
             word = words[i]
-            if word in ("-c", "--call"):
-                return i + 1 < len(words) and _shell_string_prints(words[i + 1])
+            if word == "--" and exec_at >= 0:  # the rest is the child's
+                break
+            if word in ("-c", "--call"):  # past `pnpm exec`, `-c` may be the child's own flag
+                return child_prints() or (
+                    i + 1 < len(words) and _shell_string_prints(words[i + 1]))
             if word.startswith("--call="):
-                return _shell_string_prints(word[7:])
+                return child_prints() or _shell_string_prints(word[7:])
             if word in flags:
                 i += 2
             elif word.startswith("-"):
                 i += 1
-            elif word in ("exec", "x") and not seen_exec:
-                seen_exec = True
+            elif not name.startswith("npx") and word in ("exec", "x", "dlx"):  # `x` may be an option value, so it never ends the walk
+                exec_at = i
+                i += 1
+            elif _may_own_value(words[i - 1]):  # may be an unlisted option's value
                 i += 1
             else:
-                return name.startswith("pnpm") and seen_exec and _child_prints(words, i, fed)
-        return False
+                break
+        return child_prints()
     if name.startswith("uv"):
         flags = ENV_CHILD_VALUE_FLAGS["uv"]
-        at = _first_positional(words, position + 1, flags)
-        return at < len(words) and words[at] == "run" and _child_prints(
-            words, _first_positional(words, at + 1, flags), fed)
+        return any(
+            words[at] == "run" and any(_child_prints(words, c, fed)
+                                       for c in _child_starts(words, at + 1, flags))
+            for at in _child_starts(words, position + 1, flags))
     if name.startswith(("docker", "podman")):
         flags = ENV_CHILD_VALUE_FLAGS["docker"]
-        at = _first_positional(words, position + 1, flags)
-        if words[at:at + 1] == ["compose"]:
-            at = _first_positional(words, at + 1, flags)
-        if words[at:at + 1] in (["run"], ["exec"]):
-            return _container_child_prints(words, at, fed)
+        for at in _child_starts(words, position + 1, flags):
+            if words[at] == "compose":
+                return any(words[c] in ("run", "exec") and _container_child_prints(words, c, fed)
+                           for c in _child_starts(words, at + 1, flags))
+            if words[at] in ("run", "exec"):
+                return _container_child_prints(words, at, fed)
     return False
 
 

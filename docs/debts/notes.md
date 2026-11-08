@@ -46,12 +46,11 @@
 - dw-notice-lead-space-lost: the decision-watch log folds whitespace, losing leading whitespace of a notice; no notice starts with whitespace today (mods/decision-watch)
 - dw-slash-cache-hit-reads-clean: a repeat /dw after a FLAG prints 'nothing to say' like a clean turn; Stops seen is capped at 500 (mods/decision-watch)
 - dw-slot-timers-unmeasured: decision-watch slot timers sum to about 168 s, computed not measured; a timer frees the slot but does not kill the child (mods/decision-watch)
+- env-child-printer-forms: a runner's shell string allows spaced `{ env; }`, `( env )`, `! env`, `if …; then env; fi`, `export -p`, `set` and `cat /proc/self/environ` (hooks/guard_env.py _shell_string_prints). Fix: none — unmeasured whether Claude prints through these forms. Until: 2026-11-21
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a safety hole with no pinning case (hooks/guard_env.py)
 - env-deno-run-stdin: `deno run --env-file=ENV -` reads a stdin script but allows, since `run` reads as the script word (hooks/guard_env.py _runner_inline_code). Fix: none — Claude rarely feeds a stdin script to deno run -. Until: 2026-11-21
 - env-value-flag-list-closed: a node value flag outside ENV_RUNNER_VALUE_FLAGS, such as `--title x -e y`, reads its value as the script and allows (hooks/guard_env.py). Fix: none — the value-flag list is closed by design, and an unlisted value flag before -e is rare. Until: 2026-11-21
-- env-child-shell-string-first-word: a runner child's shell string is judged by its first word only, so `sh -c "cd /app && env"`, `sh -c "exec env"` and `sh -c "(env)"` allow (hooks/guard_env.py _shell_string_prints). Fix: none — Claude prints the environment with a bare env or printenv, which deny. Until: 2026-11-21
-- env-child-value-flag-list-closed: a docker or uv value flag off ENV_CHILD_VALUE_FLAGS, such as `--pull always` or `uv run --extra dev`, reads its value as the child and allows; `--entrypoint ""` hides the child too (hooks/guard_env.py _container_child_prints). Fix: none — rare before a printing child. Until: 2026-11-21
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py)
