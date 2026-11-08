@@ -25,7 +25,7 @@
   "owner": "lane windows-local-lint (session_013NEJL1E2M7ciXj66Y5zdLH)",
   "pick": "a",
   "ref": "decision lanes-run-no-full-ci-job (line 5); bin/ci-job:200 and :248; checks.yml:234-235; step lane-lint-cloud-time-limit",
-  "reply": "Withdrawn 07:39 CST Nov 8: your ruling on page item 27 a (2026-10-27) already answers it. Lane lint runs only the fast steps and no hook suite, so the tool goes back to the ruling and the record stays. Home: step lane-lint-cloud-time-limit.",
+  "reply": "Withdrawn 07:39 CST Nov 8: your ruling on page item 27 a (2026-10-27) already answers it. A lane runs only the suites its change touches, and never a whole CI job. Lane lint now runs all 52 lint fixture suites, so the tool goes back to your ruling: it runs only the suites the change picks. The record's 'no hook suite' sentence landed later (batch 23, 2026-10-29) as a description of the tool; it is not your words. The lane PRs that rewrite it to say 'picked suites only' match your ruling. Home: step lane-lint-cloud-time-limit.",
   "short": "Lane lint record: say what it really runs",
   "status": "closed",
   "title": "May the lanes-run-no-full-ci-job record be rewritten to say lane lint runs every lint CI step, fixture suites included?"
