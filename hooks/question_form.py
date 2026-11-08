@@ -413,7 +413,7 @@ COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 PS_BASH_FORMS = re.compile(
     r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
-    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+[A-Za-z./]"
+    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=[^\s;}]*[ \t]+[A-Za-z./]"
     r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t]+[^\]\n]*[ \t]\]|\[\[[ \t]+[^\]\n]*[ \t]\]\])",
     re.M | re.I)
 # A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
@@ -674,13 +674,9 @@ def _ps_bash_form(text) -> bool:
         return True
     import guard_core   # loads only for a task that has a command
     script = guard_core.PowerShellScript(text)
-    out, comment = [], False
-    for index, char, quote in guard_core.walk_quotes(script):
-        if comment and char == "\n":
-            comment = False
-        if not comment and not quote and char == "#" and guard_core.token_start(script, index):
-            comment = True
-        out.append("_" if (quote or comment) and char != "\n" else char)
+    out = []
+    for index, char, quote in guard_core.walk_quotes(script, line_comments=True):
+        out.append("_" if quote and char != "\n" else char)
     blanked = "".join(out)
     if PS_BASH_FORMS.search(blanked):
         return True
