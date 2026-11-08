@@ -501,7 +501,9 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None):
     (`_old_body`) and is refused when that holds a record, or when the read could not run. No new body known: None, no read."""
     found = _marked_bodies(bodies)
     if edit and not found:
-        return _old_body_hit(edit, repo, where) if any(isinstance(b, str) for b in bodies) else None
+        if not any(isinstance(b, str) for b in bodies):
+            return None
+        return _old_body_hit(edit, repo, where)
     if not found:
         return None
     module, marked = found
