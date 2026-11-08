@@ -3062,9 +3062,9 @@ sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane"
 
 # Kill cases for mutate_guard: a quoted refspec and a quoted force in a commit message are verdicts.
 sh("per-file kill: a quoted refspec keeps its quotes, so a force push asks",
-   VCS + " push origin \"+main\" $'it\\'s'", "ask", cwd=GITWT)
+   VCS + " push origin \"+main\" \"x", "ask", cwd=GITWT)
 sh("per-file kill: false alarm: --force quoted in a commit message stays allowed",
-   VCS + " commit -m $'release git push --force notes\\'s'", "allow", cwd=GITWT)
+   VCS + " commit -m \"release git push --force notes\" \"x", "allow", cwd=GITWT)
 
 # THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decision agent-worktree-discard-is-noted, section "Agent-owned worktree").
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
@@ -18345,7 +18345,7 @@ def subject_unread_log_case(command=None, expect_note=True):
 def per_file_quoted_force_noted_case():
     """KILL CASE for a mutate_guard entry removed in 78e8446: a quoted force on a worktree remove.
     The base reads the quoted `--force`, so the unread subject is noted, not silent."""
-    return subject_unread_log_case(VCS + " worktree remove \"--force\" $'x\\'y' /x")
+    return subject_unread_log_case(VCS + " worktree remove \"--force\" \"x'y /x")
 
 
 LOG_CHECKS_EXTRA.append(("per-file kill: log: a quoted or abbreviated force on a worktree remove "
