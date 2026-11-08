@@ -11848,9 +11848,9 @@ cmk_allow("a fix script, add -A, commit and push, with no triplet in the tree be
 # A cd is a safe earlier segment: the commit is judged in the repository it names. These run from a
 # directory that is no repository, so only the cd leads to the repository.
 cmk_allow("a cd into a repo with a clean change, then add -A, commit and push",
-          "cd " + CMK_CL + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+          "cd " + slash(CMK_CL) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
 cmk_refuse("a cd into a repo with a triplet in a tracked file, then add -A, commit and push",
-           "cd " + CMK_CLT + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+           "cd " + slash(CMK_CLT) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
 
 # An earlier commit is a safe segment too, so each commit is judged and the push sees both.
 cmk_allow("two clean commits, each after an add, then a push",
