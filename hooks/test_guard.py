@@ -5375,6 +5375,10 @@ sh("git-after-cd: an if ! check whose then body is echo then exit 1, then ; a gi
    "if ! pytest -q; then echo bad; exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: the same if ! check over three lines, then a git push -u, passes",
    "if ! pytest -q; then\necho bad; exit 1\nfi\n%s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# CONTROL for the exit-tail passes above: a `|| { ...; exit 1; }` tail ends the shell on the check's failure, so the
+# push after it passes.
+sh("git-after-cd: a check with -q protected by || a braced exit 1, then ; a git push -u, passes",
+   "pytest -q || { echo bad; exit 1; }; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
