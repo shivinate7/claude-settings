@@ -17,14 +17,16 @@ date read counted as a real clock. The tool fixes none, and it writes nothing. E
 - calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
   `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.strftime(fmt)`,
   `time.tzname`, `time.timezone`, the date libraries `pendulum.now()`, `arrow.now()`, `arrow.utcnow()`,
-  `pd.Timestamp.now()` and Django `timezone.now()`, JS `new Date()`, `new Date(<clock>)` where the
-  argument reads `Date.now` or `performance.now` directly or through a name that holds one, any
-  `Date(...)` call without `new`, and the JS date libraries `dayjs()`, `moment()` and
-  `Temporal.Now.*()`). `new Date(0)`, `new Date(EPOCH_MS)` with a declared constant, `dayjs(0)`,
-  `moment(EPOCH)` and `pendulum.datetime(...)` read no clock and are not listed. A fake clock turns
+  `pd.Timestamp.now()`, `pd.Timestamp.utcnow()` and Django `timezone.now()`, plus, with no argument,
+  `pendulum.today()`, `arrow.get()`, `timezone.localtime()` and `timezone.localdate()`, JS
+  `new Date()`, `new Date(<clock>)` where the argument reads `Date.now` or `performance.now` directly
+  or through a name that holds one, any `Date(...)` call without `new`, and the JS date libraries
+  `dayjs()`, `dayjs.utc()`, `new dayjs()`, `moment()`, `moment.utc()` and `Temporal.Now.*()`).
+  `new Date(0)`, `new Date(EPOCH_MS)` with a declared constant, `dayjs(0)`, `moment.utc(EPOCH)`,
+  `arrow.get(0)` and `pendulum.datetime(...)` read no clock and are not listed. A fake clock turns
   calendar off and nothing else: in Python a `@freeze_time(...)` def or class, or the body of a
   `with freeze_time(...)`; in JS a file that calls `jest.useFakeTimers()` or `vi.useFakeTimers()`. Its
-  elapsed-assert rows stay.
+  elapsed-assert rows stay. `Temporal.Now.*()` stays listed under JS fake timers, which fake Date only.
 
 Scanned: test files only. Python is `test_*.py`, `*_test.py`, `conftest.py` or any `.py` under a
 `tests` or `test` folder. JS and TS (`.js .mjs .cjs .jsx .ts .tsx .mts .cts`) is a `.test.` or
@@ -463,7 +465,10 @@ PY_PASS_THROUGH = {"round", "int", "float", "abs", "max", "min", "sum", "divmod"
 # A date or zone read with no time given. `time.strftime(fmt)`, `time.localtime()`, `time.gmtime()`,
 # `time.ctime()` and `time.asctime()` read the clock only when no time argument is passed, so they are
 # matched apart from the always-real forms. `time.tzname` and `time.timezone` are attribute reads.
-PY_CALENDAR_NO_ARG = {"time.localtime", "time.gmtime", "time.ctime", "time.asctime"}
+PY_CALENDAR_NO_ARG = {"time.localtime", "time.gmtime", "time.ctime", "time.asctime",
+                      "pandas.Timestamp.utcnow", "pendulum.today", "arrow.get",
+                      "django.utils.timezone.localtime", "django.utils.timezone.localdate",
+                      "timezone.localtime", "timezone.localdate"}
 PY_CALENDAR_ATTRS = {"time.tzname", "time.timezone"}
 # The date libraries' `now` calls read the real date whatever zone they are given, as `datetime.now(tz)` does.
 # Matched on the import-resolved name too, so `pd.Timestamp.now` and `from django.utils import timezone` land.
@@ -972,10 +977,9 @@ def scan_js(text):
 
     tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_returns)
     if not fake_clock:  # under a fake clock the date is the faked one
-        for mm in re.finditer(r"(?<![\w$])new\s+Date\s*\(|(?<![\w$.])(?:dayjs|moment)\s*\(", m):
-            declared = re.search(r"(?<![\w$])(?:new|function)\s+$", m[max(0, mm.start() - 12):mm.start()])
-            if declared and not mm.group().startswith("new"):
-                continue  # `function moment(` and `new dayjs(` are no read
+        for mm in re.finditer(r"(?<![\w$])new\s+Date\s*\(|(?<![\w$.])(?:dayjs|moment)(?:\s*\.\s*utc)?\s*\(", m):
+            if re.search(r"(?<![\w$])function\s+$", m[max(0, mm.start() - 12):mm.start()]):
+                continue  # `function moment(` declares the name, it reads nothing
             got = args_of(mm.end() - 1)  # `new Date(<clock>)` reads the real date as `new Date()` does
             if got and (not m[mm.end():got[0]].strip()
                         or reads_clock(m, mm.end(), got[0], JS_CLOCK, tainted, JS_PASS_THROUGH, False)):
@@ -983,8 +987,8 @@ def scan_js(text):
         for mm in re.finditer(r"(?<![\w$.])Date\s*\(", m):  # without `new`, Date(...) ignores its arguments
             if not re.search(r"(?<![\w$])(?:new|function)\s+$", m[max(0, mm.start() - 12):mm.start()]):
                 hits.add(mm.start(), "calendar")
-        for mm in re.finditer(r"(?<![\w$.])Temporal\s*\.\s*Now\s*\.\s*[A-Za-z]+\s*\(", m):
-            hits.add(mm.start(), "calendar")
+    for mm in re.finditer(r"(?<![\w$.])Temporal\s*\.\s*Now\s*\.\s*[A-Za-z]+\s*\(", m):
+        hits.add(mm.start(), "calendar")  # fake timers fake Date, not Temporal
 
     for mm in JS_ASSERT.finditer(m):
         got = args_of(mm.end() - 1)
