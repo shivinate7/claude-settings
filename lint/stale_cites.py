@@ -147,17 +147,16 @@ class BaseUnknown(Unknown):
     """The base of the range does not resolve, as in a shallow clone. Not a finding."""
 
 
-def head_resolves(head):
-    """True when `head` names a commit. Run only after a read failed, to tell a missing head (a read that could
-    not run) from a missing base (a shallow clone)."""
-    done = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", head + "^{commit}"], capture_output=True)
-    return done.returncode == 0
-
-
 def resolves(rev):
-    """True when `rev` names a commit."""
+    """True when `rev` names a commit. Also run after a read failed, to tell a missing head (a read that could not
+    run) from a missing base (a shallow clone)."""
     done = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], capture_output=True)
     return done.returncode == 0
+
+
+def head_resolves(head):
+    """The name ResolveTests still pins; it is `resolves`."""
+    return resolves(head)
 
 
 # A first-parent suffix: `~`, `^`, `~1`, `^1`, also zero-padded (`~01`). `~0` and `^0` name the commit itself: no match.
@@ -277,7 +276,7 @@ def parse_range(text):
         try:
             base = git("merge-base", left, right).decode().strip()
         except Unknown as exc:
-            if head_resolves(right) and history_gap(left, right):
+            if resolves(right) and history_gap(left, right):
                 raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone or an orphan base
             raise
         return [text], base, right
@@ -328,7 +327,7 @@ def read_diff(diff_args, head=None, base=None):
         out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
                   *diff_args).decode("utf-8", "replace")
     except Unknown as exc:
-        if head is None or (head_resolves(head) and (base is None or cut_base(base, head))):
+        if head is None or (resolves(head) and (base is None or cut_base(base, head))):
             raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone
         raise
     head, _, patch = out.partition("\0\0")
