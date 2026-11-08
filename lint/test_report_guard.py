@@ -932,7 +932,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "a reviewer name no spawn ran was let through")
         self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
 
-    def test_dm_red_builder_sonnet_before_last_human_counts(self):
+    def test_dm_green_builder_sonnet_before_last_human_counts(self):
         # A role's name matches any spawn of that role this session, not only the in-turn ones.
         builder_sonnet = {"subagent_type": "builder", "model": "sonnet", "prompt": "build it"}
         builder_opus = {"subagent_type": "builder", "model": "opus", "prompt": "Round 3 of 3"}
@@ -948,6 +948,14 @@ class DoneNamesModelsTests(unittest.TestCase):
                            [builder_opus], before_human=[builder_sonnet])
         self.assertIsNotNone(out, "a builder name no builder spawn ran was let through")
         self.assertIn("'builder haiku' matches no builder spawn", out["reason"])
+
+    def test_dm_green_design_reviewer_name_is_not_a_reviewer(self):
+        # design-reviewer is no named role, so its name must not read as "reviewer opus". The round 1
+        # reviewer ran haiku before the last human message, and a reviewer opus name would be refused.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, design-reviewer opus)\n> **Next** Unstarted: none",
+            [{"subagent_type": "builder", "model": "sonnet", "prompt": "build it"}],
+            before_human=[{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}]))
 
     def test_dm_green_out_of_window_spawns_need_no_name_or_unstarted(self):
         # Naming and the Unstarted line stay on the in-turn spawns: spawns before the last human
