@@ -2203,11 +2203,13 @@ def _build_links():
 
 # TESTHOLD: a checkout whose root holds a test file, so a listing of it names one. A builder's shell write
 # whose target comes from that listing (`$_`) could land on the test, so this folder is the case's cwd.
+# hooks/ and tests/ hold tests, and docs/ holds none, so a listing of each names a test or a plain file.
 TESTHOLD = os.path.join(ROOT, "testhold")
 
 
 def _build_testhold():
-    make_repo(TESTHOLD, {"test_app.py": "pass\n", "app.py": "x = 1\n"})
+    make_repo(TESTHOLD, {"test_app.py": "pass\n", "app.py": "x = 1\n", "hooks/test_x.py": "pass\n",
+                         "tests/test_x.py": "pass\n", "docs/a.md": "x\n"})
 
 
 build_fixtures()
@@ -12377,6 +12379,20 @@ sh("frozen shell: PowerShell tool, Set-Content -Path with a docs file and the fr
 sh("frozen shell: PowerShell tool, Set-Content of a docs file, a space, then the frozen settings after an "
    "unquoted comma, denies [pwsh-r3 red]",
    "Set-Content docs/a.md ," + CFG_SETTINGS + " x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# L1: ni and ac write whatever their position: inside a % block, a try block, a function body, an assignment
+# or a cast to void. Each write below DENIES onto the frozen settings.
+sh("frozen shell: PowerShell tool, ni in a % block over a range, assigned to $null, onto the config settings "
+   "denies [pwsh-r3 red]",
+   "1..2 | % { $null = ni " + CFG_SETTINGS + " -Force }", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ac in a try block assigned to $null, onto the config settings denies "
+   "[pwsh-r3 red]",
+   "try { $null = ac " + CFG_SETTINGS + " x } catch {}", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ni in a function body, onto the config settings denies [pwsh-r3 red]",
+   "function w { param($p) ni " + CFG_SETTINGS + " -Force }", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ni assigned to a variable, onto the config settings denies [pwsh-r3 red]",
+   "$f=ni " + CFG_SETTINGS, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, ni cast to void, onto the config settings denies [pwsh-r3 red]",
+   "[void] ni " + CFG_SETTINGS, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 
 # =========================================================================== 6b. the model cap
@@ -13847,6 +13863,65 @@ sh("pwsh-r3 scriptblock: pwsh -c, a listing of a folder that holds a test, then 
 sh("pwsh-r3 scriptblock control: pwsh -c, a listing of a folder with no test in it, then Set-Content of $_, "
    "is allowed [pwsh-r3 green]",
    "pwsh -c 'ls | % { Set-Content $_ 1 }'", "allow", **BR)
+# L2 and L3: `$_` is the target only of a write that names it. A log named as text ALLOWS though the listed
+# folder holds tests. The twins write `$_` itself, so they are REFUSED.
+sh("pwsh-r3 listing: PowerShell tool, Add-Content to log.txt of each name in a hooks listing, is allowed "
+   "[pwsh-r3 red]",
+   "Get-ChildItem hooks | % { Add-Content log.txt $_.Name }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing: PowerShell tool, Set-Content -Path log.txt of each name in a hooks listing, is allowed "
+   "[pwsh-r3 red]",
+   "Get-ChildItem hooks | % { Set-Content -Path log.txt -Value $_.Name }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing twin: PowerShell tool, Set-Content of $_ from a hooks listing, is refused "
+   "[pwsh-r3 green]",
+   "Get-ChildItem hooks | % { Set-Content $_ x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing: PowerShell tool, a rewrite of each tests file from a tests listing, is refused "
+   "[pwsh-r3 red]",
+   "Get-ChildItem tests | % { (Get-Content $_) -replace 'a','b' | Set-Content $_ }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 listing control: PowerShell tool, the same rewrite over a docs listing with no test, is allowed "
+   "[pwsh-r3 green]",
+   "Get-ChildItem docs | % { (Get-Content $_) -replace 'a','b' | Set-Content $_ }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# L4: a comma inside quotes is text, so a quoted line that names a test path ALLOWS. The unquoted comma forms
+# DENY, and the Add-Content twin below pins the same verb unquoted.
+sh("pwsh-r3 quoted comma: PowerShell tool, Add-Content to a docs file of a quoted line that names a test and "
+   "ends in a comma, is allowed [pwsh-r3 red]",
+   'Add-Content docs/a.md "Updated hooks/test_x.py,"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 quoted comma: PowerShell tool, Add-Content to a docs file of a quoted comma then a test path, is "
+   "allowed [pwsh-r3 red]",
+   'Add-Content docs/a.md ",hooks/test_x.py"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 quoted comma twin: PowerShell tool, Add-Content to a docs file and a test file joined by an unquoted "
+   "comma, is refused [pwsh-r3 green]",
+   "Add-Content docs/a.md,hooks/test_x.py x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+# L5: text in a here-string, in a double-quoted string or in quotes inside a block is data, so each ALLOWS. Each
+# twin runs the same words as code and is REFUSED.
+sh("pwsh-r3 scanner: PowerShell tool, a here-string with a comment, a quote and a Remove-Item of a test, piped "
+   "to Set-Content of a product file, is allowed [pwsh-r3 red]",
+   "@'\n# it's\nif ($x) { Remove-Item hooks/test_x.py }\n'@ | Set-Content src/c.ps1", "allow",
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, an if block that runs Remove-Item of a test is refused "
+   "[pwsh-r3 green]",
+   "if ($x) { Remove-Item hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner: PowerShell tool, a lone apostrophe in a double-quoted string in a block, then a product "
+   "write, is allowed [pwsh-r3 green]",
+   'if ($x) { Write-Host "it\'s done" }; Set-Content src/c.ps1 x', "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, a test write after a lone apostrophe in a block's string is refused "
+   "[pwsh-r3 green]",
+   'if ($x) { Write-Host "it\'s" }; Set-Content hooks/test_x.py x', "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner: PowerShell tool, braces and a Remove-Item of a test inside double quotes, is allowed "
+   "[pwsh-r3 green]",
+   'Write-Host "{ Remove-Item hooks/test_x.py }"', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3 scanner twin: PowerShell tool, a call block that runs Remove-Item of a test is refused "
+   "[pwsh-r3 green]",
+   "& { Remove-Item hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
