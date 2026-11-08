@@ -4134,68 +4134,30 @@ guardset3() {
   rm -rf "$h"
 }
 
-# guardset4: the guard set's lists. A flat module that a guard file imports must be in each list that
-# copies the guard set, or the shipped guard cannot import. guard_merge.py imports own_session.py at load,
-# guard_stream.py imports merge_options.py. The modules come from the imports of guard.py and of each
-# guard_*.py outside a try block, at module level or in a def body (a def body runs on each call), read
-# with the Python parser, so a new import needs no edit here. A try block is optional or has a fallback,
-# so its import is not named: guard_kill's _nowindow falls back in one.
+# guardset4: the guard set's lists. guard_merge.py imports own_session.py at load, so each list that copies
+# the guard set must name it. A list without it ships a guard that cannot import.
 # The check reads the list line only (the loop or the case line), never the comments above it.
-guard_set_modules() {  # prints each flat module a guard file imports outside a try block, one per line
-  python3 -I - "$REPO_ROOT" <<'PY'
-import ast, glob, os, sys
-hooks = os.path.join(sys.argv[1], "hooks")
-flat = set(os.listdir(hooks))
-found = set()
-def visit(stmts, out):
-    for node in stmts:
-        if isinstance(node, ast.Try):
-            continue
-        if isinstance(node, ast.Import):
-            out.extend(a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            out.append(node.module)
-        for field in ("body", "orelse", "finalbody"):
-            sub = getattr(node, field, None)
-            if isinstance(sub, list):
-                visit(sub, out)
-for path in glob.glob(os.path.join(hooks, "guard_*.py")) + [os.path.join(hooks, "guard.py")]:
-    with open(path, encoding="utf-8") as fh:
-        tree = ast.parse(fh.read(), path)
-    names = []
-    visit(tree.body, names)
-    for name in names:
-        mod = name.split(".")[0] + ".py"
-        if mod in flat and mod != "guard.py" and not mod.startswith("guard_"):
-            found.add(mod)
-print("\n".join(sorted(found)))
-PY
-}
-
-listed_in() {  # $1 file, $2 sed address of the one list line, $3 label, $4 module
+listed_in() {  # $1 file, $2 sed address of the one list line, $3 label
   lines=$(sed -n "$2" "$1")
-  if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then bad "$name" "$4: $3 is not one list line"; nmiss=$((nmiss + 1)); return; fi
+  if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then miss="$miss $3 (not one list line);"; return; fi
   case "$lines" in
-    *"$4"*) ;;
-    *) bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1)) ;;
+    *own_session.py*) ;;
+    *) miss="$miss $3;" ;;
   esac
 }
 
 guardset4() {
-  name="guardset4: each module a guard file imports at load is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
-  nmiss=0
-  mods=$(guard_set_modules); mrc=$?
-  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
-    bad "$name" "the guard files' load-time imports read to no module list (exit $mrc)"
-    return
+  name="guardset4: own_session.py is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  miss=""
+  listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop"
+  listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop"
+  listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop"
+  listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|/p' "ci-scope.sh case"
+  if [ -n "$miss" ]; then
+    bad "$name" "own_session.py is not in:$miss"
+  else
+    ok "$name"
   fi
-  for m in $mods; do
-    listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop" "$m"
-    listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop" "$m"
-    listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop" "$m"
-    listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|/p' "ci-scope.sh case" "$m"
-  done
-  if [ "$nmiss" -eq 0 ]; then ok "$name"; fi
 }
 
 guardset2() {

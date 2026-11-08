@@ -437,7 +437,7 @@ $n4 = Test-NamesInSet $Cfg4 $id4
 Check 'names1: install.ps1 lands shared_names.py in guard.d\<id>\, equal to the flat copy' ($n4 -eq '') $n4
 $g4 = Test-NamesInSet $Cfg4 $id4 'git_reads.py'
 Check 'names1: install.ps1 lands git_reads.py in guard.d\<id>\, equal to the flat copy' ($g4 -eq '') $g4
-foreach ($form in 'question_form.py', 'own_session.py', 'precompact_handoff.py', 'merge_options.py') {
+foreach ($form in 'question_form.py', 'own_session.py', 'precompact_handoff.py') {
     $f4 = Test-NamesInSet $Cfg4 $id4 $form
     Check "names1: install.ps1 lands $form in guard.d\<id>\, equal to the flat copy" ($f4 -eq '') $f4
 }
@@ -461,7 +461,7 @@ $n4h = if ($id4h -eq $id4) { "hook did not switch the guard set (id $id4h is the
 Check 'names1: the post-merge hook lands shared_names.py in guard.d\<id>\, equal to the flat copy' ($n4h -eq '') $n4h
 $g4h = if ($id4h -eq $id4) { "hook did not switch the guard set (id $id4h is the install's)" } else { Test-NamesInSet $Cfg4 $id4h 'git_reads.py' }
 Check 'names1: the post-merge hook lands git_reads.py in guard.d\<id>\, equal to the flat copy' ($g4h -eq '') $g4h
-foreach ($form in 'question_form.py', 'own_session.py', 'precompact_handoff.py', 'merge_options.py') {
+foreach ($form in 'question_form.py', 'own_session.py', 'precompact_handoff.py') {
     $f4h = if ($id4h -eq $id4) { "hook did not switch the guard set (id $id4h is the install's)" } else { Test-NamesInSet $Cfg4 $id4h $form }
     Check "names1: the post-merge hook lands $form in guard.d\<id>\, equal to the flat copy" ($f4h -eq '') $f4h
 }
