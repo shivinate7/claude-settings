@@ -26,8 +26,10 @@ A simulator is machine-wide. The sweep stops only a device that a session booted
 that is idle, and that the owner did not boot (decision
 `sweep-shuts-down-idle-simulators`, the sweep stops idle simulators).
 
-The sweep never runs code that your repository supplies. It reads one file
-from your repository, and it reads that file as data.
+The sweep never runs code that your repository supplies, not even an npm
+script such as `reap:worktrees` (decisions `the-janitor-is-one-machine-wide-sweep`
+and `uniform-over-variants`). It reads one file from your repository, and it
+reads that file as data.
 
 The sweep deletes no branch that holds the only copy of its work.
 
@@ -215,7 +217,7 @@ means keep. The conditions are in decision `sweep-shuts-down-idle-simulators`
 
 The preview lists each device with `WOULD STOP` or `KEEP` and a reason code.
 `--confirm` runs one `xcrun simctl shutdown <UDID>` per device, at most 4 per
-run. The rest wait for the next run. There is no `all`, and no erase. With no
+run (`janitor/sweep.py: SIM_SHUTDOWN_CAP = 4`). The rest wait for the next run. There is no `all`, and no erase. With no
 `xcrun`, or on Windows, the tier is absent and prints nothing. The tier is
 machine-wide, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
 

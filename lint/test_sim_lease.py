@@ -7,6 +7,8 @@ ps shim passes through to the real ps except for a start time that a case sets. 
 each run. A holder is a live `sleep` child or a child already reaped, so no case depends on a pid being free.
 Temp files follow decisions/test-temp-standard.md: one run folder from lint/_test_temp.py per run, removed at the end.
 """
+import importlib.machinery
+import importlib.util
 import os
 import re
 import shutil
@@ -22,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SIM_LEASE = os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
 REAL_PS = shutil.which("ps") or "/bin/ps"
 RUN_FOLDER = None
+SLOT_UDID = None  # read from the tool under test in setUpModule: the one home of the device IDs
 
 UNAME_SH = '#!/bin/sh\necho "${SIM_LEASE_TEST_UNAME:-Darwin}"\n'
 SYSCTL_SH = '#!/bin/sh\necho read >> "$SIM_LEASE_TEST_LOADLOG"\ncat "$SIM_LEASE_TEST_LOAD"\n'
@@ -41,9 +44,22 @@ exec "$SIM_LEASE_TEST_REAL_PS" "$@"
 """
 
 
+def load_slot_udid(path):
+    """SLOT_UDID as the tool at PATH defines it. It is read from that file, never copied into this one."""
+    loader = importlib.machinery.SourceFileLoader("sim_lease_under_test", path)
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module.SLOT_UDID
+
+
 def setUpModule():
-    global RUN_FOLDER
+    global RUN_FOLDER, SLOT_UDID
+    try:
+        import fcntl  # noqa: F401  sim-lease locks with it; Windows' Python has none
+    except ImportError:
+        raise unittest.SkipTest("bin/sim-lease is Mac-only: it needs fcntl, which this Python lacks")
     RUN_FOLDER = _test_temp.run_folder()
+    SLOT_UDID = load_slot_udid(SIM_LEASE)
 
 
 def tearDownModule():
@@ -116,8 +132,9 @@ class LeaseCase(unittest.TestCase):
         return subprocess.run([sys.executable, SIM_LEASE, *args], env=self.env(**(env or {})),
                               capture_output=True, text=True, timeout=60)
 
-    def take(self, device, pid, wait=1, env=None):
-        return self.run_tool("take", "--device", device, "--pid", str(pid), "--wait", str(wait), env=env)
+    def take(self, device, pid, wait=1, env=None, udid=False):
+        extra = ["--udid"] if udid else []
+        return self.run_tool("take", "--device", device, "--pid", str(pid), "--wait", str(wait), *extra, env=env)
 
     def give(self, pid):
         return self.run_tool("give", "--pid", str(pid))
@@ -311,6 +328,36 @@ class Give(LeaseCase):
         self.assertEqual(grant(self.take("duo", later.pid)), (0, "1"), "give did not free slot 1")
 
 
+class UdidTake(LeaseCase):
+    """take --udid prints the granted slot's device UDID (SLOT_UDID in the tool) where take prints the slot."""
+
+    def test_duo_slots_print_their_own_udids(self):
+        first, second = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", first.pid, udid=True)), (0, SLOT_UDID["1"]),
+                         "take --udid is not granted slot 1's UDID")
+        self.assertEqual(grant(self.take("duo", second.pid, udid=True)), (0, SLOT_UDID["2"]),
+                         "take --udid is not granted slot 2's UDID while slot 1 is held")
+
+    def test_pro_prints_the_pro_udid(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("pro", pid, udid=True)), (0, SLOT_UDID["pro"]),
+                         "take --udid for pro is not granted the pro UDID")
+
+    def test_without_udid_the_take_still_prints_the_slot(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid)), (0, "1"), "take without --udid no longer prints the slot")
+
+    def test_each_slot_names_its_own_device(self):
+        udids = [SLOT_UDID[slot] for slot in ("1", "2", "pro")]
+        self.assertEqual(len(set(udids)), 3, "two slots name the same device UDID")
+
+    def test_a_refused_take_udid_prints_nothing(self):
+        self.set_load("0.50", "100.00", "0.50")
+        r = self.take("duo", os.getpid(), udid=True)
+        self.assertEqual(r.returncode, 1, "a take --udid at a 5-minute load of 100 is not refused with exit 1")
+        self.assertEqual(r.stdout.strip(), "", "a refused take --udid prints a UDID")
+
+
 class Usage(LeaseCase):
     def test_a_usage_error_exits_2(self):
         for label, args in (("a take with no device", ["take"]), ("a take with an unknown device",
@@ -362,6 +409,15 @@ class NoOp(LeaseCase):
         for name in ("CI", "GITHUB_ACTIONS"):
             with self.subTest(variable=name):
                 self.assert_no_op("%s=true" % name, env={name: "true"})
+
+    def test_take_udid_on_a_no_op_prints_none_and_writes_no_file(self):
+        for label, env in (("uname Linux", {"SIM_LEASE_TEST_UNAME": "Linux"}), ("CI=true", {"CI": "true"}),
+                           ("GITHUB_ACTIONS=true", {"GITHUB_ACTIONS": "true"})):
+            with self.subTest(label):
+                pid = self.spawn().pid
+                r = self.take("duo", pid, env=env, udid=True)
+                self.assertEqual(grant(r), (0, "none"), "%s: take --udid is not a no-op that prints none" % label)
+                self.assertEqual(files_under(self.cfg), [], "%s: take --udid wrote a file" % label)
 
     def test_an_empty_ci_is_not_a_no_op(self):
         pid = self.spawn().pid

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "df25a68d-rlock",
+    "name": "The stop handler's lock is not re-entrant",
+    "file": "hooks/mutate_shared.py",
+    "old": "_LIVE_LOCK = threading.RLock()",
+    "new": "_LIVE_LOCK = threading.Lock()",
+    "argv": ["python3", "hooks/test_mutate_replay.py", "RequestStopTests"],
+    "classify": "fail_line"
+  },
+  {
+    "id": "df25a68d-pw-timeout",
+    "name": "A Playwright timeout reads as an assertion kill",
+    "file": "hooks/mutate_shared.py",
+    "old": "if not _PW_NOT_ASSERT.search(error) and _PW_ASSERT",
+    "new": "if _PW_ASSERT",
+    "argv": ["python3", "hooks/test_mutate_replay.py", "PlaywrightClassifyTests"],
+    "classify": "fail_line"
+  },
+  {
+    "id": "3297d8fa-take-spare",
+    "name": "The merge lock's spare time is dropped",
+    "file": "merge/merge.py",
+    "old": "+ 10) * 60)",
+    "new": ") * 60)",
+    "argv": ["python3", "merge/test_merge.py", "LockProseStatesTheCode"],
+    "classify": "fail_line"
+  }
+]

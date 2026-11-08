@@ -612,9 +612,9 @@ case6() {
   mkdir -p "$outside" "$cfg"
   printf '@%s/CLAUDE.md\n' "$work/case6-checkout" > "$cfg/CLAUDE.md"
 
-  # CLAUDE_CODE_REMOTE unset: a cloud session prints its session-tier line by design.
+  # CLAUDE_CODE_REMOTE and CLAUDE_CODE_REMOTE_SESSION_ID unset: a cloud session prints its session-tier line by design.
   out=$(cd "$outside" && CLAUDE_CONFIG_DIR="$cfg" GIT_CEILING_DIRECTORIES="$outside" \
-        env -u CLAUDE_CODE_REMOTE sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c6err)
+        env -u CLAUDE_CODE_REMOTE -u CLAUDE_CODE_REMOTE_SESSION_ID sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c6err)
   rc=$?
   errsize=$(wc -c < /tmp/c6err | tr -d '[:space:]'); rm -f /tmp/c6err
 
@@ -1525,6 +1525,58 @@ caseF8() {
     bad "$name" "wrote to stderr"
   elif ! printf '%s\n' "$out" | grep -qF "$co is 2 commits behind origin/main"; then
     bad "$name" "expected stale line naming 2 commits behind, got: $out"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseF9, caseF10: a pointer checkout detached at a commit, not on a branch ----
+# caseF9 is the defect: a checkout detached at origin/main's tip reads as off main while its local main lags.
+# caseF10 is the control: a checkout detached at a commit that is neither local main nor origin/main still prints
+# the off-main line. Each case checks its own fixture first, so a broken setup never reads as a hook result.
+caseF9() {
+  name="caseF9: a checkout detached at origin/main's tip, with a stale local main, prints no off-main line"
+  behind_fixture caseF9 0
+  if [ -n "$fx_err" ]; then bad "$name" "$fx_err"; return; fi
+  ( cd "$co" && git fetch -q origin && git checkout -q --detach refs/remotes/origin/main ) \
+    || { bad "$name" "FIXTURE could not detach at origin/main"; return; }
+  fx_head=$(git -C "$co" rev-parse HEAD); fx_main=$(git -C "$co" rev-parse refs/heads/main)
+  fx_tip=$(git -C "$co" rev-parse refs/remotes/origin/main)
+  if [ "$fx_head" != "$fx_tip" ] || [ "$fx_head" = "$fx_main" ]; then
+    bad "$name" "FIXTURE is not detached at origin/main with a stale local main"; return
+  fi
+  pointer_hook_run ""
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif printf '%s\n' "$out" | grep -qE "not main|detached HEAD"; then
+    bad "$name" "an off-main line for a checkout at origin/main: $out"
+  else
+    ok "$name"
+  fi
+}
+
+caseF10() {
+  name="caseF10: a checkout detached at a commit that is neither main nor origin/main prints the off-main line"
+  behind_fixture caseF10 0
+  if [ -n "$fx_err" ]; then bad "$name" "$fx_err"; return; fi
+  ( cd "$co" && git fetch -q origin && git checkout -q --detach refs/remotes/origin/main~1 ) \
+    || { bad "$name" "FIXTURE could not detach at the commit before origin/main"; return; }
+  fx_head=$(git -C "$co" rev-parse HEAD); fx_main=$(git -C "$co" rev-parse refs/heads/main)
+  fx_tip=$(git -C "$co" rev-parse refs/remotes/origin/main)
+  if [ "$fx_head" = "$fx_tip" ] || [ "$fx_head" = "$fx_main" ]; then
+    bad "$name" "FIXTURE is at main or origin/main, not at a third commit"; return
+  fi
+  pointer_hook_run ""
+
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "exit $rc"
+  elif [ "$errsize" != "0" ]; then
+    bad "$name" "wrote to stderr"
+  elif ! printf '%s\n' "$out" | grep -q "is on a detached HEAD, not main"; then
+    bad "$name" "expected the off-main line for a detached third commit, got: $out"
   else
     ok "$name"
   fi
@@ -2868,9 +2920,9 @@ caseF5() {
   mkdir -p "$outside"
   # No CLAUDE_CONFIG_DIR contents at all: the pointer file itself is missing.
 
-  # CLAUDE_CODE_REMOTE unset: a cloud session prints its session-tier line by design.
+  # CLAUDE_CODE_REMOTE and CLAUDE_CODE_REMOTE_SESSION_ID unset: a cloud session prints its session-tier line by design.
   out=$(cd "$outside" && CLAUDE_CONFIG_DIR="$cfg" GIT_CEILING_DIRECTORIES="$outside" \
-        env -u CLAUDE_CODE_REMOTE sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF5err)
+        env -u CLAUDE_CODE_REMOTE -u CLAUDE_CODE_REMOTE_SESSION_ID sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF5err)
   rc=$?
   errsize=$(wc -c < /tmp/cF5err | tr -d '[:space:]'); rm -f /tmp/cF5err
 
@@ -5226,6 +5278,8 @@ run caseF5
 run caseF6
 run caseF7
 run caseF8
+run caseF9
+run caseF10
 run caseG1
 run caseG2
 run caseG3

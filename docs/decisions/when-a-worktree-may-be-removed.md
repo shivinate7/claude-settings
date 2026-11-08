@@ -4,7 +4,7 @@
 
 Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. A dirty tree is never reaped.
 
-Five routes remove a worktree. One is the unattended `--confirm` run. Three remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap, the session-end sweep's agent rule, and a repo's own `reap:worktrees` script. That script keeps its own tests. The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
+Five routes remove a worktree. One is the unattended `--confirm` run. One is a test-author's `git worktree remove` of its own red-run checkout, once that checkout is clean and detached at a pushed commit; the guard refuses the remove of a dirty one. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
 
 ### Idle limits, side by side
 
@@ -21,7 +21,7 @@ Each route keeps its own limit. A clean, pushed agent worktree that is not merge
 
 ### Safe work
 
-- Remove only a clean folder where every commit on HEAD is on a remote branch (a detached HEAD counts). Pushed is enough for the agent-end reap and the session-end `agent-*` rule: HEAD need not be merged into the default branch (owner ruling, 2026-10-18 02:03 CDT). The unattended run needs more, as below. With no remote, every worktree stays. A route may add a merged or idle test of its own, as the unattended run does below. A repo's own `reap:worktrees` script keeps its own tests.
+- Remove only a clean folder where every commit on HEAD is on a remote branch (a detached HEAD counts). Pushed is enough for the agent-end reap and the session-end `agent-*` rule: HEAD need not be merged into the default branch (owner ruling, 2026-10-18 02:03 CDT). The unattended run needs more, as below. With no remote, every worktree stays. A route may add a merged or idle test of its own, as the unattended run does below.
 - This covers every worktree reap, locked or not. `--confirm` unlocks, then removes, never with `--force`. If removal fails, the sweep restores the lock. After a cut-short remove, `_restore_cut_short` writes the deleted tracked files back from the index, never with `--force` (owner, 2026-10-15, review point 4).
 - Shared-tree guard: `git worktree remove` passes a tree whose dirty files all equal blobs in pushed commits. The commits are HEAD, its merge-base with the default branch, and HEAD's reflog (20 entries). The tree has no unpushed commit and no untracked file. The locked and live-session reads still apply. Risk kind: incident, 2026-11-01 22:41 CST. Home: `git_reads.dirty_paths_are_pushed_copies`. Cost: at most 14 fixed git process starts per `git worktree remove` call on a dirty tree, then one `ls-tree` per candidate tried (at most 22) and one `for-each-ref` per matched candidate. No files written. No other call pays it. A test in `hooks/test_guard.py` proves the bound.
 - A stale agent lock is judged by the rule in `the-janitor-is-one-machine-wide-sweep`.
@@ -62,7 +62,7 @@ A worktree is removed only when all of these hold. A read that cannot tell keeps
 - It is pushed and unlocked.
 - No live session uses it (read 2 of the reaper, `agent-end-reap-stops-what-a-finished-agent-left`), and no process has a cwd inside it.
 
-Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder and test-author agent definitions say so.
+Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder agent definition says so. The test-author commits and pushes its own branch, and cleans and removes its red-run checkout itself.
 
 ### Session-end sweep, agent rule
 
@@ -72,7 +72,7 @@ Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--att
 - It is clean, unlocked, and idle 4 hours. No live session and no process has a cwd inside it.
 - Its tip is on GitHub, read after the run's fetch (see Safe work). Two reads must both pass: `git ls-remote --heads` read now lists a head that holds HEAD (owner ruling 2026-10-14: the read is live, never a local `origin/*` ref alone; a listed head the clone lacks is dropped), and `git branch -r --contains HEAD` is not empty.
 
-A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. A repo whose `package.json` defines the script `reap:worktrees` gets `npm run reap:worktrees -- --remove` run in its root instead of this rule. An unreadable `package.json` turns the rule off for that repo.
+A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. The rule applies in every repo, whatever its `package.json` defines.
 
 Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. The test-author makes its red-run checkout under `<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it. A checkout with another name under that folder is not covered.
 

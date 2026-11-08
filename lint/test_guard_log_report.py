@@ -814,10 +814,11 @@ class OffsetStampReadTests(unittest.TestCase):
 
     @unittest.skipIf(not hasattr(time, "tzset"), "no time.tzset here, so the zone cannot be forced")
     def test_offset_line_reads_as_local_wall_time_in_a_forced_non_utc_zone(self):
-        # Asia/Kolkata is +05:30. The +05:00 line at 12:00 is 07:00 UTC, which is 12:30 there. A reader that
-        # returns UTC-naive gives 07:00 here, so this fails where a UTC clock would pass it.
+        # IST-5:30 is +05:30, read from the POSIX zone string, so it needs no tzdata: a machine without the zone
+        # database falls back to UTC for a name such as Asia/Kolkata. The +05:00 line at 12:00 is 07:00 UTC,
+        # which is 12:30 there. A reader that returns UTC-naive gives 07:00 here, so this fails where a UTC clock would pass it.
         old = os.environ.get("TZ")
-        os.environ["TZ"] = "Asia/Kolkata"
+        os.environ["TZ"] = "IST-5:30"
         time.tzset()
         try:
             row = glr.parse_line(PLUS_FIVE_LINE)
@@ -901,8 +902,8 @@ def fresh_log(lines=None):
 
 
 class CloudCheckOneHome(unittest.TestCase):
-    """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". This report's n/a (cloud) gate
-    and the brake gate in guard.py hold that one function (decision session-tiers: the brake is local-only)."""
+    """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". This report's n/a (cloud) check
+    and the brake guard in guard.py hold that one function (decision session-tiers: the brake is local-only)."""
 
     def helper(self):
         import guard_core
@@ -921,7 +922,7 @@ class CloudCheckOneHome(unittest.TestCase):
     def test_the_report_check_holds_the_guard_core_is_cloud(self):
         fn = self.helper()
         self.assertTrue(callable(fn), "guard_core has no is_cloud: the cloud check has no one home yet")
-        self.assertIs(getattr(glr, "is_cloud", None), fn, "the n/a (cloud) gate does not hold guard_core.is_cloud")
+        self.assertIs(getattr(glr, "is_cloud", None), fn, "the n/a (cloud) check does not hold guard_core.is_cloud")
 
 
 class CloudPaceReadTests(unittest.TestCase):

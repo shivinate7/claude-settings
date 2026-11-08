@@ -44,7 +44,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - The grant covers the merge act only. It lifts no check. These limits still apply:
   - Merge only by pull request. The required checks must pass on the head that merges (the `merge-checks` guard rule, `git-never-merge-failing-ci`: never merge failing CI).
   - Nothing merges while a batch's integration PR has a CI run in progress (`git-no-merge-during-batch-ci`: no merge during a batch CI run).
-  - A change merges once its review rounds end, on green checks (rule `roles-review-cap-three`: round 3 counts whatever its verdict). A change that changes no guard or check merges on green then. A change that changes a guard or check also needs the net-value test after round 3 (coordinator, 23:14, process-only).
+  - A change merges once its review rounds end, on green checks (rule `roles-review-cap-three`: round 3 counts whatever its verdict). A change that changes no guard or check merges on green then. A change that changes a guard or check also needs the net-value test after round 3 (coordinator, 23:14, process-only). A passing fix check (decision `hold-unsafe-after-round-3`, owner, 2026-11-03 22:24 CST) counts as that head's review.
   - After review round 3, a change that changes a guard or check gets the net-value test (`hold-unsafe-after-round-3`: the net-value hold after round 3). A held lane stays parked until the owner decides.
   - Batch lanes into one integration PR, the only PR that goes ready and runs CI
     (`git-integration-branch-merge`: how lanes join a batch).
@@ -54,7 +54,8 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - The lock-break path never waits or retries. A rate-limited delete of an expired lock is a network stop, because a late retry could delete another run's fresh lock (owner ruling 2026-10-17).
 - On one head, a run that ran outranks a cancelled run of its name, in either list order (owner ruling 2026-10-13, option a).
 - With no `.github/stamp.json`, the merge tool runs on defaults and names the file once (owner ruling 2026-10-10).
-- Only a proven refusal reverts the claim: a refusal reply with the pull request still OPEN (owner ruling).
+- Only a proven refusal reverts the claim (owner ruling, 2026-10-13). A refusal reply with the pull request still OPEN is one (wording recorded 2026-10-18).
+- Coordinator reading, 2026-11-07, not an owner ruling: a read answered HTTP 401 or 403 counts as a proven refusal, and any other read that cannot run keeps the claim. A rate-limit 403 is retried, then stops as a network stop, and keeps the claim (merge/merge.py `retry_net`, `Host.gh`, `HTTP_DENIED`).
 
 Kind: process
 Home: merge/merge.py

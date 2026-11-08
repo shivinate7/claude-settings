@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-21: refuse the hand-made lane worktree fully, and record which layer refused isolation. A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool. `hooks/guard.py` rule `hand-made-worktree` refuses the workaround.
+Owner, 2026-10-21: refuse the hand-made worktree fully, and record which layer refused isolation. A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool. `hooks/guard.py` rule `hand-made-worktree` refuses the workaround.
 
 - **The act.** A shell call (Bash or PowerShell) that holds a real `git worktree add`, read with `git_calls`, whose new tree resolves outside `<primary>/.claude/worktrees/`. `<primary>` is the primary checkout of the repo the call runs in: its last `cd`, its `-C`, or the payload cwd. A relative path resolves against that folder. A Windows path counts.
 - **Passes.** A new tree under `.claude/worktrees/`. A repo under the temp folder, such as a test fixture: the rule judges the repo, not the target, so a real repo that adds a tree into a scratchpad is refused. Every other `worktree` subcommand, `--help`, and text that only mentions the command. A non-git folder or an unreadable primary is unknown, and allows (`verification-report-unknown-reads`).
@@ -22,7 +22,7 @@ Named limits, each a form Claude rarely writes:
 
 Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only an agent's call. The Agent prompt hook in `settings.json` judges brief contents, and its refusal names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded. The next refusal's layer and message are still owed: the refusal text asks the session to report both.
 
-Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two lane agents wrote into the main clone. Landed 2026-10-26.
+Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two agents wrote into the main clone. Landed 2026-10-26.
 
 Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call. Files written: none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads.
 

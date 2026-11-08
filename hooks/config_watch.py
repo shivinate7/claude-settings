@@ -55,15 +55,14 @@ deadline is revoked the same way an unasked write is: the pre-lift content goes 
 lifted content is kept beside the store, and a systemMessage names the file and what was
 wrong with the expiry.
 
-THE ONE HARD PART. `save_baseline` used to re-baseline an APPROVED cap change straight to the
-lifted content, so the pre-lift bytes were gone by the time a deadline could be checked against
-them. The baseline entry now carries a THIRD field, `prior`: the content last seen before the
-lift began. It is computed once, when a lift first appears, and carried forward unchanged
-through any later edit that keeps the reading lifted, so a chain of re-approvals still restores to
-the one true pre-lift state. `load_baseline` treats a missing `prior` key, the shape every entry
-written by the version on `main` carries, the same as an explicit `null`: no prior recorded. When
-the expiry check finds no prior to restore to, it does not invent one and does not leave the
-override running in silence. It reports UNKNOWN, the same as `judge_path` already does for a
+THE ONE HARD PART. An APPROVED cap change re-baselines straight to the lifted content, so the
+pre-lift bytes would be gone by the time a deadline could be checked against them. The baseline
+entry therefore carries a third field, `prior`: the content last seen before the lift began. It
+is computed once, when a lift first appears, and carried forward unchanged through any later edit
+that keeps the reading lifted, so a chain of re-approvals still restores to the one true pre-lift
+state. `load_baseline` treats a missing `prior` key the same as an explicit `null`: no prior
+recorded. When the expiry check finds no prior to restore to, it does not invent one and does not
+leave the override running in silence. It reports UNKNOWN, the same as `judge_path` does for a
 first sight it cannot read.
 """
 
@@ -232,9 +231,9 @@ def load_baseline(path: str):
     trusted is not a baseline.
 
     The result carries a third field, `prior`: the content last seen before the current lift
-    began, or None when no lift is in effect or none was ever recorded. An entry written by the
-    version on `main` carries no `prior` key at all, and `entry.get("prior")` reads that the same
-    as an explicit `null` -- no prior recorded, never a crash. A `prior` that fails to decode is
+    began, or None when no lift is in effect or none was ever recorded. An entry with no `prior`
+    key at all reads the same as an explicit `null` (`entry.get("prior")`): no prior recorded,
+    never a crash. A `prior` that fails to decode is
     dropped the same way, rather than invalidating the whole entry: `prior` is supplementary, and
     an unreadable one must never be trusted, only treated as absent.
     """
@@ -522,6 +521,7 @@ def explained_path(tool: str, tool_input, cwd: str) -> str:
         raw = tool_input.get("command", "") or ""
         if not isinstance(raw, str) or not raw.strip():
             return ""
+        guard.POWERSHELL_CALL[0] = tool == "PowerShell"
         stripped = guard.strip_heredoc_bodies(raw)
         hit = guard._shell_write_hit(stripped, cwd, guard.is_settings_file)
         if not hit:
