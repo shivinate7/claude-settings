@@ -636,13 +636,17 @@ class ShallowMain(unittest.TestCase):
         sh(self.other, "git", "push", "-q", "origin", "feat")
         return p, f
 
-    def shallow_pr_clone(self, p, f):
+    def shallow_pr_clone(self, p, f, pin_head=False):
         """A shallow clone of origin with P fetched at depth 1 and feat fetched at depth 1 to its head F, so P's object is present and the path
-        from F to P is cut. The clone's shape is checked before any case reads it: shallow, P present, and exit 1 from P to F. -> the clone's path."""
+        from F to P is cut. The clone's shape is checked before any case reads it: shallow, P present, and exit 1 from P to F. -> the clone's path.
+        `pin_head`: the clone holds F's object alone, so P's object is absent too, and the read from P to F exits 128. -> the clone's path."""
         clone = os.path.join(self.t, "shallow-pr")
-        error = shallow_clone.make(os.path.join(self.t, "origin.git"), clone, p)
+        error = shallow_clone.make(os.path.join(self.t, "origin.git"), clone, f if pin_head else p)
         if error:
             raise RuntimeError("shallow fixture could not be built: " + error)
+        if pin_head:
+            self.assertEqual(shallow_clone.facts(clone, p, f), {"shallow": True, "pin_present": False, "ancestor_rc": 128}, "the clone is not the absent-object shape")
+            return clone
         sh(clone, "git", "fetch", "-q", "--depth", "1", "origin", "feat")
         self.assertEqual(shallow_clone.facts(clone, p, f), {"shallow": True, "pin_present": True, "ancestor_rc": 1}, "the clone is not the bug shape")
         return clone
@@ -678,6 +682,46 @@ class ShallowMain(unittest.TestCase):
         with self.assertRaises(merge.RoundOwed) as cm:
             merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), root=self.other)
         self.assertIn("#20", str(cm.exception), "the refusal does not name pull request #20:\n" + str(cm.exception))
+
+    def test_a_stale_record_whose_head_a_shallow_clone_lacks_is_unknown_and_refuses(self):
+        # P is in the history of F, and the clone holds F alone: P's object is absent, so the clone may have cut the history. The read must refuse as unknown
+        p, f = self.cut_pr_branch()
+        clone = self.shallow_pr_clone(p, f, pin_head=True)
+        try:
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), root=clone)
+        except merge.Liftable as e:
+            self.assertIn("could not read the history of a stale record's head", str(e), "the refusal does not come from the read of the stale record's history:\n" + str(e))
+            self.assertIn("--undo-check-unknown-ok", str(e), "the refusal does not name the reason flag:\n" + str(e))
+            return
+        except merge.RoundOwed as e:
+            self.fail("the round-3 check read the absent head as in the history, and refused it as owed:\n" + str(e))
+        self.fail(f"the round-3 check read the absent head as not in the history, and let the stale record through (it returned {got!r})")
+
+    def test_the_reason_flag_lifts_an_absent_head_read_in_a_shallow_clone_and_logs_its_reason(self):
+        p, f = self.cut_pr_branch()
+        clone = self.shallow_pr_clone(p, f, pin_head=True)
+        self.assertIsNotNone(merge.oldest_new_since(clone, "origin/main", f), "the date read does not see F as new, so the flag would lift a different read")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), "octopus read it", root=clone)
+        self.assertEqual(got, "octopus read it", "the reason flag did not lift the unread history of the stale record's head:\n" + out.getvalue())
+        self.assertIn("--undo-check-unknown-ok, reason: octopus read it", out.getvalue(), "the lift is not logged with its reason:\n" + out.getvalue())
+
+    def test_the_same_absent_head_in_a_full_clone_passes_as_outside_the_history(self):
+        # the control beside the cases above: a full clone holds every commit it fetched, so exit 128 for X means X is outside the batch's history, and the record passes
+        _p, f = self.cut_pr_branch()
+        sh(self.other, "git", "checkout", "-q", "-B", "agent/local", "origin/main")
+        put(os.path.join(self.other, "local.txt"), "local\n")
+        sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-q", "-m", "local, never pushed")
+        x = sh(self.other, "git", "rev-parse", "HEAD")
+        co = os.path.join(self.t, "co")
+        sh(co, "git", "fetch", "-q", "origin")
+        self.assertEqual(shallow_clone.facts(co, x, f), {"shallow": False, "pin_present": False, "ancestor_rc": 128}, "the full clone holds X, so the case does not reach the absent-object shape")
+        try:
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(x), root=co)
+        except (merge.Liftable, merge.RoundOwed) as e:
+            self.fail("the record for an absent head was refused in a full clone, though the clone is not shallow:\n" + str(e))
+        self.assertIsNone(got, "the round-3 check returned a lift in a full clone, with no reason flag")
 
 
 class ClaudeMdFlag(Env):
@@ -14272,6 +14316,8 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
     batch still refuses. A stale record of the pull request's own names its remedy by its state: held, a failed fix check, or the third round owed."""
 
+    GUARD_PHRASE = "changes a guard or check and"
+
     def test_a_guard_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
         _tips, host, _g = self.landed_guard_batch("yes", REVIEW_PASS, "not owed")
         rc, out, _before = self.run_round_check(host, "--confirm")
@@ -14387,6 +14433,32 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("Get round 3 done", self.remedy_line(out), "the remedy does not ask for the third round on an open record:\n" + out)
         self.assertNotIn("held for the owner", out, "the remedy says an open record is held for the owner:\n" + out)
+
+    def guard_clauses(self, out, marker):
+        """-> the printed clause lines of pull request #7 that hold `marker`. The case fails when none does, so an empty list cannot pass a count."""
+        lines = [line for line in out.splitlines() if "#7 " in line and marker in line]
+        self.assertTrue(lines, f"no clause of #7 holds {marker!r}:\n" + out)
+        return lines
+
+    def test_a_stale_held_record_of_the_pr_itself_says_the_guard_phrase_once_in_its_clause(self):
+        # The stale kinds add the phrase to the clause, and held's own text says it as well. The clause must say it once
+        host, older, record = self.replaced_own_record(rounds=REVIEW_FAILED_THREE, net="negative")
+        self.assertEqual(record_state(self, record, head=older), "held", "the record is not held on its own head, so the case does not reach the held rule")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        clauses = self.guard_clauses(out, "is held for the owner")
+        self.assertEqual(len(clauses), 1, "the held record of #7 prints more than one clause:\n" + out)
+        self.assertLessEqual(clauses[0].count(self.GUARD_PHRASE), 1, "the held clause says the guard phrase twice:\n" + clauses[0])
+
+    def test_a_stale_round_record_of_the_pr_itself_says_the_guard_phrase_once_in_its_clause(self):
+        # The control beside it: the round kind's clause has the phrase once, from the prefix the stale kinds add. A fix that drops the prefix for every kind fails here
+        host, older, record = self.replaced_own_record(rounds=REVIEW_PASS)
+        self.assertEqual(record_state(self, record, head=older), "open", "the record is not open on its own head, so the control does not reach the round rule")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        clauses = self.guard_clauses(out, "owed on the new head")
+        self.assertEqual(len(clauses), 1, "the round record of #7 prints more than one clause:\n" + out)
+        self.assertEqual(clauses[0].count(self.GUARD_PHRASE), 1, "the round clause does not say the guard phrase once:\n" + clauses[0])
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
