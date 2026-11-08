@@ -383,23 +383,84 @@ def delete_text(segment):
         lambda m: m.group(0) if m.group(1) in ("'", '"') else "/" + norm(m.group(1)), segment))
 
 
+def _substitution_end(text, index):
+    """Where the command substitution that opens at `text[index]` ends, else -1. `$(` ends at its
+    matching `)` and a backtick at the next one; an unclosed one runs to the end of the text.
+    PowerShell has `$( )` only, as a backtick is its escape."""
+    if text.startswith("$(", index):
+        depth = 0
+        for at in range(index + 1, len(text)):
+            depth += (text[at] == "(") - (text[at] == ")")
+            if depth == 0:
+                return at
+        return len(text)
+    if text[index] == "`" and not is_powershell(text):
+        close = text.find("`", index + 1)
+        return len(text) if close < 0 else close
+    return -1
+
+
+_TEXT_COMMANDS = ("echo", "printf", "write-host", "write-output")
+_LIVE_UNQUOTED = re.compile(r"\$\(|`|[<>]\(")
+
+
+def _quotes_are_text(segment):
+    """True when a segment only prints its quoted words or stores them as a commit message: its
+    command is a printer or `git commit`, with no substitution outside single quotes. Any other
+    command may run a quoted word (`parallel`, `script -c`, `watch`, `runuser -c`)."""
+    if _LIVE_UNQUOTED.search(re.sub(r"'[^']*'", "", segment)):
+        return False
+    words = [word for word in segment_tokens(segment) or () if not re.match(r"[A-Za-z_]\w*=", word)]
+    if not words:
+        return False
+    if words[0].lower() in _TEXT_COMMANDS:
+        return True
+    return words[0] in ("git", "git.exe") and words[_git_subcommand_index(words, 0):][:1] == ["commit"]
+
+
 class UnquotedStart:
     """A compiled pattern whose `search` skips a match that starts inside quotes. It has a
     pattern's own `search`, so a caller loops over it without knowing the difference. An
     apostrophe shaped like a contraction is text, as in split_segments' second reading: a lone
-    `don't` must not turn the rest of the line into one quote."""
+    `don't` must not turn the rest of the line into one quote. `printers_only` skips quotes only in
+    a segment whose quoted words are text (`_quotes_are_text`) and not piped on; elsewhere it reads
+    the raw text."""
 
-    def __init__(self, pattern):
+    def __init__(self, pattern, nested=False, printers_only=False):
         self.pattern = pattern
+        self.nested = nested
+        self.printers_only = printers_only
 
     def search(self, text):
-        inside, quote, index = set(), "", 0
+        if self.printers_only:
+            ends = []
+            for segment, end in zip(split_segments(text, ends), ends):
+                text_only = end != "|" and _quotes_are_text(segment)
+                found = self._search_unquoted(segment) if text_only else self.pattern.search(segment)
+                if found:
+                    return found
+            return None
+        found = self._search_unquoted(text)
+        if found or not self.nested:
+            return found
+        # The script a shell, `eval` or `pwsh -Command` runs is quoted text, so it is read again as a command.
+        for segment in split_segments(text):
+            for script in inner_commands(segment_tokens(segment) or []):
+                found = self.search(script)
+                if found:
+                    return found
+        return None
+
+    def _search_unquoted(self, text):
+        inside, quote, index, live_to = set(), "", 0, -1
         while index < len(text):
+            if quote == '"' and index > live_to:
+                live_to = max(live_to, _substitution_end(text, index))   # `$( )` and backticks run in double quotes
             if not quote and text[index] == "'" and CONTRACTION.match(text, index):
                 width, after = 1, ""
             else:
                 width, after = quote_advance(text, index, quote)
-            if quote:
+            if quote and index >= live_to:
                 inside.update(range(index, index + width))
             quote, index = after, index + width
         return next((m for m in self.pattern.finditer(text) if m.start() not in inside), None)
@@ -411,19 +472,20 @@ RM_RAW = UnquotedStart(re.compile(
 
 
 DESTRUCTIVE_DELETE = (
-    re.compile(
+    UnquotedStart(re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase|rm)\b"
+        r"(?![^\n;|&]*\s--cached\b)"   # the index-only form of `git rm`
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"(?=[^\n;|&]*\s-f(?:o(?:rce)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    ),
+    ), printers_only=True),
     # Recursion alone is enough for the PowerShell names. `rm` is read by tokens, not here. A match
     # that starts inside quotes is text (an echo, a commit message), so it is not read.
     UnquotedStart(re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    )),
+    ), nested=True),
 )
 # The one set of wide targets, read by the pattern fallbacks and, by tokens, by `rm -rf`: a root, a
 # home, the working directory or a glob of one, with an optional trailing slash and `*`. `.*` and
@@ -479,14 +541,16 @@ def _in_group(args, tick=False):
 def _git_subcommands(words):
     """The indexes of the words that name a git subcommand, such as the `rm` of `git rm -r .`. Such
     a word is no command word. A force flag keeps the word read: `git rm` without one refuses to drop an edited
-    file, so git can restore what it removes, and `git rm -f` discards the edits."""
+    file, so git can restore what it removes, and `git rm -f` discards the edits. `--cached` removes from the
+    index only, so it names the subcommand whatever the other flags say."""
     found = set()
     for at, word in enumerate(words):
         if basename(word) in ("git", "git.exe"):
             sub = _git_subcommand_index(words, at)
             args = words[sub + 1:]
             args = args[:args.index("--")] if "--" in args else args
-            if not any(a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
+            if "--cached" in args or not any(
+                    a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
                 found.add(sub)
     return found
 
