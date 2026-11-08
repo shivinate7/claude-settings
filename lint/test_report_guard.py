@@ -4747,10 +4747,10 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
 
 
 
-class AnsweredNeedsSourceTests(unittest.TestCase):
-    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
-    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
-    answered-needs-source)."""
+class StopVerdictMixin:
+    """The Stop-hook drive that the report guard's line checks share (one home): one human message and the
+    reply as the last assistant text, with a git commit before it when `landed`. run_guard runs the hook as a
+    subprocess. A verdict is the hook's JSON, or None when the reply passes."""
 
     def hook(self, reply, landed=False, stop_hook_active=False):
         records = [human("ask the owner")]
@@ -4767,7 +4767,7 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
 
     def assert_blocked(self, reply, *needles, **kw):
         out = self.verdict(reply, **kw)
-        self.assertIsNotNone(out, reply)
+        self.assertIsNotNone(out, "allowed, expected a block: %r" % reply)
         self.assertEqual(out.get("decision"), "block", reply)
         for needle in needles:
             self.assertIn(needle, out["reason"])
@@ -4776,6 +4776,12 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
     def assert_allowed(self, reply, **kw):
         out = self.verdict(reply, **kw)
         self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
+
+
+class AnsweredNeedsSourceTests(StopVerdictMixin, unittest.TestCase):
+    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
+    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
+    answered-needs-source)."""
 
     # Red: each case below fails until the verdict exists.
 
@@ -5048,6 +5054,138 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
         self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
         self.assertEqual(set(opened), {transcript, GUARD_PY})
+
+
+class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
+    """The pre-existing verdict, in report_guard.py's Stop hook (rule pre-existing-needs-main-run). A reply line
+    that calls a failure pre-existing, calls it already red on main, or says it fails on a commit "too" must name
+    a run on main on the same line: "on main at <sha>", "on origin/main", or a CI run URL on main. Incident
+    2026-11-07: a lane report said a failure "fails on 32b5f8b8e too, pre-existing"; 32b5f8b8e was the PR's own
+    head, not main, so the failure came from the PR."""
+
+    # Red: each case below fails until the verdict exists. One test per case, so the red count is the case count.
+
+    def test_pe_red_incident_line_is_refused(self):
+        # Catches: a failure on a sha with no main word passes when the line has no "pre-existing" word.
+        line = "fails on 32b5f8b8e too, so it is not from this step"
+        self.assert_blocked(line, line)
+
+    def test_pe_red_pre_existing_with_no_run_is_refused(self):
+        # Catches: "pre-existing" with no run named passes.
+        line = "The failing lint check is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_already_red_on_main_with_no_run_is_refused(self):
+        # Catches: "already red on main" with no run named passes.
+        line = "The lint check was already red on main."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_pr_head_is_no_run_on_main(self):
+        # Catches: "on the PR head" is read as evidence that the failure was on main.
+        line = "The failure is pre-existing: it fails on the PR head too."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_sha_with_no_main_word_is_refused(self):
+        # Catches: a sha with no main word is read as a run on main.
+        line = "The failure is pre-existing; it also fails at 174b005c1."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_run_url_not_on_main_is_refused(self):
+        # Catches: a CI run URL that does not say it is on main is read as a run on main.
+        line = "Pre-existing: https://github.com/shivinate7/claude-settings/actions/runs/123 is red."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_landed_turn_blocks_above_a_good_report(self):
+        # Catches: the check runs only on unlanded turns, or misses a line above the report.
+        line = "The failure is pre-existing."
+        self.assert_blocked(line + "\n\n> **Done** BUILT abc123\n> **Next** ship it", line, landed=True)
+
+    def test_pe_red_each_offending_line_is_listed_and_the_cited_one_is_not(self):
+        # Catches: only the first offending line is listed, or a line with a main run is listed with the red ones.
+        cited = "The failure is pre-existing: it fails on main at 174b005c1 too."
+        bad = "fails on 32b5f8b8e too, so it is not from this step"
+        out = self.assert_blocked("\n".join([cited, bad]), bad)
+        self.assertNotIn(cited, out["reason"])
+
+    def test_pe_red_refusal_names_the_rule(self):
+        # Catches: the refusal does not name its rule, so a reader cannot find the rule the line breaks.
+        self.assert_blocked("The failure is pre-existing.", "pre-existing-needs-main-run")
+
+    def test_pe_red_lone_apostrophe_does_not_hide_the_claim(self):
+        # Catches: a lone apostrophe in Don't opens a quote that hides the claim after it.
+        line = "Don't re-run it; the failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_fence_marker_mid_line_opens_no_fence(self):
+        # Catches: a ``` inside a line, and not at its start, opens a fence that hides the claim after it.
+        self.assert_blocked("Typed ``` mid-line.\nThe failure is pre-existing.", "The failure is pre-existing.")
+
+    def test_pe_red_text_after_a_closed_fence_is_judged(self):
+        # Catches: a fence hides every line after it, not only the lines inside it.
+        self.assert_blocked("```\nkeep the log\n```\nThe failure is pre-existing.", "The failure is pre-existing.")
+
+    # Green: these pass before the verdict exists too. Each guards against a false alarm.
+
+    def test_pe_green_brief_control_on_main_at_sha_passes(self):
+        # Catches: a line that names a run on main at a sha is refused.
+        self.assert_allowed("fails on main at 174b005c1 too")
+
+    def test_pe_green_pre_existing_with_a_run_on_main_passes(self):
+        rows = [
+            # Catches: "on main at <sha>" is not read as a run on main.
+            "The failure is pre-existing: it fails on main at 174b005c1 too.",
+            # Catches: "on origin/main" is not read as a run on main.
+            "Pre-existing: the same lint check fails on origin/main.",
+            # Catches: a CI run URL that says it is on main is not read as a run on main.
+            "Pre-existing: https://github.com/shivinate7/claude-settings/actions/runs/123 on main.",
+            # Catches: a sha in a code span is not read as the sha.
+            "The failure is pre-existing: it fails on main at `174b005c1` too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_lines_with_no_pre_existing_claim_pass(self):
+        rows = [
+            # Catches: a failure on a sha with no "too" is read as the claim.
+            "Lint fails on 32b5f8b8e in this PR run.",
+            # Catches: a red PR head with no sha is read as the claim.
+            "The lint check is red on the PR head; the fix is in lint/report_guard.py.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_quoted_and_code_span_claims_pass(self):
+        rows = [
+            # Catches: a claim quoted from someone else's words is read as this report's claim.
+            'The lane wrote "pre-existing" in its report, and the claim was false.',
+            # Catches: a claim in a code span is read as this report's claim.
+            "The lane wrote `fails on 32b5f8b8e too` in its report.",
+            # Catches: an already-red claim in a code span is read as this report's claim.
+            "The check said `already red on main` before the fix.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_fenced_block_claim_passes(self):
+        # Catches: a claim inside a multi-line fenced block is read as this report's claim.
+        self.assert_allowed("```\nThe failure is pre-existing.\nfails on 32b5f8b8e too\n```")
+
+    def test_pe_green_negated_claim_passes(self):
+        # Catches: "not pre-existing" is read as the claim.
+        self.assert_allowed("The failure is not pre-existing; it comes from this step.")
+
+    def test_pe_green_hyphen_joined_slug_is_not_the_word(self):
+        # Catches: the rule's step slug (pre-existing-needs-main-run) is read as the claim word.
+        self.assert_allowed("Step pre-existing-needs-main-run is in progress.")
+
+    def test_pe_green_long_reply_with_one_cited_claim_passes(self):
+        # Catches: a long reply trips the check on a line with no claim, or on a claim that cites a run on main.
+        lines = ["Line %d of the report: the suite ran and is green." % n for n in range(40)]
+        lines.append("The failure is pre-existing: it fails on main at 174b005c1 too.")
+        self.assert_allowed("\n".join(lines))
 
 
 class PendingRefusalTests(unittest.TestCase):
