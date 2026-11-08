@@ -1,0 +1,11 @@
+{
+  "title": "The guard refuses a python3 -c or heredoc script that writes to a frozen file",
+  "why": "Main lets a `python3 -c` or heredoc script write to a frozen file, which the frozen-path guard refuses for a shell write (lane bg-tail-loses-verdict, 06:28 CST Nov 8).",
+  "note": "Red rows on branch frozen-python-writes (22bccac1a). Held until the env-file-shell-c lane's interpreter-code reader PR exists; then it builds on that reader (one home for interpreter code, coordinator 06:26 CST; owner items 386, 410 a and 399 a). Lane session_013NEJL3ZjZdzrS8tBezxY85. Filed 06:47 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 632,
+  "owner": "triage",
+  "lane": "session_013NEJL3ZjZdzrS8tBezxY85",
+  "updatedAt": "2026-11-08T06:27:00-06:00"
+}

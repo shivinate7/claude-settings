@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool tells a replacement PR from a new one, so a guard change's replacement PR keeps its review rounds owed",
+  "why": "The merge tool cannot tell a replacement PR from a new one, so a guard-yes record reads done after a round 1 PASS while the lane still owes rounds 2 and 3 (lane fail-record-ancestor-head, recorded on PR 1957, 06:45 CST Nov 8). Replacement PRs are common (#1911 replaced #1907; #1371 replaced #1326).",
+  "note": "Fix: a PR body line naming the PR it replaces carries the old PR's rounds into the new record, and a guard-yes record after a round 1 PASS on a replacement reads not done until rounds 2 and 3 land; red case first. Queue fix (owner 13:20 CST Nov 7). Filed 06:47 CST Nov 8; the coordinator assigns a lane.",
+  "phase": "now",
+  "status": "todo",
+  "order": 633,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T06:27:00-06:00"
+}
