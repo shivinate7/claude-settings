@@ -13962,6 +13962,12 @@ sh("pwsh-r3-limits listing twin: PowerShell tool, Copy-Item of a docs file onto 
    "[pwsh-r3-limits green]",
    "gci hooks | % { Copy-Item docs/x -Destination $_.FullName }", "deny", rule=BT, carries=("test-author",),
    tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# PWSH-R3-LIMITS gap 2, a pin with no red on the old code. A folder copy of each listed test file writes docs/test_x.py,
+# a test path, so it stays REFUSED. The gap 2 fix must read the -Path source and still refuse this folder destination.
+sh("pwsh-r3-limits listing pin: PowerShell tool, Copy-Item of each listed test file into a docs folder, is refused "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { Copy-Item -Path $_.FullName -Destination docs/ }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
 # PWSH-R3-LIMITS gap 3. The listed folder is the one a listing names, through a filter, a Where-Object or Select-Object,
 # a colon-bound -Path:$_, a parenthesized $_, or a quoted $(...). Each hooks listing (it holds a test) is REFUSED.
 # Each docs twin of the same form holds no test and is ALLOWED.
