@@ -70,6 +70,8 @@ IDLE_FORMS = ("python3 -I merge/merge.py --idle-lanes --live roadmap-live.json",
               "timeout 300 merge --idle-lanes --live roadmap-live.json")
 GREP_REVIEWED = "grep -n -- --reviewed merge/merge.py"
 GREP_IDLE = "grep -n -- --idle-lanes merge/merge.py"
+LAUNCH_REVIEWED_CMD = "python3 merge/launch.py --reviewed"  # the second merge script, a run of the same ledger
+MERGE_REVIEWED_CMD = "python3 merge/merge.py --reviewed"
 
 # The Stop run with a process start and a socket refused: each fails the run loudly instead of passing silently.
 NO_IO_CODE = (
@@ -238,9 +240,10 @@ class BacklogFixture(trg.SameTurnWriter):
         self.assertRegex(out["reason"], r"(?i)(?:%s[^;.<]*\bunknown\b|\bunknown\b[^;.<]*%s)" % (name, name),
                          "the refusal does not say unknown for %r: %r" % (label, out["reason"]))
 
-    def released(self, out):
-        """The Stop was not refused as a block."""
-        self.assertFalse(out and out.get("decision") == "block", "the Stop was refused with no Backlog count owed: %r" % (out,))
+    def released(self, out, cause=""):
+        """The Stop was not refused as a block. `cause` names what a refusal would mean, when the case gives one."""
+        message = "the Stop was refused with no Backlog count owed: %r" % (out,)
+        self.assertFalse(out and out.get("decision") == "block", ("%s; " % cause if cause else "") + message)
 
 
 class BacklogCountTests(BacklogFixture, unittest.TestCase):
@@ -554,6 +557,64 @@ class VerdictReadCostTests(BacklogFixture, unittest.TestCase):
         result, opened = self.opened_reads([human("wake"), coordinator(), verdict_reviewed(log)])
         self.assertEqual(result[0], (2, 0), "the one run's count is not read: %r" % (result,))
         self.assertEqual(opened, [log], "the one run's log is not the one opened: %r" % (opened,))
+
+
+class LedgerReadTests(BacklogFixture, unittest.TestCase):
+    """What counts as a read, and how the owed check reads the own record. A run of either merge script is a ledger read. A PASS
+    line reads only the command it names. The owed check reads the own record once, for both tiers."""
+
+    def test_bk_red_a_launch_script_reviewed_run_is_a_read(self):
+        # Catches: a run of merge/launch.py --reviewed is no ledger read, so its summary counts go unread and a matching number is refused.
+        records = [human("wake"), coordinator(), reviewed_read(past=2, none=1, command=LAUNCH_REVIEWED_CMD),
+                   assistant_text(report(backlog(past=2, none=1)))]
+        self.released(self.run_stop(records), "merge/launch.py --reviewed is not read as a ledger run")
+
+    def test_bk_green_a_merge_script_reviewed_run_is_a_read(self):
+        # Control: the same counts from merge/merge.py --reviewed are released, so the refusal above is the launcher's alone.
+        records = [human("wake"), coordinator(), reviewed_read(past=2, none=1, command=MERGE_REVIEWED_CMD),
+                   assistant_text(report(backlog(past=2, none=1)))]
+        self.released(self.run_stop(records))
+
+    def test_bk_red_a_pass_of_another_command_in_one_call_is_no_reviewed_read(self):
+        # Catches: the PASS line of ./run.sh, in the call that also runs merge --reviewed, is read as that merge run's PASS. So a 0
+        # from a merge output with no summary passes unread. A PASS line reads only the command it names.
+        call = read_run("verdict ./run.sh; merge --reviewed", ["PASS ./run.sh (0.3s)", "#7 feat7 batch 6h"])
+        records = [human("wake"), coordinator(), call, assistant_text(report(backlog(past=0, none=0)))]
+        out = self.run_stop(records)
+        self.assertIsNotNone(out, "the PASS line of ./run.sh was read as the merge run's PASS, so its zero counts passed unread")
+        self.names_unknown_for(out, BACKLOG_FIELDS[0])
+        self.names_unknown_for(out, BACKLOG_FIELDS[1])
+
+    def owed_check_reads(self, tags, session, env_id):
+        """(the owed check's refusal, the own-record reads it made) for a report with no Backlog line. The check runs in process,
+        as the Stop calls it, and the reads are counted where the check calls them."""
+        import guard_merge  # hooks/guard_merge.py, on the path the header of this file sets
+        records = flat([human("wake"), coordinator(tags, session)])
+        hook = {"transcript_path": trg.write_transcript(records, self.run_dir), "session_id": OWNER_SESSION}
+        counted = []
+        real = guard_merge._own_session_read
+
+        def counting(transcript, own_id, created=False):
+            counted.append(own_id)
+            return real(transcript, own_id, created)
+
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE_SESSION_ID": env_id}), \
+                mock.patch.object(guard_merge, "_own_session_read", counting):
+            problem = report_guard.backlog_problem(hook, records, report())
+        return problem or "", counted
+
+    def test_bk_red_a_batch_runner_check_reads_the_own_record_once(self):
+        # Catches: the owed check reads the own record once for each tier, so a batch runner (the second tier) costs two reads of one
+        # report. One read of the record tests both tiers.
+        problem, counted = self.owed_check_reads(("cs-build:batch-runner",), BATCH_ID, BATCH_ENV)
+        self.assertIn(BACKLOG_ITEM, problem, "the batch runner was not owed the Backlog line: the check did not refuse, so no read count applies")
+        self.assertEqual(len(counted), 1, "the owed check read the own record %d times for one report, not once" % len(counted))
+
+    def test_bk_green_a_coordinator_check_reads_the_own_record_once(self):
+        # Control: a coordinator is the first tier, so one read decides it on both forms. The counter sees that one read.
+        problem, counted = self.owed_check_reads(("cs-build:coordinator",), COORD_ID, COORD_ENV)
+        self.assertIn(BACKLOG_ITEM, problem, "the coordinator was not owed the Backlog line: the check did not refuse, so no read count applies")
+        self.assertEqual(len(counted), 1, "the owed check read the own record %d times for a coordinator, not once" % len(counted))
 
 
 class ItemWordTests(unittest.TestCase):

@@ -13792,6 +13792,46 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
 
+
+# ---- merge: role_call_of reads `--role` on each script of the one merge-script list (shared_names.MERGE_SCRIPTS). The
+# red patches a new script name into that list: a literal pair in role_call_of refuses the name, and the list reads it.
+def _guard_merge_module():
+    """hooks/guard_merge.py beside the guard under test. _load_guard_module drops the old guard_* modules first."""
+    _load_guard_module()
+    directory = os.path.dirname(GUARD)
+    if sys.path[0] != directory:
+        sys.path.insert(0, directory)
+    import guard_merge
+    return guard_merge
+
+
+def role_call_merge_list_check():
+    """True when role_call_of reads `--role batch-runner` on merge/new.py, a script the merge-script list names."""
+    guard_merge = _guard_merge_module()
+    listed = tuple(getattr(guard_merge, "MERGE_SCRIPTS", ("merge.py", "launch.py"))) + ("new.py",)
+    with mock.patch.object(guard_merge, "MERGE_SCRIPTS", listed, create=True):
+        got = guard_merge.role_call_of("python3 merge/new.py --role batch-runner")
+    if got == "batch-runner":
+        return True, "role_call_of reads --role on merge/new.py, which the merge-script list names"
+    return False, "role_call_of reads %r on merge/new.py, which the merge-script list names: want 'batch-runner'" % (got,)
+
+
+def role_call_real_scripts_check():
+    """True when role_call_of reads `--role batch-runner` on merge/merge.py and on merge/launch.py. The pair is literal
+    because the list's name is not on every commit this check runs on; the list holds this pair."""
+    guard_merge = _guard_merge_module()
+    for script in ("merge.py", "launch.py"):
+        got = guard_merge.role_call_of("python3 merge/%s --role batch-runner" % script)
+        if got != "batch-runner":
+            return False, "role_call_of reads %r on merge/%s: want 'batch-runner'" % (got, script)
+    return True, "role_call_of reads --role on merge/merge.py and merge/launch.py"
+
+
+FIXTURELESS_CHECKS.update((role_call_merge_list_check, role_call_real_scripts_check))
+LOG_CHECKS_EXTRA.append(("merge: role_call_of reads --role on a script the merge-script list names", role_call_merge_list_check))
+LOG_CHECKS_EXTRA.append(("merge: role_call_of still reads --role on merge/merge.py and merge/launch.py",
+                         role_call_real_scripts_check))
+
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
 # impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.
