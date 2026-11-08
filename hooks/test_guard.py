@@ -1031,11 +1031,6 @@ else:
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
             print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
-    elif re.fullmatch(r"issues/comments/\d+", rel) and rel.rsplit("/", 1)[1] in state["comments"]:
-        # GET of a conversation comment: its issue_url names the pull request the comment sits on, as GitHub's does.
-        comment = rel.rsplit("/", 1)[1]
-        print(json.dumps({"id": int(comment), "body": "", "issue_url": "https://api.github.com/" + path.split("/issues/comments/")[0]
-                          + "/issues/%d" % state["comments"][comment]}))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
@@ -1045,6 +1040,11 @@ else:
             print('Get "https://api.github.com/repos/y/x/branches/main/protection/required_status_checks": dial tcp 140.82.112.6:443: connect: connection refused')
             sys.exit(1)
         print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
+    elif re.fullmatch(r"issues/comments/\d+", rel) and rel.rsplit("/", 1)[1] in state["comments"]:
+        # GET of a conversation comment: its issue_url names the pull request the comment sits on, as GitHub's does.
+        comment = rel.rsplit("/", 1)[1]
+        print(json.dumps({"id": int(comment), "body": "", "issue_url": "https://api.github.com/" + path.split("/issues/comments/")[0]
+                          + "/issues/%d" % state["comments"][comment]}))
     elif re.fullmatch(r"compare/.+", rel):  # the containment read of "<base>...<head sha>" (a base may hold a slash): a pair not listed is diverged
         status = state.get("compares", {}).get(rel[len("compare/"):], "diverged")
         if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
@@ -14363,11 +14363,6 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
-# The review-record log checks (section 5f) are appended here, where LOG_CHECKS_EXTRA exists. Their family is set by hand,
-# so the shared FAMILY that the sections below read is left as it was.
-for _label, _check in REVIEW_LOG_CHECKS:
-    LOG_CHECKS_EXTRA.append((_label, _check))
-    LOG_FAMILY[_label] = "review-record"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -14376,6 +14371,11 @@ for _name, _change in BUILDER_GREEN:
        agent_id="bld1", agent_type="builder")
     add("builder-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
         cwd=_repo, agent_id="bld1", agent_type="builder")
+# The review-record log checks (section 5f) are appended here, where LOG_CHECKS_EXTRA exists. Their family is set by hand,
+# so the shared FAMILY that the sections below read is left as it was.
+for _label, _check in REVIEW_LOG_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "review-record"
 _dirty = diff_repo("main-dirty", _put("tests/test_a.py", "pass\n"))
 sh("builder-diff: the main session may commit a test change", COMMIT, "allow", cwd=_dirty)
 sh("builder-diff: a reviewer may commit a test change", COMMIT, "allow", cwd=_dirty,
