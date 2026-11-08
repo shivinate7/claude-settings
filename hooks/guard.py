@@ -2389,17 +2389,23 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            # A base that parses for a conflicted old side: the first parent of a commit, else HEAD.
-            parent = (new + "^") if new else "HEAD"
-            bad = any(builder_test_rel(n) for n in names) or (builder_config_disables_tests(
-                rel, [text_at(root, new, rel)], text_at(root, old, rel))) or (
-                owned_config_changed(rel, owned_config_base(rel, text_at(root, old, rel),
-                                                            lambda: text_at(root, parent, rel)),
-                                     text_at(root, new, rel))) or (
-                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
+            bad = any(builder_test_rel(n) for n in names) or (
+                builder_text_offence(root, rel, old, new))
         if bad:
             found.append(rel)
     return found
+
+
+def builder_text_offence(root: str, rel: str, old: str, new=None) -> bool:
+    """True when a builder's change of `rel` from `old` to `new` (see `own_changes`) adds a test-disabling
+    line to test config, changes an owned part of partly-owned config, or disables a workflow test. Each
+    text is read once."""
+    before, after = text_at(root, old, rel), text_at(root, new, rel)
+    # A base that parses for a conflicted old side: the first parent of a commit, else HEAD.
+    parent = (new + "^") if new else "HEAD"
+    return (builder_config_disables_tests(rel, [after], before)
+            or owned_config_changed(rel, owned_config_base(rel, before, lambda: text_at(root, parent, rel)), after)
+            or (is_workflow_rel(rel) and workflow_builder_refused(before, after)))
 
 
 def diff_violation(root: str, role: str):
