@@ -9969,7 +9969,8 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
 # body is read once, and a read that fails passes the shrink rule. Only an update is judged: a first body on
 # a new pull request is not, so a create is not judged here. The acts are the merge tool's update
 # (`mcp__github__update_pull_request` with a `body` key) and `gh pr edit` (`--body`, `-b`, `--body-file`, a
-# heredoc body). `gh api -X PATCH` is not judged.
+# heredoc body). `gh api -X PATCH` is not judged. A bare variable body (`"$BODY"`, `$BODY`, `"${BODY}"`) reads as empty
+# when the command does not assign it before the call and the guard's environment does not set it.
 FAMILY = "pr-body"
 
 PR_UPDATE = "mcp__github__update_pull_request"
@@ -10017,6 +10018,15 @@ def build_pr_body_fakes():
 
 lazy_fixture([PRBODY_1700, PRBODY_400, PRBODY_399, PRBODY_300, PRBODY_BROKEN], build_pr_body_fakes)
 
+PR_DOLLAR_FILE = os.path.join(ROOT, "prbody_dollar.txt")   # a message file: a 150-character body with a literal `$`
+
+
+def build_pr_dollar_file():
+    write(PR_DOLLAR_FILE, PR_DOLLAR_BODY + "\n")
+
+
+lazy_fixture([PR_DOLLAR_FILE], build_pr_dollar_file)
+
 
 def pr_update(name, expected, rule=None, body=None, live=PRBODY_1700, carries=(), lacks=(), **fields):
     """One update of pull request 12 in repo x through the merge tool. A body is set only when given, so a
@@ -10027,9 +10037,10 @@ def pr_update(name, expected, rule=None, body=None, live=PRBODY_1700, carries=()
         config=MERGECFG, carries=carries, lacks=lacks, owner="y", repo="x", pullNumber=12, **fields)
 
 
-def pr_edit(name, expected, command, rule=None, live=PRBODY_1700):
-    """One `gh pr edit 5` call, judged with the fake gh `live` on PATH."""
-    sh(name, command, expected, rule, cwd=NOGIT, env_path=live + os.pathsep + PY_PATH)
+def pr_edit(name, expected, command, rule=None, live=PRBODY_1700, env=None):
+    """One `gh pr edit 5` call, judged with the fake gh `live` on PATH. `env` sets variables in the guard's
+    environment, and None unsets one."""
+    sh(name, command, expected, rule, cwd=NOGIT, env_path=live + os.pathsep + PY_PATH, env=env)
 
 
 # A placeholder is refused whatever the live body holds, so each deny runs with a live body of 1700 characters on
@@ -10067,6 +10078,53 @@ pr_edit("pr-body-placeholder: gh pr edit with a quoted body over two lines is al
 pr_update("pr-body-placeholder: an MCP update whose body is PLACEHOLDER is denied when the live read fails", "deny",
           PR_PLACEHOLDER, body="PLACEHOLDER", live=PRBODY_BROKEN)
 
+# A bare variable is the body the shell sends. Each call runs in a fresh shell, so a value an earlier call set is gone:
+# an unset BODY expands to nothing, the body reads as empty, and the placeholder rule denies it. The guard passes each
+# of these forms unjudged today, so each is red.
+PR_BODY_TEXT = "The lane lands the body check."   # a real body, set by a command or by the guard's environment
+BODY_UNSET = {"BODY": None}                      # decide() pops a None value: the guard's environment has no BODY
+pr_edit("pr-body-placeholder: gh pr edit --body \"$BODY\" with BODY unset in the env is denied", "deny",
+        'gh pr edit 5 --body "$BODY"', PR_PLACEHOLDER, env=BODY_UNSET)
+pr_edit("pr-body-placeholder: gh pr edit --body $BODY with BODY unset in the env is denied", "deny",
+        "gh pr edit 5 --body $BODY", PR_PLACEHOLDER, env=BODY_UNSET)
+pr_edit("pr-body-placeholder: gh pr edit --body \"${BODY}\" with BODY unset in the env is denied", "deny",
+        'gh pr edit 5 --body "${BODY}"', PR_PLACEHOLDER, env=BODY_UNSET)
+pr_edit("pr-body-placeholder: gh pr edit -b \"$BODY\" with BODY unset in the env is denied", "deny",
+        'gh pr edit 5 -b "$BODY"', PR_PLACEHOLDER, env=BODY_UNSET)
+# A prefix assignment does not reach the arguments: the shell expands "$BODY" before `BODY=x` takes effect, so this call
+# sends an empty body too. The prefix sets nothing the call reads.
+pr_edit("pr-body-placeholder: BODY=x gh pr edit --body \"$BODY\" is denied, the prefix does not reach the argument",
+        "deny", 'BODY=x gh pr edit 5 --body "$BODY"', PR_PLACEHOLDER, env=BODY_UNSET)
+pr_edit("pr-body-placeholder: BODY=x gh pr edit -b \"$BODY\" is denied, the prefix does not reach the argument",
+        "deny", 'BODY=x gh pr edit 5 -b "$BODY"', PR_PLACEHOLDER, env=BODY_UNSET)
+# Text in quotes is no assignment: echo sets nothing, so BODY stays unset for the call.
+pr_edit("pr-body-placeholder: echo 'BODY=x' before gh pr edit --body \"$BODY\" is denied, quoted text is no assignment",
+        "deny", "echo 'BODY=x'; gh pr edit 5 --body \"$BODY\"", PR_PLACEHOLDER, env=BODY_UNSET)
+# A backslash keeps the `$` literal in double quotes, so the shell sends PLACEHOLDER$, which is a placeholder.
+pr_edit("pr-body-placeholder: gh pr edit --body \"PLACEHOLDER\\$\" is denied, the shell sends PLACEHOLDER$", "deny",
+        'gh pr edit 5 --body "PLACEHOLDER\\$"', PR_PLACEHOLDER)
+
+# Controls, green today. A value the command sets before the call is the body the shell sends, so the guard may read
+# it. The value is real words, so no reading of it is a placeholder, and the live body is GHMAIN, so no shrink ask.
+PR_SET_BEFORE = (
+    'BODY="%s"; ' % PR_BODY_TEXT,
+    "BODY=$(cat f) && ",
+    'export BODY="%s"; ' % PR_BODY_TEXT,
+    'export BODY="%s" && ' % PR_BODY_TEXT,
+)
+PR_VAR_CALLS = ('gh pr edit 5 --body "$BODY"', 'gh pr edit 5 --body "${BODY}"', 'gh pr edit 5 -b "$BODY"')
+for setting in PR_SET_BEFORE:
+    for call in PR_VAR_CALLS:
+        pr_edit("pr-body-placeholder: %s%s is not denied" % (setting, call), "allow", setting + call, live=GHMAIN)
+pr_edit("pr-body-placeholder: gh pr edit --body \"$BODY\" with BODY set in the env is not denied", "allow",
+        'gh pr edit 5 --body "$BODY"', live=GHMAIN, env={"BODY": PR_BODY_TEXT})
+pr_edit("pr-body-placeholder: gh pr edit --body \"${BODY}\" with BODY set in the env is not denied", "allow",
+        'gh pr edit 5 --body "${BODY}"', live=GHMAIN, env={"BODY": PR_BODY_TEXT})
+pr_edit("pr-body-placeholder: gh pr edit --body \"Fixes $X\" is not judged", "allow",
+        'gh pr edit 5 --body "Fixes $X"', live=GHMAIN)
+pr_edit("pr-body-placeholder: a set value with a lone quote, a hash and a semicolon is not denied", "allow",
+        'BODY="Don\'t merge: see #12; the record"; gh pr edit 5 --body "$BODY"', live=GHMAIN)
+
 # The shrink rule: at least 400 live characters, and a new body under one third of them. 566 is under a third of
 # 1700 and 567 is not, so each side of that line has a case.
 pr_update("pr-body-shrink: an MCP update of 120 characters over a live body of 1700 asks", "ask", PR_SHRINK,
@@ -10096,6 +10154,9 @@ pr_edit("pr-body-shrink: a 150-character body with a backtick span, in a quoted 
         "ask", "gh pr edit 5 --body-file - <<'EOF'\n" + PR_SPAN_BODY + "\nEOF", PR_SHRINK)
 pr_edit("pr-body-shrink: a 150-character body with a backtick span, in a quoted heredoc in $(cat), over a live body of 1700 asks",
         "ask", 'gh pr edit 5 --body "$(cat <<\'EOF\'\n' + PR_SPAN_BODY + '\nEOF\n)"', PR_SHRINK)
+# A message file is read as it stands, so its literal `$` does not hide the short body from the shrink rule.
+pr_edit("pr-body-shrink: gh pr edit --body-file of a short file with a literal $ over a live body of 1700 asks", "ask",
+        "gh pr edit 5 --body-file " + slash(PR_DOLLAR_FILE), PR_SHRINK)
 
 # A create is not an update, so the rules do not judge it. A draft create with a real body is allowed.
 sh("pr-body-placeholder: gh pr create --draft with a real body is allowed",
@@ -14329,23 +14390,23 @@ def read_past_deadline_seconds():
     return None if budget is None else budget + HANG_MARGIN_S
 
 
-def pr_counted_judged(tool, tool_input, folder, config=None, max_seconds=None):
+def pr_counted_judged(tool, tool_input, folder, config=None, max_seconds=None, env=None):
     """The guard's (decision, reason) for one call, with the counted fake `folder` on PATH. `max_seconds` is the
     limit a slower judgement fails (decide reads it), so a read that waits past it is judged `slow`."""
     return decide({
         "raw": None, "tool": tool, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
         "env_path": folder + os.pathsep + PY_PATH, "config": config, "agent_id": None, "agent_type": None,
-        "temp": None, "load": None, "env": None, "transcript": None, "tool_input": tool_input,
+        "temp": None, "load": None, "env": env, "transcript": None, "tool_input": tool_input,
         "max_seconds": max_seconds,
     })
 
 
 def pr_counted_case(tool, tool_input, want_decision, want_calls, want_path=None, delay_s=0, config=None,
-                    rate_limited=False, max_seconds=None):
+                    rate_limited=False, max_seconds=None, env=None):
     """A check that one call is judged `want_decision` and makes `want_calls` gh calls, the first of them naming
     `want_path` as one argument. The counted fake answers with a live body of 1700 characters, after `delay_s`
     seconds, or after the seconds `delay_s` gives when it is a function. `rate_limited` makes every call a rate-limit
-    403, and `max_seconds` bounds the judgement."""
+    403, and `max_seconds` bounds the judgement. `env` sets variables in the guard's environment, as pr_edit does."""
     def case():
         folder = os.path.join(ROOT, "prbodycount")
         log = os.path.join(folder, ARCHIVE_CALLS)
@@ -14364,7 +14425,7 @@ def pr_counted_case(tool, tool_input, want_decision, want_calls, want_path=None,
             return False, "the fake waits %gs, past the %gs a read may take inside the hook budget" % (seconds, HANG_CEILING_S)
         make_fake_gh(folder, "main", body=pr_live_body(1700), count_file=log, delay_s=seconds,
                      rate_limited=rate_limited)
-        decision, reason = pr_counted_judged(tool, tool_input, folder, config, max_seconds)
+        decision, reason = pr_counted_judged(tool, tool_input, folder, config, max_seconds, env)
         calls = gh_calls_taken(folder)
         if decision != want_decision:
             return False, "wanted %s, got %s: %r" % (want_decision, decision, reason[:90])
@@ -14385,9 +14446,10 @@ def pr_counted_check(label, tool, tool_input, want_decision, want_calls, **kw):
 
 # The shell keeps a `$` or a backtick literal only in a single-quoted value, a quoted heredoc, or that heredoc inside
 # `$(cat ...)`. Where the shell expands one, the text the call sends is not the text the guard reads: the call passes
-# unjudged and makes no gh call.
-pr_counted_check("pr-body-placeholder: gh pr edit --body \"$BODY\" is not judged, and makes no gh call", "Bash",
-                 {"command": 'gh pr edit 5 --body "$BODY"'}, "allow", 0)
+# unjudged and makes no gh call. The one exception is a bare variable that is unset, which reads as an empty body
+# (section 5f-2). BODY is set in the guard's environment here, so the call stays unjudged.
+pr_counted_check("pr-body-placeholder: gh pr edit --body \"$BODY\" with BODY set in the env is not judged, and makes no gh call",
+                 "Bash", {"command": 'gh pr edit 5 --body "$BODY"'}, "allow", 0, env={"BODY": PR_BODY_TEXT})
 pr_counted_check("pr-body-placeholder: gh pr edit --body \"$(cat f)\" is not judged, and makes no gh call", "Bash",
                  {"command": 'gh pr edit 5 --body "$(cat f)"'}, "allow", 0)
 pr_counted_check("pr-body-shrink: an unquoted heredoc holding $ is not judged, and makes no gh call", "Bash",
