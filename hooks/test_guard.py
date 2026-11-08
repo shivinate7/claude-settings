@@ -15478,7 +15478,7 @@ def ors_h5(label):
     return ors_chain(label, VCS + " status && " + ORS_PUSH)
 
 
-def ors_deny_alone(label, build):
+def ors_refused_alone(label, build):
     """A chained ask command: `build` makes the scenario, then the push must deny as a chained ask command, since an
     ask command runs alone (rule ask-alone)."""
     def case():
@@ -15497,14 +15497,14 @@ def ors_deny_alone(label, build):
     LOG_CHECKS_EXTRA.append((label, case))
 
 
-ors_deny_alone("push-owes-review-record: H1 a commit then a push in one command, an entry at H with no record: denies, ask-alone",
+ors_refused_alone("push-owes-review-record: H1 a commit then a push in one command, an entry at H with no record: denies, ask-alone",
                ors_h1)
 ors_allow("push-owes-review-record: H1c the same chain with a record at H: allowed silently", ors_h1c)
-ors_deny_alone("push-owes-review-record: H2 a merge then a push in one command, an entry at H with no record: denies, ask-alone",
+ors_refused_alone("push-owes-review-record: H2 a merge then a push in one command, an entry at H with no record: denies, ask-alone",
                ors_h2)
-ors_deny_alone("push-owes-review-record: H3 a rebase then a push in one command, an entry at H with no record: denies, ask-alone",
+ors_refused_alone("push-owes-review-record: H3 a rebase then a push in one command, an entry at H with no record: denies, ask-alone",
                ors_h3)
-ors_deny_alone("push-owes-review-record: H4 a commit then a push separated by a semicolon, an entry at H with no record: "
+ors_refused_alone("push-owes-review-record: H4 a commit then a push separated by a semicolon, an entry at H with no record: "
                "denies, ask-alone", ors_h4)
 ors_allow("push-owes-review-record: H5 a status check then a push, HEAD at H and the remote at H: allowed silently", ors_h5)
 
@@ -15542,6 +15542,56 @@ def ors_h6t(label):
 ors_red("push-owes-review-record: H6 a builder pushes from its own worktree, an entry at H with no record: asks", ors_h6)
 ors_red("push-owes-review-record: H6t a test-author pushes from its own worktree, an entry at H with no record: asks",
         ors_h6t)
+
+
+ORS_PAST = "rrbap-x"   # a branch one commit past the reviewed head, for the J cases
+
+
+def ors_past(ctx, name):
+    """Makes branch `name` one commit past the reviewed head, without moving the lane's HEAD."""
+    tree = run_vcs(ctx["lane"], "rev-parse", "HEAD^{tree}").stdout.strip()
+    past = run_vcs(ctx["lane"], *IDENT, "commit-tree", tree, "-p", ctx["head"], "-m", "one past the reviewed head")
+    _must(ctx["lane"], "branch", name, past.stdout.strip())
+    return ctx
+
+
+def ors_j(label, make, past=False):
+    """A chained command judged with the lane at H. `make(ctx)` gives the command. `past` makes ORS_PAST one commit
+    past H first."""
+    ctx = ors_chain(label, "")
+    if past:
+        ors_past(ctx, ORS_PAST)
+    ctx["command"] = make(ctx)
+    return ctx
+
+
+ors_refused_alone("push-owes-review-record: J1 a switch to a commit past H, then a push, an entry at H unrecorded: denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " switch " + ORS_PAST + " && " + ORS_PUSH, past=True))
+ors_refused_alone("push-owes-review-record: J1b a checkout to a commit past H, then a push, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " checkout " + ORS_PAST + " && " + ORS_PUSH, past=True))
+ors_refused_alone("push-owes-review-record: J3r reset --soft to a commit past H, then a push, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " reset --soft " + ORS_PAST + " && " + ORS_PUSH, past=True))
+ors_refused_alone("push-owes-review-record: J3v revert of H, then a push, an entry at H unrecorded: denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " revert --no-edit HEAD && " + ORS_PUSH))
+ors_refused_alone("push-owes-review-record: J3c cherry-pick of a commit past H, then a push, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " cherry-pick " + ORS_PAST + " && " + ORS_PUSH, past=True))
+ors_refused_alone("push-owes-review-record: J3a am of a patch, then a push, an entry at H unrecorded: denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " am rrbap-patch.mbox && " + ORS_PUSH))
+ors_refused_alone("push-owes-review-record: J3d a commit in the lane named by -C, then a push, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " -C " + c["lane"] + " commit -am fix && " + ORS_PUSH))
+ors_refused_alone("push-owes-review-record: J3n a commit, a newline, then a push, an entry at H unrecorded: denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " commit -am fix\n" + ORS_PUSH))
+ors_refused_alone("push-owes-review-record: J3o a commit, then a push after two bars, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " commit -am fix || " + ORS_PUSH))
+ors_allow("push-owes-review-record: J4 a commit then a push of a branch with no entry: allowed silently",
+          lambda label: ors_j(label, lambda c: VCS + " commit -am fix && " + VCS + " push origin HEAD:archive/rrbap-chain"))
+ors_allow("push-owes-review-record: J5 a fetch then a push, HEAD at H and the remote at H: allowed silently",
+          lambda label: ors_j(label, lambda c: VCS + " fetch && " + ORS_PUSH))
 
 
 def ors_entries_scope(c):
