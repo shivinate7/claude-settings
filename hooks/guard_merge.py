@@ -586,18 +586,20 @@ def _marker_findings(where, top, diff_args, source):
 def _kinds_of(done, top, source):
     """{file: set of marker kinds} for the leftover conflict markers in a finished `git diff --check`.
     A line's kind is read from the new side of the file: `source` None is the working-tree file, ''
-    the index blob, and a revision that revision's blob. Only a file with a finding costs a read."""
+    the index blob, and a revision that revision's blob. Only a file with a finding costs a read. A blob
+    read that could not run is held, and raised only when no other file holds a triplet."""
     wanted = {}
     for row in done.stdout.splitlines():
         found = _CONFLICT_FINDING.match(row)
         if found:
             wanted.setdefault(found.group(1), []).append(int(found.group(2)))
-    kinds = {}
+    kinds, held = {}, None
     for name, numbers in wanted.items():
         if source is not None:
             read = _git(top, "cat-file", "-p", source + ":" + name)
             if read is None:
-                raise _GitUnread(top)
+                held = held or _GitUnread(top)
+                continue
             text = read.stdout if read.returncode == 0 else ""
         else:
             try:
@@ -609,7 +611,17 @@ def _kinds_of(done, top, source):
         for number in numbers:
             if 0 < number <= len(lines) and lines[number - 1][:1] in _MARKER_KINDS:
                 kinds.setdefault(name, set()).add(_MARKER_KINDS[lines[number - 1][0]])
+    if held and not _triplet_file(kinds):
+        raise held
     return kinds
+
+
+def _held(read, held, *args):
+    """(read(*args), held). A read that could not run gives {} and is held, unless one is held already."""
+    try:
+        return read(*args), held
+    except _GitUnread as caught:
+        return {}, held or caught
 
 
 def _covered_by(where, specs):
@@ -643,13 +655,15 @@ def _ref_sha(top, ref):
 
 
 def _checked_range(where, source, tracking, memo):
-    """(finished `git diff --check <base>...<source>`, source) for the first base that git accepts, else
-    (None, source). The three dots make git find the merge base itself, so no ref is read first. The
-    bases are the destination's remote-tracking ref, the source's upstream, then the default base (read
+    """(finished `git diff --check <base>...<source>`, source, held) for the first base that git accepts,
+    else (None, source, held). The three dots make git find the merge base itself, so no ref is read
+    first. The bases are the destination's remote-tracking ref, the source's upstream, then the default base (read
     once per push, in `memo`). Only a rejected base costs more. After the first rejection the source is
     read once: one that does not resolve is read as HEAD, and the same base is tried again.
-    `--check` exits 2 on a finding. A read that did not run (None from `_git`) raises _GitUnread."""
+    `--check` exits 2 on a finding. A read that did not run (None from `_git`) raises _GitUnread, except
+    the source's own read: it is held, the source is read as HEAD, and the caller raises it on no triplet."""
     verified = source == "HEAD"
+    held = None
     step = 0
     while step < 3:
         if step == 2 and "default" not in memo:
@@ -663,14 +677,18 @@ def _checked_range(where, source, tracking, memo):
             if done is None:
                 raise _GitUnread(where)
             if done.returncode in (0, 2):
-                return done, source
+                return done, source, held
             if not verified:
                 verified = True
-                if not _ref_sha(where, source):
+                try:
+                    sha = _ref_sha(where, source)
+                except _GitUnread as caught:
+                    sha, held = "", caught
+                if not sha:
                     source = "HEAD"
                     continue
         step += 1
-    return None, source
+    return None, source, held
 
 
 def _push_hit(segment, stripped, cwd, args):
@@ -694,18 +712,18 @@ def _push_hit(segment, stripped, cwd, args):
             continue
         source = _plain_source(source)
         tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
+        held = None   # a read that could not run while the upstream and default bases can still be read
+        if not dest and (not named[1] or (target if colon else source) in ("HEAD", "@")) and push_branch_unread(where):
+            held = _GitUnread(where)   # a detached HEAD answers, so it is not unread and keeps its path
         try:
-            if not dest and (not named[1] or (target if colon else source) in ("HEAD", "@")) and push_branch_unread(where):
-                raise _GitUnread(where)   # a detached HEAD answers, so it is not unread and keeps its path
-            done, source = _checked_range(where, source, tracking, memo)
-            if done is None:
-                continue
-            name = _triplet_file(_kinds_of(done, where, source))
+            done, source, missed = _checked_range(where, source, tracking, memo)
+            held = held or missed
+            name = _triplet_file(_kinds_of(done, where, source)) if done is not None else ""
         except _GitUnread as caught:
-            unread = unread or caught
-            continue
+            name, held = "", held or caught
         if name:
             return name
+        unread = unread or held
     if unread:
         raise unread
     return ""
@@ -715,16 +733,20 @@ def _untracked_findings(where, top, specs):
     """Marker findings in the untracked files that `git add` would stage: all of them under `top` when
     `specs` is None, else those the pathspecs name. `git diff HEAD` skips an untracked file, so each is
     read against /dev/null. At most _UNTRACKED_CAP files are read, the first in git's order. A listing
-    that did not run raises _GitUnread."""
+    that did not run raises _GitUnread. A file read that did not run is held, and raised only when no
+    other file holds a triplet."""
     done = _git(where, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard", "-z",
                 "--full-name", *(["--", *specs] if specs else []))
     if done is None:
         raise _GitUnread(where)
     if done.returncode != 0:
         return {}
-    found = {}
+    found, held = {}, None
     for name in [n for n in done.stdout.split("\0") if n][:_UNTRACKED_CAP]:
-        found.update(_marker_findings(top, top, ["--no-index", "--", "/dev/null", name], None))
+        more, held = _held(_marker_findings, held, top, top, ["--no-index", "--", "/dev/null", name], None)
+        found.update(more)
+    if held and not _triplet_file(found):
+        raise held
     return found
 
 
@@ -834,27 +856,28 @@ def _conflict_markers_hit(stripped: str, cwd: str):
             if head.returncode != 0:
                 continue
             judged = True
-            later = None   # a read after the first that could not run: a triplet already found is still refused
+            # A read that could not run gives {} and is held: the reads after it still run, and a
+            # triplet any of them finds is still refused.
             if specs:
-                found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
+                found, later = _held(_marker_findings, None, where, top, ["HEAD", "--", *specs], None)
             else:
                 if all_flag or top in wholes:
-                    found = _marker_findings(top, top, ["HEAD"], None)
+                    found, later = _held(_marker_findings, None, top, top, ["HEAD"], None)
                 else:
-                    found = _marker_findings(top, top, ["--cached"], "")
-                try:
-                    if top in wholes:
-                        found.update(_untracked_findings(top, top, None))
-                    for add_where, add_top, add_paths in adds:
-                        if add_top != top:
-                            continue
-                        if not (all_flag or top in wholes):
-                            for name in _covered_by(add_where, add_paths):
-                                found.pop(name, None)
-                            found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
-                        found.update(_untracked_findings(add_where, top, add_paths))
-                except _GitUnread as caught:
-                    later = caught
+                    found, later = _held(_marker_findings, None, top, top, ["--cached"], "")
+                if top in wholes:
+                    more, later = _held(_untracked_findings, later, top, top, None)
+                    found.update(more)
+                for add_where, add_top, add_paths in adds:
+                    if add_top != top:
+                        continue
+                    if not (all_flag or top in wholes):
+                        for name in _covered_by(add_where, add_paths):
+                            found.pop(name, None)
+                        more, later = _held(_marker_findings, later, add_where, top, ["HEAD", "--", *add_paths], None)
+                        found.update(more)
+                    more, later = _held(_untracked_findings, later, add_where, top, add_paths)
+                    found.update(more)
             name = _triplet_file(found)
             if later and not name:
                 raise later
@@ -866,7 +889,7 @@ def _conflict_markers_hit(stripped: str, cwd: str):
                 continue
             unread = unread or caught
             if judged and not readable:
-                blind_commit = True   # main judged it blind on an empty read; a conflict step still makes a push a chain
+                blind_commit = True   # still a commit after a blind step: a conflict step makes a push a chain
             continue
         if readable:
             if name:
