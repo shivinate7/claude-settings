@@ -438,6 +438,16 @@ for (const width of [390, 1280]) for (const scheme of ["light", "dark"]) for (co
   else assert.equal(cellsDrawn.length, 30, `${name} at ${width} wide draws ${cellsDrawn.length} cells, not one per step (30)`);
 });
 
+// A 0px runs layer shows no run: each run's min-width clamps to 0 against that layer, so no run has a part to show. Where the layer is
+// drawn the case does not apply, and the cases above check its runs. vis is a run's part inside the bar, the one box that clips it.
+for (const width of [390, 1280]) for (const scheme of ["light", "dark"]) for (const [name, scope] of BARS) test(`${name} at ${width} wide in ${scheme}: a run in a 0px runs layer shows no part`, async (t) => {
+  const page = await open(t, builtPage({ steps: barFixtureBlocked(), live: BAR_LIVE, stalled: STALLED_S3_P4 }), width); if (!page) return;
+  await page.emulateMedia({ colorScheme: scheme });
+  const L = await barLayers(page.locator(scope));
+  const shown = L.runsDrawn ? [] : L.runs.filter((r) => r.vis >= LAYOUT_TOL);
+  assert.deepEqual(shown.map((r) => r.cls || "to do"), [], `${name} at ${width} wide in ${scheme}: its runs layer is 0px, yet ${shown.length} run(s) show ${shown.map((r) => r.vis.toFixed(2) + "px").join(", ")}`);
+});
+
 // ---------------------------------------------------------------- the edge width (lane nfp-npc-edge)
 // The cases set a bar 1px under, 0.02px under, at, and 1px over steps x 5px - 2px. Each checks that exactly one layer draws, that the
 // layer spans the bar, and that each run shows RUN_MIN_PX or more. The 0.02px case checks the runs layer at a gap just past one 1/64px
