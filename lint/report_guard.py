@@ -11,10 +11,12 @@ or a landing GitHub MCP tool (LANDING_TOOLS, which includes delete_file, update_
 and enable_pr_auto_merge) after the last human message, block once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
 order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report.
-When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with one
-exception: a block that asked for the missing report leaves a marker file (local_time.report_marker_path,
+When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with two
+exceptions: a block that asked for the missing report leaves a marker file (local_time.report_marker_path,
 holding the index of the turn's human record). The next stop_hook_active Stop consumes it and checks
-the rewrite once for model names and the `Unstarted:` line only. A failure blocks with a correction.
+the rewrite once for model names, the `Unstarted:` line, the answered lines and the Recovered line. A block
+for notification markup leaves its own marker (local_time.notification_marker_path), and the rewrite is checked
+once for that markup alone. A failure blocks with a correction.
 Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
 stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
 
@@ -295,8 +297,9 @@ BLOCK_REASON = owner_line(
 # The owner has read the report before a refusal lands, so a resent report doubles it. The missing-report refusal
 # asks for the report itself; every other refusal asks for a short correction. Both asks live in the record.
 # A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
-# set, so this guard stays quiet on it. The rewrite after a missing-report refusal is the one
-# exception: rewrite_problems() checks it once, and its own refusal leaves no marker.
+# set, so this guard stays quiet on it. The rewrite after a missing-report refusal and the one after a
+# notification-markup refusal are the exceptions: rewrite_problems() and rewrite_notification_problem() check
+# each once, and their own refusals leave no marker.
 
 MODELS_REASON = owner_line(
     "Model-name guard",

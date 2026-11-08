@@ -14,7 +14,7 @@ Incident: step 797, lane `cite-range-symbol-match` sighting, 2026-11-08. A sessi
 
 Cost: one read of the last reply at Stop. No process, no log. One empty file per refusal of this check, `<session>.notification-block` beside the missing-report marker, written at the block and deleted at the next Stop, rewrite or not. `NotificationMarkupTests` in `lint/test_report_guard_notification.py` proves it by watching every file the check opens and every process it tries to start.
 
-Known limit: a tag in an inline code span passes even when the writer wanted a real event. A tag split across lines is not seen, because each line is read alone. Markup in a tag name outside the list is not seen. A session can still describe an event in plain words.
+Known limit: a tag in an inline code span passes even when the writer wanted a real event. A tag split across lines is not seen, because each line is read alone. Markup in a tag name outside the list is not seen. A session can still describe an event in plain words. A rewrite after a refusal for another reason, such as an unsourced "answered" line, is not re-checked.
 
 Kind: process
 Home: lint/report_guard.py
