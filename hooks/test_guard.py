@@ -10181,15 +10181,70 @@ def write_pfr_transcripts():
 lazy_fixture([pfr_path(name) for name in PFR_LINES] + [PFR_UNREADABLE], write_pfr_transcripts)
 
 
-def pfr_refuse(name, command, transcript, tool="Bash", agent_id=None):
+# The PR head's history for the held reports. A is on main. B is on PFR_BRANCH, with A as its parent. C is on
+# main, off A, so B's history does not hold it. A held report names a sha, and a sha exists only once its commit
+# is made, so the builder writes these transcripts after the commits.
+PFR_HIST = os.path.join(ROOT, "pfrhist")
+PFR_HELD = ("held-ancestor", "held-ancestor-record", "held-off-history", "held-no-sha")
+
+
+def _pfr_step(*args):
+    """One git step of the history fixture. A failed step stops the run here, not as a red case."""
+    done = run_vcs(PFR_HIST, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in _build_pfr_history: git %s: %s" % (" ".join(args), done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _build_pfr_history():
+    """A on main, B on PFR_BRANCH, C on main off A, each in its own commit. The push destinations' remote is set
+    up as _build_push sets it, so the checkout reads like a lane's."""
+    materialize(BRANCHREMOTE)
+    make_repo(PFR_HIST, {"notes.txt": "a\n"})
+    _pfr_step("remote", "add", "origin", slash(BRANCHREMOTE))
+    _pfr_step("update-ref", "refs/remotes/origin/main", "HEAD")
+    _pfr_step("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    sha_a = _pfr_step("rev-parse", "HEAD")
+    _pfr_step("checkout", "-q", "-b", PFR_BRANCH)
+    write(os.path.join(PFR_HIST, "notes.txt"), "b\n")
+    _pfr_step("add", "-A")
+    _pfr_step(*IDENT, "commit", "-q", "-m", "b")
+    _pfr_step("checkout", "-q", "main")
+    write(os.path.join(PFR_HIST, "notes.txt"), "c\n")
+    _pfr_step("add", "-A")
+    _pfr_step(*IDENT, "commit", "-q", "-m", "c")
+    sha_c = _pfr_step("rev-parse", "HEAD")
+    _pfr_step("checkout", "-q", PFR_BRANCH)
+    if run_vcs(PFR_HIST, "merge-base", "--is-ancestor", sha_a, "HEAD").returncode != 0:
+        sys.exit("fixture setup failed in _build_pfr_history: A is not in the PR head's history")
+    if run_vcs(PFR_HIST, "merge-base", "--is-ancestor", sha_c, "HEAD").returncode == 0:
+        sys.exit("fixture setup failed in _build_pfr_history: C is in the PR head's history")
+
+    report_a = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_a, PFR_FINDING)
+    report_c = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_c, PFR_FINDING)
+    held = {
+        "held-ancestor": pfr_call("toolu_rev1", report_a) + pfr_pr(),
+        "held-ancestor-record": pfr_call("toolu_rev1", report_a) + pfr_pr() + pfr_post("toolu_c1", PFR_FAIL_RECORD),
+        "held-off-history": pfr_call("toolu_rev1", report_c) + pfr_pr(),
+        "held-no-sha": pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1), "Reviewed the lane's latest push.",
+                                                         PFR_FINDING)) + pfr_pr(),
+    }
+    for name in PFR_HELD:
+        write(pfr_path(name), "".join(line + "\n" for line in held[name]))
+
+
+lazy_fixture([PFR_HIST] + [pfr_path(name) for name in PFR_HELD], _build_pfr_history)
+
+
+def pfr_refuse(name, command, transcript, tool="Bash", agent_id=None, cwd=PUSHFEAT):
     """A push the guard refuses under push-needs-review-record. The refusal names the rule, never the branch."""
     sh("push-needs-review-record: " + name, command, "deny", rule=PFR_RULE, lacks=PFR_BRANCH, tool=tool,
-       cwd=PUSHFEAT, agent_id=agent_id, transcript=transcript)
+       cwd=cwd, agent_id=agent_id, transcript=transcript)
 
 
-def pfr_allow(name, command, transcript, agent_id=None):
+def pfr_allow(name, command, transcript, agent_id=None, cwd=PUSHFEAT):
     """A command the guard lets through silently under push-needs-review-record."""
-    sh("push-needs-review-record: " + name, command, "allow", silent=True, cwd=PUSHFEAT, agent_id=agent_id,
+    sh("push-needs-review-record: " + name, command, "allow", silent=True, cwd=cwd, agent_id=agent_id,
        transcript=transcript)
 
 
@@ -10287,6 +10342,17 @@ pfr_allow("a reviewer FAIL round 1 on the Done label line, its FAIL record poste
           pfr_path("label-haiku-record"))
 pfr_refuse("a Done label line reading see below, then a ruled FAIL round 1 line, no record, then the push", PFR_PUSH,
            pfr_path("see-below-ruled"))
+
+
+# A report read before any PR is known is held by the sha it names. When a PR later becomes known, the held report
+# counts when its sha is that PR's head or an ancestor of it. The push runs in the PR head's checkout (PFR_HIST).
+pfr_refuse("a FAIL naming sha A, the parent of PR head B, then the PR, no record, then the push", PFR_PUSH,
+           pfr_path("held-ancestor"), cwd=PFR_HIST)
+pfr_allow("a FAIL naming sha A, then the PR, then its FAIL record posted, then the push", PFR_PUSH,
+          pfr_path("held-ancestor-record"), cwd=PFR_HIST)
+pfr_allow("a FAIL naming a commit off main that PR head B does not hold, then the PR, then the push", PFR_PUSH,
+          pfr_path("held-off-history"), cwd=PFR_HIST)
+pfr_allow("a FAIL naming no sha, then the PR, then the push", PFR_PUSH, pfr_path("held-no-sha"), cwd=PFR_HIST)
 
 
 def pfr_fix_refuse(name, command, transcript):
