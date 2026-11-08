@@ -190,6 +190,7 @@
 - override-removal-unreminded: nothing reminds an agent to remove a raised agent-cap file early; only expiry reverts it (hooks/config_watch.py)
 - override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_override_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_override_context. Decision: owner-override
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
+- past-ruling-restated-pick: a step line that says the owner picked or answered reads as an owner ruling whoever wrote it. The judge cannot tell a session's restated pick from the owner's answer (hooks/call_judge.py PAST_RULING_ITEM, hooks/question_form.py _step_rulings). Fix: step:step-pick-claims-match-page. Decision: question-form
 - perl-ruby-bodies-unread: perl and ruby bodies are not read, so a test write in one is not refused (hooks/guard_frozen.py _interpreter_write_hit)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)
 - plain-diff-4mib-unconfirmed: the 4 MiB host output limit behind 'Diff truncated' is unconfirmed in code (mods/plain-diff register.mjs)
@@ -309,6 +310,7 @@
 - ste-autofix-tests-linux-only: lint/test_ste_autofix.py runs on the Linux job only; macOS and Windows cost unmeasured (CI)
 - ste-eg-in-fence-reported: the lint reports e.g. inside a blockquote fence or pre block as a warning; a false alarm (lint/ste_lint.py LATIN)
 - ste-exclude-star-crosses-dir: the bash re-match in run.sh lets * cross /, so skills/*.md also skips skills/x/y.md (actions/ste-lint/run.sh)
+- step-pool-corpus-unknown-in-ci: the step-pool corpus test in hooks/test_question_form.py prints unknown in CI, because CI does not fetch origin/roadmap. Fix: none — the corpus row guards an unchanged pool and runs where the roadmap ref exists. Until: 2026-11-21
 - stream-guard-quadratic: the stream guard slices the word list per bare word; a 20,000-word segment takes 8.2 s (hooks/guard_stream.py)
 - supersede-share-unpinned: no check ties the 160-character cut in docs/decisions/compliance-defined.md and skills/compliance-check/probes.md to the cut in lint/compliance_probes.py. The cut is an inline `[:160]`, not a module-level name, so no value cite reads it. A code change leaves the docs stale. Decision: compliance-defined.
 - supersede-subbullet-exemption: an exemption in a sub-bullet, or in a second paragraph of the same bullet, does not pass the parent bullet. Put it in the same bullet (lint/compliance_probes.py). Decision: compliance-defined.
