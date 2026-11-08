@@ -1908,6 +1908,10 @@ PY_MOVE_CALLS = frozenset({"rename", "replace", "move"})
 # `echo` argument is in the shell. `write(x)` takes x as the CONTENT, never the path.
 PY_TEXT_CALLS = frozenset({"print", "pprint", "write", "writelines", "write_text", "write_bytes",
                            "dumps", "dump"})
+# A call that returns its one path argument in another spelling: the mode passes on to the call around
+# it, as it does through a join. `open(os.path.expanduser(p))` opens p; `print(expanduser(p))` prints it.
+PY_PATH_SPELLINGS = frozenset({"expanduser", "expandvars", "abspath", "realpath", "normpath", "normcase",
+                               "fspath"})
 PY_TEXT_COMPARES = (ast.In, ast.NotIn, ast.Eq, ast.NotEq)
 # Nodes that carry a string on to the call around them: a list, a dict, an f-string, a sum.
 PY_CARRIERS = (ast.Dict, ast.List, ast.Tuple, ast.Set, ast.JoinedStr, ast.FormattedValue, ast.BinOp,
@@ -1995,8 +1999,9 @@ def _python_mode(node, parents) -> str:
         parent = parents.get(value)
         if isinstance(parent, ast.Compare):
             return "text" if all(isinstance(op, PY_TEXT_COMPARES) for op in parent.ops) else "unknown"
-        if (direct and isinstance(parent, ast.Call) and _call_name(parent) == "join"
-                and _stdlib_call(parent) and value in parent.args):
+        if (direct and isinstance(parent, ast.Call) and _stdlib_call(parent) and value in parent.args
+                and (_call_name(parent) == "join"
+                     or (_call_name(parent) in PY_PATH_SPELLINGS and parent.args[0] is value))):
             value = parent
         elif isinstance(parent, PY_CARRIERS):
             value, direct = parent, False
@@ -2193,7 +2198,7 @@ def code_paths(code: str, language: str):
     literal is an argument of: "read" (`open(p)`, `Path(p).read_text()`, `shutil.copy(p, d)`,
     `fs.readFileSync(p)`), "write" (`open(p, 'w')`, the destination of a copy, a move, a rename,
     `fs.writeFileSync(p)`), "exists" (`os.path.exists(p)`, `Path(p).is_file()`, `fs.existsSync(p)`,
-    also through `os.path.join` and `Path(a, b)`), "text" (printed, written as content, dumped as
+    also through `os.path.join`, `os.path.expanduser` and its kin, and `Path(a, b)`), "text" (printed, written as content, dumped as
     JSON, or compared: `print(s)`, `f.write(s)`, `console.log(s)`, `s in names`), and "unknown" for
     any other literal: a name handed to some other call, bound to a variable, or built from parts.
     A caller that refuses a path must refuse "unknown" as well as the modes it names. Raises
