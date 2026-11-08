@@ -27312,6 +27312,7 @@ HS_BODIES = {
     "Files and commands": "hooks/guard.py and hooks/precompact_handoff.py.\n",
 }
 HS_MARKER = re.compile(r"<!--\s*handoff-sections:\s*(.*?)\s*-->")
+HS_GAP = "3c6e9a41-0000-4000-8000-00000000d1ce"    # a session whose handoff already lacks Next steps
 HS_CFG = os.path.join(ROOT, "hs-cfg")              # the installed prompt, as the repo holds it
 HS_CFG_NOMARK = os.path.join(ROOT, "hs-nomark")    # the installed prompt with its marker line removed
 HS_CFG_DIR = os.path.join(ROOT, "hs-dir")          # the prompt path is a directory
@@ -27377,6 +27378,7 @@ def hs_write_bytes(path, data):
 def _build_hs_intact():
     hs_install(HS_CFG, hs_prompt_text())
     write(hs_handoff(HS_CFG), HS_FULL)   # the Edit and MultiEdit cases edit this file on disk
+    write(hs_handoff(HS_CFG, HS_GAP), hs_text(omit=("Next steps",)))   # a handoff that already lacks Next steps
 
 
 def _build_hs_nomark():
@@ -27488,6 +27490,80 @@ add("handoff-sections: with the same marker, a Write without Next steps is still
     carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
                                     "Files and commands"),
     file_path=hs_handoff(HS_CFG_LESS), content=hs_text(omit=("Next steps",)))
+
+
+# A handoff that already lacks a section drops nothing when an edit leaves it that way, so an edit to its Goal
+# passes. Only a write that removes a section the handoff holds is refused. HS_GAP's handoff lacks Next steps on
+# disk; the scope check below proves the Edit cases edit the text they name.
+HS_GOAL_OLD = "Ship the handoff section check (owner message, 2026-11-08)."
+HS_GOAL_NEW = "Ship the handoff section check, with its red cases (owner message, 2026-11-08)."
+HS_WORK_BLOCK = "## Work in flight\n%s\n" % HS_BODIES["Work in flight"]
+add("handoff-sections: an Edit that changes only the Goal of a handoff that already lacks Next steps passes, silently",
+    "allow", tool="Edit", cwd=NOGIT, session=HS_GAP, config=HS_CFG, silent=True,
+    file_path=hs_handoff(HS_CFG, HS_GAP), old_string=HS_GOAL_OLD, new_string=HS_GOAL_NEW)
+add("handoff-sections: a MultiEdit that changes only the Goal and Where things stand of a handoff that already "
+    "lacks Next steps passes, silently",
+    "allow", tool="MultiEdit", cwd=NOGIT, session=HS_GAP, config=HS_CFG, silent=True,
+    file_path=hs_handoff(HS_CFG, HS_GAP),
+    edits=[{"old_string": HS_GOAL_OLD, "new_string": HS_GOAL_NEW},
+           {"old_string": "Branch hsk-tests at", "new_string": "Branch hsk-tests2 at"}])
+add("handoff-sections: an Edit that removes Work in flight from a handoff that already lacks Next steps is refused, "
+    "naming Work in flight",
+    "deny", HS_RULE, tool="Edit", cwd=NOGIT, session=HS_GAP, config=HS_CFG,
+    carries=("Work in flight",), lacks=("Goal", "Working premises", "Where things stand", "Files and commands"),
+    file_path=hs_handoff(HS_CFG, HS_GAP), old_string=HS_WORK_BLOCK, new_string="")
+add("handoff-sections: a Write that lacks Next steps is refused even though the old handoff lacked it, naming Next steps",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_GAP, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=hs_handoff(HS_CFG, HS_GAP), content=hs_text(omit=("Next steps",)))
+
+
+def hs_gap_scope():
+    """The gap handoff is on disk as the fixture wrote it, with the Goal text the Edit cases replace. An Edit whose
+    old text is absent is allowed by the rule, so the Edit cases prove nothing unless the file holds that text."""
+    materialize(HS_CFG)
+    try:
+        with open(hs_handoff(HS_CFG, HS_GAP), "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as e:
+        return False, "the gap handoff is unreadable: %s" % e
+    if text != hs_text(omit=("Next steps",)):
+        return False, "the gap handoff on disk is not the handoff without Next steps"
+    if HS_GOAL_OLD not in text:
+        return False, "the gap handoff lacks the Goal text the Edit cases replace"
+    return True, "the gap handoff on disk lacks Next steps and holds the Goal text the Edit cases replace"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the gap handoff on disk is the one the Edit cases edit", hs_gap_scope))
+
+
+# A heading numbered like the prompt's steps holds its section: `## 1. Goal`, and `# 5. Next steps` at H1. A `N)`
+# heading does not: the prompt numbers its steps with `N.` only, and the premises reader reads unnumbered headings.
+def hs_numbered(omit=()):
+    """A handoff whose headings carry the prompt's step numbers, one `#` or `##` heading per section."""
+    parts = ["# Handoff\n\n"]
+    for number, name in enumerate(HS_SECTIONS, 1):
+        if name not in omit:
+            parts.append("%s %d. %s\n%s\n" % ("#" if name == "Next steps" else "##", number, name, HS_BODIES[name]))
+    return "".join(parts)
+
+
+add("handoff-sections: headings numbered like the prompt's steps count as present: a Write with `## 1. Goal` and "
+    "`# 5. Next steps` passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=hs_numbered())
+add("handoff-sections: a numbered Write without Next steps is refused, naming Next steps only",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=HS_HANDOFF, content=hs_numbered(omit=("Next steps",)))
+add("handoff-sections: a heading numbered `3)` is no step heading: a Write with `## 3) Where things stand` is "
+    "refused, naming Where things stand only",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Where things stand",), lacks=("Goal", "Working premises", "Work in flight", "Next steps",
+                                            "Files and commands"),
+    file_path=HS_HANDOFF, content=hs_text().replace("## Where things stand\n", "## 3) Where things stand\n"))
 
 
 def hs_case(config, tool, tool_input, session=HS_SID):

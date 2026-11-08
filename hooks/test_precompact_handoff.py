@@ -2146,6 +2146,72 @@ def case_nudge_sections_quiet_when_complete_absent_or_active():
             c.cleanup()
 
 
+def numbered_text(omit=()):
+    """A handoff whose headings carry the prompt's step numbers: `## 1. Goal`, and `# 5. Next steps` at H1."""
+    parts = ["# Handoff\n\n"]
+    for number, name in enumerate(SECTION_NAMES, 1):
+        if name not in omit:
+            level = "#" if name == "Next steps" else "##"
+            parts.append("%s %d. %s\n%s\n" % (level, number, name, SECTION_BODIES[name]))
+    return "".join(parts)
+
+
+def case_nudge_sections_count_numbered_headings():
+    """A heading numbered like the prompt's steps holds its section. A `N)` heading does not: the prompt numbers its
+    steps with `N.` only, and the premises reader reads unnumbered headings, so the readers would part on it."""
+    variants = (
+        ("every heading numbered N., one at H1", numbered_text(), set()),
+        ("the N. headings, with Next steps gone", numbered_text(omit=("Next steps",)), {"Next steps"}),
+        ("a 3) heading for Where things stand, the rest unnumbered",
+         handoff_text().replace("## Where things stand\n", "## 3) Where things stand\n"), {"Where things stand"}),
+    )
+    for label, text, want in variants:
+        c = Case("nudge_numbered")
+        try:
+            install_prompt(c, prompt_source())
+            proc = nudge_at(c, text, MTIME_1)
+            reason = block_reason(proc)
+            named = names_in(reason) if reason is not None else set()
+            check("sections nudge (%s): %s" % (label, "blocks, naming %s" % ", ".join(sorted(want)) if want
+                                                else "is silent"),
+                  named == want and (reason is not None) == bool(want),
+                  "stdout: %r, named: %r" % (proc.stdout[:200], sorted(named)))
+        finally:
+            c.cleanup()
+
+
+def case_one_reader_for_the_premises_section():
+    """Both readers of the prompt's marker agree on the premises section. With no installed prompt, required_sections()
+    reads nothing, so premises_section() must name nothing either. Today it falls back to the repo's copy beside the
+    module and names "Working premises". The control installs the prompt: there the two agree, and the premises name
+    is one of the required names."""
+    repo_copy = os.path.join(os.path.dirname(os.path.abspath(MODULE)), "precompact_handoff_prompt.md")
+    c = Case("reader")
+    try:
+        check("one reader: scope: the repo's prompt copy beside the module is there", os.path.isfile(repo_copy),
+              "no file at %s" % repo_copy)
+        check("one reader: scope: the config folder holds no installed prompt", not os.path.exists(c.prompt_path()),
+              "a prompt exists at %s" % c.prompt_path())
+        with Env(CLAUDE_CONFIG_DIR=c.cfg):
+            req, err = call_under_test("required_sections")
+            prem, perr = call_under_test("premises_section")
+        expected = next((n for n in (req or []) if "premises" in n.lower()), None)
+        check("one reader: with no installed prompt, premises_section() names what required_sections() lists",
+              err is None and perr is None and prem == expected,
+              "required_sections() = %r, premises_section() = %r" % (req, prem))
+
+        install_prompt(c, prompt_source())
+        with Env(CLAUDE_CONFIG_DIR=c.cfg):
+            req2, err2 = call_under_test("required_sections")
+            prem2, perr2 = call_under_test("premises_section")
+        expected2 = next((n for n in (req2 or []) if "premises" in n.lower()), None)
+        check("one reader: control: with the installed prompt, the premises name is listed and matches",
+              err2 is None and perr2 is None and expected2 is not None and prem2 == expected2,
+              "required_sections() = %r, premises_section() = %r" % (req2, prem2))
+    finally:
+        c.cleanup()
+
+
 def put_bytes(path, data):
     parent = os.path.dirname(path)
     if parent:
@@ -2266,6 +2332,8 @@ def main() -> int:
     case_nudge_sections_quiet_when_complete_absent_or_active()
     case_nudge_sections_fail_open_on_bad_prompt()
     case_nudge_sections_flags_an_empty_handoff()
+    case_nudge_sections_count_numbered_headings()
+    case_one_reader_for_the_premises_section()
 
     if FAILED:
         print()
