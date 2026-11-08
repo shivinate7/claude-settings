@@ -6,4 +6,4 @@
 
 **Decision.** record-cites-live-code (claims about code cite live code names).
 
-**Retire.** `names_in` binds or skips each name form in What (class attribute, nested class, nested def, local, method on an object, string id, star import), and a case in `lint/test_stale_cites.py` shows a cite to each gives no STALE010.
+**Retire.** `names_in` binds or skips each name form in What (class attribute, nested class, nested def, local, method on an object, string id, star import, `type` alias, `global` name set in a def), and a case in `lint/test_stale_cites.py` shows a cite to each gives no STALE010.

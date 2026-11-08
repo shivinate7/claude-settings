@@ -8,7 +8,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
             A rename names its new home.
   STALE002  the line cites `<file.py> <name>` as "`file.py` `name`" or "(file.py name)", and `name` was bound
-            in that file at base (read with `ast`) and is not bound at head. `names_in` walks each module-level
+            in that file at base (read with `ast`) and is not bound at head. A dotted name, `Class.method`, reads its first
+            part as the name, in either form, for STALE002, STALE009 and STALE010. `names_in` walks each module-level
             statement, also inside a module-level if, try, with, for, while or match, never inside a def or
             class. A name counts when a def, class, import or assignment binds it there, also a tuple, for,
             with-as or walrus target, or when it is a def directly in a module-level class. A name that moved
@@ -173,10 +174,12 @@ FOREIGN_EXT = r"(?:mjs|cjs|js|ts|sh)"  # code files whose names this check does 
 
 
 def pair_res(ext):
-    """"`file.<ext>` `name`" and "(file.<ext> name)"."""
+    """"`file.<ext>` `name`" and "(file.<ext> name)". A dotted name, `Guard.run`, is read by its first part: group 2 stops
+    there, since only that part is a module-level name and the later parts are members that no module scan binds."""
+    dotted = r"(?:\.[A-Za-z_]\w*)*"
     return (
-        re.compile(NOT_BEFORE + r"`?(%s\.%s)`?\s+`([A-Za-z_]\w*)`" % (RUN, ext)),
-        re.compile(r"\(`?(%s\.%s)`?\s+([A-Za-z_]\w*)(?:\(\))?\)" % (RUN, ext)),
+        re.compile(NOT_BEFORE + r"`?(%s\.%s)`?\s+`([A-Za-z_]\w*)%s`" % (RUN, ext, dotted)),
+        re.compile(r"\(`?(%s\.%s)`?\s+([A-Za-z_]\w*)%s(?:\(\))?\)" % (RUN, ext, dotted)),
     )
 
 
