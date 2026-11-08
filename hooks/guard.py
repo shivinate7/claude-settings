@@ -976,10 +976,10 @@ WORKTREE_HOME_REASON = (
 )
 
 WORKTREE_HOME_RESTORE_REASON = (
-    "Rule (worktree home): this restore names a relative path, which resolves in this agent's own working "
-    "tree, not in the red-run folder the command also names. "
-    "Remedy: name the red-run folder in the same command, as `git -C <folder> restore <path>`, or give an "
-    "absolute path."
+    "Rule (worktree home): this restore names a relative path while your red-run folder is named in the same "
+    "command. "
+    "Remedy: to restore a file in your own tree, give its absolute path. To undo a copy made in the red-run "
+    "folder, delete it with `rm` by its absolute path."
 )
 
 HANDOFF_UNREAD_REASON = (
