@@ -1322,7 +1322,8 @@ def find_rewords(rng):
     if not removed:
         return {}
     found = {}
-    rng.tree = tracked_entries(rng.head)
+    if rng.tree is None:
+        rng.tree = tracked_entries(rng.head)
     for md in markdown_files(rng.tree, exclude_patterns(".")):
         if md in EXCLUDED_FILES:
             continue
