@@ -15622,12 +15622,25 @@ MRF_BADREMOTE = os.path.join(MRF_DIR, "badremote")    # origin routed to a bare 
 MRF_GH_BIN = os.path.join(MRF_DIR, "gh-bin")          # a folder that holds the fake gh
 MRF_GH_LOG = os.path.join(MRF_DIR, "gh-calls.log")    # one line per call the fake gh receives
 MRF_PATH = MRF_GH_BIN + os.pathsep + os.environ.get("PATH", "")
-# The fake gh. Comment 111 exists; any other comment is a 404; FAKE_GH_MODE=error is a 500, the non-404 failure.
+# The fake gh. Comment 111 exists; any other comment is a 404. FAKE_GH_MODE=error is a 500, the non-404 failure.
+# FAKE_GH_MODE=url404 is a 500 whose URL holds /404/, so it is not a 404 answer. FAKE_GH_MODE=all200 answers
+# every comment as existing.
 MRF_FAKE_GH = """#!/bin/sh
 [ -n "$FAKE_GH_LOG" ] && printf '%s\\n' "$*" >> "$FAKE_GH_LOG"
 if [ "$FAKE_GH_MODE" = error ]; then
   echo "gh: HTTP 500: Internal Server Error" >&2
   exit 1
+fi
+if [ "$FAKE_GH_MODE" = url404 ]; then
+  echo "gh: HTTP 500: Internal Server Error (https://api.github.com/repos/o/r/issues/comments/404/)" >&2
+  exit 1
+fi
+if [ "$FAKE_GH_MODE" = all200 ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      repos/o/r/issues/comments/*) printf '{"id":%s}\\n' "${arg##*/}"; exit 0 ;;
+    esac
+  done
 fi
 case " $* " in
   *" repos/o/r/issues/comments/111 "*) printf '%s\\n' '{"id":111}'; exit 0 ;;
@@ -15732,7 +15745,7 @@ mrf_case("a comment link to comment 111, which exists, is allowed", "allow",
 mrf_case("a bare #8 with no PR word is not judged", "allow", "Item #8 is open.")
 mrf_case("a pull URL of another repo is not judged", "allow",
          "See https://github.com/x/y/pull/8 for the upstream change.")
-mrf_case("a made-up sha on a line that names x/y is not judged", "allow", "x/y: fixed in 8c1f0e2a7 on main.")
+mrf_case("a sha on a line that names x/y@<sha> on main is not judged", "allow", "x/y@8c1f0e2a7 on main.")
 mrf_case("a PR in a repo with no origin is not judged", "allow", "PR #8 has the fix.", cwd=MRF_NOORIGIN)
 mrf_case("a message with no ref is allowed", "allow", "Verdict: pass, nothing to name.")
 # Fail open: the call is allowed, and the output names each ref it could not check in additionalContext,
@@ -15742,6 +15755,34 @@ mrf_case("a gh error on comment 222 is allowed, and the output names 222", "allo
          context=True)
 mrf_case("an ls-remote that fails is allowed, and the output names PR #7", "allow", "PR #7 has the fix.",
          cwd=MRF_BADREMOTE, carries=("#7",), context=True)
+# Round 2: the forms a sha, a pull request and a commit link take in running text.
+mrf_case("a made-up sha after Head, on a branch name, is refused", "deny",
+         "Head 8c1f0e2a7 on lane/env-file-scope", carries=("8c1f0e2a7",))
+mrf_case("a made-up sha after Rebased on origin/main at is refused", "deny",
+         "Rebased on origin/main at 8c1f0e2a7.", carries=("8c1f0e2a7",))
+mrf_case("pull request #8, which the repo does not have, is refused and named", "deny",
+         "pull request #8 has the fix.", carries=("#8",))
+mrf_case("#8 (PR), which the repo does not have, is refused and named", "deny",
+         "#8 (PR) has the fix.", carries=("#8",))
+mrf_case("pr #8, which the repo does not have, is refused and named", "deny",
+         "pr #8 has the fix.", carries=("#8",))
+mrf_case("a pull URL with no scheme for PR 8 is refused and named", "deny",
+         "See github.com/o/r/pull/8 for it.", carries=("#8",))
+mrf_case("a pull URL with a /files tail for PR 8 is refused and named", "deny",
+         "See https://github.com/o/r/pull/8/files for it.", carries=("#8",))
+mrf_case("PRs 7 and 8, with 8 missing, is refused and names 8", "deny",
+         "PRs 7 and 8 are open.", carries=("#8",))
+mrf_case("a commit link of this repo for a made-up sha is refused", "deny",
+         "See https://github.com/o/r/commit/8c1f0e2a7 for it.", carries=("8c1f0e2a7",))
+# Fail open: a gh 500 whose URL holds /404/ is not a 404, so the link is left unchecked and named.
+mrf_case("a gh 500 whose URL holds /404/ leaves comment 333 unchecked, and the output names it", "allow",
+         "See https://github.com/o/r/pull/7#issuecomment-333 for the reply.", carries=("333",), mode="url404",
+         context=True)
+# Controls: a ref of another repo, written with a mark, is not judged.
+mrf_case("acme/widgets: PR #8 names another repo and is not judged", "allow", "acme/widgets: PR #8 has the fix.")
+mrf_case("acme/widgets#8 names another repo and is not judged", "allow", "See acme/widgets#8 for it.")
+mrf_case("x/y@<sha> alone is not judged", "allow", "x/y@8c1f0e2a7")
+mrf_case("a bare PR #7 is allowed", "allow", "PR #7")
 
 
 def mrf_lines(path):
@@ -15795,6 +15836,32 @@ LOG_CHECKS_EXTRA.append(("message-ref-missing: a message with no ref starts no g
                          mrf_no_ref_cost_case))
 LOG_CHECKS_EXTRA.append(("message-ref-missing: PRs #7 and #8 start exactly one git ls-remote", mrf_pr_once_cost_case))
 FIXTURELESS_CHECKS.update((mrf_no_ref_cost_case, mrf_pr_once_cost_case))
+
+SIX_LINKS = " ".join("https://github.com/o/r/pull/7#issuecomment-%d" % n for n in range(201, 207))
+
+
+def mrf_six_links_case():
+    """Six comment links make at most five gh calls, and the sixth is named as unchecked
+    (decision send-message-refs-resolve)."""
+    if os.name == "nt":
+        return SKIP, "skipped: the fake gh is a POSIX shell script"
+    materialize(MRF_REPO)
+    if os.path.exists(MRF_GH_LOG):
+        os.remove(MRF_GH_LOG)
+    decision, reason = mrf_judge(MRF_REPO, "Links: " + SIX_LINKS + ".", mode="all200")
+    calls = mrf_lines(MRF_GH_LOG)
+    if len(calls) != 5:
+        return False, "%d gh call(s) for six comment links, want 5" % len(calls)
+    if "206" not in reason:
+        return False, "the sixth link, comment 206, is not named as unchecked: %r" % reason[:160]
+    if decision != "allow":
+        return False, "%s, want allow for a link left unchecked" % decision
+    return True, "six comment links make five gh calls, and the sixth is named unchecked"
+
+
+LOG_CHECKS_EXTRA.append(("message-ref-missing: six comment links make five gh calls, and the sixth is named unchecked",
+                         mrf_six_links_case))
+FIXTURELESS_CHECKS.add(mrf_six_links_case)
 
 
 # =========================================================================== failing open
@@ -18444,7 +18511,8 @@ def decide(case):
     if result.returncode != 0:
         return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
     if case.get("no_permission_key") and '"permissionDecision"' in result.stdout:
-        return "permissionDecision present", read_decision(result.stdout)[1]
+        decision, reason = read_decision(result.stdout)   # names the decision the key came with
+        return "%s with a permissionDecision key" % decision, reason
     return read_decision(result.stdout)
 
 
