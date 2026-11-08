@@ -2282,6 +2282,79 @@ class PickClaims(UpkeepFixture):
         self.publish(items=[], answers=[])
         self.assertEqual(self.flagged(self.out_with_live()), (1, ['c154 (claim "item 10 a")']))
 
+    def test_an_item_claim_also_ends_before_a_paren_or_a_colon(self):
+        self.commit_step("c153", note="Ruling: item 385 a (06:18 CST Nov 8): kept.")
+        self.commit_step("c154", note="Ruling: item 386 a: kept.", order=2)
+        self.publish(items=[], answers=[self.answer(385, "a"), self.answer(386, "a")])  # control: matching letters are clean
+        self.assertEqual(self.flagged_ids(self.out_with_live()), [])
+        self.publish(items=[], answers=[self.answer(385, "b"), self.answer(386, "b")])
+        self.assertEqual(self.flagged(self.out_with_live()), (2, sorted(
+            ['c153 (claim "item 385 a")', 'c154 (claim "item 386 a")'])))
+
+    def test_an_item_claim_also_ends_at_a_newline(self):
+        self.commit_step("c153", note="Ruling: item 9 a\nkept.")
+        self.commit_step("c154", note="Ruling: item 9 a.", order=2)  # control: a period already ends the claim
+        self.publish(items=[], answers=[self.answer(9, "b")])
+        count, entries = self.flagged(self.out_with_live())
+        self.assertIn('c154 (claim "item 9 a")', entries, "the control is not flagged")
+        self.assertEqual((count, entries), (2, sorted(['c153 (claim "item 9 a")', 'c154 (claim "item 9 a")'])))
+
+    def test_underscore_markup_around_an_item_claim_is_a_claim(self):
+        self.commit_step("c153", note="Ruling: _item 9 a_.")
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), [])  # control: a matching letter reads clean
+        self.publish(items=[], answers=[self.answer(9, "b")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), ["c153"])
+
+    def test_the_owner_picked_with_a_quoted_letter_is_an_item_less_claim(self):
+        self.commit_step("c153", note="Ruling: the owner picked b.")  # control: the bare letter is a claim
+        self.commit_step("c154", note="Ruling: the owner picked \"b\".", order=2)
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), ["c153", "c154"])
+
+    def test_other_letters_need_only_a_non_letter_after_the_item_number(self):
+        self.commit_step("c153", note="Ruling: item 9 b.")  # control: a wrong b before a period is a claim
+        self.commit_step("c154", note="Waiting on item 9 b decision.", order=2)
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), ["c153", "c154"])
+
+    def test_an_item_claim_takes_option_before_its_letter(self):
+        self.commit_step("c153", note="Ruling: item 9 b.")  # control: the bare letter is a claim
+        self.commit_step("c154", note="Ruling: item 9 option b.", order=2)
+        self.commit_step("c155", note="Ruling: item 9 option a.", order=3)  # control: the matching letter is clean
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged(self.out_with_live()), (2, sorted(
+            ['c153 (claim "item 9 b")', 'c154 (claim "item 9 option b")'])))
+
+    def test_an_owner_pick_takes_a_number_before_its_letter_as_its_item(self):
+        self.commit_step("c153", note="Ruling: item 9 b.")  # control: the bare item claim is listed
+        self.commit_step("c154", note="Ruling: Owner picked 441 b.", order=2)
+        self.commit_step("c155", note="Ruling: Owner picked 441 a.", order=3)  # item 441 holds a, so it is clean
+        self.publish(items=[], answers=[self.answer(9, "a"), self.answer(441, "a")])
+        self.assertEqual(self.flagged(self.out_with_live()), (2, sorted(
+            ['c153 (claim "item 9 b")', 'c154 (claim "Owner picked 441 b")'])))
+
+    def test_an_owner_pick_naming_an_item_is_clean_when_that_item_holds_its_letter(self):
+        self.commit_step("c153", note="Ruling: Owner picked b on item 279.")
+        self.commit_step("c154", note="Ruling: Owner picked b on page item 279.", order=2)
+        self.commit_step("c155", note="Ruling: item 9 b.", order=3)  # control: a wrong letter is listed
+        self.publish(items=[], answers=[self.answer(279, "b"), self.answer(9, "a")])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c155 (claim "item 9 b")']))
+
+    def test_an_owner_pick_naming_an_item_is_flagged_with_its_whole_claim(self):
+        self.commit_step("c153", note="Ruling: Owner picked b on item 279.")
+        self.commit_step("c154", note="Ruling: Owner picked b on page item 279.", order=2)
+        self.commit_step("c155", note="Ruling: Owner picked b.", order=3)  # control: the item-less claim is listed
+        self.publish(items=[], answers=[self.answer(279, "a")])
+        self.assertEqual(self.flagged(self.out_with_live()), (3, sorted([
+            'c153 (claim "Owner picked b on item 279")', 'c154 (claim "Owner picked b on page item 279")',
+            'c155 (claim "Owner picked b")'])))
+
+    def test_an_answers_row_that_is_a_list_or_has_a_string_n_is_skipped_not_unknown(self):
+        self.commit_step("c153", note="Ruling: item 9 b.")
+        self.publish(items=[], answers=[["junk", None], None, {"n": "9", "choice": "a"}])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c153 (claim "item 9 b")']))
+
 
 class DatedClaims(UpkeepFixture):
     """The upkeep row for each doing or active step whose note's newest dated claim is STALE_DAYS or more
