@@ -52,7 +52,8 @@ unlaned's: the branch, bare or as lane/<id>, equals a live session step.
 
 The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
 that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
-that cannot be archived reads `hold (<reason>; lane <session id>)`, and the row's count leaves holds out.
+that can never be judged reads `hold (<reason>; lane <session id>)`, is never archived, and is left out of the row's count.
+A lane that waits (step not done, open pull, open item) prints no line.
 
 This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
 "todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable readAt and pulls read (sessions are not
@@ -1540,9 +1541,9 @@ def done_without_check(steps):
 
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, trailer_ids=None):
     """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
-    `hold (<reason>; lane <session id>)` for a lane that cannot be archived. A lane with no cs-step tag, or a step that
-    is neither on the record branch nor named by a Step trailer on main, is held. `unknown (<why>)` is only for a
-    whole read that could not run, never an empty list then.
+    `hold (<reason>; lane <session id>)` for a lane that can never be judged, which is never archived: no cs-step tag,
+    or a step that is neither on the record branch nor named by a Step trailer on main. A lane that waits (step not
+    done, open pull, open item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
@@ -1558,6 +1559,8 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         return [why]
     if steps is None:
         return ["unknown (the steps could not be read)"]
+    if not steps:
+        return ["unknown (the record branch has no steps)"]
     if marks_why:
         return ["unknown (%s)" % marks_why]
     if work.get("pageItems") is None:
@@ -1591,7 +1594,9 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         absent = [k for k in mine if k not in steps]
         if absent and trailer_ids is None:
             found = step_trailers(repo, ref) if ref else None
-            trailer_ids = {t[0] for t in found} if found is not None else set()
+            if found is None:
+                return ["unknown (the Step trailers on %s could not be read)" % (ref or main_branch)]
+            trailer_ids = {t[0] for t in found}
         unproven = [k for k in absent if k not in trailer_ids]
         if unproven:
             others = sorted({t for t in tags if t.startswith(REPO_TAG) and not repo_tag_names(t, slug)})
