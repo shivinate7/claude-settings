@@ -24887,12 +24887,13 @@ def _put_whole(path, text):
     os.replace(temp, path)
 
 
-def _reload_copy_stamped(name, first_line_for):
+def _reload_copy_stamped(name, first_line_for, dest=None):
     """A scratch folder with a copy of guard.py and every guard_* sibling. first_line_for(entry) is
-    the line put at the top of that file, or None for a file with no INSTALL_ID line. Returns
+    the line put at the top of that file, or None for a file with no INSTALL_ID line. dest, when
+    given, is the folder the copy lands in; it is ROOT/reload/<name> otherwise. Returns
     (folder, good): good maps each file name to the text an install leaves."""
     source = os.path.dirname(GUARD)
-    folder = os.path.join(ROOT, "reload", name)
+    folder = dest or os.path.join(ROOT, "reload", name)
     shutil.rmtree(folder, ignore_errors=True)
     os.makedirs(folder)
     sources = [("guard.py", GUARD)] + [
@@ -25117,14 +25118,18 @@ SESSION_LOG_ABSENT = object()  # a payload with no session_id key at all
 SESSION_LOG_DENY = {"tool_name": "Bash", "tool_input": {"command": "pkill -f node"}}
 
 
-def _session_log_run(folder, body, extra_env=None):
-    """Run the guard once on a raw payload string, with CLAUDE_CONFIG_DIR set to `folder`."""
+def _session_log_run(folder, body, extra_env=None, guard=None):
+    """Run the guard once on a raw payload string, with CLAUDE_CONFIG_DIR set to `folder`. `guard` is a copy of
+    guard.py to run in place of this repository's. A copy runs with no PYTHONPATH, so a lint folder named there
+    cannot stand in for the one the copy's install lays out."""
     env = dict(os.environ)
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
+    if guard:
+        env.pop("PYTHONPATH", None)
     env.update(extra_env or {})
-    return subprocess.run([sys.executable, GUARD], input=body, capture_output=True, text=True,
+    return subprocess.run([sys.executable, guard or GUARD], input=body, capture_output=True, text=True,
                           env=env, timeout=60)
 
 
@@ -27593,19 +27598,22 @@ def r3_decision(stdout):
         return "unparsed", stdout[:80]
 
 
-def r3_check(command, state, want, rule=None):
+def r3_check(command, state, want, rule=None, guard=None, seed=None):
     """Build a check: the guard judges `command` after `state` ("fresh" refusal row, or "none") and gives `want`. It
-    names `rule` when one is given. A deny by ENC_RULE says to report and names no encoding as a remedy."""
+    names `rule` when one is given. A deny by ENC_RULE says to report and names no encoding as a remedy. `seed(folder)`,
+    when given, writes the session's state in place of `state`. `guard` runs a copy of guard.py in place of this one."""
     R3_SERIAL[0] += 1
     folder_name = "r3-%02d" % R3_SERIAL[0]
 
     def check():
         folder = enc_fresh_folder(folder_name)
-        if state == "fresh":
+        if seed is not None:
+            seed(folder)
+        elif state == "fresh":
             enc_refusal(folder, ENC_SID, ENC_FRESH)
         body = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT,
                            "session_id": ENC_SID})
-        run = _session_log_run(folder, body, extra_env=ENC_CLOCK)
+        run = _session_log_run(folder, body, extra_env=ENC_CLOCK, guard=guard)
         if run.returncode != 0:
             return False, "the guard exited %d" % run.returncode
         decision, reason = r3_decision(run.stdout)
@@ -27628,7 +27636,7 @@ def r3_check(command, state, want, rule=None):
             return False, "guard.log holds a crash row"
         if any("\x00" in row for row in rows):
             return False, "a guard.log row holds a NUL"
-        return True, "%s after %s, no crash row, no NUL" % (want, state)
+        return True, "%s after %s, no crash row, no NUL" % (want, "a seeded state" if seed is not None else state)
     return check
 
 
@@ -27672,6 +27680,129 @@ R3_F2_F3 = (
 for _label, _command in R3_F2_F3:
     r3_add(_label, _command, "fresh", "deny", ENC_RULE)
     r3_add(_label, _command, "none", "allow")
+
+
+# ---- encoded retry, installed layout. install.sh lays a copy install out as hooks/ (guard.py and the guard family,
+# flat), hooks/guard.d/<id>/ (the same family, the set guard.py loads from) and lint/ beside hooks/. guard_encoded.py
+# finds lint/guard_log_report.py at `../lint` from its own folder. In the set that is guard.d/lint, which no install
+# makes. The import fails, and the rule fails open: a guard.log deny row is never read, so a retry is allowed. Each
+# check proves the scope first (guard_encoded loads from the folder the install loads it from), then reads the decision.
+GD_DECODE = "echo ZWNobyBoaQ== | base64 -d | sh"
+GD_TAIL = "tail -f x | grep y"
+GD_BUILT = set()
+GD_PROBE = (
+    "import importlib.util, sys\n"
+    "spec = importlib.util.spec_from_file_location('guard_under_test', sys.argv[1])\n"
+    "module = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(module)\n"
+    "print(sys.modules['guard_encoded'].__file__)\n"
+)
+
+
+def gd_layout(name, guard_set, lint):
+    """Build the installed layout `name` under ROOT/guard-d, once per run, and return its hooks/guard.py. guard_set adds
+    hooks/guard.d/<INSTALL_ID>/, the family as install.sh lays it out. lint adds lint/guard_log_report.py beside hooks/.
+    Every copy carries the INSTALL_ID line, as install.sh stamps it."""
+    base = os.path.join(ROOT, "guard-d", name)
+    hooks = os.path.join(base, "hooks")
+    if name not in GD_BUILT:
+        GD_BUILT.add(name)
+        shutil.rmtree(base, ignore_errors=True)
+
+        def stamp(entry):
+            return _stamp_line(INSTALL_ID)
+        _reload_copy_stamped(name, stamp, dest=hooks)
+        if guard_set:
+            _reload_copy_stamped(name, stamp, dest=os.path.join(hooks, "guard.d", INSTALL_ID))
+        if lint:
+            os.makedirs(os.path.join(base, "lint"))
+            shutil.copy(os.path.join(HERE, "..", "lint", "guard_log_report.py"), os.path.join(base, "lint"))
+    return os.path.join(hooks, "guard.py")
+
+
+def gd_scope(guard_path, want_dir):
+    """(ok, note): the guard at guard_path loads guard_encoded from want_dir. A stamp that slips loads the flat copy
+    instead, and a decision read from that copy names no layout."""
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env["CLAUDE_CONFIG_DIR"] = os.path.dirname(os.path.dirname(guard_path))
+    run = subprocess.run([sys.executable, "-c", GD_PROBE, guard_path], capture_output=True, text=True, env=env,
+                         cwd=NOGIT, timeout=60)
+    if run.returncode != 0:
+        return False, "scope: the guard did not load: %s" % run.stderr.strip()[-100:]
+    loaded = os.path.dirname(os.path.realpath(run.stdout.strip()))
+    if loaded != os.path.realpath(want_dir):
+        return False, "scope: guard_encoded loads from %s, want %s" % (loaded, os.path.realpath(want_dir))
+    return True, "guard_encoded loads from %s" % loaded
+
+
+def gd_scope_of(name, guard_set, lint):
+    """(ok, note) for the layout `name`: guard_encoded loads from the folder the install loads it from."""
+    built = gd_layout(name, guard_set, lint)
+    hooks = os.path.dirname(built)
+    want_dir = os.path.join(hooks, "guard.d", INSTALL_ID) if guard_set else hooks
+    return gd_scope(built, want_dir)
+
+
+def gd_seed(session, when):
+    """A seed for r3_check: one guard.log deny row of `session` at `when`, in the shape guard_core.record writes."""
+    def seed(folder):
+        enc_log(folder, session, when)
+    return seed
+
+
+def gd_add(label, name, command, want, rule=None, seed=None, guard_set=True, lint=True):
+    """Register one check on the installed layout `name`: the scope first, then r3_check's judgement of `command`."""
+    guard = os.path.join(ROOT, "guard-d", name, "hooks", "guard.py")
+    judge = r3_check(command, "none", want, rule, guard=guard, seed=seed)
+
+    def check():
+        ok, note = gd_scope_of(name, guard_set, lint)
+        if not ok:
+            return False, note
+        return judge()
+    FIXTURELESS_CHECKS.add(check)
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
+def gd_scope_check(name, guard_set, lint):
+    def check():
+        return gd_scope_of(name, guard_set, lint)
+    return check
+
+
+for _label, _check in (
+        ("encoded-retry-after-refusal: scope, the installed guard set loads guard_encoded from guard.d/<id>/",
+         gd_scope_check("gd-set", True, True)),
+        ("encoded-retry-after-refusal: scope, the flat install loads guard_encoded from hooks/",
+         gd_scope_check("gd-flat", False, True))):
+    FIXTURELESS_CHECKS.add(_check)
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+# The red: a set with lint/ beside hooks/ refuses the decode-and-run call after a fresh guard.log deny row. The rule
+# reads guard.d/lint, finds nothing, and allows the call.
+gd_add("encoded-retry-after-refusal: installed guard set, lint/ beside hooks/, fresh guard.log deny row: "
+       "the decode-and-run call is refused", "gd-set", GD_DECODE, "deny", ENC_RULE,
+       seed=gd_seed(ENC_SID, ENC_FRESH))
+# Controls on the set: no row, a row 15 minutes old, and another session's row each allow the call.
+gd_add("encoded-retry-after-refusal: installed guard set, no guard.log row: the decode-and-run call is allowed",
+       "gd-set", GD_DECODE, "allow")
+gd_add("encoded-retry-after-refusal: installed guard set, guard.log deny row 15 minutes old: "
+       "the decode-and-run call is allowed", "gd-set", GD_DECODE, "allow", seed=gd_seed(ENC_SID, ENC_STALE))
+gd_add("encoded-retry-after-refusal: installed guard set, another session's guard.log deny row: "
+       "the decode-and-run call is allowed", "gd-set", GD_DECODE, "allow", seed=gd_seed(ENC_OTHER_SID, ENC_FRESH))
+# No lint/: the rule fails open. The call is allowed with no crash row and no NUL, and the stream rule still denies.
+gd_add("encoded-retry-after-refusal: installed guard set, no lint/, fresh guard.log deny row: "
+       "the decode-and-run call is allowed, with no crash row", "gd-set-nolint", GD_DECODE, "allow",
+       seed=gd_seed(ENC_SID, ENC_FRESH), lint=False)
+gd_add("encoded-retry-after-refusal: installed guard set, no lint/, fresh guard.log deny row: "
+       "tail -f is still denied by live-stream", "gd-set-nolint", GD_TAIL, "deny", "live-stream",
+       seed=gd_seed(ENC_SID, ENC_FRESH), lint=False)
+# The twin: a flat install with lint/ beside hooks/ refuses the same call, so the set's allow comes from the layout.
+gd_add("encoded-retry-after-refusal: flat install, no guard.d, lint/ beside hooks/, fresh guard.log deny row: "
+       "the decode-and-run call is refused", "gd-flat", GD_DECODE, "deny", ENC_RULE,
+       seed=gd_seed(ENC_SID, ENC_FRESH), guard_set=False)
 
 
 # =========================================================================== the machine-load brake
