@@ -129,12 +129,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An
                        undated stamp more than 60 minutes ahead reads as a quote from an earlier day, and passes; so
                        does a stamp behind. The reason steers to your own label and prints the real time. No
-                       transcript, file or process; a missing clock module passes the message. A dated limit of 1 minute ahead also judges
+                       transcript or process; a missing clock module passes the message. A dated limit of 1 minute ahead also judges
                        three written values, each an ISO instant with an offset: `added` in an ArtifactData set,
                        update or batch write to collection items (inline, through `file_path`, one local file read
-                       only for an items write with no inline data, or as a str_replace's new text); `updatedAt` in a
-                       Write or Edit to roadmap/data/steps/<name>.json; a literal double-quoted `updatedAt` in a Bash
-                       command, read as text. The reason prints the time in Central and ISO. One clock read only when
+                       only for an items write with no inline data, or as a str_replace's new text or time
+                       fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
+                       Edit's or MultiEdit's new text; a literal double-quoted `updatedAt` in a Bash command, read as text. The reason prints the time in Central and ISO. One clock read only when
                        a judged value is present. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
