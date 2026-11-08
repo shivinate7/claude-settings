@@ -5661,6 +5661,13 @@ sh("waiter: a foreground until-loop with sleep 5 is refused", "until test -e d; 
 # judges a Monitor call today, so this passes; it pins that the waiter rule never refuses one.
 add("waiter: a Monitor call with an until-loop that sleeps 2 is allowed", "allow", tool="Monitor",
     cwd=NOGIT, command="until test -e /tmp/x; do sleep 2; done; echo done", description="wait for a directory")
+# The harness sends a Monitor call to the guard as a Bash payload that carries timeout_ms, not timeout
+# (coordinator, 2026-11-08). The record allows that wait, so the loop under timeout_ms is allowed. The
+# same loop under timeout is a plain Bash call and stays refused.
+add("waiter: a Monitor call sent as Bash with timeout_ms and an until-loop is allowed", "allow", tool="Bash",
+    cwd=NOGIT, command="until test -e d; do sleep 2; done; echo repro-done", description="x", timeout_ms=60000)
+add("waiter: the same loop as a Bash call with timeout stays refused", "deny", "waiter", tool="Bash",
+    cwd=NOGIT, command="until test -e d; do sleep 2; done; echo repro-done", description="x", timeout=60000)
 sh("waiter: two sleeps, each followed by a check, are refused",
    "sleep 5; gh run view 1; sleep 5; gh run view 1", "deny", "waiter", cwd=NOGIT)
 sh("waiter: Start-Sleep -Seconds 10 is allowed", "Start-Sleep -Seconds 10", "allow",
@@ -5723,6 +5730,7 @@ for _name, _body in (
     ("a lone apostrophe in a comment", "# don't\ns = \"until test -e d; do sleep 2; done\""),
     ("an apostrophe inside a double-quoted string", 's = "it\'s: until test -e d; do sleep 2; done"'),
     ("a single-quoted string", "s = 'until test -e d; do sleep 2; done'"),
+    ("a double-quoted string, printed", 's = "until test -e d; do sleep 2; done; echo done"\nprint(s)'),
 ):
     sh("waiter: a python heredoc with " + _name + " holds a loop as text, allowed",
        "python3 - <<'EOF'\n" + _body + "\nEOF", "allow", cwd=NOGIT)
