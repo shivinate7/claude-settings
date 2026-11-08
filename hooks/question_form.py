@@ -403,8 +403,6 @@ COMMAND_FILE = re.compile(_FILE, re.I)
 COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|this\s+)?(?:file\s+)?(?:"
                              + _FILE + ")", re.I)
 COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
-# "the /doctor command" names a slash command typed in Claude Code, not a command kept in a file.
-SLASH_COMMAND = re.compile(r"(?<![\w./-])/[a-z][\w-]*\s+commands?\b", re.I)
 _RUN_VERB = r"\b(?:run|runs|copy|paste|execute|use|type)\b"
 COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
                           r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
@@ -628,12 +626,6 @@ def _shell_line(span, run) -> bool:
     return False
 
 
-def _without_slash_commands(texts) -> str:
-    """The steps, joined, with each slash command removed from a step that names no file. A step that names a
-    file anywhere keeps it, since "run the /sync command. See plans/x.md." sends the owner to that file."""
-    return "\n".join(text if COMMAND_FILE.search(text) else SLASH_COMMAND.sub("", text) for text in texts)
-
-
 def command_in_item_hit(data) -> str:
     """The matched text when a task's `command` is not {powershell, mac}, when its powershell string
     holds bash syntax, when its steps, joined, send the owner to a file for a command, or when a
@@ -654,7 +646,7 @@ def command_in_item_hit(data) -> str:
     joined = "\n".join(texts)
     has_file = COMMAND_FILE.search(joined)
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
-            or (has_file and not has_command and COMMAND_VERB.search(_without_slash_commands(texts))):
+            or (has_file and not has_command and COMMAND_VERB.search(joined)):
         return "steps send the owner to a file for a command"
     if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
            for text in texts for start, body, fenced in _code_spans(text)):

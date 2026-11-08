@@ -72,7 +72,7 @@ PATTERNS = {
         r"\b(?:current|existing|today'?s|present|old|live|shipped)\s+" + _NOUN + r"\b",
         r"\b(?:look\s+at|open|study|inspect|review|see|read|use)\s+(?:the\s+)?(?:web|native|ios|android|live)\s+"
         r"(?:app|site|version|client|screens?|pages?)\b",
-        r"\bthe\s+(?:web|native|android)\s+(?:app|client|version)\b",
+        r"\bthe\s+(?:web|native|ios|android)\s+(?:app|client|version)\b",
         r"\bas\s+it\s+(?:is|looks|works|stands)\s+(?:now|today)\b",
         r"\blooks?\s+like\s+(?:the\s+)?(?:current|existing|old|web|today)",
     ],
@@ -109,27 +109,18 @@ PATTERNS = {
 _SPACE_WORD = r"(?:spacing|gaps?|padding|margins?|gutters?|radius|radii|insets?)"
 _COLOUR_WORD = r"(?:colou?rs?|accent|ink|background|surface|border|fill|brand|palette|tint|shade)"
 _ID_WORD = ("order", "lot", "bin", "invoice", "ticket", "id", "item", "box", "parcel", "package", "no.",
-            "number", "ref", "cartridge", "part", "issue", "pr")
-# "order #123456", "orders #123456" and "boxes: #123456" are ids, not colours. With a colon after the id word
-# ("Item: #3d5af1") a hash that holds a hex letter is a colour, so only the all-digit pattern reads the colon.
-_NOT_ID_BARE = "".join(r"(?<!\b%s%s )" % (re.escape(w), plural) for w in _ID_WORD for plural in ("", "s", "es"))
-_NOT_ID = "".join(r"(?<!\b%s%s%s )" % (re.escape(w), plural, colon)
-                  for w in _ID_WORD for plural in ("", "s", "es") for colon in ("", ":"))
+            "number", "ref")
+_NOT_ID = "".join(r"(?<!\b%s )" % w for w in _ID_WORD)  # "order #123456" is an id, not a colour
+# An id word spares only an all-digit hash, so "orders #123456" and "Order ID: #123456" are ids. A hash with a
+# hex letter keeps the plain guard above: "Item: #3d5af1" is a colour.
+_NOT_ID_DIGITS = "".join(r"(?<!\b%s%s%s )" % (re.escape(w), plural, colon)
+                         for w in _ID_WORD for plural in ("", "s", "es") for colon in ("", ":"))
 SPACING_EXEMPT = ("Device",)
-# A Device section may say the lane draws an iOS app: there it names the product being drawn. Any other
-# sentence that says "the iOS app" may mean today's product, so it stays a `current` fault.
-IOS_APP_REF = re.compile(r"\bthe\s+ios\s+(?:app|client|version)\b", re.I)
-IOS_APP_EXEMPT = ("Device",)
-# Only a direct object of a draw verb ("draws the iOS app") is exempt, and only when the sentence does not
-# also match it to today's product.
-IOS_DRAW_VERB = re.compile(r"\b(?:draw|draws|drawing|drawn|design|designs|designing|build|builds|building"
-                           r"|mock|mocks|sketch|sketches)\s+$", re.I)
-IOS_MATCH_WORD = re.compile(r"\b(?:match(?:es|ed|ing)?|like|same\s+as|today|now)\b", re.I)
 PATTERNS.update({
     "token-colour": [
-        _NOT_ID_BARE + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
-        _NOT_ID + r"#(?:\d{6}|\d{8})\b",
-        r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}" + _NOT_ID_BARE + r"#[0-9a-f]{3,4}\b",
+        _NOT_ID + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
+        _NOT_ID_DIGITS + r"#(?:\d{6}|\d{8})\b",
+        r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#[0-9a-f]{3,4}\b",
         r"\b(?:rgba?|hsla?|hwb|lch|oklab|oklch)\s?\(", r"\b(?:rgba?|hsla?)\s+\d+[ ,]+\d+[ ,]+\d+",
     ],
     "token-font": [
@@ -356,25 +347,10 @@ def brief_faults(text, current=(), template=None, devices=None):
                 if hit:
                     faults.append((kind, name, hit.group(0).strip()))
                     break
-            else:
-                ios = ios_app_hit(body, name in IOS_APP_EXEMPT) if kind == "current" else None
-                if ios:
-                    faults.append((kind, name, ios))
         for view in current:
             if view and re.search(r"(?<!\w)" + re.escape(view) + r"(?!\w)", body):
                 faults.append(("named-view", name, view))
     return faults
-
-
-def ios_app_hit(body, exempt):
-    """The matched "the iOS app" text, or None. With `exempt`, a sentence whose draw verb takes the app as its
-    direct object is left out, unless it also matches the app to today's product."""
-    for sentence in re.split(r"(?<=[.!?])\s+|\n", body):
-        hit = IOS_APP_REF.search(sentence)
-        if hit and not (exempt and IOS_DRAW_VERB.search(sentence[:hit.start()])
-                        and not IOS_MATCH_WORD.search(sentence)):
-            return hit.group(0)
-    return None
 
 
 def blind_designers_ok(text):
