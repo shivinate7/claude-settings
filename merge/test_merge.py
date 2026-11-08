@@ -11909,6 +11909,12 @@ def shape_d(**kw):
     """A bullet list after the CI line, and no `---` anywhere."""
     return record_text(**kw) + "\n- closes silent allows in about 430 functions;\n- opens no hole.\n"
 
+def no_double_stop(test, text):
+    """A why or a refusal never holds a doubled stop: `..` that is not part of an ellipsis (the render command's `...` is one), or a stop before
+    a semicolon (`.;`). A sentence that ends, then another mark."""
+    test.assertNotRegex(text, r"(?<!\.)\.\.(?!\.)", "the why or refusal holds a doubled stop:\n" + text)
+    test.assertNotIn(".;", text, "the why or refusal holds a stop before a semicolon:\n" + text)
+
 class ReviewFixForm(unittest.TestCase):
     """The fix check line (decision hold-unsafe-after-round-3): one optional line after the Round lines and before Net value. parse_review
     returns it as rec["fix"], and refuses a malformed line, a second line, a line before a round, and a reviewed head equal to the record's Head.
@@ -12570,11 +12576,15 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
         self.assertIn("CI line", err, "the refusal does not say the text follows the CI line:\n" + err)
         self.assertIn("---", err, "the refusal does not name the --- remedy:\n" + err)
+        self.assertIn("nothing between the CI line and", err, "the refusal does not say nothing may sit between the CI line and the ---:\n" + err)
 
     def test_a_newest_earlier_record_of_another_form_names_the_render_remedy_in_the_refusal(self):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, record_text(kind="bogus", head=REVIEW_OLD_HEAD))))
         self.assert_refused(rc, out, err)
         self.assertIn("--review-record", err, "the refusal does not name the render remedy:\n" + err)
+        # the render remedy alone: the footer sentence is conditional, and a body with no text after its CI line gets no rule sentence
+        self.assertNotIn("such as a footer", err)
+        self.assertNotIn("free text", err)
 
     def test_free_text_below_the_rule_on_the_newest_earlier_record_is_read_as_before(self):
         # control: the record parses, so its head is the base, as before
@@ -12582,6 +12592,14 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, body)))
         self.assertEqual(rc, 0, "a base on a record with free text below its rule was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_a_fix_check_refusal_holds_no_doubled_stop(self):
+        # the refusal's why reads as one sentence: a footer-shape record and an unknown-kind record, each refused with no `..` and no `.;`
+        for label, record in (("footer after prose", shape_a(head=REVIEW_OLD_HEAD)), ("another form", record_text(kind="bogus", head=REVIEW_OLD_HEAD))):
+            with self.subTest(label=label):
+                rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, record)))
+                self.assert_refused(rc, out, err)
+                no_double_stop(self, err)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
@@ -12714,9 +12732,10 @@ class ReviewedList(ReviewEnv):
         return line
 
     def assert_rule_remedy(self, line):
-        """A bad line whose text follows the CI line names the remedy: a line exactly `---`, below the CI line."""
+        """A bad line whose text follows the CI line names the remedy: nothing may sit between the CI line and a line exactly `---`."""
         self.assertIn("CI line", line, "the bad line does not say the text follows the CI line:\n" + line)
         self.assertIn("---", line, "the bad line does not name the --- remedy:\n" + line)
+        self.assertIn("nothing between the CI line and", line, "the bad line does not say nothing may sit between the CI line and the ---:\n" + line)
 
     def test_a_bad_record_with_a_footer_after_prose_names_the_rule_remedy(self):
         # PR #1926's shape: prose and bullets after the CI line, then the attribution line, a `---` and the footer
@@ -12737,8 +12756,25 @@ class ReviewedList(ReviewEnv):
         self.assert_rule_remedy(self.bad_line(shape_d()))
 
     def test_a_bad_record_of_another_form_names_the_render_remedy(self):
-        # a body that breaks no text rule, here an unknown kind, gets the generic remedy: render it again
-        self.assertIn("--review-record", self.bad_line(record_text(kind="bogus")))
+        # a body that breaks no text rule, here an unknown kind, gets the generic remedy alone: render it again
+        line = self.bad_line(record_text(kind="bogus"))
+        self.assertIn("--review-record", line)
+        self.assertNotIn("such as a footer", line)
+        self.assertNotIn("free text", line)
+
+    def test_a_lane_note_between_the_ci_line_and_the_rule_names_the_rule_remedy(self):
+        # the probe: a lane note sits between the CI line and a `---`, so the body cut at its CI line parses, and the why names the rule
+        self.assert_rule_remedy(self.bad_line(record_text() + "Lane note.\n\n---\n" + REVIEW_GENERATED))
+
+    def test_no_bad_line_holds_a_doubled_stop(self):
+        # every bad line has no `..` and no `.;`: the rule remedy's sentence ends in a stop, and the line goes on with `;` or a parenthesis
+        bodies = {"footer after prose": shape_a(), "finding before its footer": shape_b(), "prose after the CI line": shape_c(),
+                  "bullet list": shape_d(), "lane note before the rule": record_text() + "Lane note.\n\n---\n" + REVIEW_GENERATED,
+                  "full size": shape_a(rounds=REVIEW_FAILED_THREE, fix=(fix_check_line(),), guard="yes", net="positive"),
+                  "another form": record_text(kind="bogus")}
+        for label, body in bodies.items():
+            with self.subTest(label=label):
+                no_double_stop(self, self.bad_line(body))
 
     def test_free_text_below_the_rule_parses_and_reads_as_before(self):
         # control: the text below a `---` is not read, so the record parses and its state is done, as before
