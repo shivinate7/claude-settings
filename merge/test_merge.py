@@ -12886,11 +12886,13 @@ class ReviewRecordAncestorHead(ReviewEnv):
 
     def test_a_round_three_fail_on_an_ancestor_head_is_refused_as_held(self):
         # A FAIL in the final allowed round reads held. The control stops at the first two rounds, which read open, so the final round is the
-        # factor under test.
-        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL"), status="ahead")
+        # factor under test. The earlier record holds the lower rounds, so the round lines are not the factor either.
+        lower = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))),)
+        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL"), status="ahead",
+                                            comments=lower)
         self.assert_head_refused(rc, out, err, "a round-3 all-FAIL record on an ancestor head")
         self.assertEqual(host.compare_reads, [], "a round-3 all-FAIL record read a compare, so the held rule came after the ancestry read")
-        rc, out, err, _ = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL"), status="ahead")
+        rc, out, err, _ = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL"), status="ahead", comments=lower)
         self.assertEqual(rc, 0, "control: a rounds 1-2 all-FAIL record on the same ancestor was refused:\n" + out + err)
 
     def test_a_delete_only_fail_record_on_an_ancestor_head_is_refused_with_no_compare(self):
@@ -12912,8 +12914,9 @@ class ReviewRecordAncestorHead(ReviewEnv):
         self.assertEqual(rc, 0, "control: the same ancestor record with its default net value was refused:\n" + out + err)
 
     def test_a_pass_then_fail_round_two_on_an_ancestor_head_prints_that_head(self):
-        # The top round is all FAIL, though the first round passed. The rule reads only the highest round.
-        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:FAIL"), status="ahead")
+        # The top round is all FAIL, though the first round passed. The rule reads only the highest round. The earlier record holds the passed round 1.
+        passed = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=("Round 1: reviewer, sonnet, PASS",))),)
+        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:FAIL"), status="ahead", comments=passed)
         self.assertEqual(rc, 0, "a record whose top round is all FAIL, after a passed round 1, was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.ANC, "the record does not print the head the review read")
         self.assertIn((self.ANC, self.LIVE), host.compare_reads, "the ancestry was not read as compare(head, live)")
@@ -13761,6 +13764,7 @@ class ReviewFixCountsRound(ReviewEnv):
 
     EARLIER_HEAD = "1e" * 20  # the head of the newest earlier record, whose fix check FAILed
     FIX_BASE = "2e" * 20  # the head the failed fix check's fix diff started from
+    OLDER_HEAD = "0d" * 20  # the head of an older earlier record, which holds the lower rounds the newest earlier record does not
 
     def earlier_text(self, rounds):
         """The newest earlier record's text: the round lines given, then a fix check FAIL on its head."""
@@ -13771,13 +13775,18 @@ class ReviewFixCountsRound(ReviewEnv):
         """The newest earlier record, parsed."""
         return parse_text(self, self.earlier_text(rounds))
 
-    def write_record(self, *rounds, earlier_rounds=None):
+    def write_record(self, *rounds, earlier_rounds=None, older_rounds=None):
         """`merge 7 --review-record` on the live head with the round values given, on a host whose pull request 7 holds the earlier record of
-        `earlier_rounds` when given. -> (rc, out, err, the printed record, parsed)."""
+        `earlier_rounds` when given, after an older record of `older_rounds` when given (it holds the lower rounds the newest earlier record lacks).
+        -> (rc, out, err, the printed record, parsed)."""
         argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", REVIEW_HEAD]
         for value in rounds:
             argv += ["--round", value]
-        comments = () if earlier_rounds is None else (review_comment(1, 7, self.earlier_text(earlier_rounds)),)
+        comments = []
+        if older_rounds is not None:
+            comments.append(review_comment(len(comments) + 1, 7, record_text(head=self.OLDER_HEAD, rounds=older_rounds)))
+        if earlier_rounds is not None:
+            comments.append(review_comment(len(comments) + 1, 7, self.earlier_text(earlier_rounds)))
         rc, out, err = self.run_args(*argv, host=self.record_host(*comments))
         return rc, out, err, (parse_text(self, posted_body(self, out)) if rc == 0 else None)
 
@@ -13795,7 +13804,7 @@ class ReviewFixCountsRound(ReviewEnv):
 
     def test_a_pass_on_the_counted_round_does_not_fill_its_fail_slot(self):
         earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL",))
-        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS")
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS", earlier_rounds=("Round 1: reviewer, sonnet, FAIL",))
         self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
         self.assertEqual(self.own_state(rec), "done", "scope: the record on its own rules does not read done")
         self.assertEqual(self.floor_of(earlier, rec), f"a failed fix check on head {self.EARLIER_HEAD[:9]} counts as round 2, and only a FAIL line "
@@ -13819,7 +13828,9 @@ class ReviewFixCountsRound(ReviewEnv):
     def test_a_fail_on_the_counted_round_is_not_floored(self):
         # control: a FAIL line fills the counted round, so the floor lets the record through and its own rules decide
         earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL",))
-        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS")
+        lower = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS",
+                                              older_rounds=lower, earlier_rounds=lower[:1])
         self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
         self.assertEqual(self.own_state(rec), "done", "scope: the record that fills the counted round and passes the final round does not read done")
         self.assertIsNone(self.floor_of(earlier, rec), "round_floor held a record whose counted round is a FAIL line")
@@ -14247,8 +14258,10 @@ class ReviewFixBaseRecord(ReviewEnv):
         # the source's last round is the third, so this record may not end below it: a last round of 2 is refused, and the third is allowed
         host = self.record_host(self.source(rounds=REVIEW_PASSED_THREE), head=REVIEW_HEAD)
         low = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL")
+        # the control has no source. Its pull request's own earlier record holds both lower rounds, so the record ending at 2 is still written
+        own = review_comment(1, 7, record_text(head="7f" * 20, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")))
         rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no",
-                                     "--round", low[0], "--round", low[1], host=host)  # control, green on the old code: no source, a record ending at 2 is written
+                                     "--round", low[0], "--round", low[1], host=self.record_host(own, head=REVIEW_HEAD))  # control, green on the old code: no source, a record ending at 2 is written
         self.assertEqual(rc, 0, "a record ending at round 2 was refused with no source:\n" + out + err)
         rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(), rounds=low), host)
         self.assert_refused(rc, out, err)
