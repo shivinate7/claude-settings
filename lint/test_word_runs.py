@@ -212,6 +212,11 @@ class MaskCodeSpansTests(unittest.TestCase):
                          "\0" * 15 + " (see the reviewer)",
                          "a leading span that holds a match was not masked whole, or its gloss changed")
 
+    def test_a_span_in_a_gloss_after_a_span_is_masked_without_an_only_pattern(self):
+        # Without `only`, both spans are masked. The plain words of the gloss stay readable.
+        self.assertEqual(masked("`foo` (see `reviewer opus`)"), "\0" * 5 + " (see " + "\0" * 15 + ")",
+                         "a span inside the gloss of another span was not masked when no only pattern is given")
+
 
 class FenceCallersTests(unittest.TestCase):
     def test_each_fence_caller_reads_its_rows_through_code_mask(self):
