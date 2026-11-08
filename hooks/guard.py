@@ -4793,37 +4793,67 @@ def git_after_cd_hit(command: str, cwd: str) -> str:
 # The words that start a compound body (`if X; then git push`): the body's own test guards the push, so
 # the `;` before it is no join to a check.
 GIT_PUSH_BODY_WORDS = ("then", "do", "else", "elif")
-# The last command before a `;` that leaves a cd's own protection standing: the `exit` of
-# `cd X || exit 1` and the `fi` of `if ! cd X; then exit 1; fi`. The cd itself and the `)` that closes
-# a subshell holding a cd stand too (`git_push_after_check_hit`).
-GIT_PUSH_CD_TAIL_WORDS = ("exit", "fi")
+# The words before a segment's command: a body opener, a test opener and `!`.
+GIT_PUSH_LEADING_WORDS = GIT_PUSH_BODY_WORDS + ("if", "while", "until", "!", "time")
+# Words that only open or close a compound, and commands whose failure no check can hide: `exit`, `set`,
+# `true` and `:`. A cd is inert too: `git_after_cd_hit` has already refused each cd that strands the shell.
+GIT_PUSH_INERT_WORDS = ("for", "select", "case", "in", "esac", "fi", "done", "{", "}", "(", ")",
+                        "exit", "set", "true", ":")
+
+
+def _push_segment_inert(segment: str):
+    """True when SEGMENT holds no command that can fail a check: empty, a compound word, a cd, `exit`,
+    `set`, `true`, `:`. None when a quote is cut in it (unknown). A group's open and close words are
+    read on the segment's first word, so `(pytest -q)` is a command and `(cd X; true)` is not."""
+    tokens = segment_tokens(segment)
+    if tokens is None:
+        return None
+    words = list(tokens)
+    while words and words[0] in GIT_PUSH_LEADING_WORDS:
+        words.pop(0)
+    if not words or words[0].startswith("}"):
+        return True
+    head = re.split(r"[<>&]", words[0].lstrip("({"))[0].rstrip(")}")   # `done>>/dev/null` closes a loop
+    return not head or head in CD_WORDS or head in GIT_PUSH_INERT_WORDS
 
 
 def git_push_after_check_hit(command: str) -> str:
-    """'push' when COMMAND holds a `git push` that a `;` joins to the command before it, else '' (decision
-    git-after-cd-joins-with-and). It reads the segments and ends `git_after_cd_hit` reads. The push passes
-    when the command before the `;` is a cd or the tail of a cd's exit guard and the command holds a cd
-    (the forms `git_after_cd_hit` already judges), when it opens a compound body (`then`, `do`), or when
-    a segment cannot be tokenized. A dry run is no write (`git_write_verb`)."""
+    """'push' when COMMAND holds a `git push` that runs after a `;`- or newline-joined command whose failure
+    it cannot see, else '' (decision git-after-cd-joins-with-and). It reads the segments and ends that
+    `git_after_cd_hit` reads. From the push it walks back over its `&&` chain to the chain's start. Before
+    that start, a `;` or newline joins the command before it. A cd, `exit`, `set` or `true` (or a group
+    of them) is skipped and the walk goes on over that command's own `&&` chain, which must be inert too.
+    A `|| exit` before the `;` ends the walk and passes. Any other command refuses, a subshell included.
+    A `||` or `|` before the start of the push's chain is no `;` join and passes. A push that opens a
+    compound body (`then`, `do`), a dry run (`git_write_verb`) and an unreadable segment pass."""
     ends = []
     segments = split_segments(command, ends)
-    for number in range(1, len(segments)):
-        if number > len(ends) or ends[number - 1] != ";":
-            continue
-        calls = [(verb.rstrip(")}"), args) for verb, args in git_calls(segments[number])]
+    for number, segment in enumerate(segments):
+        calls = [(verb.rstrip(")}"), args) for verb, args in git_calls(segment)]
         if not any(verb == "push" and git_write_verb(verb, args) for verb, args in calls):
             continue
-        tokens, before = segment_tokens(segments[number]), segment_tokens(segments[number - 1])
-        if not tokens or not before or tokens[0] in GIT_PUSH_BODY_WORDS:
+        tokens = segment_tokens(segment)
+        if not tokens or tokens[0] in GIT_PUSH_BODY_WORDS or len(ends) < len(segments):
             continue
-        # the first three words of a segment hold its cd, as in `if ! cd X`
-        openings = [[word.lstrip("({") for word in (segment_tokens(segment) or [])[:3]]
-                    for segment in segments[:number]]
-        last = before[0].lstrip("({")
-        tail = last in CD_WORDS or last in GIT_PUSH_CD_TAIL_WORDS or before[-1].endswith(")")
-        if tail and any(word in CD_WORDS for words in openings for word in words):
-            continue
-        return "push"
+        position, first = number, True
+        while True:
+            start = position
+            while start > 0 and ends[start - 1] == "&&":
+                start -= 1
+            if not first and not all(_push_segment_inert(part) for part in segments[start:position + 1]):
+                return "push"
+            if start == 0:
+                break
+            if ends[start - 1] not in (";", "\n"):
+                if first:
+                    break
+                return "push"
+            before = segment_tokens(segments[start - 1])
+            if before is None or (before[:1] == ["exit"] and start > 1 and ends[start - 2] == "||"):
+                break
+            if not _push_segment_inert(segments[start - 1]):
+                return "push"
+            position, first = start - 1, False
     return ""
 
 

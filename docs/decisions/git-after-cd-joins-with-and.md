@@ -18,16 +18,24 @@ A call whose argv names a read, such as `push --dry-run` or `push -n` (`read_ver
 2. The rule reads `cd_walk(...).stranded` for each write, with `failed_cd_stays=True`. A missing folder leaves the shell where it was, so `stranded` is true until a cd to a full path, home or `-` lands. `cd_walk(...).skipped` marks a segment that a failed `&&` chain never runs.
 3. The refusal tells the session to join the cd to the write with `&&`, or to leave out the cd and use `-C` with a full path. It names no target.
 
-The rule also refuses a `git push` that follows any other command joined to it by `;`, with or without a cd (coordinator step push-after-check-semicolon, 2026-11-08 09:51 CST; lane pick 2026-11-08 10:01 CST). A failed check does not stop a `;`-joined push. Incident 2026-11-08, PR #2098: a check and a push were joined by `;`, and the push ran after the check failed. The refusal tells the session to join the commands with `&&`. `git_push_after_check_hit` reads the same segments and ends as `git_after_cd_hit`.
+The rule also refuses a `git push` that runs after a `;`- or newline-joined command whose failure the push cannot see, with or without a cd (coordinator step push-after-check-semicolon, 2026-11-08 09:51 CST; lane pick 2026-11-08 10:38 CST, which replaced the pick of 10:01 CST). A failed check does not stop a push joined to it by `;` or a newline. Incident 2026-11-08, PR #2098: a check and a push were joined by `;`, and the push ran after the check failed. The refusal tells the session to join the commands with `&&`. `git_push_after_check_hit` reads the same segments and ends as `git_after_cd_hit`.
 
-Forms the push check passes, the same ones the cd check already passes:
+The push check walks back from the push:
 
-- A push whose `;` follows a cd, or the tail of a cd's exit guard (`exit`, `fi`, or a `)` that closes a subshell), when the command holds a cd: `cd X; git push`, `cd X || exit 1; git push`, `if ! cd X; then exit 1; fi; git push`.
+1. It goes back over the push's `&&` chain to the chain's start. A `||` or `|` before that start is no `;` join, so the push passes.
+2. If a `;` or a newline stands before that start, it looks at the command before it.
+3. A cd, `exit`, `set` or `true` (or a group or `if` made only of them) is skipped, and the walk goes on from it over its own `&&` chain. That chain must be inert too, so `pytest -q && cd X; git push` is refused.
+4. A command that ends `|| exit` ends the walk, and the push passes. Only a bare `exit` counts: `|| return` and `|| (exit 1)` do not stop the shell.
+5. Any other command refuses, a subshell `( ... )` included: `cd X; (pytest -q); git push` is refused.
+
+Forms the push check passes:
+
+- A push with nothing before it, or with only skipped commands before it: `cd X; git push`, `set -e; cd X; git push`, `cd X || exit 1; git push`, `if ! cd X; then exit 1; fi; git push`.
 - A push that opens a compound body (`then git push`, `do git push`).
 - A `--dry-run` push, a read.
-- A push that comes first, and a push joined by `&&`, `||`, `|` or a newline.
+- A check joined to the push by `&&` alone.
 
-A newline before the push is not read: `git commit -m m` on one line and `git push` on the next pass.
+A `git add`, `git commit` or other command before the `;` is not skipped, so `git commit -m m; git push` is refused.
 
 Allowed forms:
 
