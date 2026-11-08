@@ -3455,7 +3455,7 @@ def reviewed_read(h, cutover=None):
 
 def reviewed_lines(h, cutover=None):
     """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
-    gh calls scale with the number of roots; no new process, file or timer."""
+    gh calls scale with the number of roots. A full clone adds no process, file or timer; a shallow clone may run the deepen (decision pr-review-record, "The cutover")."""
     return reviewed_read(h, cutover)[0]
 
 def reviewed_block(h, cutover=None):
@@ -3525,7 +3525,8 @@ def reviewed_roots(roots, hosts, config):
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
     --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
-    request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
+    request and other open pull request on the base, and one compare per done pull request against the base. A full clone adds no process, file or timer;
+    a shallow clone may run the deepen (decision pr-review-record, "The cutover")."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
