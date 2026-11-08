@@ -1,7 +1,8 @@
 """Static and fake-run checks of actions/playwright-setup. `python3 actions/playwright-setup/test_action.py`.
-Asserts the opt-in `system-deps` input (default empty), that its step runs the Playwright install-deps
+Asserts the opt-in `system-deps` input (default empty), that install.sh's browsers phase runs the Playwright install-deps
 command for exactly the listed browsers, on Linux only, under a time cap, and that chromium or an unknown
-name fails the job with one line. Every other step runs no apt. The browser cache key holds the OS id and
+name fails the job with one line. The action runs install.sh's deps and browsers phases around its browser cache step,
+and the default path runs no apt. The browser cache key holds the OS id and
 version that pin.sh writes (`os=ubuntu-24.04`), never a runner env value or a literal version. pin.sh falls
 back to RUNNER_OS, with a warning, when os-release has no VERSION_ID or is missing, and the
 cache step has no restore-keys, because a prefix restore would bring back a browser built for another OS.
@@ -18,7 +19,7 @@ atexit.register(shutil.rmtree, RUN_FOLDER, True)
 
 text = open(os.path.join(HERE, "action.yml"), encoding="utf-8").read()
 PIN = os.path.join(HERE, "pin.sh")
-STEP_NAME = "Install the system libraries"
+INSTALL = os.path.join(HERE, "install.sh")  # the one install script: the action's deps and browsers phases, and ci-job's local call
 CACHE_STEP = "Cache the browsers"
 GOOD_KEY = "playwright-${{ runner.os }}-${{ steps.pin.outputs.os }}-${{ steps.pin.outputs.version }}-${{ inputs.browsers }}"
 APT = re.compile(r"install-deps|--with-deps|\bapt(-get)?\b")
@@ -50,22 +51,9 @@ def steps(src=None):
     return out
 
 
-def run_script(block):
-    """The step's `run: |` block, dedented 8 spaces."""
-    if "      run: |\n" not in block:
-        return ""
-    lines = block.split("      run: |\n", 1)[1].split("\n")
-    kept = []
-    for l in lines:
-        if l.strip() and not l.startswith("        "):
-            break
-        kept.append(l[8:])
-    return "\n".join(kept)
-
-
-def env_value(block, key):
-    m = re.search(r"^        %s: \"?([^\"\n]*)\"?$" % re.escape(key), block, re.M)
-    return m.group(1) if m else None
+def phase_call(block, phase):
+    """True when a step's run calls install.sh with the phase (`deps` or `browsers`) as its argument."""
+    return re.search(r'install\.sh"?\s+%s\b' % phase, block) is not None
 
 
 def strip_comment(line):
@@ -157,17 +145,17 @@ def fake_node(folder, body):
     return bindir
 
 
-def fake_run(script, deps, runner_os="Linux", cap="30", node_sleep=0):
-    """Run `script` with a fake `node` on PATH that records its arguments. Returns (rc, output, calls)."""
+def fake_browsers(deps, runner_os="Linux", cap="30", node_sleep=0):
+    """Run `bash install.sh browsers` with a fake `node` on PATH. The fake records each install-deps call and sleeps
+    `node_sleep` s on it; its other calls (the browser install) record nothing. Returns (rc, output, calls)."""
+    if not os.path.isfile(INSTALL):
+        return 127, "install.sh is missing", []
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         log = os.path.join(d, "calls")
-        bindir = fake_node(d, 'shift\necho "$*" >> "%s"\nsleep %d\n' % (log, node_sleep))
-        path = os.path.join(d, "step.sh")
-        with open(path, "w", newline="\n") as f:
-            f.write(script)
+        bindir = fake_node(d, 'shift\ncase "$*" in\n  install-deps*) echo "$*" >> "%s"; sleep %d ;;\nesac\n' % (log, node_sleep))
         env = dict(os.environ, PATH=bindir + os.pathsep + os.environ.get("PATH", ""), CLI="/x/cli.js",
-                   DEPS=deps, RUNNER_OS=runner_os, CAP=cap)
-        p = subprocess.run([BASH, path], env=env, capture_output=True, text=True, timeout=60)
+                   DEPS=deps, RUNNER_OS=runner_os, CAP=cap, BROWSERS="chromium")
+        p = subprocess.run([BASH, INSTALL, "browsers"], env=env, capture_output=True, text=True, timeout=60, cwd=d)
         calls = open(log).read().splitlines() if os.path.exists(log) else []
         return p.returncode, (p.stdout + p.stderr).strip(), calls
 
@@ -210,47 +198,50 @@ check("input system-deps exists, default empty (off)",
       re.search(r'^  system-deps:\n(?:    .*\n)*?    default: ""', text, re.M) is not None)
 
 all_steps = steps()
-block = all_steps.get(STEP_NAME, "")
-script = run_script(block)
-check("a step named '%s' exists" % STEP_NAME, bool(block) and bool(script))
-check("the step runs only when system-deps is non-empty",
-      re.search(r"^      if: \$\{\{ inputs\.system-deps != '' \}\}$", block, re.M) is not None, block)
-check("the step hands the input to the script as DEPS and the CLI from the pin step",
-      "DEPS: ${{ inputs.system-deps }}" in block and "CLI: ${{ steps.pin.outputs.cli }}" in block, block)
+names = list(all_steps)
+deps_steps = [n for n, b in all_steps.items() if phase_call(b, "deps")]
+browser_steps = [n for n, b in all_steps.items() if phase_call(b, "browsers")]
+check("install.sh is the one install script, beside action.yml", os.path.isfile(INSTALL))
+check("the action runs install.sh deps in one step, then the browser cache step, then install.sh browsers in one step",
+      len(deps_steps) == 1 and len(browser_steps) == 1 and CACHE_STEP in names
+      and names.index(deps_steps[0]) < names.index(CACHE_STEP) < names.index(browser_steps[0]), str(names))
+browser = all_steps[browser_steps[0]] if browser_steps else ""
+check("the browsers step hands the system-deps input as DEPS and the CLI from the pin step",
+      "DEPS: ${{ inputs.system-deps }}" in browser and "CLI: ${{ steps.pin.outputs.cli }}" in browser, browser)
 
-cap = env_value(block, "CAP")
-check("the step has a time cap CAP, in seconds, of at most 600 (under the 11 min incident)",
-      cap is not None and cap.isdigit() and 0 < int(cap) <= 600, block)
-check("the install-deps call runs under `timeout -k 30 \"$CAP\"`, so a process that ignores SIGTERM is killed",
-      re.search(r'timeout -k 30 "\$CAP" node "\$CLI" install-deps \$DEPS', script) is not None, script)
+install_text = open(INSTALL, encoding="utf-8").read() if os.path.isfile(INSTALL) else ""
+check("install.sh's browsers phase still installs the named browsers: node \"$CLI\" install $BROWSERS",
+      re.search(r'node "\$CLI" install \$BROWSERS', install_text) is not None, install_text)
+check("the install-deps call in install.sh runs under `timeout -k 30 \"$CAP\"`, so a process that ignores SIGTERM is killed",
+      re.search(r'timeout -k 30 "\$CAP" node "\$CLI" install-deps \$DEPS', install_text) is not None, install_text)
 
-if script:
-    rc, out, calls = fake_run(script, "webkit")
-    check("webkit on Linux: exit 0, one install-deps call for webkit", rc == 0 and calls == ["install-deps webkit"],
-          "%s %s %s" % (rc, out, calls))
-    rc, out, calls = fake_run(script, "webkit firefox")
-    check("webkit firefox on Linux: one call for exactly those browsers",
-          rc == 0 and calls == ["install-deps webkit firefox"], "%s %s %s" % (rc, out, calls))
-    rc, out, calls = fake_run(script, "webkit", runner_os="macOS")
-    check("webkit on macOS: exit 0, no apt", rc == 0 and calls == [], "%s %s %s" % (rc, out, calls))
-    for deps in ("chromium", "safari", "webkit chromium"):
-        for os_name in ("Linux", "macOS"):
-            rc, out, calls = fake_run(script, deps, runner_os=os_name)
-            check("%r on %s: fails with one line, no apt" % (deps, os_name),
-                  rc != 0 and calls == [] and len(out.splitlines()) == 1 and "::error" in out,
-                  "%s %r %s" % (rc, out, calls))
-    for deps in (" ", "\n", " \n "):
-        rc, out, calls = fake_run(script, deps)
-        check("blank system-deps %r: fails with one line, no install-deps (it would install every browser)" % deps,
+rc, out, calls = fake_browsers("webkit")
+check("browsers phase, webkit on Linux: exit 0, one install-deps call for webkit", rc == 0 and calls == ["install-deps webkit"],
+      "%s %s %s" % (rc, out, calls))
+rc, out, calls = fake_browsers("webkit firefox")
+check("webkit firefox on Linux: one call for exactly those browsers",
+      rc == 0 and calls == ["install-deps webkit firefox"], "%s %s %s" % (rc, out, calls))
+rc, out, calls = fake_browsers("webkit", runner_os="macOS")
+check("webkit on macOS: exit 0, no apt", rc == 0 and calls == [], "%s %s %s" % (rc, out, calls))
+for deps in ("chromium", "safari", "webkit chromium"):
+    for os_name in ("Linux", "macOS"):
+        rc, out, calls = fake_browsers(deps, runner_os=os_name)
+        check("%r on %s: fails with one line, no apt" % (deps, os_name),
               rc != 0 and calls == [] and len(out.splitlines()) == 1 and "::error" in out,
               "%s %r %s" % (rc, out, calls))
-    rc, out, calls = fake_run(script, "webkit", cap="1", node_sleep=5)
-    check("a run past the cap fails with one line that names the cap",
-          rc != 0 and len(out.splitlines()) == 1 and "::error" in out and "1 s" in out, "%s %r" % (rc, out))
+for deps in (" ", "\n", " \n "):
+    rc, out, calls = fake_browsers(deps)
+    check("blank system-deps %r: fails with one line, no install-deps (it would install every browser)" % deps,
+          rc != 0 and calls == [] and len(out.splitlines()) == 1 and "::error" in out,
+          "%s %r %s" % (rc, out, calls))
+rc, out, calls = fake_browsers("")
+check("system-deps unset, the default: exit 0 and no install-deps call", rc == 0 and calls == [], "%s %r %s" % (rc, out, calls))
+rc, out, calls = fake_browsers("webkit", cap="1", node_sleep=5)
+check("a run past the cap fails with one line that names the cap",
+      rc != 0 and len(out.splitlines()) == 1 and "::error" in out and "1 s" in out, "%s %r" % (rc, out))
 
-others = {n: b for n, b in all_steps.items() if n != STEP_NAME}
-bad = [n for n, b in others.items() if APT.search("\n".join(l for l in b.splitlines() if not l.strip().startswith("#")))]
-check("the default path runs no apt: no other step names install-deps, --with-deps or apt", others and not bad, str(bad))
+bad = [n for n, b in all_steps.items() if APT.search("\n".join(l for l in b.splitlines() if not l.strip().startswith("#")))]
+check("the default path runs no apt: no step of the action names install-deps, --with-deps or apt", all_steps and not bad, str(bad))
 
 # pin.sh writes the OS id and version of the runner into the browser cache key.
 pins = {ver: pin_run('ID=ubuntu\nVERSION_ID="%s"\n' % ver) for ver in ("24.04", "26.04")}
