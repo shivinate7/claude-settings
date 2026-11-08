@@ -1517,3 +1517,6 @@
 - push-target-last-cd: `push_target` takes the last `cd` of the whole command, even one after the push, so push-main, force-push and reviewed-head-push may judge the wrong repo (hooks/guard_push_delete.py:101). Inherited; found in review of PR #1725.
 - brief-id-markdown-backtrack: a lane brief id label followed by about 1000 `*` or `_` and no colon costs about 2 s to match; a run of 100 costs under 3 ms (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
 - brief-id-placeholder-digit: a placeholder id that holds a digit, such as `session_x1`, passes the lane brief id check (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
+- mail-not-merged-text: docs/decisions/session-messages.md ("it is not in main", "(not merged)") and skill waiting-page section "Message another session" ("not merged") turn false when PR 1371 merges. Decision: session-messages.
+- mail-comment-bug-term: a hooks/mail.py comment says "a bug"; the glossary term is "defect". Decision: none.
+- mail-store-named-public: the public repo names the private mailbox store by its repo name (decision session-messages); a name only, no secret. Decision: session-messages.
