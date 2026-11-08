@@ -105,6 +105,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "lane-step-dup": "one live lane per step: a brief or a create_session naming a step that another live session carries is refused and names that session; an archived carrier, the brief's own target, a near-miss step or a read that found none passes; a brief or a step-tagged create with no read of a carrier is asked",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10208,10 +10209,13 @@ def role_result(tool_id, text):
         {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": text}]}]}})
 
 
-def role_record(tags, session=ROLE_OWN, title="a lane session"):
-    """The text get_session returns: a JSON object whose ccr block holds the record."""
-    return json.dumps({"ccr": {"id": session, "title": title, "tags": list(tags),
-                               "parent_session_id": "session_PARENT01"}})
+def role_record(tags, session=ROLE_OWN, title="a lane session", status=None):
+    """The text get_session returns: a JSON object whose ccr block holds the record. `status` adds the
+    session_status key the tool returns, when given."""
+    record = {"id": session, "title": title, "tags": list(tags), "parent_session_id": "session_PARENT01"}
+    if status is not None:
+        record["session_status"] = status
+    return json.dumps({"ccr": record})
 
 
 def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
@@ -10271,6 +10275,7 @@ def role_said(text):
 
 
 CREATE_SESSION = "mcp__claude-code-remote__create_session"
+ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"  # moved up: lane-step-dup's fixtures name it
 ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
 
 
@@ -10280,6 +10285,50 @@ def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
     body = "Created session " + session + "." if plain else json.dumps({key: session})
     return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
             role_result(tool_id, body)]
+
+
+# lane-step-dup: one live lane per step. Its fixtures hold the reads the rule judges: a list_sessions page, a get_session
+# record, a create_session call, an archive_session call. A send_message fixture also holds a get_session record of its
+# target (a lane on DUP_TOPIC), so lane-one-topic passes the brief and only lane-step-dup judges it.
+DUP_RULE = "lane-step-dup"
+DUP_LIVE = "SESSION_STATUS_RUNNING"
+DUP_ARCHIVED = "SESSION_STATUS_ARCHIVED"
+DUP_TOPIC = "dup-topic"
+DUP_CARRIER = "session_DUPCARRIER01"  # a live lane that carries the step the briefs name
+DUP_NEW = "session_DUPNEWLANE01"      # the new lane a brief goes to: the same topic, no step the carrier holds
+DUP_CARRIER_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-a", "cs-repo:o/r"]
+DUP_TWO_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-b", "cs-step:dup-step-a", "cs-repo:o/r"]
+DUP_NEAR_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-ab", "cs-repo:o/r"]
+DUP_NEW_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-repo:o/r"]
+DUP_FILLER = 40  # the live lanes a full page holds before the carrier
+
+
+def dup_row(sid, status, tags):
+    """One list_sessions row: the keys the tool returns for a session, with `tags` as a list."""
+    return {"id": sid, "title": "a lane session", "session_status": status, "tags": list(tags)}
+
+
+def dup_filler(count):
+    """`count` live lanes on other steps: the rows a full page holds before its carrier."""
+    return [dup_row("session_DUPFILL%03d" % n, DUP_LIVE, ["cs-build:lane", "cs-step:dup-filler-%03d" % n, "cs-repo:o/r"])
+            for n in range(count)]
+
+
+def dup_list(tool_id, rows, cut=False):
+    """One list_sessions call and its result: `rows` in one wrapped record, every page in one read. `cut` drops the end
+    of the result, so the JSON is not whole and its rows are text, not a read."""
+    body = role_wrapped(json.dumps({"ccr": {"data": list(rows), "has_more": False}}))
+    return [role_use(tool_id, LIST_SESSIONS, {}), role_result(tool_id, body[:-40] if cut else body)]
+
+
+def dup_get(tool_id, sid, status, tags):
+    """One get_session call on `sid`, and its wrapped record with the session_status the tool returns."""
+    return role_target_raw(tool_id, role_wrapped(role_record(tags, sid, status=status)), target=sid)
+
+
+def dup_archive(tool_id, sid):
+    """One archive_session call on `sid`, and its result."""
+    return [role_use(tool_id, ARCHIVE_TOOL, {"session_id": sid}), role_result(tool_id, "ok")]
 
 
 # lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
@@ -10405,6 +10454,31 @@ ROLE_LINES = {
     "body-int-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
                                                           role_result_block("g1", content=7)]
                           + role_target_call("g2", ARCH_LANE_TAGS),
+    # lane-step-dup shapes. Each one is this session's transcript: the reads the rule judges, in order. "unreadable"
+    # (made by write_role_transcripts) is a folder, so the guard's open() fails on it.
+    "dup-list-carrier": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                        + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)]),
+    "dup-list-carrier-self": dup_get("t0", DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)
+                             + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)]),
+    "dup-list-archived": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                         + dup_list("l1", [dup_row(DUP_CARRIER, DUP_ARCHIVED, DUP_CARRIER_TAGS)]),
+    "dup-list-then-archive": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                             + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)])
+                             + dup_archive("a1", DUP_CARRIER),
+    "dup-list-empty": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS) + dup_list("l1", []),
+    "dup-list-near": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                     + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_NEAR_TAGS)]),
+    "dup-list-two-steps": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                          + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_TWO_TAGS)]),
+    "dup-list-full": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                     + dup_list("l1", dup_filler(DUP_FILLER) + [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)]),
+    "dup-list-cut": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                    + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)], cut=True),
+    "dup-get-carrier": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS) + dup_get("g1", DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS),
+    "dup-create-carrier": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS) + role_create_call("c1", DUP_CARRIER_TAGS,
+                                                                                            session=DUP_CARRIER),
+    "dup-no-read": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS) + [role_use("b1", "Bash", {"command": "git status"}),
+                                                                      role_result("b1", "ok")],
 }
 
 
@@ -10832,7 +10906,6 @@ FAMILY = "lane-closes-after-records"
 #   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
 #     cs-step slug denies. None allows. A read that cannot run denies: guards fail closed.
 # The allows are as load-bearing as the refusals: a false alarm on a finished lane blocks the batch runner.
-ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_RULE = "lane-closes-after-records"
 ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
 ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
@@ -11071,6 +11144,87 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+
+
+# =========================================================================== 5h2. one live lane per step
+FAMILY = "lane-step-dup"
+#
+# Rule lane-step-dup. A step has one live lane. A send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.`
+# (the marker parse of brief_hit), or a create_session whose tags hold `cs-step:<step>`, is refused when another live session,
+# not the brief's own target, carries `cs-step:<step>`. The reason names that session's id and says to send the work there.
+# A session is live unless its session_status holds ARCHIVED or a later archive_session call names it. A brief or a
+# step-tagged create with no read of a carrier is asked, never allowed. A read that ran and found none allows.
+# A message without the marker, and a create_session with no cs-step tag, read no transcript and pass.
+BRIEF_DUP = "Lane brief: dup-step-a. Topic: dup-topic.\n\nDo the step."
+DUP_STEER = (DUP_CARRIER, "send")  # the reason names the live carrier's id, and says to send the work there
+
+
+def dup_send(name, expected, transcript, message, target=DUP_NEW, carries=()):
+    """A send_message judged by lane-step-dup. An allow must print nothing. A refusal or an ask names its rule."""
+    add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else DUP_RULE, tool=SEND_MESSAGE,
+        cwd=NOGIT, transcript=transcript, env=ROLE_ENV, silent=expected == "allow", carries=carries,
+        session_id=target, message=message)
+
+
+def dup_create(name, expected, transcript, tags, carries=()):
+    """A create_session judged by lane-step-dup, with `tags` as its input. A lane's start prompt is the effort command
+    alone (lane-effort-pin), so the call carries it, and only lane-step-dup decides the case. An allow must print nothing."""
+    add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else DUP_RULE, tool=CREATE_SESSION,
+        cwd=NOGIT, transcript=transcript, env=ROLE_ENV, silent=expected == "allow", carries=carries,
+        title="a lane session", tags=list(tags), prompt="/effort medium")
+
+
+# Refused: a live carrier of dup-step-a is another session. The brief goes to a new lane, and the reason names the carrier.
+dup_send("a brief for step dup-step-a to a new lane is refused while a live lane carries it, and names that lane",
+         "deny", role_path("dup-list-carrier"), BRIEF_DUP, carries=DUP_STEER)
+# Refused: the same carrier, read another way. Each source of a record counts: get_session, create_session, a row of a
+# full page after forty others, and a carrier that holds the step beside another.
+dup_send("a brief for step dup-step-a is refused when the carrier was read with get_session",
+         "deny", role_path("dup-get-carrier"), BRIEF_DUP, carries=DUP_STEER)
+dup_send("a brief for step dup-step-a is refused when the carrier was started by create_session",
+         "deny", role_path("dup-create-carrier"), BRIEF_DUP, carries=DUP_STEER)
+dup_send("a brief for step dup-step-a is refused when the carrier holds it among two steps",
+         "deny", role_path("dup-list-two-steps"), BRIEF_DUP, carries=DUP_STEER)
+dup_send("a brief for step dup-step-a is refused when the carrier is the last row of a full page of forty",
+         "deny", role_path("dup-list-full"), BRIEF_DUP, carries=DUP_STEER)
+# Refused: a markdown lead and lower case still open a brief, as in brief_hit.
+dup_send("a brief with a markdown lead and lower case, **lane brief:** dup-step-a., is refused",
+         "deny", role_path("dup-list-carrier"), "**lane brief:** dup-step-a. Topic: dup-topic.\n\nDo the step.",
+         carries=DUP_STEER)
+# Refused: a create_session that tags the step is judged on its tags, with no target.
+dup_create("a create_session tagged cs-step:dup-step-a is refused while a live lane carries it, and names that lane",
+           "deny", role_path("dup-list-carrier"), ["cs-build:lane", "cs-step:dup-step-a", "cs-topic:dup-topic", "cs-repo:o/r"],
+           carries=DUP_STEER)
+# Asked: a read did not run, or did not parse. The guard cannot tell whether the step is live, so it never allows.
+dup_send("a brief for step dup-step-a with no list_sessions read in the transcript is asked, not allowed",
+         "ask", role_path("dup-no-read"), BRIEF_DUP)
+dup_create("a create_session tagged cs-step:dup-step-a with no list_sessions read is asked, not allowed",
+           "ask", role_path("dup-no-read"), ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"])
+dup_send("a malformed list_sessions result is asked, though the carrier's row is in its text",
+         "ask", role_path("dup-list-cut"), BRIEF_DUP)
+# Allowed: each shape below changes one fact of a refused brief. These are the controls that keep the rule narrow.
+dup_send("a brief whose target is the live carrier itself is allowed: that is the remedy",
+         "allow", role_path("dup-list-carrier-self"), BRIEF_DUP, target=DUP_CARRIER)
+dup_send("a carrier archived by status is not live: a brief to a new lane is allowed",
+         "allow", role_path("dup-list-archived"), BRIEF_DUP)
+dup_send("a carrier archived by a later archive_session call is not live: a brief to a new lane is allowed",
+         "allow", role_path("dup-list-then-archive"), BRIEF_DUP)
+dup_send("a list read that finds no live carrier allows a brief to a new lane",
+         "allow", role_path("dup-list-empty"), BRIEF_DUP)
+dup_send("a brief for step dup-step-c, a step the carrier does not hold, is allowed",
+         "allow", role_path("dup-list-carrier"), "Lane brief: dup-step-c. Topic: dup-topic.\n\nDo the step.")
+dup_send("a brief for step dup-step-a is allowed while the live carrier holds only dup-step-ab: a step id is exact",
+         "allow", role_path("dup-list-near"), BRIEF_DUP)
+dup_create("a create_session tagged cs-step:dup-step-c, a step the carrier does not hold, is allowed",
+           "allow", role_path("dup-list-carrier"), ["cs-build:lane", "cs-step:dup-step-c", "cs-repo:o/r"])
+# The scanner trap: the marker is on line 2, so the message is no brief. Its step name is in the body, not a marker.
+dup_send("a marker and step name on message line 2, not the first line, is not a brief: allowed",
+         "allow", role_path("dup-list-carrier"), "Status: the first half is merged.\n" + BRIEF_DUP)
+# Cost pair: a message without the marker, and a create with no cs-step tag, read no transcript, so an unreadable one passes.
+dup_send("a message without the marker passes an unreadable transcript: it reads none",
+         "allow", role_path("unreadable"), "Status: dup-step-a is still open.")
+dup_create("a create_session with no cs-step tag passes an unreadable transcript: it reads none",
+           "allow", role_path("unreadable"), ["cs-build:lane", "cs-topic:dup-topic", "cs-repo:o/r"])
 
 
 # =========================================================================== 5d. cite by id
@@ -15224,6 +15378,36 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+
+# ---- lane-step-dup: the owner override lifts the brief refusal. A story over several calls on one clock, so it is a log
+# check here, where LOG_CHECKS_EXTRA exists. The family line below hands the family back to the archive checks.
+FAMILY = "lane-step-dup"
+DUP_OWNER = "5c2e7d1a-0000-4000-8000-00000000d0b1"  # the calling session the override names
+
+
+def dup_override_call(config, seconds):
+    """One send_message brief of step dup-step-a to a new lane, at OV_T0 + seconds, from the session the override names."""
+    return decide({
+        "raw": None, "tool": SEND_MESSAGE, "cwd": NOGIT, "session": DUP_OWNER,
+        "env_path": None, "config": config, "agent_id": None, "agent_type": None, "temp": None, "load": None,
+        "env": dict(ROLE_ENV, LOCAL_TIME_NOW=ov_clock(seconds)),
+        "tool_input": {"session_id": DUP_NEW, "message": BRIEF_DUP}, "transcript": role_path("dup-list-carrier"),
+    })
+
+
+def dup_override_case():
+    """The owner override lifts the brief refusal: refused before a timed override, allowed under it."""
+    config = ov_config("dup-step")
+    problem = ov_want(*dup_override_call(config, 0), "deny", DUP_RULE)
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, DUP_OWNER, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: dup_override_call(config, 60), "allow", DUP_RULE)], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+LOG_CHECKS_EXTRA.append(("lane-step-dup: an owner override lifts the brief refusal", dup_override_case))
+
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
