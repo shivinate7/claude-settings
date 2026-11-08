@@ -918,12 +918,14 @@ def _locals(fdef):
 
 
 def _caught_as_stop(node, name, mod):
-    """True when the nearest `except` clause above `node`, in its own def, binds `name` and catches a Stop class.
-    Another clause that binds the same name does not count: its exception is not a Stop."""
+    """True when the nearest `except` clause above `node`, in its own def, binds `name` and catches only Stop
+    classes, alone or in a tuple whose every member is a Stop class name. Another clause that binds the same name
+    does not count: its exception is not a Stop."""
     cur = mod.parents.get(id(node))
     while cur is not None and not isinstance(cur, ast.FunctionDef):
         if isinstance(cur, ast.ExceptHandler) and cur.name == name:
-            return isinstance(cur.type, ast.Name) and cur.type.id in mod.stops
+            caught = cur.type.elts if isinstance(cur.type, ast.Tuple) else [cur.type]
+            return bool(caught) and all(isinstance(c, ast.Name) and c.id in mod.stops for c in caught)
         cur = mod.parents.get(id(cur))
     return False
 
@@ -2256,6 +2258,34 @@ class RefusalCiteHelperTests(unittest.TestCase):
     def test_a_caught_stop_re_raised_through_a_helper_is_read_as_cited(self):
         body = '    try:\n        pass\n    except Stop as e:\n        fail(str(e))\n'
         self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"])
+
+    def test_a_tuple_handler_with_a_non_stop_member_re_raised_through_a_helper_is_not_resolved(self):
+        # `except (X, Stop) as e` may bind an X, whose text no origin prints, so its text is not carried.
+        for names in ("(OSError, Stop)", "(Stop, OSError)", "(subprocess.TimeoutExpired, Stop)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"],
+                                 "a tuple except with a member that is no Stop name reads as cited")
+
+    def test_a_tuple_handler_of_stop_names_re_raised_through_a_helper_is_read_as_cited(self):
+        # Every member is a Stop class, so the bound `e` is always a Stop: its text is printed by its origin.
+        for names in ("(Stop, NetStop)", "(NetStop, Dropped)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"],
+                                 "a tuple except of Stop classes reads as not resolved")
+
+    def test_a_tuple_handler_of_no_stop_re_raised_through_a_helper_is_not_resolved(self):
+        body = '    try:\n        pass\n    except (OSError, ValueError) as e:\n        fail(str(e))\n'
+        self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
+
+    def test_a_tuple_handler_with_a_broad_class_beside_a_stop_re_raised_through_a_helper_is_not_resolved(self):
+        # A broad class catches any exception, so the bound `e` is not known to be a Stop.
+        for names in ("(Exception, Stop)", "(BaseException, Stop)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"],
+                                 "a tuple handler with a broad class reads as a caught Stop")
 
     def test_a_caught_generic_exception_re_raised_through_a_helper_is_not_resolved(self):
         body = '    try:\n        pass\n    except Exception as e:\n        fail(str(e))\n'
