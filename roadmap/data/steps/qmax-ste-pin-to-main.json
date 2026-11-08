@@ -1,0 +1,11 @@
+{
+  "title": "q_max's claude-settings pins move to main",
+  "phase": "now",
+  "status": "doing",
+  "order": 60.01,
+  "owner": "coordinator",
+  "lane": "session_013NEJL2KhBtBKhdyNpyv8c6",
+  "why": "An old pin runs old checks, so q_max misses fixes main already has.",
+  "note": "Pins move from 4f2e205 to 174b005c1. Lane qmax-ste-lint-in-narrow-checks; filed from the coordinator 19:48 CST Nov 7.",
+  "updatedAt": "2026-11-07T19:48:00-06:00"
+}
