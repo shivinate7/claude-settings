@@ -589,6 +589,46 @@ def run_as_yaml_reads_it(step):
     return None, None
 
 
+class RunHeaderComments(Job):
+    """A comment after a run: block header (`run: | # why`) is no part of the script. run_body reads the body, and
+    bin/ci-job runs that body, so the step passes or fails on its own lines. A `#` inside a body is script text."""
+
+    def raw_step(self, header, *body):
+        return "      - name: hdr\n        run: %s\n" % header + "".join("          %s\n" % ln for ln in body) + "\n"
+
+    def test_run_body_drops_the_comment_after_a_literal_header(self):
+        self.assertEqual(run_body(self.raw_step("| # why", "true")), "true\n",
+                         "run: | # why: the comment after the header was read as the script")
+
+    def test_a_literal_header_comment_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # why: the step's body is a passing command, but the header comment failed it\n" + out)
+
+    def test_a_folded_header_comment_does_not_pass_a_failing_body(self):
+        # On main the comment makes the shell read `>- # why` as a redirect: no body runs, and the step PASSes.
+        rc, lines, out = self.run_job(self.raw_step(">- # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: >- # why: the header comment hid a body that exits 3, so the step did not FAIL\n" + out)
+
+    def test_a_lone_quote_in_a_header_comment_is_text_and_the_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # don't stop", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # don't stop: a lone quote in the header comment failed the step\n" + out)
+
+    # Controls: each passes on main and must still hold.
+    def test_a_failing_body_under_a_header_comment_still_fails(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: | # why: a body that exits 3 must still FAIL under a header comment\n" + out)
+
+    def test_a_hash_inside_a_block_body_is_script_text(self):
+        rc, lines, out = self.run_job(self.raw_step("|", "echo '# kept' > kept.txt",
+                                                    "test \"$(cat kept.txt)\" = '# kept'"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: |: a # inside a body line was cut as a comment\n" + out)
+
+
 class RunBodiesOfWorkflows(unittest.TestCase):
     """run_body reads each run: block of the repo's workflows as YAML reads it. The reading is written out in
     run_as_yaml_reads_it, from the YAML definition, so a change to run_body's text for a real workflow fails here."""
