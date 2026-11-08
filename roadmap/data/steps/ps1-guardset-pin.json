@@ -1,0 +1,11 @@
+{
+  "title": "install-set.test.ps1 pins override.py, _nowindow.py and the five guardset7 modules, with a red run on pwsh",
+  "why": "Lane bg-tail-loses-verdict, 16:00 CST Nov 8, from round-3 or later reviews; queued follow-up the lane starts when its wait ends. Waits on #2276 and #2301. Add the files at install-set.test.ps1:440 and :464. The cloud has no pwsh and installing it was refused: it needs a session on the owner's computer or CI's pointer-windows job for the red run.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85)",
+  "status": "todo",
+  "order": 834,
+  "updatedAt": "2026-11-08T16:01:00-06:00"
+}

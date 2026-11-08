@@ -1,0 +1,11 @@
+{
+  "title": "The frozen-path guard refuses `FOO=$(date +%s) cp x T` once the wrapper stack meets main",
+  "why": "Lane bg-tail-loses-verdict, 16:00 CST Nov 8, from round-3 or later reviews; queued follow-up the lane starts when its wait ends. Waits on the #2113/#2208/#2241 batch. The command is allowed once the stack meets main's bc6087abb (`word.rstrip(\")`\")` at merged guard_frozen.py:783 plus `_after_assignment`); main and the stack each deny it alone. A safety hole the merge would open.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85)",
+  "status": "todo",
+  "order": 831,
+  "updatedAt": "2026-11-08T16:01:00-06:00"
+}

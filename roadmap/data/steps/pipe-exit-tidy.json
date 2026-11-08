@@ -1,0 +1,11 @@
+{
+  "title": "The end guard at guard_stream.py:324 gets a row and a mutant, and its doc drift and cwd gaps are fixed",
+  "why": "Lane bg-tail-loses-verdict, 16:00 CST Nov 8, from round-3 or later reviews; queued follow-up the lane starts when its wait ends. Waits on #1803. A row and a mutant for the end guard at guard_stream.py:324; doc drift at guard.py:78 and rule_mechanisms.json:356 (\"tail or head\"); \"gate\" wording in 3 lines; the LINT_SCRIPT false alarm on report scripts. From #2164 round 3: a payload cwd already in <repo>/lint is not read (guard_stream.py:480), and an unknown cwd or `cd $VAR/lint` reads the guard's own lint/ (guard_stream.py:349-357).",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85)",
+  "status": "todo",
+  "order": 830,
+  "updatedAt": "2026-11-08T16:01:00-06:00"
+}

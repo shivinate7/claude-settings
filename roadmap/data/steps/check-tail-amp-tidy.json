@@ -1,0 +1,11 @@
+{
+  "title": "The check-tail guard reads `&` inside expansions and arithmetic correctly",
+  "why": "Lane bg-tail-loses-verdict, 16:00 CST Nov 8, from round-3 or later reviews; queued follow-up the lane starts when its wait ends. Waits on #2156. Allowed where main refuses: `echo ${x:-$(npm start & )}` and `i { &`. False alarms: `for((i=0;i&1;i++))`, `while((i&1))`, `echo $[5&3]`. Allowed on base too: `echo a & ci-job x | tail -3 & echo $!` and `ci-job x | tail -3 &&`+newline+`echo done & echo $!`.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85)",
+  "status": "todo",
+  "order": 832,
+  "updatedAt": "2026-11-08T16:01:00-06:00"
+}
