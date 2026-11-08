@@ -472,6 +472,16 @@ class RetireRun(Case):
         self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
         self.assertEqual(self.retired_of(body, None), {})
 
+    def test_r14_a_comment_opener_in_a_code_span_does_not_hide_a_retire_run_cite(self):
+        self.closed_prose()
+        runs = Runs(("success", self.head))
+        self.findings(pr_body="Summary.\n\nRetire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)  # premise: the plain cite is read
+        self.assertEqual(runs.urls, [RUN_URL], "premise: the plain cite was not read")
+        runs = Runs(("success", self.head))
+        found = self.findings(pr_body="Summary: write `<!--` to open.\n\nRetire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "a `<!--` inside a code span hid the Retire-run cite below it: the cite was not read")
+        self.assertEqual(pairs(found), [], "a `<!--` inside a code span hid the Retire-run cite below it: the prose debt was not cleared")
+
 
 if __name__ == "__main__":
     unittest.main()

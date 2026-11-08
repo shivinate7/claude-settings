@@ -330,6 +330,32 @@ class PrBodyEscape(unittest.TestCase):
             "<!-- %s -->\n" % L,  # not at column 0: a guard that must stay green
         ])
 
+    def test_a_comment_opener_in_a_code_span_does_not_hide_the_trailer_below_it(self):
+        """`<!--` inside a backtick code span is text. The trailer below it is the last paragraph, so it excuses its path."""
+        L = self.LINE
+        ok, why = self.excused("Summary: write the marker.\n\n%s\n" % L)  # premise: the same body without the opener excuses
+        self.assertTrue(ok, why)
+        ok, why = self.excused("Summary: write `<!--` to open.\n\n%s\n" % L)
+        self.assertTrue(ok, "a `<!--` inside a code span was read as a comment opener, so the Drops-lines line below it lost its excuse: %s" % (why,))
+
+    def test_a_comment_opener_in_double_quotes_does_not_hide_the_trailer_below_it(self):
+        """`<!--` inside double quotes is text, as it is inside a code span."""
+        L = self.LINE
+        ok, why = self.excused("Summary: write the marker.\n\n%s\n" % L)  # premise: the same body without the opener excuses
+        self.assertTrue(ok, why)
+        ok, why = self.excused('Summary: write "<!--" to open.\n\n%s\n' % L)
+        self.assertTrue(ok, "a `<!--` inside double quotes was read as a comment opener, so the Drops-lines line below it lost its excuse: %s" % (why,))
+
+    def test_an_unclosed_html_comment_still_hides_the_trailer_below_it(self):  # control: a real opener strips to the end
+        L = self.LINE
+        self.assert_nothing_excused(["Summary.\n\n<!-- open note\n\n%s\n" % L])
+
+    def test_a_lone_double_quote_does_not_stop_a_real_comment_from_hiding_its_lines(self):  # control
+        L = self.LINE
+        ok, why = self.excused("Summary: a lone \" mark.\n\n%s\n" % L)  # premise: the trailer excuses without a comment
+        self.assertTrue(ok, why)
+        self.assert_nothing_excused(['Summary: a lone " mark.\n\n<!--\n%s\n-->\n' % L])
+
     def test_a_line_in_an_earlier_paragraph_excuses_nothing(self):
         L = self.LINE
         self.assert_nothing_excused([
