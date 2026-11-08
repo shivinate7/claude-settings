@@ -2508,8 +2508,9 @@ MUTATIONS = [
      "guard", 'brief-claim: test-author brief where an input before main refuses now is denied'),
     # The count word, the pronoun tail and today in _claim_active. The two whole-sentence searches in _claim_active
     # (the leading-claim search and the today-bounded subject search) have no mutant here: they are time-only, per the
-    # brief. Equivalent mutants change no verdict, so none is listed: "<=" for "<", taking a subject whenever one is
-    # found, and a today pattern without the word boundary.
+    # brief. Equivalent mutants change no verdict, so none is listed: "<=" for "<" and taking a subject whenever one is
+    # found. A today pattern without the word boundary is not equivalent: "The guard refuses `x` todays." is allowed
+    # on the guard and denied with that pattern. No mutant pins it yet.
     ('brief-claim: a count word does not refer, so refuses all three today hides from the refers test',
      'return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))',
      'return bool(BRIEF_CLAIM_REFERENT.search(text))',
