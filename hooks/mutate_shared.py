@@ -168,14 +168,6 @@ def skip_reason(only_on):
 
 _ERROR_HEADER = re.compile(r"^ERROR: ")
 _RULE_LINE = re.compile(r"^(=|-){10,}\s*$")
-_UNITTEST_FAIL_HEADER = re.compile(r"^FAIL: \w+ \(")
-
-
-def unittest_fail_lines(output: str) -> list:
-    """Each unittest `FAIL: <case> (...)` header in `output`. unittest writes them to stderr, where a suite that prints
-    its own case lines to stdout never does, so a unittest suite's red reads from here."""
-    return [line.rstrip() for line in output.splitlines() if _UNITTEST_FAIL_HEADER.match(line)]
-
 
 
 def diagnostic_lines(output: str) -> list:

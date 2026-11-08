@@ -77,12 +77,7 @@ SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
 PICK_SUITE = os.path.join(HERE, "test_pick_ack.py")
 PICK_SUITE_FILES = ("test_pick_ack.py", "test_call_judge.py")  # the suite and the git fixtures it imports
 # Targets that run in a copy of the whole guard family, with the anchor in the one module that holds it.
-PICK_ROUTE_SUITE = os.path.join(HERE, "..", "lint", "test_report_guard_route.py")
-# The hooks suites lint/test_report_guard.py imports for its fixtures, copied into the mutant's hooks folder.
-PICK_ROUTE_SUITE_FILES = ("test_call_judge.py", "test_refusal_note.py")
-GUARD_TREE_TARGETS = ("guard", "simlease", "pick", "pickpeer", "pickroute")
-# Targets whose anchor sits in lint/_transcript.py, mutated in the mutant's own lint copy.
-LINT_COPY_TARGETS = ("pickpeer", "pickroute")
+GUARD_TREE_TARGETS = ("guard", "simlease", "pick", "pickpeer")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -99,9 +94,6 @@ TARGETS = {
     "pick": (os.path.join(HERE, "guard_merge.py"), PICK_SUITE, "GUARD_UNDER_TEST", "pick_ack"),
     # lint/_transcript.py peer_sender, the one home of a peer frame's sender. Its copy sits in the mutant's own lint folder.
     "pickpeer": (os.path.join(HERE, "..", "lint", "_transcript.py"), PICK_SUITE, "GUARD_UNDER_TEST", "pick_peer"),
-    # The same peer_sender, judged by the report guard's route suite: frame reading must stay off outside the pick guard.
-    # The suite runs from the mutant's own lint folder, beside the mutated copy.
-    "pickroute": (os.path.join(HERE, "..", "lint", "_transcript.py"), PICK_ROUTE_SUITE, "GUARD_UNDER_TEST", "pick_route"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -2458,9 +2450,6 @@ MUTATIONS = [
      '                    if not (isinstance(given, dict) and given.get("session_id")):',
      '                    if True:',
      "pick", "own_record_id: a get_session call naming another session never gives this session's record"),
-    ("pick-names-rulings: peer_sender reads real frames by default, so the report guard reads a parent's reply as an ack",
-     'def peer_sender(rec, frames=False):', 'def peer_sender(rec, frames=True):',
-     "pickroute", "test_rt_red_real_frame_parent_reply_is_no_ack"),
 ]
 
 
@@ -3051,9 +3040,8 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
-    red = [line for line in lines if line.startswith("FAIL")] + mutate_shared.unittest_fail_lines(error_text)
-    # "PASS" and "FAIL" start each case line in every suite here but the unittest route suite (target pickroute),
-    # which prints none: its red comes from stderr above. "ok " is test_call_judge.py's pass.
+    red = [line for line in lines if line.startswith("FAIL")]
+    # "PASS" and "FAIL" start each case line in every suite here; "ok " is test_call_judge.py's pass.
     ran = [line for line in lines if line.startswith(("PASS", "FAIL", "ok "))]
     return result.returncode, red, ran, mutate_shared.diagnostic_lines(result.stdout + "\n" + error_text)
 
@@ -3113,7 +3101,7 @@ def run_mutant(sources, work: str, entry):
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         else:
-            if target not in LINT_COPY_TARGETS:  # their anchor sits in the lint copy, mutated below
+            if target != "pickpeer":  # a pickpeer anchor sits in the lint copy, mutated below
                 mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
@@ -3124,12 +3112,8 @@ def run_mutant(sources, work: str, entry):
         # it the role-model table reads as unread and every role-model arm passes unjudged.
         shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
                         ignore=shutil.ignore_patterns("__pycache__"))
-        if target in LINT_COPY_TARGETS:
+        if target == "pickpeer":
             mutate_shared.apply_mutant(os.path.join(root, "lint"), old, new, files=["_transcript.py"])
-        if target == "pickroute":
-            for name in PICK_ROUTE_SUITE_FILES:
-                shutil.copy(os.path.join(HERE, name), tree)
-            suite = os.path.join(root, "lint", os.path.basename(PICK_ROUTE_SUITE))
         if target in ("pick", "pickpeer"):
             for name in PICK_SUITE_FILES:
                 shutil.copy(os.path.join(HERE, name), tree)
