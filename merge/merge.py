@@ -371,7 +371,7 @@ def say(*lines):
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
 # refs/heads/merge-lock/<defaultBranch>: a branch, because the cloud proxy refuses a push to any ref outside refs/heads.
-# One backend, GitLock (default_lock): acquire, release, unlock. Its create-only or leased push is the arbiter: of two runs that push over the same ref state, one lands and the other is refused, so no lock is held by two runs.
+# One backend, GitLock (default_lock): acquire, release, unlock. Its create-only or leased push is the arbiter: of two runs that push over the same ref state, one lands and the other is refused, so no lock is held by two new-name runs. A run older than c53 takes only the old name and never reads the new one (old_lock_ref).
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
 LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
