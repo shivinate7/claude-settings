@@ -99,7 +99,7 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
-    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a brief that clears those checks but names no Triage: session_<id> or Batch runner: session_<id> is refused; a message without the marker passes unread",
+    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a brief that clears those checks but does not name a session id for each of Coordinator, Triage and Batch runner, in the form the family header gives, is refused; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -273,7 +273,7 @@ def windows_shaped(*parts):
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
+        session=None, carries=(), lacks=(), names=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
         max_seconds=None, env=None, guard=None, **tool_input):
     """Register one case.
@@ -288,6 +288,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
     approver reads, not only the decision. A tuple inside `carries` is any-of: the reason holds
     one of its fragments. `lacks` names fragments the printed reason MUST NOT hold.
+    `names` names fragments the printed reason MUST hold outside the expected form, BRIEF_ROLE_FORM,
+    so a role named only inside that form does not count as named.
 
     A case NEVER opts out of the generic-reason check. Which fragments a reason may name is read
     from the case's RULE, through `REASON_MAY_NAME` below, so the exemption belongs to one rule and
@@ -307,6 +309,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "session": session,
         "carries": (carries,) if isinstance(carries, str) else tuple(carries),
         "lacks": (lacks,) if isinstance(lacks, str) else tuple(lacks),
+        "names": (names,) if isinstance(names, str) else tuple(names),
         # The config directory the case runs against. It decides where the global rules file is
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
@@ -9415,6 +9418,7 @@ def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
 STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-repo:o/r"]
+STEP_TOPIC_T_TAGS = ["cs-build:lane", "cs-step:x", "cs-topic:t", "cs-repo:o/r"]
 
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
@@ -9492,6 +9496,7 @@ ROLE_LINES = {
     # lane-one-topic shapes. A lane is one topic: its cs-topic tag, beside one or more cs-step tags. An older
     # lane has no cs-topic, so its cs-step tags alone judge a brief. The create shapes read the start of the lane.
     "step-topic-lane": role_target_call("t1", STEP_TOPIC_TAGS),
+    "step-topic-t-lane": role_target_call("t1", STEP_TOPIC_T_TAGS),
     "step-old-lane": role_target_call("t1", STEP_OLD_TAGS),
     "step-triage": role_target_call("t1", TRIAGE_TAGS),
     "step-lane-then-triage": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS),
@@ -10097,12 +10102,16 @@ FAMILY = "lane-one-topic"
 # send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.` is refused when the target's newest
 # record is a lane whose cs-topic differs from the brief's Topic, or a lane with a cs-topic when the brief names no
 # Topic. A lane with no cs-topic (an older lane) is judged by its cs-step tags: the brief's step must be one of them.
-# A brief that clears those checks is refused too when its text names no triage session or no batch runner: each is a
-# label (`Triage`, `Batch runner`), an optional number and gloss, a colon, then a session_ id that holds a digit, anywhere
-# in the message. Markdown around the label, the colon or the id (bold, italic, backticks) is no reason to refuse.
-# Any other message passes, and so does a brief to a target that is no lane, with or without those ids. A marker brief
-# with no record of its target is refused. Only a marker brief reads the transcript: a message without the marker
-# passes unread.
+# A brief that clears those checks is refused too when it does not name a session id for each of Coordinator, Triage and
+# Batch runner. A label starts and ends at a word boundary, in any case. Between a label and its id, up to 80 characters
+# on the same line may sit, and that gap holds no other role label (word-bounded) and no `session_`. So a number
+# (`Batch runner 8`), a colon, markdown, parentheses or a word such as `is` may sit there, and the colon is optional. An
+# id is `session_` then letters and digits, and it must hold a digit, so a placeholder such as session_TBD names no role.
+# The refusal names the missing roles, the expected form `Coordinator: session_<id>; Triage: session_<id>; Batch runner:
+# session_<id>`, and the gap limit. Why: a lane reaches its coordinator, its triage session and its batch runner through
+# those ids, so a brief without one leaves the lane unable to reach that role. Presence and form only: no id is matched to
+# a roster. A target that is no lane, and a message without the marker, pass. Only a marker brief reads the transcript,
+# and a marker brief to a target with no record is refused.
 LANE_ONE_TOPIC = "lane-one-topic"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 # Each reason fragment below is unique to its reason, so a case pins its own refusal. The rule id is in every reason,
@@ -10111,29 +10120,36 @@ TOPIC_REASON = ("names a topic the lane does not hold",)
 STEP_REASON = ("names a step the lane does not carry",)
 STALE_REASON = ("a set_session_tags call on the target followed",)
 NO_RECORD_REASON = ("holds no get_session",)
-# A lane cannot reach triage or its batch runner without their ids, so a marker brief to a lane names both. IDS_LINES
-# is appended to each marker brief that must clear the id check: the allow cases, and the topic, step, stale and
-# no-record refusals, so each of those refuses on its own check alone. The ids refusal carries both labels, and
-# names no session.
+# A lane reaches its coordinator, its triage session and its batch runner by their ids, so a marker brief to a lane names
+# all three. IDS_LINES is appended to each marker brief that must clear the role check: the allow cases, and the topic,
+# step, stale and no-record refusals, so each of those refuses on its own check alone. Each role refusal keeps the other
+# two roles valid, so a failure names the one role it tests.
+COORD_ID = "session_COORD01"
+COORD_LINE = "\nCoordinator: " + COORD_ID
 TRIAGE_ID = "session_TRIAGE01"
 TRIAGE_LINE = "\nTriage: " + TRIAGE_ID
 RUNNER_ID = "session_RUNNER01"
 RUNNER_LINE = "\nBatch runner: " + RUNNER_ID
-IDS_LINES = TRIAGE_LINE + RUNNER_LINE
-IDS_CARRIES = ("Triage: session_", "triage", "Batch runner: session_")
+IDS_LINES = COORD_LINE + TRIAGE_LINE + RUNNER_LINE
+# The expected form a role refusal names, one label per role. The names check takes each prefix out of the reason first,
+# so a role named only inside the form does not count as named.
+BRIEF_ROLE_FORM = ("Coordinator: session_", "Triage: session_", "Batch runner: session_")
+# Every role refusal carries the form and the gap limit. "80 char" holds for "80 characters" and "80 chars".
+ROLE_CARRIES = ("Coordinator: session_", "; Triage: session_", "; Batch runner: session_", "80 char")
 
 
-def ids_refuse(name, transcript, message, target=ROLE_OTHER):
-    """A marker brief to a lane that clears the topic and step checks, and misses the triage or the batch runner id:
-    refused. The reason names both labels, and no session."""
-    step_refuse(name, transcript, message, target=target, carries=IDS_CARRIES, lacks=(target, TRIAGE_ID, RUNNER_ID))
+def roles_refuse(name, transcript, message, missing, target=ROLE_OTHER):
+    """A marker brief to a lane that clears the topic and step checks, and misses a role id: refused. The reason names
+    each missing role outside the form, carries the form and the gap limit, and names none of the test's ids."""
+    step_refuse(name, transcript, message, target=target, carries=ROLE_CARRIES,
+                lacks=(target, COORD_ID, TRIAGE_ID, RUNNER_ID), names=missing)
 
 
-def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=()):
+def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=(), names=()):
     """A send_message the guard refuses. The reason names its rule, and the rule's own id. `lacks` names fragments
-    the reason must not hold."""
+    the reason must not hold, and `names` fragments it must name outside BRIEF_ROLE_FORM."""
     add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
+        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks, names=names)
 
 
 def step_allow(name, transcript, message, target=ROLE_OTHER):
@@ -10228,91 +10244,210 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons." + IDS_LINES, carries=TOPIC_REASON)
 
-# A marker brief to a lane must name its triage session and its batch runner. Each refusal below misses one cause, and
-# the other label stays valid in it, so a failure names the cause it tests.
-# Refused: a fresh lane on topic icons. Its brief names the runner and its own topic, and no triage id.
-ids_refuse("a brief for the lane's own topic, to a fresh lane with no triage id, is refused",
-           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons." + RUNNER_LINE, target=ROLE_NEW)
-# Refused: an older lane with no cs-topic. Its own step clears the step check, and the triage id is missing.
-ids_refuse("a brief for an older lane's own step, with no triage id, is refused",
-           role_path("step-old-lane"), "Lane brief: icon-a. Topic: icons." + RUNNER_LINE)
-# Refused: the triage id is present and the batch runner id is missing.
-ids_refuse("a brief with a triage id and no batch runner id is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE)
-# Refused: each form the judge does not accept. The label needs a colon, and the id needs the session_ prefix and letters.
-ids_refuse("a triage id with no session_ prefix, Triage: abc123, is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: abc123" + RUNNER_LINE)
-ids_refuse("an empty triage id, Triage: session_, is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_" + RUNNER_LINE)
-ids_refuse("a triage label with no colon, triage session_abc123, is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\ntriage session_abc123" + RUNNER_LINE)
-ids_refuse("a session id under another label, Page writer: session_abc123, is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nPage writer: session_abc123" + RUNNER_LINE)
-# Refused: the label is a whole word, so a word that only ends in triage does not count.
-ids_refuse("a label that only ends in triage, Pretriage: session_abc123, is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nPretriage: session_abc123" + RUNNER_LINE)
-# Refused with today's reasons, with no triage or runner label: the topic, step, and record checks run first.
-step_refuse("a brief for topic colors to a lane on topic icons, with no triage id, keeps the topic reason",
-            role_path("step-topic-lane"), "Lane brief: icon-b. Topic: colors.",
-            carries=TOPIC_REASON, lacks=("Triage:", "Batch runner:"))
-step_refuse("a brief naming a step the older lane does not carry, with no triage id, keeps the step reason",
-            role_path("step-old-lane"), "Lane brief: icon-c. Topic: icons.",
-            carries=STEP_REASON, lacks=("Triage:", "Batch runner:"))
-step_refuse("a brief with no triage id to a target with no record keeps the no-record reason",
-            role_path("no-record"), "Lane brief: icon-b. Topic: icons.",
-            carries=("holds no get_session",), lacks=("Triage:", "Batch runner:"))
-step_refuse("a brief with no triage id and an unreadable transcript keeps the no-record reason",
-            role_path("unreadable"), "Lane brief: icon-b. Topic: icons.",
-            carries=("holds no get_session",), lacks=("Triage:", "Batch runner:"))
-# Passes: each accepted form of the triage id. The label is case-insensitive, and the id counts anywhere in the message.
+# A marker brief to a lane names a session id for each role. Each refusal below misses one role, and the other two stay
+# valid in it, so a failure names the one cause it tests.
+ROLE_TOP = "Lane brief: icon-b. Topic: icons."  # the first line a step-topic-lane fixture clears
+ROLE_GAP_80 = " " + "x" * 79  # 80 characters, the most a label's gap may hold
+ROLE_GAP_81 = " " + "x" * 80  # 81 characters, one over
+BRIEF_TEMPLATE_PATH = os.path.join(REPO, "skills", "project-ops", "templates", "brief.md")
+with open(BRIEF_TEMPLATE_PATH, encoding="utf-8") as handle:
+    BRIEF_TEMPLATE = handle.read()
+BRIEF_TEMPLATE_IDS = {"Coordinator": "session_TPLCOORD01", "Triage": "session_TPLTRIAGE01",
+                      "Batch runner": "session_TPLRUNNER01"}
+
+
+def fill_template(text, ids=None):
+    """The brief template with the step and topic slugs of its first line filled, and each `<label>: session_<id>`
+    placeholder filled from `ids` when it is given. Every other placeholder stays as shipped."""
+    text = text.replace("<step-slug>", "icon-b").replace("<topic-slug>", "icons")
+    for label, session in (ids or {}).items():
+        text = text.replace(label + ": session_<id>", label + ": " + session)
+    return text
+
+
+# Allowed: the forms the grammar adds. A form with no colon fails the old colon rule, so it is red on the old code.
+step_allow("the three roles on line one with no colons are allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + " Coordinator session_C1; Triage session_T2; Batch runner 8 session_B3.")
+step_allow("a Roles line with no colon after Coordinator or Triage is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nRoles: Coordinator session_C1; Triage session_T1; Batch runner 8 session_B1.")
+step_allow("pasted roster lines, one per role, in the Standing sessions form, are allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\n- Coordinator: \"Claude settings coordinator handoff\", session_C1, since 2026-11-03 15:32 CST."
+           "\n- Triage: \"cs triage: claude-settings (6)\", session_T1, since 2026-11-03 15:38 CST."
+           "\n- Batch runner: \"claude-settings batch runner 8\", session_B1, since 2026-11-03 15:38 CST.")
+step_allow("a Triage roster line with a note in parentheses before its quoted label is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\n- Coordinator session_C1\n- Triage (the repo's one page): \"cs triage (6)\", session_T1, "
+           "since 2026-11-03 15:38 CST.\n- Batch runner: session_B1")
+step_allow("a Coordinator id in parentheses after its label is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator (session_C1)\nTriage: session_T1\nBatch runner 8: session_B1")
+step_allow("a Coordinator id after the word is is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator is session_C1\nTriage: session_T1\nBatch runner 8: session_B1")
+step_allow("a Batch runner number in parentheses before the colon is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator: session_C1\nTriage: session_T1\nBatch runner (7): session_B1")
+step_allow("a Coordinator id in backticks is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator `session_C1`\nTriage: session_T1\nBatch runner 8: session_B1")
+step_allow("role labels in bold, the colon inside the bold, are allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\n**Coordinator:** session_C1\n**Triage:** session_T1\n**Batch runner 8:** session_B1")
+step_allow("a Triage label in bold, the colon after the bold, is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator: session_C1\n**Triage**: session_T1\nBatch runner 8: session_B1")
+step_allow("role labels in lower case with no colons are allowed: a label is read in any case",
+           role_path("step-topic-lane"),
+           ROLE_TOP + " coordinator session_C1; triage session_T2; batch runner 8 session_B3.")
+step_allow("Coordinator subtriage session_C1 is allowed: subtriage is no Triage label, so the gap holds none",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator subtriage session_C1\nTriage: session_T1\nBatch runner 8: session_B1")
+step_allow("a Coordinator gap of exactly 80 characters before its id is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator" + ROLE_GAP_80 + "session_C1\nTriage: session_T1\nBatch runner 8: session_B1")
+step_allow("the coordinator's own brief form, verbatim, is allowed: a topic t lane, with no colons",
+           role_path("step-topic-t-lane"),
+           "Lane brief: x. Topic: t. Coordinator session_013NEJL2hB1pLZPDpzas7VgB; "
+           "Triage session_013NEJL42Sv3tJkjpzY7bExj; Batch runner 8 session_013NEJL2vsmyKzJm8jUDt6za.")
+step_allow("a brief with no roles to a target that is no lane is allowed",
+           role_path("step-triage"), ROLE_TOP)
+step_allow("the brief template, its slugs and id placeholders filled, is allowed",
+           role_path("step-topic-lane"), fill_template(BRIEF_TEMPLATE, BRIEF_TEMPLATE_IDS))
+
+# Refused: each role is missing, or its id is not one the grammar takes. The names check reads each missing role outside
+# the expected form.
+roles_refuse("a brief with no Coordinator id is refused, though its Triage and Batch runner ids are named",
+             role_path("step-topic-lane"), ROLE_TOP + TRIAGE_LINE + RUNNER_LINE, ["Coordinator"])
+roles_refuse("a brief with no Triage id is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + RUNNER_LINE, ["Triage"])
+roles_refuse("a brief with no Batch runner id is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + TRIAGE_LINE, ["Batch runner"])
+roles_refuse("a brief with no role ids is refused",
+             role_path("step-topic-lane"), ROLE_TOP, ["Coordinator", "Triage", "Batch runner"])
+roles_refuse("subtriage is not the Triage label: a brief naming subtriage for Triage is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nsubtriage: session_TRIAGE01" + RUNNER_LINE, ["Triage"])
+roles_refuse("Coordinators is not the Coordinator label: a brief naming Coordinators is refused",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinators: session_COORD01" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
+roles_refuse("Triagey is not the Triage label: a brief naming Triagey is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriagey: session_TRIAGE01" + RUNNER_LINE, ["Triage"])
+roles_refuse("a Coordinator id 81 characters after its label is refused: the gap is over 80 characters",
+             role_path("step-topic-lane"),
+             ROLE_TOP + "\nCoordinator" + ROLE_GAP_81 + "session_COORD01" + TRIAGE_LINE + RUNNER_LINE, ["Coordinator"])
+roles_refuse("another role's label in the gap is refused: Triage's id is not Coordinator's",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator Triage: session_TRIAGE01" + RUNNER_LINE, ["Coordinator"])
+roles_refuse("a Coordinator label with no id on its line is refused, though the next line names a Triage id",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator:" + TRIAGE_LINE + RUNNER_LINE, ["Coordinator"])
+roles_refuse("a Coordinator id with no digit, session_TBD, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator: session_TBD" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
+roles_refuse("three session ids with no role labels are refused: an id names a role only beside its label",
+             role_path("step-topic-lane"), ROLE_TOP + " session_COORD01 session_TRIAGE01 session_RUNNER01.",
+             ["Coordinator", "Triage", "Batch runner"])
+roles_refuse("a Coordinator label with a Triage label in its gap, and a Batch runner id, is refused for Coordinator",
+             role_path("step-topic-lane"), ROLE_TOP + " Coordinator Triage session_T1; Batch runner session_B1.",
+             ["Coordinator"])
+roles_refuse("a Page writer label is no role: a brief naming a Page writer id for Triage is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nPage writer: session_x1" + RUNNER_LINE, ["Triage"])
+roles_refuse("a Pretriage label is no Triage label: a brief naming Pretriage is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nPretriage: session_x1" + RUNNER_LINE, ["Triage"])
+roles_refuse("a Triage label with words before its id and no digit, Triage session: session_x, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage session: session_x" + RUNNER_LINE, ["Triage"])
+roles_refuse("a Triage label with words before its id and no digit, Triage id: session_x, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage id: session_x" + RUNNER_LINE, ["Triage"])
+
+# Allowed: the coordinator ruled the wider form, so a role label may have words before its id, and its colon is
+# optional. Each of these is refused on the old code, which needs a colon before a Triage id.
+step_allow("a triage label with no colon, triage session_abc123, is allowed: the colon is optional",
+           role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\ntriage session_abc123" + RUNNER_LINE)
+step_allow("a Triage label with words before its id, Triage session: session_x1, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage session: session_x1" + RUNNER_LINE)
+step_allow("a Triage label with words before its id, Triage id: session_x1, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage id: session_x1" + RUNNER_LINE)
+
+# Allowed: the ids named in a brief, each under its own role label, in the forms the grammar keeps.
 step_allow("a triage id on the line after the brief passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons.\nTriage: session_abc123" + RUNNER_LINE)
+           ROLE_TOP + COORD_LINE + "\nTriage: session_abc123" + RUNNER_LINE)
 step_allow("a triage id with a number, Triage 5:, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons.\nTriage 5: session_abc123" + RUNNER_LINE)
+           ROLE_TOP + COORD_LINE + "\nTriage 5: session_abc123" + RUNNER_LINE)
 step_allow("a triage id with a gloss, Triage (page and roadmap writer):, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons.\nTriage (page and roadmap writer): session_abc123" + RUNNER_LINE)
+           ROLE_TOP + COORD_LINE + "\nTriage (page and roadmap writer): session_abc123" + RUNNER_LINE)
 step_allow("a triage id after a coordinator id on the same line passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons.\nCoordinator: session_x. Triage: session_abc123" + RUNNER_LINE)
+           ROLE_TOP + "\nCoordinator: session_x1. Triage: session_abc123" + RUNNER_LINE)
 step_allow("a lowercase triage label passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons.\ntriage: session_abc123" + RUNNER_LINE)
+           ROLE_TOP + COORD_LINE + "\ntriage: session_abc123" + RUNNER_LINE)
 step_allow("a triage id on the brief's first line passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons. Triage: session_abc123" + RUNNER_LINE)
-# Passes: the batch runner takes the same form, with a number. The triage id is present.
-step_allow("a batch runner id with a number, Batch runner 8: session_x, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner 8: session_x8")
-# Passes: both ids present, on a lane with a topic and on an older lane judged by its step.
-step_allow("a brief with both the triage id and the batch runner id passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons." + IDS_LINES)
-step_allow("an older lane's own step, with both ids, passes", role_path("step-old-lane"),
+           ROLE_TOP + " Triage: session_abc123" + COORD_LINE + RUNNER_LINE)
+step_allow("a batch runner id with a number, Batch runner 8: session_x8, passes", role_path("step-topic-lane"),
+           ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nBatch runner 8: session_x8")
+step_allow("a brief with the coordinator, triage and batch runner ids passes", role_path("step-topic-lane"),
+           ROLE_TOP + IDS_LINES)
+step_allow("an older lane's own step, with the three ids, passes", role_path("step-old-lane"),
            "Lane brief: icon-a. Topic: icons." + IDS_LINES)
-# Refused: a placeholder id. An id holds at least one digit, so a session_ id made of letters alone is no id. Each case
-# keeps the other label's id valid, so a failure names the placeholder and nothing else.
-ids_refuse("a triage id that is the placeholder session_TBD is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_TBD" + RUNNER_LINE)
-ids_refuse("a triage id that is the placeholder session_XXXX is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_XXXX" + RUNNER_LINE)
-ids_refuse("a triage id that is the word session_id is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_id" + RUNNER_LINE)
-ids_refuse("a batch runner id that is the word session_id is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: session_id")
-ids_refuse("a batch runner id that is the placeholder session_TBD is refused",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: session_TBD")
-# Passes: markdown around the form, bold, italic or backticked. Each case keeps the other label's id valid.
 step_allow("a bold triage label, **Triage:** session_abc123, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons.\n**Triage:** session_abc123" + RUNNER_LINE)
+           ROLE_TOP + COORD_LINE + "\n**Triage:** session_abc123" + RUNNER_LINE)
 step_allow("an italic triage label, _Triage_: session_abc123, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons.\n_Triage_: session_abc123" + RUNNER_LINE)
+           ROLE_TOP + COORD_LINE + "\n_Triage_: session_abc123" + RUNNER_LINE)
 step_allow("a backticked triage id, Triage: `session_abc123`, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons.\nTriage: `session_abc123`" + RUNNER_LINE)
+           ROLE_TOP + COORD_LINE + "\nTriage: `session_abc123`" + RUNNER_LINE)
 step_allow("a bold batch runner label, **Batch runner:** session_abc123, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\n**Batch runner:** session_abc123")
+           ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\n**Batch runner:** session_abc123")
 step_allow("an italic batch runner label, _Batch runner_: session_abc123, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\n_Batch runner_: session_abc123")
+           ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\n_Batch runner_: session_abc123")
 step_allow("a backticked batch runner id, Batch runner: `session_abc123`, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: `session_abc123`")
-# Passes: the batch runner label in lowercase. The label is case-insensitive, as the triage label is.
+           ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nBatch runner: `session_abc123`")
 step_allow("a lowercase batch runner label, batch runner: session_x8, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nbatch runner: session_x8")
+           ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nbatch runner: session_x8")
+
+# Refused: a role id that is a placeholder, one with no digit. Each keeps the other two roles valid.
+roles_refuse("a triage id that is the placeholder session_TBD is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage: session_TBD" + RUNNER_LINE, ["Triage"])
+roles_refuse("a triage id that is the placeholder session_XXXX is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage: session_XXXX" + RUNNER_LINE, ["Triage"])
+roles_refuse("a triage id that is the word session_id is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage: session_id" + RUNNER_LINE, ["Triage"])
+roles_refuse("a batch runner id that is the word session_id is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nBatch runner: session_id", ["Batch runner"])
+roles_refuse("a batch runner id that is the placeholder session_TBD is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nBatch runner: session_TBD", ["Batch runner"])
+roles_refuse("a triage id with no session_ prefix, Triage: abc123, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage: abc123" + RUNNER_LINE, ["Triage"])
+roles_refuse("an empty triage id, Triage: session_, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage: session_" + RUNNER_LINE, ["Triage"])
+roles_refuse("a session id under another label, Page writer: session_x1, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nPage writer: session_x1" + RUNNER_LINE, ["Triage"])
+roles_refuse("a label that only ends in triage, Pretriage: session_x1, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nPretriage: session_x1" + RUNNER_LINE, ["Triage"])
+
+# The fresh lane, the older lane and the triage-only brief, each missing one role, refuse on the role check.
+roles_refuse("a brief for the lane's own topic, to a fresh lane with no triage id, is refused",
+             role_path("step-create-json"), ROLE_TOP + COORD_LINE + RUNNER_LINE, ["Triage"], target=ROLE_NEW)
+roles_refuse("a brief for an older lane's own step, with no triage id, is refused",
+             role_path("step-old-lane"), "Lane brief: icon-a. Topic: icons." + COORD_LINE + RUNNER_LINE, ["Triage"])
+roles_refuse("a brief with a triage id and no batch runner id is refused",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + TRIAGE_LINE, ["Batch runner"])
+
+# Refused with the topic, step and record reasons: the role check runs after those, so a brief that fails them keeps its
+# own reason. The lacks fragments check that the role form is not named in it.
+step_refuse("a brief for topic colors to a lane on topic icons, with no role ids, keeps the topic reason",
+            role_path("step-topic-lane"), "Lane brief: icon-b. Topic: colors.",
+            carries=TOPIC_REASON, lacks=("Coordinator:", "Triage:", "Batch runner:"))
+step_refuse("a brief naming a step the older lane does not carry, with no role ids, keeps the step reason",
+            role_path("step-old-lane"), "Lane brief: icon-c. Topic: icons.",
+            carries=STEP_REASON, lacks=("Coordinator:", "Triage:", "Batch runner:"))
+step_refuse("a brief with no role ids to a target with no record keeps the no-record reason",
+            role_path("no-record"), "Lane brief: icon-b. Topic: icons.",
+            carries=("holds no get_session",), lacks=("Coordinator:", "Triage:", "Batch runner:"))
+step_refuse("a brief with no role ids and an unreadable transcript keeps the no-record reason",
+            role_path("unreadable"), "Lane brief: icon-b. Topic: icons.",
+            carries=("holds no get_session",), lacks=("Coordinator:", "Triage:", "Batch runner:"))
+
+# The brief template: filled, it is allowed; with its id placeholders unfilled, it is refused for each missing role.
+roles_refuse("the brief template with its session id placeholders unfilled is refused for the missing roles",
+             role_path("step-topic-lane"), fill_template(BRIEF_TEMPLATE), ["Coordinator", "Triage", "Batch runner"])
 
 
 # =========================================================================== 5d. cite by id
@@ -19759,6 +19894,14 @@ def carried(fragment, reason):
     return any(option in reason for option in options)
 
 
+def outside_form(reason):
+    """The reason with each BRIEF_ROLE_FORM prefix taken out, so a role named only inside the expected form does
+    not count as named."""
+    for prefix in BRIEF_ROLE_FORM:
+        reason = reason.replace(prefix, " ")
+    return reason
+
+
 def names_the_target(reason, rule=None):
     """Return the first forbidden fragment the printed reason carries, else ''.
 
@@ -29165,6 +29308,10 @@ def run_cases():
             ok = False
             note = "  (the reason carries %r, which it must not: %s)" % (
                 [f for f in case["lacks"] if f in reason][0], reason[:90])
+        elif ok and case.get("names") and [f for f in case["names"] if f not in outside_form(reason)]:
+            ok = False
+            note = "  (the reason does not name %r outside the expected form: %s)" % (
+                [f for f in case["names"] if f not in outside_form(reason)][0], reason[:90])
         elif ok and got != "allow" and names_the_target(reason, case["rule"]):
             ok = False
             note = "  (the reason names the forbidden target %r)" % names_the_target(
