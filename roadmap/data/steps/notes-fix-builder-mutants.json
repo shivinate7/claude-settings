@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL17gMWcgUJ44gi3ZRs",
   "why": "Builder agents edited hooks/mutate_guard.py, a test-author path (AUTHOR_MUTATION_TESTS in hooks/guard.py), and reported no refusal (lane notes-fix-merge-ci, 17:51 CST Nov 7). Rule roles-one-role-per-agent.",
-  "note": "Coordinator took c at 17:55 CST Nov 7: builders may add mutants; a builder diff that removes or changes a mutant line is refused. Home: decision builders-cannot-edit-tests, in this lane's PR. Page item 378 withdrawn. Absorbs debt builder-edits-mutation-config (coordinator 18:44 CST). Built as #1675 (builder and mutant edits go to the test-author), head 9367abf45: round 3 sonnet PASS, net value positive; with runner 8, merges after #1676 and #1742 (coordinator 21:10 CST; updated 21:11 CST). 16:47 CST Nov 8: owner item 437 a (builders never write test content) supersedes pick c above. Step builder-edits-mutation-tests takes the rest of the work.",
-  "updatedAt": "2026-11-08T16:46:00-06:00"
+  "note": "Coordinator took c at 17:55 CST Nov 7: builders may add mutants; a builder diff that removes or changes a mutant line is refused. Home: decision builders-cannot-edit-tests, in this lane's PR. Page item 378 withdrawn. Absorbs debt builder-edits-mutation-config (coordinator 18:44 CST). Built as #1675 (builder and mutant edits go to the test-author), head 9367abf45: round 3 sonnet PASS, net value positive; with runner 8, merges after #1676 and #1742 (coordinator 21:10 CST; updated 21:11 CST). 16:47 CST Nov 8: whether owner item 437 a (builders never write test content) covers mutants is page item 447; #1675 is held with runner 8 until it is answered. Step builder-edits-mutation-tests takes the rest of the work.",
+  "updatedAt": "2026-11-08T16:48:00-06:00"
 }

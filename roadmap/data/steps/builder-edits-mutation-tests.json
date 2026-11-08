@@ -1,11 +1,11 @@
 {
   "title": "builder-refuse treats the mutation test files as test paths, so a builder cannot write mutants",
   "why": "Coordinator 16:45 CST Nov 8. Incident: #2310's builder wrote six mutants into hooks/mutate_guard.py, and builder-refuse let it through. On main 2ac382cc6, AUTHOR_MUTATION_TESTS in hooks/guard.py (mutate_guard.py, mutate_shared.py, janitor/mutate_sweep.py) is read only by the test-author scope check. Its comment says \"A builder keeps editing them: they are not test paths\". That contradicts owner item 437 a (12:16 CST Nov 8: builders never write test content). Records that argue the carve-out, to rewrite in place: decision agents-get-standing-rules (its builder scope line says to add mutants to hooks/mutate_guard.py when the brief asks); decision red-run-trailer-on-test-commits (\"Mutation tests are not test paths, so they need no trailer\"); the hooks/guard.py comment at AUTHOR_MUTATION_TESTS. Overlap: step notes-fix-builder-mutants (#1675, ready) built the coordinator's pick c of 17:55 CST Nov 7, \"builders may add mutants\", in its version of decision builders-cannot-edit-tests; owner item 437 a supersedes that pick. Step tier-boundaries-enforced (#1904) carries decision builders-cannot-edit-tests too. Fix shape: builder-refuse treats the three files as test paths. Red case: a builder Edit that adds a mutant to hooks/mutate_guard.py is refused.",
-  "note": "",
+  "note": "Waits on page item 447 builder-mutants (are mutants test content?), put up 16:48 CST Nov 8 at the coordinator's ask: item 437 a does not name mutants. #1675 is held with runner 8 meanwhile.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "status": "todo",
   "order": 839,
-  "updatedAt": "2026-11-08T16:46:00-06:00"
+  "updatedAt": "2026-11-08T16:48:00-06:00"
 }
