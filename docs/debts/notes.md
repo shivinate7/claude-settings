@@ -1498,3 +1498,6 @@
 - ruling-cite-decision-path: a decision home in path form, `decision docs/decisions/<slug>.md`, is not checked against a file on disk, though the slug form is (lint/check_red_run.py). Decision: none.
 - ruling-check-hint-count: code-check counts each stdout line of the ruling-only check as a problem, so its hint lines inflate the count ("5 problems" for 2 commits) (actions/code-check/code_check.py `ruling_check`). Decision: none.
 - ruling-check-unknown-passes: code-check reads a ruling-only exit 2 (no base, shallow range) as no problems, as it does for the comment check (actions/code-check/code_check.py `ruling_check`). Decision: none.
+- ruling-cite-child-decision-home: a child repo has no copy of this repo's decisions, so `decision <slug>` naming a claude-settings record reads as no home there, while the remedy still lists that form (lint/check_red_run.py home lookup). Decision: none.
+- ruling-cite-squash-bullet: a squash-merged message whose subject claim, covered by a trailer, sits in a bullet is flagged on the push-to-main run of a squash-merging repo (lint/check_red_run.py trailer scope). Decision: none.
+- ruling-cite-pin-move-window: a child repo that moves its pin after RULING_CITE_SINCE judges commits dated between that stamp and the pin move without warning; the remedy is a reword (lint/check_red_run.py RULING_CITE_SINCE). Decision: none.

@@ -8,4 +8,4 @@
 
 **Retire.** The ruling rule runs in a child repo's CI step that no scope flag gates. A docs-only fixture PR with an uncited claim fails. The case is in `actions/code-check/test_action.py`.
 
-Fix: none — the gate lives in each child repo's workflow, so the fix is a child-repo step that triage files. Until: 2026-11-21
+Fix: step:ruling-cite-docs-only-prs — remove the gate from each child repo's code-check step when its pin moves.
