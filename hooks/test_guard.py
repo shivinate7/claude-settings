@@ -8398,7 +8398,9 @@ sh("env: interpreter code follow-ups: allow, node -e, a readdirSync loop, the fi
 # Decision env-file-stays-unread, "Interpreter code", follow-ups, sixth set: a negated name test that excuses a read
 # does not rule the file out when it is a suffix test, a longer prefix (the local and rc variants), or an or/and arm
 # whose flag the guard cannot see through. The allows are the same negated test on the name itself, in the same loop,
-# which does rule the file out. Names share "a negated name test", so MUTATE_ONLY can pick this set out.
+# which does rule the file out. A negated name test in redundant parens, or as the first conjunct of an and, rules the
+# file out too, so its allows must allow. Its denies pin a negation over an and, and a negated test as one arm of an or,
+# where a flag can open the file. Names share "a negated name test", so MUTATE_ONLY can pick this set out.
 sh("env: interpreter code follow-ups: deny, python heredoc, a negated name test by endswith, then an open",
    "python3 <<'PY'\nimport os\nfor f in os.listdir('.'):\n    if not f.endswith('" + ENV + "'): print(open(f).read())\nPY",
    "deny", "env-file", cwd=NOGIT)
@@ -8423,6 +8425,22 @@ sh("env: interpreter code follow-ups: allow, node -e, a negated name test by sta
    "node -e 'const fs=require(\"fs\"); for (const f of fs.readdirSync(\".\")) "
    "if (!f.startsWith(\"" + ENV + "\")) console.log(fs.readFileSync(f,\"utf8\"))'",
    "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a negated name test in redundant parens, then a read",
+   "node -e 'const fs=require(\"fs\"); for (const f of fs.readdirSync(\".\")) "
+   "if (!(f.startsWith(\"" + ENV + "\"))) console.log(fs.readFileSync(f,\"utf8\"))'",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a negated name test as the first conjunct of an and, then a read",
+   "node -e 'const fs=require(\"fs\"); const a = true, b = false; for (const f of fs.readdirSync(\".\")) "
+   "if (!f.startsWith(\"" + ENV + "\") && (a || b)) console.log(fs.readFileSync(f,\"utf8\"))'",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a negated name test over an and with a false flag, then a read",
+   "node -e 'const fs=require(\"fs\"); const a = false; for (const f of fs.readdirSync(\".\")) "
+   "if (!(f.startsWith(\"" + ENV + "\") && a)) console.log(fs.readFileSync(f,\"utf8\"))'",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a negated name test joined by or with an unknown flag, then a read",
+   "node -e 'const fs=require(\"fs\"); for (const f of fs.readdirSync(\".\")) "
+   "if (!f.startsWith(\"" + ENV + "\") || a) console.log(fs.readFileSync(f,\"utf8\"))'",
+   "deny", "env-file", cwd=NOGIT)
 
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
