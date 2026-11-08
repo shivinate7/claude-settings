@@ -5551,6 +5551,10 @@ for _label, _command, _tool in LANE_LINT_FORMS:
 add("lane-lint-foreground: merge --lane-lint with run_in_background false is refused", "deny",
     LANE_LINT_RULE, cwd=NOGIT, command="merge --lane-lint 1458", run_in_background=False,
     carries=LANE_LINT_REMEDY)
+# A known false alarm, pinned on purpose: a docs-only lane's short lint is refused in the foreground too.
+add("lane-lint-foreground: a docs-only lane's short lint is refused in the foreground too "
+    "(known false alarm)", "deny", LANE_LINT_RULE, cwd=NOGIT, command="merge --lane-lint 1999",
+    carries=LANE_LINT_REMEDY)
 
 # Quoted and heredoc text is data, not a run. A comment opener or an apostrophe inside quotes must
 # not hide a real run after it, the same shapes the waiter block above pins.
