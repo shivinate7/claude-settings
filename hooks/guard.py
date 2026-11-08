@@ -1577,7 +1577,8 @@ BUILDER_TEST_REASON = (
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
     "report. The orchestrator assigns it to a builder."
-    " Mid-merge, a test-author may resolve a conflicted file."
+    " Mid-merge, a test-author may resolve a conflicted file, until it is staged: `git add` each"
+    " file after its last edit."
 )
 WRITER_SCOPE_REASON = (
     "A record-writer changes only Markdown (*.md) files. Report the needed change to any other "
@@ -1971,7 +1972,8 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
 def merge_conflict_target(full: str) -> bool:
     """True when `full` is an unmerged index entry of a merge in progress in its own repository, as the
     path resolves through symlinks (the spelled name alone never qualifies). Git runs in the target's
-    repository, not the call's cwd. A cherry-pick or rebase has no MERGE_HEAD. Any git failure is False."""
+    repository, not the call's cwd. A cherry-pick, revert or rebase conflict is never a merge, even
+    beside a stale MERGE_HEAD. Any git failure is False."""
     try:
         root = os.path.dirname(norm(os.path.normpath(full)))
         while root and not os.path.exists(os.path.join(root, ".git")):
@@ -1981,14 +1983,21 @@ def merge_conflict_target(full: str) -> bool:
         merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
         if merging is None or merging.returncode != 0:
             return False
+        gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir")
+        if gitdir is None or gitdir.returncode != 0 or not gitdir.stdout.strip():
+            return False
+        if any(os.path.exists(os.path.join(gitdir.stdout.strip(), mark)) for mark in OTHER_REPLAY_MARKS):
+            return False
         rel = os.path.relpath(os.path.realpath(full), os.path.realpath(root))
         if rel == os.pardir or rel.startswith(os.pardir + os.sep):
             return False
         unmerged = git_names(root, "ls-files", "-u", "-z")
         if unmerged is None:
             return False
-        want = os.path.normcase(norm(rel))
-        return any(os.path.normcase(norm(entry.split("\t", 1)[-1])) == want for entry in unmerged)
+        # ls-files names are posix. Only the platform separator maps to "/": a backslash in a root
+        # file's name on Linux stays a name character, so `src\app.py` is not `src/app.py`.
+        want = os.path.normcase(rel.replace(os.sep, "/"))
+        return any(os.path.normcase(entry.split("\t", 1)[-1]) == want for entry in unmerged)
     except (OSError, ValueError):
         return False
 
@@ -2043,6 +2052,9 @@ REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
 # A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
 # resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
 REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
+# The replay marks that a stale MERGE_HEAD cannot excuse: a conflict in one of these is no merge. A
+# merge in progress owns MERGE_MSG and a squash owns SQUASH_MSG, so they are not here.
+OTHER_REPLAY_MARKS = tuple(mark for mark in REPLAY_MARKS if mark not in ("MERGE_MSG", "SQUASH_MSG"))
 # How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
 # rebase kept.
 OWN, NOTED, KEPT = "own", "noted", "kept"
