@@ -1,11 +1,11 @@
 {
   "title": "Merge-tool follow-ups to sha-hex-one-home: CI scope covers merge.py's imports, and merge.py loads git_reads under a private name",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 260.11,
   "owner": "coordinator",
   "lane": "session_013NEJL2sZ68ECc62SiwfqPk",
   "why": "A change to a file merge.py imports must run the merge tool's tests, or CI misses a break.",
-  "note": "Topic merge-tool. ci-scope $M covers merge.py's imports (adds hooks/git_reads.py; the scope test is re-pointed on the coordinator's ruling, 20:08 CST Nov 7); merge.py loads git_reads under a private name; a lists_refs docstring. Lane merge-lock-expired-delete-race, stacked on #1729. Filed 20:08 CST Nov 7.",
-  "updatedAt": "2026-11-07T20:08:00-06:00"
+  "note": "Topic merge-tool. ci-scope $M covers merge.py's imports (adds hooks/git_reads.py; the scope test is re-pointed on the coordinator's ruling, 20:08 CST Nov 7); merge.py loads git_reads under a private name; a lists_refs docstring. Lane merge-lock-expired-delete-race, stacked on #1729. Filed 20:08 CST Nov 7. Reviewed and with runner 8 as #1781 (20d417652) (lane merge-lock-expired-delete-race, 08:28 CST Nov 8).",
+  "updatedAt": "2026-11-08T08:29:00-06:00"
 }

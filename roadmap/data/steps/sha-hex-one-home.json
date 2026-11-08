@@ -5,7 +5,7 @@
   "owner": "coordinator",
   "lane": "session_013NEJL2sZ68ECc62SiwfqPk",
   "why": "Two readers of the same thing drift apart; one home keeps them in step.",
-  "note": "Topic merge-tool. merge.py's revert-commit scan uses SHA_HEX, and janitor/sweep.py _live_remote_heads shares GitLock's ls-remote reader. Lane merge-lock-expired-delete-race runs it, stacked on #1708. A SHA-256 note: fix none, until 2026-11-21. Filed 19:22 CST Nov 7. Built as #1729, reviewed, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:10 CST).",
+  "note": "Topic merge-tool. merge.py's revert-commit scan uses SHA_HEX, and janitor/sweep.py _live_remote_heads shares GitLock's ls-remote reader. Lane merge-lock-expired-delete-race runs it, stacked on #1708. A SHA-256 note: fix none, until 2026-11-21. Filed 19:22 CST Nov 7. Built as #1729, reviewed, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:10 CST). Reviewed and with runner 8 as #1729 (ada21a45f) (lane merge-lock-expired-delete-race, 08:28 CST Nov 8).",
   "phase": "now",
-  "updatedAt": "2026-11-07T20:10:00-06:00"
+  "updatedAt": "2026-11-08T08:29:00-06:00"
 }

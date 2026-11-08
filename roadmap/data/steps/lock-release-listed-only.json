@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL2sZ68ECc62SiwfqPk",
   "why": "A fetch failure that is not a network failure can leave a live merge lock behind, because Lock.release leases its delete on more than the ls-remote listing (lane merge-lock-expired-delete-race, 07:09 CST Nov 8).",
-  "note": "Done check: a red test where a non-network fetch failure during release leaves no live lock. Merge after: #1657. Doing in lane merge-lock-expired-delete-race (session_013NEJL2sZ68ECc62SiwfqPk). Slug from the lane; title by triage. Built as PR #2000, with runner 8 (lane, 07:51 CST Nov 8). Done when #2000 merges.",
-  "updatedAt": "2026-11-08T07:52:00-06:00"
+  "note": "Done check: a red test where a non-network fetch failure during release leaves no live lock. Merge after: #1657. Doing in lane merge-lock-expired-delete-race (session_013NEJL2sZ68ECc62SiwfqPk). Slug from the lane; title by triage. Built as PR #2000, with runner 8 (lane, 07:51 CST Nov 8). Done when #2000 merges. Reviewed and with runner 8 as #2000 (1e39cb099) (lane merge-lock-expired-delete-race, 08:28 CST Nov 8).",
+  "updatedAt": "2026-11-08T08:29:00-06:00"
 }

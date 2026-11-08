@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL2sZ68ECc62SiwfqPk",
   "why": "A stray stderr line was read as the lock's sha, so the merge lock could name a lock that does not exist.",
-  "note": "Topic merge-tool. Title from #1708. Round 1 FAIL, round 2 PASS. Built as #1708, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:11 CST). Follow-ups: sha-hex-one-home (#1729), sha-hex-followups.",
-  "updatedAt": "2026-11-07T20:11:00-06:00"
+  "note": "Topic merge-tool. Title from #1708. Round 1 FAIL, round 2 PASS. Built as #1708, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:11 CST). Follow-ups: sha-hex-one-home (#1729), sha-hex-followups. Reviewed and with runner 8 as #1708 (371002036) (lane merge-lock-expired-delete-race, 08:28 CST Nov 8).",
+  "updatedAt": "2026-11-08T08:29:00-06:00"
 }
