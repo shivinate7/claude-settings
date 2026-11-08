@@ -5490,6 +5490,13 @@ sh("git-after-cd: a substitution assigned to a name, then || exit 1 and ; a git 
    "out=$(make x) || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a test of git status output, then || exit 1 and ; a git push -u, passes",
    '[ -z "$(%s status --porcelain)" ] || exit 1; %s push -u origin b' % (VCS, VCS), "allow", cwd=NOGIT)
+# PINS, PASSING ON THE OLD CODE. The quote in each echo is text, so the `&& exit 1` runs and the push after the fi runs
+# only when the check passed. A quote mask that reads the `>` as a redirect, or a print step that refuses a word with
+# an apostrophe, would refuse these pushes.
+sh("git-after-cd: an if ! check whose then body echoes a greater-than in quotes, then && exit 1, then ; a git push, passes",
+   'if ! pytest -q; then echo "x>y" && exit 1; fi; %s push -u origin b' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an if ! check whose then body echoes an apostrophe in quotes, then && exit 1, then ; a git push, passes",
+   "if ! pytest -q; then echo \"don't\" && exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
