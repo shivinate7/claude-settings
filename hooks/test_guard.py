@@ -100,7 +100,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (<label>, or <label>: then HH:MM CST or CDT) more than 1 minute ahead of the guard's clock is refused; a stamp behind the clock passes; a stamp later in the message, mid-line, on a status line passes. The same limit judges an ISO instant with an offset in `added` of an ArtifactData write to collection items, `updatedAt` of a Write or Edit to a roadmap step file, and a literal double-quoted `updatedAt` in a Bash command; a time in prose, another field or collection, or a value with no offset passes",
+    "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items, `updatedAt` of a Write or Edit to a roadmap step file, and a literal double-quoted `updatedAt` in a Bash command; a time in prose, another field or collection, or a value with no offset passes",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10207,18 +10207,23 @@ step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topi
 FAMILY = "message-time-matches-clock"
 #
 # Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
-# with a header stamp is refused when the stamp's time is more than 1 minute ahead of the guard's clock. A stamp
-# behind the clock passes, however far behind. A header stamp is `<label>` (1 to 3 words), then `,` or `:`, then an
-# optional date `YYYY-MM-DD `, then `HH:MM CST` or `HH:MM CDT`. Anything may follow it. With a date the two are
-# compared as instants, with the zone's offset. With no date they are compared as minute of day modulo 1440, so the
-# wrap reads the short way: 00:01 at a clock of 23:59 is 2 minutes ahead. The clock is
-# LOCAL_TIME_NOW. The rule reads no transcript and only the first line, so the cases here need no transcript, except
-# the one lane brief, which needs a lane that lane-one-topic allows.
+# with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
+# then `,`, `:`, or a dash spaced on both sides (` - `, ` — `), then an optional date `YYYY-MM-DD `, then `H:MM` or
+# `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any letter case. Anything may follow it. The zone must
+# be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
+# A dated stamp is an instant with its zone's offset, refused when it is more than 1 minute ahead, with no upper
+# limit. An undated stamp is a signed minute-of-day offset mod 1440, refused only when it is 2 to 60 minutes ahead:
+# more than 60 ahead reads as a quote from an earlier day, and passes. A stamp behind the clock passes. The wrap reads
+# the short way: 00:01 at a clock of 23:59 is 2 minutes ahead. The clock is LOCAL_TIME_NOW. The rule reads no
+# transcript and only the first line, so the cases here need no transcript, except the one lane brief, which needs a
+# lane that lane-one-topic allows.
 MTC_RULE = "message-time-matches-clock"
 MTC_TOOL = "mcp__claude-code-remote__send_later"  # a tool with a message field that is not send_message
 MTC_CLOCK = "2026-11-07T13:22:00-06:00"           # 13:22 CST, the clock of most cases below
 MTC_NEXT_DAY = "2026-11-08T00:01:00-06:00"        # 00:01 CST, the clock of the midnight pair
 MTC_BODY = "detail " * 2500                       # a long body after the first line: about 17,500 characters
+MTC_MORNING = "2026-11-08T07:08:00-06:00"        # 07:08 CST, the clock of the header-form, zone and window cases
+MTC_CDT = "2026-10-30T13:22:00-05:00"            # 13:22 CDT, the clock of the CDT-season cases
 
 
 def mtc_env(clock):
@@ -10270,9 +10275,9 @@ mtc_allow("a header dated the day before, at the clock's own minute, is allowed:
 # Refused: dated the day after, the stamp is 1440 minutes ahead. A reader that ignores the date sees 0 and allows it.
 mtc_refuse("a header dated the day after, at the clock's own minute, is refused: a date counts",
            "Coordinator, 2026-11-08 13:22 CST")
-# Passes: 14:22 CDT is 13:22 CST, the same instant. A reader that drops the zone sees 60 ahead and refuses it.
-mtc_allow("a CDT header at the same instant, 14:22 CDT at 13:22 CST, is allowed",
-          "Coordinator, 14:22 CDT")
+# Refused: 14:22 CDT is the instant 13:22 CST, but CDT is the wrong zone label in CST season, so it is refused.
+mtc_refuse("a CDT header in CST season at the same instant, 14:22 CDT at 13:22 CST, is refused: the zone is wrong",
+           "Coordinator, 14:22 CDT")
 # Refused: 15:22 CDT is 14:22 CST, 60 minutes ahead. The reason prints the clock in CST, not CDT.
 mtc_refuse("a CDT header in CST season, 60 minutes ahead, is refused, and the reason prints 13:22 CST, not CDT",
            "Coordinator, 15:22 CDT", carries=("13:22 CST",), lacks=("13:22 CDT",))
@@ -10327,10 +10332,11 @@ mtc_allow("a status line with a stamp mid-line is allowed",
 mtc_allow("a lane brief whose first line holds no stamp is allowed, though a stamp follows it",
           "Lane brief: icon-a. Topic: icons.\nCoordinator, 13:40 CST: go",
           transcript=role_path("step-topic-lane"))
-# Passes: a label of four words is not a header, and neither is a label with no comma or colon.
-mtc_allow("a label of four words is not a header, so the line passes",
-          "Owner of the lane, 13:40 CST: pick 1 taken")
-mtc_allow("a label with no comma or colon is not a header, so the line passes",
+# Refused: a label of four words is a header, so this stamp 18 minutes ahead is refused.
+mtc_refuse("a label of four words, Owner of the lane, 13:40 CST, is a header and is refused",
+           "Owner of the lane, 13:40 CST: pick 1 taken")
+# Passes: a label with no comma, colon or dash is not a header, so the line passes.
+mtc_allow("a label with no comma, colon or dash is not a header, so the line passes",
           "Coordinator 13:40 CST: pick 1 taken")
 # Passes: the empty states. No first line means nothing to judge.
 mtc_allow("an empty message passes: there is no first line to judge",
@@ -10347,9 +10353,66 @@ add("message-time-matches-clock: a send_later with a header 18 minutes off is no
 # Passes: a dated header behind the clock passes, with seconds on the clock. 13:22 against 13:25:30 is 3 minutes behind.
 mtc_allow("a dated header 3 minutes behind, at a clock of 13:25:30, is allowed: a stamp behind the clock passes",
           "Coordinator, 2026-11-07 13:22 CST", clock="2026-11-07T13:25:30-06:00")
-# Refused: a header quoting another label's time, 164 minutes ahead. The reason tells the sender to open with its own label.
-mtc_refuse("a header quoting another label's time, Owner, 16:36 CST, is refused, and the reason names your own label",
-           "Owner, 16:36 CST: go", clock="2026-11-07T13:52:00-06:00", carries=("your own label",))
+# Passes: 16:36 is 9 hours 28 minutes ahead at 07:08. More than 60 minutes ahead reads as a quote from an earlier day.
+mtc_allow("a header quoting another label's time, Owner, 16:36 CST, 9 hours 28 minutes ahead, is allowed: past 60 minutes it passes",
+          "Owner, 16:36 CST: go", clock=MTC_MORNING)
+# Refused: a header quoting another label's time, 18 minutes ahead. The reason tells the sender to open with its own label.
+mtc_refuse("a header quoting another label's time, Owner, 13:40 CST, is refused, and the reason names your own label",
+           "Owner, 13:40 CST: go", carries=("your own label",))
+
+# The wider header form. Each form is refused at a stamp 32 minutes ahead of 07:08, and passes at the clock's own minute.
+# Refused: a 1-digit hour.
+mtc_refuse("a 1-digit hour header, Triage, 7:40 CST, 32 minutes ahead at 07:08, is refused",
+           "Triage, 7:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a 1-digit hour header at the clock's own minute, Triage, 7:08 CST, is allowed",
+          "Triage, 7:08 CST: x", clock=MTC_MORNING)
+# Refused: a spaced em dash in place of the comma.
+mtc_refuse("a spaced em-dash header, 07:40 CST after the label, 32 minutes ahead at 07:08, is refused",
+           "Coordinator — 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a spaced em-dash header at the clock's own minute, 07:08 CST after the label, is allowed",
+          "Coordinator — 07:08 CST: x", clock=MTC_MORNING)
+# Refused: a spaced hyphen in place of the comma.
+mtc_refuse("a spaced hyphen header, 07:40 CST after the label, 32 minutes ahead at 07:08, is refused",
+           "Coordinator - 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a spaced hyphen header at the clock's own minute, 07:08 CST after the label, is allowed",
+          "Coordinator - 07:08 CST: x", clock=MTC_MORNING)
+# Refused: a label of four words.
+mtc_refuse("a four-word label header, Coordinator for the lane, 07:40 CST, 32 minutes ahead at 07:08, is refused",
+           "Coordinator for the lane, 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a four-word label header at the clock's own minute, Coordinator for the lane, 07:08 CST, is allowed",
+          "Coordinator for the lane, 07:08 CST: x", clock=MTC_MORNING)
+# Refused: seconds after the time.
+mtc_refuse("a header with seconds, Coordinator, 07:40:00 CST, 32 minutes ahead at 07:08, is refused",
+           "Coordinator, 07:40:00 CST: x", clock=MTC_MORNING)
+mtc_allow("a header with seconds at the clock's own minute, Coordinator, 07:08:00 CST, is allowed",
+          "Coordinator, 07:08:00 CST: x", clock=MTC_MORNING)
+# Refused: a lowercase zone.
+mtc_refuse("a lowercase zone header, Coordinator, 07:40 cst, 32 minutes ahead at 07:08, is refused",
+           "Coordinator, 07:40 cst: x", clock=MTC_MORNING)
+mtc_allow("a lowercase zone header at the clock's own minute, Coordinator, 07:08 cst, is allowed",
+          "Coordinator, 07:08 cst: x", clock=MTC_MORNING)
+
+# The zone must be the clock's own. A wrong zone label is refused whatever the minutes.
+# Refused: a CDT stamp at the clock's own minute, in CST season. The instant is an hour behind, so only the label is wrong.
+mtc_refuse("a CDT header at the clock's own minute in CST season, Coordinator, 07:08 CDT, is refused: the zone is wrong",
+           "Coordinator, 07:08 CDT: x", clock=MTC_MORNING)
+# Refused: a CST stamp in CDT season. 12:22 CST is the instant 13:22 CDT, so only the zone label is wrong.
+mtc_refuse("a CST header in CDT season at the same instant, Coordinator, 12:22 CST at 13:22 CDT, is refused: the zone is wrong",
+           "Coordinator, 12:22 CST: x", clock=MTC_CDT)
+# Passes: the CDT-season pair. A CDT stamp at the clock's own minute in CDT season is allowed.
+mtc_allow("a CDT header at the clock's own minute in CDT season, Coordinator, 13:22 CDT, is allowed",
+          "Coordinator, 13:22 CDT: x", clock=MTC_CDT)
+
+# The undated window: 2 to 60 minutes ahead is refused, and past 60 it reads as a quote from an earlier day.
+# Refused: 60 minutes ahead at 07:08 is the window's upper edge, and the edge is inside it.
+mtc_refuse("a header 60 minutes ahead at 07:08 is refused: the window's upper edge is inside it",
+           "Coordinator, 08:08 CST: x", clock=MTC_MORNING)
+# Passes: 61 minutes ahead at 07:08 is past the window, so it reads as a quote from an earlier day.
+mtc_allow("a header 61 minutes ahead at 07:08 is allowed: past 60 minutes it reads as a quote from an earlier day",
+          "Coordinator, 08:09 CST: x", clock=MTC_MORNING)
+# Refused: a dated stamp has no window. 16:36 on the same day is 9 hours 28 minutes ahead at 07:08, and is refused.
+mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
 
 
 # ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
