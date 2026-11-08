@@ -15662,18 +15662,6 @@ class ReviewStampSince(unittest.TestCase):
         self.assertIn("fetch", stop, "the Stop does not say the fetch failed:\n" + stop)
         self.assertIn("ZQ7", stop, "the Stop does not carry git's failure reason:\n" + stop)
 
-    def test_a_deepen_by_another_process_after_the_log_never_returns_the_old_boundary_as_the_cutover(self):
-        # Depth 1 holds only commit 3, the boundary. The first salt commit is commit 2, and its committer time is the true cutover. Commit 3's
-        # time is the boundary's, and it is the wrong answer. Another process deepens the clone after git log and before the boundary read. The read
-        # must read again and give commit 2's time, or stop. Giving commit 3's time is the bug.
-        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=1)
-        self.assert_shallow_boundary(clone, "HEAD")
-        got, stop, _, _, raced = self.cutover_read(clone, race=True)
-        self.assertTrue(raced, "the race did not run, so the read never reached its boundary read after git log and this case proves nothing")
-        if stop is None:
-            self.assertEqual(got, "2026-10-21T15:04:05Z",
-                             "the read gave %r after another process deepened the clone: that is the old boundary's time, not the true cutover" % (got,))
-
     def test_a_depth_one_clone_with_no_race_deepens_itself_and_gives_the_true_cutover(self):
         # The control for the race above, with no other process. The read deepens the clone itself and gives commit 2's committer time.
         clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=1)
@@ -15686,7 +15674,8 @@ class ReviewStampSince(unittest.TestCase):
     def test_a_race_one_re_read_resolves_returns_the_true_cutover_in_two_git_log_runs(self):
         # The boundary changes once. The first git log returns commit 3, the boundary, and another process unshallows the clone just after it, so
         # the boundary read after the log differs from the one before. One re-read holds: the second log gives commit 2, the first salt commit, and
-        # the read returns its time, with no deepen. The counts are literal, so a mutant that sets REVIEW_RACE_TRIES to 1 fails this case.
+        # the read returns its time, with no deepen. Commit 3's time is the old boundary's and is wrong, and so is a Stop: one re-read resolves
+        # this race. The counts are literal, so a mutant that sets REVIEW_RACE_TRIES to 1 fails this case.
         clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=1)
         self.assert_shallow_boundary(clone, "HEAD")
         got, stop, logs, fetches, raced = self.cutover_read(clone, race=True)
