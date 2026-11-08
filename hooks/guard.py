@@ -1097,6 +1097,17 @@ def _settings_place(path: str, cwd: str) -> bool:
     here = {os.path.normcase(os.path.realpath(guard_core.config_dir()))}
     if cwd:
         here.add(os.path.normcase(os.path.realpath(_expanded(cwd, ""))))
+        # The checkout's own root file (the clone's is the install script's source) is one write from any
+        # subfolder of the checkout. A clone is marked by `.git` or by the install script beside the file.
+        folder_up = os.path.realpath(_expanded(cwd, ""))
+        while folder_up:
+            if any(os.path.exists(os.path.join(folder_up, mark)) for mark in (".git", "install.ps1")):
+                here.add(os.path.normcase(folder_up))
+                break
+            parent = os.path.dirname(folder_up)
+            if parent == folder_up:
+                break
+            folder_up = parent
     return os.path.normcase(os.path.realpath(folder)) in here
 
 
