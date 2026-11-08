@@ -14965,6 +14965,9 @@ def ors_scope_problem(ctx, red):
     problem = ""
     if any(decision != "allow" or reason for _role, decision, reason in ctx["stops"]):
         problem = "scope: a stop did not stay silent: %r" % (ctx["stops"],)
+    elif ctx.get("rewritten"):   # C13 rewrites origin's lane ref, so the scope is that it no longer holds the head
+        if ors_holds(ctx["main"], ctx["head"]):
+            problem = "scope: origin's lane ref still holds the head, so the rewrite did not happen"
     elif not ors_holds(ctx["main"], ctx["head"]):
         problem = "scope: origin's lane ref does not hold the head the case reviews"
     elif red and ors_head(ctx["lane"]) == ctx["head"]:
@@ -15325,6 +15328,42 @@ ors_allow("push-owes-review-record: C11 a full folder of 40 entries for other he
           ors_c11)
 ors_allow("push-owes-review-record: R7c a Fix check record with Head F posted before the push: allowed silently",
           ors_r7c)
+
+ORS_OTHER = "archive/rrbap-side"   # a second branch, with its own open pull request (C12)
+ORS_OTHER_PUSH = VCS + " push origin HEAD:" + ORS_OTHER
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"   # git's empty tree: the root of C13's unrelated history
+
+
+def ors_c12(label):
+    """C12, the entry is for branch A at H, and the push goes to branch B, which has its own open pull request with no
+    record. The entry names no branch B, so B's pull request is never read."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["command"] = ORS_OTHER_PUSH
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"]), ors_pr(ctx["head"], number=ORS_PR + 1, ref=ORS_OTHER)])
+    ctx["note"] = "a push to " + ORS_OTHER
+    return ctx
+
+
+def ors_c13(label):
+    """C13, the entry is at H, then the remote branch is rewritten to a history without H, and the lane pushes a fix.
+    The branch no longer descends from the head, so the entry names no commit this push moves past."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    unrelated = run_vcs(ctx["main"], *IDENT, "commit-tree", EMPTY_TREE, "-m", "unrelated").stdout.strip()
+    _must(ctx["main"], "push", "-q", "-f", "origin", unrelated + ":refs/heads/" + ORS_LANE)
+    ctx["rewritten"] = True
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "the remote branch rewritten off the reviewed head"
+    return ctx
+
+
+ors_allow("push-owes-review-record: C12 an entry for branch A at H, then a push to branch B with its own open pull request "
+          "and no record: allowed silently", ors_c12)
+ors_allow("push-owes-review-record: C13 an entry at H, then the remote branch rewritten off H, then a push: allowed silently",
+          ors_c13)
 
 
 def ors_entries_scope(c):
