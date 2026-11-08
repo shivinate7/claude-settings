@@ -6422,6 +6422,12 @@ sh("silent-bash-c: a push with its own quiet flag inside bash -c denies, as the 
    "bash -c '" + VCS + " push -q'", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
 sh("silent-bash-c: a commit with its own quiet flag inside bash -c is a carve-out and allows",
    "bash -c '" + VCS + " commit -q -m x'", "allow", cwd=NOGIT)
+sh("silent-bash-c: the bare form of a commit piped into cat that discards denies, the anchor",
+   VCS + " commit -m x | cat >/dev/null", "deny", "silent-write", cwd=NOGIT)
+sh("silent-bash-c: a commit piped into cat that discards inside bash -c denies, as the bare form does",
+   "bash -c '" + VCS + " commit -m x | cat >/dev/null'", "deny", "silent-write", cwd=NOGIT)
+sh("silent-bash-c: a commit piped into cat that keeps its output inside bash -c still allows",
+   "bash -c '" + VCS + " commit -m x | cat'", "allow", cwd=NOGIT)
 
 # Gaps found in Banchi's scripts/silent-write-guard.py.
 sh("silent-write gap: pull silenced, both streams, with -C",
