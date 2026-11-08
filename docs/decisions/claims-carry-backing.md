@@ -49,6 +49,8 @@ Lane ruling, 2026-11-07 23:22 CST, process-only (review round 1, item 11): the r
 
 Lane ruling, 2026-11-07 23:50 CST, lane session, process-only: only a table act is a claim. Measured on 400 recent main commit messages: a check of other acts flagged 12 of 12 phrase hits, and none was a hand-off claim (decision `guard-that-cries-wolf-is-spent`).
 
+Coordinator, 2026-11-07 14:36 CST, process-only: the waiting page judges a task's "Why yours" line by guard rule `task-why-cited`. It accepts a route-row cite and a dated measured cite only, and reads no refusals file, so a backtick tool-name cite does not pass there.
+
 ## Incident
 
 `docs/decisions/session-tiers.md:64` (origin/main 7975f6d8) said "The cloud cannot close a pull request". One fact sat in three places: that line, the 2026-10-30 refusals in `docs/decisions/auto-mode-owner-acts.md` (lines 79-82 on origin/main), and the grant "Acts the cloud refuses" in `.claude/CLAUDE.md:16-19`. It stayed on main with no check. Measured 2026-11-06 on origin/main (7975f6d8): a grep of `lint`, `hooks`, `merge` and `actions` finds no check that reads the phrase.
@@ -119,8 +121,9 @@ Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
 - The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1349-1367).
-- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:2187-2218; read lint/report_guard.py:2708-2718).
-- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1485-1494; read lint/report_guard.py:2653).
+- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:2274-2305; read lint/report_guard.py:2896-2906).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1579-1604; read lint/report_guard.py:2836).
+- Part (v) on the waiting page: guard rule `task-why-cited` refuses a task's Why yours line that gives a capability reason with no route-row or dated measured cite (`why_cited_hit` in hooks/question_form.py; the verdict is `why_yours_verdict` in lint/report_guard.py).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:759-764).
 - The merge's model judge, report-only (see Model judge at merge).
