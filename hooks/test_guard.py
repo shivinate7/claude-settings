@@ -13999,18 +13999,25 @@ def rpush_record_comments(*specs, before=0):
     return build
 
 
-def rpush_repo():
+def rpush_repo(name="repo", branch=None, git=()):
     """A merge-tool repo whose origin names main, so a push to another branch reads as settled. STAMPREPO has no origin,
-    and a push with no default branch to read asks as a force push. Built on first use, from STAMPREPO's stamp."""
-    if not os.path.isdir(os.path.join(RPUSH_ROOT, "repo", ".git")):
+    and a push with no default branch to read asks as a force push. Built on first use, from STAMPREPO's stamp. `branch`,
+    when given, is checked out after the origin is set, then each `git` step (a tuple of git arguments) runs in the repo.
+    A step that fails stops the suite: a repo missing its config would pass for the wrong reason."""
+    where = os.path.join(RPUSH_ROOT, name)
+    if not os.path.isdir(os.path.join(where, ".git")):
         with open(os.path.join(STAMPREPO, ".github", "stamp.json"), encoding="utf-8") as handle:
             stamp = handle.read()
-        make_repo(os.path.join(RPUSH_ROOT, "repo"), {".github/stamp.json": stamp, "hooks/keep": "x\n"})
-        where = os.path.join(RPUSH_ROOT, "repo")
+        make_repo(where, {".github/stamp.json": stamp, "hooks/keep": "x\n"})
         run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
         run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
         run_vcs(where, "remote", "set-head", "origin", "main")
-    return os.path.join(RPUSH_ROOT, "repo")
+        for step in ([("checkout", "-q", "-b", branch)] if branch else []) + list(git):
+            done = run_vcs(where, *step)
+            if done.returncode != 0:
+                sys.exit("fixture setup failed in reviewed-head-push: git %s in %r. stderr: %s"
+                         % (" ".join(step), where, done.stderr.strip()))
+    return where
 
 
 def rpush_no_tool_guard():
@@ -14031,20 +14038,23 @@ def rpush_route(argv):
 
 
 def rpush_case(label, want, reads, lines=0, command=RPUSH_PUSH, cwd=STAMPREPO, origin=False, comments=(),
-               others=(RPUSH_OPEN,), fail=None, page_cap=100, no_tool=False):
+               others=(RPUSH_OPEN,), fail=None, page_cap=100, no_tool=False, repo=None):
     """Register one check of reviewed-head-push. `want` is the decision, "ask" or "allow". `reads` are the gh routes the
     run makes, in order. `lines` is the stderr lines the run prints: 0, or 1 for a read that fails open, naming the rule.
-    `origin` runs the push in rpush_repo(), a repo with an origin. `comments` is a list, or a callable that builds one
-    when the check runs. The decision is judged first; the reads after it, so an allow control proves its reads."""
+    `origin` runs the push in rpush_repo(), a repo with an origin. `repo`, a callable that builds a checkout and returns
+    its folder, names the checkout the push runs in instead. `comments` and `others` are a list, or a callable that
+    builds one when the check runs, so a case can name a sha that only its checkout knows. The decision is judged first;
+    the reads after it, so an allow control proves its reads."""
     folder = os.path.join(RPUSH_ROOT, re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:70])
 
     def check():
         gh_calls_taken(folder)  # clear a call log an earlier run of this case left
         listed = comments() if callable(comments) else list(comments)
-        make_fake_gh(folder, "main", others=list(others), comments=listed, fail=fail, page_cap=page_cap,
+        pulls = others() if callable(others) else list(others)
+        make_fake_gh(folder, "main", others=pulls, comments=listed, fail=fail, page_cap=page_cap,
                      count_file=os.path.join(folder, ARCHIVE_CALLS))
         guard, config = rpush_no_tool_guard() if no_tool else (None, None)
-        where = rpush_repo() if origin else cwd
+        where = repo() if repo else rpush_repo() if origin else cwd
         case = {"raw": None, "tool": "Bash", "cwd": where, "process_cwd": where, "session": None,
                 "env_path": fake_gh_path(folder) + os.pathsep + GIT_PATH, "config": config or MERGECFG,
                 "agent_id": None, "agent_type": None, "temp": None, "load": None, "env": None, "transcript": None,
@@ -14128,6 +14138,65 @@ rpush_case("reviewed-head-push: a delete by refspec allows, with no gh read",
 rpush_case("reviewed-head-push: a delete by --delete allows, with no gh read",
            "allow", (), origin=True, command=VCS + " push --delete origin " + RPUSH_BRANCH,
            comments=rpush_record_comments({"fix": RPUSH_FIX}))
+
+# The remote a push goes to, and the head it writes. A bare push goes to the remote its branch names, else to
+# remote.pushDefault. A push to a fork never lands on origin's pull request, so it neither asks nor reads gh. A push
+# whose source is the head the pull request already holds sends nothing, so it does not ask.
+RPUSH_FORK = "https://example.invalid/fork.git"  # a remote the guard names and never contacts
+RPUSH_LANE = "branch.%s." % RPUSH_BRANCH  # the config prefix of the lane branch
+
+
+def rpush_fork_branch_repo():
+    """The lane checked out, with branch.<lane>.remote set to fork: a bare push goes to fork, not origin."""
+    return rpush_repo("fork-branch", branch=RPUSH_BRANCH, git=(
+        ("remote", "add", "fork", RPUSH_FORK), ("config", RPUSH_LANE + "remote", "fork"),
+        ("config", RPUSH_LANE + "merge", "refs/heads/" + RPUSH_BRANCH)))
+
+
+def rpush_push_default_repo():
+    """The lane checked out, with no branch remote and remote.pushDefault set to fork: a bare push goes to fork."""
+    return rpush_repo("push-default", branch=RPUSH_BRANCH, git=(
+        ("remote", "add", "fork", RPUSH_FORK), ("config", "remote.pushDefault", "fork")))
+
+
+def rpush_origin_branch_repo():
+    """The lane checked out, with branch.<lane>.remote set to origin: a bare push goes to origin. The control."""
+    return rpush_repo("origin-branch", branch=RPUSH_BRANCH, git=(
+        ("config", RPUSH_LANE + "remote", "origin"), ("config", RPUSH_LANE + "merge", "refs/heads/" + RPUSH_BRANCH)))
+
+
+def rpush_up_to_date_repo():
+    """The lane checked out at the head the pull request holds, so a push of HEAD sends nothing."""
+    return rpush_repo("up-to-date", branch=RPUSH_BRANCH)
+
+
+def rpush_newer_repo():
+    """The lane checked out one commit past the head the pull request holds, so a push of HEAD sends that commit."""
+    return rpush_repo("newer-local", branch=RPUSH_BRANCH, git=((*IDENT, "commit", "--allow-empty", "-q", "-m", "newer"),))
+
+
+def rpush_sha(build, rev="HEAD"):
+    """The full sha `rev` names in the checkout `build` returns, read when a case runs, after its checkout is built."""
+    return run_vcs(build(), "rev-parse", rev).stdout.strip()
+
+
+rpush_case("reviewed-head-push: a bare push from a branch whose remote is fork, not origin, allows, with no gh read",
+           "allow", (), repo=rpush_fork_branch_repo, command=VCS + " push",
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a bare push with remote.pushDefault set to fork allows, with no gh read",
+           "allow", (), repo=rpush_push_default_repo, command=VCS + " push",
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a bare push from a branch whose remote is origin asks, after both reads",
+           "ask", RPUSH_BOTH, repo=rpush_origin_branch_repo, command=VCS + " push",
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a push of the head the pull request holds allows, after both reads",
+           "allow", RPUSH_BOTH, repo=rpush_up_to_date_repo,
+           others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_up_to_date_repo))],
+           comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_up_to_date_repo), fix=RPUSH_FIX))])
+rpush_case("reviewed-head-push: a -u push of a newer local commit onto the lane asks, after both reads",
+           "ask", RPUSH_BOTH, repo=rpush_newer_repo, command=VCS + " push -u origin " + RPUSH_BRANCH,
+           others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_newer_repo, "HEAD~1"))],
+           comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_newer_repo, "HEAD~1"), fix=RPUSH_FIX))])
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
