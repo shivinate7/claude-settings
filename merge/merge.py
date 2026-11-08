@@ -110,7 +110,8 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 FIX_HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files."
 FIX_FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with --round."
 FIX_FROZEN_REMEDY = "Pass the old values."
-FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head."
+FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head. Base the fix check on a head that sits inside the live head's history."
+FIX_LAYOUT_REMEDY = "Fix or restore lint/layout.json so the record folders can be read."
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
@@ -3291,7 +3292,7 @@ def fix_check_arg(text):
 COMPARE_FILE_CAP = 300  # GitHub's compare lists at most this many files, so a reply this long may be cut short
 
 def fix_base_problem(host, root, base, last_head):
-    """None when a fix check may start from `base` although the newest earlier record reviewed `last_head`, else the reason it may not.
+    """(None, None) when a fix check may start from `base` although the newest earlier record reviewed `last_head`, else (the reason it may not, its remedy).
     The two heads must be one an ancestor of the other, and every file between them, a rename's old path too, a record or notes file: a Markdown
     file under a record folder, or the exact notes, todo or records-page file (the layout's places for this repo). A commit of notes after a review
     then leaves the fix diff the reviewed one. GitHub's three-dot compare lists the files on its second head's side only, so the read that finds the
@@ -3301,25 +3302,25 @@ def fix_base_problem(host, root, base, last_head):
         import layout
         folders, files = layout.record_places(layout.layout(), root)
     except Exception as e:  # LayoutError, or a module that will not load: the record places are unknown
-        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code"
+        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code", FIX_LAYOUT_REMEDY
     files = files | {RECORDS_PAGE}
     found = host.compare_files(last_head, base)
     if found["ahead_by"] and found["behind_by"]:
-        return f"{base[:9]} and the newest earlier record's Head {last_head[:9]} have diverged: one must hold the other"
+        return f"{base[:9]} and the newest earlier record's Head {last_head[:9]} have diverged: one must hold the other", FIX_HEAD_REMEDY
     if found["behind_by"]:  # base is the older head, and this read lists none of the files between them: read it from the older head
         found = host.compare_files(base, last_head)
         if found["behind_by"] or not found["ahead_by"]:
-            return f"the two compare reads of {base[:9]} and {last_head[:9]} disagree about which head holds the other"
+            return f"the two compare reads of {base[:9]} and {last_head[:9]} disagree about which head holds the other", FIX_HEAD_REMEDY
     if len(found["files"]) >= COMPARE_FILE_CAP:
-        return f"the compare of {base[:9]} and {last_head[:9]} lists {COMPARE_FILE_CAP} or more files, so its list may be cut short"
+        return f"the compare of {base[:9]} and {last_head[:9]} lists {COMPARE_FILE_CAP} or more files, so its list may be cut short", FIX_HEAD_REMEDY
     def is_record_file(path):
         path = path.strip("/")
         return path in files or any(path.startswith(d + "/") and path.endswith(".md") for d in folders)
     named = [name for f in found["files"] for name in (f["filename"], f.get("previous_filename")) if name]
     code = sorted({name for name in named if not is_record_file(name)})
     if code:
-        return f"{base[:9]} is not the newest earlier record's Head, and the files between them are not all record or notes files: {', '.join(code[:3])}{' ...' if len(code) > 3 else ''}"
-    return None
+        return f"{base[:9]} is not the newest earlier record's Head, and the files between them are not all record or notes files: {', '.join(code[:3])}{' ...' if len(code) > 3 else ''}", FIX_HEAD_REMEDY
+    return None, None
 
 FIX_BASE_URL = re.compile(r"https://github\.com/([^/\s]+)/([^/\s#]+)/(?:pull|issues)/(\d+)#issuecomment-(\d+)", re.ASCII)
 
@@ -3571,11 +3572,11 @@ def main(argv, host=None, lock=None):
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
                         problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 if not problem and last["head"] != a.fix_check[0]:
-                    problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"]), FIX_HEAD_REMEDY
+                    problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
                     found = h.compare_files(a.fix_check[0], info["head"])
                     if found["behind_by"]:
-                        problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
+                        problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}"
                         remedy = FIX_ANCESTOR_REMEDY
                 final = next((r for r in reversed(earlier) if max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # the newest earlier record that reached the final round: a short record written before the write step floored it does not hide it
                 if not problem and final:  # a passing fix keeps what the final round gave (decision hold-unsafe-after-round-3), first fix check or chained, or from the --fix-base-record source
