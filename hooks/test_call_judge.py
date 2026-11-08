@@ -2145,20 +2145,23 @@ def case_past_ruling_owner_decision_stays_refused():
           (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
 
 
-# The four clauses item 8 must carry to tell a ruling from what is not one. Each row is key phrases that one sentence of
-# the item-8 text holds, so a word that appears elsewhere in the text does not pass.
-ITEM8_CLAUSES = (
-    ("an incident, gripe, defect or risk line is no ruling", ("incident", "gripe", "defect", "risk", "not a ruling")),
-    ("a recommended option or a session's pick is no ruling", ("recommended option", "session proposed", "not a ruling")),
-    ("a session's owner-answered claim counts with his words or a dated answer",
-     ("owner answered", "quotes the owner's words", "dated owner answer")),
-    ("a page item's recommended pick restated in a note never counts", ("recommended pick", "restate", "never counts")),
+# The four sentences item 8 must carry verbatim, so the judge is told which step lines are rulings. A row fails when its
+# sentence is missing from the item-8 text. ITEM8_OLD_CLAUSES are the superseded phrases, which must no longer appear.
+ITEM8_SENTENCES = (
+    ("S1", "A step line is a ruling when it says the owner ruled, answered, picked or granted, and gives his words, "
+           "a page item, or a date."),
+    ("S2", "A line where a session made the call, such as a recommended option, a proposed pick, or a lane's call, "
+           "is not a ruling."),
+    ("S3", "An incident or gripe line that only tells what went wrong is not a ruling."),
+    ("S4", "A ruling that mentions a risk, a defect or an incident is still a ruling."),
 )
+ITEM8_OLD_CLAUSES = ("never counts", "dated owner answer", "even when it mentions the owner")
 
 
 def case_item8_prompt_names_record_kinds_and_owner_markers():
     # The item-8 text the judge is sent: the lines from its `8. ` marker up to the candidate list. It must say that a
-    # decision or debt record is a ruling by its kind, and carry the four ITEM8_CLAUSES.
+    # decision or debt record is a ruling by its kind, carry each ITEM8_SENTENCES sentence verbatim, and drop each
+    # ITEM8_OLD_CLAUSES phrase.
     r = run_hook(question_input(box=milestone_cap_box()), answer=ALLOW)
     calls = form_calls(r)
     check("item 8 prompt: the question box makes one judged call", len(calls) == 1, detail(r))
@@ -2174,9 +2177,12 @@ def case_item8_prompt_names_record_kinds_and_owner_markers():
     sentences = re.split(r"(?<=[.!?;])\s+", item8)
     check("item 8 prompt: a sentence says a decision or debt record is a ruling by its kind",
           any("decision" in s and "debt" in s and "record" in s for s in sentences), item8[:300])
-    for label, phrases in ITEM8_CLAUSES:
-        check("item 8 prompt: a sentence says %s" % label,
-              any(all(p in s.lower() for p in phrases) for s in sentences), item8[:300])
+    for label, sentence in ITEM8_SENTENCES:
+        check("item 8 prompt: sentence %s is in the item-8 text verbatim" % label, sentence in item8,
+              "missing: " + sentence)
+    for phrase in ITEM8_OLD_CLAUSES:
+        check("item 8 prompt: superseded clause %r is gone" % phrase, phrase not in item8,
+              "still in the item-8 text: " + phrase)
 
 
 def main():
