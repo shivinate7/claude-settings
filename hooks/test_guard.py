@@ -15141,13 +15141,18 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's conflicted merge of a prod
                          "is allowed and logs no builder-diff line", clean_builder_case("bd-product-conflict")))
 
 
-def author_silent_case(repo, label):
-    """A test-author's change in `repo` is never refused, and writes no author-diff or builder-diff line."""
+def author_silent_case(repo, label, read=False):
+    """A test-author's change in `repo` is never refused, and writes no author-diff or builder-diff line. With
+    `read`, a change the guard could not read fails too: a role-diff-unread line is no silent pass, since the
+    guard wrote no offence line because it judged nothing."""
     def case():
         out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), repo, "test-author", "auth1")
         hits = [r for r in rows if len(r) > 3 and r[3] in (BDIFF, "author-diff")]
+        unread = [r for r in rows if len(r) > 3 and r[3] == "role-diff-unread"]
         if out:
             return False, "a test-author's change was refused: %r" % out[:60]
+        if read and unread:
+            return False, "the change could not be read: %d role-diff-unread line(s)" % len(unread)
         if hits:
             return False, "a test-author's change was logged: %d line(s)" % len(hits)
         return True, "allowed at commit, push and stop; no builder-diff or author-diff line"
@@ -15421,7 +15426,7 @@ MM_CLEAN = diff_repo("merge-mixed-clean", lambda w: _mixed_merge_commit(w, clean
 # Case 1: the test-author commits the 2-product + 1-test merge. Nothing is refused, and no author-diff line is written.
 LOG_CHECKS_EXTRA.append(("merge-mixed: a test-author's merge commit that resolves two conflicted product files and a "
                          "conflicted test file is never refused and logs no author-diff line",
-                         author_silent_case(MM_DONE, "merge-mixed-done")))
+                         author_silent_case(MM_DONE, "merge-mixed-done", read=True)))
 # Case 2: the builder commits the same merge with the test file resolved. Its test change is denied at commit and push,
 # and blocked at the first stop.
 sh("merge-mixed: a builder's merge commit that resolves two conflicted product files and a conflicted test file "
