@@ -12277,10 +12277,12 @@ def _control_byte_constants(file_name):
 
 
 def frozen_mark_constants_case():
-    """The control-byte mark constants of guard_frozen.py, guard_core.py and guard_env.py are pairwise distinct.
+    """The top-level control-byte mark constants of the three guard modules are pairwise distinct.
 
-    The scope comes first: each named mark must be found, so a rename cannot empty the scan. Then no
-    two marks found may share a byte.
+    Only a module's top-level one-character string assignments are read. A mark assigned in a function or
+    class body, or written inline as a literal (guard_env.py's NUL stand-in is one), is not covered. The
+    scope comes first: each name in MARK_CONSTANT_NAMES must be found, so a rename cannot empty the scan.
+    Then no two marks found may share a byte.
     """
     found = {}
     for file_name in MARK_CONSTANT_FILES:
@@ -12297,7 +12299,7 @@ def frozen_mark_constants_case():
               for value, keys in sorted(by_byte.items()) if len(keys) > 1]
     if shared:
         return False, "two marks share one byte: " + "; ".join(shared)
-    return True, "the %d control-byte mark constants (%s) are pairwise distinct" % (
+    return True, "the %d top-level control-byte mark constants (%s) are pairwise distinct" % (
         len(found), ", ".join(sorted(found)))
 
 
@@ -13733,7 +13735,11 @@ def _build_dotroot():
                         # A root .py that no test pattern matches, so a shell glob `*.py` expands to a file.
                         "main.py": "x = 1\n",
                         # hooks/ holds a test beside product code, as this repo's hooks/ folder does.
-                        "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n"})
+                        "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n",
+                        # merge/ holds a test, so a git listing of that folder names one.
+                        "merge/test_cmd.py": "def test_cmd():\n    assert True\n",
+                        # The pathspecs of the 2>&1 case in DOT_ROOT_WRITES: a test file, and a docs folder.
+                        "hooks/test_guard.py": "def test_guard():\n    assert True\n", "docs/notes.md": "notes\n"})
 
 
 lazy_fixture([DOTROOT], _build_dotroot)
@@ -13764,6 +13770,11 @@ DOT_ROOT_WRITES = (
     ("git ls-files ':!README.md' piped to xargs, sed -i", "git ls-files ':!README.md' | xargs sed -i s/a/b/"),
     # Pinned by shape, as the 2>/dev/null case above: the redirect word is no pathspec.
     ("git ls-files &>/dev/null piped to xargs, sed -i", "git ls-files &>/dev/null | xargs sed -i s/a/b/"),
+    # -x drops only untracked files (git ls-files --others), so the tracked merge/test_cmd.py is still listed.
+    ("git ls-files -x '*.py' of merge piped to xargs, sed -i", "git ls-files -x '*.py' merge | xargs sed -i s/a/b/"),
+    # A redirect before the pathspecs is no pathspec either: hooks/test_guard.py is one, and the listing names it.
+    ("git ls-files 2>&1 hooks/test_guard.py docs piped to xargs, sed -i",
+     "git ls-files 2>&1 hooks/test_guard.py docs | xargs sed -i s/a/b/"),
     # A shell glob target that matches a test in hooks/ is a test write, whatever folder the glob names.
     ("sed -i over the hooks/*.py glob", "sed -i s/a/b/ hooks/*.py"),
     ("perl -pi over the hooks/*.py glob", "perl -pi -e s/a/b/ hooks/*.py"),
@@ -13783,7 +13794,8 @@ sh("builder-test: shell write, git ls-files of src/*.py piped to xargs, sed -i, 
    "git ls-files 'src/*.py' | xargs sed -i s/a/b/", "allow", **DR)
 sh("builder-test: shell write, git ls-files of the src folder piped to xargs, sed -i, is allowed",
    "git ls-files src | xargs sed -i s/a/b/", "allow", **DR)
-# The exclude drops every *.py under src, and src holds no test, so the listing names no test.
+# -x drops only untracked files, so the listing still names the tracked src/app.py. It is product code, not a
+# test, so the sed -i is allowed.
 sh("builder-test: shell write, git ls-files -x '*.py' of src piped to xargs, sed -i, is allowed",
    "git ls-files -x '*.py' src | xargs sed -i s/a/b/", "allow", **DR)
 # A glob over src names product files only, since src holds no test.
@@ -13798,6 +13810,9 @@ sh("builder-test: shell write, sed -i over the *.py glob at the root, is allowed
 # test in tests/, so the case is refused.
 sh("builder-test: shell write, cd tests then sed -i on ../src/app.py, is allowed",
    "cd tests && sed -i 's/a/b/' ../src/app.py", "allow", **DR)
+# sed -n only prints. The pattern names --in-place, which is no flag of this sed run, so nothing is written.
+sh("builder-test: shell read, sed -n over a pattern that names --in-place, is allowed",
+   "sed -n '/use --in-place/p' hooks/test_guard.py", "allow", **DR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
@@ -14168,8 +14183,8 @@ LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 # The mark-constant check is defined in the frozen section, above LOG_CHECKS_EXTRA. Its family is the
 # frozen section's, set by hand.
-MARK_CONSTANTS_LABEL = ("frozen: the control-byte mark constants of guard_frozen.py, guard_core.py and "
-                        "guard_env.py are pairwise distinct")
+MARK_CONSTANTS_LABEL = ("frozen: the top-level control-byte mark constants of guard_frozen.py, guard_core.py "
+                        "and guard_env.py are pairwise distinct")
 LOG_CHECKS_EXTRA.append((MARK_CONSTANTS_LABEL, frozen_mark_constants_case))
 LOG_FAMILY[MARK_CONSTANTS_LABEL] = "frozen"
 for _name, _change in BUILDER_GREEN:
