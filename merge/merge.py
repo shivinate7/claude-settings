@@ -28,10 +28,13 @@
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
                           then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
                           `build next batch on the running head: ...` when a ready PR on that base has CI running. The base is the root's
-                          default branch, and its config is read from it. A done PR that another open PR holds, or that is itself ready with
-                          CI running, is left off the batch line. A root whose read fails prints `repo DIR: unknown (REASON)`; the other roots
-                          print in full, and the run exits 1. Cost: the gh calls of one --reviewed per root, plus one CI read per ready PR on
-                          the base when it has a done PR; no new process, file or timer.
+                          default branch, and its config is read from it. A done PR that another open PR holds, that the base already holds,
+                          or that is itself ready with CI running, is left off the batch line. A root whose read fails, or whose folder is
+                          missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
+                          and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
+                          Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
+                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
+                          new process, file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -3183,6 +3186,7 @@ def review_state(rec, head):
 
 REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when no ready pull request on the base has CI running
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
+REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
 def reviewed_read(h):
     """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
@@ -3213,27 +3217,40 @@ def reviewed_lines(h):
     return reviewed_read(h)[0]
 
 def reviewed_block(h):
-    """-> the lines of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
+    """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
     done pull requests on the host's base, ascending, except one whose head another open pull request on that base holds (Host.holds_head, drafts
-    included: the batch would merge it twice) and one that is ready with CI running (Host.ready_busy). `open batch now` when no ready pull request
-    on that base has CI running, else `build next batch on the running head`. No pull request left, no batch line. Extra cost over reviewed_read:
+    included: the batch would merge it twice), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that
+    is ready with CI running (Host.ready_busy). `open batch now` when no ready pull request on that base has CI running, else `build next batch on
+    the running head`. No pull request left, no batch line. A Stop in a read for the batch line keeps the reviewed lines, prints
+    `batch line unknown (reason)` in place of the batch line, and ok is False; a Stop in reviewed_read raises. Extra cost over reviewed_read:
     only when a done pull request exists on the base, the branch protection read and each ready pull request's check runs, statuses and workflow
-    runs, then one compare per done pull request and other open pull request on the base."""
+    runs, then one compare per done pull request and other open pull request on the base, and one compare per done pull request against the base."""
     lines, done, pulls = reviewed_read(h)
     out = [f"repo {h.repo}:", *lines]
     nums = sorted(n for n, base in done if base == h.base)
-    if nums:
+    if not nums:
+        return out, True
+    try:
         busy = h.ready_busy(pulls, h.base)
         heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base}
-        nums = [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)]
-        if nums:
-            out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in nums))
-    return out
+        nums = [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
+                and not h.holds_head(heads[n], h.base)]
+    except Stop as e:
+        return out + [f"{REVIEW_BATCH_UNKNOWN}({' '.join(str(e).split())})"], False
+    if nums:
+        out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in nums))
+    return out, True
 
 def default_branch(root):
-    """The default branch of the checkout `root`: origin/HEAD first, else the repo's default branch as gh reads it (host_default_branch)."""
+    """The default branch of the checkout `root`: origin/HEAD first, else the repo's default branch as gh reads it (host_default_branch).
+    A folder that is missing or unreadable stops here, naming the root, so --root prints it unknown beside the other roots."""
     c, head = git(root, "rev-parse", "--abbrev-ref", "origin/HEAD")
-    return head.split("/", 1)[1] if not c and "/" in head else host_default_branch(root)
+    if not c and "/" in head:
+        return head.split("/", 1)[1]
+    try:
+        return host_default_branch(root)
+    except OSError as e:  # the gh read runs in the root's folder (cwd=root): a missing or unreadable folder raises before gh starts
+        raise Stop(f"the root {root} cannot be read: {e} " + UNKNOWN_CITE)
 
 def root_host(root, hosts, config):
     """-> the Host of one --root, its base the root's default branch (default_branch) and its merge config read from that base (load_config).
@@ -3261,9 +3278,12 @@ def root_host(root, hosts, config):
     return h
 
 def reviewed_roots(roots, hosts, config):
-    """-> (lines, ok) of `merge --reviewed --root ...`: each root's block in the order given. A root whose read or config stops prints
-    `repo ROOT: unknown (reason)` in its place, and ok is False; the other roots print in full. The notices a root's config read says are held
-    with its block and follow it, so nothing prints until every root is read."""
+    """-> (lines, ok) of `merge --reviewed --root ...`: each root's block in the order given. A root whose read or config stops, or whose folder
+    is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
+    lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
+    says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
+    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
+    request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
@@ -3271,7 +3291,8 @@ def reviewed_roots(roots, hosts, config):
             with contextlib.redirect_stdout(config_says):
                 h = root_host(r, hosts, config)
             with contextlib.redirect_stdout(read_says):
-                block = reviewed_block(h)
+                block, block_ok = reviewed_block(h)
+            ok = ok and block_ok
         except Stop as e:
             block, ok = [f"repo {r}: unknown ({' '.join(str(e).split())})"], False
         lines += [*block, *config_says.getvalue().splitlines(), *read_says.getvalue().splitlines()]
