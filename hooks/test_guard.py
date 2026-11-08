@@ -9760,6 +9760,96 @@ add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
 add("draft-pr: MCP create with draft true is allowed", "allow",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
     repo="x", owner="y", draft=True)
+# A heredoc body is data unless a shell reads it. A python, perl or node run reads the file it names in its
+# own language, so a `gh pr create` line in that file runs nothing (a python syntax error stops it). Main
+# refuses these as draft-pr: a false alarm, so the four must-allow cases are red on main. The deny cases
+# below are the same body run by a shell, or a body a shell expands while it writes, and stay refused.
+PR_BODY = "gh pr create --title x"
+sh("draft-pr: a python file from a quoted heredoc, holding a backslash-n string, is allowed",
+   "\n".join(["cat > probe.py <<'EOF'", r'C = "cat <<EOF\n$(gh pr create --title x)\nEOF"', "EOF",
+              "python3 -I probe.py"]), "allow", cwd=NOGIT)
+sh("draft-pr: a python file from a quoted heredoc, with a bare gh pr create line, is allowed",
+   "\n".join(["cat > probe.py <<'EOF'", PR_BODY, "EOF", "python3 probe.py"]), "allow", cwd=NOGIT)
+sh("draft-pr: a perl file from a quoted heredoc, with a bare gh pr create line, is allowed",
+   "\n".join(["cat > f.pl <<'EOF'", PR_BODY, "EOF", "perl f.pl"]), "allow", cwd=NOGIT)
+sh("draft-pr: a node file from a quoted heredoc, with a bare gh pr create line, is allowed",
+   "\n".join(["cat > f.js <<'EOF'", PR_BODY, "EOF", "node f.js"]), "allow", cwd=NOGIT)
+add("draft-pr: a Write of a file holding a gh pr create line is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=slash(os.path.join(NOGIT, "probe.py")), content=PR_BODY + "\n")
+for _name, _command in (
+    ("sh runs the body file", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "sh p.sh"])),
+    ("bash runs the body file", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "bash p.sh"])),
+    ("a body file run as ./p.sh", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "./p.sh"])),
+    ("source runs the body file", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "source p.sh"])),
+    ("dot runs the body file", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", ". p.sh"])),
+    ("env sh runs the body file", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "env sh p.sh"])),
+    ("sudo bash runs the body file", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "sudo bash p.sh"])),
+    ("a body file piped into sh", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "cat p.sh | sh"])),
+    ("a quoted heredoc piped into sh", "\n".join(["cat <<'EOF' | sh", PR_BODY, "EOF"])),
+    ("a quoted heredoc fed to bash", "\n".join(["bash <<'EOF'", PR_BODY, "EOF"])),
+    ("a quoted heredoc fed to ssh bash -s", "\n".join(["ssh host bash -s <<'EOF'", PR_BODY, "EOF"])),
+    ("an unquoted body a shell expands, run by python",
+     "\n".join(["cat > f.py <<EOF", 'x = "$(gh pr create -t x)"', "EOF", "python3 f.py"])),
+    ("an unquoted body a shell expands, fed to python",
+     "\n".join(["python3 - <<EOF", 'x = "$(gh pr create -t x)"', "EOF"])),
+    ("a bash -c wrapper with short flags", "bash -c 'gh pr create -t x'"),
+):
+    sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# UNCERTAIN, kept as main has it. A wrapper word (`env`, `sudo`) before a python run is read as a possible
+# shell, so the body stays in view and the case is refused. Move it to allow only with a decision on wrappers.
+for _name, _command in (
+    ("env python3 runs the body file", "\n".join(["cat > f.py <<'EOF'", PR_BODY, "EOF", "env python3 f.py"])),
+    ("sudo python3 runs the body file",
+     "\n".join(["cat > f.py <<'EOF'", PR_BODY, "EOF", "sudo python3 f.py"])),
+):
+    sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A backtick span in a body that perl, ruby or node runs is a shell command, so it is judged. A written
+# file run by its interpreter and a body fed to it both reach the span, so each form is refused.
+TICK_BODY = {
+    "perl": "print `gh pr create -t x`;",
+    "ruby": "puts `gh pr create -t x`",
+    "node": "execSync(`gh pr create -t x`)",
+}
+for _lang, _file in (("perl", "f.pl"), ("ruby", "f.rb"), ("node", "f.js")):
+    _run = "%s %s" % (_lang, _file)
+    sh("draft-pr: a %s body with a backtick gh pr create span, run from a written file, is refused" % _lang,
+       "\n".join(["cat > %s <<'EOF'" % _file, TICK_BODY[_lang], "EOF", _run]), "deny", "draft-pr",
+       cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+for _lang in ("perl", "ruby", "node"):
+    sh("draft-pr: a %s body with a backtick gh pr create span, fed to %s, is refused" % (_lang, _lang),
+       "\n".join(["%s - <<'EOF'" % _lang, TICK_BODY[_lang], "EOF"]), "deny", "draft-pr",
+       cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A `$( )` or `<( )` nested in a backtick span is a shell substitution, and perl, ruby and node run the span
+# as a shell, so the gh call inside it runs. Each body carries the gh call only in that nested form.
+sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, fed to perl, is refused",
+   "\n".join(["perl - <<'EOF'", "print `echo $(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a ruby body whose backtick span nests $( ) with gh pr create, fed to ruby, is refused",
+   "\n".join(["ruby - <<'EOF'", "puts `echo $(gh pr create -t x)`", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, run from a written file, is refused",
+   "\n".join(["cat > f.pl <<'EOF'", "print `echo $(gh pr create -t x)`;", "EOF", "perl f.pl"]), "deny",
+   "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body whose backtick span nests <( ) with gh pr create, fed to perl, is refused",
+   "\n".join(["perl - <<'EOF'", "print `cat <(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A lone backtick inside a quoted string opens no span. The span rule must not pair it with the next backtick, or the
+# real span after it goes unread. Each body below holds such a stray backtick before a real span with the gh call.
+sh("draft-pr: a node file with a stray backtick in a single-quoted string, then an execSync gh pr create span, is refused",
+   "\n".join(["cat > f.js <<'EOF'", "const b = 'Fixes `foo';", "execSync(`gh pr create -t x`);", "EOF", "node f.js"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a ruby file with a stray backtick in a single-quoted string, then a backtick gh pr create span, is refused",
+   "\n".join(["cat > f.rb <<'EOF'", "puts 'use ` here'", "puts `gh pr create -t x`", "EOF", "ruby f.rb"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl file with an escaped backtick in a double-quoted string, then a span nesting $( gh pr create ), is refused",
+   "\n".join(["cat > f.pl <<'EOF'", r'print "\`npm\`";', "print `$(gh pr create -t x)`;", "EOF", "perl f.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A quote in a comment opens no string. A lone apostrophe in `# don't` must not swallow the real span after it.
+sh("draft-pr: a perl file with an apostrophe in a comment, then a backtick gh pr create span, is refused",
+   "\n".join(["cat > f.pl <<'EOF'", "# don't", "print `gh pr create -t x`;", "EOF", "perl f.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
