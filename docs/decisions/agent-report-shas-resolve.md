@@ -24,8 +24,9 @@ The payload must carry a valid `agent_id`. Every agent type is judged, reviewers
 ## What counts as a sha
 
 - A token of 7 to 40 lowercase hex characters, with at least one digit and one letter a-f.
-- A token that touches `-`, `_`, `/`, `#`, `.` or `@` is not one. That rules out agent ids, UUIDs, colours, URLs and `owner/repo@sha`.
-- A token inside a double-quoted span or on a `> ` quoted line is skipped, since quoted text may come from another repo. A backticked sha is checked.
+- A token that touches `-`, `_`, `/`, `#`, `.` or `@` is not one. That rules out agent ids, UUIDs, colours, URLs, file names and `owner/repo@sha`.
+- A sentence mark after the token (`.`, `,`, `;`, `:`, `)`, `]`) followed by a space or the end of the text does not count as touching, so "Fixed in 8c1f0e2a7." is judged.
+- A token inside a double-quoted span or on a `> ` quoted line is skipped, since quoted text may come from another repo. A quoted span ends at the line end. A backticked sha is checked.
 - A sha resolves when `git cat-file --batch-check` finds it as `<sha>^{commit}` in the repo of the payload's `cwd`. A short sha that matches more than one object is ambiguous, not missing, and passes.
 
 ## Fail open
