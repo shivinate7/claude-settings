@@ -45,7 +45,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, functools, hashlib, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -3056,14 +3056,25 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
+REVIEW_STAMP_SALT = "claude-settings review record stamp v1"  # a stamp says the merge tool printed the record; it catches a typed or copied one, not a forger (decision guard-guards-mistakes-only)
+
+def review_stamp(lines):
+    """-> the first 16 hex digits of sha256 over REVIEW_STAMP_SALT and the record lines above the Stamp line, the marker line included."""
+    return hashlib.sha256("\n".join([REVIEW_STAMP_SALT, *lines]).encode("utf-8")).hexdigest()[:16]
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
-    fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value."""
-    return "\n".join([REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
-                      *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
-                      *([f"Fix check: {', '.join(fix)}"] if fix else []),
-                      f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
+    fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value. The Stamp line follows Net value."""
+    above = [REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
+             *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
+             *([f"Fix check: {', '.join(fix)}"] if fix else []),
+             f"Net value: {net}"]
+    return "\n".join([*above, f"Stamp: {review_stamp(above)}", REVIEW_CI_LINE]) + "\n"
+
+def review_has_pass(rounds, fix):
+    """True when the fix check is PASS or a line of the newest round is PASS: the records that wait on the lane's lint (decision pr-review-record)."""
+    top = max((r[0] for r in rounds), default=0)
+    return bool(fix and fix[3] == "PASS") or any(r[0] == top and r[3] == "PASS" for r in rounds)
 
 def review_marked(text):
     """True when the first line of `text` is exactly the review-record marker: the one test of whether a body is a record."""
@@ -3074,15 +3085,19 @@ def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
     malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
-    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. Trailing blank lines are allowed. The
+    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. The `Stamp: <16 hex>` line between Net value and
+    the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. Trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = text.splitlines()
     if "---" in lines:
         lines = lines[:lines.index("---")]
     while lines and not lines[-1].strip():
         lines.pop()
-    if len(lines) < 7 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
+    if len(lines) < 8 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
         return None
+    if lines[-2] != f"Stamp: {review_stamp(lines[:-2])}":
+        return None
+    lines = lines[:-2] + lines[-1:]  # the stamp is read; the fields run as before
     pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
     fields = [re.fullmatch(pat, line, re.ASCII) for pat, line in zip(pats, lines[1:5])]
     net = re.fullmatch(r"Net value: (.+)", lines[-2])
@@ -3379,6 +3394,12 @@ def main(argv, host=None, lock=None):
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
+            if review_has_pass(a.round, a.fix_check):
+                try:  # a PASS record is held until the lane's lint passes on this head (decision pr-review-record); lane_lint is the one home of that lint
+                    with contextlib.redirect_stdout(sys.stderr):  # its PASS line is no part of the record
+                        lane_lint(root, str(a.pr), h, "", "")
+                except Stop as e:
+                    raise Stop(f"no PASS record is printed while the lint fails: {e}\nRun `merge --lane-lint {a.pr}` until it passes, then print the record again. " + REVIEW_CITE)
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
