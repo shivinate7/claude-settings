@@ -606,7 +606,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
 .rsteps .active .ttl { font-weight: 700; }
 .rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
-.rsteps .stl-row > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .stl-row > .rrow { background: color-mix(in srgb, var(--holds) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--holds); }
+/* A paused step keeps status active: no tint, and a muted edge in the paused band's grey. */
+.rsteps .pzd-row > .rrow { background: none; box-shadow: inset 3px 0 0 var(--muted); }
+.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
 .rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
 .rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
 .rsteps li.open .rbody { display: block; }
@@ -3363,7 +3366,7 @@ function stepRow(s, nextIds) {
   const stl = shownState(s) === "stalled", pzd = shownState(s) === "paused", isNew = stepNew(s);
   const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : "", stl ? "Stalled" : "", pzd ? "Paused" : "", isNew ? "Updated since your last visit" : ""];
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = stl ? LBL.stalled : pzd ? LBL.paused : LBL[s.status] || LBL.todo;
-  return `<li class="${s.status}${stl ? " stl-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
+  return `<li class="${s.status}${stl ? " stl-row" : ""}${pzd ? " pzd-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
     <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(stl ? "stalled" : pzd ? "paused" : s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
       <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}${stl ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLY.stalled}</span>` : ""}${pzd ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused: ${esc((s.paused || {}).why || "")}">${GLY.paused}</span>` : ""}${isNew ? stepMark(s) : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
     <div class="rbody"><dl>

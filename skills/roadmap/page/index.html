@@ -177,6 +177,12 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 .st.active .rw{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
 .st.active .ttl{font-weight:600}
 .st.blocked .rw{box-shadow:inset 3px 0 0 var(--bad)}
+/* A stalled step keeps status active; its row overrides the in-progress blue with the stalled band's red. The tag pill sits on --surface because its own --bad-soft fill vanishes against the tint. */
+.st.stl-row .rw{background:var(--bad-soft);box-shadow:inset 3px 0 0 var(--bad)}
+.st.stl-row .tag.stl{background:var(--surface)}
+/* A paused step also keeps status active: no tint, and a muted edge in the paused band's grey. --surface-2 is the hover fill. */
+.st.pzd-row .rw{background:none;box-shadow:inset 3px 0 0 var(--muted)}
+.st.pzd-row .rw:hover{background:var(--surface-2)}
 .tag{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:999px;line-height:17px;white-space:nowrap}
 .tag.t-now{background:var(--accent);color:var(--on-accent)}
 .tag.next{border:1px solid var(--accent);color:var(--accent-ink)}
@@ -646,7 +652,7 @@ function stepRow(s, nextIds){
   const tags = (shown==='active'?'<span class="tag t-now">Now</span>':'') + (ni>=0?`<span class="tag next">Next ${ni+1}</span>`:'') + (s.status==='blocked'?'<span class="tag blk">Blocked</span>':'');
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id);
   const lbl = LABEL[shown]||LABEL.todo;
-  return `<li class="st ${s.status}${open?' open':''}" id="s-${esc(s.id)}">
+  return `<li class="st ${s.status}${shown==='stalled'?' stl-row':''}${shown==='paused'?' pzd-row':''}${open?' open':''}" id="s-${esc(s.id)}">
     <div class="rw">
       <button class="sp" data-cycle="${esc(s.id)}" ${db&&!db.readOnly?'':'disabled'} title="${lbl}. Tap to change." aria-label="${esc(s.id)} status: ${lbl}. Tap to change.">${glyph(shown)}</button>
       <button class="tg" data-row="${esc(s.id)}" aria-expanded="${open}"><span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title||'Untitled step')}</span>
