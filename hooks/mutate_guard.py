@@ -2010,8 +2010,8 @@ MUTATIONS = [
      "guard", "git-after-cd: a cd then ; then git status and git log pass"),
     # ---- conflict-markers after a segment the cd walk cannot read (an echo with an ANSI-C quote).
     ("conflict-markers: a segment the walk cannot read hides the cd before it",
-     '        where = walk.where or command_root(stripped, cwd)   # a segment the walk cannot read: the last cd, as before\n',
-     '        where = walk.where\n',
+     '        where = walk.where or command_root(stripped, cwd)',
+     '        where = walk.where',
      "guard", "a cd into a repo with a triplet tracked, then ; an echo the tokenizer cannot read, then add -A and commit is refused"),
     ("conflict-markers: a print-only echo is a step that may change the tree",
      '    if _PRINT_ONLY.match(segment) and not _REACHES_TREE.search(segment):\n        return True\n',
