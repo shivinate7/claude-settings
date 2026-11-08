@@ -14,6 +14,7 @@ Output names pinned (the selector writes them to $GITHUB_OUTPUT):
   any    true when files is non-empty, else false
   files_windows  a JSON list of the test files the Windows job runs
   files_macos    a JSON list of the test files the macOS job runs
+  matrix         {"include": [{"os", "files": [{"path", "cmd"}]}]}, one entry per OS with files; cmd is the run line's command
 
 Run with:  python3 lint/test_touched_tests.py -v
 """
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from textwrap import dedent
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -99,12 +101,17 @@ def ci_for(paths):
     return "name: fixture checks\non: pull_request\njobs:\n  windows:\n    runs-on: windows-latest\n    steps:\n" + steps
 
 
+def with_checks(base, text):
+    """`base` with `text` as the checks.yml the selector reads, in place of the real one."""
+    out = dict(base)
+    out[CI_PATH] = text
+    return out
+
+
 def with_ci(base, paths=None):
     """`base` with a checks.yml in place of the real one. With `paths`, its windows job runs each of them. Without,
     the fixture checks.yml runs test_a (Windows), test_b (Linux) and test_c (macOS)."""
-    out = dict(base)
-    out[CI_PATH] = ci_for(paths) if paths is not None else FIXTURE_CI
-    return out
+    return with_checks(base, ci_for(paths) if paths is not None else FIXTURE_CI)
 
 
 class Selector(unittest.TestCase):
@@ -222,7 +229,7 @@ class Selector(unittest.TestCase):
         return windows, macos, stdout
 
     def include_entries(self, matrix_text):
-        """The matrix's include entries, each as {os, files} with files a sorted list read from its JSON text."""
+        """The matrix's include entries, each as {os, files}: files a list of {path, cmd} sorted by path."""
         matrix = self.json_value(matrix_text, "matrix")
         self.assertIsInstance(matrix, dict, f"matrix= is not a JSON object: {matrix_text!r}")
         include = matrix.get("include")
@@ -230,9 +237,21 @@ class Selector(unittest.TestCase):
         entries = []
         for entry in include:
             self.assertIsInstance(entry, dict, f"a matrix entry is not an object: {entry!r}")
-            self.assertIsInstance(entry.get("files"), str, f"a matrix entry's files is not JSON text: {entry!r}")
-            entries.append({"os": entry.get("os"), "files": sorted(self.json_list(entry["files"], "matrix files"))})
+            files = entry.get("files")
+            self.assertIsInstance(files, list, f"a matrix entry's files is not a JSON list: {entry!r}")
+            for item in files:
+                self.assertIsInstance(item, dict, f"a matrix file is not an object: {item!r}")
+                self.assertEqual(sorted(item), ["cmd", "path"], f"a matrix file is not {{path, cmd}}: {item!r}")
+            entries.append({"os": entry.get("os"), "files": sorted(files, key=lambda item: item["path"])})
         return sorted(entries, key=lambda e: str(e["os"]))
+
+    def exits_1(self, base, change=None, delete=()):
+        """Run the selector on a checks.yml it cannot read. -> its stderr. The run exits 1 and writes no output."""
+        repo, sha, out = self.fixture(base, change, delete)
+        r, outputs = self.select(repo, sha, out)
+        self.assertEqual(r.returncode, 1, f"the selector exited {r.returncode}, not 1, on a checks.yml it cannot read:\n{r.stderr}")
+        self.assertEqual(outputs, {}, f"the selector wrote output on its exit 1: {outputs}")
+        return r.stderr
 
     def test_control_the_fixture_diff_names_the_changed_path(self):
         """Green control: with no selector, the fixture's own diff still holds the path it changed, so each red case
@@ -377,7 +396,9 @@ class Selector(unittest.TestCase):
         self.assertEqual(windows, [a], "files_windows names a test no Windows job runs")
         self.assertEqual(macos, [c], "files_macos names a test no macOS job runs")
         self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
-        built = [{"os": name, "files": listed} for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
+        cmds = {a: "python3", c: "python3"}  # the fixture's run lines
+        built = [{"os": name, "files": [{"path": p, "cmd": cmds[p]} for p in listed]}
+                 for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
         self.assertEqual(self.include_entries(outputs["matrix"]), sorted(built, key=lambda e: e["os"]),
                          "matrix is not the include entries built from files_windows and files_macos")
 
@@ -396,6 +417,234 @@ class Selector(unittest.TestCase):
         self.assertIn(a, windows, "a Windows-only test is not in files_windows")
         self.assertNotIn(a, macos, "a Windows-only test is in files_macos, though no macOS job runs it")
         self.assertTrue(skipped_on(stdout, a, MACOS_KEY), f"the log does not name {a} as skipped on macOS")
+
+    # Row 2: a .ps1 source maps to its own .test.ps1 and install-*.test.ps1 beside it.
+    def test_a_ps1_source_lists_its_test_and_its_dash_tests(self):
+        base = {"install.ps1": "old\n", "install.test.ps1": "old\n", "install-no-gap.test.ps1": "old\n"}
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - shell: powershell
+                    run: powershell -NoProfile -File install.test.ps1
+                  - shell: powershell
+                    run: powershell -NoProfile -File install-no-gap.test.ps1
+            """)
+        windows, _, _ = self.per_os(with_checks(base, text), {"install.ps1": "new\n"})
+        self.assertEqual(windows, ["install-no-gap.test.ps1", "install.test.ps1"],
+                         "install.ps1 does not list its install.test.ps1 and install-*.test.ps1")
+
+    # Row 2: a .sh source maps to its .test.sh beside it, as well as test_<stem>.sh.
+    def test_a_sh_source_also_lists_its_dot_test_sh(self):
+        base = {"merge/install_from_main.sh": "old\n", "merge/install_from_main.test.sh": "old\n",
+                "merge/test_install_from_main.sh": "old\n"}
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: sh merge/install_from_main.test.sh
+                  - run: sh merge/test_install_from_main.sh
+            """)
+        windows, _, _ = self.per_os(with_checks(base, text), {"merge/install_from_main.sh": "new\n"})
+        self.assertEqual(windows, ["merge/install_from_main.test.sh", "merge/test_install_from_main.sh"],
+                         "install_from_main.sh does not list its install_from_main.test.sh")
+
+    # Row 2 control: a tools/*.ps1 with no test beside it stays unmapped, and the log says so. This passes before the fix.
+    def test_a_ps1_tool_with_no_test_beside_it_maps_to_nothing(self):
+        windows, macos, stdout = self.per_os(with_ci({"tools/fmt.ps1": "old\n"}), {"tools/fmt.ps1": "new\n"})
+        self.assertEqual(windows + macos, [], "a tools/*.ps1 with no test beside it listed a test")
+        self.assertIn("no test file maps to it", stdout, "the log does not say the tools/*.ps1 maps to no test")
+
+    # Row 3: a touched mods/<mod>/ source maps to every mods/<mod>/**/*.test.mjs, not node_modules.
+    def test_a_mods_source_lists_every_mod_test_but_not_node_modules(self):
+        base = {"mods/plain-diff/check.mjs": "old\n", "mods/plain-diff/tests/a.test.mjs": "old\n",
+                "mods/plain-diff/sub/b.test.mjs": "old\n", "mods/plain-diff/node_modules/pkg/c.test.mjs": "old\n"}
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: node mods/plain-diff/tests/a.test.mjs
+                  - run: node mods/plain-diff/sub/b.test.mjs
+                  - run: node mods/plain-diff/node_modules/pkg/c.test.mjs
+            """)
+        windows, _, _ = self.per_os(with_checks(base, text), {"mods/plain-diff/check.mjs": "new\n"})
+        self.assertEqual(windows, ["mods/plain-diff/sub/b.test.mjs", "mods/plain-diff/tests/a.test.mjs"],
+                         "a touched mods/<mod>/ source does not list every test under it, or lists one under node_modules")
+
+    # Row 4: a trailing comment on runs-on does not hide the runner. The unquoted form passes before the fix.
+    def test_a_runner_with_a_trailing_comment_is_read(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest  # the Windows runner
+                steps:
+                  - run: python3 lint/test_a.py
+            """)
+        windows, _, _ = self.per_os(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertEqual(windows, [a], "a trailing comment on an unquoted runs-on hid the runner")
+
+    # Row 4: a comment after a quoted runner is cut outside the quotes, so the runner is read.
+    def test_a_quoted_runner_with_a_trailing_comment_is_read(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: "windows-latest"  # the Windows runner
+                steps:
+                  - run: python3 lint/test_a.py
+            """)
+        windows, _, _ = self.per_os(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertEqual(windows, [a], "a comment after a quoted runs-on was not cut, so the runner was not read")
+
+    # Row 5: a flow-style step in a job the selector reads exits 1, naming its line. It is never misread in silence.
+    def test_a_flow_style_step_exits_1_naming_its_line(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - { run: python3 lint/test_a.py }
+            """)
+        n = next(i for i, line in enumerate(text.splitlines(), 1) if line.lstrip().startswith("- {"))
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn(f"line {n}", stderr, f"the exit does not name the flow step's line {n}: {stderr}")
+
+    # Row 5: a powershell step names lint\test_x.py. The backslash reads as a slash there, so the test runs on Windows.
+    def test_a_powershell_step_naming_a_backslash_path_is_eligible_on_windows(self):
+        a = "lint/test_x.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - shell: powershell
+                    run: python lint\\test_x.py
+            """)
+        windows, _, _ = self.per_os(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertEqual(windows, [a], "a powershell step's backslash path was not read as lint/test_x.py")
+
+    # Row 6: each exit-1 branch exits 1 with no output, and names what it could not read.
+    def test_exit_1_when_runs_on_is_a_matrix_expression(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              matrix-os:
+                runs-on: ${{ matrix.os }}
+                steps:
+                  - run: python3 lint/test_a.py
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn("matrix-os", stderr, f"the exit does not name the job with the matrix runs-on: {stderr}")
+
+    def test_exit_1_when_runs_on_is_a_list(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              list-os:
+                runs-on: [self-hosted, windows]
+                steps:
+                  - run: python3 lint/test_a.py
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn("list-os", stderr, f"the exit does not name the job with the list runs-on: {stderr}")
+
+    def test_exit_1_when_a_job_has_no_runs_on(self):
+        """A reusable job (`uses:`) has no runs-on this can read."""
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              reusable:
+                uses: ./.github/workflows/reusable.yml
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn("reusable", stderr, f"the exit does not name the job with no runs-on: {stderr}")
+
+    def test_exit_1_when_checks_yml_has_no_jobs(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn("checks.yml", stderr, f"the exit does not name the checks.yml with no jobs: {stderr}")
+
+    def test_exit_1_when_checks_yml_is_indented_with_a_tab(self):
+        a = "lint/test_a.py"
+        text = ("name: fixture checks\non: pull_request\njobs:\n  windows:\n\truns-on: windows-latest\n"
+                "    steps:\n      - run: python3 lint/test_a.py\n")
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn("checks.yml", stderr, f"the exit does not name the checks.yml indented with a tab: {stderr}")
+
+    def test_exit_1_when_checks_yml_is_missing_at_head(self):
+        a = "lint/test_a.py"
+        stderr = self.exits_1({a: "old\n"}, {a: "new\n"}, delete=[CI_PATH])
+        self.assertIn("checks.yml", stderr, f"the exit does not name a checks.yml missing at HEAD: {stderr}")
+
+    # Row 7: each file's cmd is the command its run line names before the path.
+    def test_matrix_files_carry_the_command_from_the_run_line(self):
+        files = ["merge/test_y.sh", "lint/z.test.mjs", "skills/alpha/tests/a.test.mjs"]
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: sh merge/test_y.sh
+                  - run: node lint/z.test.mjs
+                  - run: node --test skills/alpha/tests/a.test.mjs
+            """)
+        outputs, _ = self.run_outputs(with_checks({p: "old\n" for p in files}, text), {p: "new\n" for p in files})
+        self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
+        self.assertEqual(self.include_entries(outputs["matrix"]), [{"os": "windows-latest", "files": [
+            {"path": "lint/z.test.mjs", "cmd": "node"},
+            {"path": "merge/test_y.sh", "cmd": "sh"},
+            {"path": "skills/alpha/tests/a.test.mjs", "cmd": "node --test"},
+        ]}], "a matrix file's cmd is not the command its run line names")
+
+    # Row 7: a file mod-tests.sh runs keeps that script's form: node for a mods test, node --test for a map skill test.
+    def test_a_runner_script_file_keeps_the_script_form(self):
+        mods, skill = "mods/plain-diff/tests/a.test.mjs", "skills/plain-english-map/tests/b.test.mjs"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: bash .github/scripts/mod-tests.sh
+            """)
+        outputs, _ = self.run_outputs(with_checks({mods: "old\n", skill: "old\n"}, text), {mods: "new\n", skill: "new\n"})
+        self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
+        self.assertEqual(self.include_entries(outputs["matrix"]), [{"os": "windows-latest", "files": [
+            {"path": mods, "cmd": "node"},
+            {"path": skill, "cmd": "node --test"},
+        ]}], "a runner-script file did not keep the script's own command form")
 
 
 if __name__ == "__main__":
