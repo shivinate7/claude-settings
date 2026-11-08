@@ -2425,8 +2425,8 @@ def ci_job_run(wt, *args):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
-    lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, its skipped lines, so no pass hides a
-    CI step that did not run. log: ci-job's log line, as a list of
+    lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
+    `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
@@ -2436,7 +2436,7 @@ def ci_job_run(wt, *args):
     lines = out.splitlines()
     log = [l for l in lines if l.startswith("log=")][-1:]
     if c == 0:
-        return "pass", [l.rstrip() for l in lines if l.startswith("skipped")], log, False
+        return "pass", [l.split(None, 1)[1].split(": ", 1)[0] for l in lines if l.startswith("skipped") and len(l.split(None, 1)) > 1], log, False
     if c == 1:
         return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
     if c == 2:
@@ -2463,8 +2463,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         drop_worktree(root, tmp, wt)
     short = head[:9]
     if state == "pass":
-        skipped = [l.split(None, 1)[1].split(": ", 1)[0] for l in lines if len(l.split(None, 1)) > 1]  # ci-job's `skipped <step>: <why>` lines
-        named = f" ({len(skipped)} CI step{'s' if len(skipped) != 1 else ''} skipped: {', '.join(skipped)})" if skipped else ""
+        named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.")
         return 0
     if state == "fail":
