@@ -1426,6 +1426,142 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/guide.md": "# Guide\n"})
         self.refused()
 
+    def move_main_after_the_claim(self, claimed, move=None):
+        """Main moves during the wait, after the claim push, so the green run needs the small-move proof. move: the push (default a docs-only commit)."""
+        def on_wait():
+            claimed.append(self.head())
+            (move or (lambda: self.on("main", {"docs/guide.md": "# Guide\n"})))()
+        self.host.on_wait = on_wait
+
+    def base_read_fails_after_the_claim(self, matches, cause, move=None):
+        """A git read in the small-move proof fails after the claim push: `matches(args)` picks it. The stop is unknown, keeps the claim and names `cause`."""
+        claimed = []
+        self.move_main_after_the_claim(claimed, move)
+        real = merge.git
+        def git(cwd, *a, **k):
+            if claimed and matches(a):
+                return 128, "fatal: unreadable"
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", git), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn(cause, out, "the stop does not name the read that could not run")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_merge_of_the_base_that_fails_without_a_conflict_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        real = merge.git
+        def merge_fails(cwd, *a, **k):
+            if claimed and "Merge origin/main to read the lints" in a:  # the merge the lints run on: it fails, and no file conflicts
+                return 128, "fatal: unable to write new index file"
+            return real(cwd, *a, **k)
+        with unittest.mock.patch.object(merge, "git", merge_fails), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("does not merge cleanly", out, "the stop does not name the merge that failed")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_lint_step_listing_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        real = merge.sh
+        def plan_fails(args, *a, **k):
+            if claimed and "--plan" in args:  # lint_steps: ci-job cannot list the lint steps
+                return 1, "ci-job: cannot list the steps"
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", plan_fails), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("the lint steps cannot be listed", out, "the stop does not name the lint listing")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_checks_workflow_that_cannot_be_read_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        workflow = os.path.join(".github", "workflows", "checks.yml")
+        real_open = open
+        def unreadable(path, *a, **k):
+            if claimed and str(path).endswith(workflow):  # hit_suites reads the workflow of the merge
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_open(path, *a, **k)
+        with unittest.mock.patch.object(merge, "open", unreadable, create=True), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("the workflow cannot be read", out, "the stop does not name the workflow read")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_checks_suite_that_cannot_be_read_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        suite = os.path.join("hooks", "test_reads_guide.py")
+        real_open = open
+        def unreadable(path, *a, **k):
+            if claimed and str(path).endswith(suite):  # hit_suites reads each suite line's file
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_open(path, *a, **k)
+        with unittest.mock.patch.object(merge, "open", unreadable, create=True), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("cannot be read", out, "the stop does not name the suite read")
+        self.assertIn("test_reads_guide.py", out, "the stop does not name the suite")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_the_merge_base_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.base_read_fails_after_the_claim(lambda a: a[:1] == ("merge-base",), "the merge base cannot be read")
+
+    def test_the_changed_paths_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.base_read_fails_after_the_claim(lambda a: a[:1] == ("diff",) and "-z" in a, "the paths of main or of the batch cannot be read")
+
+    def test_the_commit_count_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.base_read_fails_after_the_claim(lambda a: a[:2] == ("rev-list", "--count"), "the paths of main or of the batch cannot be read")
+
+    def test_the_worktree_head_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.base_read_fails_after_the_claim(lambda a: a == ("rev-parse", "HEAD"), "the worktree's HEAD cannot be read")
+
+    def test_the_trees_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        def empty_main_commit():  # main moves by a commit that changes no path, so the proof reads the trees of its commits
+            o = self.other
+            sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+            sh(o, "git", "commit", "-q", "--allow-empty", "-m", "main: an empty commit"); sh(o, "git", "push", "-q", "origin", "main")
+        self.scoped()
+        self.base_read_fails_after_the_claim(lambda a: a[:2] == ("log", "--format=%T"), "the trees of main's commits since the merge base cannot be read",
+                                             move=empty_main_commit)
+
+    def test_the_proof_that_cannot_start_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.scoped()
+        claimed = []
+        self.move_main_after_the_claim(claimed)
+        real = merge.sh
+        def scope_cannot_start(args, *a, **k):
+            if claimed and merge.CI_SCOPE in args:  # the scope script the proof runs cannot start
+                raise OSError(2, "No such file or directory", merge.CI_SCOPE)
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", scope_cannot_start), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("the proof could not run", out, "the stop does not name the proof")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_real_conflict_with_the_base_is_still_a_refusal(self):
+        """Main and the batch both change the records page, which the shared-path check leaves out, so git conflicts. A refusal that names the merge, never unknown."""
+        repo, _ = self.batch_repo()
+        page = os.path.join(*merge.RECORDS_PAGE.split("/"))
+        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, page), "main\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main page")
+        sh(repo, "git", "checkout", "-q", "n"); put(os.path.join(repo, page), "batch\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "batch page")
+        n_head = sh(repo, "git", "rev-parse", "HEAD")
+        with tempfiles_in_run_folder():
+            ok, why = merge.small_base_move(repo, "main", n_head)
+        self.assertFalse(ok, why)
+        self.assertNotIsInstance(why, merge.UnreadText, why)
+        self.assertIn("does not merge cleanly", why)
+
 class CutBranch(Env):
     def local_branch(self, extra):
         sh(self.co, "git", "fetch", "-q", "origin")
@@ -2879,6 +3015,26 @@ class ClaimSurvivesUnknown(Env):
         rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_an_os_error_from_the_merge_call_after_the_claim_push_stops_unknown_and_says_it_may_have_landed(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        def merge_fails(*a):
+            raise OSError(5, "Input/output error")
+        self.host.merge = merge_fails
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("may have landed", out, "the stop does not say the merge may have landed")
+
+    def test_a_timeout_from_the_merge_call_after_the_claim_push_stops_unknown_and_says_it_may_have_landed(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        def merge_times_out(*a):
+            raise subprocess.TimeoutExpired(["gh", "api"], 30)
+        self.host.merge = merge_times_out
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("may have landed", out, "the stop does not say the merge may have landed")
 
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
@@ -6243,6 +6399,44 @@ class DebtRetire(Env):
         names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
         self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
 
+
+    def cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self, error):
+        """The PR closes a debt by a prose check and cites a run on its head. The run reads green before the claim push; after it, the read raises."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        run_head = self.head()
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        claimed = []
+        def read(url):
+            if claimed:
+                raise error
+            return "success", run_head
+        self.host.cited_run = read
+        self.host.on_wait = lambda: claimed.append(self.head())
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("could not be read", out, "the stop does not name the cited run that could not be read")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_cited_run_read_that_fails_with_a_network_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(merge.NetStop("the run's reply was cut short"))
+
+    def test_a_cited_run_read_that_fails_with_an_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        self.cited_run_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(RuntimeError("boom"))
+
+    def test_a_cited_run_that_is_red_after_the_claim_push_still_reverts(self):
+        """A real finding: the cited run reads green before the claim push and red after it. A red finding refuses, so the claim reverts."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        run_head = self.head()
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.cited_run = lambda url: ("failure", run_head) if claimed else ("success", run_head)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reverted on feat", out)
+        self.assertIn("closes a debt without proof", out)
+        self.assertEqual(self.show("feat", "docs/decisions/second.md"), record("pending", "second").strip())
+        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
 
 class DraftPreview(Env):
     """`merge <pr>` with no --confirm: a draft is previewed, not refused. The silent-undo check runs on the head
