@@ -1720,6 +1720,11 @@ _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), r
 _BRIEF_LINE = re.compile(
     _MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER) + r"[\s*_]*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?",
     re.IGNORECASE)
+BRIEF_TRIAGE_LABEL = "Triage"  # a lane brief names triage's and the batch runner's session ids, so the lane can reach them
+BRIEF_RUNNER_LABEL = "Batch runner"
+_BRIEF_ID_FORM = r"\b{label}(?:\s*\d+)?(?:\s*\([^()]*\))?\s*:\s*session_[A-Za-z0-9]+"
+_BRIEF_TRIAGE_ID = re.compile(_BRIEF_ID_FORM.format(label=re.escape(BRIEF_TRIAGE_LABEL)), re.IGNORECASE)
+_BRIEF_RUNNER_ID = re.compile(_BRIEF_ID_FORM.format(label=re.escape(BRIEF_RUNNER_LABEL)), re.IGNORECASE)
 BRIEF_NO_RECORD_REASON = (
     "this session's transcript holds no get_session or create_session record of the target, so the guard "
     "cannot tell which topic the lane holds. Run get_session on the target alone, in its own turn, then retry. "
@@ -1782,11 +1787,17 @@ def topic_hit(first: str, tags, start: bool = False):
         return "lane brief for step " + str(step) + " to a lane with no topic tag", \
             BRIEF_START_STEP_REASON if start else BRIEF_STEP_REASON
     return None
+BRIEF_IDS_REASON = (
+    "this brief does not name both the triage session and the batch runner, so the lane cannot reach them. "
+    "Add `" + BRIEF_TRIAGE_LABEL + ": session_<id>` and `" + BRIEF_RUNNER_LABEL + ": session_<id>` to the brief, "
+    "each on a line of its own or beside the Coordinator id. The coordinator copies both ids from its own records. "
+    "(decision session-tiers, a lane holds one topic)"
+)
 
 
 def brief_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
-    hold, else None. Only a message whose first non-blank line (after its Grant line, if any) starts with
+    hold, or one that names no triage or no batch runner session id, else None. Only a message whose first non-blank line (after its Grant line, if any) starts with
     LANE_BRIEF_MARKER is read; the transcript is read for that message alone. A Grant line before such a brief
     must hold the owner's words (grant_line_holds_words). A target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
@@ -1826,7 +1837,15 @@ def brief_hit(tool: str, tool_input, transcript: str):
         return None
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
-    return topic_hit(first, tags)
+    return topic_hit(first, tags) or _brief_ids_hit(text)
+
+
+def _brief_ids_hit(message: str):
+    """A brief that cleared the topic or step check is refused when its text lacks the triage or the batch runner
+    id. Reads the message text only."""
+    if _BRIEF_TRIAGE_ID.search(message) and _BRIEF_RUNNER_ID.search(message):
+        return None
+    return "lane brief with no triage or no batch runner session id", BRIEF_IDS_REASON
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)

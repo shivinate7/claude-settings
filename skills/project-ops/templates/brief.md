@@ -3,6 +3,8 @@ Lane brief: <step-slug>. Topic: <topic-slug>. <Plain name of the step>.
 
 The lane treats the Grant line as the owner's grant. It checks the grant against the coordinator's chat only when the act cannot be undone.
 
+Coordinator: session_<id>. Batch runner: session_<id>. Triage: session_<id>. The guard refuses a brief that lacks the last two (rule `lane-one-topic`).
+
 <Who runs it: a cloud lane, or a lane on a named local machine.> The coordinator
 starts it with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
 The coordinator also tags the lane `cs-topic:<topic slug>`, its one topic. The step slug is the step id.

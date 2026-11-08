@@ -186,8 +186,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        with no cs-topic is judged by its cs-step tags: the brief's step must be one. The marker matches
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A `Grant:` line before the marker
-                       that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
-                       line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
+                       that holds a `<` or no letter or digit is a refusal. A brief to a lane that clears those checks is
+                       refused unless its text names `Triage: session_<id>` and `Batch runner: session_<id>` (label without
+                       case, optional number and parenthetical gloss, anywhere in the message). A lane `create_session` whose
+                       prompt has the marker line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
