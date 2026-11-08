@@ -1,6 +1,6 @@
 {
   "added": "2026-11-08T05:30:00Z",
-  "context": "Goal: a test that fails only on Windows shows up before the batch, so it drops no batch.\nProblem (rule): lane PRs are drafts and run no CI, so the only Windows run is the batch's. Each way to run Windows for each lane breaks a recorded ruling.\nBased on (observed): draft lane PRs skip every job (run 42450467463, #1472).\nBased on (observed): batch #1782 caught the T11b red in checks-windows, then was rebuilt without #1472.\nBased on (ruling): decisions/draft-until-reviewed (owner, 2026-10-10 and 2026-10-13): CI skips drafts, and the batch run is the only CI run. Asked again because tonight a Windows-only red dropped #1472 from batch #1782 and forced a 48-lane rebuild, a cost that ruling did not weigh.\nDeparts from: decision draft-until-reviewed, where CI skips drafts \u2014 option a runs one Windows job on a draft lane PR. Option b instead departs from rule git-integration-branch-merge, one CI run per batch.\nMeanwhile: lane windows-tests-for-touched-files (session_013NEJL4HeTtQTFg5s9G62RY) waits on this answer.",
+  "context": "Goal: a test that fails only on Windows shows up before the batch, so it drops no batch.\nProblem (rule): lane PRs are drafts and run no CI, so the only Windows run is the batch's. Each way to run Windows for each lane breaks a recorded ruling.\nBased on (observed): draft lane PRs skip every job (run 42450467463, #1472).\nBased on (observed): batch #1782 caught the T11b red in checks-windows, then was rebuilt without #1472.\nBased on (ruling): decisions/draft-until-reviewed (owner, 2026-10-10 and 2026-10-13): CI skips drafts, and the batch run is the only CI run. Asked again because tonight a Windows-only red dropped #1472 from batch #1782 and forced a 48-lane rebuild, a cost that ruling did not weigh.\nBased on (observed): a second drop tonight, from macOS: #1487's caseM17 fails only on shell-macos, so batch #1783 was rebuilt as #1794. The same gap covers macOS.\nDeparts from: decision draft-until-reviewed, where CI skips drafts \u2014 option a runs one Windows job on a draft lane PR. Option b instead departs from rule git-integration-branch-merge, one CI run per batch.\nMeanwhile: lane windows-tests-for-touched-files (session_013NEJL4HeTtQTFg5s9G62RY) waits on this answer.",
   "home": "windows-tests-for-touched-files",
   "id": "windows-run-per-lane",
   "kind": "decision",
@@ -8,9 +8,9 @@
   "options": [
     {
       "gain": "Windows reds show on the lane, with no step by anyone.",
-      "how": "checks.yml gets one job that runs on a draft PR, on Windows only, and runs only the test files the lane changed.",
+      "how": "checks.yml gets one job that runs on a draft PR, on Windows, and on macOS where a macOS job exists, and runs only the test files the lane changed.",
       "key": "a",
-      "label": "A draft-only Windows job runs just the test files a lane touches (recommended)",
+      "label": "A draft-only job runs just the test files a lane touches, on Windows and macOS (recommended)",
       "lose": "One Windows job for each lane push that touches a test. It may queue behind or ahead of batch Windows jobs (unmeasured)."
     },
     {
@@ -33,6 +33,6 @@
   "ref": "decision draft-until-reviewed; rule git-integration-branch-merge; #1472; #1782; #1543",
   "short": "Windows tests per lane",
   "status": "open",
-  "title": "How should a lane's tests run on Windows before its batch?",
+  "title": "How should a lane's tests run on Windows and macOS before its batch?",
   "why": "The coordinator recommends a: it finds a Windows red on the lane with no manual step, and costs one job only when a lane touches a test."
 }
