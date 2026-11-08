@@ -554,6 +554,19 @@ class RulingCiteCase(CheckCase):
         self.ruling_commit(INCIDENT_SUBJECT, INCIDENT_MESSAGE)
         self.assertClean(script=MODULE, cwd=self.tree)
 
+    def test_product_only_commit_with_the_incident_message_is_flagged(self):
+        """The rule judges every commit in range, a commit that touches no test path included."""
+        self.base()
+        sha = self.commit(INCIDENT_SUBJECT, {"README.md": "Widget docs.\n"}, message=INCIDENT_MESSAGE)
+        self.assertRulingFlagged(sha, INCIDENT_SUBJECT, "a product-only claim with no home and no time is not flagged")
+
+    def test_product_only_commit_with_a_full_cite_passes(self):
+        self.base()
+        subject = "Drop the widget docs"
+        self.commit(subject, {"README.md": "Widget docs.\n"},
+                    message=ruling_message(subject, body="Per the owner's ruling, item 359 b, 2026-11-08 08:15 CST."))
+        self.assertClean()
+
 
 if __name__ == "__main__":
     unittest.main()
