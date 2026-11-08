@@ -13,6 +13,7 @@ checkout. In a fresh worktree, run the repo's setup command before any test. Use
 checks, tests, lint, and git reads. You may switch your own worktree to the branch with `git checkout`
 or `git switch`. Never write a file, stage, commit, or push through the shell. If a check needs a
 fixture written, report the need instead.
+When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 Check each new name in the diff against `GLOSSARY.md` beside the global `CLAUDE.md`. Report a name from its "Not" cell, or a second name for one of its terms.
 
