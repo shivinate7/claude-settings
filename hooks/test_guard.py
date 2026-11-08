@@ -28353,6 +28353,8 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: PASS. l
            "Check the floor fix.\nDone: PASS.\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold Done: **FAIL.** line, the period inside the bold",
            "Check the floor fix.\nDone: **FAIL.**\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold Done: **FAIL**, round not named in brief line, bold verdict",
+           "Check the floor fix.\nDone: **FAIL**, round not named in brief\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS from the family run line, the verdict word not at a clause end",
           "Check the floor fix.\nDone: PASS from the family run.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS, FAIL or PARTIAL, then list the findings line",
@@ -28364,6 +28366,9 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS, or
           "Check the floor fix.\nDone: PASS, or FAIL, then list the findings.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS, and FAIL if a check is red line",
           "Check the floor fix.\nDone: PASS, and FAIL if a check is red.\nFiles: hooks/guard.py.")
+# A backticked verdict word that opens a choice list is no bare verdict: the lookahead must read the backtick before the second word.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a backticked Done: `PASS`, `FAIL` or PARTIAL line, then stop",
+          "Check the floor fix.\nDone: `PASS`, `FAIL` or PARTIAL then stop.\nFiles: hooks/guard.py.")
 
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
