@@ -20,3 +20,12 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
   run build.py again rather than merging it by hand.
 - Briefs go in briefs/, plans in plans/, hand-off notes in handoffs/. A brief's full text also
   goes in its step's ask field.
+
+## Standing sessions
+
+Lane briefs name these ids. Triage rewrites a line when a role changes hands.
+
+- Coordinator: "Claude settings coordinator handoff", session_013NEJL2hB1pLZPDpzas7VgB, since 2026-11-03 15:32 CST.
+- Triage: "cs triage: claude-settings (6)", session_013NEJL42Sv3tJkjpzY7bExj, since 2026-11-03 15:38 CST.
+- Batch runner: "claude-settings batch runner 8", session_013NEJL2vsmyKzJm8jUDt6za, since 2026-11-03 15:38 CST.
+- Batch runner, child repos: "batch runner 9 (child repos)", session_013NEJKymmzw37seAr3Qq5nv, since 2026-11-03 15:39 CST.
