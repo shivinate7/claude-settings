@@ -7648,46 +7648,54 @@ for _command in ("rm -rf ..&", "rm -rf ..>x", "rm -rf .>/dev/null"):
     rm_parent("known open: " + _command, _command, "allow")
 
 
-# ARCHIVE GATES DELETE. Rule archive-gates-delete (CLAUDE.md, shared-trees-archive-then-delete): a branch is
+# ARCHIVE THEN DELETE. Rule archive-then-delete (CLAUDE.md, shared-trees-archive-then-delete): a branch is
 # lossless to delete only once its archive push has succeeded. Incident 2026-11-07: the archive pushes
 # failed (zsh read `$b:r` as a filename modifier), `| tail` hid each failure, and the delete after them
 # removed six branches on GitHub with no archive copy. A delete is judged against the nearest earlier
-# archive push of its branch. It may run only when that push's failure stops the chain first: `&&`, `set -e`
-# with no pipe, `set -euo pipefail` (pipefail makes a pipe report the push's status), `|| exit`, `|| return`,
-# `|| continue`, `|| break`, or the condition of an `if`.
-GATE_RULE = "archive-gates-delete"
+# archive push of its branch. A push word holding a `$` variable pairs with any later delete (loop forms).
+# It may run only when that push's failure stops the chain first: `&&`, `set -e` with no pipe, `set -euo
+# pipefail` (pipefail makes a pipe report the push's status), `|| exit`, `|| continue` and `|| break` inside a
+# loop body, `|| return` inside a function body, or the condition of an `if`.
+ARCHIVE_DELETE_RULE = "archive-then-delete"
+# The reason leads with the rule id and a colon. The bare id is also a substring of the rule's
+# name in every archive reason (shared-trees-archive-then-delete), so a refusal carries the colon.
+ARCHIVE_DELETE_CARRY = (ARCHIVE_DELETE_RULE + ":",)
 ZSH_RULE = "zsh-var-modifier"
 
 # THE FENCE. A delete with no archive push of its branch keeps today's verdict: allow, and silent.
-sh("archive gate fence: a bare delete with no archive push is allowed", VCS + " push origin --delete b",
+sh("archive then delete fence: a bare delete with no archive push is allowed", VCS + " push origin --delete b",
    "allow", cwd=PUSHFEAT, silent=True)
-sh("archive gate fence: a colon-refspec delete with no archive push is allowed", VCS + " push origin :b",
+sh("archive then delete fence: a colon-refspec delete with no archive push is allowed", VCS + " push origin :b",
    "allow", cwd=PUSHFEAT, silent=True)
 
 # REFUSED. The archive push can fail and the delete still runs: a pipe hides the push's status, `;` and a
 # newline do not wait, and `||` runs the delete only after the push has failed.
-sh("archive gate: a pipe to tail hides the failed archive push, the delete is refused",
-   VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b", "deny", GATE_RULE,
-   cwd=PUSHFEAT)
-sh("archive gate: a semicolon does not wait for the archive push, the delete is refused",
-   VCS + " push origin b:archive/b; " + VCS + " push origin --delete b", "deny", GATE_RULE, cwd=PUSHFEAT)
-sh("archive gate: || runs the delete after a failed archive push, the delete is refused",
-   VCS + " push origin b:archive/b || " + VCS + " push origin --delete b", "deny", GATE_RULE, cwd=PUSHFEAT)
-sh("archive gate: a for loop with a semicolon between the pushes is refused",
+sh("archive then delete: a pipe to tail hides the failed archive push, the delete is refused",
+   VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b", "deny", ARCHIVE_DELETE_RULE,
+   cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: a semicolon does not wait for the archive push, the delete is refused",
+   VCS + " push origin b:archive/b; " + VCS + " push origin --delete b", "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: || runs the delete after a failed archive push, the delete is refused",
+   VCS + " push origin b:archive/b || " + VCS + " push origin --delete b", "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: a for loop with a semicolon between the pushes is refused",
    'for b in x y; do ' + VCS + ' push origin "${b}:archive/${b}"; ' + VCS + ' push origin --delete "${b}"; done',
-   "deny", GATE_RULE, cwd=PUSHFEAT)
-sh("archive gate: a newline between the archive push and the colon delete is refused",
-   VCS + " push origin b:refs/heads/archive/b\n" + VCS + " push origin :b", "deny", GATE_RULE, cwd=PUSHFEAT)
-sh("archive gate: set -e does not stop a pipe, the delete is refused",
+   "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: a newline between the archive push and the colon delete is refused",
+   VCS + " push origin b:refs/heads/archive/b\n" + VCS + " push origin :b", "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: set -e does not stop a pipe, the delete is refused",
    "set -e; " + VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b",
-   "deny", GATE_RULE, cwd=PUSHFEAT)
-sh("archive gate: pipefail alone does not stop the delete, the delete is refused",
+   "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: pipefail alone does not stop the delete, the delete is refused",
    "set -o pipefail; " + VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b",
-   "deny", GATE_RULE, cwd=PUSHFEAT)
+   "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
 
-sh("archive gate: names that match through quotes and braces are refused, the delete is refused",
-   VCS + ' push origin "${b}:archive/${b}"; ' + VCS + ' push origin --delete "$b"', "deny", GATE_RULE,
-   cwd=PUSHFEAT)
+sh("archive then delete: names that match through quotes and braces are refused, the delete is refused",
+   VCS + ' push origin "${b}:archive/${b}"; ' + VCS + ' push origin --delete "$b"', "deny", ARCHIVE_DELETE_RULE,
+   cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+
+sh("archive then delete: a loop whose push word holds a variable pairs with a later delete, refused",
+   'for b in a c; do ' + VCS + ' push origin "${b}:archive/${b}" | tail -1; done && ' + VCS + ' push origin --delete a c',
+   "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
 
 # REFUSED, zsh. In zsh an unbraced `$name:` followed by a letter takes a filename modifier (zsh manual,
 # Parameter Expansion, Modifiers: `:a`, `:r`, `:e` and the rest), so `$b:archive/` or `$b:refs/` changes the
@@ -7699,35 +7707,75 @@ sh("zsh modifier: the incident form, $b:refs in a push word, is refused",
    VCS + " push origin $b:refs/heads/archive/$b && " + VCS + " push origin --delete $b", "deny", ZSH_RULE,
    cwd=PUSHFEAT)
 
-# SILENT. Each form stops the delete when the archive push fails, so the gate has nothing to say.
-sh("archive gate: && runs the delete only after the archive push succeeds, silent",
+# SILENT. Each form stops the delete when the archive push fails, so the rule has nothing to say.
+sh("archive then delete: && runs the delete only after the archive push succeeds, silent",
    VCS + " push origin b:archive/b && " + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT,
    silent=True)
-sh("archive gate: a for loop with && between the pushes and braced names is silent",
+sh("archive then delete: a for loop with && between the pushes and braced names is silent",
    'for b in x y; do ' + VCS + ' push origin "${b}:archive/${b}" && ' + VCS + ' push origin --delete "${b}"; done',
    "allow", cwd=PUSHFEAT, silent=True)
-sh("archive gate: set -e stops at a failed archive push, silent",
+sh("archive then delete: set -e stops at a failed archive push, silent",
    "set -e; " + VCS + " push origin b:archive/b; " + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT,
    silent=True)
-sh("archive gate: set -euo pipefail stops at a failed piped archive push, silent",
+sh("archive then delete: set -euo pipefail stops at a failed piped archive push, silent",
    "set -euo pipefail; " + VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b",
    "allow", cwd=PUSHFEAT, silent=True)
-for _exit in ("exit 1", "return", "continue", "break"):
-    sh("archive gate: || " + _exit + " stops the chain before the delete, silent",
-       VCS + " push origin b:archive/b || " + _exit + "; " + VCS + " push origin --delete b",
-       "allow", cwd=PUSHFEAT, silent=True)
-sh("archive gate: an if holds the archive push, the delete is in the then branch, silent",
+# `exit` always stops the chain. `continue` and `break` stop it only in a loop body, and `return` only in a
+# function body. At top level none of them stops the delete, which runs after a failed push.
+sh("archive then delete: || exit 1 stops the chain before the delete, silent",
+   VCS + " push origin b:archive/b || exit 1; " + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT,
+   silent=True)
+sh("archive then delete: a top-level || return does not stop the delete, refused",
+   VCS + " push origin b:archive/b || return; " + VCS + " push origin --delete b", "deny", ARCHIVE_DELETE_RULE,
+   cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: a top-level || continue does not stop the delete, refused",
+   VCS + " push origin b:archive/b || continue; " + VCS + " push origin --delete b", "deny",
+   ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: a top-level || break does not stop the delete, refused",
+   VCS + " push origin b:archive/b || break; " + VCS + " push origin --delete b", "deny", ARCHIVE_DELETE_RULE,
+   cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: || continue in a loop body stops the delete, silent",
+   'for b in x y; do ' + VCS + ' push origin b:archive/b || continue; ' + VCS + ' push origin --delete b; done',
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: || break in a loop body stops the delete, silent",
+   'for b in x y; do ' + VCS + ' push origin b:archive/b || break; ' + VCS + ' push origin --delete b; done',
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: || return in a function body stops the delete, silent",
+   "f() { " + VCS + " push origin b:archive/b || return; " + VCS + " push origin --delete b; }; f",
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: || continue after done leaves the delete outside the loop, refused",
+   'for b in x y; do ' + VCS + ' push origin b:archive/b || continue; done; ' + VCS + ' push origin --delete b',
+   "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+sh("archive then delete: an if holds the archive push, the delete is in the then branch, silent",
    "if " + VCS + " push origin b:archive/b; then " + VCS + " push origin --delete b; fi", "allow", cwd=PUSHFEAT,
    silent=True)
-sh("archive gate: each delete pairs with the nearest earlier archive push, silent",
+sh("archive then delete: each delete pairs with the nearest earlier archive push, silent",
    VCS + " push origin a:archive/a && " + VCS + " push origin --delete a; " + VCS + " push origin c:archive/c && "
    + VCS + " push origin --delete c", "allow", cwd=PUSHFEAT, silent=True)
-sh("archive gate: a delete whose name no archive push names keeps the fence, silent",
+sh("archive then delete: a delete whose name no archive push names keeps the fence, silent",
    VCS + " push origin a:archive/a && " + VCS + " push origin --delete a; " + VCS + " push origin --delete c",
    "allow", cwd=PUSHFEAT, silent=True)
-sh("archive gate: a braced ${b} gives no zsh modifier, silent",
+sh("archive then delete: a braced ${b} gives no zsh modifier, silent",
    VCS + " push origin ${b}:archive/${b} && " + VCS + " push origin --delete ${b}", "allow", cwd=PUSHFEAT,
    silent=True)
+# False alarms: each form stops the delete when the push fails, so each is silent.
+sh("archive then delete: an if that continues past a failed push in a loop body keeps the delete, silent",
+   'for b in x y; do if ! ' + VCS + ' push origin b:archive/b; then continue; fi; ' + VCS + ' push origin --delete b; done',
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: an if that exits on a failed push at top level keeps the delete, silent",
+   "if ! " + VCS + " push origin b:archive/b; then exit 1; fi; " + VCS + " push origin --delete b",
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: || with a brace group that exits keeps the delete, silent",
+   VCS + " push origin b:archive/b || { echo failed; exit 1; }; " + VCS + " push origin --delete b",
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: a brace group around the push keeps && gating, silent",
+   "{ " + VCS + " push origin b:archive/b; } && " + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT,
+   silent=True)
+# The zsh rule reads only git push words, and a quote or a hash in a comment is no word of the push.
+sh("zsh modifier: docker push with a $IMG:latest word is not a git push, silent",
+   "docker push $IMG:latest", "allow", cwd=PUSHFEAT, silent=True)
+sh("zsh modifier: a braced archive push with a comment holding a lone quote is silent",
+   VCS + ' push origin "${b}:archive/${b}" # don\'t', "allow", cwd=PUSHFEAT, silent=True)
 
 
 # =========================================================================== 3b. linked node_modules
