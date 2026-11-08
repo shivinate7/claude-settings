@@ -49,8 +49,6 @@ stalled mark is already red.
 
 - CSS: `.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }`.
 - CSS: `.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }`.
-- CSS: a paused cell under 3px wide paints solid, with 1px of each gap: `--ink` in light, `--ground` in
-  dark. The ring fills such a cell and paints near a done cell (1.15:1); the solid paint is at least 3:1.
 - JS: `segs(counts, n)` over `tally` emits `<i class="stl">` and `<i class="pzd">` in the order of item 4.
   Count `t` and `p` with `shownState(s)`. Change all three calls: `renderNow`, `renderRail` and the
   phase head in the phase view.
@@ -65,8 +63,8 @@ stalled mark is already red.
 
 The detector found nothing. It reads the harness, not the screen in the frames.
 - Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's foot.
-- Fixed: a paused cell under 3px wide (a rail chip at 390, the phase head at 1280, with 30 steps) read
-  as a grey line beside a done cell. It now paints solid, as in the builder changes above.
+- Open: paused cells under ~3px read like done (measured 1.08-1.25:1); lane `nfp-narrow-paused-cell`
+  gives them a non-colour cue.
 - Open: Tint (item 2) fails in dark. It stays only so the owner can cull it.
 
 ## Seen, outside this lane
