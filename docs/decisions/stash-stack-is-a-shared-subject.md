@@ -8,9 +8,9 @@ another session's entry leaves no trace.
 
 The predicate is the act's direction:
 
-- `list`, `show` and `create` read the stack. They pass. `create` writes an unreachable commit and
-  prints its hash. It adds no entry and changes no ref, index or working tree, so it takes nothing
-  from any session.
+- `list` and `show` read the stack. `create` reads the working tree and index. All three pass.
+  `create` writes an unreachable commit and prints its hash. It adds no entry and changes no ref,
+  index or working tree, so it takes nothing from any session.
 - `push`, `save` and a bare `git stash` put work on. The subject is the working tree, read with
   `git status --porcelain`.
 - Every other action touches the stack. It takes an entry off (`pop`, `apply`, `drop`, `clear`,
