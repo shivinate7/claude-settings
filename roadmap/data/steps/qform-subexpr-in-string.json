@@ -1,11 +1,11 @@
 {
   "title": "The question-form check finds a $( ) subexpression inside a double-quoted string in a PowerShell block",
   "why": "Lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), from #1785 round 1: hooks/question_form.py blanks double-quoted strings before the bash-form scan (#1785 head near 678-680), so `Write-Output \"$(tool log | head -1)\"` passes, though PowerShell runs the $( ) and head fails in PS 5.1. Main passes it too.",
-  "note": "Filed 10:25 CST Nov 8 from that lane. Related: qform-backslash-line-end, qform-path-program-span.",
+  "note": "Filed 10:25 CST Nov 8 from that lane. Related: qform-backslash-line-end, qform-path-program-span. 10:27 CST Nov 8 (coordinator 10:26 CST, item 386): rides in the lane that found it, as a follow-up PR with Merge after: #1785.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
+  "lane": "session_013NEJKzjkypcToggneCjJN8",
   "status": "todo",
   "order": 730,
-  "updatedAt": "2026-11-08T10:25:00-06:00"
+  "updatedAt": "2026-11-08T10:27:00-06:00"
 }
