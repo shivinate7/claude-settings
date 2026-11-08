@@ -4,6 +4,7 @@ guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
 import fnmatch
+import os
 import re
 import warnings
 
@@ -393,7 +394,7 @@ def _plain_escaped_quotes(cmd: str) -> str:
     return cmd
 
 
-def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
+def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, cwd: str = ""):
     """Return (printed reason, logged text) when the command touches an environment file.
 
     Both are the empty string when the command is clean.
@@ -409,7 +410,8 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     Every substitution is cut out and judged as a command of its own, at any depth. `text_ok` is
     set for one that sits in a commit or pull request message: an `echo` or `printf` there only
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
-    around them, for the body of a heredoc.
+    around them, for the body of a heredoc. `cwd` is the folder the command runs in, for the search
+    that walks a folder (`_env_walk`); with none, that check is skipped.
     """
     cmd = _plain_escaped_quotes(cmd)
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
@@ -426,6 +428,9 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
         refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
+    refusal = _env_walk(texts, cwd) if cwd else ("", "")
+    if refusal[0]:
+        return refusal
     return _env_relay(texts)
 
 
@@ -455,7 +460,8 @@ def _env_parts(piece: str):
 
 def _pattern_words(words, position: int, command: str):
     """Read the flags of a search or script command. Return (the indexes of the words that are a
-    PATTERN or a program, never a path, {index: the file name glued to a flag word}).
+    PATTERN or a program, never a path, {index: the file name glued to a flag word}, whether a
+    hidden flag is set, the indexes of the positional words).
 
     The words after the command go flag by flag. A short cluster is read letter by letter, so `-nf`
     and `-ex` are seen. `-e` and the long pattern flags take the pattern (the word itself when it
@@ -529,7 +535,157 @@ def _pattern_words(words, position: int, command: str):
             skip.update(plain[:lead + 1])
     elif not given and plain and not (hidden and type_not):
         skip.add(plain[0])
-    return skip, glued
+    return skip, glued, hidden, plain
+
+
+def _git_grep_at(words, position: int, command: str) -> int:
+    """The index of the `grep` word in `git grep ...`, else 0. `git grep` is read as `grep` is:
+    its first plain word is a pattern, so an env name inside it is text. Only the plain form counts
+    (`git grep`, with no flag before the subcommand), as `git check-ignore` does."""
+    rest = [i for i in range(position + 1, len(words)) if not words[i].startswith("-")]
+    return rest[0] if command == "git" and rest and words[rest[0]] == "grep" else 0
+
+
+def _shell_value(word: str) -> str:
+    """The value a command gets from one shell word, after the shell's quote removal. Bash reads
+    it by `segment_tokens`. PowerShell does not: a single quote holds every character as it stands
+    (`'\\.env'` keeps its backslash) and a backtick escapes the next character, so the bash reader
+    would double each backslash and change what a regex means."""
+    if not is_powershell(word):
+        tokens = segment_tokens(word)
+        return "".join(tokens) if tokens else word.strip("\"'")
+    out, quote, i = [], "", 0
+    while i < len(word):
+        char = word[i]
+        if quote:
+            if char == quote and word[i + 1:i + 2] == quote:
+                out.append(quote)   # a doubled quote is one literal quote
+                i += 2
+                continue
+            if char == quote:
+                quote = ""
+            elif char == "`" and quote == '"' and i + 1 < len(word):
+                out.append(word[i + 1])
+                i += 1
+            else:
+                out.append(char)
+        elif char in "'\"":
+            quote = char
+        elif char == "`" and i + 1 < len(word):
+            out.append(word[i + 1])
+            i += 1
+        else:
+            out.append(char)
+        i += 1
+    return "".join(out)
+
+
+# A POSIX class inside a bracket expression, as PCRE (the regex ag runs) reads it. Python's `re`
+# reads `[[:alpha:]]` as a set of the characters `[`, `:`, `a`, `l`, `p`, `h`, then a literal `]`,
+# so the guard writes each class out as the ranges it stands for. A negated or unknown class is
+# not translated, and the regex is refused: the guard cannot tell what it matches.
+POSIX_CLASS = re.compile(r"\[:(\^?)([a-z]+):\]")
+POSIX_CLASS_RANGES = {
+    "alpha": "a-zA-Z", "digit": "0-9", "alnum": "a-zA-Z0-9", "upper": "A-Z", "lower": "a-z",
+    "xdigit": "0-9A-Fa-f", "space": r"\s", "blank": r" \t", "word": r"\w",
+    "punct": r"!-/:-@\[-`{-~", "cntrl": r"\x00-\x1f\x7f", "print": r"\x20-\x7e",
+    "graph": r"\x21-\x7e", "ascii": r"\x00-\x7f",
+}
+
+
+def _posix_classes_to_python(regex: str) -> str:
+    def ranges(match):
+        if match.group(1) or match.group(2) not in POSIX_CLASS_RANGES:
+            raise ValueError("a POSIX class the guard does not translate")
+        return POSIX_CLASS_RANGES[match.group(2)]
+    return POSIX_CLASS.sub(ranges, regex)
+
+
+# The names a file regex could pick, built from the regex itself, so a suffix outside
+# ENV_SAMPLE_NAMES (`\.env\.prod$`) is still seen. Every literal is kept, a repeat runs its least
+# count and one more, and a class or a dot offers the letters of `.env` it holds, then one other
+# letter. A built string counts only when the regex really matches it (the caller searches), so a
+# name is never claimed that the regex would not pick. ACCEPTED LIMIT: a regex that names no env
+# prefix of its own (`prod$`) is judged on ENV_SAMPLE_NAMES only. Rewriting `\.py$` as the names it
+# could pick would refuse every extension filter.
+try:
+    from re import _parser as _sre_parse
+except ImportError:   # Python before 3.11
+    import sre_parse as _sre_parse
+SAMPLE_PICK_FROM = ".env"
+SAMPLE_PICK_OTHER = "abcdefghijklmnopqrstuvwxyz0123456789_-/"
+SAMPLE_LIMIT = 2048
+SAMPLE_REPEATS = ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT")
+SAMPLE_CATEGORIES = {
+    "CATEGORY_DIGIT": str.isdigit, "CATEGORY_NOT_DIGIT": lambda c: not c.isdigit(),
+    "CATEGORY_SPACE": str.isspace, "CATEGORY_NOT_SPACE": lambda c: not c.isspace(),
+    "CATEGORY_WORD": lambda c: c.isalnum() or c == "_",
+    "CATEGORY_NOT_WORD": lambda c: not (c.isalnum() or c == "_"),
+}
+
+
+def _sample_pick(test):
+    """The letters a class or a dot offers: those of `.env` it holds, then the first other one."""
+    picks = [c for c in SAMPLE_PICK_FROM if test(c)]
+    other = next((c for c in SAMPLE_PICK_OTHER if test(c)), "")
+    return picks + ([other] if other and other not in picks else [])
+
+
+def _sample_class(items):
+    tests, negate = [], False
+    for op, value in items:
+        name = str(op)
+        if name == "NEGATE":
+            negate = True
+        elif name == "LITERAL":
+            tests.append(lambda c, v=value: ord(c) == v)
+        elif name == "RANGE":
+            tests.append(lambda c, lo=value[0], hi=value[1]: lo <= ord(c) <= hi)
+        elif name == "CATEGORY":
+            tests.append(SAMPLE_CATEGORIES.get(str(value), lambda c: False))
+    return lambda c: any(test(c) for test in tests) != negate
+
+
+def _sample_seq(items):
+    out = [""]
+    for op, value in items:
+        options = _sample_node(str(op), value)
+        out = list(dict.fromkeys(a + b for a in out for b in options))
+        if len(out) > SAMPLE_LIMIT:
+            raise OverflowError("a file regex with too many shapes")
+    return out
+
+
+def _sample_node(name, value):
+    if name == "LITERAL":
+        return [chr(value)]
+    if name == "NOT_LITERAL":
+        return _sample_pick(lambda c: ord(c) != value)
+    if name == "ANY":
+        return _sample_pick(lambda c: True)
+    if name == "IN":
+        return _sample_pick(_sample_class(value))
+    if name == "CATEGORY":
+        return _sample_pick(SAMPLE_CATEGORIES.get(str(value), lambda c: False))
+    if name == "BRANCH":
+        return list(dict.fromkeys(s for branch in value[1] for s in _sample_seq(branch)))
+    if name == "SUBPATTERN":
+        return _sample_seq(value[-1])
+    if name == "ATOMIC_GROUP":
+        return _sample_seq(value)
+    if name in SAMPLE_REPEATS:
+        low, high, body = value
+        if low > 64:
+            raise OverflowError("a file regex with a long repeat")
+        counts = {low} | ({low + 1} if high > low else set())
+        return list(dict.fromkeys(s * k for s in _sample_seq(body) for k in sorted(counts)))
+    if name == "GROUPREF_EXISTS":
+        return _sample_seq(value[1]) + _sample_seq(value[2] or [])
+    return [""]   # an anchor, a look-around or a back reference adds no characters
+
+
+def _regex_names(regex: str):
+    return _sample_seq(_sre_parse.parse(regex))
 
 
 def _ag_hidden_regex_refusal(words, position: int) -> str:
@@ -574,17 +730,17 @@ def _ag_hidden_regex_refusal(words, position: int) -> str:
     if not hidden:
         return ""
     for regex in regexes:
-        tokens = segment_tokens(regex)   # the value ag gets, after the shell's quote removal
-        regex = "".join(tokens) if tokens else regex.strip("\"'")
         try:
+            regex = _posix_classes_to_python(_shell_value(regex))
             with warnings.catch_warnings():
-                # A POSIX class such as `[[:alpha:]]` warns of a nested set on stderr. The verdict stands.
                 warnings.simplefilter("ignore", FutureWarning)
                 compiled = re.compile(regex)
-        except re.error:
-            return "a file regex the guard cannot compile"
-        for name in ENV_SAMPLE_NAMES:
-            if names_env_file(name) and (compiled.search(name) or compiled.search("./" + name)):
+            names = list(ENV_SAMPLE_NAMES) + _regex_names(regex)
+        except (re.error, ValueError, RecursionError, OverflowError):
+            return "a file regex the guard cannot read"
+        for name in names:
+            if names_env_file(name.rsplit("/", 1)[-1]) and (
+                    compiled.search(name) or compiled.search("./" + name)):
                 return "the file regex matches the name '%s'" % name
     return ""
 
@@ -737,6 +893,66 @@ def _env_relay(texts):
     return "", ""
 
 
+# A search that reads dotfiles and walks a folder reaches each env file in it, whatever its name.
+# ENV_WALK_COMMANDS read a folder when no path is named. The walk stops at ENV_WALK_LIMIT entries
+# and the search is then refused: a folder that large cannot be shown clean.
+ENV_WALK_COMMANDS = ("rg", "ag")
+ENV_WALK_LIMIT = 50000
+ENV_WALK_REASON = ("this command would search a folder that holds an environment file, and a "
+                   "hidden flag makes it read dotfiles")
+
+
+def _env_file_in(folder: str) -> str:
+    """The first env file under `folder`, or `<too large>` past ENV_WALK_LIMIT entries, else ''.
+    A symlink is not followed, as rg and ag do not. `.git` holds no env file and is skipped."""
+    seen = 0
+    for top, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        seen += len(dirs) + len(files)
+        for name in files:
+            if names_env_file(name):
+                return os.path.join(top, name)
+        if seen > ENV_WALK_LIMIT:
+            return "<too large>"
+    return ""
+
+
+def _env_walk(texts, cwd: str):
+    """Return (reason, log) when `rg` or `ag` with a hidden flag walks a folder that holds an env
+    file on disk. The folder is each path word that is a folder, or `cwd` when no path is named
+    and no pipe or `<` feeds the search. `rg --files` lists names and reads no contents.
+
+    ACCEPTED LIMITS: a word that holds a variable, a glob or a substitution is not resolved, a
+    `cd` earlier in the command is not followed (a path reads against `cwd`), a search in the body
+    of a heredoc is not walked, and a `.gitignore` or `-g '!...'` that skips the file is not read,
+    so such a search of a folder with an env file is refused.
+    """
+    for text, _ in texts:
+        ends = []
+        for number, piece in enumerate(split_segments(text, ends)):
+            fed = number > 0 and ends[number - 1] == "|"
+            for part, segment in enumerate(_env_parts(piece)):
+                words, position, command = _env_words(segment)
+                if command not in ENV_WALK_COMMANDS or "--files" in words:
+                    continue
+                skip, _, hidden, plain = _pattern_words(words, position, command)
+                if not hidden:
+                    continue
+                paths = [re.sub(r"[\\\"']", "", words[i]) for i in plain if i not in skip]
+                folders = [os.path.join(cwd, os.path.expanduser(w)) for w in paths
+                           if not re.search(r"[$`*?\[]", w)]
+                folders = [f for f in folders if os.path.isdir(f)]
+                if not paths and not ((fed and part == 0) or "<" in words):
+                    folders = [cwd]
+                for folder in folders:
+                    found = _env_file_in(folder)
+                    if found:
+                        return (ENV_WALK_REASON,
+                                "'%s' with a hidden flag walks '%s', which holds '%s'"
+                                % (command, folder, found))
+    return "", ""
+
+
 def _env_flat(cmd: str, text_ok: bool = False):
     """The segment rules over one text whose substitutions are already cut out."""
     ends = []
@@ -765,10 +981,12 @@ def _env_flat(cmd: str, text_ok: bool = False):
                 if hit:
                     return (ENV_CONTENTS_REASON,
                             "'ag' with a hidden flag would read an environment file: %s" % hit)
-            patterns, glued = (_pattern_words(words, position, command)
-                               if command in (ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
-                                              + ENV_PROGRAM_COMMANDS)
-                               else (set(), {}))
+            grep_at = _git_grep_at(words, position, command)
+            patterns, glued = (
+                _pattern_words(words, grep_at, "grep")[:2] if grep_at
+                else _pattern_words(words, position, command)[:2]
+                if command in (ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS + ENV_PROGRAM_COMMANDS)
+                else (set(), {}))
             # An awk `-v name=value` value that holds a glob is a regex, as a pattern is. A plain
             # env name there stays judged: awk can open it. ACCEPTED LIMIT: a glob value that
             # could name an env file is cleared.

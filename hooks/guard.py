@@ -3531,7 +3531,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                                 "push to a stray branch")
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
-    refusal, logged = env_refusal(stripped)
+    refusal, logged = env_refusal(stripped, cwd=cwd)
     if not refusal:
         refusal, logged = env_heredoc_refusal(raw)
     if refusal:
