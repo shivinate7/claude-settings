@@ -8954,36 +8954,45 @@ for _cmd in (r"ag --hidden -G '\.env[A-Z]*\.md$' foo", r"ag --hidden -G 'env\.pr
 for _cmd in (r"ag --hidden -G '.*a.*b.*c.*d.*e.*f' foo", r"ag --hidden -G '[[:^alpha:]]x' foo"):
     sh("env: ag hidden regex, no sample env name it picks, allowed: " + _cmd, _cmd, "allow", cwd=NOGIT)
 
-# The forms below are safety holes: each reads an env file the guard lets through. A green control beside
-# each one runs on the same tree, so the change that closes a hole cannot refuse more than it should.
+# The forms below are safety holes: each reads an env file the guard lets through. Each group pins its controls
+# too. A control is the same form over a folder with no env file, which must stay allowed, or the same form
+# over a folder that holds one and is refused already, which must stay refused. So a fix that refuses too much
+# goes red on the allowed control.
 
 # rg takes a value after some flags the guard does not list. The guard takes that value for the pattern and
 # the pattern for a folder, so no folder is walked. The env file here is not gitignored, so every form reads it.
-for _cmd in ("rg --hidden --sort path K", "rg --hidden -j 2 K", "rg --hidden -M 200 K", "rg --hidden -r X K",
-             "rg --hidden --color never K", "rg --hidden -T py K"):
+_RG_VALUE_FLAG = ("rg --hidden --sort path K", "rg --hidden -j 2 K", "rg --hidden -M 200 K", "rg --hidden -r X K",
+                  "rg --hidden --color never K", "rg --hidden -T py K")
+for _cmd in _RG_VALUE_FLAG:
     sh("env: walk safety hole, rg value flag outside the lists, refused: " + _cmd, _cmd, "deny", "env-file",
        cwd=ENVWALK_UNIGNORED)
+    sh("env: walk control, rg value flag, folder has no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_CLEAN)
 # With a folder named, the same flags walk it, so these are refused already. This pins that they still are.
 for _cmd in ("rg --hidden --sort path K .", "rg --hidden -j 2 K .", "rg --hidden -M 200 K ."):
     sh("env: walk control, rg value flag with a folder named, refused: " + _cmd, _cmd, "deny", "env-file",
        cwd=ENVWALK_UNIGNORED)
 
-# A positive glob names the files a search reads, and rg reads a gitignored file that a positive glob names,
-# because the glob overrides the ignore rules. The env file here is gitignored.
-for _cmd in ("rg -g '*env*' K", "rg --hidden -g '*env*' K", "rg --hidden --iglob '*env*' K"):
+# A positive glob names the files a search reads, and rg reads a gitignored file that a positive glob names, with
+# or without --hidden, because the glob overrides the ignore rules. The env file here is gitignored.
+_POSITIVE_GLOB = ("rg -g '*env*' K", "rg --hidden -g '*env*' K", "rg --hidden --iglob '*env*' K")
+for _cmd in _POSITIVE_GLOB:
     sh("env: walk safety hole, positive glob names a gitignored env file, refused: " + _cmd, _cmd, "deny",
        "env-file", cwd=ENVWALK_IGNORED)
+    sh("env: walk control, positive glob, folder has no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_CLEAN)
 sh("env: walk control, positive glob names no env file, allowed: rg --hidden -g '*.md' K",
    "rg --hidden -g '*.md' K", "allow", cwd=ENVWALK_IGNORED)
 
 # The walk does not see a search behind a wrapper or a subshell, and it does not resolve a folder given as
 # `$(pwd)` or `$PWD`, so the folder is never walked.
-for _cmd in ("command rg --hidden K", "env X=1 rg --hidden K", "nice rg --hidden K", "(rg --hidden K)",
-             'grep -r K "$(pwd)"', 'grep -r K "$PWD"'):
+_WRAPPED = ("command rg --hidden K", "env X=1 rg --hidden K", "nice rg --hidden K", "(rg --hidden K)",
+            'grep -r K "$(pwd)"', 'grep -r K "$PWD"')
+for _cmd in _WRAPPED:
     sh("env: walk safety hole, search behind a wrapper or a substitution, refused: " + _cmd, _cmd, "deny",
        "env-file", cwd=ENVWALK_HELD)
-sh("env: walk control, wrapper over a folder with no env file, allowed: command rg --hidden K",
-   "command rg --hidden K", "allow", cwd=ENVWALK_CLEAN)
+    sh("env: walk control, wrapper or substitution, folder has no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_CLEAN)
 
 # GNU grep decides each file by the last of its --include and --exclude options that matches it. An exclude
 # before an include re-includes the env file, so it is read. In the reverse order the exclude wins.
