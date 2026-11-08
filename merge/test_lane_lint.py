@@ -710,9 +710,10 @@ class LaneLint(CiJobStub, tm.CloudSession):
                         "the trace holds no `git worktree add`, which only a git() call runs, so git() dropped the path-valued trace variable: " + out)
 
     def test_git_trace_variables_set_to_a_stderr_or_stdout_path_leave_the_git_reads_clean_and_the_lint_passes(self):
-        # A value that names stderr or stdout is an absolute path, so the git helper keeps it, and the trace then joins its combined read.
+        # A value that names a standard stream writes into the child's stdout or stderr, which a combined read takes as text. The git
+        # helper must drop each such value (merge.STD_STREAMS), so every spelling of stdout and stderr is named here.
         for name in ("GIT_TRACE", "GIT_TRACE2", "GIT_TRACE2_EVENT"):
-            for target in ("/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "/dev/stdout"):
+            for target in ("/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "/dev/stdout", "/dev/fd/1", "/proc/self/fd/1"):
                 with self.subTest(name=name, target=target):
                     expect = tm.sh(self.co, "git", "rev-parse", "HEAD")
                     with unittest.mock.patch.dict(os.environ, {name: target}):
@@ -721,17 +722,29 @@ class LaneLint(CiJobStub, tm.CloudSession):
                     self.assert_lint_passed_on_real_root(*self.lint_in_trace_env({name: target}))
 
     def test_a_git_trace_in_the_environment_leaves_the_branch_read_on_the_branch_alone(self):
-        # The no-selector branch read (Host.pr_number) reads `git rev-parse --abbrev-ref HEAD` stdout only. A trace line on stderr must
-        # not join the branch name, or the read matches no open pull request and merge stops with a false count.
+        # The no-selector branch read (Host.pr_number) reads `git rev-parse --abbrev-ref HEAD` stdout only, in the git helper's env.
+        # A standard stream would put the trace on stdout, and a path in a missing directory puts git's warning on stderr: each
+        # would join the branch name, so the read matches no open pull request and merge stops with a false count.
         branch = tm.sh(self.co, "git", "rev-parse", "--abbrev-ref", "HEAD")
         host = merge.Host(["checks"], "main", minute=60, now=lambda: 0.0, pause=lambda s: None, cwd=self.co)
         host.pages = lambda rel, key=None, fields=None: [{"number": 7, "head": {"ref": branch}}]  # the pull request list is not this case's claim
-        with unittest.mock.patch.dict(os.environ, {"GIT_TRACE": "1"}):
-            try:
-                number = host.pr_number(None)
-            except merge.Stop as e:
-                self.fail("the branch read under GIT_TRACE=1 refused, so it read more than the branch: %s" % e)
-        self.assertEqual(number, 7, "the branch read under GIT_TRACE=1 named another pull request")
+        for target in ("/dev/stdout", "/nonexistent-dir/t.log"):
+            with self.subTest(target=target), unittest.mock.patch.dict(os.environ, {"GIT_TRACE": target}):
+                try:
+                    number = host.pr_number(None)
+                except merge.Stop as e:
+                    self.fail("the branch read under GIT_TRACE=%s refused, so it read more than the branch: %s" % (target, e))
+                self.assertEqual(number, 7, "the branch read under GIT_TRACE=%s named another pull request" % target)
+
+    def test_a_git_trace_path_in_a_missing_directory_leaves_the_git_reads_clean_and_the_lint_passes(self):
+        # git cannot open GIT_TRACE's file in a missing directory, and warns on stderr; a combined read takes that warning as text.
+        # GIT_TRACE2 and GIT_TRACE2_EVENT stay silent there, so they cannot join a read this way and are not named here.
+        name, path = "GIT_TRACE", "/nonexistent-dir/t.log"
+        expect = tm.sh(self.co, "git", "rev-parse", "HEAD")
+        with unittest.mock.patch.dict(os.environ, {name: path}):
+            read = merge.git(self.co, "rev-parse", "HEAD")
+        self.assertEqual(read, (0, expect), "merge.git() read is not the sha alone with %s set to a missing directory: %r" % (name, read))
+        self.assert_lint_passed_on_real_root(*self.lint_in_trace_env({name: path}))
 
     def test_lint_unknown_ok_does_not_lift_a_failed_unshallow_fetch(self):
         pin = self.make_shallow_lane()
