@@ -12805,10 +12805,11 @@ class ReviewRecordAncestorHead(ReviewEnv):
     FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
     PASS_ONE = ("1:reviewer:sonnet:PASS",)
 
-    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal", base_status="ahead"):
+    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal", base_status="ahead", **reads):
         """The record for --head `head` with `rounds` (N:ROLE:MODEL:VERDICT each), `extra` after them. The compare of `head` and the live head
-        answers `status`, and the compare of the base branch and `head` answers `base_status`. -> (rc, out, err, host)."""
-        host = self.record_host(*comments, diffs={(head, self.LIVE): compare_of(status), (self.BASE_BRANCH, head): compare_of(base_status)})
+        answers `status`, and the compare of the base branch and `head` answers `base_status`. `reads` go to record_host, a failed compare read
+        for one. -> (rc, out, err, host)."""
+        host = self.record_host(*comments, diffs={(head, self.LIVE): compare_of(status), (self.BASE_BRANCH, head): compare_of(base_status)}, **reads)
         argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", head]
         for rnd in rounds:
             argv += ["--round", rnd]
@@ -12984,6 +12985,44 @@ class ReviewRecordAncestorHead(ReviewEnv):
                                          "--round", "1:reviewer:sonnet:FAIL", host=host)
             self.assertEqual(rc, 0, "a FAIL record on the live head was refused:\n" + out + err)
             self.assertNotIn((self.BASE_BRANCH, self.LIVE), host.compare_reads, "the live head read the base compare")
+
+    def test_a_pr_commit_under_a_moved_base_still_prints_its_fail_record(self):
+        # The base moved past the PR commit, so the base compare answers diverged: the commit holds commits the base lacks, and the base holds
+        # commits the commit lacks. The check reads ahead_by above 0, so the record prints. The control is the same record with the base ahead.
+        rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE, base_status="diverged")
+        base = host.compare_reply(self.BASE_BRANCH, self.ANC)
+        self.assertIn((self.BASE_BRANCH, self.ANC), host.compare_reads, "the base branch was not compared with the past head")
+        self.assertTrue(base["ahead_by"] > 0 and base["behind_by"] > 0, f"the base compare is not diverged: {base}")
+        self.assertEqual(rc, 0, "a FAIL record on a PR commit under a moved base was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.ANC, "the record does not print the head the review read")
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, base_status="ahead")
+        self.assertEqual(rc, 0, "control: the same record with its base compare ahead was refused:\n" + out + err)
+
+    def test_the_past_round_label_goes_to_stderr_only_for_an_ancestor_head(self):
+        # The label names the head the review read and the live head, on stderr and never on stdout. The control is a record on the live head,
+        # which prints no label on either stream.
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE)
+        self.assertEqual(rc, 0, "a FAIL record on an ancestor head was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.ANC, "the record does not print the head the review read")
+        self.assertRegex(err, rf"merge: past round: head {self.ANC[:9]}\b.*live head {self.LIVE[:9]}",
+                         "the ancestor-head record has no past-round label naming both heads on stderr:\n" + err)
+        self.assertNotIn("past round", out, "the past-round label is on stdout:\n" + out)
+        rc, out, err, _ = self.review_at(self.LIVE, self.FAIL_ONE)
+        self.assertEqual(rc, 0, "control: a FAIL record on the live head was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.LIVE, "the control does not print the live head")
+        self.assertNotIn("past round", out + err, "the live-head record prints a past-round label:\n" + out + err)
+
+    def test_a_failed_base_compare_on_the_ancestor_path_refuses_with_no_record(self):
+        # The ancestry read answers ahead, so the base compare is the read that fails. The run stops with exit 1, prints no record, and names
+        # the failed compare read. The control is the same record with the base compare answering.
+        rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE, base_compare_error=(1, "gh: Not Found (HTTP 404)"))
+        self.assertIn((self.ANC, self.LIVE), host.compare_reads, "the ancestry was not read as compare(head, live)")
+        self.assertIn((self.BASE_BRANCH, self.ANC), host.compare_reads, "the base branch was not compared with the past head")
+        self.assert_head_refused(rc, out, err, "a failed base compare on an ancestor head")
+        self.assertIn(f"cannot read the compare of {self.BASE_BRANCH} and {self.ANC[:9]}", err,
+                      "the refusal does not name the failed compare read:\n" + err)
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE)
+        self.assertEqual(rc, 0, "control: the same record with the base compare answering was refused:\n" + out + err)
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
