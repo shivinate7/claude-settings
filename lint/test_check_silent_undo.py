@@ -2400,12 +2400,11 @@ class RetireCite(unittest.TestCase):
 
 
 class NotesUnionRevival(unittest.TestCase):
-    """The debt notes file merges by union (decision notes-merge-union, .gitattributes merge=union). The batch runner merges
-    each lane into the integration branch with a local `git merge --no-ff`, so union keeps a row that one lane deleted
-    whenever another lane's side still holds it: the deletion is undone with no conflict marker. The read is narrow: a line
-    of a union-merged file, in the merge base with upstream, absent from a lane head that upstream does not hold, and
-    present in the final head, is a finding naming path and line. A file without merge=union is not read, and neither is
-    a merge whose second parent upstream holds."""
+    """The debt notes file merges by union (decision notes-merge-union, .gitattributes merge=union). A local merge keeps
+    a row that one side deleted when the other side adds next to it, with no conflict marker, so union revives the row.
+    One read covers every merge of upstream..head: a line of a merge=union file (union read from the merge's first
+    parent) that is in the merge base of the two parents, absent from one parent, and present in the merge result is a
+    finding naming path and line. Duplicate rows count by copies. A Drops-lines trailer still excuses its path."""
 
     PATH = "docs/debts/notes.md"
     ALPHA = "- note alpha: pin the tag"
@@ -2413,6 +2412,8 @@ class NotesUnionRevival(unittest.TestCase):
     GAMMA = "- note gamma: drop the cache"
     NEW = "- note delta: add the probe"
     BETA_NEW = "- note beta: retry the push, with backoff"
+    GAMMA_NEW = "- note gamma: rewritten entirely"
+    DUP = "- note dup: keep two copies"
     ROWS = [ALPHA, BETA, GAMMA]
     ORDERS = (("A", "B"), ("B", "A"))
 
@@ -2423,27 +2424,31 @@ class NotesUnionRevival(unittest.TestCase):
     def rows_at(self, r, rev, path):
         return r.sh("show", "%s:%s" % (rev, path)).splitlines()
 
-    def base(self, path, union):
-        """origin/main holds ROWS at `path`; with union, main's .gitattributes gives `path` merge=union."""
+    def base(self, path, union, rows=None):
+        """origin/main holds `rows` (ROWS by default) at `path`; with union, main's .gitattributes gives `path` merge=union."""
         r = Repo()
         if union:
             r.put(".gitattributes", "%s merge=union\n" % path)
-        r.put(path, self.text(self.ROWS))
+        r.put(path, self.text(self.ROWS if rows is None else rows))
         r.commit("base")
         r.push()
         return r
 
-    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None):
+    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False):
         """The batch shape: integ is origin/main with lane A and lane B merged in by local `git merge --no-ff`, one merge
-        commit each, in `order`. A conflict in a file without merge=union is resolved by hand to `keep`. -> (repo, integ head)."""
-        r = self.base(path, union)
-        for lane, rows in (("A", a_rows), ("B", b_rows)):
+        commit each, in `order`. ff_first fast-forwards integ to lane A instead. A conflict in a file without merge=union
+        is resolved by hand to `keep`. -> (repo, integ head)."""
+        r = self.base(path, union, rows)
+        for lane, rows_ in (("A", a_rows), ("B", b_rows)):
             r.sh("checkout", "-q", "-b", "lane" + lane, "origin/main")
-            r.put(path, self.text(rows))
+            r.put(path, self.text(rows_))
             r.commit("lane " + lane)
         r.sh("checkout", "-q", "-b", "integ", "origin/main")
         for lane in order:
             msg = b_msg if lane == "B" else "Merge lane A"
+            if ff_first and lane == "A":
+                r.sh("merge", "--ff-only", "laneA")
+                continue
             r.sh("merge", "--no-ff", "--no-edit", "-m", msg, "lane" + lane, ok=False)
             if r.sh("diff", "--name-only", "--diff-filter=U"):
                 self.assertIsNotNone(keep, "premise: a union-merged file does not conflict")
@@ -2527,6 +2532,105 @@ class NotesUnionRevival(unittest.TestCase):
                 self.assertNotIn(self.BETA, rows, "premise: the rewritten row is gone from the final head")
                 problems, _ = C.check(r.dir, "origin/main", head)
                 self.assertEqual(problems, [], "the rewritten row is read as a revival")
+
+    def assert_fails_naming(self, r, head, row, upstream="origin/main"):
+        """The check finds `row` in the file at head, one finding line names the path and the row, and main exits 1."""
+        problems, _ = C.check(r.dir, upstream, head)
+        self.assertTrue(any(self.PATH in p and row in p for p in problems), "no finding names the path and the row: %s" % problems)
+        rc, text = PrintedFindings.run_main(self, ["--upstream", upstream, "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+        self.assertEqual(rc, 1, "a row revived by a merge does not exit 1")
+        self.assertIn(row, text, "the printed FAIL does not name the row")
+
+    def test_a_fast_forwarded_lane_then_a_merge_revives_the_row_and_fails(self):
+        r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"), ff_first=True)
+        self.assertEqual(r.sh("rev-parse", "%s^1" % head), r.sh("rev-parse", "laneA"), "premise: integ was fast-forwarded to lane A")
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+        self.assert_fails_naming(r, head, self.GAMMA)
+
+    def test_a_duplicate_row_one_lane_deletes_and_the_union_restores_is_a_finding(self):
+        rows = [self.ALPHA, self.DUP, self.BETA, self.DUP]
+        r, head = self.build(self.PATH, [self.ALPHA, self.DUP, self.BETA], rows + [self.NEW], ("A", "B"), rows=rows)
+        self.assertEqual(self.rows_at(r, "laneA", self.PATH).count(self.DUP), 1, "premise: lane A holds one copy")
+        self.assertEqual(self.rows_at(r, head, self.PATH).count(self.DUP), 2, "premise: the union merge restored a copy")
+        self.assert_fails_naming(r, head, self.DUP)
+
+    def test_a_lane_with_its_own_revival_fails_on_the_integ_branch(self):
+        r = self.base(self.PATH, union=True)
+        r.sh("checkout", "-q", "-b", "laneC", "origin/main")
+        r.put(self.PATH, self.text(self.ROWS + [self.NEW]))
+        r.commit("lane C appends after the last row")
+        r.sh("checkout", "-q", "-b", "laneL", "origin/main")
+        r.put(self.PATH, self.text(self.ROWS[:2]))
+        r.commit("lane L deletes the last row")
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Merge lane C into lane L", "laneC")
+        self.assertIn(self.GAMMA, self.rows_at(r, "laneL", self.PATH), "premise: lane L's own merge revived the row")
+        r.sh("checkout", "-q", "-b", "integ", "origin/main")
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Merge lane L", "laneL")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: integ holds the revived row")
+        self.assert_fails_naming(r, head, self.GAMMA)
+
+    def test_a_lane_that_merges_main_after_deleting_a_row_fails_on_the_lane_and_on_integ(self):
+        r = self.base(self.PATH, union=True)
+        r.sh("checkout", "-q", "-b", "laneL", "origin/main")
+        r.put(self.PATH, self.text(self.ROWS[:2]))
+        r.commit("lane L deletes the last row")
+        r.sh("checkout", "-q", "main")
+        r.put(self.PATH, self.text(self.ROWS + [self.NEW]))
+        r.commit("main appends after the last row")
+        r.push()
+        r.sh("checkout", "-q", "laneL")
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Merge main into lane L", "origin/main")
+        lane = r.sh("rev-parse", "HEAD")
+        self.assertIn(self.GAMMA, self.rows_at(r, lane, self.PATH), "premise: the union merge of main revived the row on the lane")
+        self.assert_fails_naming(r, lane, self.GAMMA)
+        r.sh("checkout", "-q", "-b", "integ", "origin/main")
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Merge lane L", "laneL")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: integ holds the revived row")
+        self.assert_fails_naming(r, head, self.GAMMA)
+
+    def test_a_later_removal_of_the_union_rule_does_not_hide_the_earlier_revival(self):
+        r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"))
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+        r.put(".gitattributes", "")
+        r.commit("drop the union rule")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertIn("unspecified", r.sh("check-attr", "merge", "--", self.PATH), "premise: the head no longer has merge=union")
+        self.assert_fails_naming(r, head, self.GAMMA)
+
+    def test_a_row_main_re_adds_after_a_lane_deleted_it_is_not_a_finding(self):
+        r = self.base(self.PATH, union=True)
+        r.sh("checkout", "-q", "-b", "laneA", "origin/main")
+        r.put(self.PATH, self.text(self.ROWS[:2]))
+        r.commit("lane A deletes the last row")
+        r.sh("checkout", "-q", "main")
+        r.put(self.PATH, self.text(self.ROWS[:2]))
+        r.commit("main deletes the last row")
+        r.push()
+        r.sh("checkout", "-q", "-b", "integ", "origin/main")
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Merge lane A", "laneA")
+        r.sh("checkout", "-q", "main")
+        r.put(self.PATH, self.text(self.ROWS))
+        r.commit("main re-adds the last row")
+        r.push()
+        r.sh("checkout", "-q", "integ")
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Merge origin/main", "origin/main")
+        head = r.sh("rev-parse", "HEAD")
+        base = r.sh("merge-base", "%s^1" % head, "origin/main")
+        self.assertIn(self.GAMMA, self.rows_at(r, "origin/main", self.PATH), "premise: main holds the re-added row")
+        self.assertNotIn(self.GAMMA, self.rows_at(r, base, self.PATH), "premise: the merge base of integ and main lacks the row")
+        problems, _ = C.check(r.dir, "origin/main", head)
+        self.assertEqual(problems, [], "a row main re-added, which integ catches up to, is read as a revival")
+
+    def test_an_adjacent_rewrite_and_append_revives_the_old_text_and_fails(self):
+        for order in self.ORDERS:
+            with self.subTest(order=order):
+                r, head = self.build(self.PATH, self.ROWS[:2] + [self.GAMMA_NEW], self.ROWS + [self.NEW], order)
+                rows = self.rows_at(r, head, self.PATH)
+                self.assertIn(self.GAMMA, rows, "premise: the union kept the old text beside its rewrite")
+                self.assertIn(self.GAMMA_NEW, rows, "premise: the rewrite is in the final head")
+                self.assert_fails_naming(r, head, self.GAMMA)
 
 
 if __name__ == "__main__":
