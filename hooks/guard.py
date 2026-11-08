@@ -106,9 +106,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        non-runner and a local session (no cloud session id) pass. The bare branch fails open on a
                        read error, since a lane's read listing must never be refused. The merge tool is read as
                        `merge`, `bin/merge`, the script run by its path (`merge/merge.py`, `./merge/merge.py`, an
-                       absolute path, `merge/launch.py`; its folder, or for `./merge.py` the folder of
-                       `cd`, must be named `merge`), or any `python*` word or
-                       `py`/`py -3` on it, python options `-X` and `-W` skipping their value. It is read inside
+                       absolute path, `merge/launch.py`; its folder must be named `merge`), or any
+                       `python*` word or `py`/`py -3` on it, python options `-X` and `-W` skipping their value.
+                       After `cd merge`, `merge.py`, `./merge.py` and `python3 [./]merge.py` all count, and so
+                       does launch.py. It is read inside
                        the wrappers inner_commands unwraps (`nested_script`, `ssh_remote_script` and
                        `wrapped_commands` in guard_core.py), with the script's heredoc bodies dropped.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is

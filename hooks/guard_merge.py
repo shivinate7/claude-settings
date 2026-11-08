@@ -821,15 +821,22 @@ def _python_script(rest):
     return None, 0
 
 
+def _script_folder(path: str, cd) -> str:
+    """The folder a merge script runs from: its own folder, or the folder of `cd` when the path names none (`merge.py`)
+    or only `.` (`./merge.py`)."""
+    folder = os.path.dirname(path.replace("\\", "/"))
+    return (cd or "").replace("\\", "/").rstrip("/") if folder in ("", ".") else folder
+
+
 def merge_args_of(segment: str, cd=None):
     """Return the arguments after the command word when the segment runs the merge tool, else None.
 
     The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`), the script itself run by its path
-    (`merge/merge.py`, `./merge/merge.py`, an absolute path, `merge/launch.py`: a merge.py or launch.py whose folder is
-    named `merge`, or, for `./merge.py`, the folder of `cd`), or python (any `python*` word such as `pythonw` or
-    `python3.13t`, or the `py` launcher) on such a script;
-    for python, the arguments follow the script. A script named with no folder runs from the folder of `cd`, the last
-    cd target of the segments before this one (see merge_calls).
+    (`merge/merge.py`, `./merge/merge.py`, an absolute path, `merge/launch.py`), or python (any `python*` word such as
+    `pythonw` or `python3.13t`, or the `py` launcher) on such a script; for python, the arguments follow the script.
+    A merge.py or launch.py counts when its folder is named `merge`. A script named with no folder or with `.`
+    (`merge.py`, `./merge.py`) runs from the folder of `cd`, the last cd target of the segments before this one (see
+    merge_calls): after `cd merge`, `merge.py`, `./merge.py` and `python3 [./]merge.py` all count, launch.py the same.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -839,17 +846,13 @@ def merge_args_of(segment: str, cd=None):
         return None
     word = basename(tokens[index])
     rest = tokens[index + 1:]
-    if basename(word) in ("merge.py", "launch.py"):
-        folder = os.path.dirname(tokens[index].replace("\\", "/"))
-        if folder in ("", "."):  # `./merge.py` runs from the folder of `cd`, as a bare script name does
-            folder = (cd or "").replace("\\", "/").rstrip("/")
-        return rest if basename(folder) == "merge" else None
+    if word in ("merge.py", "launch.py"):
+        return rest if basename(_script_folder(tokens[index], cd)) == "merge" else None
     if word.startswith("python") or word == "py":
         script, after = _python_script(rest)
         if script is None:
             return None
-        folder = os.path.dirname(script.replace("\\", "/")) or (cd or "").replace("\\", "/").rstrip("/")
-        if basename(script) not in ("merge.py", "launch.py") or basename(folder) != "merge":
+        if basename(script) not in ("merge.py", "launch.py") or basename(_script_folder(script, cd)) != "merge":
             return None
         return rest[after:]
     return rest if word == "merge" else None
@@ -990,7 +993,8 @@ def merge_roots_hit(stripped: str, transcript: str) -> str:
     own get_session record tags cs-repo, or it has no `--root` and the newest own record shows a batch runner with two or
     more such tags, else ''. Only a batch runner's record is compared; a record that is not one's allows. For a call with
     `--root`, no readable own record, or one read before the turn's last incoming message, gives ROOTS_REMEDY. A call with
-    no `--reviewed` is not this rule's. The calls are read by merge_calls, so a call inside a wrapper inner_commands
+    no `--reviewed` is not this rule's. The calls are read by merge_calls (after `cd merge`, `merge.py`, `./merge.py`
+    and `python3 [./]merge.py` count, launch.py the same), so a call inside a wrapper inner_commands
     unwraps counts: what `nested_script`, `ssh_remote_script` and `wrapped_commands` (guard_core.py) read.
     The `--root` branch fails closed, like role_proof_hit: the guard-wide crash path fails open. The bare branch fails
     open on a read error, as it does on a missing record: a lane's read listing (a bare `--reviewed`) must never be refused."""
