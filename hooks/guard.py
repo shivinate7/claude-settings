@@ -4546,16 +4546,19 @@ def sim_device_lease_refusal(tool: str, names: list, session: str, listing, laun
     """Rule simulator-device-lease: refuse a simulator MCP call unless SESSION holds a live sim-lease for each device
     in NAMES, or, when NAMES is empty, for every booted device (and at least one device). A name no simulator holds is
     refused, except for a LAUNCH, which stays allowed. PROVEN holds the UDIDs a launch lease already covered. One lease
-    read per call. The remedy names the role of each device missing a lease (_sim_hold_remedy)."""
-    devices, need, unknown = listing[1], [], []
+    read per call. A call that names no single leased device (no name, or a name that matches a leased and an unleased
+    device) is told to name a leased device by UDID; a remedy never names an unleased device. With no lease held, the
+    remedy names the role of each device missing a lease (_sim_hold_remedy)."""
+    devices, need, unknown, hit_sets = listing[1], [], [], []
     for name in names:
         hits = _sim_name_hits(devices, name)
+        hit_sets.append({d["udid"].casefold() for d in hits})
         need.extend(d["udid"].casefold() for d in hits)
         if not hits and not launch:
             unknown.append(name)
     need = [u for u in dict.fromkeys(need) if u not in proven]
     detail = ", ".join(names) or "no device"
-    missing = []
+    missing, held, no_single = [], set(), False
     if unknown:
         reason = "No simulator is listed as %s, so no lease can cover it." % ", ".join(unknown)
     else:
@@ -4571,12 +4574,17 @@ def sim_device_lease_refusal(tool: str, names: list, session: str, listing, laun
                 return
         if names and not missing:
             return
-        reason = "This session holds no live simulator lease for %s." % (
-            detail if names else "every booted device" if missing else "any device")
+        no_single = not names or any(s & held and s & set(missing) for s in hit_sets)
+        reason = ("This call names no single device this session leases." if no_single
+                  else "This session holds no live simulator lease for %s." % detail)
+    if no_single and held:
+        remedy = "Name the device by its UDID in `device` (this session leases %s), then call again." % ", ".join(
+            sorted(u.upper() for u in held))
+    else:
+        remedy = "Run %s to get a lease, then call again." % _sim_hold_remedy(missing)
     refuse(tool, "deny", "simulator-device-lease",
            "%s A simulator MCP call acts on a device only while this session holds a lease for it: the Mac shares "
-           "one simulator across repos. Run %s to get a lease, then call again. "
-           "(decision sim-test-is-the-one-boot-path)" % (reason, _sim_hold_remedy(missing)), detail)
+           "one simulator across repos. %s (decision sim-test-is-the-one-boot-path)" % (reason, remedy), detail)
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:

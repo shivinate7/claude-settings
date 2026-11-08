@@ -53,10 +53,12 @@
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
 # processes (take, give) and one more simctl list; a waiting take costs one sysctl and one ps per poll there, and writes
-# leases.json (see the header of sim-lease). A reuse adds the same two sim-lease processes, with no sysctl and no extra
-# simctl list; a take that waits costs one ps per poll. One folder listing per poll while the child runs (a waiting run also reads
-# the lock every poll). A hold adds no process: its polls cost the same, for at most 900 s, with the lock held. It writes
-# no file beyond the lock folder's pid file and, during a take, take.out (the take's output); no log.
+# leases.json (see the header of sim-lease). A reuse found on the first scan adds the same two sim-lease processes, with
+# no sysctl and no extra simctl list; a take that waits costs one ps per poll. A reuse found on the scan after a grant
+# costs the own-boot take, then a second simctl list (that scan), a give, and a `take --for-udid` (given back at exit).
+# One folder listing per poll while the child runs (a waiting run also reads the lock every poll). A hold adds no
+# process: its polls cost the same, for at most 900 s, with the lock held. It writes no file beyond the lock folder's pid
+# file and, during a take, take.out (the take's output); no log.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
 # The exit code is otherwise xcodebuild's.
 # macOS only. It runs under /bin/bash 3.2.
