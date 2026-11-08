@@ -19,8 +19,16 @@
   lane, and the batch's merge of each lane. It reads the union rule as of the merge's first parent. A line
   counts when the merge base of the two parents has it, one parent holds fewer copies, and the merge holds
   more. A lane fast-forwarded into the batch is read through the merge that follows. A row main re-added
-  after the deletion is in no merge base, so it is no finding. No gap is known beyond what the test cases
-  pin. Cost: a few git reads per merge, no process, no log.
+  after the deletion is in no merge base, so it is no finding. It needs git 2.40 or newer, and reads
+  UNKNOWN on an older git. Known limits:
+  - A lane rebased, cherry-picked or squashed onto main drops its deletion with no merge commit, so this
+    read cannot see it.
+  - A row one lane deletes while another lane rewrites it keeps only the rewrite. Nothing is read.
+  - A section-separator line in both a deleted and an appended block can read as restored. A
+    `Drops-lines` trailer excuses it.
+  - A finding stays after a fix-forward commit. Redo the merge, or add the trailer.
+
+  Cost: a few git reads per merge, no process, no log.
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses

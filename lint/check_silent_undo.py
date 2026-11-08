@@ -635,7 +635,10 @@ def revived_lines(cwd, m):
     paths = sorted(set(raw_files(cwd, base, parents[0])) | set(raw_files(cwd, base, parents[1])))
     if not paths:
         return []
-    out = git(cwd, "check-attr", "-z", "--source=" + parents[0], "merge", "--", *paths)[1].split("\0")
+    try:
+        out = git(cwd, "check-attr", "-z", "--source=" + parents[0], "merge", "--", *paths)[1].split("\0")
+    except Unknown as e:  # --source is git 2.40; the command's failure, never a version string, says it is missing
+        raise Unknown("needs git 2.40 or newer to read merge=union (%s)" % e)
     found = []
     for i in range(0, len(out) - 2, 3):
         if out[i + 2] != "union":
