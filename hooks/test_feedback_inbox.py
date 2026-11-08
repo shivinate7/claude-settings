@@ -225,6 +225,24 @@ RED_CASES = []
 CASE_COUNT = [0]
 
 CENTRAL = re.compile(r"Local time: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (CDT|CST) \(UTC-0[56]:00\)")
+# The printed line ends with the pointer hooks/local_time.py emits: the constant itself, read from that file, never a
+# copy (building-allow-list-is-the-constant). Its import has no side effect; its cases stay in test_local_time.py.
+# Without the constant nothing matches, so no printed line passes. The stamps (CENTRAL, HEADER, STAMP) stay exact.
+
+
+def _pointer_from_local_time():
+    try:
+        spec = importlib.util.spec_from_file_location("local_time_for_inbox", LT_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return getattr(module, "NOW_CENTRAL_POINTER", None)
+    except Exception:
+        return None
+
+
+POINTER = _pointer_from_local_time()
+CENTRAL_PRINTED = (re.compile(CENTRAL.pattern + re.escape(POINTER)) if isinstance(POINTER, str)
+                   else re.compile(r"(?!)"))
 HEADER = re.compile(r"### (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (CDT|CST) \(UTC-0[56]:00\)")
 STAMP = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
 
@@ -466,7 +484,7 @@ def append_file(path, text):
 def ran_central(p):
     """The hook ran: exit 0 and one Central line on stdout. Every negative case needs this."""
     line = p.out.strip()
-    return p.code == 0 and "\n" not in line and CENTRAL.fullmatch(line) is not None
+    return p.code == 0 and "\n" not in line and CENTRAL_PRINTED.fullmatch(line) is not None
 
 
 def longest_run(text):
@@ -582,7 +600,7 @@ def not_saved_check(name, p):
     """Stdout is the Local time line, then a line that says the message was not saved."""
     lines = [ln.strip() for ln in p.out.splitlines() if ln.strip()]
     check("%s: exit 0, Local time line first" % name,
-          p.code == 0 and bool(lines) and CENTRAL.fullmatch(lines[0]) is not None, p.desc())
+          p.code == 0 and bool(lines) and CENTRAL_PRINTED.fullmatch(lines[0]) is not None, p.desc())
     check("%s: a further stdout line says the message was not saved" % name,
           any("not saved" in ln.lower() for ln in lines[1:]), p.desc())
 
@@ -607,7 +625,7 @@ def case_lone_surrogate_is_saved_or_said_not_saved():
     p = run(LT_PATH, raw, cfg)
     lines = [ln.strip() for ln in p.out.splitlines() if ln.strip()]
     check("lone surrogate: exit 0, Local time line first",
-          p.code == 0 and bool(lines) and CENTRAL.fullmatch(lines[0]) is not None, p.desc())
+          p.code == 0 and bool(lines) and CENTRAL_PRINTED.fullmatch(lines[0]) is not None, p.desc())
     inbox = inbox_of(cfg, sid)
     strict = True
     if os.path.exists(inbox):
@@ -631,7 +649,7 @@ def agent_ok(p):
     except (ValueError, KeyError, TypeError):
         return False
     return (p.code == 0 and hso.get("hookEventName") == "SubagentStart"
-            and CENTRAL.fullmatch(str(hso.get("additionalContext", ""))) is not None)
+            and CENTRAL_PRINTED.fullmatch(str(hso.get("additionalContext", ""))) is not None)
 
 
 def sub_payload(sid, prompt, cfg):

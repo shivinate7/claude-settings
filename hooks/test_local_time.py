@@ -17,6 +17,7 @@ Contract the builder codes against:
     whatever stdin holds. As a UserPromptSubmit hook it also saves each owner prompt; those cases
     are in test_feedback_inbox.py. With --agent, prints one JSON object:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
+    The printed line in both modes ends with local_time.NOW_CENTRAL_POINTER, on the same line (LINE_PRINTED).
     As a UserPromptSubmit hook it also grants the owner override when the prompt starts with the
     word `override` (the rest is the reason, logged to guard.log). The whole-prompt forms
     `override <n>[m|h]` and `override off` keep their meaning. The cases for that are the override_* ones.
@@ -62,6 +63,7 @@ FAILED = []
 LINE_FULL = re.compile(
     r"Local time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT \(UTC-05:00\)|CST \(UTC-06:00\))"
 )
+# LINE_FULL stays exact for line() itself. The printed line ends with LINE_PRINTED's pointer, defined below.
 
 
 def utc(*args):
@@ -105,6 +107,12 @@ except Exception as e:
     LT = None
     LOAD_ERROR = "%s: %s" % (type(e).__name__, e)
 
+# The printed line ends with the pointer the hook emits, exactly: the constant itself, never a copy of it
+# (building-allow-list-is-the-constant). Without the constant nothing matches, so no printed line passes.
+POINTER = getattr(LT, "NOW_CENTRAL_POINTER", None)
+LINE_PRINTED = (re.compile(LINE_FULL.pattern + re.escape(POINTER)) if isinstance(POINTER, str)
+                else re.compile(r"(?!)"))
+
 
 def check(name, condition, detail=""):
     if condition:
@@ -132,6 +140,13 @@ def case_table_in_process():
     for name, instant, want in TABLE:
         got, err = call_line(instant)
         check("in process: " + name, got == want, "want %r, got %r %s" % (want, got, err))
+
+
+def case_pointer_constant():
+    # The pointer the printed line ends with is the hook's own constant: a leading space, then a sentence naming now-central.
+    check("local_time has NOW_CENTRAL_POINTER: a leading space, then a sentence that names now-central",
+          isinstance(POINTER, str) and POINTER.startswith(" ") and "now-central" in POINTER,
+          "NOW_CENTRAL_POINTER is %r (module %s)" % (POINTER, LOAD_ERROR or "loaded"))
 
 
 def case_real_clock():
@@ -239,7 +254,7 @@ def case_cli_hook_shape():
     check("CLI as UserPromptSubmit hook: exit 0", proc.returncode == 0,
           "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
     check("CLI as UserPromptSubmit hook: one Central line on stdout",
-          len(lines) == 1 and LINE_FULL.fullmatch(lines[0]) is not None,
+          len(lines) == 1 and LINE_PRINTED.fullmatch(lines[0]) is not None,
           "stdout=%r" % proc.stdout[-200:])
     check("CLI as UserPromptSubmit hook: no traceback", "Traceback" not in proc.stderr,
           "stderr=%r" % proc.stderr[-300:])
@@ -268,7 +283,7 @@ def case_cli_agent(flag="--agent"):
     check("CLI %s: additionalContext starts with 'Local time: '" % flag,
           isinstance(ctx, str) and ctx.startswith("Local time: "), "got %r" % (ctx,))
     check("CLI %s: additionalContext is one Central line" % flag,
-          isinstance(ctx, str) and LINE_FULL.fullmatch(ctx) is not None, "got %r" % (ctx,))
+          isinstance(ctx, str) and LINE_PRINTED.fullmatch(ctx) is not None, "got %r" % (ctx,))
 
 
 # Runs the real script as __main__ with the tz database blocked. Only the shape is checked here:
@@ -297,7 +312,7 @@ def case_cli_no_tz_database():
     check("CLI with no tz database: exit 0", proc.returncode == 0,
           "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
     check("CLI with no tz database: one Central line on stdout",
-          len(lines) == 1 and LINE_FULL.fullmatch(lines[0]) is not None,
+          len(lines) == 1 and LINE_PRINTED.fullmatch(lines[0]) is not None,
           "stdout=%r" % proc.stdout[-200:])
 
 
@@ -412,7 +427,7 @@ def case_override_context_line():
         lines = proc.stdout.splitlines() if proc else []
         named = [l for l in lines if "override" in l.lower()]
         check("override: `%s` prints one line that names the override and its end %s" % (prompt, ends),
-              any(ends in l for l in named) and any(LINE_FULL.fullmatch(l) for l in lines),
+              any(ends in l for l in named) and any(LINE_PRINTED.fullmatch(l) for l in lines),
               "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
 
 
@@ -426,7 +441,7 @@ def case_opus_context_line():
         lines = proc.stdout.splitlines() if proc else []
         check("opus: `%s` prints one line that names the Opus override and %s" % (prompt, want),
               sum(l.startswith("Opus override:") for l in lines) == 1 and any(want in l for l in lines)
-              and any(LINE_FULL.fullmatch(l) for l in lines),
+              and any(LINE_PRINTED.fullmatch(l) for l in lines),
               "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
     cfg = ov_cfg()
     ov_type(cfg, "opus 2h")
@@ -623,7 +638,7 @@ def case_override_fail_open():
     proc = ov_type(blocker, "override 15m")
     lines = proc.stdout.splitlines() if proc else []
     check("override: a config directory that cannot be written still prints the time and exits 0",
-          proc is not None and proc.returncode == 0 and any(LINE_FULL.fullmatch(l) for l in lines)
+          proc is not None and proc.returncode == 0 and any(LINE_PRINTED.fullmatch(l) for l in lines)
           and "Traceback" not in proc.stderr,
           "rc=%s stdout=%r stderr=%r" % (proc and proc.returncode, proc and proc.stdout[-120:],
                                          proc and proc.stderr[-120:]))
@@ -2411,6 +2426,7 @@ def case_override_ask_plain_one_act_logs_its_words_once():
 def main():
     try:
         case_table_in_process()
+        case_pointer_constant()
         case_real_clock()
         case_no_tz_database()
         case_machine_zone_is_not_used()

@@ -38,5 +38,6 @@ A fix round is a fresh isolated spawn from the branch head (decision `lanes-star
 
 ## Report
 
+Read each time you write from `~/.claude/bin/now-central`, never from memory.
 Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
 no, and why". Send the green, reviewed head and branch to the coordinator. Do not merge.
