@@ -115,13 +115,13 @@ def scrubbed_env(config_dir):
     return env
 
 
-def probe(args, stdin="", config_dir=None, tmp=None, script=None):
-    """Run hooks/probe.py (or `script`) the way a reviewer runs it, from NOGIT. Returns (rc, stdout, stderr)."""
+def probe(args, stdin="", config_dir=None, tmp=None, script=None, run_in=None):
+    """Run hooks/probe.py (or `script`) as a reviewer does, from NOGIT or `run_in`. Returns (rc, stdout, stderr)."""
     env = scrubbed_env(config_dir or new_dir())
     if tmp is not None:
         env["TMPDIR"] = tmp
     result = subprocess.run([PY, script or PROBE] + list(args), input=stdin, capture_output=True, text=True,
-                            env=env, cwd=NOGIT, timeout=120)
+                            env=env, cwd=run_in or NOGIT, timeout=120)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -595,6 +595,37 @@ def dropped_session_fields_are_noted():
     for field in ("session_id", "agent_id", "agent_type"):
         problems += expect(field in err2, "stderr does not name the dropped %s" % field)
     return problems
+
+
+@case
+def relative_cwd_is_judged_as_the_absolute_folder():
+    """Probe: a relative --cwd gives the guard the same folder as the absolute path, so the verdict is the same."""
+    folder = new_dir()
+    sub = os.path.join(folder, "sub")
+    os.makedirs(sub)
+    probe_copy = os.path.join(folder, "probe.py")
+    shutil.copyfile(PROBE, probe_copy)
+    # The stub refuses with the cwd it was handed as its reason, so the verdict shows which folder the guard judged.
+    write(os.path.join(folder, "guard.py"), (
+        "import json, sys\n"
+        "payload = json.load(sys.stdin)\n"
+        "reason = 'cwd-seen: ' + str(payload.get('cwd'))\n"
+        "out = {'permissionDecision': 'deny', 'permissionDecisionReason': reason}\n"
+        "print(json.dumps({'hookSpecificOutput': out}))\n"
+    ).encode("utf-8"))
+    # Scope first: the absolute folder gives the verdict naming that folder.
+    rc, out, err = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", sub], script=probe_copy, run_in=folder)
+    bad = scope(rc, out, err)
+    if bad:
+        return ["control, absolute cwd: " + bad[0]]
+    if out != "deny cwd-seen: %s\n" % sub:
+        return ["control, absolute cwd: printed %r, want the folder named" % out[:80]]
+    rc2, out2, err2 = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", "sub"], script=probe_copy,
+                            run_in=folder)
+    bad = scope(rc2, out2, err2)
+    if bad:
+        return ["relative cwd: " + bad[0]]
+    return expect(out2 == out, "relative cwd gives %r, want the absolute run's %r" % (out2[:80], out[:80]))
 
 
 if __name__ == "__main__":
