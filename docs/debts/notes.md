@@ -52,6 +52,7 @@
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a safety hole with no pinning case (hooks/guard_env.py)
 - env-node-env-file-prints: node --env-file=.env -e 'console.log(process.env)' prints the env file through the runner allow-list (hooks/guard_env.py)
+- env-python-body-open: a quoted python heredoc body that calls open() on the env file allows (hooks/guard_env.py env_refusal). Fix: none — needs an owner ruling on reading interpreter bodies.
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)

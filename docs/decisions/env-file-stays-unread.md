@@ -12,7 +12,7 @@ Shell form. `judge_shell` calls `env_refusal` and `env_heredoc_refusal`. A name 
 
 - Refused: a redirect onto the file. A shell variable that holds its path, because the guard cannot follow a variable to its use. The file given to a command that is not a runner. Any other command that would read, write or commit it.
 - Allowed: an existence check (`ls`, `test`, `[`, `[[`). `echo` and `printf`, where the name is text. The message or body value of `git commit` and `gh pr create`. A runner in `ENV_LOADER_COMMANDS` (node, npm, npx, pnpm, bun, deno, uv, docker, podman, and their variants) given `--env-file` or `--env-file-if-exists`.
-- Substitutions (`$(...)`, backticks, `<(...)`) are judged as commands of their own, at any depth up to `ENV_MAX_DEPTH` (64). A deeper nest is refused. The substitutions in an unquoted heredoc body are judged (`env_heredoc_refusal`). A quoted heredoc body is text.
+- Substitutions (`$(...)`, backticks, `<(...)`) are judged as commands of their own, at any depth up to `ENV_MAX_DEPTH` (64). A deeper nest is refused. The `-c` script of a shell, and each script `inner_commands` reads (`eval`, `env -S`, `docker exec`, `su -c`, `find -exec`, ssh), is judged as a command of its own by a recursive `env_refusal`, under the same cap. The substitutions in an unquoted heredoc body are judged (`env_heredoc_refusal`). A quoted heredoc body is text.
 
 Write form. In `judge`, a write tool call (Write, Edit, MultiEdit or NotebookEdit) whose target name is in the scope is refused (`is_env`). It reads the same matcher as the shell form.
 

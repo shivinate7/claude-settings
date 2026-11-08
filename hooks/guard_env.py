@@ -5,11 +5,12 @@ Other files reach these names through `guard`.
 """
 import fnmatch
 import re
+import shlex
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
-    is_powershell, norm, split_segments,
+    inline_script, inner_commands, is_powershell, norm, segment_tokens, split_segments,
 )
 
 
@@ -340,17 +341,24 @@ _ESCAPED_QUOTE = re.compile(r"""\\\\|\\['"]""")
 def _plain_escaped_quotes(cmd: str) -> str:
     """Write a backslash-escaped quote in the body of a python, node, perl or ruby heredoc as a plain
     character. Those languages read the backslash as an escape, but the word reader below does not:
-    a `\\'` would flip its quote state, and the prose after it would read as bare shell words."""
-    if "<<" not in cmd or "\\" not in cmd:
+    a `\\'` would flip its quote state, and the prose after it would read as bare shell words.
+
+    A backtick in the body of a heredoc with a QUOTED delimiter is text: bash runs no substitution
+    there, so it is written as a plain character too. An unquoted body keeps its backticks."""
+    if "<<" not in cmd or ("\\" not in cmd and "`" not in cmd):
         return cmd
-    for _, body, header in _split_heredocs(cmd)[1]:
+    for quote, body, header in _split_heredocs(cmd)[1]:
         header = _without_message_values(header)
         if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
-            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub(lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body), 1)
+            plain = _ESCAPED_QUOTE.sub(
+                lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body)
+            if quote:
+                plain = plain.replace("`", "_")
+            cmd = cmd.replace(body, plain, 1)
     return cmd
 
 
-def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
+def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, depth: int = 0):
     """Return (printed reason, logged text) when the command touches an environment file.
 
     Both are the empty string when the command is clean.
@@ -367,9 +375,15 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     set for one that sits in a commit or pull request message: an `echo` or `printf` there only
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
+
+    The script a segment hands on (`inner_commands`: `sh -c`, `eval`, `env -S`, `docker exec`, ssh)
+    is judged as a command of its own by a call one `depth` deeper. Substitutions and scripts share
+    ENV_MAX_DEPTH.
     """
+    if depth > ENV_MAX_DEPTH:
+        return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     cmd = _plain_escaped_quotes(cmd)
-    texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
+    texts, too_deep = _substitutions(cmd, depth, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
@@ -383,7 +397,29 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
         refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
+        for script in _handed_on_scripts(text):
+            refusal = env_refusal(script, depth=depth + 1)
+            if refusal[0]:
+                return refusal
     return _env_relay(texts)
+
+
+def _reads_as(word: str, script: str) -> bool:
+    """True when the shell word, quotes and all, is that one script."""
+    try:
+        return shlex.split(word) == [script]
+    except ValueError:
+        return False
+
+
+def _handed_on_scripts(text: str):
+    """The scripts each segment of one text hands on, read by the one shared reader."""
+    scripts = []
+    for piece in split_segments(text):
+        tokens = segment_tokens(piece)
+        if tokens:
+            scripts.extend(inner_commands(tokens))
+    return scripts
 
 
 def env_heredoc_refusal(raw: str):
@@ -648,8 +684,11 @@ def _env_flat(cmd: str, text_ok: bool = False):
                 patterns = set(patterns) | {
                     i for i, w in enumerate(words)
                     if i and words[i - 1] == "-v" and ENV_GLOB.search(w)}
+            # The script of `sh -c` is judged as a command of its own by `env_refusal`. Read here as
+            # a plain word, a script that starts with a loader flag would look like an assignment.
+            script = inline_script(segment_tokens(segment) or [])
             for index, word in enumerate(words):
-                if index in patterns:
+                if index in patterns or (script and _reads_as(word, script)):
                     continue
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""

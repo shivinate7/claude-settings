@@ -412,8 +412,9 @@ MUTATIONS = [
      'return "stray" if merge != current() and not upstream else ""',
      'return "stray" if merge != current() else ""', "guard", 'stacked lane, -u HEAD is silent'),
     ("env-file: a search command's pattern is read as a path",
-     '                if index in patterns:\n                    continue\n',
-     '                if False:\n                    continue\n', "guard",
+     '                if index in patterns or (script and _reads_as(word, script)):\n'
+     '                    continue\n',
+     '                if script and _reads_as(word, script):\n                    continue\n', "guard",
      'trim: env: grep with a dot-star pattern'),
     ("machine-wide-kill: pkill and killall no longer deny in command position",
      '    if tool in KILL_COMMAND_WORDS:\n        return word',
