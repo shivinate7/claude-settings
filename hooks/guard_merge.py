@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import shlex
 import sys
 
 from guard_core import (
@@ -828,6 +829,46 @@ def _script_folder(path: str, cd) -> str:
     return (cd or "").replace("\\", "/").rstrip("/") if folder in ("", ".") else folder
 
 
+def _call_pieces(segment: str):
+    """The calls one segment holds. The segment splitter cuts at `&&`, `||`, `;`, `|` and a newline, but not at a lone
+    unquoted `&` or `)` word: each ends a call (a background send, a closed subshell), and the words after it are a
+    new call. Return the segment as it is when it holds none, or cannot be read (an unmatched quote)."""
+    try:
+        raw = shlex.split(segment, posix=False)
+    except ValueError:
+        return [segment]
+    if not any(word in ("&", ")") for word in raw):
+        return [segment]
+    pieces, current = [], []
+    for word in raw:
+        if word in ("&", ")"):
+            pieces.append(current)
+            current = []
+        else:
+            current.append(word)
+    pieces.append(current)
+    return [" ".join(words) for words in pieces if words]
+
+
+def _glued_closer(segment: str, tokens) -> bool:
+    """True when the segment's last word ends in an unquoted `)` or `&`, which closes the call: read with its quotes
+    kept, so a quoted argument that ends in `)` (`"/Work (old)"`) is not one. The readings that do not line up say yes."""
+    try:
+        raw = shlex.split(segment, posix=False)
+    except ValueError:
+        return True
+    return len(raw) != len(tokens) or raw[-1].endswith((")", "&"))
+
+
+def _call_arguments(segment: str, tokens, rest):
+    """`rest`, the words after the command word, with a `)` or `&` glued to the last one stripped, as the shell reads it.
+    Only the last argument ends the call; an earlier argument that ends in either (a quoted path) is kept whole."""
+    if rest and _glued_closer(segment, tokens):
+        last = rest[-1].rstrip(")&")
+        return rest[:-1] + ([last] if last else [])
+    return rest
+
+
 def merge_args_of(segment: str, cd=None):
     """Return the arguments after the command word when the segment runs the merge tool, else None.
 
@@ -837,9 +878,12 @@ def merge_args_of(segment: str, cd=None):
     A merge.py or launch.py counts when its folder is named `merge`. A script named with no folder or with `.`
     (`merge.py`, `./merge.py`) runs from the folder of `cd`, the last cd target of the segments before this one (see
     merge_calls): after `cd merge`, `merge.py`, `./merge.py` and `python3 [./]merge.py` all count, launch.py the same.
-    The arguments end where the command does (`_command_words`): a `)` or `&` glued to the last one ends it, so it
-    never hides a flag.
+    A `)` or `&` glued to the last argument is stripped (`_call_arguments`); a quoted argument that ends in one is
+    kept, and a segment is judged as its first call only (`_call_pieces` cuts a lone `&` or `)` word, and merge_calls
+    reads each piece). A bare `)` or `&` inside a quoted string is not a closer; a `)` or `&` glued inside text this
+    reader cannot tell from a closer (a heredoc body, an unmatched quote) is read as one.
     """
+    segment = (_call_pieces(segment) or [""])[0]
     tokens = segment_tokens(segment)
     if not tokens:
         return None
@@ -849,29 +893,32 @@ def merge_args_of(segment: str, cd=None):
     word = basename(tokens[index])
     rest = tokens[index + 1:]
     if word in ("merge.py", "launch.py"):
-        return _command_words(rest) if basename(_script_folder(tokens[index], cd)) == "merge" else None
+        folder = basename(_script_folder(tokens[index], cd))
+        return _call_arguments(segment, tokens, rest) if folder == "merge" else None
     if word.startswith("python") or word == "py":
         script, after = _python_script(rest)
         if script is None:
             return None
         if basename(script) not in ("merge.py", "launch.py") or basename(_script_folder(script, cd)) != "merge":
             return None
-        return _command_words(rest[after:])
-    return _command_words(rest) if word == "merge" else None
+        return _call_arguments(segment, tokens, rest[after:])
+    return _call_arguments(segment, tokens, rest) if word == "merge" else None
 
 
 def merge_calls(stripped: str, cd=None):
     """Yield (segment, arguments) for each segment of the command that runs the merge tool, and for each one inside a
     script the segment hands on (`bash -c`, `sh -c`: the one reader of those wrappers is inner_commands). The last `cd`
     target of the segments before a segment is its folder (guard_core's `_segment_cd_target`, the reader the push and
-    delete rules use); a script starts in its segment's folder."""
-    for segment in split_segments(stripped):
-        if not segment.strip():
+    delete rules use); a script starts in its segment's folder. A lone `&` or `)` word ends a call, and the words after
+    it are a call of their own."""
+    for whole in split_segments(stripped):
+        if not whole.strip():
             continue
-        rest = merge_args_of(segment, cd)
-        if rest is not None:
-            yield segment, rest
-        tokens = segment_tokens(segment)
+        for segment in _call_pieces(whole):
+            rest = merge_args_of(segment, cd)
+            if rest is not None:
+                yield segment, rest
+        tokens = segment_tokens(whole)
         if tokens:
             for text in inner_commands(tokens):
                 yield from merge_calls(text, cd)
