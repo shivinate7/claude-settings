@@ -27454,9 +27454,14 @@ for _label, _command in (ENC_DECODE_RUN[0], ENC_ANSI_RUN[0]):
        "allow", cwd=NOGIT, session=ENC_SID, config=E_LOG_STALE, env=ENC_CLOCK, silent=True)
     sh("encoded retry: %s is allowed when the guard.log deny belongs to another session" % _label,
        _command, "allow", cwd=NOGIT, session=ENC_SID, config=E_LOG_OTHER_SID, env=ENC_CLOCK, silent=True)
+    # The call is ENC_AGENT and the row names ENC_OTHER_AGENT: a different agent, so allowed.
     sh("encoded retry: %s is allowed when the refusal row names another agent" % _label, _command,
-       "allow", cwd=NOGIT, session=ENC_SID, agent_id=ENC_OTHER_AGENT, config=E_OTHER_AGENT, env=ENC_CLOCK,
+       "allow", cwd=NOGIT, session=ENC_SID, agent_id=ENC_AGENT, config=E_OTHER_AGENT, env=ENC_CLOCK,
        silent=True)
+    # The call is the agent the row names: refused, as the agent-red case is refused for its own row.
+    sh("encoded retry: %s is refused for the agent its refusal row names" % _label, _command, "deny",
+       rule=ENC_RULE, cwd=NOGIT, session=ENC_SID, agent_id=ENC_OTHER_AGENT, config=E_OTHER_AGENT, env=ENC_CLOCK,
+       carries=("report",), lacks=ENC_LACKS)
     sh("encoded retry: %s is allowed for the orchestrator when the refusal row names an agent" % _label,
        _command, "allow", cwd=NOGIT, session=ENC_SID, config=E_AGENT_ORCH, env=ENC_CLOCK, silent=True)
     sh("encoded retry: %s is allowed on an empty state file" % _label, _command, "allow",
