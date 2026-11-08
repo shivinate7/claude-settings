@@ -1658,6 +1658,13 @@ def _claim(body, mask, hit, floor):
     return (act, window) if act else None
 
 
+def _report_label_end(body):
+    """Where a bold report label (LABEL_ORDER) that starts `body` ends, else 0. "**Input Needed** Could not ..." opens
+    its clause after the label, so the phrase has no other subject."""
+    m = LABEL_RE.match(body)
+    return m.end() if m and m.group(1).strip().rstrip(":").strip() in LABEL_ORDER else 0
+
+
 def cannot_lines(text):
     """(sentence, act, window) for each phrase of the reply's prose that claims a table act cannot be done. The text is
     read a sentence at a time: a sentence that ends in `?` asks and claims nothing, one that starts with Unvetted: (the
@@ -1679,7 +1686,7 @@ def cannot_lines(text):
             sentence, shadow = body[begin:stop].strip(), mask[begin:stop]
             if sentence.rstrip("*_)\"' ").endswith("?") or CANNOT_UNVETTED_RE.match(sentence):
                 continue
-            floor = 0
+            floor = _report_label_end(body) if begin == 0 else 0  # a report label opens the clause after it
             for hit in CANNOT_RE.finditer(shadow):
                 claim = _claim(body[begin:stop], shadow, hit, floor)
                 floor = hit.end()

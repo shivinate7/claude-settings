@@ -34,7 +34,7 @@ Part (vi), the cannot-claim check. Lane ruling, 2026-11-07 22:37 CST, process-on
 - The phrases. cannot, can not and unable to. could not. no way to, no way I can and no way we can. not able to, was not able to and will not be able to. have not been able to and has not been able to. The n't form of each counts too. A phrase inside a hyphenated name, a code span or quotes is no phrase.
 - What the check reads. At Stop, `cannot_problem` in `lint/report_guard.py` reads the reply a sentence at a time. It reads the turn after the last human message.
 - The act table. A sentence is a claim only when the verb right after the phrase names a table act. The acts are pr-open, pr-merge, push, pr-edit and github-reach. github-reach is reach, use, access or connect to, followed by GitHub, the GitHub API, the GitHub MCP server or tools, gh, or api.github.com. A later noun names no act: "I cannot see the merge commit" is no claim. An act outside the table is no claim.
-- The subject. The words just before the phrase must be I, we, the cloud, the cloud session, this session, here, or there is. The phrase may also open its clause. Any other subject is a third party: it, the guard, the lane, the session, a builder, a draft PR. A passive verb whose clause says from here, from the cloud or from this session is a claim whatever its subject: "That PR cannot be merged from here."
+- The subject. The words just before the phrase must be I, we, the cloud, the cloud session, this session, here, or there is. The phrase may also open its clause, or follow a bold report label such as Input Needed. Any other subject is a third party: it, the guard, the lane, the session, a builder, a draft PR. A passive verb whose clause says from here, from the cloud or from this session is a claim whatever its subject: "That PR cannot be merged from here."
 - When a claim passes. The turn holds a failed try of the same act. Or the sentence carries a hand-off cite: a route row that says refused or asks, a dated `(measured ...)`, or a tool the classifier refused. The sentence must also name its check: a backtick span, an MCP tool name, or a word such as returned or refused.
 - What a try is. A tool call whose result has an error flag, an exit code above zero, or an HTTP 4xx or 5xx. A loose word such as refused in the output of a call that worked is no failure. A relayed agent result counts when its text names the route. A github-reach try is any `mcp__github__` tool, any gh call, curl, wget or httpie to github.com, or git fetch, push or ls-remote.
 - What cancels a try. A later call that works cancels an earlier failure only for the same act, program, verb and target. The target is the PR number, branch or URL the call names. A call with `--dry-run` never counts and never cancels.
@@ -119,8 +119,8 @@ Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
 - The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1349-1367).
-- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:1824-1847; read lint/report_guard.py:2336-2341).
-- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1485-1494; read lint/report_guard.py:2282).
+- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:1831-1854; read lint/report_guard.py:2343-2348).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1485-1494; read lint/report_guard.py:2289).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:759-764).
 - The merge's model judge, report-only (see Model judge at merge).
