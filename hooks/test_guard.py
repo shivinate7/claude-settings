@@ -10372,6 +10372,8 @@ RF_RUNNING, RF_RUNNING_AGENT = "reviewer-pr20", "a3b8d0e6f4c17295"
 RF_ERR_FINISHED, RF_ERR_FINISHED_AGENT = "reviewer-pr21", "a5d8c3f1e7b20964"
 RF_ERR_RUNNING, RF_ERR_RUNNING_AGENT = "reviewer-pr22", "a6e9d4a2f8c31075"
 RF_MALFORMED = "reviewer-pr23"
+# A reviewer named `rev`. A `to` in the `name [ref]` form names it by that name and by the first eight hex of its id.
+RF_REV, RF_REV_AGENT = "rev", "a5eb5d25c7e90b41"
 # A record the reader cannot parse: a user record whose message is a string, not an object.
 RF_UNPARSED = json.dumps({"type": "user", "message": "a message that is a string, not a record"})
 RF_DIR = os.path.join(ROOT, "resumefinished")
@@ -10500,6 +10502,11 @@ RF_TRANSCRIPTS = {
     "running-then-errored-spawn": rr_session(
         rf_launch("r1", "reviewer", RF_ERR_RUNNING, RF_ERR_RUNNING_AGENT), rr_comment("c1", rr_record()),
         rr_spawn_error("r2", "reviewer", name=RF_ERR_RUNNING)),
+    # A reviewer named `rev` that finished, and one that runs, each with the round's review record after its spawn.
+    "bg-rev-finished": rr_session(rf_launch("r1", "reviewer", RF_REV, RF_REV_AGENT), rf_finish("r1"),
+                                  rr_comment("c1", rr_record())),
+    "bg-rev-running": rr_session(rf_launch("r1", "reviewer", RF_REV, RF_REV_AGENT),
+                                 rr_comment("c1", rr_record())),
     # No spawn at all: the empty state.
     "no-spawn": rr_session(),
 }
@@ -10581,6 +10588,22 @@ rf_allow("a reviewer that runs, then a same-name spawn whose result is an error,
          {"to": RF_ERR_RUNNING, "message": RF_MSG}, rf_path("running-then-errored-spawn"))
 rf_ask("a reviewer whose finish notice says it is still running asks",
        {"to": RF_RUNNING_AGENT, "message": RF_MSG}, rf_path("reviewer-notice-running"))
+
+
+# A `to` in the `name [ref]` form, which SendMessage writes when a name is ambiguous. The ref is the first eight hex of
+# the agent id, so `rev [a5eb5d25]` names the spawn `rev` that holds that id. The bare-name cases are controls: they
+# show the fixture reads as finished and as running, so each ref case turns on its ref alone.
+rf_refuse("name [ref] form: a finished reviewer named rev is refused by its bare name (control)",
+          {"to": RF_REV, "message": RF_MSG}, rf_path("bg-rev-finished"))
+rf_refuse("name [ref] form: a finished reviewer named rev, with its ref, is refused",
+          {"to": "rev [a5eb5d25]", "message": RF_MSG}, rf_path("bg-rev-finished"))
+rf_allow("name [ref] form: a running reviewer named rev is allowed by its bare name (control)",
+         {"to": RF_REV, "message": RF_MSG}, rf_path("bg-rev-running"))
+rf_allow("name [ref] form: a running reviewer named rev, with its ref, is allowed",
+         {"to": "rev [a5eb5d25]", "message": RF_MSG}, rf_path("bg-rev-running"))
+# The name picks the spawn: a name no spawn holds is allowed, though the finished rev holds the ref.
+rf_allow("name [ref] form: a name with no spawn is allowed, though a finished reviewer holds its ref",
+         {"to": "nobody [a5eb5d25]", "message": RF_MSG}, rf_path("bg-rev-finished"))
 
 
 # The two checks below run one SendMessage each, in a config folder of their own, so each reads the guard.log rows
