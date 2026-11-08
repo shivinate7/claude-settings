@@ -12725,6 +12725,15 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(typed))
         self.assert_refused(rc, out, err)
 
+    def test_a_fix_check_refusal_on_a_record_with_text_after_its_ci_line_names_the_rule_remedy(self):
+        # the remedy: the first failing line sits right after the CI line, so the refusal says where free text goes
+        note = record_text(head=REVIEW_OLD_HEAD) + "Lane note.\n" + REVIEW_FOOTER
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, note)))
+        self.assert_refused(rc, out, err)
+        self.assertIn("nothing between the CI line", err, "the refusal does not name the rule remedy:\n" + err)
+        self.assertIn("---", err, "the refusal does not name the --- line:\n" + err)
+
+
 class ReviewLaneLint(ReviewEnv):
     """`merge <pr> --review-record` prints a record whose newest round, or whose fix check, is PASS only when `merge --lane-lint` passes on that
     head. The incident: a pull request was handed off with its lint red and no CI run. lane_lint is stubbed, so the lint verdict is the case's:
@@ -13035,6 +13044,56 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertNotIn("\x1b", out, "an ESC byte printed raw in merge --reviewed:\n" + repr(out))
         self.assertIn("red note.", list_line(self, out, 7))
+
+    def test_a_bad_line_right_after_the_ci_line_names_the_rule_remedy(self):
+        # the #2317 and #2284 shapes: a note between the CI line and the rule, then the footer. The first failing line is the one after the CI line.
+        # The #2016 shape: a Finding paragraph after the CI line, with no rule.
+        for label, tail in (("note above the rule", "Lane note.\n" + REVIEW_FOOTER), ("finding paragraph", "Finding: the guard misses a case.\n")):
+            with self.subTest(label=label):
+                comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS) + tail)]
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+                self.assertEqual(rc, 0, out + err)
+                line = list_line(self, out, 7)
+                self.assertIn("nothing between the CI line", line, "the bad line does not name the rule remedy:\n" + out)
+                self.assertIn("---", line, "the bad line does not name the --- line:\n" + out)
+
+    def test_a_bad_line_that_fails_elsewhere_gets_no_rule_sentence(self):
+        # control: the first failing line is the Kind line, not the line after the CI line, so no --- sentence
+        comments = [review_comment(1, 7, record_text(kind="bogus", rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertNotIn("nothing between the CI line", line, out)
+        self.assertNotIn("---", line, out)
+
+    def test_a_bad_record_line_names_the_comment_it_came_from(self):
+        # the bad line names the comment id of the body that failed, and the failing line's text
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), review_comment(3, 7, record_text(rounds=REVIEW_PASS) + "Lane note.\n")]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("comment 3", out, "the bad line does not name the comment id:\n" + out)
+        self.assertIn("Lane note.", out, "the bad line does not echo the failing line:\n" + out)
+
+    def test_a_body_with_record_fields_and_no_marker_is_flagged_not_dropped(self):
+        # the #2294 shape: the marker line is cut off, but the body opens with PR: #7 and Head: <sha>. It is named by its comment id.
+        body = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(4, 7, body)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("comment 4", out, "the marker-less record was dropped with no flag:\n" + out)
+
+    def test_a_marker_less_flag_makes_the_same_gh_calls_as_before(self):
+        # cost control: the flag reads the comment list --reviewed already reads, so the gh calls are the list reads alone
+        body = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(4, 7, body)], count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"], "the marker-less flag made a read the list did not need")
+
+    def test_prose_that_mentions_a_pr_number_mid_text_is_not_flagged(self):
+        # control: a body whose lines do not open with the field names is an ordinary comment, so it is not flagged
+        prose = "Reviewed the change.\nIt matches PR: #5 and the Head: the lane named.\n"
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(21, 7, prose)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("comment 21", out, "an ordinary comment that mentions PR: #5 was flagged:\n" + out)
 
     def test_review_comments_reads_one_list_from_since_oldest_first(self):
         if getattr(merge.Host, "review_comments", None) is None:
