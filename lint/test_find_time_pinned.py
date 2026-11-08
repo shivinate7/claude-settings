@@ -961,6 +961,33 @@ class JsCategoriesTest(FinderCase):
                                "const t_plain = Temporal.Now.plainDateISO();"],
                        clean=["const t_date = new Date();"])
 
+    def test_fake_clock_in_a_line_comment_does_not_hide_new_date(self):
+        text = src(
+            "// jest.useFakeTimers();",
+            "const d_line = new Date();",
+        )
+        self.put("tests/line_comment_fake.test.js", text)
+        calendar_judge(self, "tests/line_comment_fake.test.js", text,
+                       listed=["const d_line = new Date();"])
+
+    def test_fake_clock_in_a_block_comment_does_not_hide_new_date(self):
+        text = src(
+            "/* vi.useFakeTimers(); */",
+            "const d_block = new Date();",
+        )
+        self.put("tests/block_comment_fake.test.js", text)
+        calendar_judge(self, "tests/block_comment_fake.test.js", text,
+                       listed=["const d_block = new Date();"])
+
+    def test_fake_clock_in_a_string_does_not_hide_new_date(self):
+        text = src(
+            "const note = 'jest.useFakeTimers();';",
+            "const d_string = new Date();",
+        )
+        self.put("tests/string_fake.test.js", text)
+        calendar_judge(self, "tests/string_fake.test.js", text,
+                       listed=["const d_string = new Date();"])
+
     def test_elapsed_assert_on_expect_or_assert_calls(self):
         text = src(
             "const t0 = Date.now();",
@@ -1336,6 +1363,22 @@ class JsCalendarTest(FinderCase):
         self.put("tests/new_dayjs_fixed.test.js", text)
         calendar_judge(self, "tests/new_dayjs_fixed.test.js", text,
                        clean=["const n_fixed = new dayjs(0);", "const n_epoch = new dayjs(EPOCH);"])
+
+    def test_temporal_text_in_a_comment_string_or_template_is_not_listed_and_interpolation_is(self):
+        text = src(
+            "// const c_note = Temporal.Now.instant();",
+            "/* let c_block = Temporal.Now.plainDateISO(); */",
+            "const c_str = 'Temporal.Now.instant()';",
+            "const c_tpl = `Temporal.Now.instant()`;",
+            "const c_interp = `${Temporal.Now.instant()}`;",
+        )
+        self.put("tests/temporal_text.test.js", text)
+        calendar_judge(self, "tests/temporal_text.test.js", text,
+                       listed=["const c_interp = `${Temporal.Now.instant()}`;"],
+                       clean=["// const c_note = Temporal.Now.instant();",
+                              "/* let c_block = Temporal.Now.plainDateISO(); */",
+                              "const c_str = 'Temporal.Now.instant()';",
+                              "const c_tpl = `Temporal.Now.instant()`;"])
 
     def test_new_date_in_a_template_interpolation_is_listed(self):
         text = src(
