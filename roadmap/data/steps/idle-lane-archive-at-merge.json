@@ -1,11 +1,11 @@
 {
   "title": "Each batch merge archives the lane sessions whose PRs all merged or closed",
   "why": "Coordinator, 10:11 CST Nov 8: 62 of the newest 100 sessions are idle lanes whose PRs all merged or closed, and none is archived. The roadmap build lists them (lanes-to-archive row, #1312), but no tool acts on the list.",
-  "note": "Filed 10:14 CST Nov 8 from the coordinator. Fix: at each batch merge, the merge tool or runner 8 (session_013NEJL2vsmyKzJm8jUDt6za) reads the idle-lane list (skills/roadmap/build.py idle_lanes), pushes any unmerged branch to archive/, then archives each session. Related: idle-lane-steps-unknown (ready), lane-end-releases-steps (doing). A gap fix: may start a lane under owner item 410 a. 10:25 CST Nov 8: the coordinator starts its lane after its archive audit reports, so the brief carries the measured flaw.",
+  "note": "Filed 10:14 CST Nov 8 from the coordinator. Fix: at each batch merge, the merge tool or runner 8 (session_013NEJL2vsmyKzJm8jUDt6za) reads the idle-lane list (skills/roadmap/build.py idle_lanes), pushes any unmerged branch to archive/, then archives each session. Related: idle-lane-steps-unknown (ready), lane-end-releases-steps (doing). A gap fix: may start a lane under owner item 410 a. 10:25 CST Nov 8: the coordinator starts its lane after its archive audit reports, so the brief carries the measured flaw. Doing 10:35 CST Nov 8 in lane session_013NEJKzhVo8BrXKn2ZpYnYx, with step-landed-from-prs and live-file-archive-fields (coordinator 10:30 CST, owner ask 10:15 CST: the batch runner is not archiving and reviewing as it should).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJKzhVo8BrXKn2ZpYnYx",
+  "status": "doing",
   "order": 723,
-  "updatedAt": "2026-11-08T10:25:00-06:00"
+  "updatedAt": "2026-11-08T10:35:00-06:00"
 }

@@ -1,10 +1,11 @@
 {
   "title": "Live file carries the fields the lanes-to-archive row reads",
   "phase": "cleanup",
-  "status": "ready",
+  "status": "doing",
   "order": 102.72,
   "why": "Idle-lane-archive (PR #1312) adds a lanes-to-archive upkeep row. Without these fields in the live file triage writes, the row reads unknown.",
-  "note": "#1312 merged 16:36 CST Nov 6; the roadmap skill on main now names the fields (sessions.status_bucket, pulls.head, items.lane and owner). Triage copies them on its next --live block build.\nWAITS: PR #1312 (idle-lane-archive) merges.\nThen triage's live file also copies sessions.status_bucket (its enum form), each pull's head sha, and each item's lane and owner.\nSource: coordinator session_013NEJL2hB1pLZPDpzas7VgB, 13:54 CST Nov 6.",
-  "updatedAt": "2026-11-06T22:42:00Z",
-  "owner": "triage"
+  "note": "#1312 merged 16:36 CST Nov 6; the roadmap skill on main now names the fields (sessions.status_bucket, pulls.head, items.lane and owner). Triage copies them on its next --live block build.\nWAITS: PR #1312 (idle-lane-archive) merges.\nThen triage's live file also copies sessions.status_bucket (its enum form), each pull's head sha, and each item's lane and owner.\nSource: coordinator session_013NEJL2hB1pLZPDpzas7VgB, 13:54 CST Nov 6. Doing 10:35 CST Nov 8 in lane session_013NEJKzhVo8BrXKn2ZpYnYx (coordinator 10:30 CST).",
+  "updatedAt": "2026-11-08T10:35:00-06:00",
+  "owner": "triage",
+  "lane": "session_013NEJKzhVo8BrXKn2ZpYnYx"
 }

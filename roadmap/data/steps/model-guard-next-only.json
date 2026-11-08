@@ -1,11 +1,11 @@
 {
   "title": "The model-name report guard does not ask for a model on agents named only under Next",
   "why": "The model-name stop guard asked three times for a model on agents that were named only under Next, not under Done (lane export-scan-option-key, 01:06 CST Nov 8). A possible false alarm: rule reports-done-names-models covers Done items only.",
-  "note": "First get one exact refusal text from the lane. Related: step report-model-from-role (ready, the role-word-in-id case) and reviewer-model-hook-latest. Queue fix (owner 13:20 CST Nov 7). Title by triage. Filed 01:10 CST Nov 8. Built under step model-guard-default-model, lane model-guard-reads-next (coordinator, 07:51 CST Nov 8). Built as #2040 (tests only; covers model-guard-default-model, model-guard-next-only and report-guard-all-spawns), with runner 8 (lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), 08:18 CST Nov 8).",
+  "note": "First get one exact refusal text from the lane. Related: step report-model-from-role (ready, the role-word-in-id case) and reviewer-model-hook-latest. Queue fix (owner 13:20 CST Nov 7). Title by triage. Filed 01:10 CST Nov 8. Built under step model-guard-default-model, lane model-guard-reads-next (coordinator, 07:51 CST Nov 8). Built as #2040 (tests only; covers model-guard-default-model, model-guard-next-only and report-guard-all-spawns), with runner 8 (lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), 08:18 CST Nov 8). Sighting 10:35 CST Nov 8 (lane fix-none-cite-check, session_013NEJL2ChVc4QiMs2icnEB8, via the coordinator 10:31 CST): the Stop model-name guard fired 6 times on agents named only under Next. Still on main until #2040 merges.",
   "phase": "now",
   "status": "ready",
   "order": 556,
   "owner": "triage",
   "lane": "session_013NEJL1SsG5NZULw1mG6qgB",
-  "updatedAt": "2026-11-08T08:18:00-06:00"
+  "updatedAt": "2026-11-08T10:35:00-06:00"
 }

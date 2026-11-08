@@ -1,0 +1,11 @@
+{
+  "title": "A roadmap step counts as landed from its lane's merged PRs, not from Step: trailers",
+  "why": "Step: trailers are never written: 33 ever, none since 11-02, so landed steps never read landed and lanes look idle with work on main.",
+  "note": "Filed 10:35 CST Nov 8. Owner ask, 10:15 CST Nov 8 (\"the batch runner isnt archiving and reviewing as well as it should ... mechanical flaw\"), coordinator audit 10:30 CST.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKzhVo8BrXKn2ZpYnYx",
+  "status": "doing",
+  "order": 735,
+  "updatedAt": "2026-11-08T10:35:00-06:00"
+}

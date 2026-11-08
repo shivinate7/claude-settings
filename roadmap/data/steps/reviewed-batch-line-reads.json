@@ -1,0 +1,11 @@
+{
+  "title": "merge --reviewed reads open heads once, tests ancestry locally, and lets stacked done PRs into the batch line",
+  "why": "225 done PRs sit unmerged; the per-PR compare reads would exceed the GitHub rate limit.",
+  "note": "Filed 10:35 CST Nov 8. Owner ask, 10:15 CST Nov 8 (\"the batch runner isnt archiving and reviewing as well as it should ... mechanical flaw\"), coordinator audit 10:30 CST.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJL1M5FMSnTFvUd8wY9u",
+  "status": "doing",
+  "order": 737,
+  "updatedAt": "2026-11-08T10:35:00-06:00"
+}

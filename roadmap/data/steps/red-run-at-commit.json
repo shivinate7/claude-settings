@@ -1,11 +1,11 @@
 {
   "title": "A revert commit with no Red-run trailer is caught when it is written or pushed, not at lane lint",
   "why": "Lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8): revert 8c05e5bc7 on #1581 went out with no Red-run trailer; lint/check_red_run.py caught it only at lane lint after the hand-off, so the fix took two replacement PRs (#2139, #2140).",
-  "note": "Filed 10:29 CST Nov 8 from that lane. First check whether a commit-msg or pre-push hook already runs it and was skipped by plumbing (the lane lands with git commit-tree and a push of a sha to refs/heads). Maybe covered by lane-lint-before-push (doing), which runs fast lane-lint checks before a push: ask that lane before building. Covered by #1582 (step red-run-pre-push, lane session_013NEJKz8JXQTvhuGYo4UJpi), which refuses the push of a test commit with no Red-run trailer (lane notes-fix-page and the coordinator, 10:30 CST). Gap sent to that lane: no case for a raw-sha push source (git push origin <sha>:refs/heads/<branch>), the form that sent 8c05e5bc7. Done when #1582 merges with that case.",
+  "note": "Filed 10:29 CST Nov 8 from that lane. First check whether a commit-msg or pre-push hook already runs it and was skipped by plumbing (the lane lands with git commit-tree and a push of a sha to refs/heads). Maybe covered by lane-lint-before-push (doing), which runs fast lane-lint checks before a push: ask that lane before building. Covered by #1582 (step red-run-pre-push, lane session_013NEJKz8JXQTvhuGYo4UJpi), which refuses the push of a test commit with no Red-run trailer (lane notes-fix-page and the coordinator, 10:30 CST). Gap sent to that lane: no case for a raw-sha push source (git push origin <sha>:refs/heads/<branch>), the form that sent 8c05e5bc7. Done when #1582 merges with that case. Fix: none (10:35 CST Nov 8, coordinator 10:30 CST): #1582 refuses the push; the raw-sha case went to #1582's lane.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKz8JXQTvhuGYo4UJpi",
-  "status": "ready",
+  "status": "done",
   "order": 732,
-  "updatedAt": "2026-11-08T10:31:00-06:00"
+  "updatedAt": "2026-11-08T10:35:00-06:00"
 }

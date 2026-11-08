@@ -1,0 +1,11 @@
+{
+  "title": "merge --reviewed names each draft over 12 h old with a missing, stale or bad record, for the runner to send back",
+  "why": "260 drafts lack a usable review record, so they sit unmerged with no next act.",
+  "note": "Filed 10:35 CST Nov 8. Owner ask, 10:15 CST Nov 8 (\"the batch runner isnt archiving and reviewing as well as it should ... mechanical flaw\"), coordinator audit 10:30 CST.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKzBfRycskE32T2Pj9F",
+  "status": "doing",
+  "order": 736,
+  "updatedAt": "2026-11-08T10:35:00-06:00"
+}
