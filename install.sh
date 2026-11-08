@@ -711,7 +711,7 @@ log "wrote $TARGET_MD -> $POINTER"
 
 # land_guard_set SRC_HOOKS DEST_HOOKS: copy mode, the guard files (install-hooks-whole).
 # A guard run sees the old set or the new set, never a mix. Step 1 writes every guard file, stamped
-# with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py and merge_options.py, which the guard imports, into DEST_HOOKS/guard.d/<id>/,
+# with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py and _nowindow.py, which the guard imports, into DEST_HOOKS/guard.d/<id>/,
 # where no guard reads it yet. Step 2 replaces
 # DEST_HOOKS/guard.py: the one landing that switches, because a stamped guard.py loads guard.d/<its
 # id>/ (see the comment above INSTALL_ID in hooks/guard.py). Step 3 lands the flat guard_*.py, kept
