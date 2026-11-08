@@ -650,7 +650,7 @@ try {
 }
 
 # ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
-# Per merge-reinstalls-from-main, install.ps1 allows a linked worktree only at
+# Per install-refuses-linked-tree, install.ps1 allows a linked worktree only at
 # <clone>-live AND detached at the clone's local main commit. pinlivewt1: a -live worktree on a lane
 # branch is refused. pinlivewt2: a -live worktree detached at a commit that is not main is refused.
 # pinlivehook1: run from the pin, the post-merge hook still lands in the clone's .git\hooks. Only copy
