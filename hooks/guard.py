@@ -578,9 +578,9 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DEFAULT_BRANCH_FALLBACK, DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
+            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
-            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, names_default_branch, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
         )
         _loading = "guard_merge"
@@ -7051,7 +7051,7 @@ def judge(payload) -> None:
     # in its schema, so a call with none fails at the host and is not judged here.
     if tool in FILE_WRITE_TOOLS:
         branch = tool_input.get("branch")
-        if isinstance(branch, str) and branch.strip() in DEFAULT_BRANCH_FALLBACK:
+        if isinstance(branch, str) and names_default_branch(branch):
             refuse(tool, "ask", "push-main", PUSH_MAIN_REASON, tool + " to " + branch.strip())
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).

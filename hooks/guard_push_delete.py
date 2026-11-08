@@ -27,6 +27,11 @@ DEFAULT_BRANCH_FALLBACK = ("main", "master")
 AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")
 
 
+def names_default_branch(ref: str) -> bool:
+    """True when a pushed ref, with or without its `refs/heads/` prefix, is main or master. The one home of that test."""
+    return ref.strip().removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK
+
+
 def _push_config(cwd: str, key: str, overrides=None):
     """The config value, '' when the key is unset, None when git cannot answer.
 
@@ -925,10 +930,10 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                     globs.append(spec)
             elif colon:
                 # A main destination does not end the scan: an agent name later in the push is refused, not asked.
-                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():
+                if names_default_branch(target) and main():
                     to_main = True
                 agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
-            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
+            elif names_default_branch(source):
                 # A local origin makes main() empty; the other refspecs are still read for agent and stray.
                 if main():
                     to_main = True
