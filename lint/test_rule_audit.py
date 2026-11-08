@@ -1999,6 +1999,18 @@ def merge_src(raise_line, defs="", body=None):
             + defs + 'def go(b):\n' + lines)
 
 
+BRANCH_HELPER = ('def helper(seg):\n'
+                 '    if seg:\n'
+                 '        return seg, "see decision alpha"\n'
+                 '    return "", ""\n')
+BRANCH_PICK = 'def pick(seg):\n    return seg\n'  # its reason is a parameter, so the text is known only at run time
+
+
+def branch_src(judge_body):
+    """A guard module with a cited helper, a run-time helper, and `judge(seg, tool)` made of the lines of `judge_body`."""
+    return BRANCH_HELPER + BRANCH_PICK + 'def judge(seg, tool):\n' + judge_body
+
+
 class RefusalCiteFixtureTests(unittest.TestCase):
     """The cite pattern and the scanner, on in-memory source."""
 
@@ -2115,6 +2127,47 @@ class RefusalCiteFixtureTests(unittest.TestCase):
         self.assertEqual(status_of(src, "tuple-id"), ["cited"])
         uncited = src.replace("see decision alpha", "no cite here")
         self.assertEqual(status_of(uncited, "tuple-id"), ["no cite"])
+
+    def test_a_run_time_walrus_in_another_branch_does_not_unresolve_a_cited_branch(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        if hit[0]:\n'
+                         '            refuse(tool, "deny", "walrus-id", hit[1], hit[0])\n'
+                         '    elif seg == "b" and (hit := pick(seg)):\n'
+                         '        return hit\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "walrus-id"), ["cited"],
+                         "a run-time walrus of hit in another branch hides the cited hit this branch binds")
+
+    def test_an_unbound_read_in_a_branch_stays_not_resolved(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        refuse(tool, "deny", "unbound-id", hit[1], hit[0])\n'
+                         '    elif seg == "b":\n'
+                         '        hit = pick(seg)\n'
+                         '        return hit\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "unbound-id"), ["not resolved"],
+                         "no binding of hit reaches this refusal, so its reason must not resolve")
+
+    def test_a_branch_whose_only_reaching_binding_is_run_time_stays_not_resolved(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        return hit\n'
+                         '    elif seg == "b":\n'
+                         '        hit = pick(seg)\n'
+                         '        if hit[0]:\n'
+                         '            refuse(tool, "deny", "runtime-id", hit[1], hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "runtime-id"), ["not resolved"],
+                         "the only binding reaching this refusal is run-time; a cited binding elsewhere must not resolve it")
+
+    def test_a_single_binding_read_in_its_branch_stays_cited(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        if hit[0]:\n'
+                         '            refuse(tool, "deny", "single-id", hit[1], hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "single-id"), ["cited"])
 
     def test_an_empty_reason_is_not_resolved(self):
         self.assertEqual(status_of('refuse(t, "deny", "empty-id", "", m)\n', "empty-id"), ["not resolved"])
