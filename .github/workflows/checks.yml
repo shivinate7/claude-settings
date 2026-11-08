@@ -206,6 +206,9 @@ jobs:
       - name: Daily note fixture suite
         run: python3 hooks/test_daily_note.py
 
+      - name: Git mailbox suite
+        run: python3 hooks/test_mail.py
+
       - name: No-window helper fixture suite
         run: python3 hooks/test_nowindow.py
 
