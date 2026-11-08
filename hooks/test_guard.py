@@ -13435,6 +13435,36 @@ add("builder-test (file-judge): a test step moved within checks.yml is allowed",
 add("builder-test (file-judge): continue-on-error added under the lint step is allowed", "allow", tool="Edit",
     file_path=WF, old_string="      - name: Lint\n", new_string="      - name: Lint\n        continue-on-error: true\n",
     **dict(B, cwd=FILE_JUDGE_ONE))
+# file-judge: the guard refuses each case below. A trailing comment after `continue-on-error` or `if: false` must not
+# hide the disabling key, and a run line that joins a no-op (`|| true`, `; exit 0`, `|| exit 0`) must not keep a
+# test path while the step can no longer fail.
+add("builder-test (file-judge): continue-on-error with a trailing comment added under a test step's name line is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=TEST_NAME_LINE,
+    new_string=TEST_NAME_LINE + "        continue-on-error: true  # flaky\n", carries=("test-author", "Report"),
+    **dict(B, cwd=FILE_JUDGE_ONE))
+add("builder-test (file-judge): if: false with a trailing comment added under a test step's name line is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=TEST_NAME_LINE,
+    new_string=TEST_NAME_LINE + "        if: false  # skip for now\n", carries=("test-author", "Report"),
+    **dict(B, cwd=FILE_JUDGE_ONE))
+for _tail in (" || true", "; exit 0", " || exit 0"):
+    add("builder-test (file-judge): a test run joined with %s is refused" % _tail.strip(), "deny", rule=BT,
+        tool="Edit", file_path=WF, old_string=TEST_LINUX,
+        new_string=TEST_LINUX.replace("test_guard.py\n", "test_guard.py%s\n" % _tail),
+        carries=("test-author", "Report"), **dict(B, cwd=FILE_JUDGE_ONE))
+# Green control: the whole-file judge alone catches a plain continue-on-error that an Edit adds under a test step's
+# name line with replace_all, since the fragment holds no run line.
+add("builder-test (file-judge): plain continue-on-error added by replace_all under a test step's name line is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=TEST_NAME_LINE,
+    new_string=TEST_NAME_LINE + "        continue-on-error: true\n", replace_all=True, carries=("test-author", "Report"),
+    **dict(B, cwd=FILE_JUDGE_ONE))
+# Green control: a file that already holds a continue-on-error test step still takes a benign lint rename.
+FILE_JUDGE_COE = _workflow_file_repo("wf-file-judge-coe", LINT + CONTINUE_ON_ERROR + CLEAN)
+add("builder-test (file-judge): a lint step renamed in a file that already holds a continue-on-error test step is allowed",
+    "allow", tool="Edit", file_path=WF, old_string="      - name: Lint\n", new_string="      - name: Lint (ste)\n",
+    **dict(B, cwd=FILE_JUDGE_COE))
+add("builder-test (file-judge): a test run joined with && echo done is allowed", "allow", tool="Edit", file_path=WF,
+    old_string=TEST_LINUX, new_string=TEST_LINUX.replace("test_guard.py\n", "test_guard.py && echo done\n"),
+    **dict(B, cwd=FILE_JUDGE_ONE))
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
