@@ -250,20 +250,25 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(run([p], existing=[p]), want)
 
-    def test_shared_names_change_sets_the_same_flags_as_guard_py(self):
-        # guard_core.py and config_watch.py import it, so the guard mutation tests must run on it.
-        want = run(["hooks/guard.py"])
-        self.assertEqual(run(["hooks/shared_names.py"]), want)
+    def test_shared_names_change_sets_guard_py_flags_and_the_merge_job(self):
+        # guard_core.py and config_watch.py import it, so the guard mutation tests must run on it. git_reads.py
+        # imports it too, and merge.ancestor() loads git_reads, so the Windows merge job (merge/test_merge.py) runs on it.
+        want = dict(run(["hooks/guard.py"]), checks_windows_merge="true")
+        self.assertEqual(run(["hooks/shared_names.py"]), want,
+                         "shared_names turns checks_windows_merge off: merge.ancestor() reaches it through git_reads")
         self.assertEqual(run(["hooks/shared_names.py"], existing=["hooks/shared_names.py"]),
-                         run(["hooks/guard.py"], existing=["hooks/guard.py"]))
+                         dict(run(["hooks/guard.py"], existing=["hooks/guard.py"]), checks_windows_merge="true"),
+                         "shared_names edit turns checks_windows_merge off: merge.ancestor() reaches it through git_reads")
 
-    def test_git_reads_change_sets_the_same_flags_as_guard_py(self):
+    def test_git_reads_change_sets_guard_py_flags_and_the_merge_job(self):
         # guard_core.py and the janitor's sweep.py and session_end_sweep.py import it, so the guard
-        # and sweep mutation tests must run on it.
-        want = run(["hooks/guard.py"])
-        self.assertEqual(run(["hooks/git_reads.py"]), want)
+        # and sweep mutation tests must run on it. merge.ancestor() loads it too, so the Windows merge job runs on it.
+        want = dict(run(["hooks/guard.py"]), checks_windows_merge="true")
+        self.assertEqual(run(["hooks/git_reads.py"]), want,
+                         "git_reads turns checks_windows_merge off: merge.ancestor() loads it and merge/test_merge.py covers it")
         self.assertEqual(run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"]),
-                         run(["hooks/guard.py"], existing=["hooks/guard.py"]))
+                         dict(run(["hooks/guard.py"], existing=["hooks/guard.py"]), checks_windows_merge="true"),
+                         "git_reads edit turns checks_windows_merge off: merge.ancestor() loads it and merge/test_merge.py covers it")
 
     # Control: the guard test file keeps today's flags. A family rule must not catch it.
     def test_guard_test_file_keeps_its_current_flags(self):
