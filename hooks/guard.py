@@ -120,7 +120,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
-  draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  lane-lint-send      deny. A send_message to a target whose newest record (get_session, create_session or a
+                       list_sessions row) is tagged cs-build:batch-runner, when its text names an open pull request
+                       (`#n`, or a github.com pull URL; at most five) with no parseable review record whose Head equals
+                       the live head. A closed or merged pull request, an issue, a target that is no runner (no pull
+                       request read) and a message that names no pull request pass. A target with no record, or one
+                       retagged after it, is refused once per session with a steer to get_session; a send after that
+                       refusal passes. A read that fails, a read past LANE_LINT_SEND_SECONDS (25 s), an unknown repo
+                       (a bare #n with no cs-repo tag and no GitHub origin) and a sixth pull request read as unknown:
+                       allowed, with one guard.log line and one stderr line. An override lifts it. (lane-lint-send)
+  draft-pr            deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
@@ -415,7 +424,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, RED_RUN_PUSH_REASON, ROLE_REASON,
             conflict_markers_hit, lane_lint_push_hit, red_run_parts, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, lane_lint_send_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -5217,6 +5226,17 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A hand-off to a batch runner that names an open pull request with no review record at its live head (rule lane-lint-send).
+    # Cost: none for a message that names no pull request or a target that is no runner; else one pulls read per pull request
+    # (at most five) and one comment list per repo (see guard_merge.py, lane-lint-send).
+    def lane_send_note(why):
+        record(tool, "noted", "lane-lint-send", "unknown: " + why)
+        print("lane-lint-send: unknown, %s. The hand-off is allowed, not judged." % cap_safe(why, 300), file=sys.stderr)
+
+    sent = lane_lint_send_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", cwd, lane_send_note)
+    if sent:
+        refuse(tool, "deny", "lane-lint-send", sent[1], sent[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

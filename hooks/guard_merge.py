@@ -1308,10 +1308,11 @@ def role_call_of(segment: str):
     return None
 
 
-def _own_session_read(transcript: str, own_id: str, created: bool = False):
+def _own_session_read(transcript: str, own_id: str, created: bool = False, listed: bool = False):
     """(tags, tagged_after): the own-record read of hooks/own_session.py, without the parent id."""
     # `created` counts a create_session call as a record too: rule lane-one-topic reads a lane by its start.
-    return own_session.own_session_read(transcript, own_id, created)[:2]
+    # `listed` counts a list_sessions row: rule lane-lint-send reads a runner by any record of it. The role proofs leave it off.
+    return own_session.own_session_read(transcript, own_id, created, listed)[:2]
 
 
 def _own_get_session_tags(transcript: str, session_id: str):
@@ -1613,6 +1614,145 @@ def brief_hit(tool: str, tool_input, transcript: str):
     steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
+    return None
+
+
+# ---- send_message: a lane hands a batch runner only pull requests with a review record at the live head (rule lane-lint-send)
+LANE_SEND_RULE = "lane-lint-send"
+LANE_SEND_ENV = "LANE_LINT_SEND_SECONDS"  # the seconds one hand-off's pull request reads may take together; a read past it is unknown
+LANE_SEND_MAX = 5  # pull requests judged in one message; a sixth makes the whole message unknown
+RUNNER_TAG = ROLE_TAG_PREFIX + ROLE_TIERS[0]
+_SEND_PR_URL = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)(?!\d)")
+_SEND_PR_BARE = re.compile(r"(?<![\w&/])#(\d{1,5})(?!\w)")  # `#41`; not `&#39;`, a colour, or a number in a longer digit run
+LANE_SEND_REASON = (
+    "lane-lint-send: this hand-off names %s, with no review record at its live head. Run `merge --lane-lint <pr>` on the "
+    "lane's pushed head, fix any finding, write the review record with `merge <pr> --review-record`, post it on the pull "
+    "request, then send again. (decision lane-lint-send, a lane hands a batch runner only a pull request whose live head passed its lint)"
+)
+LANE_SEND_NO_RECORD_REASON = (
+    "lane-lint-send: this hand-off names a pull request, and this session's transcript holds no get_session, create_session or "
+    "list_sessions record of the target, so the guard cannot tell whether the target is a batch runner. Run get_session on the "
+    "target alone, in its own turn, then retry; a retry of this send passes once. "
+    "(decision lane-lint-send, a lane hands a batch runner only a pull request whose live head passed its lint)"
+)
+
+
+def _send_refs(message: str):
+    """The pull requests a message names, in order, without repeats: (repo or '', number). A pull URL names its repo; a bare `#n` names none."""
+    found = [(m.start(), m.group(1), int(m.group(2))) for m in _SEND_PR_URL.finditer(message)]
+    covered = [(m.start(), m.end()) for m in _SEND_PR_URL.finditer(message)]
+    found += [(m.start(), "", int(m.group(1))) for m in _SEND_PR_BARE.finditer(message)
+              if not any(lo <= m.start() < hi for lo, hi in covered)]
+    refs = []
+    for _at, repo, number in sorted(found):
+        if (repo, number) not in refs:
+            refs.append((repo, number))
+    return refs
+
+
+def _send_refused_before(transcript: str, target: str) -> bool:
+    """True when this transcript holds an earlier send_message to `target` whose result names LANE_SEND_RULE: the one refusal per target is spent."""
+    sends = set()
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = json.loads(line)["message"]["content"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            for block in content if isinstance(content, list) else ():
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("send_message"):
+                    given = block.get("input")
+                    if isinstance(given, dict) and given.get("session_id") == target:
+                        sends.add(block.get("id"))
+                elif block.get("type") == "tool_result" and block.get("tool_use_id") in sends:
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    if isinstance(body, str) and LANE_SEND_RULE in body:
+                        return True
+    return False
+
+
+def _send_cap():
+    """Seconds one hand-off's reads may take together: LANE_SEND_ENV, else MERGE_READ_TIMEOUT."""
+    try:
+        value = float(os.environ.get(LANE_SEND_ENV, ""))
+    except ValueError:
+        value = 0.0
+    return value if value > 0 else float(MERGE_READ_TIMEOUT)
+
+
+def _send_default_repo(tags, cwd):
+    """The repo a bare `#n` names: the target's cs-repo tag, else the origin of the checkout holding `cwd`, else ''."""
+    named = [str(t)[len(ARCHIVE_REPO_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_REPO_PREFIX)]
+    named = [r for r in named if _REPO_NAME.fullmatch(r)]
+    if named:
+        return named[0]
+    found = _toplevel(cwd) if cwd and os.path.isdir(cwd) else None
+    top = os.path.normpath(found.stdout.strip()) if found is not None and found.returncode == 0 and found.stdout.strip() else ""
+    if not top:
+        return ""
+    import git_reads
+    return git_reads.github_repo(top) or ""
+
+
+def lane_lint_send_hit(tool: str, tool_input, transcript: str, cwd: str, note):
+    """Return (matched, reason) when this send_message hands a batch runner an open pull request whose live head has no review record,
+    else None. A message that names no pull request reads nothing. A target whose newest record (get_session, create_session or a
+    list_sessions row) has no cs-build:batch-runner tag is not judged and costs no pull request read. With no usable record of the
+    target the first such send is refused with a steer, and a send after that refusal passes. Each pull request (at most
+    LANE_SEND_MAX) is read through the merge tool's hand_off_read: a closed or merged pull request and an issue pass. A read that
+    fails, a read past LANE_SEND_ENV, an unknown repo, a missing merge tool and a sixth pull request are unknown: allowed, with `note(why)`
+    called once. Fails open: the guard-wide crash path allows too, and a bug here never blocks a hand-off."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message, target = tool_input.get("message"), tool_input.get("session_id")
+    if not isinstance(message, str) or not isinstance(target, str) or not target:
+        return None
+    refs = _send_refs(message)
+    if not refs:
+        return None
+    try:  # cost: one transcript read per send that names a pull request
+        tags, tagged_after = _own_session_read(transcript, target, created=True, listed=True) if transcript else (None, False)
+    except Exception:
+        tags, tagged_after = None, False
+    if tags is None or tagged_after:
+        try:
+            spent = bool(transcript) and _send_refused_before(transcript, target)
+        except Exception:
+            spent = False
+        return None if spent else ("hand-off to a target with no record", LANE_SEND_NO_RECORD_REASON)
+    if RUNNER_TAG not in tags:
+        return None
+    if len(refs) > LANE_SEND_MAX:
+        note("the message names %d pull requests, past the %d the guard judges" % (len(refs), LANE_SEND_MAX))
+        return None
+    try:
+        default = ""
+        if any(not repo for repo, _n in refs):
+            default = _send_default_repo(tags, cwd)
+            if not default:
+                note("the repo of a bare #n is unknown: the target has no cs-repo tag and the working directory has no GitHub origin")
+                return None
+        by_repo = {}
+        for repo, number in refs:
+            by_repo.setdefault(repo or default, []).append(number)
+        module = merge_module()
+        if module is None:
+            note("the merge tool could not be loaded")
+            return None
+        open_prs = []
+        with module.shared_deadline(_send_cap()):  # cost: one pulls read per number and one comment list per repo, under one budget
+            for repo, numbers in by_repo.items():
+                states = module.hand_off_read(module.Host(repo=repo), numbers)
+                open_prs += ["#%d" % n if repo == default else "%s#%d" % (repo, n) for n in numbers if states[n] == "open"]
+    except (Exception, SystemExit) as err:
+        note("the pull request read failed (%s: %s)" % (type(err).__name__, cap_safe(" ".join(str(err).split()), 120)))
+        return None
+    if open_prs:
+        return "hand-off of " + ", ".join(open_prs), LANE_SEND_REASON % ", ".join(open_prs)
     return None
 
 

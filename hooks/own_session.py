@@ -46,13 +46,40 @@ def _record_json(body):
     return record
 
 
-def own_session_read(transcript, own_id, created=False):
+def _listed_rows(body):
+    """The session records a list_sessions result holds: each `ccr` object, and each object that carries a string `id` and a list `tags`, at any
+    depth of its JSON. [] when the body is not JSON."""
+    try:
+        parsed = _record_json(body)
+    except (ValueError, KeyError):
+        try:
+            parsed = json.loads(body)
+        except ValueError:
+            return []
+    rows, todo = [], [parsed]
+    while todo:
+        item = todo.pop()
+        if isinstance(item, list):
+            todo.extend(item)
+        elif isinstance(item, dict):
+            if isinstance(item.get("ccr"), dict):
+                todo.append(item["ccr"])
+            if isinstance(item.get("id"), str) and isinstance(item.get("tags"), list):
+                rows.append(item)
+            todo.extend(v for v in item.values() if isinstance(v, (list, dict)))
+    return rows
+
+
+def own_session_read(transcript, own_id, created=False, listed=False):
     """(tags, tagged_after, parent): the tags and parent_session_id of the newest get_session result
     whose ccr.id is own_id, else None for each, and whether a set_session_tags call follows that
     result. With `created`, a create_session call whose result names own_id is a record too: its tags
     are the call's input.tags, its parent is None unless the input names parent_session_id. The newest
-    record of either kind decides. Without it, only get_session counts."""
+    record of either kind decides. Without it, only get_session counts. With `listed`, a list_sessions row whose
+    id is own_id is a record too, and the newest record of any kind decides; the default leaves a list_sessions
+    result unread, so the own-role proof never rests on a list."""
     uses, newest, parent, tagged_after = set(), None, None, False
+    lists = set()  # tool_use ids of list_sessions calls, read only when `listed`
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -67,6 +94,8 @@ def own_session_read(transcript, own_id, created=False):
                     continue
                 if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
+                elif listed and block.get("type") == "tool_use" and str(block.get("name", "")).endswith("list_sessions"):
+                    lists.add(block.get("id"))
                 elif created and block.get("type") == "tool_use" and str(block.get("name", "")).endswith("create_session"):
                     given = block.get("input", {}).get("tags") if isinstance(block.get("input"), dict) else None
                     if isinstance(given, list):
@@ -78,10 +107,18 @@ def own_session_read(transcript, own_id, created=False):
                     ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
                     if not isinstance(ids, list) or own_id in ids:
                         tagged_after = True
-                elif block.get("type") == "tool_result" and (block.get("tool_use_id") in uses or block.get("tool_use_id") in creates):
+                elif block.get("type") == "tool_result" and (block.get("tool_use_id") in uses or block.get("tool_use_id") in creates
+                                                             or block.get("tool_use_id") in lists):
                     body = block.get("content")
                     if isinstance(body, list):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    if block.get("tool_use_id") in lists:
+                        for row in (_listed_rows(body) if isinstance(body, str) else []):
+                            if row["id"] == own_id:
+                                newest, tagged_after = [str(t) for t in row["tags"]], False
+                                found = row.get("parent_session_id")
+                                parent = found if isinstance(found, str) and found else None
+                        continue
                     if block.get("tool_use_id") in creates:
                         if _created_session_id(body) == own_id:
                             (newest, parent), tagged_after = creates[block.get("tool_use_id")], False
