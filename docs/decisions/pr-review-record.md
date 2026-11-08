@@ -33,7 +33,7 @@ CI: read live by merge --reviewed
 
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
-- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
+- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after the final round (round 3, or 4 with a `Grant` line) it keeps the net value that round gave; with no round recorded it reads open.
 - The `Grant` line is optional and comes once, directly after `Guard or check`. It is the owner's grant of round 4, the one round past round 3 (rule `roles-review-cap-three`). `--grant TEXT` writes it, only with `--review-record`. Its text is an item number, one lowercase letter for the pick, `owner`, and a CST or CDT time. With the line the rounds must reach round 4. Without it they stop at round 3. Never round 5.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.

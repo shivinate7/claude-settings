@@ -3183,6 +3183,16 @@ REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 
+def grant_valid(text):
+    """True when `text` is a whole Grant text whose date and time are a real time; the pattern alone lets 2026-99-99 25:99 through."""
+    if not re.fullmatch(REVIEW_GRANT, text, re.ASCII):
+        return False
+    try:
+        datetime.datetime.strptime(text[-len("YYYY-MM-DD HH:MM CST"):-4], "%Y-%m-%d %H:%M")
+    except ValueError:
+        return False
+    return True
+
 def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
     fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value. `grant` is None or the Grant text, printed
@@ -3218,8 +3228,8 @@ def parse_review(text):
         return None
     if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
         return None
-    g = re.fullmatch(rf"Grant: ({REVIEW_GRANT})", lines[5], re.ASCII)
-    grant = g.group(1) if g else None
+    g = re.fullmatch(r"Grant: (.*)", lines[5], re.ASCII)
+    grant = g.group(1) if g and grant_valid(g.group(1)) else None  # a malformed Grant line falls through to the round loop, which refuses it
     ceiling = REVIEW_LAST_ROUND + bool(grant)
     rounds, last, fix = [], 0, None
     for line in lines[5 + bool(grant):-2]:
@@ -3327,8 +3337,8 @@ def round_arg(text):
     return (int(m.group(1)), *m.group(2, 3, 4))
 
 def grant_arg(text):
-    """argparse type of --grant TEXT -> the text, when it fully matches REVIEW_GRANT."""
-    if not re.fullmatch(REVIEW_GRANT, text, re.ASCII):
+    """argparse type of --grant TEXT -> the text, when grant_valid accepts it."""
+    if not grant_valid(text):
         raise argparse.ArgumentTypeError(f"{text!r} is not `item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with x one lowercase letter")
     return text
 
@@ -3435,11 +3445,12 @@ def main(argv, host=None, lock=None):
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `item N x, owner, YYYY-MM-DD HH:MM CST|CDT`; the rounds must then reach round 4")
-    p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
+    p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if (a.head or a.kind or a.guard or a.round or a.fix_check or a.grant or a.net_value != "not owed") and not a.review_record:
-        p.error("--head, --kind, --guard, --round, --fix-check, --net-value and --grant go with --review-record")
+        p.error("--head, --kind, --guard, --round, --fix-check, --net-value and --grant go with --review-record" if a.grant
+                else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
