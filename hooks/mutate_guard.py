@@ -2776,6 +2776,7 @@ _PATH_NAMES = frozenset(("Path", "PurePath", "PurePosixPath", "PureWindowsPath",
 _PATH_METHODS = frozenset(("Path", "PurePath", "joinpath", "abspath", "realpath", "normpath", "with_name"))
 _FILE_CALLS = frozenset(("open", "copy", "copy2", "copyfile", "copytree", "move", "run", "call", "check_call",
                          "check_output", "Popen", "read_text", "read_bytes"))
+_PATH_WRAPPERS = frozenset(("str", "fspath", "format"))  # a call that passes its argument's text on as a path
 
 
 def _suite_profile(source: str):
@@ -2787,14 +2788,16 @@ def _suite_profile(source: str):
     (`_PATH_NAMES`, `_PATH_METHODS`), and the path argument of `spec_from_file_location`, `SourceFileLoader` and
     `runpy.run_path` (never the module-name argument). A name in such an expression is followed to the expressions an
     assignment binds it to, in any scope of the file (module, function or class level; one name bound in two scopes pools
-    both values), and a `for` target is bound to the strings of its iterable: a tuple, list or set literal, or a name bound
-    to one. A path that arrives as a function parameter is not followed (debt tests-for-misses-param-loads)."""
+    both values). A `for` or comprehension target is bound, inside its own loop only, to the strings of its own iterable: a
+    tuple, list, set or dict literal, a comprehension's element, `sorted` / `reversed` / `enumerate` / `list` / `tuple` /
+    `set` / `frozenset` of one of these, or a name bound to one, through at most one more name (`B = A`). Another loop's
+    use of the same name adds nothing, and the name means nothing after its loop. A path that arrives as a function parameter is not followed (debt tests-for-misses-param-loads)."""
     import ast
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
         return None
-    bound = {}  # a name -> the expressions it is bound to, in any scope
+    bound = {}  # a name -> the expressions an assignment binds it to, in any scope
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
@@ -2802,26 +2805,89 @@ def _suite_profile(source: str):
                     bound.setdefault(target.id, []).append(node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
-    literals = (ast.Tuple, ast.List, ast.Set)
-    for node in ast.walk(tree):  # after the assignments, so a loop over a bound name finds its literal
+    literals = (ast.Tuple, ast.List, ast.Set, ast.Dict)
+    wrappers = ("sorted", "reversed", "enumerate", "list", "tuple", "set", "frozenset")
+
+    def items_of(expr, scope, hops, seen):
+        """The expressions whose strings a loop over `expr` yields: a literal itself, the element of a comprehension, the
+        argument of a wrapper (`wrappers`), or a name's values: a loop name of `scope`, or what an assignment binds it to
+        (one more hop when that is a name again, `hops`)."""
+        if isinstance(expr, literals):
+            return [expr]
+        if isinstance(expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            return [expr.elt]
+        if isinstance(expr, ast.DictComp):
+            return [expr.key, expr.value]
+        if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id in wrappers and expr.args:
+            return items_of(expr.args[0], scope, hops, seen)
+        if isinstance(expr, ast.Name) and expr.id not in seen:
+            seen = seen | {expr.id}
+            found = list(scope.get(expr.id, ()))
+            for value in bound.get(expr.id, ()):
+                if not isinstance(value, ast.Name) or hops > 0:
+                    found.extend(items_of(value, {}, hops - isinstance(value, ast.Name), seen))
+            return found
+        return []
+
+    def loop_scope(scope, target, iterable):
+        """`scope` with each name of a loop `target` bound to the items of this loop's own iterable, so the name means
+        these strings inside the loop and nowhere else. `enumerate` gives its element to the second name of a pair."""
+        items = items_of(iterable, scope, 1, frozenset())
+        if isinstance(iterable, ast.Call) and getattr(iterable.func, "id", "") == "enumerate" \
+                and isinstance(target, ast.Tuple) and len(target.elts) == 2:
+            target = target.elts[1]
+        inner = dict(scope)
+        for part in ast.walk(target):
+            if isinstance(part, ast.Name):
+                inner[part.id] = items
+        return inner
+
+    scopes = {}  # a node -> the loop names in force at it
+    todo = [(tree, {})]
+    while todo:  # a stack, so a deep expression cannot overflow the recursion limit
+        node, scope = todo.pop()
+        scopes[node] = scope
         if isinstance(node, (ast.For, ast.AsyncFor)):
-            if isinstance(node.iter, ast.Name):
-                items = [value for value in bound.get(node.iter.id, ()) if isinstance(value, literals)]
-            else:
-                items = [node.iter] if isinstance(node.iter, literals) else []
-            for target in ast.walk(node.target):
-                if isinstance(target, ast.Name):
-                    bound.setdefault(target.id, []).extend(items)
+            inner = loop_scope(scope, node.target, node.iter)
+            todo.append((node.iter, scope))
+            todo.append((node.target, inner))
+            todo.extend((child, inner) for child in node.body + node.orelse)
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            inner = scope
+            for generator in node.generators:
+                todo.append((generator.iter, inner))
+                inner = loop_scope(inner, generator.target, generator.iter)
+                todo.append((generator.target, inner))
+                todo.extend((test, inner) for test in generator.ifs)
+            todo.extend((part, inner) for part in ((node.key, node.value) if isinstance(node, ast.DictComp) else (node.elt,)))
+        else:
+            todo.extend((child, scope) for child in ast.iter_child_nodes(node))
     stems, bases = set(), set()
 
+    def walk(expr):
+        """(node, direct) for each node under `expr`. `direct` is False below a call that does not build a path (not in
+        `_PATH_NAMES`, `_PATH_METHODS`, `_FILE_CALLS` or `_PATH_WRAPPERS`): a loop name there is an argument of some other
+        function, not a path, so it is not followed."""
+        todo = [(expr, True)]
+        while todo:
+            node, direct = todo.pop()
+            yield node, direct
+            if isinstance(node, ast.Call):
+                func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+                if not (is_path_call(node.func) or func in _FILE_CALLS or func in _PATH_WRAPPERS):
+                    direct = False
+            todo.extend((child, direct) for child in ast.iter_child_nodes(node))
+
     def constants(expr, seen):
-        for part in ast.walk(expr):
+        for part, direct in walk(expr):
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
                 bases.add(part.value.replace("\\", "/").rsplit("/", 1)[-1])
-            elif isinstance(part, ast.Name) and part.id in bound and part.id not in seen:
-                seen.add(part.id)
-                for value in bound[part.id]:
-                    constants(value, seen)
+            elif isinstance(part, ast.Name):
+                loop = scopes.get(part, {}).get(part.id, ()) if direct else ()
+                for value in list(loop) + bound.get(part.id, []):
+                    if id(value) not in seen:  # each bound expression once, so a self-reference ends
+                        seen.add(id(value))
+                        constants(value, seen)
 
     def is_path_call(func) -> bool:
         if isinstance(func, ast.Name):
