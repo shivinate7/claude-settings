@@ -17,7 +17,7 @@ Home: hooks/guard.py
 The PreToolUse guard judges `mcp__claude-code-remote__send_message`, from any session, main or agent. The text is `tool_input.message`. Rule `message-ref-missing` (deny). An owner override lifts it.
 
 - **Commit sha.** The token rule of `agent-report-shas-resolve`, resolved in the repo of the payload's `cwd`. A `github.com/<owner>/<repo>/commit/<sha>` URL of this repo is judged too.
-- **Pull request.** `PR #N`, `PR N`, `pull request #N`, `#N (PR)`, in any case, and every number of a list such as `PRs 7 and 8` or `PRs #7, #8 and #9`. Also a `github.com/<owner>/<repo>/pull/N` URL of this repo, with or without a scheme and with any tail such as `/files`. A bare `#N` with no `PR` word is skipped: it may be an issue or an item. A merged or closed PR keeps its `refs/pull/N/head` (measured: #1 and #1764 of this repo), so it passes.
+- **Pull request.** `PR #N`, `PR N`, `pull request #N`, `#N (PR)`, in any case, and every number of a list such as `PRs 7 and 8` or `PRs #7, #8 and #9`. After a singular `PR`, a further number needs its own `#`, so `PR #7, 12 files` names one PR. Also a `github.com/<owner>/<repo>/pull/N` URL of this repo, with or without a scheme and with any tail such as `/files`. A bare `#N` with no `PR` word is skipped: it may be an issue or an item. A merged or closed PR keeps its `refs/pull/N/head` (measured: #1 and #1764 of this repo), so it passes.
 - **PR comment.** A `github.com/<owner>/<repo>/(pull|issues)/N#issuecomment-<id>` URL of this repo.
 
 ## Which repo
