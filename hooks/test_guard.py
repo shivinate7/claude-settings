@@ -3212,9 +3212,10 @@ sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.
 #      shared checkout, ask in a linked worktree, allow and noted in an agent-owned worktree.
 #   C. A work-tree discard (checkout -- ., checkout -q -- .) takes the same three verdicts. Its restore
 #      and checkout HEAD forms each have one home per tree. restore -- <path> and checkout HEAD -- .
-#      take their shared and hand-made verdicts from RULING_TREE_FORMS, below, and their agent-owned
-#      note from AGENT_NOTED_RULING, above. restore . takes its shared and hand-made verdicts from the
-#      per-file ASK and DENY blocks, above, and its agent-owned note from AGENT_NOTED_RULING.
+#      take their shared and hand-made verdicts from RULING_TREE_FORMS, below, which is ruling D, and
+#      their agent-owned note from AGENT_NOTED_RULING, below. restore . takes its shared and hand-made
+#      verdicts from the per-file ASK and DENY blocks, above, and its agent-owned note from
+#      AGENT_NOTED_RULING, below.
 # The discard and path forms name f.txt, which _build_gitmain leaves tracked and dirty in all four trees.
 # A path the fixture lacks would read as an empty subject and pass for the wrong reason. reset -q and
 # reset -- . name no file: ruling A allows them whatever the subject, so they pin the flag-free verdict.
