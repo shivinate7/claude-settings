@@ -546,6 +546,8 @@ class Lock:
             self.until = None  # no lock is held after this: a later rate wait extends nothing
         say(f"merge: the lock release failed: {why}.{left} Run merge --unlock only if no run holds it.")
 
+SHA_HEX = r"[0-9a-f]{40}"  # a full git object id; one home for every sha check
+
 class GitLock(Lock):
     """Any git remote. Tests use a local bare origin. Each push is leased on the sha it read (empty: create only), so a ref that moved since the read refuses the push."""
     def __init__(self, root, now=time.time, pause=time.sleep):
@@ -560,7 +562,7 @@ class GitLock(Lock):
             return None
         # Only stdout lists refs. A first token that is no sha is a listing this run cannot read: a Stop, never a lock sha and never no lock.
         sha = out.split()[0]
-        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        if not re.fullmatch(SHA_HEX, sha):
             raise Stop("cannot read the merge lock " + LOCK_CITE + ": ls-remote listed no sha: " + out)
         return sha
 
@@ -3013,7 +3015,7 @@ REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL"
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
 REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
-REVIEW_SHA = r"[0-9a-f]{40}"
+REVIEW_SHA = SHA_HEX
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
