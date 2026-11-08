@@ -2556,9 +2556,10 @@ def ci_job_run(wt, *args, pr_body=""):
 
 PARENT_LINE = re.compile(r"merge after(.*)", re.I)
 # A backticked `git diff [flags] <start> <end>`, `<start>..<end>` or `<start>...<end>`, flags or `-- path` after the end allowed. Leading flags are
-# skipped; a lone `--` is no flag, since paths follow it.
-REVIEW_RANGE = re.compile(r"`git diff\s+(?:-(?!-(?:\s|`))[^\s`]+\s+)*(?!-)([^\s`]+?)(?:\.\.\.?|\s+)(?!-)[^\s`]+[^`]*`")
+# skipped; a lone `--` is no flag, since paths follow it. Group 1 is the start, group 2 the end.
+REVIEW_RANGE = re.compile(r"`git diff\s+(?:-(?!-(?:\s|`))[^\s`]+\s+)*(?!-)([^\s`]+?)(?:\.\.\.?|\s+)((?!-)[^\s`]+)[^`]*`")
 SHORT_HEX = re.compile(r"[0-9a-fA-F]{1,6}")
+LONG_HEX = re.compile(r"[0-9a-fA-F]{7,40}")
 
 def parent_prs(body):
     """The PR numbers of each `merge after` line in a PR body, in order, once each: every `#N` after the words on that line (case, colon, `**` and bullet free).
@@ -2570,12 +2571,12 @@ def parent_prs(body):
     return list(dict.fromkeys(found))
 
 def review_range_starts(body):
-    """The start of each backticked range (REVIEW_RANGE) in a PR body, read row by row. It reads the whole body: the range sits in the first paragraph.
-    A range in a fenced block (stale_cites.fenced_lines) is an example and a start holding <>{} is a placeholder: both are skipped."""
+    """The (start, end) of each backticked range (REVIEW_RANGE) in a PR body, read row by row. It reads the whole body: the range sits in the first paragraph.
+    A range in a fenced block (stale_cites.fenced_lines) is an example and a range whose start or end holds <>{} is a placeholder: both are skipped."""
     import stale_cites
     rows = (body or "").split("\n")
     fenced = stale_cites.fenced_lines(rows)
-    return [s for i, row in enumerate(rows, 1) if i not in fenced for s in REVIEW_RANGE.findall(row) if not re.search(r"[<>{}]", s)]
+    return [s for i, row in enumerate(rows, 1) if i not in fenced for s in REVIEW_RANGE.findall(row) if not re.search(r"[<>{}]", s[0] + s[1])]
 
 def check_review_ranges(root, host, info, base, body):
     """A lane that names a parent (`Merge after: #N`) asks its reviewer to read `git diff <start> <end>`. A start judged by ancestry, not by string, also passes
@@ -2583,6 +2584,7 @@ def check_review_ranges(root, host, info, base, body):
     a start S passes when (1) S is an ancestor of, or is, the lane head; (2) for each named parent P, merge-base(lane head, P's head) is an ancestor of, or is, S;
     (3) `git rev-list --no-merges S --not <each parent head> origin/<base>` is empty. A start that does not resolve, or a hex start under 7 digits, refuses.
     A start equal to a parent's branch, bare or as origin/<branch>, is that parent's head. `info` is the lane PR's read and `base` its base branch.
+    The end of each judged range must be the lane head: a 7 or more hex prefix of `info["head"]`, or `info["branch"]`, bare or as origin/<branch>. Else it refuses.
     The caller has fetched the base and the lane head (open_worktree, in lane_lint). It fetches each parent's head by its sha. Any git or host error refuses.
     A parent with no range passes with one note line. Raises Stop on the first bad start. Reads each parent's PR once."""
     parents = parent_prs(body)
@@ -2604,9 +2606,13 @@ def check_review_ranges(root, host, info, base, body):
     for n, i in infos.items():  # by sha, not branch: a merged parent's branch may be deleted while its head stays on origin
         c, out = git(root, "fetch", "-q", "origin", i["head"])
         if c:
-            refuse(starts[0], f"cannot be judged: git fetch origin {i['head'][:9]} (#{n}'s head) failed, so that head is on no remote this clone reads: {out}")
+            refuse(starts[0][0], f"cannot be judged: git fetch origin {i['head'][:9]} (#{n}'s head) failed, so that head is on no remote this clone reads: {out}")
     branch_heads = {name: i["head"] for i in infos.values() for name in (i["branch"], f"origin/{i['branch']}")}
-    for start in starts:
+    lane_ends = {info["branch"], f"origin/{info['branch']}"}
+    for start, end in starts:
+        if end not in lane_ends and not (LONG_HEX.fullmatch(end) and lane.startswith(end.lower())):  # an end below the lane head leaves the commits above it unread
+            raise Stop(f"the review range ends at {end}, which is not the lane head {lane[:9]}. The end must be the lane head: {info['branch']}, "
+                       f"origin/{info['branch']}, or 7 or more hex digits of {lane[:9]}. End the range at the lane branch. {LANE_LINT_CITE}")
         if SHORT_HEX.fullmatch(start):
             refuse(start, "is a hex start under 7 digits")
         sha = branch_heads.get(start)
