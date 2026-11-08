@@ -8193,6 +8193,29 @@ sh("env-child: deny, npm --registry takes a value, so exec -c runs env as the ch
    "npm --env-file=" + ENV + " --registry x exec -c env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: deny, pnpm --reporter takes a value, so exec runs env as the child",
    "pnpm --env-file=" + ENV + " --reporter silent exec env", "deny", "env-file", cwd=NOGIT)
+# `--` ends the runner's options, so the word after it is the child. The two allows are a test
+# filter (vitest env) and jest's own option (jest -c env), and the guard must not read them as env.
+sh("env-child: deny, pnpm exec -- runs env, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec -- runs printenv, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec -- runs vitest, so env is vitest's test filter",
+   "pnpm --env-file=" + ENV + " exec -- vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, so -c env is jest's option, not npm's shell string",
+   "npm --env-file=" + ENV + " exec -- jest -c env", "allow", cwd=NOGIT)
+# A flag that takes no value (--recursive, --parallel, --silent) is skipped alone, so the word after
+# it is the child: env here.
+sh("env-child: deny, pnpm exec --recursive takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --recursive env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --parallel takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --parallel env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --silent takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --silent env", "deny", "env-file", cwd=NOGIT)
+# Controls, green on this head: with no flag before the child, pnpm exec denies env and allows vitest.
+sh("env-child: deny, pnpm exec with no flag runs env, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec with no flag runs vitest, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec vitest", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
