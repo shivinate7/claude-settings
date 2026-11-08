@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T05:20:00Z",
+  "context": "Goal: secrets in .env files never reach a session's output by mistake.\nProblem (risk): the env guard reads shell words only. Code run through `python3 -c`, `node -e` or a quoted python or node heredoc that opens the env file passes unjudged. Only you can decide whether the guard reaches into code.\nBased on (read): debt env-interpreter-code-reads, filed by lane env-file-shell-c (#1767) at 23:16 CST Nov 7.\nBased on (decision): guard-guards-mistakes-only: a guard stops Claude's likely mistakes, not an attacker.\nDeparts from: decision env-file-stays-unread, where the guard judges shell words and a quoted heredoc body is text \u2014 it also judges interpreter code that opens the env file.\nMeanwhile: #1767 (bash -c and sh -c strings) goes on with runner 8; nothing waits on this answer.",
+  "home": "env-file-shell-c",
+  "id": "env-guard-reads-code",
+  "kind": "decision",
+  "n": 399,
+  "options": [
+    {
+      "gain": "A quick one-liner written to debug, which opens .env, is stopped like `cat .env`.",
+      "how": "The env guard also reads the code in `python3 -c`, `node -e` and quoted python or node heredocs, and refuses code that opens the env file.",
+      "key": "a",
+      "label": "Judge interpreter code too (recommended)",
+      "lose": "A parser or a model call on each such command, and some false alarms on code that names .env but does not print it."
+    },
+    {
+      "gain": "No new false alarms and no work.",
+      "how": "The guard stays on shell words. Debt env-interpreter-code-reads stays open.",
+      "key": "b",
+      "label": "Leave it as a debt",
+      "lose": "Claude can still print a secret by mistake through a one-liner."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "debt env-interpreter-code-reads; decision env-file-stays-unread; #1767",
+  "short": "Env guard reads interpreter code",
+  "status": "open",
+  "title": "Should the env-file guard also judge code run through python3 -c, node -e or a quoted heredoc?",
+  "why": "The coordinator recommends a: a debug one-liner that opens .env is a mistake Claude is likely to make, so it falls under guard-guards-mistakes-only."
+}
