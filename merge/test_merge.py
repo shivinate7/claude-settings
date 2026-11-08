@@ -21,6 +21,7 @@ import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+import layout  # noqa: E402  the one home of where records live (lint/layout.py); the layout cases patch it and name its error
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
@@ -12624,10 +12625,15 @@ class ReviewEnv(Env):
 
     def run_args(self, *argv, host=None):
         out, err = io.StringIO(), io.StringIO()
+        escaped = None
         try:
             rc = self.run_merge(*argv, host=host, stdout=out, stderr=err)[0]
         except SystemExit as e:
             rc = e.code
+        except layout.LayoutError as e:  # merge must read a layout that cannot be read as unknown, so an escape is a named failure, not an error
+            escaped = e
+        if escaped is not None:  # failed outside the except block, so the failure carries no chained traceback
+            self.fail(f"a LayoutError escaped merge (a layout that cannot be read was not read unknown): {escaped}")
         return rc, out.getvalue(), err.getvalue()
 
     def record_host(self, *comments, head=REVIEW_HEAD):
@@ -13235,6 +13241,75 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.base, "main", "reading the follow-up pull request moved the host's base off main")
         self.assertEqual(sorted(host.gh_calls), sorted([*self.READY_READS, "pulls/8"]), "the follow-up read made a call beyond pulls/8")
 
+    # ---- a layout that cannot be read (owner item 276 a). A `1, this PR` Findings read takes its filing folders from layout.path, which raises
+    # layout.LayoutError for an extras file that does not parse, a kind that conflicts with the layout, or a legacy-repos entry that names no layout
+    # kind. The line reads `findings unknown` with the layout as its cause, the ledger prints the other pull requests, and the exit is an unknown read's.
+
+    def listing_with_neighbour(self):
+        """`--reviewed`: pull request 7 at REVIEW_HEAD with a record that says `1, this PR`, and pull request 8, a draft with no record, whose line
+        the ledger prints as it does with any layout. -> (rc, out + err)."""
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="1, this PR"))]
+        _host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, OTHER_SHA, draft=True)], comments, check_rows=self.GREEN_CI)
+        return rc, out + err
+
+    def assert_findings_unknown(self, rc, out):
+        """Pull request 7 reads `findings unknown` (its cause wording is not pinned), pull request 8 prints its own line, and the exit is the exit of
+        a run whose follow-up read cannot be reached (an unknown line, the same run shape as the 502 case above)."""
+        _host, control_rc, _out, _err = self.listing([batch_pull(7, REVIEW_HEAD)],
+                                                     [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="2, follow-up #8"))],
+                                                     check_rows=self.GREEN_CI, pull_errors={8: "gh: Server Error (HTTP 502)"})
+        self.assertEqual(rc, control_rc, "a layout that cannot be read changed the exit from the one an unknown read gives:\n" + out)
+        self.assertTrue(list_line(self, out, 7).startswith("#7 feat7 findings unknown: "), "the line does not read `findings unknown`:\n" + out)
+        self.assertEqual(list_line(self, out, 8), "#8 feat8 lane round 1 30h", "the ledger stopped printing the other pull request:\n" + out)
+
+    def test_an_extras_file_that_does_not_parse_reads_the_line_findings_unknown(self):
+        put(os.path.join(self.co, ".claude/layout-extras.json"), "{not json")
+        assert_layout_unreadable(self, self.co)
+        rc, out = self.listing_with_neighbour()
+        self.assert_findings_unknown(rc, out)
+
+    def test_an_empty_extras_file_reads_the_line_findings_unknown(self):
+        put(os.path.join(self.co, ".claude/layout-extras.json"), "")  # the empty state of the same file (P8)
+        assert_layout_unreadable(self, self.co)
+        rc, out = self.listing_with_neighbour()
+        self.assert_findings_unknown(rc, out)
+
+    def test_an_extras_file_that_conflicts_with_the_layout_reads_the_line_findings_unknown(self):
+        put(os.path.join(self.co, ".claude/layout-extras.json"), json.dumps({"kinds": {"debts": {"path": "records/debts"}}, "rolled-out": True}))
+        assert_layout_unreadable(self, self.co)
+        rc, out = self.listing_with_neighbour()
+        self.assert_findings_unknown(rc, out)
+
+    def test_a_legacy_repos_entry_that_names_no_layout_kind_reads_the_line_findings_unknown(self):
+        patched_layout(self, {"shivinate7/home": {"no-such-kind": "x"}}, origin="shivinate7/home")
+        assert_layout_unreadable(self, self.co)
+        rc, out = self.listing_with_neighbour()
+        self.assert_findings_unknown(rc, out)
+
+    def test_a_readable_extras_file_still_reads_the_debt_file_as_done(self):
+        # control, green today: the same fixture with a readable extras file reads the record done, so the cases above fail on the layout alone
+        put(os.path.join(self.co, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
+        self.assertEqual(layout.path(self.co, "debts"), "docs/debts", "scope: a readable rolled-out layout gives the debts folder")
+        host, out = self.this_pr([pull_file("docs/debts/x.md")])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+
+
+def assert_layout_unreadable(test, root):
+    """The scope of an unreadable-layout case, asserted before its subject (P7): layout.path cannot give `root` its debts folder, which is the read
+    that filing_homes makes for a Findings line. The case then asserts what merge prints, never the layout itself."""
+    with test.assertRaises(layout.LayoutError, msg="the layout still gives this repo its debts folder, so the case does not test an unreadable layout"):
+        layout.path(root, "debts")
+
+def patched_layout(test, legacy_repos, origin=None):
+    """The real layout with its `legacy-repos` replaced by `legacy_repos`, and, when `origin` is given, repo_name answers it, so the entry is the one
+    this repo's origin names. Both patches end at the case's cleanup. No file is written: the layout is read through layout.layout()."""
+    real = layout.layout()
+    patches = [unittest.mock.patch.object(layout, "layout", lambda: dict(real, **{"legacy-repos": legacy_repos}))]
+    if origin is not None:
+        patches.append(unittest.mock.patch.object(layout, "repo_name", lambda root: origin))
+    for p in patches:
+        p.start()
+        test.addCleanup(p.stop)
 
 # The ledger: `merge --reviewed` gives every open pull request one next act, read from GitHub alone. Ages come from one clock, LEDGER_NOW, so no
 # case reads the real one. A limit is read by name from merge.py's one constant, PR_STATE_AGE_HOURS, and never retyped here.
@@ -14735,12 +14810,39 @@ class BuildBatchCandidates(BuildEnv):
 class BuildBatchFindingsUnknown(BuildEnv):
     """A done record whose Findings read could not run (findings unknown) is out of the batch. The reason flag --findings-unknown-ok "<reason>"
     lets it join, and the lift is printed with its reason, as the other reason flags print theirs. Without the flag, or with a blank reason, it
-    stays out and its line names the flag. The read here is a follow-up that cannot be reached (a 502, not a 404), so it is unknown, not open."""
+    stays out and its line names the flag. Two causes make a read unknown: a follow-up the read cannot reach (a 502, not a 404), which is the default
+    `cause`, and a layout that cannot be read (`cause` layout: a `1, this PR` record over an extras file that does not parse)."""
 
-    def unknown_host(self, head):
-        """Pull request 7 at `head`, with a done record that names follow-up #8, which the read cannot reach."""
-        comment = review_comment(901, 7, record_text(head=head, rounds=REVIEW_PASS, findings="2, follow-up #8"))
-        return PullsHost([batch_pull(7, head)], {}, comments=[comment], pull_errors={8: "gh: Server Error (HTTP 502)"})
+    def unknown_host(self, head, cause="follow-up"):
+        """Pull request 7 at `head`, with a done record whose Findings read cannot run: a follow-up #8 that the read cannot reach, or, for `cause`
+        layout, a `1, this PR` record over a repo whose extras file does not parse."""
+        if cause == "layout":
+            put(os.path.join(self.co, ".claude/layout-extras.json"), "{not json")
+            findings, pull_errors = "1, this PR", None
+        else:
+            findings, pull_errors = "2, follow-up #8", {8: "gh: Server Error (HTTP 502)"}
+        comment = review_comment(901, 7, record_text(head=head, rounds=REVIEW_PASS, findings=findings))
+        return PullsHost([batch_pull(7, head)], {}, comments=[comment], pull_errors=pull_errors)
+
+    def test_a_layout_that_cannot_be_read_keeps_the_pr_out_without_the_flag(self):
+        head = self.lane(7)
+        host = self.unknown_host(head, cause="layout")
+        assert_layout_unreadable(self, self.co)
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 0)
+        self.assertEqual(joins_of(out), [], out)
+        self.assertNotIn("feat7", self.linted(), "a PR whose layout cannot be read was linted without the flag")
+        self.assertIn("--findings-unknown-ok", out, "the line does not name the reason flag")
+
+    def test_a_reason_lets_a_pr_whose_layout_cannot_be_read_join(self):
+        head = self.lane(7)
+        host = self.unknown_host(head, cause="layout")
+        assert_layout_unreadable(self, self.co)
+        reason = "the extras file is being repaired by its owner"
+        rc, out, err = self.build(host, "--findings-unknown-ok", reason)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {head[:9]}"], out)
+        self.assertIn(f"--findings-unknown-ok, reason: {reason}", out, "the lift is not printed with its reason")
 
     def test_without_the_flag_the_pr_stays_out_and_the_line_names_the_flag(self):
         head = self.lane(7)
