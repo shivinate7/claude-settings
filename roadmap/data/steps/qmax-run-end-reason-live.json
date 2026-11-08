@@ -1,11 +1,11 @@
 {
-  "title": "q_max: qmax-run-end-reason-live (follow-up to #1104)",
+  "title": "q_max: the live cancel banner shows the server's own cancel reason",
   "phase": "now",
   "status": "doing",
   "order": 41,
   "owner": "coordinator",
   "lane": "session_013NEJL3YdbExdrKFgwkR9kr",
-  "why": "Follow-up to qmax-d369-failed-reason (#1104). The coordinator gave no scope; the lane is asked for it.",
-  "note": "Stacked on q_max #1104. Coordinator 19:00 CST Nov 7.",
-  "updatedAt": "2026-11-07T19:00:00-06:00"
+  "why": "The check aChatPanelCanStopItsOwnRun is re-pointed, not re-ruled: D-055 (owner, 2026-10-07) hides provider text only, and D-519 says the live banner carries the server's own reason, so the live cancel banner shows cancelReason's sentence.",
+  "note": "Coordinator reading, 19:01 CST Nov 7, can be undone; no page item. Stacked on q_max #1104.",
+  "updatedAt": "2026-11-07T19:01:00-06:00"
 }
