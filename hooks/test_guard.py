@@ -22211,10 +22211,11 @@ python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-
 _relesc_add("other-checkout: heredoc replay: the first refused call, a python script that a heredoc writes and "
             "python runs as its script, holds cd .. and > ../f, is refused",
             "deny", RELESC_REPLAY_1, "home", rule="other-checkout")
-_relesc_add("other-checkout: heredoc replay: the second refused call, its quoted arguments after a heredoc, are allowed",
-            "allow", RELESC_REPLAY_2, "home")
-_relesc_add("other-checkout: heredoc replay: the third refused call, a file-redirected heredoc of cd .. and > ../f, is allowed",
-            "allow", RELESC_REPLAY_3, "home")
+# Ruling of 08:43 CST: a heredoc judge.py with no visible source keeps main's verdict, so these two replays are refused.
+_relesc_add("other-checkout: heredoc replay: the second refused call, its quoted arguments after a heredoc, are refused",
+            "deny", RELESC_REPLAY_2, "home")
+_relesc_add("other-checkout: heredoc replay: the third refused call, a file-redirected heredoc of cd .. and > ../f, is refused",
+            "deny", RELESC_REPLAY_3, "home")
 # Ruling of 08:43 CST: a script with no visible source keeps main's verdict, so its quoted write is refused.
 _relesc_add("other-checkout: heredoc replay control: the second call's quoted arguments with no heredoc before them, and no script on disk, are refused",
             "deny", 'python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581/hooks/guard.py /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581 ab8bdbda8fd686581 "cd .. && mkdir tmp" "echo x > ../f" "touch ../f" "mkdir ../tmp"', "home", rule="other-checkout")
