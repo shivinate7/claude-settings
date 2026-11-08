@@ -1274,7 +1274,7 @@ class RuleQuotes(Case):
     def test_decision_pinned_in_the_checker_tree_counts_for_a_gloss(self):
         checker_root = self.home_tree(self.DECISION)
         self.base({"keep.py": "x = 1\n"})
-        self.change({"x.py": "# (decision hold-unsafe-after-round-3, review round 3)\nx = 1\n"})
+        self.change({"x.py": "# (decision hold-unsafe-after-round-3, round 3)\nx = 1\n"})
         # Scope first: the scanned repo has no decisions folder, and the check's own tree holds the decision.
         self.assertFalse(os.path.isdir(os.path.join(self.tree, "docs")))
         self.assertTrue(os.path.isfile(os.path.join(checker_root, "docs", "decisions", "hold-unsafe-after-round-3.md")))
@@ -1284,7 +1284,7 @@ class RuleQuotes(Case):
     def test_decision_absent_from_the_checker_tree_stays_flagged(self):
         checker_root = self.home_tree({})
         self.base({"keep.py": "x = 1\n"})
-        self.change({"x.py": "# (decision hold-unsafe-after-round-3, review round 3)\nx = 1\n"})
+        self.change({"x.py": "# (decision hold-unsafe-after-round-3, round 3)\nx = 1\n"})
         self.assertFalse(os.path.isdir(os.path.join(self.tree, "docs")))
         self.assertFalse(os.path.isdir(os.path.join(checker_root, "docs")))
         rc, out = self.lint(checker_root=checker_root)
@@ -1298,6 +1298,11 @@ class RuleQuotes(Case):
 
     def test_round_with_an_unknown_decision_id_stays_flagged(self):
         rc, out = self.scan({"x.py": "# Holds a change after round 3 (decision some-unknown-round-3).\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_then_a_verb_before_a_real_decision_gloss_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# round 3 fixed it (decision hold-unsafe-after-round-3)\nx = 1\n"})
         self.assertHit(out, "x.py", 1)
         self.assertEqual(rc, 1, out)
 
