@@ -63,6 +63,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
+from guard_merge import ROLE_GAP_WORDS  # noqa: E402  the one home of the filler words a role gap may hold
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
@@ -10105,11 +10106,13 @@ FAMILY = "lane-one-topic"
 # A brief that clears those checks is refused too when it does not name a session id for each of Coordinator, Triage and
 # Batch runner. A label starts and ends at a word boundary, in any case, and a label inside a closed quoted or
 # parenthetical span is no label occurrence. Between a label and its id, up to 80 characters on the same line may sit,
-# with no `session_` in it. Outside each closed span (straight or curly quotes, or parentheses), the text before the
-# gap's last colon is free. The rest of the gap, all of it when no colon sits there, holds only the words `is`, `id` and
-# `session`, digits, spaces, punctuation and markdown. So a number (`Batch runner 8`), a field name (`Coordinator IDs:`),
-# a colon, markdown, a quoted title or the word `is` may sit there. An id is `session_` then letters and digits, and it
-# must hold a digit, so a placeholder such as session_TBD names no role.
+# with no `session_` in it, not even inside a span. Outside each closed span (straight or curly double quotes, or
+# parentheses), the text before the gap's last colon is free. The rest of the gap, all of it when no colon sits there,
+# holds only the filler words (`is`, `id`, `session`, their plurals `ids` and `sessions`, in any case), a possessive `'s`
+# read as punctuation, digits, spaces, punctuation and markdown. Single quotes are no span, because an apostrophe in a
+# possessive would open or close one. So a number (`Batch runner 8`), a field name (`Coordinator IDs:`), a colon, markdown,
+# a quoted title or the word `is` may sit there. An id is `session_` then letters and digits, and it must hold a digit,
+# so a placeholder such as session_TBD names no role.
 # The refusal names the missing roles, the expected form `Coordinator: session_<id>; Triage: session_<id>; Batch runner:
 # session_<id>`, and the gap limit. Why: a lane reaches its coordinator, its triage session and its batch runner through
 # those ids, so a brief without one leaves the lane unable to reach that role. Presence and form only: no id is matched to
@@ -10141,11 +10144,12 @@ BRIEF_ROLE_FORM = ("Coordinator: session_", "Triage: session_", "Batch runner: s
 ROLE_CARRIES = ("Coordinator: session_", "; Triage: session_", "; Batch runner: session_", "80 char")
 
 
-def roles_refuse(name, transcript, message, missing, target=ROLE_OTHER, lacks_more=()):
+def roles_refuse(name, transcript, message, missing, target=ROLE_OTHER, lacks_more=(), carries_more=()):
     """A marker brief to a lane that clears the topic and step checks, and misses a role id: refused. The reason names
     each missing role outside the form, carries the form and the gap limit, and names none of the test's ids. The
-    `lacks_more` fragments are ones the reason must not hold either, such as the id of a role the brief does name."""
-    step_refuse(name, transcript, message, target=target, carries=ROLE_CARRIES,
+    `lacks_more` fragments are ones the reason must not hold either, such as the id of a role the brief does name. The
+    `carries_more` fragments are ones the reason must hold on top of the form and the gap limit."""
+    step_refuse(name, transcript, message, target=target, carries=ROLE_CARRIES + tuple(carries_more),
                 lacks=(target, COORD_ID, TRIAGE_ID, RUNNER_ID) + tuple(lacks_more), names=missing)
 
 
@@ -10251,7 +10255,10 @@ step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topi
 # A marker brief to a lane names a session id for each role. Each refusal below misses one role, and the other two stay
 # valid in it, so a failure names the one cause it tests.
 ROLE_TOP = "Lane brief: icon-b. Topic: icons."  # the first line a step-topic-lane fixture clears
-ROLE_GAP_80 = " " + "." * 79  # 80 characters, the most a label's gap may hold. Dots: the gap takes punctuation, no words
+# Dots, not letters: under the coordinator ruling effective 2026-11-08 09:21 CST, a letter is a word, and a word outside
+# the filler list refuses the gap. A letter pad would fail the length cases for their words, not their length. Dots keep
+# each length case pinning length only.
+ROLE_GAP_80 = " " + "." * 79  # 80 characters, the most a label's gap may hold
 ROLE_GAP_81 = " " + "." * 80  # 81 characters, one over
 BRIEF_TEMPLATE_PATH = os.path.join(REPO, "skills", "project-ops", "templates", "brief.md")
 with open(BRIEF_TEMPLATE_PATH, encoding="utf-8") as handle:
@@ -10419,15 +10426,15 @@ step_allow("a lowercase batch runner label, batch runner: session_x8, passes", r
 roles_refuse("a Coordinator id after the word Triagey, Coordinator Triagey session_C1, is refused: Triagey is no filler word",
              role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator Triagey session_C1" + TRIAGE_LINE + RUNNER_LINE,
              ["Coordinator"])
-# Allowed, N1 (brief-role-title-holds-label): a quoted span and a parenthetical span in the gap are skipped, so another
-# role's label inside them is no label of the gap. Each case keeps the other two roles valid.
+# Allowed: a roster title holding another role's label. A quoted span and a parenthetical span in the gap are skipped, so
+# another role's label inside them is no label of the gap. Each case keeps the other two roles valid.
 step_allow("a Coordinator title holding a Triage label in quotes, session_A1, is allowed",
            role_path("step-topic-lane"),
            ROLE_TOP + '\n- Coordinator: "cs coordinator, triage backup", session_A1' + TRIAGE_LINE + RUNNER_LINE)
 step_allow("a Triage id with a Batch runner label in parentheses, Triage (batch runner backup): session_T1, is allowed",
            role_path("step-topic-lane"),
            ROLE_TOP + COORD_LINE + "\nTriage (batch runner backup): session_T1" + RUNNER_LINE)
-# Refused, N3 (brief-role-label-in-prose): a role word in prose, with an id after it on the same line, names no id for
+# Refused: prose before an id. A role word in prose, with an id after it on the same line, names no id for
 # that role. The prose words sit outside any quoted or parenthetical span, so the gap holds them and is refused.
 roles_refuse("a Triage word in prose, Triage the failing test in session_01Q., is refused: prose is no role id",
              role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage the failing test in session_01Q." + RUNNER_LINE,
@@ -10539,6 +10546,55 @@ step_allow("a Triage label with a dotted capital I in quotes before its id, Tria
            role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage \"İ\" session_01A" + RUNNER_LINE)
 roles_refuse("a Triage label with a dotted capital I and no colon, Triage İ session_01A, is refused: İ is a word",
              role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage İ session_01A" + RUNNER_LINE, ["Triage"])
+
+
+# A session_ is banned in a gap, even inside a span: the first session_ after a label is the id's start. A span does not
+# hide one, so the placeholder in parentheses still counts, and the id after it is not read.
+roles_refuse("a Coordinator session_id placeholder before a valid id, Coordinator session_id session_C1, is refused: the gap holds no session_",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator session_id session_C1" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
+roles_refuse("a Coordinator session_x in parentheses before a valid id, Coordinator (session_x) session_C1, is refused: a span holds no session_ either",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator (session_x) session_C1" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
+
+# A filler word in the gap, with no colon before the id, is allowed. Each keeps the other two roles valid.
+step_allow("a Coordinator filler word id, Coordinator id session_C1, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator id session_C1" + TRIAGE_LINE + RUNNER_LINE)
+step_allow("a Coordinator filler word session, Coordinator session session_C1, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator session session_C1" + TRIAGE_LINE + RUNNER_LINE)
+# The filler words match in any case.
+step_allow("a Coordinator filler word in capitals, Coordinator IS session_C1, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator IS session_C1" + TRIAGE_LINE + RUNNER_LINE)
+# Markdown underscores are punctuation, so an italic label with no colon before its id is allowed.
+step_allow("a Triage label in markdown underscores with no colon, _Triage_ session_T1, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\n_Triage_ session_T1" + RUNNER_LINE)
+# A word before the gap's last colon is free, even one that is no filler word. Only the text after the last colon is judged.
+step_allow("a Coordinator field name between two colons, Coordinator note: field: session_01A, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator note: field: session_01A" + TRIAGE_LINE + RUNNER_LINE)
+# A label is a whole word: subtriage holds the letters of Triage, but starts no Triage label occurrence.
+step_allow("a Coordinator with the letters of Triage inside a word, Coordinator subtriage: session_C1, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator subtriage: session_C1" + TRIAGE_LINE + RUNNER_LINE)
+# The refusal names the filler words, the double quote rule and the session_ ban in spans, so a reader learns each rule.
+roles_refuse("a Triage id with no digit is refused, and its reason names the filler words, the double quote rule and the session_ ban",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage: session_TBD" + RUNNER_LINE, ["Triage"],
+             carries_more=tuple("`" + word + "`" for word in ROLE_GAP_WORDS) + ("double quote", "`session_` is banned even in a span"))
+
+# Lane ruling effective 2026-11-08 11:50 CST: a possessive 's directly after a label is punctuation, so the label and its id
+# may sit with it.
+step_allow("a Coordinator possessive directly before its id, Coordinator's session_01A, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator's session_01A" + TRIAGE_LINE + RUNNER_LINE)
+# Lane ruling effective 2026-11-08 11:50 CST: plurals join the filler words, in any case.
+step_allow("a Coordinator plural filler word ids, Coordinator ids session_01A, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator ids session_01A" + TRIAGE_LINE + RUNNER_LINE)
+step_allow("a Coordinator plural filler word sessions, Coordinator sessions session_01A, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator sessions session_01A" + TRIAGE_LINE + RUNNER_LINE)
+step_allow("a Coordinator plural filler word in capitals with no colon, Coordinator IDs session_01A, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator IDs session_01A" + TRIAGE_LINE + RUNNER_LINE)
+# Single quotes are no span, because an apostrophe in a possessive such as Coordinator's would open or close one. So the
+# quoted word 'handoff' is plain gap text, and its word is refused.
+roles_refuse("a Coordinator with a single-quoted word after its colon, Coordinator: 'handoff', session_01A, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator: 'handoff', session_01A" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
 
 
 # =========================================================================== 5d. cite by id
