@@ -11533,6 +11533,14 @@ sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CF
 # stay one write.
 sh("frozen: sed -i with a newline in its quoted script, onto the frozen settings",
    "sed -i '1i\\\ntext' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The in-place cluster forms of sed, which carry an uppercase flag or a suffix after the i. Each is one
+# write to a frozen file, as the plain `sed -i` above is.
+for _name, _command in (
+    ("sed -Ei on the frozen settings", "sed -Ei s/a/b/ " + CFG_SETTINGS),
+    ("sed -ie on the frozen settings", "sed -ie s/a/b/ " + CFG_SETTINGS),
+    ("bash -c sed -Ei on the frozen settings", 'bash -c "sed -Ei s/a/b/ ' + CFG_SETTINGS + '"'),
+):
+    sh("frozen: %s is refused" % _name, _command, "deny", "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -13516,6 +13524,36 @@ for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **BR)
 
+# A sed script is read as sed reads it: a real newline ends a line, a label (`b`, `t`, `T`, `:`) ends at
+# `;` or the line's end, and an in-place flag is any cluster of letters that holds an `i`.
+SED_FORM_WRITES = (
+    ("sed -i script with a real newline before a w on tests/a.py",
+     "sed -i '# n\nw tests/a.py' src/app.py"),
+    ("sed -i b label ended by ; then a w on tests/a.py", "sed -i 'bx;w tests/a.py' src/x"),
+    ("sed -i :label ended by ; then a w on tests/a.py", "sed -i ':a;w tests/a.py' src/x"),
+    ("sed -i t ended by ; then a w on tests/a.py", "sed -i 's/a/b/;t;w tests/a.py' src/x"),
+    ("bash -c sed -Ei on tests/a.py", 'bash -c "sed -Ei s/a/b/ tests/a.py"'),
+    ("sed -ie on tests/a.py", "sed -ie s/a/b/ tests/a.py"),
+    # The plain -i inside bash -c is already refused: the control for the -Ei form beside it.
+    ("bash -c sed -i on tests/a.py, plain -i", 'bash -c "sed -i s/a/b/ tests/a.py"'),
+)
+for _name, _command in SED_FORM_WRITES:
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **BR)
+# SCANNER PINS (rule building-scanner-respects-strings) for the sed script walk: a # inside a quoted
+# script, a script over several lines, and a lone apostrophe in text. Each pin holds its verdict.
+sh("builder-test: scanner, a # inside a quoted sed script ahead of a sed -i on tests/a.py, is refused",
+   "sed -i 's/#x/y/' src/app.py; sed -i s/a/b/ tests/a.py", "deny", rule=BT,
+   carries=("test-author",), **BR)
+sh("builder-test: scanner, a # inside a quoted sed script on src/app.py, is allowed",
+   "sed -i 's/#x/y/' src/app.py", "allow", **BR)
+sh("builder-test: scanner, a multi-line sed script whose w line names tests/a.py, is refused",
+   "sed -i 's/a/b/\nw tests/a.py' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: scanner, a multi-line sed script on src/app.py, is allowed",
+   "sed -i '1i\\\nnote' src/app.py", "allow", **BR)
+sh("builder-test: scanner, a lone apostrophe in echo ahead of a sed -i on tests/a.py, is refused",
+   "echo don't; sed -i s/a/b/ tests/a.py", "deny", rule=BT, carries=("test-author",), **BR)
+
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
     ("cat of tests/x.py", "cat tests/x.py"),
@@ -13684,6 +13722,28 @@ sh("builder-test: shell write, cd tests then find . piped to xargs, sed -i, is r
 # A root with no tests in it is still allowed, in the same checkout.
 sh("builder-test: shell write, grep -rl over src piped to xargs, sed -i, is allowed",
    "grep -rl old src | xargs sed -i s/a/b/", "allow", **DR)
+# A listing that prints tracked paths is read by its pathspecs. A redirect word is no pathspec, and a
+# glob pathspec is matched against the tracked tree (DOTROOT holds tests/test_a.py).
+for _name, _command in (
+    ("git ls-files with a redirect piped to xargs, sed -i", "git ls-files 2>/dev/null | xargs sed -i s/a/b/"),
+    ("git ls-files of a glob piped to xargs, sed -i", "git ls-files '*.py' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+# A -name pattern limits the `.` root: this find reads only *.md files, so it writes no test, though the
+# tree holds one.
+sh("builder-test: shell write, find . with -name *.md, -exec sed -i, in a tree with a test, is allowed",
+   "find . -name '*.md' -exec sed -i s/a/b/ {} +", "allow", **DR)
+# A -name pattern names the test files a find writes, under any folder it searches. `gsed` is GNU sed on
+# macOS, and it writes the same way.
+for _name, _command in (
+    ("find hooks with -name test_*.py, -exec sed -i", "find hooks -name 'test_*.py' -exec sed -i s/a/b/ {} +"),
+    ("find hooks with -name test_*.py, -exec sed -i ended by \\;",
+     "find hooks -name 'test_*.py' -exec sed -i s/a/b/ {} \\;"),
+    ("gsed -i on hooks/test_a.py", "gsed -i s/a/b/ hooks/test_a.py"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
