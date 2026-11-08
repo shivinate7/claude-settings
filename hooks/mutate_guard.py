@@ -2875,26 +2875,39 @@ SPAWN_SCAN_SUITE = "lint/test_no_window_spawn.py"
 SPLIT_SCAN_SUITE = "lint/test_windows_split.py"
 WORKFLOW_FOLDER = ".github/workflows/"
 # Folder-scan suites: each reads every file of one folder, so a new file there changes what it checks. The value is the
-# module that holds the scope (the suite itself, or the check it runs), then the function that reads it, `_scan_*` below.
+# module that holds the scope (the suite itself, or the check it runs), the function that reads it (`_scan_*` below), and
+# the file suffixes of the files it can read. The suffixes are a first check, coarser than the scope: a diff with no
+# file of those suffixes never loads the module, so a docs-only diff loads none of them.
 FOLDER_SCAN_SUITES = {
-    "lint/test_ci_job.py": ("lint/test_ci_job.py", "_scan_workflow_files"),
-    "lint/test_check_agent_models.py": ("lint/check_agent_models.py", "_scan_agent_files"),
-    "lint/test_rule_audit.py": ("lint/rule_audit.py", "_scan_hook_modules"),
-    "lint/test_check_landed_dirs.py": ("lint/check_landed_dirs.py", "_scan_guard_glob"),
-    "lint/test_guard_log_report.py": ("lint/test_guard_log_report.py", "_scan_guard_log_folders"),
+    "lint/test_ci_job.py": ("lint/test_ci_job.py", "_scan_workflow_files", (".yml",)),
+    "lint/test_check_agent_models.py": ("lint/check_agent_models.py", "_scan_agent_files", (".md",)),
+    "lint/test_rule_audit.py": ("lint/rule_audit.py", "_scan_hook_modules", (".py",)),
+    "lint/test_check_landed_dirs.py": ("lint/check_landed_dirs.py", "_scan_guard_glob", (".py", ".md")),
+    "lint/test_guard_log_report.py": ("lint/test_guard_log_report.py", "_scan_guard_log_folders", (".py",)),
 }
 
 
 def _load_suite(suite: str):
-    """The suite file `suite` loaded as a module by its path, or None when it cannot be loaded."""
+    """The suite file `suite` loaded as a module by its path, or None when it cannot be loaded. The load leaves no trace in
+    this process: the environment is put back, and the run folder that a suite makes at load (`RUN_FOLDER`, from
+    lint/_test_temp.py, named `<pid>-<32 hex>`) is removed."""
     import importlib.util
+    import re
+    import shutil
+    environment = dict(os.environ)
     try:
         spec = importlib.util.spec_from_file_location("_scan_scope_" + os.path.basename(suite)[:-3], suite)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        run_folder = getattr(module, "RUN_FOLDER", None)
+        if isinstance(run_folder, str) and re.fullmatch(r"%d-[0-9a-f]{32}" % os.getpid(), os.path.basename(run_folder)):
+            shutil.rmtree(run_folder, ignore_errors=True)
         return module
     except Exception:  # noqa: BLE001  a suite that fails to load must not hide itself from lane lint
         return None
+    finally:
+        os.environ.clear()
+        os.environ.update(environment)
 
 
 def _read_scope(source: str, reader) -> bool:
@@ -2994,7 +3007,10 @@ def _scan_guard_log_folders(module, paths) -> bool:
 def _scans_folder_file(suite: str, paths) -> bool:
     """True when the folder-scan suite `suite` (FOLDER_SCAN_SUITES) reads any of `paths`. A scope that cannot be loaded or
     read reads True, as in `_scans_any_file`."""
-    source, reader = FOLDER_SCAN_SUITES[suite]
+    source, reader, suffixes = FOLDER_SCAN_SUITES[suite]
+    paths = [path for path in paths if path.endswith(suffixes)]
+    if not paths:
+        return False
     return _read_scope(source, lambda module: globals()[reader](module, paths))
 
 
@@ -3108,7 +3124,9 @@ def lint_suites_main(argv) -> int:
     one selector `bin/ci-job --lint` asks for the CI steps with a suite it runs. Unlike `--tests-for`, a listed file also gets the
     suites its scan finds, and a suite also gets a `.py` file that a module it loads imports (`chain`). Exit 2 with one
     `ERROR` line when the diff or the file list cannot be read. Cost: one `git diff`, then, when the diff holds a file, one
-    `git ls-files` and one parse of each tracked `test_*.py` and of each module they reach, once for the whole diff."""
+    `git ls-files` and one parse of each tracked `test_*.py` and of each module they reach, once for the whole diff. A folder-scan
+    suite's scope is loaded only for a diff with a file of its suffixes (`FOLDER_SCAN_SUITES`), and a load leaves no environment
+    change and no run folder (`_load_suite`)."""
     import argparse
     parser = argparse.ArgumentParser(prog="mutate_guard.py --lint-suites")
     parser.add_argument("--lint-suites", required=True, metavar="BASE", help="a ref the diff BASE...HEAD starts from")
