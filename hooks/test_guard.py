@@ -10421,8 +10421,8 @@ mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated
 # in a Write (the content's JSON) or an Edit (the new_string) to a roadmap step file; and a literal `updatedAt` in a
 # Bash command, read as text, quoted or not. A value more than 1 minute ahead of the clock is refused. A value behind
 # the clock passes, because a kept old value is always behind. Quoted times in prose and any other field pass.
-# Incident (triage 6, 2026-11-07): `added` 20:16Z was written to
-# items at a clock of 20:14Z, and roadmap step files got a wrong `updatedAt`, in the shape 2026-11-07T14:15:00-06:00.
+# The cases mirror the incident in decision local-time-central: `added` 20:16Z written to items at a clock of 20:14Z,
+# and a roadmap step `updatedAt` ahead of the clock, in the shape 2026-11-07T14:15:00-06:00.
 MTC_WRITE_CLOCK = "2026-11-07T14:14:00-06:00"  # 14:14 CST, which is 20:14Z: the clock of every case below
 MTC_WRITE_CARRIES = ("14:14 CST", ("2026-11-07T14:14", "2026-11-07T20:14"))  # the reason prints the real time, both ways
 MTC_ITEM_URL = "https://claude.ai/artifact/mtcwrites"  # the page whose items the ArtifactData cases write
