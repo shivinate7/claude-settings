@@ -7843,6 +7843,18 @@ nm_case("linked-nm: npm ci with a repeated --prefix whose last value is linked, 
 nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, from a linked folder, is allowed",
         "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
 
+# THE SHORT PREFIX FLAG. npm reads `-C` as its prefix config (`--prefix`), and reads `-C=<dir>` the same way.
+# The guard reads only `--prefix`, so each `-C` case is judged in the wrong folder. `-Csub`, glued with no `=`,
+# is not read by npm (its prefix stays the working folder), so it has no case.
+nm_case("linked-nm: npm -C <linked folder> ci, run from a real folder, is refused",
+        "npm -C " + slash(NMLINKED) + " ci", "deny", NMREAL)
+nm_case("linked-nm: npm -C=<linked folder> ci, run from a real folder, is refused",
+        "npm -C=" + slash(NMLINKED) + " ci", "deny", NMREAL)
+nm_case("linked-nm: npm -C ../nmlinked ci, relative, run from a real folder, is refused",
+        "npm -C ../nmlinked ci", "deny", NMREAL)
+nm_case("linked-nm: npm -C <real folder> ci, run from a linked folder, is allowed",
+        "npm -C " + slash(NMREAL) + " ci", "allow", NMLINKED)
+
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
 for _command, _tool in (("npm run setup", "Bash"),
                         ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
@@ -7899,12 +7911,37 @@ nm_case("linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder",
 nm_case("linked-nm: refuse npm --prefix . ci (Bash) in a linked folder",
         "npm --prefix . ci", "deny", NMLINKED)
 
+# THE --loglevel VALUE. Under a mutant that drops --loglevel from the value flags, `error` becomes the subcommand
+# and this allowed `ls` is refused. The case passes on the current guard; the mutant is its only red.
+nm_case("linked-nm: npm --loglevel error ls (Bash) in a linked folder is allowed",
+        "npm --loglevel error ls", "allow", NMLINKED)
+
+# THE VALUE FLAGS THE GUARD DOES NOT KNOW. --depth, --package, --location and its short -L take a value, so the
+# word after them is not the subcommand. The guard refuses each today. The controls put the same flag after the
+# subcommand, or use the spelling the guard already reads (`--location=global`), and the guard allows each.
+nm_case("linked-nm: npm --depth 0 ls (Bash) in a linked folder is allowed",
+        "npm --depth 0 ls", "allow", NMLINKED)
+nm_case("linked-nm: npm --package yo exec yo (Bash) in a linked folder is allowed",
+        "npm --package yo exec yo", "allow", NMLINKED)
+nm_case("linked-nm: npm --location global ci (Bash) in a linked folder is allowed, a global install",
+        "npm --location global ci", "allow", NMLINKED)
+nm_case("linked-nm: npm -L global ci (Bash) in a linked folder is allowed, a global install",
+        "npm -L global ci", "allow", NMLINKED)
+nm_case("linked-nm: npm --location=global ci (Bash) in a linked folder is allowed, a control",
+        "npm --location=global ci", "allow", NMLINKED)
+nm_case("linked-nm: npm --location project ci (Bash) in a linked folder is refused, a control",
+        "npm --location project ci", "deny", NMLINKED)
+nm_case("linked-nm: npm ls --depth 0 (Bash) in a linked folder is allowed, a control",
+        "npm ls --depth 0", "allow", NMLINKED)
+nm_case("linked-nm: npm exec --package yo -- yo (Bash) in a linked folder is allowed, a control",
+        "npm exec --package yo -- yo", "allow", NMLINKED)
+
 # THE OFF-LIST COMMANDS. The guard allows only the read-only commands it lists. Each of these is refused in a
-# linked folder: some rewrite node_modules, and the rest are not on the list. A real folder and a folder with
-# no node_modules allow each, since neither is a link.
+# linked folder. `npm init` reifies with -w, `npm edit` runs a rebuild, and `npm explore` runs its command inside
+# the link, so none is read-only. A real folder and a folder with no node_modules allow each, since neither is a link.
 NM_OFF_LIST = (
     "npm unlink x", "npm ddp", "npm rb", "npm ln x", "npm pru", "npm it", "npm install-test",
-    "npm install-ci-test", "npm sit", "npm edit x", "npm explore x", "npm init", "npm shrinkwrap",
+    "npm install-ci-test", "npm sit", "npm edit x", "npm explore x", "npm init",
     "npm instal x", "npm -C . ci",
 )
 for _command in NM_OFF_LIST:
@@ -7915,15 +7952,20 @@ for _command in NM_OFF_LIST:
 
 # THE WORKSPACE FLAGS ON `npm version`. With a workspace flag, npm reifies the linked root, so the command
 # changes the install through the link. Without one it only rewrites package.json (a control below).
+# `verison` is npm's own alias for version, so it takes the same flags.
 NM_WORKSPACE_VERSION = (
     "npm version patch -w a", "npm version patch --workspaces", "npm version patch -ws",
     "npm version patch --workspace=a", "npm -w a version patch",
+    "npm verison patch -w a", "npm -w a verison patch",
 )
 # THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
-# --dry-run, so a dry run is no no-change for them. `npm prune --dry-run` and `npm audit fix --dry-run`
-# stay allowed (a control below).
+# --dry-run, so a dry run is no no-change for them. npm resolves the unique abbreviations of rebuild and edit to
+# those commands (its cmd-list deref), so each abbreviation is refused too. `npm prune --dry-run` and
+# `npm audit fix --dry-run` stay allowed (a control below).
 NM_DRY_RUN_WRITERS = (
     "npm rebuild --dry-run", "npm rb x --dry-run", "npm edit x --dry-run", "npm --dry-run rebuild",
+    "npm reb x --dry-run", "npm rebu x --dry-run", "npm rebui x --dry-run", "npm rebuil x --dry-run",
+    "npm ed x --dry-run", "npm edi x --dry-run",
 )
 for _command in NM_WORKSPACE_VERSION + NM_DRY_RUN_WRITERS:
     nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
@@ -7947,10 +7989,18 @@ NM_READ_ONLY = (
     "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
     "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
     "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
-    "npm rebuild --help", "npm run build", "npm test",
+    "npm rebuild --help", "npm run build", "npm test", "npm verison patch",
 )
 for _command in NM_READ_ONLY:
     nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
+
+# THE SHRINKWRAP COMMAND. npm shrinkwrap reads the tree, then writes npm-shrinkwrap.json and yarn.lock at the
+# prefix, never under node_modules (arborist shrinkwrap.js, save). So it is read-only for this rule, and the
+# guard's refusal contradicts that rule. Its real and absent folders are controls.
+nm_case("linked-nm: npm shrinkwrap (Bash) in a linked folder is allowed", "npm shrinkwrap", "allow", NMLINKED)
+nm_case("linked-nm: npm shrinkwrap (Bash) in a real folder is allowed", "npm shrinkwrap", "allow", NMREAL)
+nm_case("linked-nm: npm shrinkwrap (Bash) in a folder with no node_modules is allowed",
+        "npm shrinkwrap", "allow", NMABSENT)
 
 # THE JUNCTION WITHOUT os.path.isjunction. Python 3.11, the CI interpreter, has no os.path.isjunction, so
 # the link test must read the junction itself. This case runs the guard with that function removed.
