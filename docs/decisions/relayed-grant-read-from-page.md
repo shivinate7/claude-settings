@@ -4,6 +4,8 @@
 
 Owner ask ask-mw3lqb8bwx, 2026-11-05 07:49 CST, verbatim: "i need sessions to be able to relay my word to other cloud sessions and it be trust worthy add in auto mode". Roadmap step owner-word-relay builds it.
 
+Owner ruling, 2026-11-08 ~11:50 CST, picking "Widen to settings" in lane session page-save-reaches-auto-mode: the entry may also cover a change to settings or permissions, when `page_grant.py` counted the owner's page answer naming that change. Overrides stay refused. He saw the risk first: a session that writes a fake answer row could then widen auto mode.
+
 ## What counts
 
 A relayed act has the owner's grant only when all hold:
@@ -40,6 +42,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 
 - Item 254 (lane review-fix-check): the owner had to type "go" after picking item 231's choice a on the page.
 - Item 242, joyous ruleset: batch runner 9 was refused at 07:47 CST. Measured 2026-11-05 07:58 CST: `answers/joyous-ruleset-shared-form` is gone. The owning session deletes the answer when it routes ("Route and close"). So a reader alone would not have fixed item 242.
+- Item 149 b: a page answer to add an auto-mode allow line was refused as self-modification, 2026-11-01 23:06 CST. The 2026-11-08 ruling above answers it.
 - Source for both: the roadmap step owner-word-relay note (record branch commit dd574d33), and the live read of item 242 at 07:58 CST.
 
 ## Gaps
@@ -52,7 +55,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 
 ## Auto-mode entry
 
-`settings.json` `autoMode.allow` holds the "Relayed Grant:" entry, the owner's own PR #1293 (item 267). It keeps `$defaults`. No row goes into the "Current entries" table of decision auto-mode-owner-acts. `hooks/test_auto_mode_allow.py` pins it: one entry; it quotes `page_grant.COMMAND` and `page_grant.COUNTED_LINE` in full, read from the checker; its Never covers names each act in `RELAYED_REFUSED`. Whether the classifier reads the `counted` line is unmeasured (Gaps above).
+`settings.json` `autoMode.allow` holds the "Relayed Grant:" entry, the owner's own PR #1293 (item 267). It keeps `$defaults`. Its Covers text says the act may be a change to settings or permissions, under the same counted-answer condition. Its Never covers keeps overrides and every other limit above. No row goes into the "Current entries" table of decision auto-mode-owner-acts. `hooks/test_auto_mode_allow.py` pins it: one entry; it quotes `page_grant.COMMAND` and `page_grant.COUNTED_LINE` in full, read from the checker; its Never covers names each act in `RELAYED_REFUSED`. Whether the classifier reads the `counted` line is unmeasured (Gaps above).
 
 ## Check and cost
 
