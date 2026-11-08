@@ -664,11 +664,19 @@ def _without_message_values(cmd: str) -> str:
     return "".join(_blank_messages(part) for part in _SEGMENT_BREAK.split(cmd))
 
 
+# A shell script run by its own name as the command word (`./run.sh <<EOF`, `x.bash <<EOF`, `sudo /p/a.zsh <<EOF`): its
+# heredoc is a shell heredoc. Only the command word counts, so `cat > notes.sh <<EOF` and `cat notes.sh` stay text.
+_SCRIPT_COMMAND = re.compile(
+    r"(?:^|[;&|(`{])[ \t]*(?:(?:sudo|env|exec|time|nohup|nice|command)[ \t]+|\w+=\S*[ \t]+)*"
+    r"[\"']?[^\s;&|<>()\"'`]*\.(?:sh|bash|zsh)[\"']?(?=[ \t]|<<)[^\n;&|]*<<", re.M).search
+
+
 def _interpreter_header(words: str):
     # The word stands alone or ends a path or a name (`/usr/bin/bash`, `ts-node`, `node.cmd`);
     # the lookahead alone keeps `node-notes.md` and `bash-tips.md` text.
     # `(?<![\w.])`: the word is no file extension either, so `cat > notes.sh <<EOF` holds no `sh`.
-    return re.compile(r"(?<![\w.])(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
+    named = re.compile(r"(?<![\w.])(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
+    return lambda text: named(text) or _SCRIPT_COMMAND(text)
 
 
 _SHELLS = "bash|sh|zsh|dash|ksh|pwsh|powershell"
@@ -948,6 +956,22 @@ def _runs_written_file(text: str, headers, bodies=()) -> bool:
     return bool(_written_file_use(text, headers, bodies))
 
 
+def _kept_headers(text: str, bodies) -> set:
+    """The headers whose body stays in view: a body whose file a later command runs, and every body whose
+    file a kept body names as a word (`bash helper.sh`, `source ./helper.sh`, `subprocess.run(['bash','helper.sh'])`),
+    repeated until nothing more is added. The kept script may run the file, so the file's body is not data."""
+    kept = {header for _, _, header in bodies if _runs_written_file(text, [header], bodies)}
+    grew = bool(kept)
+    while grew:
+        grew = False
+        named = {word for _, body, header in bodies if header in kept for word in _plain_words(_WORDS(body))}
+        for _, _, header in bodies:
+            if header not in kept and named & set(_plain_words(_WRITE_TARGET.findall(header))):
+                kept.add(header)
+                grew = True
+    return kept
+
+
 def drop_script_bodies(cmd: str) -> str:
     """CMD with the body of each heredoc dropped that only a python, node, perl or ruby runs as its script
     file: that body is not shell text, so a rule that asks whether the shell can run stored text leaves it
@@ -987,7 +1011,8 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
         return cmd  # the body may be executed, so keep it under inspection
     if _runs_written_file(text, [header for _, _, header in bodies], bodies):
         # Only a body whose file is run stays in view: a file that a later command reads as data is text.
-        return "\n".join([_drop_heredoc_bodies(cmd, lambda header: _runs_written_file(text, [header], bodies))] + runs)
+        kept = _kept_headers(text, bodies)
+        return "\n".join([_drop_heredoc_bodies(cmd, lambda header: header in kept)] + runs)
     return "\n".join([dropped] + runs)
 
 
