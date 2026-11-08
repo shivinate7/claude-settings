@@ -909,7 +909,7 @@ class OneHomeInRepoTests(unittest.TestCase):
         self.assertEqual(sorted(set(os.listdir(self.tmp.name)) - {"events.json"}), before_tmp,
                          "a file or folder appeared in TMPDIR, such as a test temp root")
 
-    # Review round 2, F4: a gloss in parentheses after a backticked decision id is no copy, even where a rule sentence
+    # A gloss in parentheses after a backticked decision id is no copy, even where a rule sentence
     # holds the same gloss words. The parent rule cites its own decision that way, as the rules do. Its id differs from
     # its anchor, so the rule id never exempts a copy here.
     GLOSS = ("**Review.** Decision `hold-unsafe-after-round-3` (net-value hold after round 3) holds the delete-only "
@@ -982,6 +982,8 @@ class OneHomeInRepoTests(unittest.TestCase):
 
     # Review round 2, F3: word_runs.SPANS had no re.S, so a comment that runs over two lines was read as prose, and an
     # exception marker over two lines went unseen.
+    # word_runs.SPANS reads with re.S, so a comment that runs over two lines is no prose, and an exception marker over
+    # two lines is seen.
     def test_a_two_line_comment_is_not_read_as_prose(self):
         self.tracked({"agents/note.md": "<!-- a note on the brief\n%s -->\n" % RULE})
         found, out = self.verdict_scan()
