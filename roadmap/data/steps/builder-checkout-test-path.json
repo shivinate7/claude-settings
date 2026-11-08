@@ -1,0 +1,11 @@
+{
+  "title": "A builder cannot restore an old copy of a test file with git checkout <sha> -- <test path> or git restore --source=<sha> <test path>",
+  "phase": "now",
+  "status": "doing",
+  "order": 60.01,
+  "owner": "coordinator",
+  "lane": "session_013NEJKz785dJ3UKyxpvQuZu",
+  "why": "That form can weaken a test with no Edit call, so no test guard sees it.",
+  "note": "Incident: a builder in lane handoff-bash-redirect ran that form in its own worktree on Nov 7. Lane handoff-per-agent took it at the coordinator's ask (19:34 CST Nov 7); the PR goes to runner 8.",
+  "updatedAt": "2026-11-07T19:34:00-06:00"
+}
