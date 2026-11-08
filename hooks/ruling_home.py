@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""At Stop, refuses once when this session wrote a memory file whose section has no valid `home:` line. A valid line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory would be lost.
+"""At Stop, refuses once when this session wrote a memory file whose section has no valid `home:` line, or wrote its handoff with a ruling line that has no valid `Home:`. A valid memory line is `process-only` or the path of a tracked file. Without it, a ruling kept only in memory or the handoff would be lost.
 
 `docs/decisions/memory-is-never-a-rulings-only-home.md`, "The mechanism", names the defect this
 closes: an orchestrator's auto-memory can hold an owner ruling that reaches no tracked file in
 the repo. This hook is that mechanism. It matches that section's 9 numbered items exactly.
 
 WHAT IT CHECKS. The memory folder is `<dirname(transcript_path)>/memory`. If that folder does
-not exist, this hook does nothing. It keys on an ACT, not on prose
+not exist, the memory check does nothing; the handoff check below still runs. It keys on an ACT, not on prose
 (`docs/decisions/predicate-is-the-act.md`): a `.md` file in the folder (`MEMORY.md`, the index,
 excepted) counts as written THIS SESSION when a `Write`, `Edit`, or `MultiEdit` tool use since
 the last human message names it, OR a `Bash` tool use since the last human message names the
@@ -34,6 +34,21 @@ checks only that the value RESOLVES, never comparing text, so a paraphrase of an
 already-recorded ruling cannot make it cry wolf (item 8;
 `docs/decisions/guard-that-cries-wolf-is-spent.md`): "A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it."
+
+THE HANDOFF. The session's own handoff is `precompact_handoff.handoff_path(session_id)`. It counts as
+written THIS TURN when a Write/Edit/MultiEdit since the last human message names it, or its mtime
+is after that message. This check runs with or without a memory folder. Each line
+`precompact_handoff.handoff_ruling_lines` returns (a `[ruling]` premise, or a list line under
+`## Rulings with NO HOME YET`) must end with `Home: <v>`. It passes when `<v>` is `NO HOME YET (branch
+<b>)` and some ref is branch `<b>`, or when `feedback_guard.Homes.problem` accepts `<v>` as a ruling
+home (a tracked decision, rule or CLAUDE.md path, never `step:<slug>`; that import is lazy, as
+feedback_guard imports this module). The reason names the labels (a P-id, or `NO HOME YET line <n>`),
+never a value. Cost per Stop: the transcript tail is read and `precompact_handoff` imported; the handoff is
+stat-ed, and opened only on a turn that wrote it. Git is asked only on such a turn: about 3 calls per
+path-homed ruling, one ref list for a branch-homed one.
+No process starts, file is written or timer runs beyond that. A git failure stands the
+whole check down, as below. Out of reach: prose in other sections, rules sent by message, and whether a
+`[ruling]` was truly the owner's. `docs/decisions/premise-format.md` names the line form.
 
 RESOLUTION, ONE GIT PROCESS PER VALUE. `git for-each-ref` lists every `refs/heads` and
 `refs/remotes` ref once per run; each home: value then asks about every ref at once with one
@@ -88,6 +103,12 @@ FS_NAME_CHAR = re.compile(r"[A-Za-z0-9_.\-]")
 
 HOME_RE = re.compile(r"^\s*[-*]?\s*home:\s*(.+?)\s*$", re.IGNORECASE)
 PROCESS_ONLY = "process-only"
+# A handoff ruling line ends with `Home: <v>`: a one-word path, or the branch form. The token follows
+# whitespace, so a `Home:` inside a backtick span never counts.
+# One trailing period after the value is ignored, in the branch form too (feedback_guard.home_path does
+# the same for a path).
+HANDOFF_HOME_RE = re.compile(r"(?:^|[ \t])Home:[ \t]*(NO HOME YET \(branch [^)\s]+\)|\S+?)\.?[ \t]*$")
+NO_HOME_YET_BRANCH_RE = re.compile(r"NO HOME YET \(branch ([^)\s]+)\)")
 
 REMEDY = (
     "Each written section needs a home: line, plain text, in the section body: "
@@ -456,6 +477,69 @@ def check_file(full_path, display_name, cwd):
     return findings
 
 
+# ------------------------------------------------------------------ the handoff
+
+def _handoff_written(hpath, after_records, baseline):
+    """True when this turn wrote the handoff: a file tool names it, or its mtime is after the last human
+    message. One stat at most, and no read."""
+    norm = _norm(hpath)
+    for rec in after_records:
+        for tu in tool_uses(rec):
+            inp = tu.get("input") or {}
+            if tu.get("name") in FILE_TOOLS and isinstance(inp, dict):
+                target = inp.get("file_path") or inp.get("path")
+                if isinstance(target, str) and target and _norm(target) == norm:
+                    return True
+    if baseline is None:
+        return False
+    try:
+        return os.path.getmtime(hpath) > baseline
+    except OSError:
+        return False
+
+
+def _branch_held(cwd, branch, refs):
+    """True when some local or remote ref is branch `branch`. `refs` is a one-item cache of _list_refs."""
+    if not refs:
+        refs.append(_list_refs(cwd))
+    return any(ref == "refs/heads/" + branch or
+               (ref.startswith("refs/remotes/") and ref.split("/", 3)[3:] == [branch]) for ref in refs[0])
+
+
+def handoff_findings(hook, after_records, baseline, cwd):
+    """[label, ...] of the ruling lines in this turn's handoff whose `Home:` is missing or does not
+    resolve; [] when the handoff was not written this turn or cannot be read."""
+    sid = hook.get("session_id")
+    if not isinstance(sid, str) or not sid:
+        return []
+    import precompact_handoff  # lazy: sibling hook, loaded only when the Stop check runs
+    hpath = precompact_handoff.handoff_path(sid)
+    if not _handoff_written(hpath, after_records, baseline):
+        return []
+    try:
+        with open(hpath, "r", encoding="utf-8") as f:
+            lines = precompact_handoff.handoff_ruling_lines(f.read())
+    except (OSError, UnicodeDecodeError):
+        return []
+    homes, refs, bad = None, [], []
+    for label, line in lines:
+        m = HANDOFF_HOME_RE.search(line)
+        if not m:
+            bad.append(label)
+            continue
+        branch = NO_HOME_YET_BRANCH_RE.fullmatch(m.group(1))
+        if branch:
+            if not _branch_held(cwd, branch.group(1), refs):
+                bad.append(label)
+            continue
+        if homes is None:
+            import feedback_guard  # lazy: it imports this module
+            homes = feedback_guard.Homes(cwd)
+        if homes.problem(label, "ruling", "-> " + m.group(1)):
+            bad.append(label)
+    return bad
+
+
 # ------------------------------------------------------------------ orchestration
 
 def run(hook):
@@ -469,10 +553,6 @@ def run(hook):
     if not path or not isinstance(path, str) or not os.path.exists(path):
         return ""
 
-    memory_dir = os.path.join(os.path.dirname(path), MEMORY_DIRNAME)
-    if not os.path.isdir(memory_dir):
-        return ""
-
     cwd = hook.get("cwd") or ""
     if not isinstance(cwd, str):
         cwd = ""
@@ -480,9 +560,29 @@ def run(hook):
     # The shared early exit is the tail reader, not the git predicate: this hook fires on a
     # tool use that names a memory file "regardless of mtime", and the memory folder sits
     # outside the work tree, so dirty or committed work in `cwd` says nothing about it.
-    # Only this turn's records are parsed; an idle turn names no memory file and ends here.
+    # Only this turn's records are parsed. An idle turn names no memory file; the handoff is opened only
+    # when this turn wrote it.
     human, after = read_turn(path)
     baseline = _last_human_baseline([human] if human else [])
+
+    memory = _memory_reason(os.path.join(os.path.dirname(path), MEMORY_DIRNAME), after, baseline, cwd)
+    unhomed = handoff_findings(hook, after, baseline, cwd)
+    if not unhomed:
+        return memory
+    reason = ("Ruling home: this turn's handoff has ruling lines with no home a branch holds: %s. "
+              "End each with `Home: <ruling record path>` or `Home: NO HOME YET (branch <name>)`. "
+              "A pick the owner did not rule is [read] or [assumed], with its source." % ", ".join(unhomed))
+    import precompact_handoff  # lazy, and already loaded by handoff_findings
+    if any(label.startswith(precompact_handoff.NO_HOME_LABEL) for label in unhomed):
+        reason += " Lines under `## Rulings with NO HOME YET` count from 1."
+    reason += " (decision premise-format)"
+    return (memory + " " + reason).strip()
+
+
+def _memory_reason(memory_dir, after, baseline, cwd):
+    """The block reason for this turn's memory writes, or '' when there is no memory folder or no finding."""
+    if not os.path.isdir(memory_dir):
+        return ""
 
     candidate_names = find_memory_files(memory_dir)
     written = _written_names(after, baseline, memory_dir, candidate_names)

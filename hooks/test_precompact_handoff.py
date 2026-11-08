@@ -1179,6 +1179,93 @@ def case_prompt_names_list_home_not_copy():
           "no window of step 4 holds all four; the closest lacks: %s" % "; ".join(missing))
 
 
+def case_prompt_ruling_no_home_section():
+    """Step 4 names the fixed heading the handoff's first section uses, and the Home: token that
+    every ruling line ends with: the two forms hooks/ruling_home.py reads on the Stop check."""
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        text = f.read()
+    step4 = step_body(text, 4) or ""
+    check("prompt: step 4 has the fixed heading '## Rulings with NO HOME YET'",
+          re.search(r"^## Rulings with NO HOME YET[ \t]*$", step4, re.M) is not None,
+          "step 4 has no such heading line")
+    check("prompt: step 4 names the Home: token and its 'NO HOME YET (branch <name>)' form",
+          "Home:" in step4 and "NO HOME YET (branch" in step4,
+          "step 4 lacks the Home: token or the branch form")
+
+
+def case_prompt_ruling_clause_no_debt_store():
+    """Step 4 files a ruling in a decision record or a rule, never in the debt store: a debt is a gap, and the
+    Stop check does not take a debt as a ruling's home. No sentence of step 4 that names a ruling names the debt
+    store. The step must still hold a ruling sentence, so the check cannot pass on a deleted clause."""
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        text = f.read()
+    sentences = [s for s in re.split(r"(?<=\.)\s+", squash(step_body(text, 4) or "")) if s.strip()]
+    ruling_sentences = [s for s in sentences if re.search(r"\bruling", s)]
+    check("prompt: step 4 has a sentence that files a ruling, so the check is not vacuous",
+          bool(ruling_sentences), "no sentence of step 4 names a ruling")
+    named = [s for s in ruling_sentences if "debt store" in s]
+    check("prompt: no sentence that files a ruling in step 4 names the debt store",
+          not named, "ruling sentence names the debt store: %r" % named)
+
+
+def handoff_lines_text(no_home=(), premises=()):
+    """A handoff with the two sections handoff_ruling_lines reads, each closed by the next heading."""
+    return ("# Handoff\n\n## Rulings with NO HOME YET\n%s\n\n## Working premises\n%s\n\n"
+            "## Next steps\n- Write the cases.\n" % ("\n".join(no_home), "\n".join(premises)))
+
+
+def claimed_labels(out):
+    return [label for label, _line in (out or [])]
+
+
+def case_handoff_ruling_lines_parse():
+    """precompact_handoff.handoff_ruling_lines, called directly: which handoff lines claim a ruling, and the label
+    each one gets. Under NO HOME YET every non-blank, non-fenced line bar `- none` claims one: dash, star, plus,
+    numbered and plain paragraph. A fenced line claims nothing. In Working premises a [ruling] premise claims one
+    in its bare, bold and colon forms, and a [measured] premise claims nothing. The Home: token is the caller's
+    check, so a homed line still claims its label."""
+    no_home = [
+        "- P1. Source: coordinator 2026-11-07. Home: docs/decisions/x.md.",
+        "* P2. Source: coordinator 2026-11-07.",
+        "+ P3. Source: coordinator 2026-11-07.",
+        "4. P4. Source: coordinator 2026-11-07.",
+        "P5. A guard or check change batches alone. Source: coordinator 2026-11-07.",
+        "- none", "- NONE",
+        "```", "- P6. Source: coordinator 2026-11-07.", "```",
+    ]
+    premises = [
+        "- P7 [measured] The Stop check reads one handoff. Source: x. Checked 2026-11-07.",
+        "- P8 [ruling] A guard or check change batches alone. Source: coordinator 2026-11-07. Checked never.",
+        "- **P9** [ruling] A guard or check change batches alone. Source: coordinator 2026-11-07. Checked never.",
+        "- P10: [ruling] A guard or check change batches alone. Source: coordinator 2026-11-07. Checked never.",
+    ]
+    out, err = call_under_test("handoff_ruling_lines", handoff_lines_text(no_home, premises))
+    got = set(claimed_labels(out))
+    detail = "claimed %r, error %r" % (sorted(got), err)
+    check("handoff_ruling_lines: the parser returns a value, no error", err is None, detail)
+    check("handoff_ruling_lines: dash and star lines under NO HOME YET claim P1 and P2 (control)",
+          {"P1", "P2"} <= got, detail)
+    check("handoff_ruling_lines: a plus-bullet line under NO HOME YET claims P3", "P3" in got, detail)
+    check("handoff_ruling_lines: a numbered line under NO HOME YET claims P4", "P4" in got, detail)
+    check("handoff_ruling_lines: a plain paragraph line under NO HOME YET claims P5", "P5" in got, detail)
+    check("handoff_ruling_lines: `- none`, `- NONE` and a fenced line claim nothing (control)",
+          "P6" not in got and not any(label.startswith("NO HOME YET line") for label in claimed_labels(out)),
+          detail)
+    check("handoff_ruling_lines: a bare [ruling] premise claims P8 (control)", "P8" in got, detail)
+    check("handoff_ruling_lines: a bold **P9** [ruling] premise claims P9", "P9" in got, detail)
+    check("handoff_ruling_lines: a colon P10: [ruling] premise claims P10", "P10" in got, detail)
+    check("handoff_ruling_lines: a [measured] premise claims nothing (control)", "P7" not in got, detail)
+    rows = ["%d. P%d. Source: coordinator 2026-11-07." % (i, 20 + i) for i in range(1, 13)]
+    out, err = call_under_test("handoff_ruling_lines", handoff_lines_text(rows))
+    want = ["P%d" % (20 + i) for i in range(1, 13)]
+    check("handoff_ruling_lines full size: twelve numbered lines claim their twelve labels",
+          err is None and sorted(claimed_labels(out)) == sorted(want),
+          "claimed %r, error %r" % (claimed_labels(out), err))
+    out, err = call_under_test("handoff_ruling_lines", handoff_lines_text(["- none"]))
+    check("handoff_ruling_lines empty state: `- none` and no premise claim nothing (control)",
+          err is None and out == [], "got %r, error %r" % (out, err))
+
+
 def write_compaction(c):
     tp = os.path.join(c.root, "transcript.jsonl")
     write_transcript(tp, [transcript_line("user", [{"type": "text", "text": "hello"}])])
@@ -2022,6 +2109,9 @@ def main() -> int:
     case_handoffs_dir_keeps_other_sessions()
     case_prompt_lists_working_premises()
     case_prompt_names_list_home_not_copy()
+    case_prompt_ruling_no_home_section()
+    case_prompt_ruling_clause_no_debt_store()
+    case_handoff_ruling_lines_parse()
     case_reorient_lists_weak_premises()
     case_reorient_premise_lines_survive_odd_text()
     case_reorient_flags_missing_premises()

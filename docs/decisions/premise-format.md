@@ -10,7 +10,7 @@ A premise is a statement, not a fact. It is one line: `- P<n> [<kind>] <statemen
 
 | Kind | Means | Strength |
 |---|---|---|
-| `ruling` | The owner said it. Names the date and the home (a decision, a debt, or NO HOME YET). | Strong |
+| `ruling` | The owner said it. Names the date. Ends `Home: <ruling record path>` or `Home: NO HOME YET (branch <b>)`; `hooks/ruling_home.py` refuses a handoff line whose home does not resolve. | Strong |
 | `measured` | A command ran and showed it. Names the command, the time, the commit, and the log while one exists. | Strong while the commit is current for the files it covers |
 | `read` | Read in a file. Names `path:line` and the commit. | Strong while that file has not changed since the commit |
 | `notes` | From a handoff, a summary, a digest, memory, a brief, a roadmap note, or an agent report not yet checked. | Weak |
