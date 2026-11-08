@@ -151,7 +151,7 @@ merge --reviewed        the ledger: one line per open PR with its one next act (
                         A done record whose Findings are not filed reads `lane: <cause>`, where the cause is `findings not filed: this PR`,
                         `follow-up #N does not exist`, `follow-up #N closed unmerged` or `follow-up #N is this PR`. It keeps the lane round age limit.
                         RED past the age limit or with no next act. The last line: the longest wait since a done record, and the count
-                        with no next act. Exit 0 nothing red, 1 any red, 2 on a failed read (a malformed field too).
+                        with no next act. Exit 0 nothing red, 1 any red, 2 on a failed list, comment or base-run read (a malformed field too). An unknown Findings read prints its line: exit 0, or 1 past 24 h.
 merge --build-batch [--base BRANCH] [--push BRANCH]   build an integration branch from PR state alone: the PRs whose act is `batch`
                         (a PR with a held, parked or replaced label is left out), merged in PR order, a stack whole or not at all, each lane-linted
                         in parallel unless its merge base holds main's newest lint change. A red lint leaves the PR out and posts `Lint: red <head> <steps>`.

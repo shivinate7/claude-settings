@@ -24,10 +24,11 @@
                           PR's issue comments since the PR opened.
   merge --reviewed        the ledger: one line per open PR, `#n branch act age`, with its one next act read from GitHub alone, first match wins:
                           `lane lint red: <steps>` (a done record for the live head, and a `Lint: red <live head> <steps>` comment that
-                          `merge --build-batch` posted: it comes before `batch`), `batch` (a done review record for the live head),
+                          `merge --build-batch` posted: it comes first, so a red head costs no Findings read),
                           `lane: <cause>` (a done record whose Findings are not filed: a filing is owed, not a round; the cause is
                           `findings not filed: this PR`, `follow-up #N does not exist`, `follow-up #N closed unmerged` or `follow-up #N is this PR`;
                           the lane round age limit holds; a Findings read that could not run is `findings unknown: <why>`),
+                          `batch` (a done review record for the live head with no match above),
                           `lane round n` (an open record, or one for another head),
                           `waits on debt:<slug>|page:<item id>` (a held, parked or replaced label and a `Waits on:` comment line),
                           `batch run` (the `batch` label: an integration PR, aged from its labeled event, the batch limit),
@@ -35,7 +36,8 @@
                           `lane round n` with n 1 (a draft with no record; a failed fix check reads n 1 too), else `NO NEXT ACT`. A line past its limit
                           (merge.PR_STATE_AGE_HOURS) or with no next act is RED. When the base's latest run is red, each batch line adds
                           `held by main red <age>`. The last line: the longest wait since a done record, and the count with no next act.
-                          Exit 0 nothing red, 1 any red, 2 on a failed read, with no list printed. Cost: the open-pull list, the repo's
+                          Exit 0 nothing red, 1 any red, 2 on a failed list, comment or base-run read, with no list printed (an unknown Findings read
+                          prints its line: exit 0, or 1 past the 24 h batch limit). Cost: the open-pull list, the repo's
                           comments since the oldest open PR (one read), one issue-events read per held or batch-labelled PR, one read of the base's latest run.
                           No GraphQL, no per-head check read, no timer, file or log. A malformed field from GitHub also exits 2.
                           The batch line carries no CI state of its own (design of 12:33 CST Nov 7, record pr-ledger).
