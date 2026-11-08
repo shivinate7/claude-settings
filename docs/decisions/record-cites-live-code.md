@@ -13,8 +13,8 @@ Coordinator readings:
 - 2026-11-07 15:06 CST, coordinator reading, process-only (lane brief `record-claim-cites-code`): "My judgement: fold it into the fresh-prose skill (skills/fresh-prose) and its existing check, not a new lint. The rule: a record sentence that says what code does or does not do cites the code symbol (`module.symbol`). The skill's check then confirms that the symbol exists. Whether the sentence is true stays with the reviewer"
 - 2026-11-07 15:08 CST, coordinator reading, process-only: "one grammar and report-only are fine."
 - 2026-11-08 04:03 CST, coordinator reading, process-only (item 386; #1539 is the PR that adds CODE_CLAIM): "Your lane owns stale_cites (CODE_CLAIM), so the guard rides with you (item 386), as a follow-up from #1539's head with `Merge after: #1539`: lane lint runs stale_cites on the PR's own tree (base plus PR), so a cite to a code name missing there is red."
-- 2026-11-08 08:43 CST, coordinator reading, process-only: fix debt stale010-no-top-folder by reusing STALE003's top-folder test.
 - 2026-11-08 07:43 CST, coordinator reading, process-only: "go ahead with record-cites-live-code."
+- 2026-11-08 08:43 CST, coordinator reading, process-only, paraphrased: fix debt stale010-no-top-folder by reusing STALE003's top-folder test.
 
 Lane pick, 2026-11-08 04:16 CST, process-only, under the 04:03 reading: a dead cite has one home, STALE010 (a cite into a tracked top folder to a Python name missing at head). STALE009 (a report that never fails) covers only a code claim with no cite. A name the range removed stays STALE002 (a cite to a name the range removed from its file). A deleted or renamed path stays STALE001 (a line naming a path the range deleted or renamed). The 04:03 reading says a missing name "is red". The lane reads that as red on added lines only. So a PR is never red on work it did not do.
 
