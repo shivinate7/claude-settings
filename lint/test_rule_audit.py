@@ -834,7 +834,7 @@ REFUSAL_UNCITED_EXEMPT = {
     "merge:host_default_branch: the default branch cannot be read from gh": ("refusal-matches-rule", "gh could not give the default branch, and the stop prints the error"),
     "merge:ignore_checks: merge.ignoreChecks entry needs a name": ("refusal-matches-rule", "a merge.ignoreChecks entry has no name or no reason, and the stop names the config entry"),
     "merge:lane_lint: moved: gh says": ("refusal-matches-rule", "the branch moved during the run, and the stop prints both heads; nothing was claimed"),
-    "merge:load_config: cannot read on origin/":("refusal-matches-rule", "a config or workflow file cannot be read on the base, and the stop prints the read's error"),
+    "merge:apply_cap_floor: cannot read on": ("refusal-matches-rule", "a workflow file cannot be read on the base, and the stop prints the read's error"),
     "merge:main: not in a git checkout": ("refusal-matches-rule", "the run is not in a git checkout, so no merge can start, and the stop names no decision"),
     "merge:main: the pull request is": ("refusal-matches-rule", "the pull request is closed or conflicting, and the stop names GitHub's state"),
     "merge:main: on origin/: defaultBranch must be a non-empty string": ("refusal-matches-rule", "the merge config on the base names no usable default branch, and the stop names the field"),
