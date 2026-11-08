@@ -4090,16 +4090,23 @@ _design_deadline = [None]  # time.monotonic() of the deadline of the call being 
 PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
+def _page_check_module():
+    """skills/waiting-page/page_check.py, the one home of the picture check, or None when it is not found."""
+    folder = _waiting_page_folder("page_check.py")
+    if folder is None:
+        return None
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    return importlib.import_module("page_check")
+
+
 def _run_check_designs(page_file, item):
     """(code, text) from the checker on `item` (a dict) against `page_file`: code 0 pass, 1 miss with the page's
     sentence as text, 3 unknown with the reason as text. The seam of the guard; skills/waiting-page/page_check.py
     is the one home that starts node, and this call only sets the cap from the call's deadline."""
-    folder = _waiting_page_folder("page_check.py")
-    if folder is None:
+    page_check = _page_check_module()
+    if page_check is None:
         return 3, "page_check.py not found"
-    if folder not in sys.path:
-        sys.path.insert(0, folder)
-    page_check = importlib.import_module("page_check")
     cap = page_check.CHECK_DESIGNS_CAP
     if _design_deadline[0] is not None:
         cap = max(1.0, min(cap, _design_deadline[0] - time.monotonic()))
@@ -4163,25 +4170,36 @@ def page_design_hit(writes, tool_input, cwd):
         record(DATA_TOOL, "noted", "page-item-design",
                "unknown: " + ("no published page stamped" if not page_file else "the stamped page file is gone"))
         return None
-    deadline = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
-    _design_deadline[0] = deadline
     try:
-        for done, (doc_id, data) in enumerate(pictured):
-            if time.monotonic() >= deadline:
-                record(DATA_TOOL, "noted", "page-item-design",
-                       "unknown: the %d s budget of this call is spent, %d item(s) not checked"
-                       % (PAGE_ITEM_DESIGN_BATCH_SECONDS, len(pictured) - done))
-                return None
-            try:
-                code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
-            except Exception as err:
-                code, text = 3, type(err).__name__ + ": " + str(err)
-            if code == 1:
-                return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
-            if code != 0:
-                record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+        page_check = _page_check_module()
+    except Exception as err:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if page_check is None:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: page_check.py not found")
+        return None
+
+    def run_one(entry):
+        doc_id, data = entry
+        try:
+            return _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
+        except Exception as err:
+            return 3, type(err).__name__ + ": " + str(err)
+
+    _design_deadline[0] = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
+    try:
+        results, left = page_check.run_within_budget(pictured, PAGE_ITEM_DESIGN_BATCH_SECONDS, run_one, stop_on_miss=True)
     finally:
         _design_deadline[0] = None
+    for (doc_id, data), code, text in results:
+        if code == 1:
+            return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
+        if code != 0:
+            record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+    if left:
+        record(DATA_TOOL, "noted", "page-item-design",
+               "unknown: the %d s budget of this call is spent, %d item(s) not checked"
+               % (PAGE_ITEM_DESIGN_BATCH_SECONDS, left))
     return None
 
 
