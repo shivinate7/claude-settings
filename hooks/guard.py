@@ -1629,12 +1629,29 @@ def is_test_config_rel(rel: str) -> bool:
     return bool(TEST_CONFIG.match(basename(rel)))
 
 
+def builder_config_rel(rel: str) -> bool:
+    """True when a builder's change to `rel` is judged as test config, whole-file or partly-owned. The one
+    predicate `builder_test_rel` and `builder_config_disables_tests` read. A document that is named like a
+    config (`docs/jest.config.md`) is a document, as in `_in_test_dir`. The test-author's scope keeps
+    `is_test_config_rel`, so it still owns such a document."""
+    return (is_test_config_rel(rel)
+            and os.path.splitext(rel)[1].lower() not in SPEC_DOC_EXTENSIONS)
+
+
 def builder_test_rel(rel: str) -> bool:
     """True when a repository-relative path is one a builder may not change whatever the change: a test
     path or a whole-file test config. A partly-owned file is judged by its owned parts."""
-    # A document that is named like a config (`docs/jest.config.md`) is a document, as in `_in_test_dir`.
-    return is_test_rel(rel) or (bool(WHOLE_FILE_TEST_CONFIG.match(basename(rel)))
-                                and os.path.splitext(rel)[1].lower() not in SPEC_DOC_EXTENSIONS)
+    return is_test_rel(rel) or (builder_config_rel(rel) and bool(WHOLE_FILE_TEST_CONFIG.match(basename(rel))))
+
+
+def builder_config_disables_tests(rel: str, new_texts, old_text: str = "") -> bool:
+    """True when a builder's change adds a test-disabling line to test config: any of `new_texts` against
+    `old_text`. The write tool and the diff check both ask it."""
+    # The name match is the cheap filter, so the line scan runs only on a config name.
+    if is_test_config_rel(rel) and any(
+            disables_tests(new.splitlines(), old_text.splitlines()) for new in new_texts):
+        return builder_config_rel(rel)
+    return False
 
 
 def author_path_ok(rel: str) -> bool:
@@ -2012,8 +2029,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return "" if rel.lower().endswith(".md") else target
     if builder_test_path(target, cwd):
         return target
-    if is_test_config_rel(rel) and any(
-            disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
+    if builder_config_disables_tests(rel, write_content_parts(tool_input)):
         return target
     if (repo_rel(target, cwd, outside=False) is not None
             and owned_config_edit(rel, tool_input, _expanded(target, cwd))):
@@ -2294,6 +2310,19 @@ def owned_config_changed(rel: str, old: str, new: str) -> bool:
     return ini_owned_parts(old) != ini_owned_parts(new)
 
 
+def owned_config_base(rel: str, old: str, read_base) -> str:
+    """The text a change to a partly-owned config is judged from: `old`, or `read_base()` when `old` does
+    not parse and that base does. A manifest that holds merge conflict markers does not parse, and judged
+    from it every resolution would count as changed, even one that touched no owned part. The caller names
+    the base: HEAD for a write or a merge in progress, a merge commit's first parent. A blank base or one
+    that does not parse leaves `old`, which counts as changed. The new text is never replaced, so a
+    malformed resolution stays refused."""
+    if basename(rel) != "package.json" or package_json_parts(old if old.strip() else "{}") is not None:
+        return old
+    base = read_base()
+    return base if base.strip() and package_json_parts(base) is not None else old
+
+
 def owned_config_edit(rel: str, tool_input, full: str) -> bool:
     """True when a write tool call changes an owned part of the partly-owned config at `full`. An Edit's
     strings are fragments, so each is applied to the file on disk to give the whole texts. A fragment
@@ -2303,8 +2332,12 @@ def owned_config_edit(rel: str, tool_input, full: str) -> bool:
     pairs = workflow_pairs(tool_input, full)
     if not pairs:
         return False
+    def head():
+        # `./` reads the file at HEAD relative to its own folder, so a nested manifest reads itself, not the root's.
+        return text_at(os.path.dirname(full), "HEAD", "./" + basename(full))
+
     if "content" in tool_input:
-        return any(owned_config_changed(rel, o, n) for o, n in pairs)
+        return any(owned_config_changed(rel, owned_config_base(rel, o, head), n) for o, n in pairs)
     disk = text_at(os.path.dirname(full), None, basename(full))
     text, unplaced = disk, []
     count = -1 if tool_input.get("replace_all") else 1
@@ -2313,6 +2346,8 @@ def owned_config_edit(rel: str, tool_input, full: str) -> bool:
             text = text.replace(old, new, count)
         else:
             unplaced.append((old, new))
+    # The fragments are placed in the text on disk; the whole text is judged from a base that parses.
+    disk = owned_config_base(rel, disk, head)
     return owned_config_changed(rel, disk, text) or any(owned_config_changed(rel, o, n) for o, n in unplaced)
 
 
@@ -2354,9 +2389,13 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
-                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
-                owned_config_changed(rel, text_at(root, old, rel), text_at(root, new, rel))) or (
+            # A base that parses for a conflicted old side: the first parent of a commit, else HEAD.
+            parent = (new + "^") if new else "HEAD"
+            bad = any(builder_test_rel(n) for n in names) or (builder_config_disables_tests(
+                rel, [text_at(root, new, rel)], text_at(root, old, rel))) or (
+                owned_config_changed(rel, owned_config_base(rel, text_at(root, old, rel),
+                                                            lambda: text_at(root, parent, rel)),
+                                     text_at(root, new, rel))) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
         if bad:
             found.append(rel)
