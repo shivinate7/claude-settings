@@ -521,6 +521,7 @@ def explained_path(tool: str, tool_input, cwd: str) -> str:
         raw = tool_input.get("command", "") or ""
         if not isinstance(raw, str) or not raw.strip():
             return ""
+        guard.POWERSHELL_CALL[0] = tool == "PowerShell"
         hit = guard.shell_write_hit(raw, cwd, guard.is_settings_file)
         if not hit:
             return ""
