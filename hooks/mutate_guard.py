@@ -2210,8 +2210,8 @@ MUTATIONS = [
     # ---- lane-repo-tag. Each mutant breaks one clause of the lane repo tag check, or of git_reads.github_repo and
     # origin_slug, the reading of a checkout's GitHub repo that the rule shares with the roadmap build.
     ("lane-repo-tag: the rule never fires",
-     '    if lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
-     '    if False and lane_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
+     '    if False and repo_tag_hit_tags:\n        refuse(tool, "deny", "lane-repo-tag"',
      "guard", "lane-repo-tag: lane tag with no repo tag is denied"),
     ("lane-repo-tag: a tag in other case no longer matches",
      '        if repo and repo_tag_names(tag, repo):',
