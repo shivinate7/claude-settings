@@ -993,6 +993,8 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
     def test_a_linux_uname_still_gets_the_tmpdir_line(self):
         """Control for the Windows case: the same fake answering Linux still gets the export line."""
         self.assertEqual(self.uname_probe("Linux"), "Linux", "the shell did not run the fake uname")
+        self.assertEqual(self.shell_tmpdir("Linux", None), "",
+                         "the shell fills an unset TMPDIR, so no case here proves the line")
         for tmpdir in (None, ""):
             # Scope first: the value the hook's shell starts with decides which expectation holds.
             shell_value = self.shell_tmpdir("Linux", tmpdir)
