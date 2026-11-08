@@ -13648,6 +13648,22 @@ sh("builder-test: shell write, r4 gap B, sort --output=tests/test_a.py on src/x,
    "sort --output=tests/test_a.py src/x", "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: shell, r4 gap B control, sed e command runs sort on src/x, no -i, on src/app.py, is allowed",
    "sed 'e sort src/x' src/app.py", "allow", **BR)
+# Split controls: a lone, unquoted & ends a sed e command's job, but the & of a redirect (2>&1, &>, |&) is no
+# break. Each control reads a test beside its redirect, so the call is allowed. A split at every & reads the
+# word after the redirect as a command, and the test it names then counts as written, so each control goes red there.
+sh("builder-test: shell, split control, sed e command runs head tests/x 2>&1, no -i, on src/app.py, is allowed",
+   "sed 'e head tests/x 2>&1' src/app.py", "allow", **BR)
+sh("builder-test: shell, split control, sed e command runs head tests/x &> /dev/null, no -i, on src/app.py, is allowed",
+   "sed 'e head tests/x &> /dev/null' src/app.py", "allow", **BR)
+sh("builder-test: shell, split control, sed e command runs head tests/x |& cat, no -i, on src/app.py, is allowed",
+   "sed 'e head tests/x |& cat' src/app.py", "allow", **BR)
+# Quote controls: an & inside quotes is text, so a quoted & never ends a command. The echo prints its quoted text, and
+# nothing it names is written. A split that reads the quotes as no quotes ends the command at that &, and the test
+# named after it then counts as written, so the twin goes red there.
+sh("builder-test: shell, quote control, sed e command runs echo of a quoted a & b, no -i, on src/app.py, is allowed",
+   "sed \"e echo 'a & b'\" src/app.py", "allow", **BR)
+sh("builder-test: shell, quote control, sed e command runs echo of a quoted a & tee tests/x, no -i, on src/app.py, is allowed",
+   "sed \"e echo 'a & tee tests/x'\" src/app.py", "allow", **BR)
 # r5 gap: an output flag of a reader or of git diff writes the file it names, as sort -o does. less -o and
 # less --log-file copy the input into the named file, and git diff --output writes the diff into it. Each
 # names a test, so each is refused. The controls name a product file or /tmp, and are allowed.
