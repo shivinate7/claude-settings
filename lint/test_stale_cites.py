@@ -2916,7 +2916,8 @@ def value_file(name, literal):
 
 
 class NamedExcerptPhraseTests(unittest.TestCase):
-    """named_excerpt with quoted phrases: a phrase is found at word boundaries only, and the rows that hold it whole rank first."""
+    """Quoted phrases: quoted_phrases reads the title a line quotes, and named_excerpt finds a phrase at word boundaries only, ranks the rows
+    that hold it whole first, and shows a long row from the phrase when the phrase lies past the cut."""
 
     @classmethod
     def setUpClass(cls):
@@ -2944,6 +2945,34 @@ class NamedExcerptPhraseTests(unittest.TestCase):
         shown = self.numbers_in(self.stale.named_excerpt((), "\n".join(rows) + "\n", phrases=(phrase,)))
         self.assertIn(2, shown, "scope: the rows that hold the phrase whole are not shown, so the cap is not tested: %s" % shown)
         self.assertNotIn(1, shown, "the row that only contains the phrase is shown ahead of the rows that hold it whole: %s" % shown)
+
+    def test_a_stray_inch_mark_before_a_quoted_title_does_not_eat_the_title(self):
+        # The rule: a straight quote opens a phrase only when no word character is before it, so a stray inch mark pairs with nothing,
+        # and the quoted title after it stays the phrase.
+        title = "every table whose cells render Thousands has exactly one money head that carries the unit"
+        line = '- 5" ... "%s".' % title
+        self.assertIn('"%s"' % title, line, "scope: the line does not quote the title")
+        self.assertEqual(self.stale.quoted_phrases(line), [title], "the stray inch mark takes the quoted title as its own phrase")
+
+    def test_a_phrase_past_the_row_cut_is_shown_from_just_before_it(self):
+        # The rule: a row cut at NAMED_ROW_CHARS that holds a phrase past that column is shown from just before the phrase, under a marker
+        # that says where the shown part starts. The shown part holds at most NAMED_ROW_CHARS characters.
+        phrase = "every table whose cells render Thousands"
+        limit = self.stale.NAMED_ROW_CHARS
+        row = "x " * 120 + "'%s'" % phrase + " tail" + " y" * 40
+        self.assertNotIn(phrase, row[:limit], "scope: the phrase starts within the first %d characters, so the cut does not hide it" % limit)
+        out = self.stale.named_excerpt((), row + "\n", phrases=(phrase,))
+        self.assertIsNotNone(out, "scope: the phrase finds no row")
+        shown = out.split("\n")[0]
+        self.assertTrue(shown.startswith("1: [row starts at character "), "the cut row does not say where its shown part starts: %r" % shown)
+        self.assertIn(phrase, shown, "the phrase past the cut is not shown: %r" % shown)
+        part = re.sub(r" \[row cut at \d+ characters\]$", "", re.sub(r"^1: \[row starts at character \d+\] ", "", shown))
+        self.assertLessEqual(len(part), limit, "the shown part is %d characters, want at most %d" % (len(part), limit))
+
+    def test_an_apostrophe_or_a_single_quote_is_never_a_phrase_quote(self):
+        # The rule: an apostrophe is no quote, and a single quote never quotes, so neither opens a phrase.
+        self.assertEqual(self.stale.quoted_phrases("<p>Don't</p>"), [], "a lone apostrophe gives a phrase")
+        self.assertEqual(self.stale.quoted_phrases("the 'money head' unit, and Don't stop"), [], "a single-quoted phrase gives a phrase")
 
 
 class ValueCiteTests(StaleCase):
