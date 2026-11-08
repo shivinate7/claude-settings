@@ -1054,7 +1054,7 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, origin=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1067,21 +1067,27 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    fails closed on an untrusted `cd` keeps doing so. `origin` returns `(folder, absolute)` instead:
+    `absolute` is True when a `cd` that named an absolute, `~`, bare (home) or variable path was last
+    to set the folder the segment runs in, and a relative `cd` after it keeps that, so `cd /tmp && cd ..`
+    is absolute and `cd ../..` from the shell's own folder is not."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    far, prev_far = False, False
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        stack.extend([(where, prev, far, prev_far)] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            return None if skipping else where
+            if skipping:
+                where, far = None, False
+            return (where, far) if origin else where
         if skipping:
             skipping = end in ("&&", "|")
             for _ in range(marks.count(")")):
                 if stack:
-                    where, prev = stack.pop()
+                    where, prev, far, prev_far = stack.pop()
                     skipping = False
             continue
         tokens = segment_tokens(segment)
@@ -1090,13 +1096,17 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
         if tokens is None:
-            where = None
+            where, far = None, False
         elif move is not None:
-            old = where
+            old, old_far, pre_far = where, far, far
+            if move is not CD_UNKNOWN and move != "-" and not (
+                    move and shell_abs(move, None) is None and not move.startswith("~")
+                    and not any(mark in move for mark in "$%`")):
+                far = True   # an absolute, `~`, bare or variable cd
             if move is CD_UNKNOWN:
                 where = None
             elif move == "-":
-                where = prev
+                where, far = prev, prev_far
             elif any(mark in move for mark in "$%`"):
                 where = None
             else:
@@ -1106,13 +1116,15 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
+                    old_far, far = prev_far, pre_far   # the shell stays: so does where it was reached from
                 else:
                     where = None
-            prev = old
+                    far = False   # a missing folder is not a trusted one
+            prev, prev_far = old, old_far
         for _ in range(marks.count(")")):
             if stack:
-                where, prev = stack.pop()
-    return where
+                where, prev, far, prev_far = stack.pop()
+    return (where, far) if origin else where
 
 
 def _segment_git_c_target(tokens):
