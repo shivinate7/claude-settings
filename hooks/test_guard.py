@@ -11772,6 +11772,37 @@ sh("frozen: uv run with a quoted --with value holding a greater-than sign, pytes
    'uv run --with "requests>=2" pytest', "allow", cwd=NOGIT)
 sh("frozen: sudo -u with a quoted value holding a space, wrapped cat of the config hook, is allowed",
    'sudo -u "a b" cat ' + CFG_HOOK, "allow", cwd=NOGIT)
+# A WRITE NAMED BY A REDIRECT OR A WRAPPER VALUE WITH A SPACE OR QUOTES IS STILL A WRITE TO ITS TARGET. A
+# REDIRECT TARGET IS ONE WORD WHETHER OR NOT A SPACE SITS BEFORE IT (`>& out`, `> "a b"`, `>& "o u"`), AND A
+# QUOTED WRAPPER VALUE IS ONE WORD (`doas -u "a b"`, `sudo -g "my group"`, `uv --directory "a b"`,
+# `docker exec -e "A=b c"`, `flock -w "1 s"`). `sed -i` behind a wrapper is an in-place write too. The cat rows
+# read the same frozen hook through the same prefixes, so the scan must still allow the read.
+sh("frozen: a >& out redirect with a space, ahead of a rm of the config hook, is denied",
+   ">& out rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a 2>& out dup with a space, ahead of a cp onto the config hook, is denied",
+   "2>& out cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a >& quoted redirect target with a space, ahead of a mv onto the config hook, is denied",
+   '>& "o u" mv x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a > quoted redirect target with a space, ahead of a cp onto the config hook, is denied",
+   '> "a b" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a doas -u value holding a space, wrapped cp onto the config hook, is denied",
+   'doas -u "a b" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -g value holding a space, wrapped tee onto the config hook, is denied",
+   'sudo -g "my group" tee ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv --directory value holding a space, wrapped cp onto the config hook, is denied",
+   'uv --directory "a b" run --with x cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a docker exec -e value holding a space, wrapped cp onto the config hook, is denied",
+   'docker exec -e "A=b c" ctr cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a flock -w value holding a space, wrapped cp onto the config hook, is denied",
+   'flock -w "1 s" lockf cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -u value holding a space, wrapped sed -i of the config hook, is denied",
+   'sudo -u "a b" sed -i s/a/b/ ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a doas -u value holding a space, wrapped cat of the config hook, is allowed",
+   'doas -u "a b" cat ' + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a uv --directory value holding a space, wrapped cat of the config hook, is allowed",
+   'uv --directory "a b" run --with x cat ' + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a docker exec -e value holding a space, wrapped cat of the config hook, is allowed",
+   'docker exec -e "A=b c" ctr cat ' + CFG_HOOK, "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
