@@ -272,6 +272,13 @@ RED = [
     ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
     ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
     ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
+    # A prose tail after a plain value passes only as a function word first, then letter words. A letter word with no
+    # function word first, a digit in a later word, and a symbol inside a later word each refuse.
+    ("password none then a letter word with no function word first", "password: none " + "swordfish", "swordfish"),
+    ("password none then a function word and a word with a digit", "password: none for " + "hunter2", "hunter2"),
+    ("password none then a function word and a word with a trailing mark and a digit",
+     "password: none for " + "hunter2!", "hunter2!"),
+    ("password none then a function word and a symbol inside a word", "password: none for " + "hunter&co", "hunter&co"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -340,6 +347,11 @@ GREEN = [
     ("donkey with a value", "donkey: Kong1981"),
     ("whiskey with a value", "whiskey: Jameson12"),
     ("jockey with a value", "jockey: Rider123"),
+    # Each word of EVERYDAY_KEY_WORDS has its own row with a random-looking value. Dropping a word from the list
+    # turns that row red.
+    ("turnkey with a random value", "turnkey=" + "Xq7Zt2Lm" + "9Qw4"),
+    ("hockey with a random value", "hockey: " + "Rk4Ps8Vn" + "2Tz6"),
+    ("lackey with a random value", "lackey=" + "Wm3Bq9Jd" + "5Hx7"),
     ("a keyboard label with a number", "keyboard: 104 keys"),
     # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
     ("password word with optional", "password: " + "optional"),
