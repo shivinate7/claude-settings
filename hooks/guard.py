@@ -2869,19 +2869,40 @@ def stop_diff_block(payload, role: str, where: str):
 
 
 # Rule report-sha-missing. A report's sha-like token must resolve as a commit in the repo at the payload's cwd
-# (decision agent-report-shas-resolve). A token is 7 to 40 lowercase hex characters with a digit and a letter a-f.
-# It is not one when it touches - _ / # @ or a period that is followed by a non-space (a file name, a URL, an
-# agent id, a colour), or when it sits inside a double-quoted span that closes on the same line or on a `> ` line.
+# (decision agent-report-shas-resolve). A token is a run of 7 to 12, or exactly 40, lowercase hex characters with a
+# digit and a letter a-f. It is not one when it touches - _ / # @ = or a period (a file name, a URL, an agent id,
+# a colour, key=value), or when it sits inside a double-quoted span that closes on the same line or on a `> ` line.
+# Two forms that touch a period are judged: each side of a range (`a..b`, `a...b`), and a token followed by
+# sentence marks up to a space or the end of the text.
 HANDBACK_TOOL = "SubagentHandback"
-REPORT_SHA = re.compile(r"(?<![0-9A-Za-z_\-/#.@])[0-9a-f]{7,40}(?![0-9A-Za-z_\-/#@]|\.(?!\s|$))")
+REPORT_HEX_RUN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]+(?![0-9A-Za-z])")
+REPORT_RANGE_BEFORE = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]+\.{2,3}$")
+REPORT_RANGE_AFTER = re.compile(r"\.{2,3}[0-9a-f]")
+REPORT_MARKS_END = re.compile(r"[.,;:)\]*\"`]*(?:\s|$)")
+REPORT_TOUCH = "-_/#@="
 REPORT_QUOTED = re.compile(r'"[^"\n]*"')
 REPORT_QUOTE_LINE = re.compile(r"\s*>(\s|$)")
 REPORT_SHA_MAX = 100   # shas judged in one report: a bound on the one git call's input
-REPORT_SHA_REASON = (
+REPORT_SHA_FIX = (
     "Your report names a commit this repo does not hold: %s. Check each sha with git before you write it, "
     "and name only a commit that exists. If you made no commit, say so and give no sha. "
-    "Then hand back again. (decision agent-report-shas-resolve)"
 )
+REPORT_SHA_REASON = REPORT_SHA_FIX + "Then hand back again. (decision agent-report-shas-resolve)"
+REPORT_SHA_STOP_REASON = REPORT_SHA_FIX + "Fix the report, then stop again. (decision agent-report-shas-resolve)"
+
+
+def report_sha_judged(line: str, run) -> bool:
+    """True when the hex run `run` of `line` is judged: no touching mark, bar the range and sentence-mark forms."""
+    before, after = line[:run.start()], line[run.end():]
+    if before and before[-1] in REPORT_TOUCH:
+        return False
+    if before.endswith(".") and not REPORT_RANGE_BEFORE.search(before):
+        return False
+    if after and after[0] in REPORT_TOUCH:
+        return False
+    if after.startswith(".") and not (REPORT_RANGE_AFTER.match(after) or REPORT_MARKS_END.match(after)):
+        return False
+    return True
 
 
 def report_shas(text) -> list:
@@ -2893,8 +2914,10 @@ def report_shas(text) -> list:
         if REPORT_QUOTE_LINE.match(line):
             continue
         line = REPORT_QUOTED.sub(lambda m: " " * len(m.group()), line)
-        for token in REPORT_SHA.findall(line):
-            if re.search(r"[0-9]", token) and re.search(r"[a-f]", token) and token not in found:
+        for run in REPORT_HEX_RUN.finditer(line):
+            token = run.group()
+            if (7 <= len(token) <= 12 or len(token) == 40) and re.search(r"[0-9]", token) \
+                    and re.search(r"[a-f]", token) and token not in found and report_sha_judged(line, run):
                 found.append(token)
     return found[:REPORT_SHA_MAX]
 
@@ -2949,9 +2972,10 @@ def judge_stop(payload) -> None:
             record("SubagentStop", "noted", "report-sha-unresolved", " ".join(missing))
         else:
             record("SubagentStop", "deny", "report-sha-missing", " ".join(missing))
-            sha_reason = "report-sha-missing: " + REPORT_SHA_REASON % ", ".join(missing)
+            sha_reason = "report-sha-missing: " + REPORT_SHA_STOP_REASON % ", ".join(missing)
     if diff_reason or sha_reason:
-        print(json.dumps({"decision": "block", "reason": diff_reason + " " + sha_reason}))
+        reason = diff_reason + " " + sha_reason if diff_reason and sha_reason else diff_reason + sha_reason
+        print(json.dumps({"decision": "block", "reason": reason}))
         sys.exit(0)
 
 
@@ -6148,6 +6172,14 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
+    # 0, report-sha-missing. An agent's hand-back names only commits its repo holds (decision agent-report-shas-resolve).
+    # First, before any rule that reads git: a hand-back with no sha-like token starts no git process.
+    if tool == HANDBACK_TOOL:
+        missing = report_sha_missing(tool, payload, tool_input.get("message"), cwd)
+        if missing:
+            refuse(tool, "deny", "report-sha-missing", REPORT_SHA_REASON % ", ".join(missing), " ".join(missing))
+        if payload.get("agent_id"):
+            return   # no other rule judges an agent's hand-back, and each of them reads git
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
@@ -6217,12 +6249,6 @@ def judge(payload) -> None:
     # agent's create_session is refused here. An override lifts it.
     if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
         refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
-
-    # 0, report-sha-missing. An agent's hand-back names only commits its repo holds (decision agent-report-shas-resolve).
-    if tool == HANDBACK_TOOL:
-        missing = report_sha_missing(tool, payload, tool_input.get("message"), cwd)
-        if missing:
-            refuse(tool, "deny", "report-sha-missing", REPORT_SHA_REASON % ", ".join(missing), " ".join(missing))
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
