@@ -18122,13 +18122,27 @@ def _ours_drops_main(w):
     _check_merge(w, TEST_A, LANE_TEXT)
 
 
-def _pull_theirs(w):
+def _origin_url(w):
+    """The worktree's local remote as a file:// URL: a pull that names its source by address."""
+    return "file://" + w + "-origin"
+
+
+def _url_source(w):
+    return [_origin_url(w), "main"]
+
+
+def _refspec_source(w):
+    return ["origin", "main:refs/tmp/main"]
+
+
+def _pull_theirs(w, source=lambda w: ["origin", "main"]):
     """Cut at main, with a local remote. The conflicting hunk of _conflict_setup is pushed, and the builder pulls it
-    with `-X theirs`. The pull settles the hunk and commits the merge (reflog `pull ...: Merge made by`)."""
+    with `-X theirs`. `source` gives the arguments that name what it pulls: the remote and branch by default, or a
+    URL, or a `src:dst` refspec. The pull settles the hunk and commits the merge (reflog `pull ...: Merge made by`)."""
     _origin(w)
     _conflict_setup(w)
     _push_main(w)
-    _must(w, *IDENT, "pull", "-q", "--no-rebase", "--no-edit", "-X", "theirs", "origin", "main")
+    _must(w, *IDENT, "pull", "-q", "--no-rebase", "--no-edit", "-X", "theirs", *source(w))
     _check_merge(w, TEST_A, BASE_FILES[TEST_A] + MAIN_LATER)
 
 
@@ -18155,6 +18169,41 @@ def _product_strategy_merge(w):
     _product_conflict_setup(w)
     _must(w, *IDENT, "merge", "-q", "--no-edit", "-X", "theirs", "main")
     _check_merge(w, "src/app.py", "x = 9\n")
+
+
+def _ff_pull_url(w):
+    """Cut at main, with a local remote. The test-author's lane is pushed, and the builder fast-forwards to it with
+    `pull --ff-only` from a file:// URL. It makes no commit of its own (reflog `pull ...: Fast-forward`)."""
+    _origin(w)
+    _test_author_lane(w)
+    _must(w + "-main", "push", "-q", "origin", "lane")
+    _must(w, "pull", "-q", "--ff-only", _origin_url(w), "lane")
+    _check_merge(w, how="Fast-forward")
+
+
+def _octopus(w):
+    """Cut at main. The builder commits product work, then merges two branches that each add a product file: one
+    commit with three parents (reflog `merge b1 b2: Merge made by the 'octopus' strategy`). The branches touch
+    different files, so the merge is clean."""
+    main = w + "-main"
+    _product_commit(w)
+    for branch, rel in (("b1", "src/one.py"), ("b2", "src/two.py")):
+        _must(main, "checkout", "-q", "-b", branch)
+        write(os.path.join(main, rel), "v = 1\n")
+        _must(main, "add", "-A")
+        _must(main, *IDENT, "commit", "-q", "-m", branch)
+        _must(main, "checkout", "-q", "main")
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "b1", "b2")
+    parents = run_vcs(w, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()
+    if len(parents) != 4:
+        sys.exit("fixture setup failed: HEAD in %r has %d parents, want three" % (w, len(parents) - 1))
+
+
+def _octopus_then_test_edit(w):
+    """_octopus, then the builder edits a test file in the working tree. The octopus entry is clean, so the test
+    edit is the only change the guard should judge."""
+    _octopus(w)
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_edit():\n    assert 2\n")
 
 
 # Refused: a test change a strategy merge settled, judged at commit, push and the first stop.
@@ -18190,6 +18239,24 @@ sh("builder-refuse: a pull --no-rebase -X theirs that settles a test hunk both s
 add("builder-refuse: a pull --no-rebase -X theirs that settles a test hunk both sides edit is blocked at the first stop",
     "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_strat_pull, agent_id="bld1", agent_type="builder")
 
+# A pull that names its source by a file:// URL, or by a `src:dst` refspec, writes a reflog subject with a colon before
+# `: Merge made by`. The guard must read that merge all the same.
+_bd_strat_pull_url = diff_repo("bd-strat-pull-url", lambda w: _pull_theirs(w, _url_source))
+sh("builder-refuse: a pull --no-rebase -X theirs from a file:// URL that settles a test hunk is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_strat_pull_url, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a pull --no-rebase -X theirs from a file:// URL that settles a test hunk is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_strat_pull_url, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a pull --no-rebase -X theirs from a file:// URL that settles a test hunk is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_strat_pull_url, agent_id="bld1", agent_type="builder")
+
+_bd_strat_pull_refspec = diff_repo("bd-strat-pull-refspec", lambda w: _pull_theirs(w, _refspec_source))
+sh("builder-refuse: a pull --no-rebase -X theirs with a src:dst refspec that settles a test hunk is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_strat_pull_refspec, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a pull --no-rebase -X theirs with a src:dst refspec that settles a test hunk is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_strat_pull_refspec, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a pull --no-rebase -X theirs with a src:dst refspec that settles a test hunk is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_strat_pull_refspec, agent_id="bld1", agent_type="builder")
+
 # Not refused: a fast-forward is other people's commit; a clean -X theirs merge equals git's own merge; a -X theirs
 # that settles a product file is no test path. Each logs no builder-diff line.
 diff_repo("bd-strat-ff", _ff_lane)
@@ -18202,6 +18269,22 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's -X theirs merge of a test-
 diff_repo("bd-strat-product", _product_strategy_merge)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's -X theirs merge that settles a product file both sides changed "
                          "is allowed and logs no builder-diff line", clean_builder_case("bd-strat-product")))
+diff_repo("bd-pull-url-ff", _ff_pull_url)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's fast-forward pull from a file:// URL to a test-author's lane is "
+                         "allowed and logs no builder-diff line", clean_builder_case("bd-pull-url-ff")))
+
+# A three-parent octopus: git commits it, and the guard cannot measure it. Its own entry is then skipped and logged
+# as unread, and the test edit after it is still judged. The same octopus with no test edit is allowed.
+_bd_octopus = diff_repo("bd-octopus-test", _octopus_then_test_edit)
+sh("builder-refuse: a three-parent octopus merge, then a test edit, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_octopus, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a three-parent octopus merge, then a test edit, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_octopus, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a three-parent octopus merge, then a test edit, is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_octopus, agent_id="bld1", agent_type="builder")
+diff_repo("bd-octopus-clean", _octopus)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a three-parent octopus merge with no test edit is allowed and logs no "
+                         "builder-diff line", clean_builder_case("bd-octopus-clean")))
 
 
 
