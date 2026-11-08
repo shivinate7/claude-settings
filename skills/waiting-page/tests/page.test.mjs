@@ -1428,6 +1428,8 @@ test("a note-only task sends its note with no done; the notice says note, not do
   assert.ok(!("done" in a), "a note-only answer carries done");
   await page.waitForFunction(() => window.__sent.length === 1);
   assert.match((await sent(page))[0].text, /28 note, not done \(Which cable\?\)/);
+  await card(page, TASK).locator(".receipt").waitFor({ state: "attached" });
+  await openAnswered(page); // Answered starts closed, and the sunk note-only card's receipt is in it: open the section before its receipt is read.
   await card(page, TASK).locator(".receipt").waitFor();
   assert.match(await card(page, TASK).locator(".receipt").textContent(), /Not marked done/);
 });
@@ -2323,11 +2325,13 @@ const layout = (page) => page.evaluate(() => [...document.querySelectorAll("arti
 // The href of the rail row that a chip sits in, or null.
 const railRowOf = (page, it) => page.evaluate((id) => { const c = document.getElementById("c-" + id); const row = c && c.closest(".ov-tier"); const a = row && row.querySelector("a.ov-head"); return a ? a.getAttribute("href") : null; }, it.id);
 // Opens the Answered section when it is closed; does nothing when no section is drawn yet. A case that works on its answered cards calls this first,
-// so its claim does not depend on whether the section starts open or closed.
-const openAnswered = async (page) => {
+// so its claim does not depend on whether the section starts open or closed. quiet: the head gets a click event and no press, so the page does not
+// scroll to the head and the focus stays where the case left it. A case that measures the screen or the focus after a Send opens it quietly.
+const openAnswered = async (page, { quiet = false } = {}) => {
   const head = page.locator("#b-answered");
   if (!(await head.count()) || (await head.getAttribute("aria-expanded")) === "true") return;
-  await head.click();
+  if (quiet) await head.dispatchEvent("click");
+  else await head.click();
 };
 
 // ---------------------------------------------------------------- answered sink: arrivals on top, and a card sent on this visit
@@ -2370,6 +2374,12 @@ test("answered-sink: a card sent on this visit moves to the Answered section, fo
   await addNote(page, sent, "Kept it.");
   await send(page);
   await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor({ state: "attached" });
+  // The decided behaviour: a Send that sinks a card opens nothing. This Send draws the Answered head, so its count goes to 1 and the head stays closed.
+  await page.locator("#b-answered").waitFor();
+  assert.equal(await page.locator("#b-answered .ct").textContent(), "1", "the Answered count did not rise to 1 on the Send");
+  assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "false", "the Send opened the Answered section");
+  await openAnswered(page); // Answered starts closed, and the sunk card's receipt is in it: open the section before the card's own checks.
   await card(page, sent).locator(".receipt").waitFor();
   assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
   const fold = card(page, sent).locator("button.unfold");
@@ -2401,6 +2411,8 @@ test("answered-sink: a Change on a card sent this visit reopens it in place in t
   await addNote(page, sent, "Kept it."); // a note gives the sunk card a fold, as in the case above
   await send(page);
   await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor({ state: "attached" });
+  await openAnswered(page); // Answered starts closed, and the sunk card is in it: open the section before the card's checks.
   await card(page, sent).locator(".receipt").waitFor();
   assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
   const answeredBefore = await cardsIn(page, "#tier-answered");
@@ -4697,6 +4709,9 @@ const openSend = async (t, { items, width, height, scheme, anchored, sentMove })
 async function sendAndRead(page, sent) {
   const pre = await cardMap(page), band = await bandOf(page);
   await send(page);
+  // A sent card that sinks sits in the closed Answered section: wait for its receipt to exist, then open the section quietly, so the page does not move.
+  for (const it of sent) await card(page, it).locator(".receipt").waitFor({ state: "attached" });
+  await openAnswered(page, { quiet: true });
   for (const it of sent) await card(page, it).locator(".receipt").waitFor();
   const atOnce = await cardMap(page);
   await page.locator("#sent .stamp").waitFor();
@@ -4883,6 +4898,8 @@ async function sinkUndoRailRow(t) {
   await settleAt(page, sent, "top", 60);
   const pre = await cardMap(page), band = await bandOf(page);
   await send(page);
+  await card(page, sent).locator(".receipt").waitFor({ state: "attached" });
+  await openAnswered(page, { quiet: true }); // The sent card sinks into the closed Answered section: open it quietly, so the rail and the cards hold still.
   await card(page, sent).locator(".receipt").waitFor();
   await page.locator("#sent .stamp").waitFor();
   await frameWait(page, 2);
@@ -4935,6 +4952,8 @@ async function sinkWithFocusBelow(t, { focusOn }) {
   const focused = await focusedId(page);
   await watchLoads(page);
   await page.evaluate(() => document.getElementById("send").click());
+  await card(page, sent).locator(".receipt").waitFor({ state: "attached" });
+  await openAnswered(page, { quiet: true }); // The sent card sinks into the closed Answered section: open it quietly, so the focus stays on the radio.
   await card(page, sent).locator(".receipt").waitFor();
   await page.locator("#sent .stamp").waitFor();
   await frameWait(page, 3);
@@ -4988,6 +5007,8 @@ async function undoFromTop(t, { width, want }) {
   const pre = await cardMap(page);
   assert.ok(Math.abs(pre[S].top - want) <= 2, `fixture: the sent card's top is ${pre[S].top}, not ${want}`);
   await send(page);
+  await card(page, sent).locator(".receipt").waitFor({ state: "attached" });
+  await openAnswered(page, { quiet: true }); // The sent card sinks into the closed Answered section: open it quietly, so its top is the one Send left.
   await card(page, sent).locator(".receipt").waitFor();
   await page.locator("#sent .stamp").waitFor();
   await frameWait(page, 2);
@@ -5118,6 +5139,8 @@ test("a rail jump after Send lands on its card", async (t) => {
   await noAnchor(page);
   await choose(page, items[0], "a"); await choose(page, items[1], "a");
   await send(page);
+  await page.locator("#item-q0 .receipt").waitFor({ state: "attached" });
+  await openAnswered(page); // q0 sinks into the closed Answered section: open it, as a reader would, before its receipt is read.
   await page.locator("#item-q0 .receipt").waitFor();
   await page.click("#c-q9");
   await page.waitForTimeout(2500);
@@ -5136,6 +5159,8 @@ test("a receipt wholly below the screen drops its height without moving the page
   const railTop = () => page.evaluate(() => Math.round(document.querySelector(".ov-prog").getBoundingClientRect().top));
   const at = await railTop();
   await send(page);
+  await page.locator("#item-q0 .receipt").waitFor({ state: "attached" });
+  await openAnswered(page, { quiet: true }); // q0 sinks into the closed Answered section: open it quietly, so the page's own position is what is measured.
   await page.locator("#item-q0 .receipt").waitFor();
   await page.waitForTimeout(600);
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
@@ -7715,6 +7740,8 @@ test("a sent Park shows the receipt Parked. with Change, and Change then a pick 
   await send(page);
   await recordOf(page, DECISION.id);
   const c = card(page, DECISION);
+  await c.locator(".receipt").waitFor({ state: "attached", timeout: 3000 }).catch(() => {});
+  await openAnswered(page); // Answered starts closed, and a sent Park sinks into it: open the section before its receipt and Change are read.
   await c.locator(".receipt").waitFor({ timeout: 3000 }).catch(() => {});
   await need(c.locator(".receipt"), "the sent Park card shows no receipt");
   assert.match(await c.locator(".receipt").textContent(), /Parked\./, "the receipt does not read Parked.");
