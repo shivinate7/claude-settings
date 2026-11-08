@@ -28046,6 +28046,15 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict: FAIL, PASS on round 2 after a choice list on the same line",
            "Re-check the floor fix.\nVerdict: PASS or FAIL. Round 1 verdict: FAIL, PASS on round 2.\nFiles: hooks/guard.py.")
 
+# A verdict label after a backticked quote, or after a choice list whose period has no space after it, is still a verdict
+# line. The quote's colon ends the label scan, and a choice sentence is skipped only when a space follows its period.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict: FAIL after a backticked verdict quote on the same line",
+           "Re-check the floor fix.\nQuote `verdict: FAIL` mid-line, then prior verdict: FAIL.\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict: FAIL after a finding's backticked verdict quote on the same line",
+           "Re-check the floor fix.\nFinding quotes `verdict: FAIL`. Round 1 verdict: FAIL.\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict: FAIL after a choice list with no space after its period",
+           "Re-check the floor fix.\nGive a verdict: PASS or FAIL.Prior verdict: FAIL.\nFiles: hooks/guard.py.")
+
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
 rbb_allow("reviewer-brief-blind: allowed: a Round 2 of 3 reviewer brief with a findings list, file:line plus claim",
@@ -28089,6 +28098,11 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdi
           "Check the floor fix in hooks/guard.py.\nEnd your report with a verdict: PASS, FAIL or PARTIAL.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Give a verdict: PASS or FAIL",
           "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS or FAIL.\nFiles: hooks/guard.py.")
+# A choice list that ends its sentence is a format line, even when another choice list or a quoted verdict follows it.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, then End with a verdict: PASS, FAIL or PARTIAL on the same line",
+          "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS or FAIL. End with a verdict: PASS, FAIL or PARTIAL.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, then a finding may quote `verdict: FAIL` on the same line",
+          "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS or FAIL. A finding may quote `verdict: FAIL`.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a Round 2 of 3 finding that quotes `verdict: FAIL` in backticks mid-line",
           "Round 2 of 3. Re-check the round 1 findings.\n"
           "Finding 1 quotes `verdict: FAIL` in backticks, hooks/guard.py:2454, the check refuses the quote.\n"
