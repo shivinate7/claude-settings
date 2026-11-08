@@ -32,7 +32,7 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
-# A reviewer may run Sonnet, above its Haiku row, on a fix check: its brief's first line starts with this marker, since a fix check has no review round to mark it.
+# A reviewer may run Sonnet, above its Haiku row, on a fix check: its brief's first non-blank line starts with this marker, since a fix check has no review round to mark it.
 FIX_CHECK_MARKER = "Fix check"
 
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
