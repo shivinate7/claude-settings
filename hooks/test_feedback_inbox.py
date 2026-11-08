@@ -1842,23 +1842,28 @@ def case_page_read_close_on_other_page_gets_waiting_first_blocks():
     The ruling reaches page B's writer and never the waiting page's, so the close must block. The guard takes the
     writer from the read's own page and passes it. The control, the waiting page naming this session with the read and
     the close on it, passes."""
+    repo = record_repo("filed", copy_files(FILED))
     metas = writer_names(OTHER_WRITER) + writer_names(SELF, url=OTHER_PAGE_URL, tool_id="meta2")
     p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL)] + metas + read_back_of_98(url=OTHER_PAGE_URL) + [close_on_page(OTHER_PAGE_URL)])
+                 [owner_rec(NEUTRAL)] + metas + read_back_of_98(url=OTHER_PAGE_URL) + [close_on_page(OTHER_PAGE_URL)],
+                 cwd=repo)
     expect_send_missing("page: read and close of 98 on page B, which names this session, blocks when the waiting "
                         "page names another writer (waiting page's get first)", p, "fb-0958-7", "98")
     p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
                  [owner_rec(NEUTRAL)] + writer_names(SELF)
-                 + writer_names(OTHER_WRITER, url=OTHER_PAGE_URL, tool_id="meta2") + read_back_of_98() + [close_on_page()])
+                 + writer_names(OTHER_WRITER, url=OTHER_PAGE_URL, tool_id="meta2") + read_back_of_98() + [close_on_page()],
+                 cwd=repo)
     expect_silent("page: control, the waiting page names this session, read and close on it, passes", p)
 
 
 def case_page_read_close_on_other_page_gets_page_first_blocks():
     """The same records with the two meta gets in the other order: page B's get first, the waiting page's get last.
     The waiting page still names another writer, so the close of 98 on page B must block."""
+    repo = record_repo("filed", copy_files(FILED))
     metas = writer_names(SELF, url=OTHER_PAGE_URL, tool_id="meta1") + writer_names(OTHER_WRITER, tool_id="meta2")
     p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL)] + metas + read_back_of_98(url=OTHER_PAGE_URL) + [close_on_page(OTHER_PAGE_URL)])
+                 [owner_rec(NEUTRAL)] + metas + read_back_of_98(url=OTHER_PAGE_URL) + [close_on_page(OTHER_PAGE_URL)],
+                 cwd=repo)
     expect_send_missing("page: read and close of 98 on page B, which names this session, blocks when the waiting "
                         "page names another writer (page B's get first)", p, "fb-0958-7", "98")
 
