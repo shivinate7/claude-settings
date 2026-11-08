@@ -22392,6 +22392,19 @@ rr_case("review-rounds: round 2 on PR #2038 is refused while round 1 runs in a l
         "red-long-session", rr_background("rr-e1", RR_R1) + rr_filler(1000), RR_R2,
         carries=(("round 1", "Round 1"),))
 
+# The pull request named without its hash, and with the hash glued to PR, is the same pull request.
+rr_case("review-rounds: round 2 on PR 2038, written with no hash, is refused beside a running round 1 on PR #2038",
+        "deny", "red-pr-no-hash", rr_background("rr-n1", RR_R1), "Round 2 of 3. Re-check PR 2038 after the fix.",
+        carries=(("round 1", "Round 1"),))
+rr_case("review-rounds: round 2 on PR#2038, with no space, is refused beside a running round 1 on PR #2038",
+        "deny", "red-pr-glued", rr_background("rr-o1", RR_R1), "Round 2 of 3. Re-check PR#2038 after the fix.",
+        carries=(("round 1", "Round 1"),))
+# The reason names the one round still running. It does not tell the orchestrator to spawn the closed round.
+rr_case("review-rounds: round 3 on PR #2038 is refused while round 1 runs and round 2 has closed, and the reason "
+        "does not say to spawn the round 2 reviewer", "deny", "red-remedy",
+        rr_background("rr-s1", RR_R1) + rr_background("rr-s2", RR_R2) + [rr_notice("rr-s2", "user")], RR_R3,
+        carries=(("round 1", "Round 1"),), lacks=("spawn the round 2 reviewer",))
+
 # Controls: each passes on the guard as it stands, and each is a spawn the rule must not refuse.
 rr_case("review-rounds: round 2 on PR #2038 is allowed once round 1's notice (user form) has come", "allow",
         "ok-notice-user", rr_background("rr-f1", RR_R1) + [rr_notice("rr-f1", "user")], RR_R2)
@@ -22412,6 +22425,34 @@ rr_case("review-rounds: a builder's round 3 is not refused by this rule while a 
         agent="builder", model="opus")
 rr_case("review-rounds: round 2 on PR #2038 is allowed when the transcript holds no spawn", "allow",
         "ok-empty", [], RR_R2)
+
+
+def rr_cost_check(agent, prompt, model, records, want_opens):
+    """The round-order rule opens the transcript for a later-round reviewer spawn and for no other call. The whole
+    guard runs through the load-brake probe, whose spy counts each open of the transcript path. The call is allowed."""
+    def check():
+        tool_input = {"prompt": prompt, "subagent_type": agent, "model": model}
+        got, reason, side = lb_run("Agent", {"mode": "judge", "reading": LB_NORMAL}, tool_input,
+                                   transcript=[json.dumps(rec) for rec in records], spy=True)
+        if got == "error":
+            return False, reason
+        opened = side.get("opened", 0)
+        if opened != want_opens:
+            return False, "the transcript was opened %d time(s), want %d" % (opened, want_opens)
+        if got != "allow":
+            return False, "%s, want allow: %s" % (got, reason[:90])
+        return True, "allow, and the transcript was opened %d time(s)" % opened
+    return check
+
+
+LOG_CHECKS_EXTRA.append(("review-rounds cost: a first-round reviewer spawn opens no transcript",
+                         rr_cost_check("reviewer", RR_R1, "haiku", rr_background("rr-t1", RR_R1), 0)))
+LOG_CHECKS_EXTRA.append(("review-rounds cost: a builder spawn opens no transcript",
+                         rr_cost_check("builder", "Round 3 of 3. Finish the fix for PR #2038.", "opus",
+                                       rr_background("rr-t2", RR_R2), 0)))
+LOG_CHECKS_EXTRA.append(("review-rounds cost: a later-round reviewer spawn opens the transcript once",
+                         rr_cost_check("reviewer", RR_R2, "sonnet",
+                                       rr_background("rr-t3", RR_R1) + [rr_notice("rr-t3", "user")], 1)))
 
 
 # ------------------------------------------------------------------ other-checkout: a separate clone
