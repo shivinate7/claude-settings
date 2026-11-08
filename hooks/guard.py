@@ -2122,6 +2122,13 @@ def _message_goal(words, at: int) -> bool:
             or any(w in MESSAGE_GREEN and words[at + k][0] != "to" for k, (w, _) in enumerate(words[at + 1:at + 4])))
 
 
+def _anaphor_goal(words, at: int) -> bool:
+    """True when the anaphor at `at` is followed at once by a green word, `them green` or `that case green`. A green
+    word further on describes a replacement (`Replace it with a passing assert`), not the anaphor."""
+    skip = 2 if words[at][0] in ("the", "that") else 1
+    return any(w in MESSAGE_GREEN for w, _ in words[at + skip:at + skip + 1])
+
+
 def _message_edits(words):
     """(governed, named, anaphor) for one clause. `governed` is None when the clause has no edit verb, else
     (path, test_object) per path its edit verbs govern. An edit verb governs the first path after it, and a path joined
@@ -2144,7 +2151,7 @@ def _message_edits(words):
                 ahead = [w for w, _ in words[at + 1:at + 3]]
                 anaphor = anaphor or ((bool(ahead) and ahead[0] in MESSAGE_ANAPHORS) or (
                     len(ahead) == 2 and ahead[0] in ("the", "that") and ahead[1] in MESSAGE_TEST_NOUNS)) and not (
-                    _message_goal(words, at + 1))
+                    _anaphor_goal(words, at + 1))
             continue
         if word in MESSAGE_READ_VERBS:
             kind, verb, slot = "read", word, False

@@ -2410,7 +2410,7 @@ MUTATIONS = [
      'if kind != "read" or anaphor]',
      "guard", "message-role: a CI red line on a test path, then Fix the guard, is allowed to a builder"),
     ("message-role: an anaphor that goes green is still carried to",
-     "and not (\n                    _message_goal(words, at + 1))",
+     "and not (\n                    _anaphor_goal(words, at + 1))",
      "and not (\n                    False)",
      "guard", "message-role: red cases in a test file, then Make them green, is allowed to a builder"),
     ("message-role: a double-quoted example is read as an order",
@@ -2441,6 +2441,10 @@ MUTATIONS = [
      ' and ahead[0] in ("the", "that") and ahead[1] in MESSAGE_TEST_NOUNS)',
      ' and False)',
      "guard", "message-role: a read of a test path, then Fix the case, is refused to a builder"),
+    ("message-role: a green word two or more words after an anaphor clears the carry",
+     "words[at + skip:at + skip + 1])",
+     "words[at + 1:at + 4])",
+     "guard", "message-role: a green word later in the replacement does not clear the carry: Replace it with a passing assert"),
 ]
 
 
