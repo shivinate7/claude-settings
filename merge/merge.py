@@ -73,6 +73,9 @@ class Stop(Exception):
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
 
+class LintHold(Liftable):
+    """A refusal whose message is its whole remedy, and which no flag lifts: main() adds no override line to it. The review record render raises it when the lane lint does not pass."""
+
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
 
@@ -3059,8 +3062,9 @@ REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never 
 REVIEW_STAMP_SALT = "claude-settings review record stamp v1"  # a stamp says the merge tool printed the record; it catches a typed or copied one, not a forger (decision guard-guards-mistakes-only)
 
 def review_stamp(lines):
-    """-> the first 16 hex digits of sha256 over REVIEW_STAMP_SALT and the record lines above the Stamp line, the marker line included."""
-    return hashlib.sha256("\n".join([REVIEW_STAMP_SALT, *lines]).encode("utf-8")).hexdigest()[:16]
+    """-> the first 16 hex digits of sha256 over REVIEW_STAMP_SALT and the record lines above the Stamp line, the marker line included.
+    Each line counts without its trailing whitespace, so a body the MCP tool re-spaced or gave CRLF ends keeps the stamp the merge tool printed."""
+    return hashlib.sha256("\n".join([REVIEW_STAMP_SALT, *(line.rstrip() for line in lines)]).encode("utf-8")).hexdigest()[:16]
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
@@ -3071,14 +3075,9 @@ def review_body(n, head, kind, guard, rounds, net, fix=None):
              f"Net value: {net}"]
     return "\n".join([*above, f"Stamp: {review_stamp(above)}", REVIEW_CI_LINE]) + "\n"
 
-def review_has_pass(rounds, fix):
-    """True when the fix check is PASS or a line of the newest round is PASS: the records that wait on the lane's lint (decision pr-review-record)."""
-    top = max((r[0] for r in rounds), default=0)
-    return bool(fix and fix[3] == "PASS") or any(r[0] == top and r[3] == "PASS" for r in rounds)
-
 def review_marked(text):
     """True when the first line of `text` is exactly the review-record marker: the one test of whether a body is a record."""
-    return text.splitlines()[:1] == [REVIEW_MARKER]
+    return [line.rstrip() for line in text.splitlines()[:1]] == [REVIEW_MARKER]
 
 
 def parse_review(text):
@@ -3086,9 +3085,9 @@ def parse_review(text):
     malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. The `Stamp: <16 hex>` line between Net value and
-    the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. Trailing blank lines are allowed. The
+    the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. Trailing whitespace on a line and trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
-    lines = text.splitlines()
+    lines = [line.rstrip() for line in text.splitlines()]  # trailing spaces and CRLF are no part of a line, the marker's included
     if "---" in lines:
         lines = lines[:lines.index("---")]
     while lines and not lines[-1].strip():
@@ -3394,13 +3393,15 @@ def main(argv, host=None, lock=None):
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
-            if review_has_pass(a.round, a.fix_check):
-                try:  # a PASS record is held until the lane's lint passes on this head (decision pr-review-record); lane_lint is the one home of that lint
-                    with contextlib.redirect_stdout(sys.stderr):  # its PASS line is no part of the record
-                        lane_lint(root, str(a.pr), h, "", "")
-                except Stop as e:
-                    raise Stop(f"no PASS record is printed while the lint fails: {e}\nRun `merge --lane-lint {a.pr}` until it passes, then print the record again. " + REVIEW_CITE)
-            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
+            body = review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)
+            if review_state(parse_review(body), a.head)[0] == "done":  # a done record is the handoff, so the lane lint must pass on the head it names (decision pr-review-record)
+                try:
+                    with release_on_signals(), contextlib.redirect_stdout(sys.stderr):  # a signal removes lane_lint's worktree; its PASS line is no part of the record
+                        lane_lint(root, a.head, h, info["base"], "")
+                except Stop as e:  # no unknown-ok flag reaches this path, so the message drops lane_lint's offer of one
+                    why = "\n".join(line for line in str(e).splitlines() if "--lint-unknown-ok" not in line)
+                    raise LintHold(f"no done record is printed while the lint of {a.head[:9]} does not pass: {why}\nRun `merge --lane-lint {a.pr}` until it passes, then print the record again. " + REVIEW_CITE)
+            say(body.rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
         if not a.reviewed:
