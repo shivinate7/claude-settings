@@ -2907,6 +2907,8 @@ class BaseAware(Env):
                 finally:
                     h.in_wait = False
             def merge(h, *a): return fake.merge(*a)
+            def pages(h, rel, key=None, fields=None): return [] if rel == "pulls" else merge.Host.pages(h, rel, key, fields)  # the batch-red check's open pull list: none
+            def issue_comments(h, since): return fake.issue_comments(since)  # the batch-red check's comment read: the fake's, no comments
         rc, out = self.run_merge("7", "--confirm", host=WaitHost())
         self.assertEqual(rc, 1, out)
         self.assertFalse(getattr(fake, "merged", False), out)
@@ -15183,16 +15185,17 @@ class BatchRedWindow(Env):
         self.assertTrue(getattr(host, "merged", False), "the fix on a dropped lane head did not merge:\n" + out)
 
     def test_control_a_line_on_a_batch_head_refuses_a_fix_built_on_that_head(self):
-        """The same fix, built on the integration head with the line on it: a head that holds a batch's head holds its line, so the fix is refused.
-        The one difference from the red case is whose head carries the line."""
+        """The red case's shape, with the line on the batch head the fix sits on (the integration pull request INT_PR), not on the lane head the
+        fix replaces. A head that holds a batch's head holds its line, so the fix is refused. The one difference from the red case is which
+        head carries the line."""
         head, _ = self.closed_lane_head()  # feat is the integration head, with lane1 merged in
         fix = self.commit("feat-fix", {"fix.txt": "fix\n"}, base="origin/feat")
         sh(self.co, "git", "fetch", "-q", "origin")
         sh(self.co, "git", "merge-base", "--is-ancestor", head, fix)  # scope: the fix is built on the batch's head
         host = CommentHost(self.co, self.other, comments=[batch_red_line(950, INT_PR, head, created=self.LINE)], branch="feat-fix",
-                           created=self.HEAD_OPENED, pulls=[batch_pull(INT_PR, head, head_ref="feat", created_at=self.LANE_OPENED),
-                                                            batch_pull(21, fix, head_ref="feat-fix", created_at=self.HEAD_OPENED)])
-        rc, out = self.run_merge("21", "--confirm", host=host)
+                           created=self.LANE_OPENED, pulls=[batch_pull(INT_PR, head, head_ref="feat", created_at=self.LANE_OPENED),
+                                                            batch_pull(7, fix, head_ref="feat-fix", created_at=self.LANE_OPENED)])
+        rc, out = self.run_merge("7", "--confirm", host=host)
         self.assertNotEqual(rc, 0, "a fix built on a batch head that carries its Batch: red line was merged:\n" + out)
         self.assertIn(merge.BATCH_RED_WORD, out, "the refusal does not name the Batch: red line:\n" + out)
         self.assertFalse(getattr(host, "merged", False), "the fix was merged past the Batch: red line on the head it holds:\n" + out)
@@ -15342,6 +15345,7 @@ class BatchDropRed(BuildEnv):
     SUITE_RED_JOB = "checks-merge-install"  # a job of CHECKS_SUITE_JOBS: the suite cases' red job, whose suite the real suite read reaches
     SUITE_RED_JOBS = [(SUITE_RED_JOB, "failure"), ("all-jobs-passed", "failure"), ("checks", "success")]  # the integration run's jobs
     ALPHA, BETA = "data/alpha.txt", "data/beta.txt"  # what the suites read: lane #7 changes ALPHA (the fast job's suite), lane #9 changes BETA (the merge job's)
+    GAMMA = "data/gamma.txt"  # what only the windows shard's suite reads, so a twin of the merge job cannot hit it
     WORKFLOW = "\n".join(["name: checks", "on: push", "jobs:", "  checks:", "    runs-on: ubuntu-latest", "    steps:", "      - name: fast suite",
                           "        run: bash tests/fast.sh", "  checks-merge-install:", "    runs-on: ubuntu-latest", "    steps:",
                           "      - name: merge suite", "        run: bash tests/merge.sh"]) + "\n"  # no `name:` key on a job: its id is its job name
@@ -15355,11 +15359,11 @@ class BatchDropRed(BuildEnv):
     def suite_main(self, windows=False):
         """Commit the checks workflow and its two suites to main: job `checks` runs tests/fast.sh, which reads ALPHA, and job `checks-merge-install`
         runs tests/merge.sh, which reads BETA. `windows`: the workflow also holds WINDOWS_JOB, whose step runs merge/test_merge.py, which reads
-        BETA, and that file is committed. -> main's head."""
+        GAMMA and no other suite does, and that file is committed. -> main's head."""
         files = {CHECKS_PATH: self.WINDOWS_WORKFLOW if windows else self.WORKFLOW, "tests/fast.sh": f"# the fast suite\ncat {self.ALPHA}\n",
                  "tests/merge.sh": f"# the merge suite\ncat {self.BETA}\n"}
         if windows:
-            files["merge/test_merge.py"] = f"# the windows merge suite\nopen('{self.BETA}')\n"
+            files["merge/test_merge.py"] = f"# the windows merge suite\nopen('{self.GAMMA}')\n"
         return self.main_commit(files)
 
     def suite_lanes(self, main=None, red=None, windows=False, nine=None):
@@ -15646,8 +15650,9 @@ class BatchDropRed(BuildEnv):
 
     def test_a_red_windows_merge_shard_drops_the_lane_whose_files_its_own_suite_reads(self):
         """The red job is a checks-windows-merge shard, a job id outside CHECKS_SUITE_JOBS. Its own step runs merge/test_merge.py, which reads
-        BETA, so lane #9 is dropped and lane #7, whose file only the fast job's suite reads, is kept."""
-        h7, h9, hi, host = self.suite_lanes(red=self.WINDOWS_RED_JOBS, windows=True)
+        GAMMA, so lane #9 (GAMMA) is dropped. Lane #7, whose file only the fast job's suite reads, is kept. A map of the shard to the merge job
+        would read BETA and drop nothing here."""
+        h7, h9, hi, host = self.suite_lanes(red=self.WINDOWS_RED_JOBS, windows=True, nine={self.GAMMA: "gamma\n"})
         self.assertIn(f"  {self.WINDOWS_JOB}:", self.show("int-red", CHECKS_PATH), "scope: the integration head's workflow has no windows shard job, so the case proves nothing")
         rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
         self.assertIn(9, [n for n, _ in host.posts], "a red windows merge shard did not drop the lane whose files its own suite reads:\n" + out + err)
