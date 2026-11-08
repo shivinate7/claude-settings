@@ -9851,6 +9851,17 @@ roots_refuse("merge --reviewed --root o/alpha=$(cd d && pwd) for two tagged repo
 # A real `&&` still splits: the merge after `cd /w &&` is read, and o/bravo has no --root, so the call is refused.
 roots_refuse("cd /w && merge --reviewed --root o/alpha=/w/a is refused for two tagged repos, and the reason names o/bravo",
              "cd /w && merge --reviewed --root o/alpha=/w/a", role_path("roots-runner"), carries=("o/bravo",))
+# A backtick span joins as a $( ) span does: the second --root after a && inside the backticks is read, so the call allows.
+roots_allow("merge --reviewed --root o/alpha=`cd d && pwd` --root o/bravo=/w/b with two tagged repos allows",
+            "merge --reviewed --root o/alpha=`cd d && pwd` --root o/bravo=/w/b", role_path("roots-runner"))
+# A merge after a `;` inside a $( ) is read: with both roots it allows, and with o/bravo missing it is refused, naming o/bravo.
+roots_allow("echo $(cd d; merge --reviewed --root o/alpha=/x --root o/bravo=/y) with two tagged repos allows",
+            "echo $(cd d; merge --reviewed --root o/alpha=/x --root o/bravo=/y)", role_path("roots-runner"))
+roots_refuse("echo $(cd d; merge --reviewed --root o/alpha=/x) with o/bravo missing is refused, and the reason names o/bravo",
+             "echo $(cd d; merge --reviewed --root o/alpha=/x)", role_path("roots-runner"), carries=("o/bravo",))
+# An escaped \$( opens no span, so the `;` after it splits and the merge after it is a call of its own: o/bravo is missing.
+roots_refuse("echo \\$(x; merge --reviewed --root o/alpha=/z) with an escaped $( is refused, and the reason names o/bravo",
+             "echo \\$(x; merge --reviewed --root o/alpha=/z)", role_path("roots-runner"), carries=("o/bravo",))
 # A `$( )` with a `&&` in it, ahead of a chain: the merge after the chain is read, and a lane's --role refuses it.
 role_refuse("x=$(cd d && pwd) && merge --reviewed --role batch-runner is refused on a lane record",
             "x=$(cd d && pwd) && merge --reviewed --role batch-runner", role_path("lane"))
