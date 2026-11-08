@@ -4954,6 +4954,17 @@ sh("git-after-cd: a cd then ; then git push --dry-run passes",
    "cd /tmp/w; %s push --dry-run" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a cd then ; then git push -n passes",
    "cd /tmp/w; %s push -n" % VCS, "allow", cwd=NOGIT)
+# The && skip ends at the next ; or ||. The cd after a failed cd never runs, so the shell stays in the
+# folder it started in, and the write after ; or || runs there. ROOT is the run folder: a real folder.
+sh("git-after-cd: a failed cd, then && a cd that is skipped, then ; a git push is refused",
+   "cd /tmp/w && cd %s ; %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then && a cd that is skipped, then || a git push is refused",
+   "cd /tmp/w && cd %s || %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+# A subshell's ) ends its cd, but the && chain goes on, so the git push after it is still skipped.
+sh("git-after-cd: a failed cd, then && a subshell, then && a git push passes, the chain stops at the cd",
+   "cd /tmp/w && (true) && %s push" % VCS, "allow", cwd=NOGIT)
 FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
@@ -11337,6 +11348,10 @@ cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet
 sh("git-after-cd: a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean is refused",
    "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", "deny", "git-after-cd",
    cwd=CMK_CL, carries=("&&", "-C"))
+# An echo the tokenizer cannot read (its ANSI-C quote holds an escaped quote) must not hide the cd before it:
+# the commit still runs in the folder that cd named, the triplet repo.
+cmk_refuse("a cd into a repo with a triplet tracked, then ; an echo the tokenizer cannot read, then add -A and commit",
+           "cd " + slash(CMK_CLT) + "; echo $'it\\'s'; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
