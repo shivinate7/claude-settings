@@ -2490,11 +2490,66 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL: %s:" % self.DEBT, out, "the cited delete was excused with no flag:\n" + out)
 
+    def test_an_unread_cite_prints_one_named_line_and_still_fails(self):
+        import merge  # lazy, as in cli(): the Host is the one whose construction fails in the second case
+        head, body = self.cited_close()
+
+        def no_host(host, *args, **kw):
+            raise RuntimeError("merge cannot build the Host")
+
+        with self.subTest("the read raises"):
+            raising = Runs(RuntimeError("the run read failed: HTTP 502"))
+            code, out = self.cli(head, raising, env={CASE_BODY: body})
+            self.assertIn(RUN_URL, raising.urls, "the cited run was never read, so the case proves nothing")
+            self.assert_unread_line(code, out, "the read raises")
+
+        with self.subTest("no run reader"), unittest.mock.patch.object(merge.Host, "__init__", no_host):
+            code, out = self.cli(head, Runs(("success", head)), env={CASE_BODY: body})
+            self.assert_unread_line(code, out, "no run reader")
+
+    def assert_unread_line(self, code, out, label):
+        lines = [ln for ln in out.splitlines() if ln.startswith("silent-undo: cite for ")]
+        self.assertEqual(len(lines), 1, "%s: want one 'cite for' line, got %r:\n%s" % (label, lines, out))
+        self.assertTrue(lines[0].startswith("silent-undo: cite for %s not read: " % self.SLUG), "%s: %s" % (label, lines[0]))
+        self.assertTrue(lines[0].split("not read: ", 1)[1].strip(), "%s: the line gives no reason: %s" % (label, lines[0]))
+        self.assertEqual(code, 1, "%s: an unread cite must still fail the check:\n%s" % (label, out))
+
+    def test_a_body_with_no_cite_prints_no_cite_line(self):  # control
+        head, _ = self.cited_close()
+        code, out = self.cli(head, Runs(("success", head)), env={CASE_BODY: "A summary with no cite.\n"})
+        self.assertEqual([ln for ln in out.splitlines() if "silent-undo: cite for " in ln], [], out)
+        self.assertEqual(code, 1, out)
+
+    def clean_head(self):
+        """A branch cut from main that adds one unrelated file, so it has no finding. -> its head sha."""
+        self.r.sh("checkout", "-q", "-b", "clean")
+        self.r.put("notes/unrelated.txt", "an unrelated note\n")
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "add an unrelated note")
+        return self.r.sh("rev-parse", "HEAD")
+
+    def test_a_clean_branch_builds_no_run_reader_even_with_a_cite(self):
+        import merge  # lazy, as in cli()
+        head = self.clean_head()
+        problems, _ = self.silent(head)
+        self.assertEqual(problems, [], "premise: the branch has no finding, so a cite has nothing to excuse")
+        built = []
+
+        def record(host, *args, **kw):
+            built.append((args, kw))
+
+        runs = Runs(("success", head))
+        with unittest.mock.patch.object(merge.Host, "__init__", record):
+            code, out = self.cli(head, runs, env={CASE_BODY: self.CITE % (self.SLUG, RUN_URL)})
+        self.assertEqual(built, [], "the merge tool's Host was built on a branch with no finding: the reader is built only for a finding")
+        self.assertEqual(runs.urls, [], "the run reader was asked on a branch with no finding")
+        self.assertEqual(code, 0, out)
+
 
 CHECKS_YML = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 ACTION_YML = os.path.join(HERE, "..", "actions", "silent-undo", "action.yml")
 STEP = "Silent undo check"
-INLINE_BODY = re.compile(r"\$\{\{[^}]*body")  # a body expression: a template injection when it sits in a run: line
+INLINE_BODY = re.compile(r"\$\{\{(?:(?!\}\}).)*body", re.S)  # a body expression, across lines and past a `{0}`: a template injection in a run: line
 
 
 def squash(value):
@@ -2556,6 +2611,8 @@ class CheckStepPins(unittest.TestCase):
 
     def test_the_scan_flags_an_inline_body_in_a_run(self):  # control: the pattern is not vacuous
         self.assertIsNotNone(INLINE_BODY.search('echo "${{ github.event.pull_request.body }}"'))
+        self.assertIsNotNone(INLINE_BODY.search("echo \"${{ format('{0}', github.event.pull_request.body) }}\""), "a format() wrapper hides the body")
+        self.assertIsNotNone(INLINE_BODY.search("echo \"${{ format('{0}',\n  github.event.pull_request.body) }}\""), "a multi-line expression hides the body")
         self.assertIsNone(INLINE_BODY.search('echo "${{ env.PR_BODY }}"'))
 
 
