@@ -107,6 +107,12 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
+FIX_HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files."
+FIX_FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with --round."
+FIX_FROZEN_REMEDY = "Pass the old values."
+FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head."
+FIX_FAILED_REMEDY = "Post the next round's record."
+FIX_WIDE_REMEDY = "Start a new lane at round 1."
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
@@ -3538,33 +3544,39 @@ def main(argv, host=None, lock=None):
             if a.fix_check:  # a fix follows no FAIL or WIDE fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
                 recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
                 problem, earlier = None, []
+                remedy = FIX_HEAD_REMEDY  # a refusal that is not a head refusal sets its own remedy beside its problem
                 if a.fix_base_record:  # a source record on another pull request stands in for the one this pull request lacks
                     last, problem = source_record_problem(h, root, a, recs)
                     earlier = [last] if last else []
                     if not problem:
                         problem = round_floor([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
+                        remedy = FIX_FLOOR_REMEDY if problem else remedy
                 else:
                     last = parse_review(recs[-1]) if recs else None
                     if not last:
                         problem = "the newest earlier review record on this pull request must exist"
                     elif last["fix"] and last["fix"][3] != "PASS":  # a FAIL is the next round and a WIDE is a new lane; only a passed fix check chains
                         problem = f"the newest earlier review record's Fix check is {last['fix'][3]}, so a new fix check may not follow it"
+                        remedy = FIX_FAILED_REMEDY if last["fix"][3] == "FAIL" else FIX_WIDE_REMEDY
                     else:  # the record's rounds may not fall below the floor the earlier records set, or a later record could copy them and relabel the final round's net value
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
                         problem = round_floor(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
+                        remedy = FIX_FLOOR_REMEDY if problem else remedy
                 if not problem and last["head"] != a.fix_check[0]:
                     problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
                     found = h.compare_files(a.fix_check[0], info["head"])
                     if found["behind_by"]:
                         problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
+                        remedy = FIX_ANCESTOR_REMEDY
                 final = next((r for r in reversed(earlier) if max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # the newest earlier record that reached the final round: a short record written before the write step floored it does not hide it
                 if not problem and final:  # a passing fix keeps what the final round gave (decision hold-unsafe-after-round-3), first fix check or chained, or from the --fix-base-record source
                     moved = [f"{label} {old}, so {flag} must be {old}, not '{new}'" for label, flag, old, new in (("Net value", "--net-value", final["net"], a.net_value), ("Guard or check", "--guard", final["guard"], a.guard), ("Kind", "--kind", final["kind"], a.kind)) if old != new]
                     if moved:
                         problem = f"the record on head {final['head'][:9]} is at the final round, and a fix check keeps its net value, guard and kind: " + "; ".join(moved)
+                        remedy = FIX_FROZEN_REMEDY
                 if problem:
-                    print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
+                    print(f"merge: --fix-check: {problem}. {remedy} " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
