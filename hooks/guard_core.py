@@ -2435,8 +2435,9 @@ def _js_scan(code: str):
     # only when no variable reaches a file call. One exception: a bare name read inside the body of
     # `!name.startsWith('.env')` or `!(name.startsWith('.env'))`, alone or `&&`-joined with other tests
     # (_js_rules_out_env), cannot name an env file. A longer prefix, an endsWith, a test under `||`, a
-    # second negation or a `!(` group around it, or one next to `==`, `|` or `?`, can all be true for an
-    # env name, so none of them excuses a read.
+    # second negation or a `!(` group around it, or one next to `==`, `|` or `:`, can all be true for an
+    # env name, so none of them excuses a read. A `?` after the test is excused, but inside an `if`
+    # condition a same-level `?`, `,` or `||` still refuses.
     if prefixes and opened:
         excusers = list(_js_scopes(code, mask, [test for test in prefixes if _js_rules_out_env(code, mask, test)],
                                    True))
