@@ -22,7 +22,7 @@ Known limits:
 - A branch that merged a newer main carries main's commits in the range, and each is judged like the rest.
 - A lane begun before the check landed escapes for its commits from before that, unless it is rebased.
 - Conflict-resolution lines in a merge commit are not judged.
-- Mutation tests are not test paths, so they need no trailer.
+- The three mutation tests (`hooks/mutate_guard.py`, `hooks/mutate_shared.py`, `janitor/mutate_sweep.py`) are test content: a builder never edits them, a test-author writes them (owner ruling, 2026-11-08 17:19 CST, waiting-page item 447 a). This check does not judge them. It reads only `guard.is_test_rel`, which does not name them. `AUTHOR_MUTATION_TESTS` in `hooks/guard.py` is read only by `author_path_ok`. So a commit that adds lines to one of them needs no trailer.
 - The check path is fixed in the check. Renaming the check turns it off.
 - In a repo whose HEAD has no `lint/check_red_run.py`, a range that reaches back past the repo's first trailered test commit judges old commits too (item 5). The test-author's `--base origin/main` keeps the range to its own lane.
 
