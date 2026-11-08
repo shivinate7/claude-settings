@@ -1604,8 +1604,7 @@ REVIEW_NO_RECORD = (
 # The record for the live head is posted, but merge's review_state reads it open or held: name that state and its why.
 REVIEW_NOT_DONE = (
     "Review-record guard: this reply claims a review PASS for PR #%d, but merge reads its review record for the live head "
-    "as %s: %s. Review is not done, so no PASS claim yet. Report the review state as it stands, and claim PASS once the "
-    "record reads done."
+    "as %s: %s. Review is not done, so no PASS claim yet. Report the review state as it stands."
 )
 
 
