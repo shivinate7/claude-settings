@@ -152,6 +152,14 @@ MUTATIONS = [
      '            if agent_owned_worktree(root) is True:',
      '            if False:', "guard",
      'agent-owned worktree is allowed and noted, not asked'),
+    ("shared-tree: a lone operand that is also a revision still reads as a dirty file",
+     '    if rev.returncode == 0:\n        return False\n',
+     '    if False:\n        return False\n', "guard",
+     'per-file bare: checkout of a dirty file that is also a branch in the shared checkout allows'),
+    ("shared-tree: a lone operand with no tracked change still reads as a dirty file",
+     '    return any(line[:2] != "??" for line in lines)\n',
+     '    return True\n', "guard",
+     'per-file bare: checkout of an untracked extensionless file in the shared checkout allows'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the safety hole in this rule.

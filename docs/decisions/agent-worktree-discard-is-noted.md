@@ -46,10 +46,16 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
 - A bare `git checkout <folder>` with no `--`. Git reads it in path mode.
 - A bare `git checkout <file>` with no `--`, when the file is tracked, has an uncommitted change, and
   no branch or other revision has its name. The guard reads git state (`lone_operand_is_dirty_file`),
-  never the spelling, so `Makefile` and `tools/runner` count as `a.json` does. A name that is both a
-  branch and a file stays a branch, as git reads it. A clean file, a branch and a hand-made worktree
-  keep their answers. Incident: 2026-11-08 03:37 CST, with coordinator rulings at 04:38 and 05:16 CST.
-  An agent-owned worktree keeps its named-file allow.
+  not the file extension, so `Makefile` and `tools/runner` count as `a.json` does. It reads the name
+  only to skip an empty name and one that starts with `-` or `:`. A name that is both a branch and a
+  file stays a branch, as git reads it. A clean file and a branch keep their answers. In a hand-made
+  worktree the call moves from allow to ask, as every discard form does. Incident: 2026-11-08 03:37
+  CST, with coordinator rulings at 04:38 and 05:16 CST. An agent-owned worktree keeps its named-file
+  allow.
+  - Cost: 0 git starts when no file of that name exists, 1 when it is a revision, 2 otherwise.
+  - A staged-only change is refused, the same as main's `git checkout -- <path>`, even though git
+    keeps the staged change.
+  - An unreadable git answer allows and logs `subject-unread`.
 - `--pathspec-from-file` and each unique prefix that git accepts, such as `--pathspec-from`.
 - Each `-C <dir>` in a git call. They chain as git's own chdir does. The result sets the checkout that
   the rule judges.

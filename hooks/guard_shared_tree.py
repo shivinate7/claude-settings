@@ -24,14 +24,20 @@ def lone_operand_is_dirty_file(root: str, name: str) -> bool:
     change: `name` is no revision (git's own rule reads a name that is both a branch and a file as
     the branch), it exists under `root`, and `git status` reports a tracked change for it. The
     spelling decides nothing, so an extensionless file reads the same as `a.json`. An unreadable
-    answer is False, the form this read used to leave unjudged."""
+    answer is False and is logged as `subject-unread`, the form this read used to leave unjudged."""
     if not name or name.startswith(("-", ":")) or not os.path.lexists(os.path.join(root, name)):
         return False
     rev = _git(root, "rev-parse", "--verify", "--quiet", name + "^{commit}")
-    if rev is None or rev.returncode == 0:
+    if rev is None:
+        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)
+        return False
+    if rev.returncode == 0:
         return False
     lines = porcelain(root, [name])
-    return bool(lines) and any(line[:2] != "??" for line in lines)
+    if lines is None:
+        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)
+        return False
+    return any(line[:2] != "??" for line in lines)
 
 
 def checkout_names_a_path(args, root: str = "") -> str:
