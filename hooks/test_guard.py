@@ -7084,6 +7084,15 @@ push_case("a glued push option in a cluster then force denies", "-vofoo --force 
 push_case("a glued push option, other letters, then force denies", "-oyo --force origin feat", "deny")
 push_case("a push option with its value then force denies", "-o foo --force origin feat", "deny")
 
+# A SUBSHELL WORD IN THE PUSH ARGUMENTS. The shell runs `$(...)` before git reads the push. The guard cuts
+# the arguments at a word that ends in `)`, so a flag after that word is lost. A quoted word with a space in
+# it is blanked as text first, so the shapes below are the ones that reach the cut. The control names no flag.
+push_case("a $(...) refspec, unquoted, then -f, denies", "origin $(git branch --show-current) -f", "deny")
+push_case("a quoted $(...) refspec with no space, then --force, denies", 'origin "$(pwd)" --force', "deny")
+push_case("a $(...) refspec, unquoted, -u, then a lease naming a ref, denies",
+          "-u origin $(git rev-parse --abbrev-ref HEAD) --force-with-lease=x", "deny")
+push_case("a $(...) refspec, -u, no force, allows", '-u origin "$(git branch --show-current)"', "allow")
+
 # THE TARGET DIRECTORY. Config and the default branch are read where the push runs: a `git -C`,
 # a `cd` before it, a `-c` override on the call. The session's cwd here is never the answer.
 sh("push: lease with git -C naming the default branch's checkout asks",
