@@ -98,13 +98,15 @@ the rows file or that file's presence at head, all through the one `cat-file` th
 for a range with no such line. A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
-or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once per finder that needs it (the removed-path
-finder, and the reworded-rule finder when the range also removes or changes a rule sentence), through the same
-`cat-file`, so the second read adds no process start. A finder reads only
-when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
-look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once per finder,
+through the same `cat-file`, so the second read adds no process start. A finder that has nothing to look for reads none.
+find_stale (STALE001, STALE002, STALE008) reads every tracked .md when the range removes or renames a path, or a touched
+.py no longer binds a name it bound at base, or changes or removes a module-level literal. Otherwise it reads only the
+touched .md whose added lines hold a value cite of a code file. find_rewords (STALE006) reads every tracked .md when a
+rule sentence in a RULE_FILES file is removed or changed, with no removed path or name needed.
+A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
-when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
+when a touched .py changed or removed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
 whose added lines hold a value cite of a .py, .mjs, .js, .cjs, .ts or .sh file, found from the diff already read. Such a
 Markdown-only range starts 4 (the 3 and that `cat-file`); one with no such line reads no blob and starts 3. A touched .json
 starts nothing more.
