@@ -406,6 +406,7 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
     remote, refspecs, flags = call
     remote = remote or "origin"
     seen = [(m.group(2), m.group(3)) for m in map(PUSH_REF_LINE.match, output.splitlines()) if m]
+    from_ref_lines = bool(seen)
     if not seen and (PUSH_REJECTED_LINE.search(output) or set(flags) & {"--tags", "--all", "--mirror", "--prune"}):
         return []
 
@@ -416,11 +417,12 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
         except ci_wake.Unknown as unknown:
             return [(None, (refspecs[0].lstrip("+").split(":")[-1] if refspecs else "HEAD") or "HEAD", str(unknown))]
         seen = [(None, n) for n in names if n]
-    new_tags = set(PUSH_NEW_TAG_LINE.findall(output))
+    # A [new tag] line drops a name only when no ref line named it: a ref line (`[new branch]` too) is a branch head.
+    new_tags = set() if from_ref_lines else set(PUSH_NEW_TAG_LINE.findall(output))
     bare = {r.lstrip("+") for r in refspecs if ":" not in r and r.lstrip("+") != "HEAD"}
     heads = []
     for sha, branch in seen:
-        if "\n" in branch or branch.startswith("refs/tags/") or (sha is None and branch in new_tags):
+        if "\n" in branch or branch.startswith("refs/tags/") or branch in new_tags:
             continue
         branch = branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch
         why = None
