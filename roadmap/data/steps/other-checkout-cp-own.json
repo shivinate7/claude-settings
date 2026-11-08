@@ -1,0 +1,11 @@
+{
+  "title": "The other-checkout guard passes a cp whose target lands in the lane's own checkout",
+  "why": "The other-checkout guard refused `cp \"$B/$f\" \"$f\"`, whose write landed in the lane's own checkout (lane lint-uses-pinned-tools, coordinator 01:03 CST Nov 8). A possible false alarm.",
+  "note": "Triage read of the guard's record, decision an-agent-outside-its-home-tree-must-stop (00:59 CST Nov 8): its Ceiling says a target named through a variable the scan cannot resolve is not seen, so a plain `cp \"$B/$f\" \"$f\"` should pass; a refusal points to the cwd (a cwd in another checkout, or a `cd` earlier in the same command) rather than the cp. First step: get the exact command line, the cwd and the refusal text from the lane; red case first if the guard is wrong. Queue fix (owner 13:20 CST Nov 7). Related done step other-checkout-scratch-false-alarm. Slug from the coordinator. Filed 01:00 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 553,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T01:02:00-06:00"
+}
