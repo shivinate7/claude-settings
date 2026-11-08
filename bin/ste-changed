@@ -23,6 +23,7 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 import git_reads  # noqa: E402  the one home of the ancestry read (hooks/git_reads.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (hooks/git_bash.py)
 from pin_note import ENV as PIN_NOTE_ENV, MARKER as NOTE  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
+from action_pin import pin_regex  # noqa: E402  the one home of the sha pin's pattern (hooks/action_pin.py)
 
 LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
 
@@ -55,7 +56,7 @@ LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/st
 # remedy's clause on who may move the pin)}. The "with no question" grant is the owner's for ste-lint pins only.
 PINNED = {"ste-lint": (LINT_FILES, "lint", ", with no question (rule git-integration-branch-merge)"),
           "zizmor": (("actions/zizmor/action.yml", "actions/zizmor/run.sh"), "zizmor run", "")}
-PIN = re.compile(r"[\w.-]+/claude-settings/actions/(%s)@([0-9a-f]{40})" % "|".join(map(re.escape, PINNED)))
+PIN = pin_regex(PINNED)
 
 
 def out(*a):
