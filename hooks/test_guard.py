@@ -27211,10 +27211,10 @@ role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is all
 # The row reads a round line on line three too: the same scan the step-up reads.
 role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line three is allowed", "reviewer", "sonnet",
            "Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff.")
-# ---- Granted round 4 (the owner's grant of a fourth review round, item 396 a, 2026-11-08 06:08 CST). A reviewer's
-# fourth round runs on Sonnet only when its brief opens with `Round 4 of 4` and carries a `Grant: <cite>` line in the
-# form the review record takes (merge/merge.py REVIEW_GRANT, grant_valid). Each refusal names one cause: the marker,
-# the cite, or the model. Every case here shares the prefix "role-model: granted round 4", so MUTATE_ONLY selects them.
+# ---- Fourth-round grant. A reviewer runs on Sonnet for a fourth round only when its brief opens with the
+# GRANTED_ROUND_MARKER and carries one Grant line that grant_valid accepts (hooks/shared_names.py). Each refusal
+# names one cause: the marker, the cite, or the model. Every case here shares one name prefix, so MUTATE_ONLY
+# selects them as a group.
 GRANT_ROUND_4 = "Round 4 of 4. Re-check the diff."
 GRANT_CITE = "Grant: item 396 a, owner, 2026-11-08 06:08 CST"
 role_model_allow("role-model: granted round 4 on sonnet with a Grant line is allowed", "reviewer", "sonnet",
@@ -27238,7 +27238,7 @@ for _label, _cite in (("with an upper-case item letter in its Grant line", "Gran
                       ("with text after the zone in its Grant line", "Grant: item 396 a, owner, 2026-11-08 06:08 CST (round 4)"),
                       ("with no item number in its Grant line", "Grant: owner, 2026-11-08 06:08 CST"),
                       ("with no cite after Grant:", "Grant:"),
-                      ("with the cite inside a prose line, not on a Grant line", "Owner's word: Grant: item 396 a, owner, 2026-11-08 06:08 CST")):
+                      ("with the cite inside a prose line, not on a Grant line", "Owner's grant: Grant: item 396 a, owner, 2026-11-08 06:08 CST")):
     role_model_refuse("role-model: granted round 4 on sonnet %s is denied" % _label,
                "reviewer", "sonnet", GRANT_ROUND_4 + "\n" + _cite)
 # Every other marker keeps main's verdict: a valid Grant line frees a fourth round only, not another round or Opus.
