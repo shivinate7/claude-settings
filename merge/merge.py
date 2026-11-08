@@ -155,8 +155,8 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
-def git(cwd, *a, input=None):
-    return sh(["git", "-C", cwd, *a], input=input)
+def git(cwd, *a, input=None, timeout=None):
+    return sh(["git", "-C", cwd, *a], input=input, timeout=timeout)
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -1530,6 +1530,7 @@ CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs re
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
+UNSHALLOW_SECONDS = 600  # the bound on the lane lint's `git fetch --unshallow origin`: a full fetch of this repo over a slow link, about half of LINT_SECONDS, since the lint it gates runs 550 s to 660 s. Unmeasured; raise it on a timeout from a link that was only slow.
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
 SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
 
@@ -2469,12 +2470,11 @@ def ci_job_run(wt, *args):
 
 def unshallow_for_lint(root):
     """Make `root` a full clone before the lane lint reads history: the silent-undo check reads a shallow clone as unknown (decision
-    lanes-run-no-full-ci-job). One `git fetch --unshallow origin` on a shallow clone, none on a full one. Any other outcome raises Stop,
-    not Liftable: a failed fetch, a clone still shallow after it, a probe that answers neither true nor false. The lint is unknown,
-    and --lint-unknown-ok must not lift an unknown that no step named."""
-    def stop(why):
-        raise Stop(f"the lint is unknown, not a pass: {why}\n"
-                   f"Run `git fetch --unshallow origin` where origin is reachable, then run `merge --lane-lint` again. {LANE_LINT_CITE}")
+    lanes-run-no-full-ci-job). One `git fetch --unshallow origin` on a shallow clone, bounded by UNSHALLOW_SECONDS, none on a full one.
+    Any other outcome raises Stop, not Liftable: a failed or timed-out fetch, a clone still shallow after it (origin is shallow), a probe
+    that answers neither true nor false. The lint is unknown, and --lint-unknown-ok must not lift an unknown that no step named."""
+    def stop(why, remedy="Run `git fetch --unshallow origin` where origin is reachable, then run `merge --lane-lint` again."):
+        raise Stop(f"the lint is unknown, not a pass: {why}\n{remedy} {LANE_LINT_CITE}")
     def shallow():  # stdout only: a stderr line (GIT_TRACE) must not change the answer; stderr passes through
         c, out = sh(["git", "-C", root, "rev-parse", "--is-shallow-repository"], live_stderr=True)
         if c or out not in ("true", "false"):
@@ -2482,11 +2482,15 @@ def unshallow_for_lint(root):
         return out == "true"
     if not shallow():
         return
-    c, out = git(root, "fetch", "--unshallow", "origin")
+    try:
+        c, out = git(root, "fetch", "--unshallow", "origin", timeout=UNSHALLOW_SECONDS)
+    except subprocess.TimeoutExpired:
+        stop(f"this clone is shallow, so the lint cannot read the history, and `git fetch --unshallow origin` timed out: it did not finish in {UNSHALLOW_SECONDS} s.")
     if c:
         stop(f"this clone is shallow, so the lint cannot read the history, and `git fetch --unshallow origin` failed: {out}")
     if shallow():
-        stop("this clone is still shallow after `git fetch --unshallow origin`, so the lint cannot read the history.")
+        stop("this clone is still shallow after the fetch, because origin itself is shallow and has no more history to send, so the lint cannot read the history.",
+             "Lint from a clone whose origin has full history (a clone of the real remote, not of a shallow copy), then run `merge --lane-lint` again.")
 
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
