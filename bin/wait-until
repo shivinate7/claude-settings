@@ -3,7 +3,7 @@
 # signals no process. Chain the command after it: `wait-until TIME && cmd`.
 # TIME is an ISO-8601 instant with a zone: `Z` or a numeric offset (2026-11-06T22:48:00Z, 2026-11-06T17:48:00-05:00).
 # Exit 0: the time has come, or was already past at the start. 124: still short of the time at --timeout
-# (default 540, under Bash's 600 s cap; 0 means no cap). 2: a bad argument, a bad time, or a time with no zone,
+# (no --timeout means no cap: the target time ends the wait). 2: a bad argument, a bad time, or a time with no zone,
 # at once, with no wait. While it waits, print "wait-until: still waiting until TIME, <s>s" every
 # $WAIT_UNTIL_HEARTBEAT s (default 120), so a quiet background run does not trip the stall watch.
 # The argument, heartbeat and poll parts are hooks/wait_common.py, shared with bin/wait-pid.

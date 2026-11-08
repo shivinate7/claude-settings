@@ -208,23 +208,46 @@ def watch_flag(args) -> bool:
     return False
 
 
-# A loop test that reads the clock: a `$(date ...)` word and a literal time (an ISO date or time of day, or a
-# whole-number epoch). Such a loop ends at that time, so it is a deadline, not a wait with no end.
-CLOCK_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}|\d{9,}$")
+# A loop ends at a clock time only when its one test orders `date` output against a literal time, in the
+# direction that turns false at that time: `until [ $(date ...) > TIME ]` ends once the clock passes TIME, and
+# `while [ $(date ...) < TIME ]` ends at TIME too. Equality, the other direction, a second test, a poll of a
+# file and a bare date or filename never reach the time, so none of them is a deadline.
+# The literal is a full ISO date-time or an epoch number.
+CLOCK_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$|\d{9,}$")
+CLOCK_READ = re.compile(r"\$\(date(?:\s[^;&|<>$`()]*)?\)$|`date(?:\s[^;&|<>$`()]*)?`$")
+TEST_CLOSER = {"[": "]", "[[": "]]", "test": None}   # the only commands a clock loop's test may use
+LATER_THAN = {">", "-gt", "-ge"}     # ends an `until` loop once the clock is past the literal
+EARLIER_THAN = {"<", "-lt", "-le"}   # ends a `while` loop when the clock reaches the literal
+
+
+def clock_test(head) -> bool:
+    """True when the loop header `head` (tokens, `while` or `until` first) is one `[ ]`, `[[ ]]` or `test`
+    whose operands are exactly a `date` read, an ordering that ends the loop, and a literal time."""
+    opener = head[1] if len(head) > 1 else ""
+    if opener not in TEST_CLOSER:
+        return False
+    rest, closer = head[2:], TEST_CLOSER[opener]
+    if closer:
+        if not rest or rest[-1] != closer:
+            return False
+        rest = rest[:-1]
+    # An unquoted `$(date -u +%s)` is split on its spaces: take the words up to the one that closes it.
+    cut = next((n for n in range(1, len(rest) + 1) if CLOCK_READ.match(" ".join(rest[:n]))), 0)
+    if not cut:
+        return False
+    rest = rest[cut:]
+    ends_loop = LATER_THAN if head[0].lower() == "until" else EARLIER_THAN
+    return len(rest) == 2 and rest[0] in ends_loop and bool(CLOCK_LITERAL.match(rest[1]))
 
 
 def clock_loop(token_rows) -> bool:
-    """True when the command's one loop is bounded by a clock test: a single `while`/`until` whose
-    own test (no `&&` or `||` clause after it) compares `date` output with a literal time, and no
-    other loop. A quoted word is one token, so `grep -q "date"` names no clock."""
+    """True when the command's one loop is a `while`/`until` whose own test (no `&&` or `||` clause after
+    it) is a `clock_test`, and no other loop. A quoted word is one token, so `grep -q "date"` names no clock."""
     words = [re.match(r"[\w%-]*", row[0]).group().lower() for row in token_rows]
     heads = [i for i, word in enumerate(words) if word in ("while", "until")]
     if len(heads) != 1 or any(w in LOOP_WORDS and w not in ("while", "until", "do") for w in words):
         return False
-    head, after = token_rows[heads[0]], words[heads[0] + 1:heads[0] + 2]
-    return (after == ["do"]
-            and any(t.startswith(("$(date", "`date")) for t in head)
-            and any(CLOCK_LITERAL.match(t) for t in head[1:]))
+    return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])
 
 
 def waiter_verdict(segments, background: bool) -> str:

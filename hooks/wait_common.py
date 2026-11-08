@@ -3,15 +3,18 @@ argument, the number parse, the `[--timeout SECS]` argument loop, the heartbeat 
 
 Why one home: both helpers wait for a condition with no process of their own to hold, print a line every
 heartbeat so a quiet background run does not trip the stall watch (300 s quiet), and end with the same exit
-codes: 0 done, 124 at --timeout, 2 a bad argument. Cost per wait: one process, a wake every poll seconds (POLL by default),
-no file written.
+codes: 0 done, 124 at --timeout, 2 a bad argument. The default --timeout differs by helper
+(DEFAULT_TIMEOUTS). Cost per wait: one process, a wake every poll seconds (POLL by default), no file written.
 """
 import os
 import re
 import sys
 import time
 
-DEFAULT_TIMEOUT = 540.0  # under Bash's 600 s cap; a --timeout of 0 means no cap
+# Seconds a helper waits when it gets no --timeout; 0 means no cap. wait-pid caps at 540, under Bash's 600 s,
+# because the pid it waits on may never end. wait-until has no cap: its target time ends the wait.
+DEFAULT_TIMEOUTS = {"wait-pid": 540.0, "wait-until": 0.0}
+CAPPED = 540.0  # the default for a helper the table does not name
 HEARTBEAT_DEFAULT = 120.0
 POLL = 0.25  # the default seconds between polls
 EXIT_TIMEOUT = 124
@@ -37,7 +40,7 @@ def number(prog, usage, text, name):
 def split_args(prog, usage, argv):
     """(the one positional argument or None, the timeout) from `[ARG] [--timeout SECS]`, exit 2 on any
     other argument. A leading `-` is no flag unless it starts `--`, so a negative number is a positional."""
-    positional, timeout = None, DEFAULT_TIMEOUT
+    positional, timeout = None, DEFAULT_TIMEOUTS.get(prog, CAPPED)
     args = list(argv)
     while args:
         arg = args.pop(0)
