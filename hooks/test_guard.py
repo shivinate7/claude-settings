@@ -15045,6 +15045,41 @@ def _amend_own_msg(w):
     _must(w, *IDENT, "commit", "-q", "--amend", "-m", "own test edit, reworded")
 
 
+def _newer_main(w):
+    """Commits a product change on main, so a rebase of the builder's commit onto main replays it."""
+    main = w + "-main"
+    write(os.path.join(main, "src/app.py"), "x = 9\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "newer main")
+
+
+def _amend_replayed_own_msg(w):
+    """Cut at main. The builder commits its own test edit, main moves on, and the builder rebases its commit
+    onto it. The pick rewrites the sha, and its reflog subject is `rebase (pick)`, not the builder's `commit`.
+    Then it rewords that commit's message only. The amend still holds the edit, so the amend is refused."""
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_own():\n    assert 8\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test edit")
+    _newer_main(w)
+    _must(w, *IDENT, "rebase", "-q", "main")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "own test edit, reworded")
+
+
+def _amend_cherry_own_msg(w):
+    """Cut at main. The builder commits its own test edit, then cherry-picks it onto a side branch that holds a
+    product commit of its own. The product commit makes the pick a new commit: without it, a pick in the same
+    second as the original has the same sha, and the original still reaches HEAD. The reflog subject of the
+    pick is `cherry-pick`, not the builder's `commit`. The builder then rewords that commit's message only.
+    The amend still holds the edit, so the amend is refused."""
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_own():\n    assert 8\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test edit")
+    _must(w, "switch", "-q", "-c", "side", "main")
+    _product_commit(w)
+    _must(w, *IDENT, "cherry-pick", "work")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "own test edit, reworded on side")
+
+
 # Amend: a builder's message-only amend of an inherited test-author commit changes no test. Its tree is
 # the inherited one, so it is allowed. The amend's own change is the reword, and that is no builder edit.
 _bd_amend_msg = diff_repo("bd-amend-inherited-msg", _amend_inherited_msg)
@@ -15064,6 +15099,17 @@ sh("builder-refuse: a builder's message-only amend of its own test commit is den
    COMMIT, "deny", rule=BDIFF, cwd=_bd_amend_own, agent_id="bld1", agent_type="builder")
 sh("builder-refuse: a builder's message-only amend of its own test commit is denied at push",
    PUSH, "deny", rule=BDIFF, cwd=_bd_amend_own, agent_id="bld1", agent_type="builder")
+# Replayed own commit: a rebase pick is no builder commit in the reflog, so its message-only amend is still the
+# builder's own test edit. The inherited allow case above is the green control for these two.
+_bd_amend_replayed = diff_repo("bd-amend-replayed-own-msg", _amend_replayed_own_msg)
+sh("builder-refuse: a builder's message-only amend of its own test commit, rebased onto a newer main, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_amend_replayed, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's message-only amend of its own test commit, rebased onto a newer main, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_replayed, agent_id="bld1", agent_type="builder")
+# Cherry-picked own commit: a cherry-pick is no builder commit in the reflog, so its message-only amend is refused at push.
+_bd_amend_cherry = diff_repo("bd-amend-cherry-own-msg", _amend_cherry_own_msg)
+sh("builder-refuse: a builder's message-only amend of its own test commit, cherry-picked onto another branch, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_cherry, agent_id="bld1", agent_type="builder")
 
 # Rebase: a builder that rebases onto the lane tip is judged against that tip. A test file written back
 # to main's bytes differs from it, so it is refused. The clean rebase is checked with the log checks below.
