@@ -44,7 +44,7 @@
 # that is not one colour). Exit 1 from the check prints one stderr line (first-frame check failed, with the UDID; the hook's
 # own line is not forwarded), runs no tests and no hold child, and exits 1; the trap shuts the device down. Any other outcome
 # passes, a missing hook file or python3 too (fail open, as an unjudged frame passes). A reuse runs no check. Known gap,
-# untested: a TERM during the check waits for the check to return (bootstatus, up to 90 s).
+# untested: a TERM during the check waits for the check to return (up to 105 s: 90 s bootstatus, 15 s screenshot).
 # Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3 twice
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl; --check: one
 # bootstatus and one screenshot, no file kept); mv and find on a
