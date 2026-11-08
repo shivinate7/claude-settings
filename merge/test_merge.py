@@ -12623,7 +12623,7 @@ def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no",
     return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
-def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
+def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
     return f"Fix check: {head}, {role}, {model}, {verdict}"
 
@@ -12669,9 +12669,8 @@ def no_record_numbers(out):
     """The pull request numbers named on the `no record:` line."""
     return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
 
-REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
-REVIEW_FIX_PASS_SONNET = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the same tuple on the model a guard or check change's fix check runs on
-REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
+REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict; every fix check runs on that model (owner, 2026-11-08 15:04 CST, item 444 a)
+REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "FAIL")
 
 def fix_state(test, fix, **kw):
     """-> (state, why) of a record built without a fix line, with `fix` set on its parsed dict. review_state runs without the parser, so a
@@ -13004,8 +13003,7 @@ class ReviewFixRules(unittest.TestCase):
             for guard in ("no", "yes"):
                 with self.subTest(verdict=verdict, guard=guard):
                     rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
-                    fix_pass = REVIEW_FIX_PASS_SONNET if guard == "yes" else REVIEW_FIX_PASS
-                    state, why = fix_state(self, fix_pass, rounds=rounds, guard=guard, net="not owed")
+                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
                     self.assertEqual(state, "done", f"a fix check PASS after round 1 {verdict}, guard {guard}, must read done: {why!r}")
 
     def test_a_fix_pass_after_round_two_is_done_whatever_round_two_said(self):
@@ -13014,8 +13012,7 @@ class ReviewFixRules(unittest.TestCase):
             for guard in ("no", "yes"):
                 with self.subTest(verdict=verdict, guard=guard):
                     rounds = ("Round 1: reviewer, sonnet, FAIL", f"Round 2: reviewer, sonnet, {verdict}")
-                    fix_pass = REVIEW_FIX_PASS_SONNET if guard == "yes" else REVIEW_FIX_PASS
-                    state, why = fix_state(self, fix_pass, rounds=rounds, guard=guard, net="not owed")
+                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
                     self.assertEqual(state, "done", f"a fix check PASS after round 2 {verdict}, guard {guard}, must read done: {why!r}")
 
     def test_a_fix_pass_after_a_delete_only_round_one_with_guard_yes_is_done(self):
@@ -13023,7 +13020,7 @@ class ReviewFixRules(unittest.TestCase):
         for verdict in ("FAIL", "PASS"):
             with self.subTest(verdict=verdict):
                 rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
-                state, why = fix_state(self, REVIEW_FIX_PASS_SONNET, rounds=rounds, kind="delete-only", guard="yes")
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, kind="delete-only", guard="yes")
                 self.assertEqual(state, "done", f"a fix check PASS after a delete-only round 1 {verdict} with guard yes must read done: {why!r}")
 
     def test_a_fix_pass_before_round_three_with_a_design_hold_is_open_and_names_the_design_reviewer(self):
@@ -13053,12 +13050,12 @@ class ReviewFixRules(unittest.TestCase):
     def test_a_fix_pass_after_round_three_with_guard_yes_is_done_for_a_zero_or_positive_net_value(self):
         for net in ("zero", "positive"):
             with self.subTest(net=net):
-                state, why = fix_state(self, REVIEW_FIX_PASS_SONNET, rounds=REVIEW_FAILED_THREE, guard="yes", net=net)
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net=net)
                 self.assertEqual(state, "done", f"round 3's net value {net} must carry through the fix check: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_keeps_the_net_value_owed(self):
         # the fix check does not settle a net value that the third round left owed
-        state, why = fix_state(self, REVIEW_FIX_PASS_SONNET, rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")
         self.assertEqual(state, "open", f"a fix check settled a net value round 3 left owed: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_is_held_for_a_negative_net_value(self):
@@ -13079,7 +13076,7 @@ class ReviewFixRules(unittest.TestCase):
                  (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"))
         for rounds, guard, net, verdict, want in cases:
             with self.subTest(rounds=rounds, guard=guard, net=net, verdict=verdict):
-                model = merge.REVIEW_FIX_GUARD_MODEL if guard == "yes" else "haiku"
+                model = merge.REVIEW_FIX_GUARD_MODEL
                 text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict, model=model),))
                 self.assertEqual(record_state(self, text), want)
 
@@ -13233,7 +13230,7 @@ class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
 
-    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model="haiku", verdict="PASS"):
+    def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL, verdict="PASS"):
         return f"{head}:{role}:{model}:{verdict}"
 
     def earlier_host(self):
@@ -13286,7 +13283,7 @@ class ReviewFixBase(ReviewEnv):
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
 
     def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
 
     def assert_refused(self, rc, out, err):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
@@ -14078,7 +14075,7 @@ class ReviewFixSonnetOnGuard(ReviewEnv):
 
     def test_a_sonnet_fix_pass_on_a_guard_change_still_reads_done(self):
         # control: a Sonnet fix check counts as it did before, so a first-round FAIL the fix PASSes reads done
-        state, why = self.guard_yes_verdict(("Round 1: reviewer, sonnet, FAIL",), "sonnet")
+        state, why = self.guard_yes_verdict(("Round 1: reviewer, sonnet, FAIL",), merge.REVIEW_FIX_GUARD_MODEL)
         self.assertEqual(state, "done", f"a Sonnet fix check PASS on a guard or check change must read done: {why!r}")
 
     def test_a_haiku_fix_pass_on_a_change_with_no_guard_still_reads_done(self):
@@ -14096,9 +14093,9 @@ class ReviewFixSonnetOnGuard(ReviewEnv):
 
     def test_a_sonnet_fix_check_on_a_guard_change_prints_the_record(self):
         # control: the same flags on Sonnet are written, with the fix line the record reads back
-        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags("sonnet"), host=self.earlier_host())
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(merge.REVIEW_FIX_GUARD_MODEL), host=self.earlier_host())
         self.assertEqual(rc, 0, "a Sonnet fix check on a guard or check change was refused:\n" + out + err)
-        self.assertIn(fix_check_line(model="sonnet"), posted_body(self, out).splitlines())
+        self.assertIn(fix_check_line(model=merge.REVIEW_FIX_GUARD_MODEL), posted_body(self, out).splitlines())
 
     def test_a_haiku_fix_check_on_a_change_with_no_guard_still_prints_the_record(self):
         # control: Guard or check no, with a Haiku fix check, is written as it was before
