@@ -1,11 +1,11 @@
 {
-  "title": "Refuse `git checkout -B <current branch>` in an agent worktree; it left a stale index twice",
+  "title": "Refuse `git checkout -B` or `git switch -C` of any branch a worktree holds",
   "phase": "now",
   "status": "doing",
   "order": 261.5,
   "owner": "coordinator",
   "why": "Coordinator 14:34 CST: `git checkout -B <current branch>` in an agent worktree left a stale index twice.",
-  "note": "A guard change, so a build lane (test-author, builder, reviewer). Done check: a red test on `git checkout -B <current branch>` in an agent worktree. Nov 7 22:47 CST: lane roadmap-push-refusal-says-fetch (#1777) hit it twice more: an agent's `git checkout -B` left old files in the worktree and index. Possible false alarm in the same incident: the shared-trees guard refused restoring stale staged files that match origin's blobs in an agent worktree; unchecked.",
-  "updatedAt": "2026-11-07T22:47:00-06:00",
-  "lane": "session_013NEJL1N3YkCMouc1pELXyu"
+  "note": "A guard change, so a build lane (test-author, builder, reviewer). Done check: a red test on `git checkout -B <current branch>` in an agent worktree. Nov 7 22:47 CST: lane roadmap-push-refusal-says-fetch (#1777) hit it twice more: an agent's `git checkout -B` left old files in the worktree and index. Possible false alarm in the same incident: the shared-trees guard refused restoring stale staged files that match origin's blobs in an agent worktree; unchecked. Scope widened (coordinator, 03:16 CST Nov 8): one rule refusing `checkout -B` or `switch -C` of any branch a worktree holds. Folded in: checkout-b-held-branch (git 2.43 lets `checkout -B <b>` / `switch -C <b>` reset a branch ANOTHER worktree has checked out, leaving that worktree's index stale; seen 02:49 CST Nov 8 in lane idle-lane-steps-unknown). Lane moved: session_013NEJL1N3YkCMouc1pELXyu ended 02:48 CST with its work on archive/checkout-b-current-branch; lane idle-lane-steps-unknown (session_013NEJL1VtpMs3Aw5JLtyvVD) takes it.",
+  "updatedAt": "2026-11-08T03:14:00-06:00",
+  "lane": "session_013NEJL1VtpMs3Aw5JLtyvVD"
 }
