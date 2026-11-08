@@ -391,21 +391,46 @@ NO_PUSH_EVENTS = ("workflow_dispatch", "schedule")   # events that start no run 
 
 
 def _glob_regex(pattern):
-    """A workflow path-filter pattern as a regex: `**` crosses folders, `*` and `?` stay inside one."""
-    out, i = "", 0
+    """A workflow path-filter pattern as a regex, per GitHub's filter pattern cheat sheet: `*` is zero or more
+    characters but `/`, `**` is zero or more of any character (`**/` also matches no folder), `?` and `+` are zero or
+    one and one or more of the character before them, `[...]` is one listed letter, digit or range, and `\\` escapes
+    the next character. Raises _Unparsed for a form whose meaning is unsure (a `?` or `+` after no plain character, an
+    open or odd bracket, a trailing `\\`), so the run stays due rather than a guessed reading dropping it."""
+    parts, quantifiable, i = [], False, 0
     while i < len(pattern):
-        two = pattern[i:i + 2]
-        if two == "**":
-            out, i = out + ".*", i + 2
-            continue
         c = pattern[i]
-        if c == "[" and "]" in pattern[i:]:
-            j = pattern.index("]", i)
-            out, i = out + pattern[i:j + 1], j + 1
-            continue
-        out += "[^/]*" if c == "*" else "[^/]" if c == "?" else re.escape(c)
-        i += 1
-    return re.compile(out + r"\Z")
+        if pattern.startswith("**/", i):
+            parts.append("(?:.*/)?")
+            quantifiable, i = False, i + 3
+        elif pattern.startswith("**", i):
+            parts.append(".*")
+            quantifiable, i = False, i + 2
+        elif c == "*":
+            parts.append("[^/]*")
+            quantifiable, i = False, i + 1
+        elif c in "?+":
+            if not quantifiable:
+                raise _Unparsed(pattern)
+            parts[-1] = "(?:%s)%s" % (parts[-1], c)
+            quantifiable, i = False, i + 1
+        elif c == "[":
+            j = pattern.find("]", i)
+            if j < 0 or not re.fullmatch(r"(?:[a-z]-[a-z]|[A-Z]-[A-Z]|[0-9]-[0-9]|[A-Za-z0-9])+", pattern[i + 1:j]):
+                raise _Unparsed(pattern)
+            parts.append(pattern[i:j + 1])
+            quantifiable, i = False, j + 1
+        elif c == "\\":
+            if i + 1 == len(pattern):
+                raise _Unparsed(pattern)
+            parts.append(re.escape(pattern[i + 1]))
+            quantifiable, i = True, i + 2
+        else:
+            parts.append(re.escape(c))
+            quantifiable, i = True, i + 1
+    try:
+        return re.compile("".join(parts) + r"\Z")
+    except re.error:
+        raise _Unparsed(pattern) from None
 
 
 def _path_passes(path, patterns):
@@ -426,7 +451,8 @@ def _unquote(word):
 def _strip_comment(raw):
     """A workflow line without its comment: a `#` at a line start or after a space ends the line, unless a quoted
     string holds it. A quote opens only where a value starts (after a space, `[`, `{`, `,` or the line start), so a lone
-    apostrophe inside a word is text."""
+    apostrophe inside a word is text. Not actions/ci-alarm/clear_rule.py's `strip_comment`: that one reads a lone
+    apostrophe as a quote, and hooks/ stays stdlib-only and loads in the Stop hook."""
     quote = None
     for i, ch in enumerate(raw):
         before = raw[i - 1] if i else " "
@@ -486,7 +512,8 @@ def _filter_list(block, key):
 def workflow_runs_for(text, files):
     """False only when a workflow's `on:` block reads cleanly and no push of `files` starts a run of it: it has no
     event but workflow_dispatch and schedule, or its push event carries a `paths` or `paths-ignore` filter that every
-    file fails. A form this reader does not parse (a flow map, a key it does not know) reads True, so a run stays due.
+    file fails. A form this reader does not parse (a flow map, a key it does not know, an unsure filter pattern) reads
+    True, so a run stays due.
     Stdlib only: CI and the Stop hook have no YAML parser."""
     lines = _workflow_lines(text)
     start = next((n for n, (i, c) in enumerate(lines) if i == 0 and re.match(r"""["']?on["']?\s*:""", c)), None)
@@ -504,6 +531,8 @@ def workflow_runs_for(text, files):
     if not body:
         return True
     base = body[0][0]
+    if body[0][1].startswith("- "):
+        return _sequence_runs(body, base)
     events, push_block, in_push = [], [], False
     for indent, content in body:
         if indent == base and not content.startswith("- "):
@@ -520,13 +549,25 @@ def workflow_runs_for(text, files):
         return False
     try:
         paths, ignore = _filter_list(push_block, "paths"), _filter_list(push_block, "paths-ignore")
+        if (paths is None) == (ignore is None):
+            return True
+        if paths is not None:
+            return any(_path_passes(f, paths) for f in files)
+        return any(not _path_passes(f, ignore) for f in files)
     except _Unparsed:
         return True
-    if (paths is None) == (ignore is None):
-        return True
-    if paths is not None:
-        return any(_path_passes(f, paths) for f in files)
-    return any(not _path_passes(f, ignore) for f in files)
+
+
+def _sequence_runs(body, base):
+    """An `on:` block written as a block sequence (`- push`): False only when every item is a plain event name and
+    none starts a run for a push. An item it cannot read, a line that is no item, or a deeper line reads True."""
+    events = []
+    for indent, content in body:
+        name = _unquote(content[2:]) if indent == base and content.startswith("- ") else ""
+        if not re.fullmatch(r"[\w-]+", name):
+            return True
+        events.append(name)
+    return any(e not in NO_PUSH_EVENTS for e in events)
 
 
 def push_may_start_run(full, old, cwd, budget):
