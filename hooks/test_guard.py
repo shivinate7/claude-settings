@@ -101,6 +101,7 @@ FAMILIES = {
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "review-record-after-round": "a lane's builder or test-author spawn, or its send_message, after a reviewer or design-reviewer spawn with no review record after it: the record marker from the merge tool, the transcript read, and its cost",
+    "resume-finished-reviewer": "a SendMessage from the main session to a reviewer or design-reviewer spawn that has finished (a background finish notice, or a foreground result): the target resolved by agentId or spawn name, the latest spawn with that name wins; a result of unknown shape asks; an agent's send, a send to main, a name no spawn holds and a missing transcript are allowed",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10137,10 +10138,14 @@ def rr_session(*parts):
     return [RR_HUMAN] + role_call("g0", LANE_TAGS) + [line for part in parts for line in part]
 
 
-def rr_spawn(tool_id, subagent_type, tool="Agent"):
-    """A spawn of `subagent_type` and its result, as the transcript holds them."""
-    return [role_use(tool_id, tool, {"subagent_type": subagent_type, "prompt": "Review PR #12.", "model": "sonnet"}),
-            role_result(tool_id, "Verdict: PASS.")]
+def rr_spawn(tool_id, subagent_type, tool="Agent", name=None, result=None):
+    """A spawn of `subagent_type` and its result, as the transcript holds them. `name` adds the spawn's name to its
+    input, and `result` (a line the caller built) replaces the plain text result."""
+    tool_input = {"subagent_type": subagent_type, "prompt": "Review PR #12.", "model": "sonnet"}
+    if name is not None:
+        tool_input["name"] = name
+    return [role_use(tool_id, tool, tool_input),
+            role_result(tool_id, "Verdict: PASS.") if result is None else result]
 
 
 def rr_comment(tool_id, body):
@@ -10197,17 +10202,23 @@ RR_TRANSCRIPTS = {
 }
 
 
-def write_rr_transcripts():
-    """Write each transcript as JSONL, with the merge tool's record marker where RR_MARK stands. `unreadable` is a
-    folder, so the guard's open() fails on it. `missing` is never written."""
+def write_transcripts(transcripts, folder):
+    """Write each transcript in `transcripts` as JSONL under `folder`, with the merge tool's record marker where
+    RR_MARK stands. One home for the marker: every review-record fixture is written here."""
     import guard_merge  # the merge tool's loader: the guard reads the marker through the same one
     tool = guard_merge.merge_module()
     if tool is None:
         raise RuntimeError("merge/merge.py does not load, so the record marker is unknown")
-    os.makedirs(RR_DIR, exist_ok=True)
-    for name, lines in RR_TRANSCRIPTS.items():
-        with open(rr_path(name), "w", encoding="utf-8") as handle:
+    os.makedirs(folder, exist_ok=True)
+    for name, lines in transcripts.items():
+        with open(os.path.join(folder, name + ".jsonl"), "w", encoding="utf-8") as handle:
             handle.write("\n".join(line.replace(RR_MARK, tool.REVIEW_MARKER) for line in lines) + "\n")
+
+
+def write_rr_transcripts():
+    """Write the review-record transcripts. `unreadable` is a folder, so the guard's open() fails on it. `missing` is
+    never written."""
+    write_transcripts(RR_TRANSCRIPTS, RR_DIR)
     os.makedirs(rr_path("unreadable"), exist_ok=True)
 
 
@@ -10328,6 +10339,174 @@ def review_send_matcher_case():
 
 
 RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher routes every send tool to the guard"
+
+
+# =========================================================================== 5j. resume a finished reviewer
+#
+# Rule resume-finished-reviewer. A SendMessage from the main session (no agent_id in the payload) is refused when
+# `to` names a reviewer or design-reviewer spawn that has finished. `to` resolves to a spawn by its launch result's
+# toolUseResult.agentId, or by the spawn call's `name` input, and the latest spawn with that name wins. A background
+# spawn is running while its launch result is async_launched and no later record holds a finish notice for its id.
+# Any other result, a foreground spawn's included, is finished. A result of unknown shape asks. The refusal says to
+# spawn a fresh reviewer and pass it the prior report (rule roles-resume-by-name). Each transcript also holds the
+# round's review record after its reviewer spawn, so review-record-after-round does not refuse first.
+FAMILY = "resume-finished-reviewer"
+RF_RULE = "resume-finished-reviewer"
+RF_CARRIES = ("fresh reviewer", "prior report")
+RF_MSG = "Round 2: fix the findings on PR #12."
+RF_REVIEW, RF_REVIEW_AGENT = "reviewer-pr12", "a7c1e9d04b2f3a58"
+RF_DESIGN, RF_DESIGN_AGENT = "design-reviewer-pr12", "a2d9f4b8e1c6073d"
+RF_BUILDER, RF_BUILDER_AGENT = "builder-pr12", "b3e8f1a6c92d7e40"
+RF_OTHER, RF_OTHER_AGENT = "builder-pr13", "b5d0a7c3e91f2468"
+RF_SHARED = "worker-pr12"
+RF_SHARED_REVIEWER_AGENT, RF_SHARED_BUILDER_AGENT = "a9f2c6e1d7b04385", "b1c4e8a2f7d93056"
+RF_UNKNOWN = "reviewer-pr14"
+RF_NOTICE, RF_NOTICE_AGENT = "reviewer-pr15", "a4e7b0d3c9f15862"
+RF_DIR = os.path.join(ROOT, "resumefinished")
+
+
+def rf_path(name):
+    return os.path.join(RF_DIR, name + ".jsonl")
+
+
+def rf_launch_result(tool_id, agent_id):
+    """A background spawn's launch result: async_launched, its agent id at toolUseResult.agentId on the record."""
+    record = json.loads(role_result(tool_id, "Async agent launched successfully."))
+    record["toolUseResult"] = {"status": "async_launched", "agentId": agent_id}
+    return json.dumps(record)
+
+
+def rf_launch(tool_id, subagent_type, name, agent_id):
+    """A background spawn named `name`, and its launch result."""
+    return rr_spawn(tool_id, subagent_type, name=name, result=rf_launch_result(tool_id, agent_id))
+
+
+def rf_launch_unknown(tool_id, subagent_type, name):
+    """A background spawn named `name` whose launch result holds a bare string as toolUseResult, so its state is
+    not readable from the record."""
+    record = json.loads(role_result(tool_id, "Async agent launched successfully."))
+    record["toolUseResult"] = "Async agent launched successfully."
+    return rr_spawn(tool_id, subagent_type, name=name, result=json.dumps(record))
+
+
+def rf_finish(tool_id, kind="queue-operation"):
+    """The finish notice of background spawn `tool_id`, in the record type it arrives as: a queue-operation or an
+    attachment. Its text names the tool use and a status, as the real notice does."""
+    text = ("<task-notification>\n<tool-use-id>%s</tool-use-id>\n<status>completed</status>\n"
+            "</task-notification>" % tool_id)
+    if kind == "attachment":
+        return [json.dumps({"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}})]
+    return [json.dumps({"type": "queue-operation", "operation": "enqueue", "content": text})]
+
+
+def rf_notice_no_status(tool_id):
+    """A task notice that names the tool use and carries no <status>: the spawn's state is not known from it."""
+    text = "<task-notification>\n<tool-use-id>%s</tool-use-id>\n</task-notification>" % tool_id
+    return [json.dumps({"type": "queue-operation", "operation": "enqueue", "content": text})]
+
+
+RF_TRANSCRIPTS = {
+    # A background reviewer that finished: its launch result, its finish notice, then the round's record.
+    "bg-reviewer-finished": rr_session(rf_launch("r1", "reviewer", RF_REVIEW, RF_REVIEW_AGENT),
+                                       rf_finish("r1"), rr_comment("c1", rr_record())),
+    # A foreground reviewer: its result is the plain tool_result, with no launch record.
+    "fg-reviewer-finished": rr_session(rr_spawn("r1", "reviewer", name=RF_REVIEW),
+                                       rr_comment("c1", rr_record())),
+    # A background design-reviewer whose finish notice is an attachment record.
+    "bg-design-reviewer-finished": rr_session(rf_launch("d1", "design-reviewer", RF_DESIGN, RF_DESIGN_AGENT),
+                                              rf_finish("d1", "attachment"), rr_comment("c1", rr_record())),
+    # The reviewer still runs. A builder spawned after it finished, so a notice for another id is in the transcript.
+    "bg-reviewer-running": rr_session(rf_launch("r1", "reviewer", RF_REVIEW, RF_REVIEW_AGENT),
+                                      rr_comment("c1", rr_record()),
+                                      rf_launch("b1", "builder", RF_OTHER, RF_OTHER_AGENT), rf_finish("b1")),
+    # A reviewer and a builder, both finished, under different names.
+    "builder-finished": rr_session(rf_launch("r1", "reviewer", RF_REVIEW, RF_REVIEW_AGENT),
+                                   rf_finish("r1"), rr_comment("c1", rr_record()),
+                                   rf_launch("b1", "builder", RF_BUILDER, RF_BUILDER_AGENT), rf_finish("b1")),
+    # Two spawns share one name: the older a finished reviewer, the newer a running builder.
+    "shared-name-finished-reviewer-then-running-builder": rr_session(
+        rf_launch("r1", "reviewer", RF_SHARED, RF_SHARED_REVIEWER_AGENT), rf_finish("r1"),
+        rr_comment("c1", rr_record()),
+        rf_launch("b1", "builder", RF_SHARED, RF_SHARED_BUILDER_AGENT)),
+    # The same two spawns in the reverse order: the older a running builder, the newer a finished reviewer.
+    "shared-name-running-builder-then-finished-reviewer": rr_session(
+        rf_launch("b1", "builder", RF_SHARED, RF_SHARED_BUILDER_AGENT),
+        rf_launch("r1", "reviewer", RF_SHARED, RF_SHARED_REVIEWER_AGENT), rf_finish("r1"),
+        rr_comment("c1", rr_record())),
+    # A finished reviewer far up a transcript of about a megabyte: the reader must still reach its spawn.
+    "long-reviewer-finished": rr_session(rf_launch("r1", "reviewer", RF_REVIEW, RF_REVIEW_AGENT), RR_FILLER,
+                                         rf_finish("r1"), rr_comment("c1", rr_record())),
+    # A reviewer whose launch result holds a bare string, so its state cannot be read.
+    "reviewer-unknown-result": rr_session(rf_launch_unknown("r1", "reviewer", RF_UNKNOWN),
+                                          rr_comment("c1", rr_record())),
+    # A reviewer whose notice names its id with no status.
+    "reviewer-notice-no-status": rr_session(rf_launch("r1", "reviewer", RF_NOTICE, RF_NOTICE_AGENT),
+                                            rf_notice_no_status("r1"), rr_comment("c1", rr_record())),
+    # No spawn at all: the empty state.
+    "no-spawn": rr_session(),
+}
+
+
+def write_rf_transcripts():
+    write_transcripts(RF_TRANSCRIPTS, RF_DIR)
+
+
+# `missing` is never written: the guard's read of it fails, and the rule allows.
+lazy_fixture([rf_path(name) for name in RF_TRANSCRIPTS], write_rf_transcripts)
+
+
+def rf_refuse(name, tool_input, transcript, agent_id=None):
+    """A SendMessage the guard refuses for the rule: the reason names the rule, a fresh reviewer and the prior report."""
+    add("resume-finished-reviewer: " + name, "deny", rule=RF_RULE, tool=RR_BUILTIN_SEND, cwd=NOGIT,
+        transcript=transcript, carries=RF_CARRIES, agent_id=agent_id, env=ROLE_ENV, **tool_input)
+
+
+def rf_allow(name, tool_input, transcript, agent_id=None):
+    """A SendMessage the guard lets through silently."""
+    add("resume-finished-reviewer: " + name, "allow", tool=RR_BUILTIN_SEND, cwd=NOGIT, transcript=transcript,
+        silent=True, agent_id=agent_id, env=ROLE_ENV, **tool_input)
+
+
+def rf_ask(name, tool_input, transcript):
+    """A SendMessage the guard holds for the owner: the reason names the rule."""
+    add("resume-finished-reviewer: " + name, "ask", rule=RF_RULE, tool=RR_BUILTIN_SEND, cwd=NOGIT,
+        transcript=transcript, env=ROLE_ENV, **tool_input)
+
+
+# Refused: the target is a reviewer or design-reviewer spawn that has finished.
+rf_refuse("a finished background reviewer, named by its agent id, is refused",
+          {"to": RF_REVIEW_AGENT, "message": RF_MSG}, rf_path("bg-reviewer-finished"))
+rf_refuse("a finished background reviewer, named by its spawn name, is refused",
+          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-finished"))
+rf_refuse("a finished foreground reviewer, named by its spawn name, is refused",
+          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("fg-reviewer-finished"))
+rf_refuse("a finished design-reviewer, named by its spawn name, is refused",
+          {"to": RF_DESIGN, "message": RF_MSG}, rf_path("bg-design-reviewer-finished"))
+rf_refuse("a finished reviewer far up a long transcript is refused",
+          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("long-reviewer-finished"))
+rf_refuse("the latest spawn with the name wins: an older running builder, then a newer finished reviewer, is refused",
+          {"to": RF_SHARED, "message": RF_MSG}, rf_path("shared-name-running-builder-then-finished-reviewer"))
+# Allowed: the target runs, is not a reviewer, is not in the transcript, or the send is not the main session's.
+rf_allow("a running reviewer is allowed, though another spawn's finish notice is in the transcript",
+         {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-running"))
+rf_allow("a finished builder is allowed, though a reviewer in the same session finished",
+         {"to": RF_BUILDER, "message": RF_MSG}, rf_path("builder-finished"))
+rf_allow("the latest spawn with the name wins: an older finished reviewer, then a newer running builder, is allowed",
+         {"to": RF_SHARED, "message": RF_MSG}, rf_path("shared-name-finished-reviewer-then-running-builder"))
+rf_allow("a send to main is allowed", {"to": "main", "message": RF_MSG}, rf_path("bg-reviewer-finished"))
+rf_allow("a name that matches no spawn (a peer session) is allowed",
+         {"to": "session-peer-pr9", "message": RF_MSG}, rf_path("bg-reviewer-finished"))
+rf_allow("an agent's own send (a payload with agent_id) is not judged by this rule",
+         {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-finished"), agent_id=RR_AGENT)
+rf_allow("a send in a transcript with no spawn at all is allowed",
+         {"to": RF_REVIEW, "message": RF_MSG}, rf_path("no-spawn"))
+rf_allow("a missing transcript is allowed, never refused",
+         {"to": RF_REVIEW, "message": RF_MSG}, rf_path("missing"))
+# Asked: the target is a reviewer whose result shape is unknown, so the guard cannot tell whether it finished.
+rf_ask("a reviewer whose launch result holds a bare string asks",
+       {"to": RF_UNKNOWN, "message": RF_MSG}, rf_path("reviewer-unknown-result"))
+rf_ask("a reviewer whose notice names its id with no status asks",
+       {"to": RF_NOTICE_AGENT, "message": RF_MSG}, rf_path("reviewer-notice-no-status"))
 
 
 # =========================================================================== 5d. cite by id
