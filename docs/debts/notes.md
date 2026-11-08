@@ -1509,5 +1509,4 @@
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - env-cwd-prose-false-alarm: `echo "(cwd=.envs)"` and `python3 -c "print('x (cwd=.envs):')"` are refused on main and on this branch, because the guard reads the prose as a working-directory change. Nothing but decision prose tracked them (hooks/guard_env.py). Decision: env-file-stays-unread.
-- ag-glued-value-env: `ag -fp .env K` passes. `ag -fG .env K` is refused (hooks/guard_env.py). Decision: env-file-stays-unread.
 - jq-lone-word-false-alarm: `jq --arg k v .environment f.json`, `jq --indent 2 .envs f.json`, `yq -o json .envs f.yaml`, a lone `jq .envs` and `cat f | jq .environment` are still refused. For jq and gojq a lone word is never a file (hooks/guard_env.py). Decision: env-file-stays-unread.
