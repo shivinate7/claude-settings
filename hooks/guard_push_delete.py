@@ -805,6 +805,21 @@ def npm_prefix(where: str) -> str:
         folder = parent
 
 
+def npm_prefix_flag(words, where: str) -> str:
+    """The folder `--prefix <dir>` or `--prefix=<dir>` names, from `where` when relative, else ''. npm uses
+    that folder as the prefix as it stands, with no walk upward. The last flag wins, as in npm."""
+    value = ""
+    for at, word in enumerate(words):
+        if word == "--prefix" and at + 1 < len(words):
+            value = words[at + 1]
+        elif word.startswith("--prefix="):
+            value = word[len("--prefix="):]
+    value = value.strip("\"'")
+    if "$" in value or "`" in value or value.startswith("~"):
+        return ""  # the shell fills these in, so the guard cannot name the folder: the walk from `where` decides
+    return os.path.join(where, value) if value else ""
+
+
 def linked_nm_hit(segment: str, where: str) -> str:
     """Return the matched text when one segment runs a dependency install in `where`, or a
     recursive delete of what is inside a `node_modules`, and that `node_modules` is a link, else ''."""
@@ -828,7 +843,7 @@ def linked_nm_hit(segment: str, where: str) -> str:
                 subcommand = NPM_ALIASES.get(words[at].lower(), "")
                 break
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
-                os.path.join(npm_prefix(where), "node_modules")):
+                os.path.join(npm_prefix_flag(words, where) or npm_prefix(where), "node_modules")):
             return "npm " + subcommand + " in a folder whose node_modules is a link"
         return ""
 
