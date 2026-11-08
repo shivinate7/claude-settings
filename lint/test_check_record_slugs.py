@@ -62,10 +62,13 @@ NOTE_DUP_TEXT = ("# Notes\n\n"
 NOTE_MID_ROW_TEXT = ("# Notes\n\n"
                      "- beta-slug: the cause is alpha-slug: unmeasured, see its row.\n"
                      "- gamma-slug: alpha-slug: is named again inside this row's text.\n"
-                     "- alpha-slug: the only row that starts with the slug.\n")
+                     "- alpha-slug: the only row that starts with the slug.\n"
+                     "- delta-slug: see - alpha-slug: quoted.\n")  # `- ` before the slug in a row's text: no row
 NOTE_OPENERS_TEXT = ("# Notes\n\n"
                      "- beta-slug: a row with `/*`, `//` and # in its text. Don't stop there.\n"
                      "- beta-slug: the second row, which makes the duplicate.\n")
+NOTE_CASE_TEXT = NOTE_DUP_TEXT.replace("- alpha-slug: the same", "- Alpha-slug: the same")  # the slug in another case
+NOTE_SPACE_TEXT = NOTE_DUP_TEXT.replace("- alpha-slug: the same", "- alpha-slug : the same")  # a space before the colon
 FULL_UNIQUE = "# Notes\n\n" + "".join("- row-%03d-slug: finding %d.\n" % (i, i) for i in range(300))  # full size
 FULL_DUP = FULL_UNIQUE + "- row-000-slug: the first row, written again at the end.\n"
 
@@ -439,14 +442,31 @@ class DuplicateNoteSlugTests(unittest.TestCase):
 
     def test_slug_named_mid_row_is_not_counted(self):
         fn = self.under_test()
-        self.assertEqual(NOTE_MID_ROW_TEXT.count("- alpha-slug:"), 1)  # scope: one row starts with the slug
-        self.assertEqual(NOTE_MID_ROW_TEXT.count("alpha-slug:"), 3)  # two more name it inside a row's text
-        self.assertEqual(fn(NOTE_MID_ROW_TEXT), [])
+        starts = [line for line in NOTE_MID_ROW_TEXT.splitlines() if line.startswith("- alpha-slug:")]
+        self.assertEqual(len(starts), 1)  # scope: one row starts with the slug
+        self.assertEqual(NOTE_MID_ROW_TEXT.count("alpha-slug:"), 4)  # three more name it inside a row's text
+        self.assertEqual(fn(NOTE_MID_ROW_TEXT), [], "a slug named inside a row's text is counted as a row")
 
     def test_comment_openers_and_a_lone_quote_in_row_text_do_not_hide_a_duplicate(self):
         fn = self.under_test()
         self.assertEqual(NOTE_OPENERS_TEXT.count("- beta-slug:"), 2)  # scope: the two rows
         self.assertEqual(fn(NOTE_OPENERS_TEXT), ["beta-slug"])
+
+    def test_one_slug_in_two_cases_is_one_duplicate(self):
+        fn = self.under_test()
+        self.assertEqual(fn("# Notes\n\n- Alpha-slug: one row alone.\n- beta-slug: another row.\n"), [])  # control
+        self.assertEqual(NOTE_CASE_TEXT.count("- alpha-slug:"), 1)  # scope: the two rows differ only in case
+        self.assertEqual(NOTE_CASE_TEXT.count("- Alpha-slug:"), 1)
+        self.assertEqual([slug.lower() for slug in fn(NOTE_CASE_TEXT)], ["alpha-slug"],
+                         "`- Alpha-slug:` and `- alpha-slug:` are not counted as one duplicate")
+
+    def test_one_slug_with_a_space_before_the_colon_is_one_duplicate(self):
+        fn = self.under_test()
+        self.assertEqual(fn("# Notes\n\n- alpha-slug : one row alone.\n- beta-slug: another row.\n"), [])  # control
+        self.assertEqual(NOTE_SPACE_TEXT.count("- alpha-slug :"), 1)  # scope: one row has the space
+        self.assertEqual(NOTE_SPACE_TEXT.count("- alpha-slug:"), 1)
+        self.assertEqual(fn(NOTE_SPACE_TEXT), ["alpha-slug"],
+                         "`- alpha-slug :` and `- alpha-slug:` are not counted as one duplicate")
 
 
 class ImportTests(unittest.TestCase):
