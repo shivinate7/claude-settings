@@ -1062,6 +1062,50 @@ class GuardRuleIdReadTests(unittest.TestCase):
             self.fail("false alarm: the reader refused an inline conditional of two literal ids: %s" % why)
         self.assertEqual(ids, {"inline-a", "inline-b"})
 
+    def test_a_refuse_def_whose_id_parameter_is_not_named_rule_lists_its_id(self):
+        # Scope first: the same def with its id parameter named `rule` already lists the id its call passes.
+        def_src = ('def refuse(payload, tool, %s, reason, matched):\n'
+                   '    guard_core.refuse(tool, "deny", %s, reason, matched)\n')
+        call = 'def go(payload, tool):\n    refuse(payload, tool, "%s", "why", "m")\n'
+        self.assertEqual(self.listed(def_src % ("rule", "rule") + call % "named-rule-control"),
+                         {"named-rule-control"},
+                         "control: a refuse() def whose id parameter is `rule` lists the id its call passes")
+        self.assertEqual(self.listed(def_src % ("rule_id", "rule_id") + call % "renamed-param-rule"),
+                         {"renamed-param-rule"},
+                         "a refuse() def whose id parameter is not named `rule` loses the id its call passes")
+
+    def test_a_refuse_def_whose_rule_is_keyword_only_lists_its_id(self):
+        # Scope first: the same def with `rule` as a positional parameter lists the id a keyword call passes.
+        def_src = 'def refuse(tool, %s):\n    guard_core.refuse(tool, "deny", rule, "R", "m")\n'
+        call = 'def go(t):\n    refuse(t, rule="%s")\n'
+        self.assertEqual(self.listed(def_src % "rule" + call % "positional-rule-control"),
+                         {"positional-rule-control"},
+                         "control: a refuse() def whose `rule` is positional lists the id a keyword call passes")
+        self.assertEqual(self.listed(def_src % "*, rule" + call % "kwonly-rule"), {"kwonly-rule"},
+                         "a refuse() def whose `rule` is keyword-only loses the id a keyword call passes")
+
+    def test_a_loop_row_that_is_a_def_local_name_lists_its_id(self):
+        # Scope first: a def-local literal named in a call, and a loop over literals, already list their ids.
+        direct = 'def go(tool):\n    LOCAL = "local-rule"\n    refuse(tool, "deny", LOCAL, R, m)\n'
+        self.assertEqual(self.listed(direct), {"local-rule"}, "control: a def-local literal named in a call is listed")
+        literals = 'def go(tool):\n    for r in ("lit-a", "lit-b"):\n        refuse(tool, "deny", r, R, m)\n'
+        self.assertEqual(self.listed(literals), {"lit-a", "lit-b"}, "control: a loop over literals lists each id")
+        empty = 'def go(tool):\n    for r in ():\n        refuse(tool, "deny", r, R, m)\n'
+        self.assertEqual(self.listed(empty), set(), "control: a loop over an empty tuple lists no id")
+        src = ('def go(tool):\n    LOCAL = "local-rule"\n    for r in (LOCAL, "lit-rule"):\n'
+               '        refuse(tool, "deny", r, R, m)\n')
+        self.assertEqual(self.listed(src), {"local-rule", "lit-rule"},
+                         "a loop row that is a def-local name drops its id: the row must resolve in the def")
+
+    def test_an_unpacked_row_element_that_is_a_def_local_name_lists_its_id(self):
+        # Scope first: the same unpack over literal rows lists both ids; the local row element is the only gap.
+        loop = ('def go(tool):\n    LOCAL = "local-rule"\n    for hit in (%s, ("lit-rule", "why")):\n'
+                '        rule, why = hit\n        refuse(tool, "deny", rule, why, m)\n')
+        self.assertEqual(self.listed(loop % '("lit-a", "why a")'), {"lit-a", "lit-rule"},
+                         "control: an unpacked loop over literal rows lists each id")
+        self.assertEqual(self.listed(loop % '(LOCAL, "why a")'), {"local-rule", "lit-rule"},
+                         "an unpacked loop row whose id is a def-local name drops that id")
+
 
 # ------------------------------------------------------------ parse cache
 # `_parsed` keeps one tree per test file, keyed on its path, size and mtime. A file rewritten in place
