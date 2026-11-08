@@ -14,9 +14,12 @@ records that run as a trailer on the commit that adds the test:
     Red-run: none: <reason>                         a change that adds no new claim, such as a re-pointed fixture
 
 A message passes only when it has at least one Red-run line and every Red-run line is valid: one malformed line fails the
-commit, even beside a valid one. The failed form refuses a command whose first word is in REFUSED_FIRST_WORDS (a typo
-of `mutant` or `none`, such as `mutants:`, `mutation:`, a no-colon `mutant A (...)` or `non:`), so a typo is not read as
-a failed form. Two main commits (408340997, 1762ec79f) wrote the no-colon mutant form.
+commit, even beside a valid one. A line counts as a Red-run line when its key reads `red-run` followed by optional spaces and a colon at line
+start, in any case (`Red-Run:`, `red-run:`, `Red-run :`); a key that is not exactly `Red-run:` is malformed. Prose that
+mentions red-run mid-line is not judged. The failed form refuses a command whose first word starts with `mutant` or
+`mutation` (`mutants:`, `mutation:`, `mutant(A)`, `mutant-A`, `mutantA:`, a no-colon `mutant A (...)`), or is exactly
+`mutate`, `none` or `non`, so a typo is not read as a failed form. Two main commits (408340997, 1762ec79f) wrote the
+no-colon mutant form.
 
 A line whose keyword reads `mutant` is judged by the mutant form alone, never by the command form. The mutant
 pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case,
@@ -51,10 +54,10 @@ MUTANT_KEY = re.compile(r"^Red-run:\s*(?i:mutant)\s*:")  # routes a line to the 
 MUTANT = re.compile(r"^Red-run:\s*(?i:mutant)\s*: \s*\S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
 REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILINE)
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
-# First words a failed-form command may not start with. Each is a typo of the mutant or none keyword, or the start of
-# a free-form mutant line (`mutant A (...)`). The failed pattern would accept them as a command, so a typo such as
-# `mutants:` would pass as a failed form that never ran. No real command starts with one of these words.
-REFUSED_FIRST_WORDS = frozenset(("mutant", "mutants", "mutation", "mutations", "mutate", "none", "non"))
+RED_KEY = re.compile(r"^red-run\s*:", re.IGNORECASE)  # a Red-run line in any case; only `Red-run:` exactly can be valid
+# First words, besides the mutant-like ones (`mutant_like`), a failed-form command may not be. Each is a typo of the none
+# keyword. The failed pattern would accept it as a command that never ran. No real command is one of these words.
+REFUSED_NONE_WORDS = frozenset(("none", "non"))
 FIELD = "\x1f"
 MAX_PATHS = 5
 
@@ -85,17 +88,19 @@ def valid_line(line):
     if NONE.match(line):
         return True
     red = RED.match(line)
-    return bool(red) and int(red.group(1)) >= 1 and command_of(line) not in REFUSED_FIRST_WORDS
+    return bool(red) and int(red.group(1)) >= 1 and not mutant_like(line) and command_of(line) not in REFUSED_NONE_WORDS
 
 
 def mutant_like(line):
-    """True when a refused line looks like a try at the mutant form, so the remedy can name that form."""
-    return command_of(line).startswith(("mutant", "mutation"))
+    """True when the failed-form command starts like the mutant keyword: it starts with `mutant` or `mutation`, or is
+    `mutate`. The one home of the mutant-like refusal and of the hint that names the mutant form. Pure."""
+    word = command_of(line)
+    return word.startswith(("mutant", "mutation")) or word == "mutate"
 
 
 def has_valid_trailer(message):
     """True when the message has a Red-run line and every Red-run line is valid. Pure: it reads no repo."""
-    lines = [line for line in message.splitlines() if line.startswith("Red-run:")]
+    lines = [line for line in message.splitlines() if RED_KEY.match(line)]
     return bool(lines) and all(valid_line(line) for line in lines)
 
 
@@ -141,7 +146,7 @@ def gaps(root, base):
             continue
         if not has_valid_trailer(message):
             hint = ""
-            if any(mutant_like(l) and not valid_line(l) for l in message.splitlines() if l.startswith("Red-run:")):
+            if any(mutant_like(l) and not valid_line(l) for l in message.splitlines() if RED_KEY.match(l)):
                 hint = "; a mutant line reads `Red-run: mutant: <mutation> -> <N> failed on <sha>`"
             shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
             lines.append("check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer%s" % (sha[:7], subject, shown, hint))
