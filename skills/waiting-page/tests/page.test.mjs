@@ -7894,7 +7894,7 @@ const edgeBad = async (page, edges, scheme) => {
   return bad;
 };
 
-// The dashed buttons draw an unpressed edge that must reach 3:1 (debt alts-dash-edge-contrast). Overturn on a ruling card is one of them.
+// The dashed buttons draw an unpressed edge that must reach 3:1. Overturn on a ruling card is one of them.
 for (const scheme of ["light", "dark"]) {
   test(`the unpressed None of these, Mark done, Park and Overturn buttons draw an edge of 3:1 or more on their card and on the page, ${scheme} scheme`, async (t) => {
     const page = await open(t, { items: [DECISION, TASK, ARBITER], scheme }); if (!page) return;
@@ -7943,7 +7943,7 @@ for (const scheme of ["light", "dark"]) {
   });
 }
 
-// The rail rows share .ov-head (debt rail-row-touch-height). Its 44px floor is for a coarse pointer only: the fine page stays exactly 32px, so a 44px floor for every pointer fails here.
+// The rail rows share .ov-head. Its 44px floor is for a coarse pointer only: the fine page stays exactly 32px, so a 44px floor for every pointer fails here.
 test("each rail row is 44px tall or more on a coarse pointer, and 32px on a fine one, at 390 wide", async (t) => {
   const items = [DECISION, TASK, ARBITER];
   const page = await open(t, { items, answers: SAVED_A, hasTouch: true, viewport: { width: 390, height: 844 } }); if (!page) return;
@@ -7957,7 +7957,7 @@ test("each rail row is 44px tall or more on a coarse pointer, and 32px on a fine
   assert.deepEqual([...bad, ...fineBad], []);
 });
 
-// The rail's chips are 32px and have no coarse-pointer rule. Fine stays exactly 32px.
+// The rail's chips are 32px on a fine pointer and 44px on a coarse one. Fine stays exactly 32px.
 for (const width of [390, 1280]) {
   test(`each rail chip is 44px tall or more on a coarse pointer, and 32px on a fine one, at ${width} wide`, async (t) => {
     const items = [DECISION, TASK, mk("pair-a", 3, { group: "pair" }), mk("pair-b", 4, { group: "pair" })];
