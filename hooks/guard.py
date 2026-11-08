@@ -2060,7 +2060,7 @@ MESSAGE_ANAPHORS = {"it", "that", "them"}
 # value` is two words.
 MESSAGE_DETERMINERS = {"the", "this", "that", "these"}
 MESSAGE_TEST_SIDE_NOUNS = {"assert", "assertion", "case", "cases", "test", "tests", "expected value", "fixture"}
-MESSAGE_PRODUCT_SIDE_NOUNS = {"guard", "bug", "code", "hook", "function", "fix"}
+MESSAGE_PRODUCT_SIDE_NOUNS = {"guard", "bug", "code", "hook", "function", "fix"}  # glossary-ok: bug is a word the messages use
 # `make it pass by changing X` is an edit of X, not a goal.
 MESSAGE_EDIT_GERUNDS = {"editing", "changing", "fixing", "updating", "modifying", "replacing", "rewriting", "adding",
                         "removing", "deleting", "dropping", "re-pointing", "writing"}
