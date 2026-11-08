@@ -105,14 +105,21 @@ def peer_msg(body, stamp=None, from_session="local_fixture"):
     return rec
 
 
-def tool_use_msg(name, input_=None):
+def tool_use_msg(name, input_=None, tool_use_id=None):
     block = {"type": "tool_use", "name": name, "input": input_ or {}}
+    if tool_use_id is not None:
+        block["id"] = tool_use_id
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [block]}}
 
 
-def tool_result_msg(tool_use_id="tu_1"):
+def tool_result_msg(tool_use_id="tu_1", resolved_model=None):
     block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": "ok"}
-    return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
+    rec = {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
+    if resolved_model is not None:
+        # An Agent call's result names the model the agent ran, top level beside `message`
+        # (measured on a real transcript as toolUseResult.resolvedModel).
+        rec["toolUseResult"] = {"resolvedModel": resolved_model}
+    return rec
 
 
 def assistant_text(text):
@@ -854,6 +861,8 @@ NAMED_REPORT = "> **Done** BUILT the guard, PR #5 (%s)\n> **Next** Unstarted: no
 BUILDER_UNKNOWN = {"subagent_type": "builder", "prompt": "Round 1 of 3"}
 BUILDER_SONNET = {"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}
 REVIEWER_HAIKU = {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}
+# A builder's third try runs on opus (roles-third-round-steps-up), and its call names opus.
+BUILDER_OPUS_ROUND3 = {"subagent_type": "builder", "model": "opus", "prompt": "Round 3 of 3"}
 # Reports for the Next waiver: Done is the test-author's OTHER line, and Next names the role still running.
 TEST_AUTHOR_DONE = "OTHER: the test-author wrote 31 cases, red on main, at b5c911b10 (test-author haiku)"
 TEST_AUTHOR_AND_BUILDER_DONE = (
@@ -864,6 +873,15 @@ def waiver_report(next_line, done=TEST_AUTHOR_DONE):
     return "> **Done**\n> - %s\n>\n> **Next**\n> - %s" % (done, next_line)
 
 
+def spawn_records(spawn):
+    """The call and its result for one Agent spawn, under a tool_use id of its own, as a real transcript
+    pairs them. `spawn` is the call's input, or (input, resolved_model) when the result names the model
+    the agent ran."""
+    inp, resolved = spawn if isinstance(spawn, tuple) else (spawn, None)
+    use_id = "tu_spawn_" + uuid.uuid4().hex[:8]
+    return [tool_use_msg("Agent", inp, tool_use_id=use_id), tool_result_msg(use_id, resolved_model=resolved)]
+
+
 def prior_records(earlier=()):
     """The records before the window the model-name check reads. With `earlier` spawns, they come
     first, then a report, then the Stop hook's feedback record. That record is a plain user text
@@ -872,7 +890,7 @@ def prior_records(earlier=()):
     if not earlier:
         return records
     for spawn in earlier:
-        records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        records += spawn_records(spawn)
     return records + [assistant_text("Round 1 is in."), human("Stop hook feedback: send the report")]
 
 
@@ -935,9 +953,11 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def verdict(self, reply, spawns, denied=(), earlier=(), env_model="sonnet"):
+        """`spawns` and `earlier` take each spawn's input, or (input, resolved_model) for a spawn whose
+        result names the model it ran."""
         records = prior_records(earlier)
         for spawn in spawns:
-            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+            records += spawn_records(spawn)
         for spawn in denied:
             use = tool_use_msg("Agent", spawn)
             use["message"]["content"][0]["id"] = "tu_denied"
@@ -1103,6 +1123,54 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict(waiver_report("The builder opus builds the tree check.",
                                          done=TEST_AUTHOR_AND_BUILDER_DONE), [BUILDER_SONNET])
         assert_no_model_block(self, out)
+
+    def test_dm_red_role_word_in_done_code_span_is_ignored(self):
+        # The quoted `reviewer opus` is code, not a claim about the reviewer. The reviewer ran sonnet.
+        out = self.verdict(NAMED_REPORT % "builder sonnet, reviewer sonnet, quoting `reviewer opus`",
+                           [BUILDER_SONNET, REVIEWER_SONNET])
+        assert_no_model_block(self, out)
+
+    def test_dm_red_role_word_in_next_code_span_is_ignored(self):
+        # The reviewer finished: Next quotes its row in code. Done must still name the reviewer.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet)\n"
+                           "> **Next** Unstarted: none; the `reviewer` row is quoted",
+                           [BUILDER_SONNET, REVIEWER_SONNET])
+        assert_blocks(self, out, "no model named for reviewer")
+
+    def test_dm_pin_lone_backtick_keeps_role_word_in_done(self):
+        # A lone backtick opens no code span, so "reviewer opus" still counts and matches no spawn.
+        out = self.verdict(NAMED_REPORT % "`reviewer opus", [REVIEWER_SONNET])
+        assert_blocks(self, out, "'reviewer opus' matches no reviewer spawn")
+
+    def test_dm_red_round3_opus_builder_in_window_must_be_named(self):
+        # The window ran a sonnet builder and the opus third try. Done names only the sonnet one.
+        out = self.verdict(NAMED_REPORT % "builder sonnet", [BUILDER_SONNET, BUILDER_OPUS_ROUND3])
+        assert_blocks(self, out, "opus")
+
+    def test_dm_red_earlier_sonnet_builder_does_not_cover_window_opus(self):
+        # The sonnet builder ran in an earlier window, so Done may name sonnet. This window ran only opus.
+        out = self.verdict(NAMED_REPORT % "builder sonnet", [BUILDER_OPUS_ROUND3], earlier=[BUILDER_SONNET])
+        assert_blocks(self, out, "opus")
+
+    def test_dm_red_resolved_model_is_the_run_not_the_env(self):
+        # No model field, no pin, env sonnet. The result says the agent ran opus, so Done's sonnet is wrong.
+        out = self.verdict(NAMED_REPORT % "builder sonnet", [(BUILDER_UNKNOWN, "claude-opus-5-5")])
+        assert_blocks(self, out, "opus")
+
+    def test_dm_red_resolved_opus_name_passes(self):
+        # The same spawn: Done names the opus run the result recorded, so the env's sonnet does not block it.
+        out = self.verdict(NAMED_REPORT % "builder opus", [(BUILDER_UNKNOWN, "claude-opus-5-5")])
+        assert_no_model_block(self, out)
+
+    def test_dm_pin_window_names_every_model_it_ran(self):
+        out = self.verdict(NAMED_REPORT % "builder sonnet, builder opus", [BUILDER_SONNET, BUILDER_OPUS_ROUND3])
+        assert_no_model_block(self, out)
+
+    def test_dm_pin_backticked_role_never_counts(self):
+        # "`reviewer` haiku" names no role: the backticked reviewer is code. The reviewer ran haiku.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet); rule `reviewer` haiku\n"
+                           "> **Next** Unstarted: none", [REVIEWER_HAIKU])
+        assert_blocks(self, out, "no model named for reviewer")
 
 
 class UnstartedItemsTests(unittest.TestCase):
