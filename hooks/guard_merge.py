@@ -1031,6 +1031,13 @@ def _head_landed(module, repo: str, row) -> bool:
         raise RuntimeError("the compare read failed: " + str(e))
 
 
+def open_pull_rows(module, repo: str):
+    """The open pull request rows of `repo`, every page, through the merge tool's page reader `module`. The one home of
+    this read: rules lane-closes-after-records and lane-step-dup call it. A failed read raises."""
+    with module.shared_deadline(MERGE_READ_TIMEOUT):
+        return module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+
+
 def archive_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
     get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
@@ -1058,8 +1065,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
         for repo in repos:
-            with module.shared_deadline(MERGE_READ_TIMEOUT):
-                rows = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
+            rows = open_pull_rows(module, repo)
             for row in rows:
                 ref = str(row["head"]["ref"])
                 slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
@@ -1149,6 +1155,14 @@ STEP_DUP_REASON = (
     "session %s is live and carries cs-step:%s in the same repo, so this would start a second lane on one step. "
     "Send the work to that session with send_message instead." + STEP_DUP_TAIL
 )
+STEP_DUP_PR_REASON = (
+    "open pull request %s of this repo has the head of step %s, so a lane holds the step that the list read did not "
+    "show, and this would start a second one. Send the work to that lane, or close the pull request, then retry." + STEP_DUP_TAIL
+)
+STEP_DUP_RECORD_REASON = (
+    "the step record of %s on origin/roadmap names %s as its lane, and the list read did not show that session as a "
+    "carrier. Send the work to that session, or fix the record's lane field, then retry." + STEP_DUP_TAIL
+)
 STEP_DUP_UNKNOWN_REASON = (
     "this session's transcript does not prove that no other live lane carries cs-step:%s in this repo: it holds no "
     "whole list_sessions result, the newest one has more pages or did not parse, or the subject has no cs-repo tag "
@@ -1162,17 +1176,24 @@ def _tag_values(tags, prefix: str):
     return [v for v in (str(t)[len(prefix):].strip() for t in tags if str(t).startswith(prefix)) if v]
 
 
-def step_dup_hit(tool: str, tool_input, transcript: str):
+def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
     """Return (decision, matched, reason) when this call would put a second live lane on a step, else None. The
     call is a lane brief (send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.`, parsed as
     brief_hit parses it) or a create_session tagged cs-step:<step>. It is denied when another live session, not the
     brief's target, carries that step and shares a cs-repo tag with the subject (the target's record, or the create's
     own tags); the reason names that session. A session is live unless its newest sight in this transcript is
-    archived (hooks/own_session.py session_rows_read). With no carrier found, anything short of a whole
-    list_sessions read, or a subject with no cs-repo tag, is an ask: unknown, never an allow. Fails closed: an error
-    in the reads is an ask, because the guard-wide crash path fails open. Known limit: only this transcript is read,
-    so a session started after the newest list read is not seen.
-    Cost: one transcript read per brief or create with a step; no file written, no process, no extra tool call."""
+    archived (hooks/own_session.py session_rows_read). Any one whole list_sessions read earlier in the transcript
+    counts, however old: a newer page with more pages, or a body that did not parse, is the read that decides.
+    With no carrier found, anything short of a whole read, or a subject with no cs-repo tag, is an ask: unknown, never
+    an allow. After a whole read with no carrier, two more reads can still ask: an open pull request of the cs-repo
+    whose head is lane_head_refs(step), when the target does not carry the step, and the step record on origin/roadmap
+    (`lane` field) naming a session id other than the target. A failed pull request or record read is an ask; a lane
+    field with no session id gives no verdict. Fails closed: an error in the reads is an ask, because the guard-wide
+    crash path fails open. Known limit: only this transcript is read, so a session started after the newest list
+    read is not seen.
+    Cost: one transcript read per brief or create with a step, no file written, no process, no extra tool call; the
+    coordinator pays about one list_sessions call per session. Only after a whole read found no carrier: one gh read
+    (open pull requests per cs-repo tag) plus one local git read (the step record)."""
     if not isinstance(tool_input, dict) or tool not in (BRIEF_TOOL, CREATE_TOOL):
         return None
     target = None
@@ -1208,8 +1229,40 @@ def step_dup_hit(tool: str, tool_input, transcript: str):
                         return "deny", "lane step " + step + " carried by " + sid, STEP_DUP_REASON % (sid, step)
         if not repos or listing != own_session.LIST_FULL:
             raise ValueError("not proved")
-    except Exception:
+        held = _step_held_hit(steps, subject, records.get(target, ([], False))[0], target, cwd)
+        if held:
+            return "ask", held[0], held[1]
+    except (Exception, SystemExit):
         return ("ask",) + unknown
+    return None
+
+
+def _step_held_hit(steps, subject, target_tags, target, cwd: str):
+    """(matched, reason) when a step is held by a lane the list read did not show, else None; raises when a read fails.
+    An open pull request in a cs-repo of `subject` whose head is lane_head_refs(step), unless the target's own tags
+    carry the step, or the step record's `lane` field names a session id other than `target`. The pull request read
+    is open_pull_rows, the one reader archive_hit uses; the record is read from override.STEP_REF."""
+    import override  # lazy: holds the one name of the record branch and its step folder
+    module = merge_module()
+    if module is None:
+        raise RuntimeError("the merge tool could not be loaded")
+    repos = _tag_values(subject, ARCHIVE_REPO_PREFIX)
+    for step in steps:
+        if step not in _tag_values(target_tags, ARCHIVE_STEP_PREFIX):
+            for repo in repos:
+                if not _REPO_NAME.fullmatch(repo):
+                    raise ValueError("not an owner/name repo tag")
+                for row in open_pull_rows(module, repo):
+                    if str(row["head"]["ref"]) in lane_head_refs(step):
+                        return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
+                                STEP_DUP_PR_REASON % (row.get("number", "?"), step))
+        shown = _git(cwd, "show", override.STEP_REF + ":" + override.STEP_DIR + step + ".json") if cwd else None
+        if shown is None or shown.returncode != 0:
+            raise ValueError("the step record could not be read")
+        lane = json.loads(shown.stdout).get("lane")
+        named = [i for i in re.findall(r"session_[A-Za-z0-9_-]+", lane) if i != target] if isinstance(lane, str) else []
+        if named:
+            return ("lane step " + step + " recorded for " + named[0], STEP_DUP_RECORD_REASON % (step, named[0]))
     return None
 
 

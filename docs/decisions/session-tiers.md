@@ -140,9 +140,11 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Verdict: a lane brief (the `lane-one-topic` marker line) or a `create_session` tagged `cs-step:<step>` is denied when another live session, not the brief's target, carries `cs-step:<step>` and shares a `cs-repo` tag with the subject (the target's record, or the create's own tags). The reason names that session and says to send the work there.
   - Live: a session is not live when its newest sight in the transcript has an archived `session_status`, or an `archive_session` call on it, answered without error, follows that sight.
   - Unknown reads ask, never allow: no whole `list_sessions` read in the transcript (the newest one has more pages, did not parse, or there is none) with no carrier found, a brief whose target has no record, and a subject with no `cs-repo` tag. A carrier found on a page with more pages is a deny. An override lifts it.
+  - Any one whole `list_sessions` read earlier in the transcript counts, with no freshness limit (coordinator ruling, round 2). The coordinator pays about one list call per session.
+  - Two more reads, only after a whole list read found no carrier. Each asks. (a) An open pull request of a shared `cs-repo` has a head ref in `lane_head_refs(step)`, and the brief's target does not carry the step. (b) The step record (`origin/roadmap`, path `roadmap/data/steps/<step>.json`, field `lane`) holds a `session_` id other than the target. A failed pull request read or step record read asks. A `lane` field with no session id gives no verdict. The pull request read is the one `lane-closes-after-records` uses (`open_pull_rows`).
   - Steer: send the work to the carrier. To start a lane anyway, run `list_sessions` first.
   - Known limit: the guard sees only records in this transcript, so a session started after the coordinator's last `list_sessions` read is not seen. The coordinator runs `list_sessions` before a brief.
-  - Cost: one transcript read per brief or create with a step; none otherwise. No file written, no process, no extra tool call.
+  - Cost: one transcript read per brief or create with a step; none otherwise. No file written, no process, no extra tool call. Only after a whole list read found no carrier: one `gh` read (open pull requests, per `cs-repo` tag) plus one local `git` read (the step record).
   - Tests: family `lane-step-dup` in `hooks/test_guard.py`.
   - Landed at merge.
 

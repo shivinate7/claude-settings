@@ -126,7 +126,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        list_sessions, get_session and create_session records. Archived by status or by a later
                        archive_session means not live. The reason names the carrier. Ask, never allow: no whole
                        list_sessions read (the newest has more pages, did not parse, or none exists) with no carrier
-                       found, or a subject with no cs-repo tag. An override lifts it.
+                       found, or a subject with no cs-repo tag. After a whole read with no carrier it also asks when an
+                       open pull request of the cs-repo has the step's head ref (lane_head_refs) and the target does
+                       not carry the step, or the step record on origin/roadmap names another session in its `lane`
+                       field; a failed read of either asks. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -5256,7 +5259,7 @@ def judge(payload) -> None:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     # A second live lane on one step: a brief or a create naming a step another live lane of the repo carries (rule lane-step-dup).
-    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    doubled = step_dup_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", cwd)
     if doubled:
         refuse(tool, doubled[0], "lane-step-dup", doubled[2], doubled[1])
 
