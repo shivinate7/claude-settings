@@ -2057,7 +2057,11 @@ MESSAGE_TEST_NOUNS = {"case", "cases", "test", "assert"}
 MESSAGE_LOCATIONS = {"in", "at", "of", "to", "into"}
 MESSAGE_PREPOSITIONS = MESSAGE_LOCATIONS | {"for", "from", "with", "on", "by", "as", "about"}
 # A word that may sit between an edit verb and the path it takes directly (`edit the file X`).
-MESSAGE_DIRECT = MESSAGE_NOT_VERB_BEFORE | {"file", "files"}
+# `only` and `just` narrow the object and keep it direct (`Edit only X`).
+MESSAGE_DIRECT = MESSAGE_NOT_VERB_BEFORE | {"file", "files", "only", "just"}
+# Words after a path that hand the edit back (`Fix X is not your job`): the clause is no order for that path.
+MESSAGE_NOT_YOURS = (("is", "not", "your", "job"), ("is", "not", "yours"), ("isn't", "your", "job"),
+                     ("isn't", "yours"))
 # The word right after an edit verb that points back to a path a read verb named (`Read X. Replace it.`).
 MESSAGE_ANAPHORS = {"it", "that", "them"}
 # A role noun after one of these determiners is an anaphor too (`Fix the tests`). A test-side noun carries only a test
@@ -2229,6 +2233,9 @@ def _message_edits(words):
             slot = False
             direct = joined or all(w in MESSAGE_DIRECT for w, _, _ in words[verb_at + 1:at])
             if note or _message_goal(words, at) or not (direct or before in MESSAGE_LOCATIONS):
+                continue
+            ahead = tuple(w for w, _, _ in words[at + 1:at + 5])
+            if any(ahead[:len(tail)] == tail for tail in MESSAGE_NOT_YOURS):
                 continue
             governed.append((path, test_object and not direct))
             named.append((path, "edit", test_object and not direct))
