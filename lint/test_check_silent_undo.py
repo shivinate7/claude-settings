@@ -2998,6 +2998,30 @@ class LostSentence(unittest.TestCase):
                                 "the footer %s prints for a lost sentence does not give the `- <slug>` form for drop-note: %r"
                                 % (surface, lines[0]))
 
+    def test_a_plain_lost_line_refusal_outside_the_notes_path_gives_no_slug_form_in_either_footer(self):
+        """A merge that drops a line of app.txt, with no revived note and no lost sentence in it, is refused as a plain lost line.
+        Only a notes line has a slug, so neither footer may offer the `- <slug>` form. Both surfaces are read, as in the footer test above."""
+        import merge
+        r, _ = drop_merge(["added by main"])
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and "drops" in p for p in got), "premise: the merge does not refuse the dropped line of app.txt: %r" % got)
+        self.assertFalse(any(isinstance(p, C.SlugKept) for p in got), "premise: a problem is a revived or lost-sentence line, so the slug form may belong: %r" % got)
+        rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", r.dir], "utf-8")
+        self.assertEqual(rc, 1, "premise: the CLI does not refuse the merge: %r" % text)
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(r.dir, "origin/main")
+        refusal = str(cm.exception)
+        footers = {
+            "the CLI": [line for line in text.splitlines() if line.startswith("silent-undo: put the work back")],
+            "the merge tool": [line for line in refusal.splitlines() if line.startswith("Put it back, or add the trailer")],
+        }
+        for surface, lines in footers.items():
+            with self.subTest(surface=surface):
+                self.assertEqual(len(lines), 1, "premise: %s prints one footer line: %r" % (surface, lines))
+                self.assertNotIn("- <slug>", lines[0],
+                                 "the footer %s prints for a plain lost line outside the notes path gives the `- <slug>` form: %r"
+                                 % (surface, lines[0]))
+
 
 if __name__ == "__main__":
     unittest.main()
