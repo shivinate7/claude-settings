@@ -376,6 +376,9 @@ TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
 RESULT_PATH = re.compile(r"Output is being written to: (.*?\.output)", re.S)
 STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
 TERMINAL = ("completed", "failed", "killed", "stopped")
+TASK_SUMMARY = re.compile(r"<summary>(.*?)</summary>", re.S)
+# An agent's notice with a terminal status whose summary says this still runs: it waits on work of its own.
+WAITING_ON_OWN = "is waiting on its own background work"
 
 
 def text_of(content):
@@ -468,14 +471,17 @@ def scan_jobs(transcript):
              for k, v in jobs.items() if k not in done}, prev_stop)
 
 
-def closed_by_notice(text):
-    """The ids of the <task-notification> blocks in text with a terminal status."""
+def closed_by_notice(text, keep_waiting=False):
+    """The ids of the <task-notification> blocks in text with a terminal status. With keep_waiting, a
+    block whose summary says the agent waits on its own background work closes nothing."""
     ids = []
     if not TASK_NOTIFICATION_TAG:
         return ids
     for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
-        tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
+        tid, st, summary = TASK_ID.search(note), TASK_STATUS.search(note), TASK_SUMMARY.search(note)
         if tid and st and st.group(1).strip().lower() in TERMINAL:
+            if keep_waiting and summary and WAITING_ON_OWN in summary.group(1):
+                continue
             ids.append(tid.group(1).strip())
     return ids
 
@@ -491,6 +497,55 @@ def stopped_ids(content):
         msg = content
     m = STOPPED.match(msg) if isinstance(msg, str) else None
     return [m.group(1)] if m else []
+
+
+def open_agents(transcript):
+    """The ids of this session's background agents that still run, oldest first. An agent opens on the
+    answer to its spawn (toolUseResult.agentId, status async_launched) and reopens on a SendMessage
+    answer that resumes it (resumedAgentId). It closes on a terminal task notice, unless the notice's
+    summary says it waits on its own background work, or on the result of a TaskStop call. A foreground
+    agent never opens: its answer is its end. Reads only lines that hold one of the keys; raises on an
+    unreadable file, so a caller that must not fail wraps the call."""
+    running, stops = {}, set()
+    keys = (b"agentId", b"resumedAgentId", b"TaskStop", b"Successfully stopped") + NOTICE_KEY
+    with open(transcript, "rb") as f:
+        for line in f:
+            if not any(k in line for k in keys):
+                continue
+            try:
+                rec = json.loads(line)
+                kind = rec.get("type")
+                if kind == "attachment":  # a completion notice that arrives as a queued command
+                    att = rec.get("attachment")
+                    notice = att.get("prompt") if isinstance(att, dict) else None
+                    if isinstance(notice, str):
+                        for gone in closed_by_notice(notice, keep_waiting=True):
+                            running.pop(gone, None)
+                    continue
+                content = rec["message"]["content"]
+                text = text_of(content)
+            except Exception:  # a bad or half-written line is skipped
+                continue
+            tur = rec.get("toolUseResult")
+            if kind == "assistant" and isinstance(content, list):
+                stops.update(b["id"] for b in content if isinstance(b, dict)
+                             and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
+                             and isinstance(b.get("id"), str))
+            elif kind == "user":
+                for gone in closed_by_notice(text, keep_waiting=True):
+                    running.pop(gone, None)
+                if isinstance(tur, dict):
+                    if tur.get("status") == "async_launched" and isinstance(tur.get("agentId"), str):
+                        running.setdefault(tur["agentId"], True)
+                    if isinstance(tur.get("resumedAgentId"), str):
+                        running.setdefault(tur["resumedAgentId"], True)
+                if isinstance(content, list):  # only the result of a TaskStop call of this session
+                    for b in content:
+                        if (isinstance(b, dict) and b.get("type") == "tool_result"
+                                and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops):
+                            for gone in stopped_ids(b.get("content")):
+                                running.pop(gone, None)
+    return list(running)
 
 
 def stop():

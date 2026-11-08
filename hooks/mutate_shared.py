@@ -71,8 +71,10 @@ def anchor_files(folder: str):
     holds the reads of the repository and of sessions that the guard and the janitor share, then
     proc_env.py, the one home of the exec-environment session-tag read, then reread_check.py,
     the one home of the handoff-unread check the guard calls, then own_session.py, the one home of
-    the own get_session read that guard_merge.py and lint/report_guard.py both import."""
-    shared = [os.path.join(folder, name) for name in ("git_reads.py", "proc_env.py", "reread_check.py", "own_session.py")]
+    the own get_session read that guard_merge.py and lint/report_guard.py both import, then stall_watch.py,
+    the one reader of the session's background work, which rule worktree-strands-agents calls."""
+    shared = [os.path.join(folder, name)
+              for name in ("git_reads.py", "proc_env.py", "reread_check.py", "own_session.py", "stall_watch.py")]
     return guard_files(folder) + [path for path in shared if os.path.exists(path)]
 
 

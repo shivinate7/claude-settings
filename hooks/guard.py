@@ -251,6 +251,15 @@ Other tools, in `judge` order:
                        message edits a path. No transcript, no spawn record, `main`, an unreadable file and any
                        other role pass. An override lifts it. `mcp__claude-code-remote__send_message` is not
                        judged. (message-role-scope)
+  worktree-strands-agents
+                       deny. An EnterWorktree from the main session (no `agent_id`) while an agent of this
+                       session runs. The running agents are read from the transcript by
+                       stall_watch.open_agents: an agent opens on its async spawn or a SendMessage resume,
+                       and closes on a terminal task notice (not one that says it waits on its own
+                       background work) or a TaskStop result. The refusal names each running agent and
+                       says to wait for each completion notice, or to enter before spawning. An agent's
+                       own call, no transcript, an unreadable file and a foreground agent pass. An
+                       override lifts it. (worktree-strands-agents)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
@@ -2341,6 +2350,36 @@ def message_role_hit(tool: str, tool_input, transcript):
                 and not author_path_ok(rel) and not is_workflow_rel(rel)):
             return path, MESSAGE_ROLE_AUTHOR_REASON
     return None
+
+
+# ---- worktree-strands-agents: an EnterWorktree from the main session while this session's agents run.
+# Each agent's home is a worktree under the checkout the session started in; a session that moves into a worktree
+# cuts every running agent off from its own (worktree-home refuses its next call). The running agents are read by
+# stall_watch.open_agents, the one reader of the session's background work.
+STRANDS_TOOL = "EnterWorktree"
+STRANDS_REASON = (
+    "This session's agents still run: %s. Entering a worktree now cuts each one off from its own, and its round is lost. "
+    "Wait for each agent's completion notice, or enter the worktree before you spawn agents. "
+    "(decision worktree-strands-agents, an EnterWorktree waits for the agents of the session)"
+)
+
+
+def worktree_strand_hit(payload, tool: str, transcript):
+    """(matched, reason) when the main session enters a worktree while an agent of this session runs, else None.
+    The reason names each running agent. An agent's own call, no transcript, an unreadable file and no running agent
+    pass. Cost: one transcript read per EnterWorktree call."""
+    if tool != STRANDS_TOOL or not isinstance(payload, dict) or payload.get("agent_id"):
+        return None
+    if not isinstance(transcript, str) or not transcript:
+        return None
+    try:
+        from stall_watch import open_agents
+        running = open_agents(transcript)
+    except Exception:
+        return None
+    if not running:
+        return None
+    return ", ".join(running), STRANDS_REASON % ", ".join(running)
 
 
 # HEAD reflog subjects (`%gs`). The agent's own commit: `commit`, `commit (initial)`, `commit (amend)` and
@@ -5234,6 +5273,12 @@ def judge(payload) -> None:
     sent = message_role_hit(tool, tool_input, trust_transcript)
     if sent:
         refuse(tool, "deny", "message-role-scope", sent[1], sent[0])
+
+    # An EnterWorktree from the main session while this session's agents run (rule worktree-strands-agents). An override
+    # lifts it: it is not in never_lifted, because the owner may mean to enter now.
+    stranded = worktree_strand_hit(payload, tool, trust_transcript)
+    if stranded:
+        refuse(tool, "deny", "worktree-strands-agents", stranded[1], stranded[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
