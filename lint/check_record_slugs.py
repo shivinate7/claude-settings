@@ -27,11 +27,15 @@ Four more rules read the notes file (decision notes-name-their-fix):
     after the reason: a backticked command, then a colon, comma, semicolon, dash, double dash, en or em dash, or arrow, then a verdict word
     (pass, fail, ok, red, green), which may follow a count ("12 passed"). Read with the Until check; each refused note
     prints one FAIL line with its slug.
-  Body: the same cite rule reads the PR body (cite_claim, the one home of the test). Each `Fix: none` line of the body, with
-    a free reason or a listed one, whose text after `none --` names a commit or a cost with no check output prints one FAIL
-    line and fails the run. The body is `--pr-body TEXT`, else env PR_BODY (CI and `merge --lane-lint` set it, as for
-    lint/check_silent_undo.py), read as a reader sees it (fenced blocks and comments dropped, check_silent_undo.body_prose),
-    every line, not only the last paragraph. A step or already-fixed Fix is no free reason and is skipped.
+  Body: the same cite rule reads the PR body (cite_claim, the one home of the test). The body is `--pr-body TEXT`, else env
+    PR_BODY (CI and `merge --lane-lint` set it, as for lint/check_silent_undo.py), read as a reader sees it (fenced blocks and
+    comments dropped, a comment opener in a code span ignored: check_silent_undo.body_prose). Its items are bullets with
+    their continuation lines, up to the next bullet, heading or blank line, and paragraphs; every item counts, not only the last
+    paragraph. A `Fix: none` field is the label (`Fix:`, `**Fix:**` or `**Fix**:`), `none` in any case or in backticks, then a
+    colon, en dash, em dash or `--`. The text after it, to the end of the item or the next `Fix:`, is read; a field inside a code
+    span is read only to the span's end. Text that names a commit or a cost with no check output prints one FAIL line and
+    fails the run. A step or already-fixed Fix is no free reason and is skipped.
+  Check output may also be a link to a GitHub Actions run (https://github.com/<owner>/<repo>/actions/runs/<digits>), in a note or the body.
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
 A notes line holds the field anywhere (the last `Fix:` on the line counts). A debt file holds it as a line that
 starts `Fix:` at column one, or after one leading `- `. A notes line whose `- <slug>:` already exists at the merge
@@ -347,8 +351,8 @@ COST = re.compile(
     r"(?<![\w.,])\d[\d,]*(?:\.\d+)?(?:[ \t-]?(?:" + "|".join(TIME_UNITS + SIZE_UNITS + COUNT_UNITS) + r")|x)(?!\w)"
     + r"|(?<!\w)(?:" + SPELLED + r")[ \t]+(?:" + "|".join(TIME_UNITS) + r")(?!\w)"
     + r"|(?<!\w)(?:quadratic(?:ally)?|linear(?:ly)?)(?!\w)|(?<!\w)(?-i:O)\(", re.I)
-CHECK_OUTPUT = re.compile(r"`[^`]+`[ \t]*(?:->|=>|--|[:,;\u2013\u2014\u2192-])?[ \t]*(?:\d+[ \t]+)?(?:pass|passed|fail|failed|ok|red|green)(?!\w)",
-                          re.I)
+CHECK_OUTPUT = re.compile(r"`[^`]+`[ \t]*(?:->|=>|--|[:,;\u2013\u2014\u2192-])?[ \t]*(?:\d+[ \t]+)?(?:pass|passed|fail|failed|ok|red|green)(?!\w)"
+                          + r"|https://github\.com/[\w.-]+/[\w.-]+/actions/runs/\d+(?!\w)", re.I)  # or a link to the run that holds the output
 
 
 def cite_claim(rest):
@@ -370,26 +374,50 @@ def cite_problem(line):
     return cite_claim(line[FIX_BODY.match(line, marks[-1].end()).end():])
 
 
-NONE_FREE = re.compile(r"none\s*" + DASH + r"\s*")  # the lead of a `Fix: none` line whose reason is free text
 BODY_LABEL = 60  # characters of a refused body line that its FAIL line quotes
+# A Fix label in a PR body as a person writes it: `Fix:`, `**Fix:**` or `**Fix**:`, then `none` in any case, maybe in backticks,
+# then a colon, en dash, em dash or `--`. The field after it is free text.
+BODY_FIX_NONE = re.compile(r"(?<![\w-])(?:\*\*)?Fix(?:\*\*)?:(?:\*\*)?[ \t]*`?none`?(?!\w)[ \t]*(?:\u2014|\u2013|--|:)[ \t]*", re.I)
+BODY_FIX_ANY = re.compile(r"(?<![\w-])(?:\*\*)?Fix(?:\*\*)?:")
+BODY_BULLET = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)]|#{1,6})[ \t]")
+ALREADY_FIXED = re.compile(r"already fixed on main [0-9a-f]{7,40}(?!\w)")
+
+
+def body_items(prose):
+    """The items of a PR body, each as one line of text: a bullet with its continuation lines, up to the next bullet, heading or
+    blank line, or a paragraph."""
+    items, cur = [], []
+    for line in prose.splitlines():
+        if not line.strip() or BODY_BULLET.match(line):
+            if cur:
+                items.append(" ".join(cur))
+            cur = [line.strip()] if line.strip() else []
+        else:
+            cur.append(line.strip())
+    if cur:
+        items.append(" ".join(cur))
+    return items
 
 
 def body_cite_failures(pr_body):
-    """[(label, why)] for each `Fix: none` line of the PR body that fails the cite rule. A body line has a free reason
-    (any text), so the text after `none --` is read, or after a listed reason. The body reads as a reader sees it:
-    fenced blocks and comments drop out, then every line counts, not only the last paragraph. A step or already-fixed
-    Fix names no free reason and is skipped."""
+    """[(label, why)] for each `Fix: none` field of the PR body that fails the cite rule. The reason is free text, so the text
+    after `none --` is read (see BODY_FIX_NONE for the label forms), to the end of its item, or to the next `Fix:`. A field inside
+    a code span is read only to the span's end. The body reads as a reader sees it (check_silent_undo.body_prose), every
+    item, not only the last paragraph. A step or already-fixed Fix names no free reason and is skipped."""
     bad = []
-    for line in check_silent_undo.body_prose(pr_body).splitlines():
-        marks = list(FIX_MARK.finditer(line))
-        fix = parse_fix(line)
-        if not marks or (fix and fix[0] != "none"):
-            continue
-        m = FIX_BODY.match(line, marks[-1].end()) or NONE_FREE.match(line, marks[-1].end())
-        why = m and cite_claim(line[m.end():])
-        if why:
-            text = " ".join(line.split())
-            bad.append((text[:BODY_LABEL] + ("..." if len(text) > BODY_LABEL else ""), why))
+    for item in body_items(check_silent_undo.body_prose(pr_body)):
+        spans = [(m.start(), m.end(), len(m.group(1))) for m in check_silent_undo.CODE_SPAN.finditer(item)]
+        marks = [m.start() for m in BODY_FIX_ANY.finditer(item)]
+        for m in BODY_FIX_NONE.finditer(item):
+            end = min([x for x in marks if x >= m.end()] or [len(item)])
+            for lo, hi, ticks in spans:
+                if lo <= m.start() < hi:
+                    end = min(end, hi - ticks)
+            rest = item[m.end():end]
+            why = "" if ALREADY_FIXED.match(rest) else cite_claim(rest)
+            if why:
+                text = " ".join(item.split())
+                bad.append((text[:BODY_LABEL] + ("..." if len(text) > BODY_LABEL else ""), why))
     return bad
 
 
