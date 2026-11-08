@@ -11,6 +11,7 @@ Run with:
 """
 import ast
 import glob
+import io
 import json
 import os
 import re
@@ -18,10 +19,14 @@ import shutil
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rule_audit  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+
+RUN_FOLDER = _test_temp.run_folder()
 
 # .mjs fixtures must be listable: form 1 names node:test, form 2 names LIST_TESTS (see rule_audit).
 NODE_TEST = 'import { test } from "node:test";\n'
@@ -69,7 +74,7 @@ def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC,
         rule_floor=1, unmechanized_expected=None, judgment_expected=None):
     """Call check() with small pins sized to the fixture, not this repo's real numbers."""
     if rule_map is None:
-        rule_map = GOOD_MAP
+        rule_map = guards_map(guard_ids(guard))
     if unmechanized_expected is None:
         unmechanized_expected = kind_count(rule_map, "unmechanized")
     if judgment_expected is None:
@@ -78,9 +83,29 @@ def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC,
                             judgment_expected=judgment_expected)
 
 
+GUARD_TEST = "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"
+
+
+def guard_ids(guard):
+    """The rule ids `guard` text writes, read the way the audit reads them."""
+    return sorted(rule_audit.guard_rule_names(guard))
+
+
+def guards_map(ids, test=GUARD_TEST, rule_map=GOOD_MAP):
+    """`rule_map` plus a `guards` section: one row per id, each row naming `test`."""
+    return dict(rule_map, guards={i: {"test": test} for i in ids})
+
+
+def with_guards(rule_map, guard=GUARD_SRC):
+    """`rule_map` with a `guards` section for every id `guard` writes. A map that has one is kept."""
+    if "guards" in rule_map:
+        return rule_map
+    return guards_map(guard_ids(guard), rule_map=rule_map)
+
+
 def check_map(mechanism):
     mechanism = dict(mechanism, kind="check")
-    return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
+    return with_guards({"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}})
 
 
 class RuleAuditTests(unittest.TestCase):
@@ -115,7 +140,7 @@ class RuleAuditTests(unittest.TestCase):
                 }
             }
         }
-        problems = run(rule_map=rule_map)
+        problems = run(rule_map=with_guards(rule_map))
         self.assertEqual(problems, [])
 
     def test_row_naming_a_missing_check_file_fails(self):
@@ -197,7 +222,7 @@ class RuleAuditTests(unittest.TestCase):
                 }
             }
         }
-        problems = run(rule_map=rule_map)
+        problems = run(rule_map=with_guards(rule_map))
         self.assertEqual(problems, [])
 
     def test_unmechanized_with_a_thin_reason_fails(self):
@@ -264,7 +289,7 @@ class RuleAuditTests(unittest.TestCase):
             "kind": "unmechanized",
             "reason": "No check reads whether the first sentence of a reply gives the result.",
         }}
-        problems = run(md=self._rule_files(GOOD_MD, style), rule_map={"rules": rules},
+        problems = run(md=self._rule_files(GOOD_MD, style), rule_map=with_guards({"rules": rules}),
                        rule_floor=2)
         self.assertEqual(problems, [])
 
@@ -282,7 +307,7 @@ def one_row_map(kind, reason=None):
     mechanism = {"kind": kind}
     if reason is not None:
         mechanism["reason"] = reason
-    return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
+    return with_guards({"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}})
 
 
 class JudgmentKindTests(unittest.TestCase):
@@ -341,7 +366,7 @@ class JudgmentKindTests(unittest.TestCase):
             "shared-trees-no-destructive-git": {"mechanism": {
                 "kind": "unmechanized", "reason": JUDGMENT_REASON}},
             "second-judged-rule": {"mechanism": {"kind": "judgment", "reason": JUDGMENT_REASON}}}}
-        problems = run(md=TWO_RULE_MD, rule_map=rule_map, unmechanized_expected=1,
+        problems = run(md=TWO_RULE_MD, rule_map=with_guards(rule_map), unmechanized_expected=1,
                        judgment_expected=1)
         self.assertEqual(problems, [])
 
@@ -385,7 +410,7 @@ class GuardTextTests(unittest.TestCase):
     module (guard_x.py, not guard.py) must resolve, and test files must not count as rule homes."""
 
     def tree(self, files):
-        root = tempfile.mkdtemp()
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, root, True)
         for rel, body in files.items():
             path = os.path.join(root, rel)
@@ -405,7 +430,8 @@ class GuardTextTests(unittest.TestCase):
     def test_rule_refused_only_in_a_sibling_module_resolves(self):
         root = self.tree(self.files())
         guard_text = rule_audit.guard_text(root)
-        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0, judgment_expected=0)
+        problems = rule_audit.check(GOOD_MD, with_guards(SIBLING_MAP, guard_text), guard_text, "", 1, 0,
+                                    judgment_expected=0)
         self.assertEqual(problems, [])
 
     def test_guard_py_alone_leaves_that_sibling_rule_stale(self):
@@ -740,6 +766,226 @@ class EmittedRuleIdsTests(unittest.TestCase):
         ids = self.ids_of(self.files())
         self.assertIn("main-rule", ids)
         self.assertNotIn("watch-rule", ids)
+
+
+# ------------------------------------------------------------ guards section
+# rule_mechanisms.json gives each guard rule id its own row under `guards`, keyed by the id, and each
+# row names the test that proves that guard. The ids come from the guard source the same way the audit
+# reads them (guard_rule_names over hooks/guard*.py), never from a copy of the list kept here.
+
+class GuardsSectionTests(unittest.TestCase):
+    """Every guard rule id the guard source writes needs its own `guards` row, and each row needs a
+    test that resolves. A row for an id the guard no longer writes is stale."""
+
+    def fixture_ids(self):
+        return sorted(rule_audit.guard_rule_names(GUARD_SRC))
+
+    def real_guard_text(self):
+        return rule_audit.guard_text(rule_audit.ROOT)
+
+    def test_fixture_source_reads_the_three_ids_the_cases_use(self):
+        # Control: the ids the cases name are the ones the reader finds in GUARD_SRC.
+        self.assertEqual(self.fixture_ids(), ["agent-model-cap", "merge-main", "shared-tree"])
+
+    def test_guard_id_with_no_row_fails_and_names_it(self):
+        ids = [i for i in self.fixture_ids() if i != "merge-main"]
+        problems = run(rule_map=guards_map(ids))
+        self.assertTrue(any("merge-main" in p for p in problems), problems)
+
+    def test_no_guards_section_names_every_guard_id(self):
+        # The empty state: the map has its rules and no `guards` section at all.
+        problems = run(rule_map=GOOD_MAP)
+        for guard_id in self.fixture_ids():
+            with self.subTest(guard_id=guard_id):
+                self.assertTrue(any(guard_id in p for p in problems), problems)
+
+    def test_full_size_guards_section_names_the_one_missing_id(self):
+        guard = self.real_guard_text()
+        ids = sorted(rule_audit.guard_rule_names(guard))
+        missing = ids[-1]
+        problems = run(rule_map=guards_map([i for i in ids if i != missing]), guard=guard)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(missing, problems[0])
+
+    def test_guards_row_for_an_id_the_guard_no_longer_emits_fails_as_stale(self):
+        problems = run(rule_map=guards_map(self.fixture_ids() + ["retired-guard-rule"]))
+        stale = [p for p in problems if "retired-guard-rule" in p]
+        self.assertTrue(stale, problems)
+        self.assertIn("stale", stale[0].lower())
+
+    def test_guards_row_naming_a_test_that_does_not_exist_fails(self):
+        rule_map = guards_map(self.fixture_ids())
+        rule_map["guards"]["merge-main"] = {
+            "test": "lint/test_rule_audit.py::RuleAuditTests.test_no_such_thing"}
+        problems = run(rule_map=rule_map)
+        self.assertTrue(any("merge-main" in p and "test_no_such_thing" in p for p in problems),
+                        problems)
+
+    def test_guards_row_naming_no_test_fails(self):
+        rule_map = guards_map(self.fixture_ids())
+        rule_map["guards"]["merge-main"] = {}
+        problems = run(rule_map=rule_map)
+        self.assertTrue(any("merge-main" in p for p in problems), problems)
+
+    def test_complete_guards_section_passes(self):
+        problems = run(rule_map=guards_map(self.fixture_ids()))
+        self.assertEqual(problems, [])
+
+    def test_complete_full_size_guards_section_passes(self):
+        guard = self.real_guard_text()
+        problems = run(rule_map=guards_map(sorted(rule_audit.guard_rule_names(guard))), guard=guard)
+        self.assertEqual(problems, [])
+
+
+# ------------------------------------------------------------ guard rule id reads
+# A guard writes a rule id from a module constant: its own, or one imported from a sibling module under
+# hooks/. The reader lists the value, or raises with path:line on a call whose id it cannot list. The
+# audit takes its ids from one list, emitted_rule_ids, and main() checks every id on that list.
+
+WATCH_ONLY = "watch-only-rule"  # an id that no hooks/guard*.py writes; only a non-guard module would
+
+
+class GuardRuleIdReadTests(unittest.TestCase):
+    """`guard_rule_names` lists a constant rule id, and raises with path:line when it cannot list one."""
+
+    def fixture(self, files):
+        return GuardTextTests.tree(self, files)
+
+    def test_same_module_constant_rule_id_is_listed(self):
+        self.assertEqual(rule_audit.guard_rule_names('NEW_RULE = "x"\nrefuse(t, "deny", NEW_RULE, R, m)\n'),
+                         {"x"})
+
+    def test_constant_imported_from_a_sibling_module_is_listed(self):
+        root = self.fixture({
+            os.path.join("hooks", "rule_ids.py"): 'SIBLING_RULE = "from-sibling"\n',
+            os.path.join("hooks", "guard.py"):
+                'from rule_ids import SIBLING_RULE\nrefuse(t, "deny", SIBLING_RULE, R, m)\n',
+        })
+        self.assertIn("from-sibling", rule_audit.emitted_rule_ids(root))
+
+    def test_import_from_a_module_that_is_not_there_raises_with_path_and_line(self):
+        root = self.fixture({
+            os.path.join("hooks", "guard.py"):
+                'from rule_ids_absent import ABSENT\nrefuse(t, "deny", ABSENT, R, m)\n',
+        })
+        with self.assertRaisesRegex(ValueError, r"hooks[\\/]guard\.py:2: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.emitted_rule_ids(root)
+
+    def test_non_literal_constant_raises_with_path_and_line(self):
+        with self.assertRaisesRegex(ValueError, r"hooks/guard\.py:2: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.guard_rule_names('NEW = make()\nrefuse(t, "deny", NEW, R, m)\n', "hooks/guard.py")
+
+    def test_subscript_rule_id_raises_with_path_and_line(self):
+        with self.assertRaisesRegex(ValueError, r"hooks/guard\.py:2: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.guard_rule_names('RULES = {"a": "x"}\nrefuse(t, "deny", RULES["a"], R, m)\n',
+                                        "hooks/guard.py")
+
+    def test_f_string_rule_id_raises_with_path_and_line(self):
+        # Pin: the old reader already raised on an f-string. Kept here so every unlistable shape has a case.
+        with self.assertRaisesRegex(ValueError, r"hooks/guard\.py:2: refuse\(\) takes an f-string"):
+            rule_audit.guard_rule_names('n = 1\nrefuse(t, "deny", f"fs-{n}", R, m)\n', "hooks/guard.py")
+
+    def test_main_checks_an_id_only_config_watch_emits(self):
+        # The audit's real run, with one extra id on the list that emitted_rule_ids returns. It has no row,
+        # so main() must name it and exit 1. main() reads the real CLAUDE.md and map, as CI does.
+        listed = rule_audit.emitted_rule_ids
+        out = io.StringIO()
+        with mock.patch.object(rule_audit, "emitted_rule_ids",
+                               side_effect=lambda root: listed(root) | {WATCH_ONLY}) as emitted, \
+                redirect_stdout(out):
+            try:
+                rule_audit.main()
+                code = 0
+            except SystemExit as stop:
+                code = stop.code
+        self.assertTrue(emitted.called, "control: the patched emitted_rule_ids is not on main()'s path")
+        self.assertEqual(code, 1, "main() passes, so an id emitted_rule_ids lists with no guards row goes "
+                                  "unchecked. Output: " + out.getvalue())
+        self.assertIn(WATCH_ONLY, out.getvalue())
+
+    def listed(self, src):
+        """The ids the reader lists for `src`. A refusal here is a failure that names it, not an error."""
+        try:
+            return rule_audit.guard_rule_names(src, "hooks/guard.py")
+        except ValueError as why:
+            self.fail("the reader refused a def-local rule id: %s" % why)
+
+    def test_a_def_local_name_assigned_a_literal_lists_that_id(self):
+        # Scope first: the same call with the literal inline is read, so the local line is the only gap.
+        self.assertEqual(self.listed('def go():\n    refuse(tool, "deny", "zzz-local-new", R, m)\n'),
+                         {"zzz-local-new"})
+        self.assertEqual(self.listed('def go():\n    rid = "zzz-local-new"\n    refuse(tool, "deny", rid, R, m)\n'),
+                         {"zzz-local-new"})
+
+    def test_a_def_local_name_assigned_a_conditional_of_literals_lists_both_ids(self):
+        src = 'def go(c):\n    rid = "x-a" if c else "x-b"\n    refuse(tool, "deny", rid, R, m)\n'
+        self.assertEqual(self.listed(src), {"x-a", "x-b"})
+
+    def test_a_parameter_rule_id_stays_a_silent_pass(self):
+        self.assertEqual(self.listed('def go(rid):\n    refuse(tool, "deny", rid, R, m)\n'), set())
+
+    def test_a_tuple_unpacked_rule_id_stays_a_silent_pass(self):
+        self.assertEqual(self.listed('def go():\n    rid, why = pick()\n    refuse(tool, "deny", rid, why, m)\n'),
+                         set())
+
+    def test_a_def_local_name_assigned_a_call_raises_with_path_and_line(self):
+        src = 'def go():\n    rid = make()\n    refuse(tool, "deny", rid, R, m)\n'
+        with self.assertRaisesRegex(
+                ValueError, r"hooks/guard\.py:3: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.guard_rule_names(src, "hooks/guard.py")
+
+    def test_a_def_local_with_a_literal_and_a_call_assignment_raises_with_path_and_line(self):
+        src = ('def go(c):\n    rid = "x-a"\n    if c:\n        rid = make()\n'
+               '    refuse(tool, "deny", rid, R, m)\n')
+        with self.assertRaisesRegex(
+                ValueError, r"hooks/guard\.py:5: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.guard_rule_names(src, "hooks/guard.py")
+
+    def test_a_name_bound_only_in_an_outer_def_stays_a_silent_pass(self):
+        # The outer binding is a call, so a reader that looked past the innermost def would raise here.
+        src = ('def outer():\n    rid = make()\n    def inner():\n        refuse(tool, "deny", rid, R, m)\n'
+               '    return inner\n')
+        self.assertEqual(self.listed(src), set())
+
+
+# ------------------------------------------------------------ parse cache
+# `_parsed` keeps one tree per test file, keyed on its path, size and mtime. A file rewritten in place
+# gets a new key, so the audit reads the new content.
+
+class ParseCacheTests(unittest.TestCase):
+    """A cited test file that is rewritten is parsed again, never served from the cache."""
+
+    CITED = os.path.join("tests", "test_cited.py")
+    CITED_ID = "tests/test_cited.py::CitedTests.test_aaaa"
+    BODY = ("import unittest\n\n\nclass CitedTests(unittest.TestCase):\n"
+            "    def test_aaaa(self):\n        self.assertTrue(True)\n")
+
+    def cited_root(self):
+        root = GuardTextTests.tree(self, {self.CITED: self.BODY})
+        self.assertIsNone(rule_audit.citation_problem(self.CITED_ID, root), "control: the cited test resolves")
+        return root
+
+    def rewrite(self, root, body, mtime_ns):
+        path = os.path.join(root, self.CITED)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body)
+        os.utime(path, ns=(mtime_ns, mtime_ns))  # an explicit mtime: no clock is read
+
+    def test_a_rewrite_that_changes_the_size_is_read_fresh(self):
+        root = self.cited_root()
+        mtime = os.stat(os.path.join(root, self.CITED)).st_mtime_ns
+        self.rewrite(root, self.BODY.replace("test_aaaa", "test_renamed_longer"), mtime)  # same mtime, new size
+        why = rule_audit.citation_problem(self.CITED_ID, root)
+        self.assertIsNotNone(why, "the rewritten file still resolves test_aaaa: a stale tree was served")
+        self.assertIsNone(rule_audit.citation_problem("tests/test_cited.py::CitedTests.test_renamed_longer", root))
+
+    def test_a_same_size_rewrite_with_a_new_mtime_is_read_fresh(self):
+        root = self.cited_root()
+        mtime = os.stat(os.path.join(root, self.CITED)).st_mtime_ns
+        self.rewrite(root, self.BODY.replace("test_aaaa", "test_bbbb"), mtime + 1_000_000_000)  # same size, new mtime
+        why = rule_audit.citation_problem(self.CITED_ID, root)
+        self.assertIsNotNone(why, "the rewritten file still resolves test_aaaa: a stale tree was served")
+        self.assertIsNone(rule_audit.citation_problem("tests/test_cited.py::CitedTests.test_bbbb", root))
 
 
 # ------------------------------------------------------------ refusal cites
@@ -2704,6 +2950,10 @@ class RefusalCiteRatchetTests(unittest.TestCase):
         src = body_src('    raise Stop("not in a git checkout")\n')
         exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
         self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
 
 if __name__ == "__main__":

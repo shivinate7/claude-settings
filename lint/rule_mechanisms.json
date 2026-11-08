@@ -1,5 +1,5 @@
 {
-  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in a file that lint/rule_audit.py RULE_FILES names. `mechanism.kind` is one of guard, check, ci, unmechanized, judgment. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. check.ref must be a file path, relative to the repo root, that exists; a check row cites `test` (path::name, resolved by AST) and/or `setting` (a JSON value in settings.json), never a `needle`. ci.ref must name a `- name:` step in .github/workflows/checks.yml. unmechanized.reason must say what a hook or check would have to see. judgment.reason must say why only judgment can apply the rule.",
+  "_note": "Checked-in map for lint/rule_audit.py. Each key is a `<!-- rule:<slug> -->` anchor in a file that lint/rule_audit.py RULE_FILES names. `mechanism.kind` is one of guard, check, ci, unmechanized, judgment. guard.ref must name a rule string passed to refuse()/record() in hooks/guard.py. check.ref must be a file path, relative to the repo root, that exists; a check row cites `test` (path::name, resolved by AST) and/or `setting` (a JSON value in settings.json), never a `needle`. ci.ref must name a `- name:` step in .github/workflows/checks.yml. unmechanized.reason must say what a hook or check would have to see. judgment.reason must say why only judgment can apply the rule. The `guards` section is keyed by guard rule id: one row per id hooks/guard*.py write to guard.log, each naming `test` (path::name, resolved by AST). A row for an id no longer written is stale.",
   "rules": {
     "outcomes-judge-by-outcome": {
       "mechanism": {
@@ -754,6 +754,257 @@
         "ref": "lint/check_comment_narration.py",
         "test": "lint/test_check_comment_narration.py::FlagsAddedLines.test_each_pattern_flags_an_added_comment"
       }
+    }
+  },
+  "guards": {
+    "agent-model-cap": {
+      "test": "hooks/test_guard.py::cap: Write of a project local settings file setting an opus model asks"
+    },
+    "agent-model-floor": {
+      "test": "hooks/test_guard.py::floor: Agent with model haiku is denied"
+    },
+    "agent-role-model": {
+      "test": "hooks/test_guard.py::role_model_refuse"
+    },
+    "agent-role-model-unread": {
+      "test": "hooks/test_guard.py::role_unread_log_check"
+    },
+    "ask-alone": {
+      "test": "hooks/test_guard.py::chained_ask"
+    },
+    "author-diff": {
+      "test": "hooks/test_guard.py::diff_refusal_case"
+    },
+    "background-end": {
+      "test": "hooks/test_guard.py::background-end: a python http.server under run_in_background with no note is refused"
+    },
+    "bare-merge": {
+      "test": "hooks/test_guard.py::bare-merge: gh pr merge in a repo with a merge block asks"
+    },
+    "builder-diff": {
+      "test": "hooks/test_guard.py::builder-diff: stop after COMMITTING a test change is blocked"
+    },
+    "builder-test-edit": {
+      "test": "hooks/test_guard.py::builder-test: the refusal routes a test-file merge conflict"
+    },
+    "cite-by-id": {
+      "test": "hooks/test_guard.py::cite-by-id: a message file that cannot be read is unknown, and denies"
+    },
+    "command-in-item": {
+      "test": "hooks/test_guard.py::ci"
+    },
+    "config-edit": {
+      "test": "hooks/test_guard.py::config_edit_log_case"
+    },
+    "conflict-markers": {
+      "test": "hooks/test_guard.py::cmk_refuse"
+    },
+    "designer-diff": {
+      "test": "hooks/test_guard.py::dz_diff_case"
+    },
+    "designer-scope": {
+      "test": "hooks/test_guard.py::designer: a decoy mockup path does not hide a product path in another field"
+    },
+    "destructive-delete": {
+      "test": "hooks/test_guard.py::rm-var redirect: plain root is refused"
+    },
+    "detached-launch": {
+      "test": "hooks/test_guard.py::detached: the incident's exact command orphans to pid 1"
+    },
+    "draft-pr": {
+      "test": "hooks/test_guard.py::draft-pr: a pull request opened without --draft is refused"
+    },
+    "env-file": {
+      "test": "hooks/test_guard.py::env: a PowerShell backtick pair before ; then a read of the env file, denies"
+    },
+    "force-push": {
+      "test": "hooks/test_guard.py::control: a PowerShell path ending in a backslash, then a force push on the next line, denies"
+    },
+    "frozen-path": {
+      "test": "hooks/test_guard.py::trim: env: an unquoted heredoc with no substitution still reaches the frozen-path rule"
+    },
+    "gh-login-switch": {
+      "test": "hooks/test_guard.py::gl"
+    },
+    "git-env-set": {
+      "test": "hooks/test_guard.py::per-file deny: GIT_WORK_TREE set to the shared checkout by a prefix assignment, from a worktree"
+    },
+    "guard-crash": {
+      "test": "hooks/test_guard.py::crash_log_case"
+    },
+    "hand-made-worktree": {
+      "test": "hooks/test_guard.py::hm_deny"
+    },
+    "handoff-unread": {
+      "test": "hooks/test_guard.py::hu_cycle_check"
+    },
+    "impeccable-review-only": {
+      "test": "hooks/test_guard.py::impeccable: no args is denied"
+    },
+    "item-field-rendered": {
+      "test": "hooks/test_guard.py::ifr"
+    },
+    "lane-by-slug": {
+      "test": "hooks/test_guard.py::lane-by-slug: the refusal names a branch slug as the remedy"
+    },
+    "lane-closes-after-records": {
+      "test": "hooks/test_guard.py::archive_refuse"
+    },
+    "lane-effort-pin": {
+      "test": "hooks/test_guard.py::lane-effort-pin: lane tag with a brief after the effort command is denied"
+    },
+    "lane-one-topic": {
+      "test": "hooks/test_guard.py::step_refuse"
+    },
+    "lane-repo-tag": {
+      "test": "hooks/test_guard.py::lane-repo-tag: lane tag with no repo tag is denied"
+    },
+    "linked-node-modules": {
+      "test": "hooks/test_guard.py::nm_case"
+    },
+    "live-stream": {
+      "test": "hooks/test_guard.py::stream: tail -f never ends"
+    },
+    "ln-over-directory": {
+      "test": "hooks/test_guard.py::ln: -s over a real directory nests the link inside it"
+    },
+    "load-brake": {
+      "test": "hooks/test_guard.py::gl_check"
+    },
+    "machine-wide-kill": {
+      "test": "hooks/test_guard.py::kill: pkill by pattern denies"
+    },
+    "merge-checks": {
+      "test": "hooks/test_guard.py::merge-checks: match-head-commit is no proof the head settled"
+    },
+    "merge-role-proof": {
+      "test": "hooks/test_guard.py::role_refuse"
+    },
+    "mockup-home": {
+      "test": "hooks/test_guard.py::mh_case"
+    },
+    "option-letter-keys": {
+      "test": "hooks/test_guard.py::option letter keys: a batch with one item keyed e2, a and c is denied"
+    },
+    "other-checkout": {
+      "test": "hooks/test_guard.py::builder-test: Write of the guard's test file in the main checkout, from a worktree, is refused"
+    },
+    "owner-judge": {
+      "test": "hooks/test_question_form.py::case_chat_reasons_name_a_remedy_and_no_page_field"
+    },
+    "page-item-design": {
+      "test": "hooks/test_guard.py::pd_case"
+    },
+    "page-stale": {
+      "test": "hooks/test_guard.py::wp_publish"
+    },
+    "playwright-browsers-path": {
+      "test": "hooks/test_guard.py::guard-command-position: playwright, two heredoc headers on one line write the export"
+    },
+    "playwright-install": {
+      "test": "hooks/test_guard.py::playwright-install: an agent install is denied"
+    },
+    "pointer-head": {
+      "test": "hooks/test_guard.py::pointer: checkout of a branch in the pointer checkout is refused"
+    },
+    "port-question": {
+      "test": "hooks/test_guard.py::port question: a batch with today's item among the sets is denied"
+    },
+    "press-link": {
+      "test": "hooks/test_guard.py::press link: a batch with the press item among the sets is denied"
+    },
+    "push-main": {
+      "test": "hooks/test_guard.py::push: main, a bare push under push.default current on main asks"
+    },
+    "push-stray-branch": {
+      "test": "hooks/test_guard.py::push: stray branch, a bare push under push.default current asks"
+    },
+    "question-departs": {
+      "test": "hooks/test_guard.py::question departs: a batch with a decision that has no line is denied"
+    },
+    "question-form": {
+      "test": "hooks/test_guard.py::oj"
+    },
+    "record-writer-scope": {
+      "test": "hooks/test_guard.py::audit-high paths: record-writer Write of a temp file in no repo is still refused"
+    },
+    "records-page": {
+      "test": "hooks/test_guard.py::records_deny"
+    },
+    "rework-off-page": {
+      "test": "hooks/test_guard.py::rework off page: a str_replace that adds the phrase to context is denied"
+    },
+    "rm-after-cd": {
+      "test": "hooks/test_guard.py::rm-var: the 2026-10-27 scratch delete, a cd then a relative glob, is refused"
+    },
+    "rm-var-unguarded": {
+      "test": "hooks/test_guard.py::rm-var: a loop deletes under an unguarded variable"
+    },
+    "roadmap-one-writer": {
+      "test": "hooks/test_guard.py::record_refuse"
+    },
+    "role-diff-main-checkout": {
+      "test": "hooks/test_guard.py::role_log_case"
+    },
+    "role-diff-unread": {
+      "test": "hooks/test_guard.py::role_log_case"
+    },
+    "role-diff-unresolved": {
+      "test": "hooks/test_guard.py::stop_pair_case"
+    },
+    "roles-third-round-steps-up": {
+      "test": "hooks/test_guard.py::floor step-up: reviewer Round 2 of 3 on haiku is denied"
+    },
+    "session-home": {
+      "test": "hooks/test_guard.py::session_home_lost_refuses_case"
+    },
+    "shared-tree": {
+      "test": "hooks/test_guard.py::stash: set work aside in a shared tree"
+    },
+    "silent-write": {
+      "test": "hooks/test_guard.py::silent-write: push's own quiet flag needs no redirect at all"
+    },
+    "simulator-boot-bypass": {
+      "test": "hooks/test_guard.py::boot a third simulator with two booted: bash simctl boot, bypass first"
+    },
+    "simulator-boot-cap": {
+      "test": "hooks/test_guard.py::boot a third simulator with two booted: xcodebuild destination"
+    },
+    "simulator-boot-lease": {
+      "test": "hooks/test_guard.py::lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease"
+    },
+    "simulator-boot-route": {
+      "test": "hooks/test_guard.py::route: a test of a shut-down simulator by id names sim-test"
+    },
+    "simulator-boot-twin": {
+      "test": "hooks/test_guard.py::boot a shut-down copy with an idle twin on its runtime, OS=latest: xcodebuild destination"
+    },
+    "subject-unread": {
+      "test": "hooks/test_guard.py::subject_unread_log_case"
+    },
+    "task-names-check": {
+      "test": "hooks/test_guard.py::task names its check: a batch with a task that has no Why yours line is denied"
+    },
+    "test-author-scope": {
+      "test": "hooks/test_guard.py::test-author: Edit of product code is refused"
+    },
+    "trust-card-in-build": {
+      "test": "hooks/test_guard.py::trust_refuse"
+    },
+    "uniform-pick": {
+      "test": "hooks/test_guard.py::uniform pick: a batch with today's item among the sets is denied"
+    },
+    "waiter": {
+      "test": "hooks/test_guard.py::waiter: a bare sleep"
+    },
+    "worktree-home": {
+      "test": "hooks/test_guard.py::worktree_home_chained_case"
+    },
+    "writer-diff": {
+      "test": "hooks/test_guard.py::rw_diff_logs_case"
+    },
+    "wsl-allow-list": {
+      "test": "hooks/test_guard.py::wsl: a glob in a plain node test path is refused"
     }
   }
 }
