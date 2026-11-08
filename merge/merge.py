@@ -2040,15 +2040,15 @@ def cut_local(root, branch, merged):
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
 def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None):
-    """-> (tips, dropped). tips: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
+    """-> (tips, dropped). tips: the review tips, parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
     (a merge of the base into the branch has a base commit as its second parent) and any on `default_ref`, the default branch (a stacked pull request whose base is a lane branch
-    that merged the default branch: the default branch's new commit is on neither the base nor in any lane, and is no lane tip). The same log is cut at `default_ref`, so it costs no extra read;
-    a default_ref the clone does not hold cuts nothing. dropped: the tips whose every such
+    that merged the default branch: the default branch's new commit is on neither the base nor in any lane, and is no review tip). dropped: the tips whose every such
     merge is net-reverted on the batch: a "This reverts commit <sha>." message names it, and a revert of that revert
-    undoes it, so an odd chain is a revert. A read that fails raises. `own_out`, a list, receives the commits the pull request adds itself: the non-merge commits
-    of base_ref..sha that no lane tip holds, from the same log (no second read). A pull request with tips and none of these is an integration pull request."""
-    cut = ["--ignore-missing", f"^{default_ref}"] if default_ref and default_ref != base_ref else []  # a default branch the clone lacks holds no commit, so it cuts none
-    c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", *cut, f"{base_ref}..{sha}")
+    undoes it, so an odd chain is a revert. The dropped-lane read is never cut at `default_ref`: a revert of a lane's merge that the default branch holds still drops that lane, so `dropped`
+    may name a tip that `tips` does not. The cut costs one extra local read, `git rev-list base..sha ^default_ref`, made only when `default_ref` is given and differs from the base; a default_ref
+    the clone does not hold cuts nothing. A read that fails raises. `own_out`, a list, receives the commits the pull request adds itself: the non-merge commits
+    of base_ref..sha that no review tip holds and the default branch lacks. A pull request with tips and none of these is an integration pull request."""
+    c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
     if c:
         raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
     undone, took, parents_of = {}, {}, {}  # commit -> the commit that reverts it; tip -> the merges that took it in; commit -> its parents
@@ -2062,31 +2062,36 @@ def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None):
             undone[r] = h
         for t in parents.split()[1:]:
             took.setdefault(t, []).append(h)
+    on_default = set()  # the commits of the range that the default branch holds
+    if default_ref and default_ref != base_ref:
+        c, out = git(wt, "rev-list", "--ignore-missing", f"{base_ref}..{sha}", f"^{default_ref}")  # a default branch the clone lacks holds no commit, so it cuts none
+        if c:
+            raise ValueError("git rev-list failed: " + (out.splitlines() or ["?"])[-1])
+        on_default = set(parents_of) - set(out.split())
     def reverted(h):
         n, seen = 0, set()
         while h in undone and h not in seen:
             seen.add(h)
             h, n = undone[h], n + 1
         return n % 2 == 1
-    tips = []
+    lanes = []  # every tip not on the base, the default branch's too: the dropped-lane read
     for t in took:
-        if t not in parents_of:  # outside the cut log: on the base or on the default branch
-            continue
         c = ancestor(wt, t, base_ref)
         if c is None:  # a failed read, or a shallow clone that cut the history: never "not an ancestor"
             raise ValueError(f"git merge-base failed on {t[:9]}: git could not tell (a shallow clone needs "
                              "`git fetch --unshallow`)")
         if not c:
-            tips.append(t)
+            lanes.append(t)
+    tips = [t for t in lanes if t not in on_default]
     if own_out is not None:
-        held, todo = set(), list(tips)  # the commits of the range that a lane tip reaches
+        held, todo = set(), list(tips)  # the commits of the range that a review tip reaches
         while todo:
             h = todo.pop()
             if h not in held and h in parents_of:
                 held.add(h)
                 todo.extend(parents_of[h])
-        own_out.extend(h for h, ps in parents_of.items() if len(ps) < 2 and h not in held)
-    return tips, {t for t in tips if all(reverted(h) for h in took[t])}
+        own_out.extend(h for h, ps in parents_of.items() if len(ps) < 2 and h not in held and h not in on_default)
+    return tips, {t for t in lanes if all(reverted(h) for h in took[t])}
 
 def lane_tips(wt, base_ref, sha):
     """read_lanes, read before the merge. A read that fails prints one line and returns no lanes: the merge goes on and nothing is deleted."""
@@ -2101,7 +2106,7 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out
     the revert silently deletes its files (batch #663: the platform-ask lane lost 11 of 13 files). Refuse it before anything
     is claimed. A read that fails refuses too, unless the run has the reason flag --undo-check-unknown-ok "<reason>", which Claude may type with a reason.
     A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, and `own_out` the pull request's own commits, so the round-3 check reads no second time. `default_ref` (origin/<default branch>) is passed to read_lanes: a commit of the default
-    branch is no lane tip and no own commit, and the cut is made in the one log read that was made already, so it adds no git call."""
+    branch is no review tip and no own commit, but the dropped-lane read stays uncut, so a default-branch revert of a lane's merge is seen. The cut adds one local git read (rev-list)."""
     try:
         tips, dropped = read_lanes(wt, base_ref, sha, own_out, default_ref)
         if tips_out is not None:
