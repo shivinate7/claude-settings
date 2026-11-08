@@ -1098,6 +1098,44 @@ def _exits_on_failure(segments, ends, at: int) -> bool:
     return False
 
 
+def _compound_delta(segment: str) -> int:
+    """How far a skipped segment moves the compound nesting: +1 for each `{` group, `if`, `for`,
+    `while` or `until` it opens at its head (past a leading `then`, `do` or `else`), -1 for a `}`,
+    `fi` or `done` that closes one. `case` is not read, so its skip ends at the next `;` (it fails
+    closed: the commands after it are judged in the stranded folder)."""
+    tokens = segment_tokens(segment) or []
+    delta = 0
+    while tokens:
+        word = tokens[0]
+        if word in ("then", "do", "else"):
+            tokens = tokens[1:]
+        elif word == "{":
+            delta += 1
+            tokens = tokens[1:]
+        elif word in ("if", "for", "while", "until"):
+            return delta + 1
+        else:
+            return delta - (word.rstrip(")") in ("}", "fi", "done"))
+    return delta
+
+
+def _sets_errexit(tokens, marks) -> bool | None:
+    """True or False when the segment is a bare `set` that turns `-e` (or `-o errexit`) on or off,
+    None when it is not one. A `set` inside a `( ... )` is not read, so it fails closed."""
+    if marks or not tokens or tokens[0] != "set":
+        return None
+    state = None
+    for at, token in enumerate(tokens[1:], 1):
+        flags = token[1:]
+        if token[:1] in "-+" and not token.startswith("--"):
+            on = token[0] == "-"
+            if "o" in flags and tokens[at + 1:at + 2] == ["errexit"]:
+                state = on
+            elif "e" in flags:
+                state = on
+    return state
+
+
 def _opens_if_body(segments, at: int) -> bool:
     """True when `segments[at]` is `if <cd ...>` alone as the test, and the next segment opens its `then`."""
     tokens = segment_tokens(segments[at]) or []
@@ -1131,6 +1169,8 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
     prev, stack = None, []
     stranded = False
     skip_depth = None   # a failed cd ended in `&&`: the group depth the skipped chain stands at
+    skip_nest = 0       # the `{`, `if` and loop compounds opened inside that skipped chain and not yet closed
+    errexit = False     # `set -e` ran before: a failed bare cd ends the shell
     skip_if = None      # a failed cd was an `if` test: the `if`s nested in the skipped `then` body
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
@@ -1158,10 +1198,16 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
                 if stack:
                     where, prev, stranded = stack.pop()
             skip_depth = min(skip_depth, len(stack))
+            skip_nest = max(0, skip_nest + _compound_delta(segment))
+            if skip_nest:
+                continue   # inside a `{`, `if` or loop the failed `&&` skipped: a `;` or newline does not end it
             if end not in ("&&", "|") and len(stack) <= skip_depth:
                 skip_depth = None
             continue
         tokens = segment_tokens(segment)
+        if tokens and "|" not in (end, ends[at - 1] if 0 < at <= len(ends) else ""):
+            flipped = _sets_errexit(tokens, marks)
+            errexit = errexit if flipped is None else flipped
         move = _segment_cd_move(tokens) if tokens else None
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
@@ -1184,10 +1230,18 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
                     where = target
                 elif target and failed_cd_stays:
                     skip_depth = len(stack) if end == "&&" else None   # the shell stays, and an `&&` chain stops
+                    skip_nest = 0
                     if end in (";", "\n") and _opens_if_body(segments, at):
                         skip_if = 0   # the `then` body runs only when the test passes
+                    # The shell exits on a failure: later segments follow a cd that landed. That holds for an
+                    # `|| exit`, an `if ! cd` whose then body starts with `exit`, and a bare cd under `set -e`.
+                    negated_if = end in (";", "\n") and tokens[:2] == ["if", "!"] and _exits_on_failure(segments, ends, at)
+                    bare_under_errexit = (errexit and end not in ("&&", "||", "|") and not stack and not marks
+                                          and basename(tokens[0]) in CD_WORDS)
                     if end == "||" and _exits_on_failure(segments, ends, at):
-                        where, stranded = None, False   # the shell exits on a failure: later segments follow a cd that landed
+                        where, stranded = None, False
+                    elif negated_if or bare_under_errexit:
+                        where, stranded = None, False
                     else:
                         stranded = True
                         old = prev   # a failed cd leaves the folder `cd -` goes back to alone
