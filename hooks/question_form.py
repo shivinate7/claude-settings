@@ -533,9 +533,9 @@ def _owner_acts(clause) -> bool:
     return any(OWNER_ACT.match(clause, m.end()) for m in OWNER_NAME.finditer(clause))
 
 
-# The verb a session clause's own subject presses ("the session clicks Merge"), and a past press by the owner
+# The verb a session clause's own subject, the session or Claude, presses ("the session clicks Merge"), and a past press by the owner
 # ("the owner clicked Approve", "he has already pressed it"), which asks him for nothing.
-_SESSION_SUBJECT = re.compile(r"\bsession\s+(?:\w+ly\s+)?$", re.I)
+_SESSION_SUBJECT = re.compile(r"\b(?:session|claude)\s+(?:\w+ly\s+)?$", re.I)
 _PAST_OWNER_PRESS = re.compile(OWNER_NAME.pattern + r"\s+(?:(?:has|had|already)\s+)*$", re.I)
 _PAST_PRESS = re.compile(r"(?:press|click|tap)(?:ed|ped)\b", re.I)
 
