@@ -28735,7 +28735,13 @@ FAMILY = "simulator"
 #   simulator-boot-lease   refuses an MCP launch of a shut-down device, held lock or not: a launch needs a lease,
 #                          and the Mac shares one simulator across repos (decision sim-test-is-the-one-boot-path,
 #                          ruling 5). Judged after cap and twin. The reason names sim-test and the lease. A booted
-#                          device is never refused.
+#                          device is never refused by this rule.
+#   simulator-device-lease refuses every simulator MCP call except launch (tap, screenshot, appearance, swipe,
+#                          type) unless this session holds a live sim-lease for the device it names. Device and
+#                          udid are both judged, and a name or UDID matches the list without case or outer spaces.
+#                          A call that names no device needs one live lease of its own. A name no simulator holds
+#                          is refused. A launch of a booted device is judged here too. Fails open when the device
+#                          list cannot be read (no janitor beside guard.py, no xcrun, or an unreadable list).
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
 # UDIDs and device names only, never the config folder or the record file.
 
@@ -29383,6 +29389,13 @@ def sim_lease_override_check():
                               {"action": "launch", "device": SIM_UC}, folder_path("one"))
 
 
+def sim_device_lease_override_check():
+    """The owner override lifts simulator-device-lease. A tap of a booted device this session holds no lease for is
+    refused with no override. The "one" fixture has the Alpha Pro booted, so the device rule is what refuses it."""
+    return sim_override_check("sim-device-lease-override", DEV_RULE, SIM_MCP,
+                              {"action": "tap", "device": "Alpha Pro"}, folder_path("one"))
+
+
 # --------------------------------------------------------------------------- the lease allow
 # Decision sim-test-is-the-one-boot-path, ruling 5, and decision sim-lease-tool. An MCP launch of a shut-down
 # phone simulator is allowed when THIS session holds a LIVE lease whose slot maps to the launched device's UDID.
@@ -29406,6 +29419,11 @@ LEASE_START = "Wed Nov  4 03:00:00 2026"
 LEASE_REUSED_START = "Mon Nov  2 09:00:00 2026"   # the start of another process that reuses LEASE_PID
 LEASE_OWN, LEASE_OTHER = "sess-own-0001", "sess-other-0002"
 LEASE_ENV = {"CI": None, "GITHUB_ACTIONS": None}  # sim-lease's no-op reads CI; the guard's lease read must not
+# The 18 Pro booted under its own pro lease (the device-lease cases): the fake ps needs its launchd_sim pid.
+LAUNCHD_PID[LEASE_PRO] = 4006
+# Rule simulator-device-lease: every simulator MCP call except launch names a device the session must hold a lease for.
+DEV_RULE = "simulator-device-lease"
+DEV_CARRIES = ("lease",)
 
 
 def lease_entry(slot, pid=LEASE_PID, start=LEASE_START, session=LEASE_OWN):
@@ -29437,11 +29455,13 @@ def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_di
     return folder + os.pathsep + PY_PATH, cfg
 
 
-def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None):
-    """One MCP launch case against FIXTURE, naming the device by DEVICE or by UDID. SESSION rides on the payload,
-    and None sends no session key. A deny carries LEASE_CARRIES unless CARRIES says otherwise. Returns the case."""
+def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None,
+                 action="launch"):
+    """One simulator MCP case against FIXTURE, naming the device by DEVICE or by UDID, with ACTION (a launch unless the
+    case names another). SESSION rides on the payload, and None sends no session key. A deny carries LEASE_CARRIES
+    unless CARRIES says otherwise. Returns the case."""
     env_path, config = fixture
-    tool_input = {"action": "launch"}
+    tool_input = {"action": action}
     if device is not None:
         tool_input["device"] = device
     if udid is not None:
@@ -29531,9 +29551,34 @@ def lease_fake_ps_check():
     return check
 
 
+def device_scope_check(pro_folder, dead_folder):
+    """Scope before subject (test-practices P7). The device-lease cases decide on what their fixtures say, so this
+    reads each fixture first: the 18 Pro is listed Booted, the live holder's pid answers its recorded start, and the
+    dead holder's pid answers nothing. A fixture that said otherwise would decide those cases for the wrong reason."""
+    def read(exe, *args):
+        answer = subprocess.run([exe, *args], capture_output=True, text=True)
+        return answer.returncode, answer.stdout.strip()
+
+    def check():
+        code, text = read(os.path.join(pro_folder, "xcrun"), "simctl", "list", "devices", "--json")
+        states = {}
+        if code == 0:
+            states = {d["udid"]: d["state"] for group in json.loads(text)["devices"].values() for d in group}
+        if states.get(LEASE_PRO) != "Booted":
+            return False, "the 18 Pro fixture lists it %r, not Booted" % states.get(LEASE_PRO)
+        if read(os.path.join(pro_folder, "ps"), "-o", "lstart=", "-p", str(LEASE_PID)) != (0, LEASE_START):
+            return False, "the live holder's pid does not answer its recorded start"
+        code, text = read(os.path.join(dead_folder, "ps"), "-o", "lstart=", "-p", str(LEASE_DEAD_PID))
+        if code == 0 and text:
+            return False, "the dead holder's pid answers a start"
+        return True, "the 18 Pro is listed Booted, the live pid answers its start, the dead pid answers nothing"
+    return check
+
+
 def register_simulator_lease_cases():
-    """The lease allow and its controls. Returns the dead-lease case, which lease_no_write_check runs, and the
-    lease read counts as (label, check) pairs for LOG_CHECKS."""
+    """The lease allow and its controls, and the device rule's cases. Returns the dead-lease case, which
+    lease_no_write_check runs, and the lease read counts and the device fixtures' scope as (label, check) pairs
+    for LOG_CHECKS."""
     rows = [(LEASE_DUO1, "iPhone Duo A", "Shutdown", SIM_TYPE_MINI, SIM_RT),
             (LEASE_DUO2, "iPhone Duo B", "Shutdown", SIM_TYPE_MINI, SIM_RT),
             (LEASE_PRO, "iPhone 18 Pro", "Shutdown", SIM_TYPE_PRO, SIM_RT),
@@ -29648,10 +29693,83 @@ def register_simulator_lease_cases():
                                        records=[sim_boot_record(SIM_UT0, "Idle Pro", SIM_TYPE_PRO, SIM_RT,
                                                                 2 * 3600)]),
                  device=duo1, rule="simulator-boot-twin", carries=(SIM_UT0,))
+    # Rule simulator-device-lease. Every simulator MCP call except launch names a device this session must hold a live
+    # lease for, and a launch of a booted device is judged the same way. Each case differs from a neighbour in one input.
+    # The fixtures reach the empty states (no file, an empty list), a dead holder, a full list, and the 18 Pro booted.
+    dev_nofile = lease_fixture("dev_nofile", rows, live)
+    dev_empty = lease_fixture("dev_empty", rows, live, [])
+    dev_other = lease_fixture("dev_other", rows, live, [lease_entry("1", session=LEASE_OTHER)])
+    dev_dead = lease_fixture("dev_dead", rows, live, [lease_entry("1", pid=LEASE_DEAD_PID)])
+    dev_two = lease_fixture("dev_two", rows, live, [lease_entry("1"), lease_entry("2")])
+    pro_rows = [(LEASE_PRO, "iPhone 18 Pro", "Booted", SIM_TYPE_PRO, SIM_RT)] + rows[:2]  # and Duo 1, Duo 2, shut down
+    pro_ended = lease_fixture("dev_pro_ended", pro_rows, live, [])
+    pro_held = lease_fixture("dev_pro_held", pro_rows, live, [lease_entry("pro")])
+    lease_launch("device-lease: a tap of a booted device this session holds no lease for is refused",
+                 "deny", dev_nofile, device="Beta Air", action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a screenshot of Duo 1 under another session's live lease is refused",
+                 "deny", dev_other, device=duo1, action="screenshot", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease control: an appearance change of Duo 1 under this session's live lease is allowed",
+                 "allow", own1, device=duo1, action="appearance")
+    lease_launch("device-lease: a tap of Duo 2 under this session's lease for slot 1 is refused",
+                 "deny", own1, device=duo2, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a swipe of Duo 1 whose lease holder is dead (reaped) is refused",
+                 "deny", dev_dead, device=duo1, action="swipe", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a tap of Duo 1 with no session id on the payload is refused",
+                 "deny", own1, device=duo1, action="tap", session=None, rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a tap naming Duo 1 by device and Duo 2 by udid is refused, the udid is judged too",
+                 "deny", own1, device=duo1, udid=LEASE_DUO2, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a tap naming Duo 2 by udid alone is refused under this session's slot 1 lease",
+                 "deny", own1, udid=LEASE_DUO2, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a tap naming a device no simulator holds is refused, lease or not",
+                 "deny", own1, device="Zeta Mini", action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a type with no device field and no live lease of this session is refused",
+                 "deny", dev_empty, action="type", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a tap with no device field, the session's only lease dead, is refused",
+                 "deny", dev_dead, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease control: a tap with no device field under this session's live lease is allowed",
+                 "allow", own1, action="tap")
+    lease_launch("device-lease control: a tap with no device field, two live leases of this session, is allowed",
+                 "allow", dev_two, action="tap")
+    lease_launch("device-lease control: a full state, a tap of Duo 1 under this session's slot 1 lease is allowed",
+                 "allow", full, device=duo1, action="tap")
+    lease_launch("device-lease: a full state, a tap of Duo 2 under another session's lease is refused",
+                 "deny", full, device=duo2, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a launch of a booted device this session holds no lease for is refused",
+                 "deny", dev_nofile, device="Beta Air", action="launch", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease control: a tap of the 18 Pro under this session's live pro lease is allowed",
+                 "allow", pro_held, device="iPhone 18 Pro", action="tap")
+    lease_launch("device-lease control: a lowercase name with outer spaces names the held 18 Pro, a tap is allowed",
+                 "allow", pro_held, device=" iphone 18 pro ", action="tap")
+    lease_launch("device-lease control: the 18 Pro named by udid under its live pro lease, a tap is allowed",
+                 "allow", pro_held, udid=LEASE_PRO, action="tap")
+    lease_launch("device-lease: the incident, a tap of the 18 Pro after its lease ended is refused",
+                 "deny", pro_ended, device="iPhone 18 Pro", action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    # Fail open, as the launch rule does: with no device list there is no proof of a lease, so nothing is refused.
+    lease_launch("device-lease control: an unreadable device list, a tap of a booted device is allowed (fail open)",
+                 "allow", (folder_path("unreadable"), dev_nofile[1]), device="Beta Air", action="tap")
+    # PATH is NOPS alone, not beside PY_PATH: on a Mac the python folder can be /usr/bin, which holds a real xcrun.
+    lease_launch("device-lease control: no xcrun on the PATH, a tap of a booted device is allowed (fail open)",
+                 "allow", (NOPS, dev_nofile[1]), device="Beta Air", action="tap")
+    # No janitor beside guard.py (a cloud copy): the device list is never read, so the call is not refused.
+    copy_dir = os.path.join(ROOT, "nojanitor", "hooks")
+    copy_guard = os.path.join(copy_dir, "guard.py")
+
+    def copy_guard_without_janitor():
+        os.makedirs(copy_dir, exist_ok=True)
+        copy_guard_family(copy_dir)
+
+    lazy_fixture([copy_guard], copy_guard_without_janitor)
+    add("device-lease control: a guard copy with no janitor beside it, a tap of a booted device is allowed (fail open)",
+        "allow", tool=SIM_MCP, session=LEASE_OWN, env=LEASE_ENV, guard=copy_guard,
+        env_path=dev_nofile[0], config=dev_nofile[1], action="tap", device="Beta Air")
+
     ps_counts = [("simulator: a held-lease allow of two leases makes two lease reads, one ps per lease (ruling 7)",
                   lease_ps_count_check(shared_case, 2)),
                  ("simulator: a launch of a booted device makes no lease read (ruling 7)",
                   lease_ps_count_check(booted_case, 0))]
+    ps_counts.append(("simulator: the device-lease fixtures list the 18 Pro booted and answer each holder's pid as their "
+                      "lease says", device_scope_check(pro_held[0].split(os.pathsep)[0],
+                                                       dev_dead[0].split(os.pathsep)[0])))
     return dead_case, ps_counts
 
 
@@ -29675,6 +29793,9 @@ if os.name != "nt":
     sim_lease_label = "simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)"
     LOG_FAMILY[sim_lease_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((sim_lease_label, sim_lease_override_check()),)
+    sim_device_label = "simulator: an owner override lifts a tap of a booted device with no lease (simulator-device-lease)"
+    LOG_FAMILY[sim_device_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_device_label, sim_device_lease_override_check()),)
     lease_dead_case, lease_ps_counts = register_simulator_lease_cases()
     lease_write_label = "simulator: the lease read writes nothing: a dead lease is refused and sim-lease's files keep their bytes"
     LOG_FAMILY[lease_write_label] = FAMILY
