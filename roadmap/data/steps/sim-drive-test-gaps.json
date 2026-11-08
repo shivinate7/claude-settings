@@ -5,7 +5,7 @@
   "order": 55,
   "owner": "coordinator",
   "lane": "session_013NEJKzSDXuw4rJESuzdw1Y",
-  "why": "Three hold arms and the simctl verbs in the simulator-drive guard have no test case or mutant.",
+  "why": "Two hold arms and the simctl verbs in the simulator-drive guard have no test case or mutant.",
   "note": "Lane sim-lease-gaps (session_013NEJKzSDXuw4rJESuzdw1Y). #1692 is reverted to its round-3 tree with its record posted; #1699 is stacked on it. Coordinator 19:06 CST Nov 7.",
-  "updatedAt": "2026-11-07T19:08:00-06:00"
+  "updatedAt": "2026-11-08T07:24:00-06:00"
 }
