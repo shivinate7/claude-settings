@@ -74,8 +74,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   2026-11-08 06:09 CST: "Keep a stalled job's log for 7 days"). Reason: a stalled job keeps writing after
   its STALL report, and that final output was lost when the job ended. On a stall the watcher writes a
   marker, `LOG.stalled`, beside the log before it exits 3. At the job's end the trap keeps the log if the
-  marker is there. Each `--hook` call then removes, from the log folder, every stall-watch log not written
-  for 7 days with its marker, and no other file. No timer runs and no process starts. A job that never
+  marker is there. Each `--hook` call then removes, from the log folder, every stall-watch log with a marker not
+  written for 7 days, and that marker, and no other file. No timer runs and no process starts. A job that never
   stalls leaves no files. The wrapper creates both files and opens both before the job starts. The watcher
   inherits those handles, so a job that ends at once loses no output, and the STALL report reads its tail
   from the handle. An EXIT trap in the job does the removal, also when the original calls `exit N` (the
@@ -84,9 +84,9 @@ guard rule, so the watcher does the waiting and the session is told once.
   and so does one that sets its own EXIT trap. The exec'd command replaces the job's subshell and keeps
   its pid, so the report still lists one process. A stalled job of that kind leaves its beat file, and its
   log and marker stay for the prune. A job killed before it can run its trap leaves its files too. A job
-  that never stalls is cleaned by the wrapper after `wait`. The report's `Log:` line says the file is kept
-  7 days. Cost: two small files created per job and two held handles in the watcher, no new process. A
-  stalled job keeps one log and one marker for 7 days, removed by the first background call after that.
+  that never stalls is cleaned by the wrapper after `wait`, which keeps a log whose marker exists, as the trap does. The report's `Log:` line says the file is kept
+  7 days after its last write. Cost: two small files created per job and two held handles in the watcher, no new process. A
+  stalled job keeps one log and one marker until 7 days after the log's last write, removed by the first background call after that.
   The prune costs one folder listing per background call. In a wrapped run the watcher no longer polls
   for the beat file. Run by hand with no beat handle, it still tries one open a second.
 
