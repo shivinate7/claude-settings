@@ -3941,6 +3941,9 @@ def impeccable_shell_hit(segment: str) -> str:
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 
 
+_BACKTICK_SPAN = re.compile(r"(`(?:\\.|[^`\\])*`)")
+
+
 def shell_run_texts(raw: str) -> list:
     """The texts a shell reads from a whole command, for a rule that judges shell lines. A body a shell
     reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
@@ -3963,11 +3966,13 @@ def shell_run_texts(raw: str) -> list:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
             elif "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):
                 # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
-                # backtick span as a shell.
-                # `$(` and `<(` stay text there: no interpreter reads them as a shell. Python's own
-                # backtick span is read too, a rare false alarm.
-                texts.extend(t for t, _ in _substitutions(re.sub(r"([$<>])\(", r"\1 (", body),
-                                                          heredoc=True)[0][:-1])
+                # backtick span as a shell, `$(` and `<(` inside the span too. Outside a span they stay
+                # text: no interpreter reads them as a shell. Python's own backtick span is read too, a
+                # rare false alarm. The split follows _substitutions' span rule (to the next unescaped backtick).
+                parts = _BACKTICK_SPAN.split(body)
+                inert = "".join(part if at % 2 else re.sub(r"([$<>])\(", r"\1 (", part)
+                                for at, part in enumerate(parts))
+                texts.extend(t for t, _ in _substitutions(inert, heredoc=True)[0][:-1])
     return texts
 
 
