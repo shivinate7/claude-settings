@@ -69,6 +69,19 @@ ENV_LOADER_COMMANDS = (
 )
 ENV_LOADER_FLAGS = ("--env-file", "--env-file-if-exists")
 
+# A runner that runs inline code (`-e`, `-p`, a stdin script) has the file's variables in scope and
+# can print them. Only these runners take inline code, and only the loader commands among them
+# reach the check.
+ENV_INLINE_RUNNERS = ("node", "node.exe", "bun", "bun.exe", "deno", "deno.exe")
+# Runner options that take the next word as a value, so that word is no script. The `=` forms are one word.
+ENV_RUNNER_VALUE_FLAGS = (
+    "--env-file", "--env-file-if-exists", "-r", "--require", "--import", "--loader", "-C",
+    "--conditions", "--input-type", "--experimental-loader", "--preload",
+)
+# A second copy of guard_frozen.py's `_NODE_EVAL_FLAG`, kept on purpose: this module reads the
+# `=` forms and the open rewrite of that one is not ours to touch.
+ENV_INLINE_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)(?:=.*)?$")
+
 # Commands that ask whether the file is THERE. They read no contents.
 ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 
@@ -120,6 +133,7 @@ ENV_ADVICE = (
     "To RUN something that needs those variables, hand the file to the runner with the "
     "--env-file flag ahead of node, npm, npx or a container command. "
     "That loads it into one process's own environment and prints nothing. "
+    "A runner given the file runs a script file: put the code in a script file, not inline. "
     "A listing and a test for existence are allowed."
 )
 
@@ -133,6 +147,9 @@ ENV_VARIABLE_REASON = (
 ENV_RUNNER_REASON = (
     "only a runner may be handed an environment file with the loader flag, and this command "
     "is not a runner"
+)
+ENV_INLINE_REASON = (
+    "a runner given an environment file may run a script file, not inline code"
 )
 ENV_CONTENTS_REASON = (
     "this command would read, write or commit the contents of an environment file"
@@ -618,16 +635,57 @@ def _env_relay(texts):
     return "", ""
 
 
+def _runner_inline_code(words, position: int, command: str, stdin_fed: bool = False) -> bool:
+    """True when a node, bun or deno command runs inline code: an eval or print flag, a stdin
+    script (`-`, or no script word with stdin fed by a pipe or a heredoc), or deno's `eval`.
+    The option words after the runner are read up to the first positional word or `--`, so the
+    `-e` of a script's own arguments (`node app.js -e x`) is not inline code."""
+    if command.lower() not in ENV_INLINE_RUNNERS:
+        return False
+    fed = stdin_fed
+    script = False
+    i = position + 1
+    while i < len(words):
+        word = words[i]
+        if REDIRECT.fullmatch(word):
+            i += 2
+        elif word.lstrip("0123456789").startswith("<"):
+            # A heredoc, here-string or `<` file feeds stdin. A spaced operator (`<<`, `<<-`, `<<<`,
+            # `<`) owns the next word, which is the delimiter, the string or the file.
+            fed = True
+            i += 2 if word.lstrip("0123456789") in ("<", "<<", "<<-", "<<<") else 1
+        elif word.isdigit() and words[i + 1:i + 2] and words[i + 1].startswith("<"):
+            i += 1  # the fd of `0< file`
+        elif word == "--":
+            script = i + 1 < len(words)
+            break
+        elif word in ENV_RUNNER_VALUE_FLAGS:
+            i += 2
+        elif ENV_INLINE_FLAG.match(word) or word == "-":
+            return True
+        elif word.startswith("-"):
+            i += 1
+        else:
+            if command.lower().startswith("deno") and word == "eval":
+                return True
+            script = True
+            break
+    return fed and not script
+
+
 def _env_flat(cmd: str, text_ok: bool = False):
     """The segment rules over one text whose substitutions are already cut out."""
     ends = []
     pieces = split_segments(cmd, ends)
-    for piece, end in zip(pieces, ends):
+    for at, (piece, end) in enumerate(zip(pieces, ends)):
+        previous_end = ends[at - 1] if at else ""
         parts = _env_parts(piece)
         for number, segment in enumerate(parts):
             words, position, command = _env_words(segment)
             if not words:
                 continue
+            # The first segment of a piece reads the pipe that the piece before it closed with.
+            stdin_piped = number == 0 and previous_end == "|"
             # A segment that pipes onward hands its output to another command, which may read it
             # as a path. Only its stdout to the terminal or to a file keeps the text allowance.
             piped = end == "|" and number == len(parts) - 1
@@ -672,6 +730,9 @@ def _env_flat(cmd: str, text_ok: bool = False):
                             "a shell variable holds '%s'" % named)
                 loaded = flag in ENV_LOADER_FLAGS or previous in ENV_LOADER_FLAGS
                 if loaded and command.lower() in ENV_LOADER_COMMANDS:
+                    if _runner_inline_code(words, position, command, stdin_piped):
+                        return (ENV_INLINE_REASON,
+                                "'%s' runs inline code with '%s' loaded" % (command, named))
                     continue  # a runner loading it into its own environment prints nothing
                 if loaded:
                     return (ENV_RUNNER_REASON,
