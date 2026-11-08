@@ -13968,8 +13968,8 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 # Rule reviewed-head-push. The incident: a lane pushed onto the head of a reviewed pull request whose one fix check
 # was already used. The merge tool writes one fix check per record, so it can write no fix check for the new head, and
 # the lane hand-wrote one. A `git push` that would land on the head of an open pull request ASKS, when that head's
-# newest review record carries its fix check and that record is done, its fix check FAILed, or it is held (net value
-# negative). Further work on such a head belongs on a new branch. The ask says to stack the change on a new branch.
+# newest review record carries its fix check, whatever the record's state, or when it is held (net value negative),
+# fix check or not. Further work on such a head belongs on a new branch. The ask says to stack the change on a new branch.
 # A pull request whose head comes from a fork never asks: its head is not this repo's branch.
 # The reader is guard_merge's helper, on the merge tool's own parser and state rule. Every record a case reads is
 # built by the tool's own review_body.
@@ -13993,6 +13993,7 @@ RPUSH_FIX_FAILED = (RPUSH_PREFIX, "reviewer", "sonnet", "FAIL")
 RPUSH_THREE = ((1, "reviewer", "sonnet", "PASS"), (2, "reviewer", "sonnet", "PASS"), (3, "reviewer", "sonnet", "PASS"))  # three passed rounds
 RPUSH_HELD = {"guard": "yes", "net": "negative", "rounds": RPUSH_THREE}  # a held record: the final round passed, net value negative
 RPUSH_OPEN_ROUND = ((1, "reviewer", "sonnet", "FAIL"),)  # an open record: its one round failed
+RPUSH_DESIGN_FAILED = ((1, "reviewer", "sonnet", "PASS"), (1, "design-reviewer", "opus", "FAIL"))  # a reviewer PASS, then a design-reviewer FAIL
 RPUSH_FORKED = "forker/x"  # the repo a fork's pull request head comes from, not the base repo y/x
 RPUSH_CHATTER = "looks fine to me"  # an issue comment that is no review record
 RPUSH_ROOT = os.path.join(ROOT, "reviewed-head-push")
@@ -14129,23 +14130,30 @@ rpush_case("reviewed-head-push: a newer fix check after an older record without 
 rpush_case("reviewed-head-push: a record on page two of the comments still asks",
            "ask", (RPUSH_PULLS, RPUSH_COMMENTS, RPUSH_COMMENTS), page_cap=2,
            comments=rpush_record_comments({"fix": RPUSH_FIX}, before=2))
-# A used fix check also asks when it FAILed, or when its record is held: the fix is taken, so the work goes on a new branch.
+# A fix check asks on the live head in any state, and a held record asks with or without one: more work on either goes
+# on a new branch.
 rpush_case("reviewed-head-push: a newest record whose fix check failed on the live head asks, after both reads",
            "ask", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX_FAILED}))
 rpush_case("reviewed-head-push: a held record with a passed fix check on the live head asks, after both reads",
            "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, fix=RPUSH_FIX)))
 rpush_case("reviewed-head-push: a held record with a failed fix check on the live head asks, after both reads",
            "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, fix=RPUSH_FIX_FAILED)))
+rpush_case("reviewed-head-push: a held record with no fix check asks, after both reads",
+           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD)))
+# An open record whose fix check passed still asks while its last design review is FAIL: the ask keys on the fix check,
+# not on the record's state.
+rpush_case("reviewed-head-push: an open record whose fix check passed but whose design review failed asks, after both reads",
+           "ask", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX, "rounds": RPUSH_DESIGN_FAILED}))
 
 # The allow controls. Each names its two reads, so it cannot pass on a read that never happened.
 rpush_case("reviewed-head-push: a done record with no fix check allows, after both reads",
            "allow", RPUSH_BOTH, comments=rpush_record_comments({}))
-rpush_case("reviewed-head-push: a held record with no fix check allows, after both reads",
-           "allow", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD)))
 rpush_case("reviewed-head-push: an open record with no fix check allows, after both reads",
            "allow", RPUSH_BOTH, comments=rpush_record_comments({"rounds": RPUSH_OPEN_ROUND}))
 rpush_case("reviewed-head-push: a stale record with a failed fix check allows, after both reads",
            "allow", RPUSH_BOTH, comments=rpush_record_comments({"head": RPUSH_OLD, "fix": RPUSH_FIX_FAILED}))
+rpush_case("reviewed-head-push: a held record for an older head allows, after both reads",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, head=RPUSH_OLD)))
 rpush_case("reviewed-head-push: a record for an older head allows, after both reads",
            "allow", RPUSH_BOTH, comments=rpush_record_comments({"head": RPUSH_OLD, "fix": RPUSH_FIX}))
 rpush_case("reviewed-head-push: a record that names another pull request allows, after both reads",
