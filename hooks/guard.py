@@ -1812,7 +1812,7 @@ WORKFLOW_SHELL_LONG_VALUE = {"--rcfile", "--init-file"}
 
 def workflow_shell_c_scripts(tokens) -> set:
     """The indexes of `tokens` that are the script word of a shell `-c`: the first non-option word after the
-    shell's options, when any short cluster of them holds a `-c`."""
+    shell's options (and a `--` that follows them), when any short cluster of them holds a `-c`."""
     scripts = set()
     for at, tok in enumerate(tokens):
         if os.path.basename(tok) not in WORKFLOW_SHELLS:
@@ -1828,6 +1828,9 @@ def workflow_shell_c_scripts(tokens) -> set:
                 at += 1 + sum(ch in "oO" for ch in word[1:])
             else:
                 break
+        # A `--` ends the options; the script word is the one after it.
+        if has_c and at < len(tokens) and tokens[at] == "--":
+            at += 1
         if has_c and at < len(tokens):
             scripts.add(at)
     return scripts
