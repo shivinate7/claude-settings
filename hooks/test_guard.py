@@ -12013,6 +12013,27 @@ sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs t
    "between two echoes is echo data, denies [cap-ask-fix r1 red]",
    "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
+# PWSH-C TEXT MODE. PowerShell reads U+201C and U+201D as double quotes, so `Set-Content -Path “P” -Value 1`
+# writes P. The guard's path token keeps the curly quotes, so `is_frozen` does not match P, and the write
+# is allowed. That holds for the PowerShell tool, and for a Bash call that runs the same text in
+# `pwsh -c` or `powershell -Command`. Each write DENIES.
+SMART_CFG_SETTINGS = "“" + CFG_SETTINGS + "”"
+SMART_CFG_WRITE = "Set-Content -Path " + SMART_CFG_SETTINGS + " -Value 1"
+sh("frozen shell: pwsh-c-text-mode, a Bash call that runs a smart-quoted config settings write in pwsh -c "
+   "denies [pwsh-c-text-mode red]",
+   "pwsh -c '" + SMART_CFG_WRITE + "'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, a Bash call that runs a smart-quoted config settings write in "
+   "powershell -Command denies [pwsh-c-text-mode red]",
+   "powershell -Command \"" + SMART_CFG_WRITE + "\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, the PowerShell tool's smart-quoted config settings write denies "
+   "[pwsh-c-text-mode red]",
+   SMART_CFG_WRITE, "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# Bash reads `\"` inside double quotes as one literal character, so with no PowerShell in the call this
+# echo is text and allowed. A PowerShell reading would end the string at the `\"` and read on.
+sh("frozen shell: pwsh-c-text-mode, a Bash echo of an escaped quote with no PowerShell is allowed "
+   "[pwsh-c-text-mode green]",
+   "echo \"a \\\" b\"", "allow", cwd=NOGIT)
+
 
 # ================================================================ 6a-2. cap-ask-fix (frozen)
 # Each case is a frozen write the guard reads as text, so each case names its safety hole. Each DENIES. The
