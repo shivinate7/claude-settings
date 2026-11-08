@@ -1222,8 +1222,11 @@ def case_powershell_bash_prefix_command_substitution():
          entry_of(ps_task("$x = $(Get-Date); git push")), None)
 
 
-def case_powershell_two_deep_expansion_in_single_quotes_passes():
-    # The same two-level text in single quotes is a string, and its contents are blanked, so it passes.
+def case_powershell_two_deep_expansion():
+    # A NAME=value prefix may hold an expansion nested two levels deep, as in `A=${A:-${B:-${C}}}`, which is a bash form
+    # and is refused. The same text in single quotes is a string, and its contents are blanked, so it passes.
+    page("a PowerShell command, A=${A:-${B:-${C}}} node x, is refused as a bash operator", "set",
+         entry_of(ps_task("A=${A:-${B:-${C}}} node x")), ("command-in-item", "bash operator"))
     page("a PowerShell string holding ${A:-${B:-${C}}}, single-quoted, passes", "set",
          entry_of(ps_task("$cfg = '${A:-${B:-${C}}}'")), None)
 
@@ -1264,6 +1267,18 @@ def case_step_path_cmdlet_is_a_shell_line():
     page("a step holding a learn.microsoft.com URL ending in Get-Item alone is text and passes", "set",
          entry_of(task_item(["Check the output of `https://learn.microsoft.com/en-us/powershell/module/"
                              "microsoft.powershell.management/Get-Item`"])), None)
+
+
+def case_step_span_flag_after_a_determiner_is_text():
+    # A determiner (the, a, an, this, its) as a span's first word marks prose, so `the -x flag` is text, and so are the
+    # other four. A span whose first word is no determiner keeps the span-flag rule: `ok --force` and `mode -v` stay
+    # refused, as does `grep -r x` (case_step_shell_programs_partial).
+    for span in ("the -x flag", "a -v option", "an -x flag", "this --force switch", "its -x flag"):
+        page("a step holding `%s` is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    for span in ("ok --force", "mode -v"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
 
 
 def case_bracket_test_alternative_is_linear():
@@ -1939,8 +1954,9 @@ def main():
                  case_task_str_replace_prose_label_passes,
                  case_powershell_pipe_then_newline_then_head, case_powershell_param_attribute_at_line_start,
                  case_powershell_bash_prefix_command_substitution,
-                 case_powershell_two_deep_expansion_in_single_quotes_passes,
-                 case_step_path_cmdlet_is_a_shell_line, case_bracket_test_alternative_is_linear):
+                 case_powershell_two_deep_expansion,
+                 case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_after_a_determiner_is_text,
+                 case_bracket_test_alternative_is_linear):
         try:
             case()
         except Exception as exc:
