@@ -2,7 +2,9 @@
 # Decides which checks jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
 #   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
 #   per suite: code (any non-docs file changed), guard_windows_full (the Windows guard suite runs in full shards on a pull_request: set by every repo file the guard suite loads, which GuardClosure in lint/test_ci_scope.py derives from the code and checks, by hooks/test_guard.py, hooks/mutate_guard.py and settings.json; every path that sets it also sets guard and code), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
-#   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot job: the bin/shoot suite, which installs a browser). The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`). checks_macos gates both checks-macos and checks-macos-b.
+#   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot job: the bin/shoot suite, which installs a browser).
+#   The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`).
+#   checks_macos gates both checks-macos and checks-macos-b.
 # guard_windows_slice is derived (after the loop, and outside ALL): guard on and guard_windows_full off. On a pull_request the Windows guard job runs the slice then, and the full shards only when guard_windows_full is on. Both are job outputs.
 # merge_windows_full (the Windows merge suite runs in full shards on a pull_request: set by every repo file the merge suite loads, which merge_closure in lint/test_ci_scope.py derives from merge/test_merge.py; every path that sets it also sets checks_windows_merge and code).
 # merge_windows_slice is derived (after the loop, and outside ALL): checks_windows_merge on and merge_windows_full off. On a pull_request the Windows merge job runs the slice then, and the full shards only when merge_windows_full is on. Both are job outputs.
@@ -43,7 +45,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       hooks/mutate_js.mjs) on="$on code guard $F " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
-      hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_report_guard_route.py|lint/test_report_guard_landing.py|lint/test_report_guard_refusal.py|lint/test_report_guard_handoff.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
+      hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_report_guard_route.py|lint/test_report_guard_landing.py|lint/test_report_guard_refusal.py|lint/test_report_guard_handoff.py|lint/test_report_guard_review.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
         on="$on $R $Z $X code guard "; case "$f" in lint/_transcript.py|lint/guard_log_report.py) on="$on $M " ;; esac
         # The files among them that the guard suite loads (GuardClosure in lint/test_ci_scope.py) also turn on the full Windows guard shards.
         case "$f" in hooks/_nowindow.py|hooks/call_judge.py|hooks/cc_compaction_baseline.json|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/git_bash.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/reply_judge.py|hooks/required_check.py|hooks/reread_check.py|hooks/route_match.py|hooks/route_rows.json|hooks/ruling_home.py|lint/_transcript.py|lint/guard_log_report.py|lint/report_guard.py) on="$on $F " ;; esac ;;
@@ -89,12 +91,14 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       install.ps1|install.test.ps1|install-no-gap.test.ps1|install-bin-eol.test.ps1|install-set.test.ps1) on="$on $P code " ;;
       # decision-watch.test.mjs imports lint/test_scanner_traps.mjs, so the mod-tests.sh step runs it too.
       lint/test_scanner_traps.mjs) on="$on $W $X mods code " ;;
+      # .gitignore: skills/plain-english-map/tests/typescript-home.test.mjs reads it, so it runs the mod step. `code` stays for the lints.
+      .gitignore) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
       bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
       # Files the guard suite loads (GuardClosure in lint/test_ci_scope.py): the Linux `checks` job, and the full Windows guard shards.
       actions/ci-alarm/clear_rule.py|actions/ci-alarm/events.json|testing/shallow_clone.py|lint/check_debt_retire.py|lint/check_record_slugs.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|lint/rule_audit.py|lint/stale_cites.py|lint/workflow_steps.py) on="$on code guard $F " ;;
       # Linux `checks` job only: the lints and opt-in templates.
-      actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
+      actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
       skills/plain-english-map/*.md) on="$on $W $X mods " ;;
       # Docs the guard suite reads: they run it in full, as a code path does.
