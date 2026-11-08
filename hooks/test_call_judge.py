@@ -59,10 +59,13 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
-- Owner-question sends: a send_message or SendMessage whose message carries a Goal line and a Problem (<stake>) line
-  gets the past-ruling check (lint/report_guard.py past_ruling_problem, the one home) before it is sent, whoever the
-  target is. Any other send makes no model call and starts no subprocess. A refusal is rule `past-ruling` with the
-  relay remedy, and an `Unvetted:` line passes a check that could not run.
+- Owner-question sends: a send_message or SendMessage whose message carries a Goal line and a Problem line gets the
+  past-ruling check (lint/report_guard.py past_ruling_problem, the one home) before it is sent, whoever the target is.
+  The Goal line may be plain, bold, bulleted, quoted, or a `## Goal:` heading. The Problem line may carry a stake, a
+  stake outside the set, or none. A message over report_guard.ASK_TEXT_MAX keeps its Based on lines and its text from
+  its first form line. Any other send makes no model call and starts no subprocess. A refusal is rule `past-ruling`
+  with the relay remedy. A check that could not run refuses unless every question in the message carries its own
+  `Unvetted:` line.
 - Page item writes (ruled 14:38 CST): a judged item write gets the dedicated past-ruling call first (item 8 alone, Sonnet).
   A refusal denies with rule past-ruling and makes no form-judge call. Otherwise the form judge (Opus) runs, and its
   prompt carries no item 8.
@@ -1665,7 +1668,7 @@ def case_item_8_naming_an_unshown_id_takes_the_unvetted_path():
 
 # ------------------------------------------------------------------ owner questions sent to a session (send tools)
 #
-# A send_message or SendMessage whose message carries a Goal line and a Problem (<stake>) line is an owner question. It
+# A send_message or SendMessage whose message carries a Goal line and a Problem line is an owner question. It
 # gets the past-ruling check, the one home lint/report_guard.py past_ruling_problem, before it is sent, whoever the target
 # is: the page writer is not special. Any other send makes no model call and starts no subprocess.
 from shared_names import SEND_TOOLS  # noqa: E402  the one home of the send tool names (hooks/shared_names.py)
@@ -1845,6 +1848,31 @@ def case_send_model_error_refuses_as_unvetted_unless_marked():
         check(name + " with an Unvetted line: not refused", r.code == 0 and r.deny() is None, detail(r))
 
 
+def case_send_two_questions_one_unvetted_line_is_refused_when_a_check_cannot_run():
+    # Two owner questions in one send, and one `Unvetted:` line, in either place. The check cannot run (the model fails),
+    # so the send is refused: each question needs its own marker, as a page batch already does. Both places are cased, so
+    # a check that reads only the first question's block, or only the last, fails one of them.
+    first, second = INCIDENT_357, INCIDENT_370
+    orders = (("after the first question", first + "\n" + UNVETTED_LINE + "\n\n" + second),
+              ("after the second question", first + "\n\n" + second + "\n" + UNVETTED_LINE))
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    for label, message in orders:
+        for tool in SEND_TOOLS:
+            name = "send two questions, marker %s, via %s" % (label, tool)
+            r = run_hook(send_input(tool, message), model_fail=True)
+            check(name + ": the check is attempted", len(r.calls) >= 1, detail(r))
+            check(name + ": refused with the Unvetted remedy",
+                  (r.deny() or {}).get("permissionDecision") == "deny" and bool(marker) and marker in r.reason(),
+                  detail(r))
+    # Control, green on the old code: each question carries its own marker, so the send is not refused.
+    both = first + "\n" + UNVETTED_LINE + "\n\n" + second + "\n" + UNVETTED_LINE
+    for tool in SEND_TOOLS:
+        name = "send two questions, each with its own marker, via %s" % tool
+        r = run_hook(send_input(tool, both), model_fail=True)
+        check(name + ": the check is attempted", len(r.calls) >= 1, detail(r))
+        check(name + ": not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
 # ------------------------------------------------------------------ the dedicated past-ruling call (page item writes)
 #
 # Coordinator ruling (14:38 CST): a judged page item write gets the dedicated past-ruling call first (lint/report_guard.py
@@ -1968,9 +1996,10 @@ def case_non_item_and_non_judged_writes_make_no_model_call():
 # ------------------------------------------------------------------ past-ruling cases: batches, form errors, send forms
 #
 # The cases below cover a page batch cut from the front, a batch whose one question no check reached, a form error that
-# must refuse, the send check's markdown and bullet forms, a send cut from the front, a send whose form sits only in a
-# code fence, and the send tool names, which come from hooks/shared_names.py.
+# must refuse, the send check's forms (markdown, bullet, a heading Goal, a Problem with no stake), a send cut from the
+# front, a send whose form sits only in a code fence, and the send tool names, which come from hooks/shared_names.py.
 PAGE_FILLER = "Background sentence for the owner. " * 200  # about 8,000 characters, past ASK_TEXT_MAX
+SEND_LOG_FILLER = "Lane 4 log: ruff clean, no finding.\n" * 200  # about 7,200 characters, past ASK_TEXT_MAX
 
 
 def case_page_batch_passes_every_write_to_the_dedicated_call():
@@ -2025,16 +2054,21 @@ def replace_line(text, prefix, line):
     return "\n".join(line if part.startswith(prefix) else part for part in text.split("\n"))
 
 
-def case_send_check_catches_the_markdown_and_bullet_forms():
-    # The send check reads a Goal line and a stake Problem line in the forms owners' pages use: bold, a bullet and
-    # a blockquote. Each variant makes one dedicated call, and the incident ruling refuses it.
+def case_send_check_judges_each_form_variant():
+    # The send check reads a Goal line and a Problem line in the forms owners' pages use: bold, a bullet, a blockquote,
+    # a `## Goal:` heading, and a Problem line with no stake or with one outside the set. Each variant makes one
+    # dedicated call, and the incident ruling refuses it.
     goal = "a merge frees disk without losing a running agent's work."
     problem = "freeing a running agent's worktree loses its uncommitted files."
     variants = (
         ("a bold Goal", replace_line(INCIDENT_357, "Goal:", "**Goal:** " + goal)),
         ("a bulleted Goal", replace_line(INCIDENT_357, "Goal:", "- Goal: " + goal)),
         ("a blockquoted Goal", replace_line(INCIDENT_357, "Goal:", "> Goal: " + goal)),
+        ("a heading Goal", replace_line(INCIDENT_357, "Goal:", "## Goal: " + goal)),
         ("a bold Problem (risk)", replace_line(INCIDENT_357, "Problem (risk):", "**Problem (risk):** " + problem)),
+        ("a Problem with no stake", replace_line(INCIDENT_357, "Problem (risk):", "Problem: " + problem)),
+        ("a Problem with a stake outside the set",
+         replace_line(INCIDENT_357, "Problem (risk):", "Problem (cost): " + problem)),
     )
     for label, message in variants:
         for tool in SEND_TOOLS:
@@ -2052,7 +2086,7 @@ def case_send_over_the_cap_keeps_the_goal_and_problem():
     cap = guard_constant(REPORT_GUARD, "ASK_TEXT_MAX")
     lines = INCIDENT_357.split("\n")
     goal_line, problem_line = lines[1], lines[2]
-    message = INCIDENT_357 + "\n" + "Lane 4 log: ruff clean, no finding.\n" * 200
+    message = INCIDENT_357 + "\n" + SEND_LOG_FILLER
     check("send over the cap: the message is longer than ASK_TEXT_MAX",
           isinstance(cap, int) and len(message) > cap, cap)
     for tool in SEND_TOOLS:
@@ -2061,6 +2095,24 @@ def case_send_over_the_cap_keeps_the_goal_and_problem():
         check("send over the cap via %s: the one model call is made" % tool, len(r.calls) == 1, detail(r))
         check("send over the cap via %s: the Goal line reaches the prompt" % tool, goal_line in prompt, detail(r))
         check("send over the cap via %s: the Problem line reaches the prompt" % tool, problem_line in prompt, detail(r))
+
+
+def case_send_over_the_cap_keeps_a_based_on_line_above_the_goal():
+    # A send past ASK_TEXT_MAX whose Based on (ruling) line sits above its Goal line. A cut from the first form line drops
+    # that line, so the judge would not see the ruling the question names. The line must reach the prompt.
+    cap = guard_constant(REPORT_GUARD, "ASK_TEXT_MAX")
+    title, goal_line, *rest = INCIDENT_357.split("\n")
+    message = "\n".join([title, BASED_RULING_357, goal_line, *rest]) + "\n" + SEND_LOG_FILLER
+    check("send based-on over the cap: the message is longer than ASK_TEXT_MAX",
+          isinstance(cap, int) and len(message) > cap, cap)
+    check("send based-on over the cap: the Based on ruling line sits above the Goal line",
+          message.index(BASED_RULING_357) < message.index(goal_line), "fixture order")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, message), answer=ALLOW)
+        prompt = r.calls[0]["prompt"] if r.calls else ""
+        check("send based-on over the cap via %s: the one model call is made" % tool, len(r.calls) == 1, detail(r))
+        check("send based-on over the cap via %s: the Based on ruling line reaches the prompt" % tool,
+              BASED_RULING_357 in prompt, detail(r))
 
 
 def case_send_with_the_form_only_in_a_fence_makes_no_call():
@@ -2147,6 +2199,7 @@ def main():
                  case_send_with_a_based_on_ruling_line_is_sent,
                  case_send_without_the_form_makes_no_call_and_no_subprocess,
                  case_send_model_error_refuses_as_unvetted_unless_marked,
+                 case_send_two_questions_one_unvetted_line_is_refused_when_a_check_cannot_run,
                  case_page_past_ruling_refuses_before_the_form_judge,
                  case_page_past_ruling_ok_then_the_form_judge_without_item_8,
                  case_page_form_item_naming_a_listed_id_is_question_judge,
@@ -2154,8 +2207,9 @@ def main():
                  case_non_item_and_non_judged_writes_make_no_model_call,
                  case_page_batch_passes_every_write_to_the_dedicated_call,
                  case_page_batch_with_one_unvetted_line_is_refused_when_a_check_cannot_run,
-                 case_page_form_error_refuses_as_unvetted, case_send_check_catches_the_markdown_and_bullet_forms,
+                 case_page_form_error_refuses_as_unvetted, case_send_check_judges_each_form_variant,
                  case_send_over_the_cap_keeps_the_goal_and_problem,
+                 case_send_over_the_cap_keeps_a_based_on_line_above_the_goal,
                  case_send_with_the_form_only_in_a_fence_makes_no_call,
                  case_send_tool_names_come_from_shared_names):
         try:
