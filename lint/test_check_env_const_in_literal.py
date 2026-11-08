@@ -10,11 +10,14 @@ in hooks/test_*.py and lint/test_*.py under a root. It reads the source with tok
 
 The cases pin this contract:
 - Exit 0 when clean. Exit 1 on a hit, one line per hit: path:line: env-const-in-literal: matched text.
-  Exit 2 when a scanned file cannot be read or tokenized. Unknown is never clean.
+  Exit 2 when a scanned file cannot be read or tokenized, or when nothing was scanned: a missing root, or
+  no test file in the scanned folders. Unknown is never clean.
 - A real concatenation outside a literal, and the same words in a comment, never flag.
 - Comment openers inside strings, a multi-line string, a lone quote in text and a large file never move a line.
-- Only hooks/test_*.py and lint/test_*.py are scanned. --root names the tree. A tree with neither folder exits 0.
-- A hit needs its closing quote. A hit with an odd count of its own quote before it is embedded source, and is skipped.
+- Only hooks/test_*.py and lint/test_*.py are scanned. --root names the tree. A tree with neither folder exits 2.
+- A hit needs its closing quote, escaped or not. A hit with an odd count of its own quote before it is embedded
+  source, and is skipped. An escaped copy of that quote counts only when the hit's own quote is escaped too.
+  An apostrophe between two letters is text, so it is not counted.
 
 CHECK_ENV_CONST_IN_LITERAL_UNDER_TEST, when set, names the module to run instead. The red record runs a
 stand-in that exits 0 and prints nothing, as lint/test_check_red_run.py does for its own check. Each case that
@@ -67,15 +70,19 @@ C = "'"
 D = 'x'
 """
 CLEAN = 'ENV = "/x/.env"\nMSG = "ok, then done"\nPATH = "x" + SUFFIX\n'
-# The line-139 shape of hooks/test_sendmessage_state.py: five quotes come before the match, so its count is odd.
+# The spawned-shell-script shape: five quotes come before the match, so the count of that quote is odd.
 JS_SHAPE = 'spawn("sh", ["-c", "echo 1 > started.flag && sleep %s && echo 1 > done.flag"])'
 # Shapes for the closing-quote part and the odd-count skip. Each is one source line, built with % like the rest.
 GAP_LINE = "GUARD = '%s + %s + x'\n" % (DQ, "ENV")                    # no closing quote after the NAME
-EMBEDDED_PY = "CODE = '%s'\n" % ("f = %srepos/%s/%s" % (DQ, inc(DQ, "word"), DQ))  # the test_guard.py:1055 shape
-EMBEDDED_JS = "CODE = '%s'\n" % (JS_SHAPE % inc(DQ, "secs"))          # the test_sendmessage_state.py:139 shape
+EMBEDDED_PY = "CODE = '%s'\n" % ("f = %srepos/%s/%s" % (DQ, inc(DQ, "word"), DQ))  # the embedded Python shape
+EMBEDDED_JS = "CODE = '%s'\n" % (JS_SHAPE % inc(DQ, "secs"))          # the embedded spawned-shell shape
 EVEN_BEFORE = "GUARD = '%s'\n" % ("say %shi%s then %s" % (DQ, DQ, inc(DQ)))  # two quotes come before the incident
 ESCAPED_BEFORE = "GUARD = '%s'\n" % ("x \\%s then %s" % (DQ, inc(DQ)))       # an escaped quote before the incident
 OTHER_QUOTE_BEFORE = "GUARD = '''%s'''\n" % ("it's %s x" % inc(DQ))          # an apostrophe before the incident
+EDQ = "\\" + DQ                                                        # a backslash then a double quote, as in source
+ESCAPED_LINE = 'GUARD = "%s"\n' % ("x %s y" % inc(EDQ))                # the incident in a double-quoted literal, escaped
+EMBEDDED_ESC_PY = 'CODE = "%s"\n' % ("f = %srepos/%s/%s" % (EDQ, inc(EDQ, "word"), EDQ))  # the embedded Python shape, escaped
+CONTRACTION_LINE = 'MSG = "%s"\n' % ("Don%st set the %s variable" % (SQ, inc(SQ)))  # an apostrophe between two letters
 
 
 def tree(files):
@@ -89,11 +96,11 @@ def tree(files):
     return root
 
 
-def scan(root, exe=None):
-    """Run the check as the CLI on root, from inside root."""
+def scan(root, exe=None, cwd=None):
+    """Run the check as the CLI on root, from inside root unless cwd names another folder (a missing root)."""
     if not os.path.isfile(MODULE):
         raise AssertionError("module absent: lint/check_env_const_in_literal.py")
-    return subprocess.run([exe or sys.executable, MODULE, "--root", root], cwd=root,
+    return subprocess.run([exe or sys.executable, MODULE, "--root", root], cwd=cwd or root,
                           capture_output=True, text=True, timeout=120)
 
 
@@ -141,6 +148,13 @@ class Scan(unittest.TestCase):
                       "the control incident was not flagged, so the scan proves nothing")
         self.assertEqual(got.returncode, 1, "%s: exit %d, want 1 (the control only)" % (cause, got.returncode))
         self.assertEqual({hit for hit in hits if hit[0] == "hooks/test_probe.py"}, set(), cause)
+
+    def assert_unknown(self, root, cause, cwd=None):
+        """Run the check on a tree with nothing to scan: exit 2, the message 'nothing was scanned', no hit lines."""
+        got = scan(root, cwd=cwd)
+        self.assertEqual(got.returncode, 2, "%s: exit %d, want 2 (unknown)" % (cause, got.returncode))
+        self.assertIn("nothing was scanned", got.stdout + got.stderr, "%s: no 'nothing was scanned' message" % cause)
+        self.assertEqual(hits_of(got.stdout, root), set(), "%s: hit lines printed" % cause)
 
     def test_single_quoted_incident_is_flagged(self):
         self.assert_scan({"hooks/test_single.py": SINGLE_LINE},
@@ -254,14 +268,21 @@ class Scan(unittest.TestCase):
         self.assertEqual(hits, {("hooks/test_control.py", 1)},
                          "a file outside hooks/test_*.py and lint/test_*.py was flagged")
 
-    def test_root_with_neither_folder_exits_zero(self):
+    def test_root_with_neither_folder_exits_two(self):
         control = tree({"hooks/test_control.py": SINGLE_LINE})
         self.assertEqual(scan(control).returncode, 1,
                          "--root not honored: the control tree's incident was not flagged")
-        empty = tree({"README.md": "no test folders here\n"})
-        got = scan(empty)
-        self.assertEqual(got.returncode, 0, "a root with neither folder: exit %d, want 0" % got.returncode)
-        self.assertEqual(hits_of(got.stdout, empty), set(), "a root with neither folder: hit lines printed")
+        self.assert_unknown(tree({"README.md": "no test folders here\n"}), "a root with neither folder")
+
+    def test_folders_with_no_test_files_exit_two(self):
+        # Both folders exist and hold an incident outside the scanned names: nothing is read, so it is unknown.
+        self.assert_unknown(tree({"hooks/guard_x.py": SINGLE_LINE, "lint/helper.py": SINGLE_LINE}),
+                            "scanned folders holding no test file")
+
+    def test_missing_root_exits_two(self):
+        missing = os.path.join(RUN_FOLDER, "no-such-tree")
+        self.assertFalse(os.path.exists(missing), "the fixture root exists, so the case proves nothing")
+        self.assert_unknown(missing, "a root that does not exist", cwd=RUN_FOLDER)
 
     def test_closing_quote_gap_is_clean(self):
         # The pattern needs the closing quote: a quote, plus, NAME and plus with no quote after the NAME is not a hit.
@@ -272,7 +293,7 @@ class Scan(unittest.TestCase):
         self.assert_clean_beside_control(EMBEDDED_PY, "embedded Python concatenation flagged")
 
     def test_odd_quote_before_embedded_js_is_clean(self):
-        # Five quotes come before the match on the line-139 shape, so the count of that quote is odd: embedded source.
+        # Five quotes come before the match on the spawned-shell shape, so the count of that quote is odd: embedded source.
         self.assert_clean_beside_control(EMBEDDED_JS, "embedded JS concatenation flagged")
 
     def test_incident_forms_with_no_earlier_quote_stay_flagged(self):
@@ -291,10 +312,24 @@ class Scan(unittest.TestCase):
         self.assert_scan({"hooks/test_escaped.py": ESCAPED_BEFORE}, {("hooks/test_escaped.py", 1)},
                          "an escaped quote before the incident was counted")
 
+    def test_escaped_quotes_around_the_incident_are_flagged(self):
+        # The quotes around the match are escaped, and no unescaped quote comes before it: an incident.
+        self.assert_scan({"lint/test_escaped_dq.py": ESCAPED_LINE}, {("lint/test_escaped_dq.py", 1)},
+                         "escaped quotes hid the incident in a double-quoted literal")
+
+    def test_escaped_embedded_python_is_clean(self):
+        # Passes today by design: a fix that only allows a backslash before the closing quote would flag this shape.
+        self.assert_clean_beside_control(EMBEDDED_ESC_PY, "escaped embedded Python concatenation flagged")
+
     def test_odd_count_of_the_other_quote_does_not_skip(self):
         # The count is of the match's own quote only: one apostrophe comes before it, zero of the match's quote.
         self.assert_scan({"hooks/test_other.py": OTHER_QUOTE_BEFORE}, {("hooks/test_other.py", 1)},
                          "an apostrophe before the incident skipped it")
+
+    def test_apostrophe_between_two_letters_does_not_skip_the_incident(self):
+        # The apostrophe in the contraction is text, not a closing quote: it is not counted, so the incident is flagged.
+        self.assert_scan({"hooks/test_contraction.py": CONTRACTION_LINE}, {("hooks/test_contraction.py", 1)},
+                         "an apostrophe between two letters hid the incident")
 
     def test_repo_tree_gets_a_defined_exit(self):
         got = scan(REPO)
@@ -329,6 +364,13 @@ class Scan(unittest.TestCase):
         self.assertIn("\\" + DQ, ESCAPED_BEFORE, "escaped fixture holds no backslash before its quote")
         self.assertEqual(value(OTHER_QUOTE_BEFORE).value, "it's %s x" % inc(DQ),
                          "other-quote fixture is not one string")
+        self.assertEqual(value(ESCAPED_LINE).value, "x %s y" % inc(DQ), "escaped incident fixture is not one string")
+        self.assertIn("\\" + DQ, ESCAPED_LINE, "escaped incident fixture holds no backslash before its quote")
+        self.assertEqual(value(EMBEDDED_ESC_PY).value, "f = %srepos/%s + word + %s/%s" % (DQ, DQ, DQ, DQ),
+                         "escaped embedded fixture is not one string")
+        self.assertIn("\\" + DQ, EMBEDDED_ESC_PY, "escaped embedded fixture holds no backslash before its quote")
+        self.assertEqual(value(CONTRACTION_LINE).value, "Don%st set the %s variable" % (SQ, inc(SQ)),
+                         "contraction fixture is not one string")
 
 
 def tearDownModule():
