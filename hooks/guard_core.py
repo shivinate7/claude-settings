@@ -858,8 +858,10 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     # is text, and no body line may make another body look run.
     text = _without_message_values(dropped)
     if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, [header for _, _, header in bodies]) or (not shells_only and heredoc_code(cmd)):
+            text, [header for _, _, header in bodies]):
         return cmd  # the body may be executed, so keep it under inspection
+    if not shells_only and heredoc_code(cmd):
+        return cmd  # the code reader finds python or node in a body no test above names: `| python3`, `uv run x.py`
     return "\n".join([dropped] + runs)
 
 
