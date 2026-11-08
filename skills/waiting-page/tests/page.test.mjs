@@ -593,7 +593,7 @@ test("a decode that finishes after a newer identity is ignored", async (t) => {
     state.meta = { identity: { name: "Compass" } }; applyIdentity();
   }, slow);
   // The slow decode has finished, and the page has had its chance to apply it, once the fixture sets its flag.
-  await page.waitForFunction(() => window.__slowDecodeDone === true);
+  await page.waitForFunction(() => window.__slowDecodeDone === true, null, { timeout: 5000 }).catch(() => assert.fail("the slow decode did not finish in 5 s"));
   const m = await markState(page);
   assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""]);
 });
@@ -5151,7 +5151,7 @@ test("the SENT stamp is the same element, not rebuilt, as the Undo count ticks",
   // Wait until the Undo count has ticked down by two, so the stamp has been seen across two ticks.
   const countNow = () => page.evaluate(() => { const m = /\((\d+)\)/.exec(document.getElementById("undoBtn")?.textContent || ""); return m ? Number(m[1]) : null; });
   const n0 = await countNow();
-  await page.waitForFunction((n) => { const b = document.getElementById("undoBtn"), m = b && /\((\d+)\)/.exec(b.textContent); return !!m && Number(m[1]) <= n - 2; }, n0, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction((n) => { const b = document.getElementById("undoBtn"), m = b && /\((\d+)\)/.exec(b.textContent); return !!m && Number(m[1]) <= n - 2; }, n0, { timeout: 5000 }).catch(() => assert.fail("the Undo count did not tick down twice in 5 s"));
   assert.equal(await page.evaluate(() => window.__stamp.isConnected && window.__stamp === document.querySelector("#sent .stamp")), true, "the stamp was rebuilt, so it settles again each second");
   assert.match(await page.locator("#undoBtn").textContent(), /Undo send \(\d\)/);
 });
