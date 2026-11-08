@@ -138,7 +138,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        and a path the commit carries (the index; the working tree with `-a`, a pathspec or an
                        earlier add) has its entry at C, absent included, while HEAD's differs. Names those
                        paths only. It judges a commit only when each earlier segment is a git add, a git read,
-                       `true`, `false` or `cd`. A HEAD log that cannot be read, and a path edited to match
+                       `true`, `false`, `cd`, or one `update-ref` of the branch or `reset --soft` (then C is the
+                       current HEAD and the move's target the new head). A HEAD log that cannot be read, and a path edited to match
                        neither C nor HEAD, give no hit. (commit-refuses-stale-index)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)

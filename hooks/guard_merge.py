@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _index_entries, _segment_git_c_target, _tree_entries, _worktree_entries,
-    basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    basename, branch_is_ancestor, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     strip_heredoc_bodies,
 )
@@ -820,23 +820,29 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # newer commit's files. Two moves do it: another worktree's update-ref of the checked-out branch, and a
 # reset or update-ref here that nothing followed with a read-tree. The old head C comes from two file
 # reads, no spawn: this worktree's own HEAD log (its newest new value when that is not HEAD, or the old
-# value of a newest step that is a reset or has no message), and the shared branch log (its newest old
-# value when its new value is HEAD and this worktree's HEAD log did not write that step: a move made
-# elsewhere shows only there). A HEAD log that cannot be read gives no hit. The commit is refused only when
-# C is a strict ancestor of HEAD and a path the commit carries holds the entry it had at C (absent
-# included) while HEAD's entry differs. Only those paths are named.
+# value of a newest step that is a reset or has no message), and, only when this worktree has no HEAD log,
+# the shared branch log (its newest old value when its new value is HEAD: a move made elsewhere shows only
+# there). A HEAD log that cannot be read gives no hit. The commit is refused only when C is a strict
+# ancestor of HEAD and a path the commit carries holds the entry it had at C (absent included) while
+# HEAD's entry differs. Only those paths are named.
+# A move chained before the commit in the same call (`update-ref <this branch> X` or `reset --soft X`, one
+# such move) is read as a plain target: X is resolved with `git rev-parse` and nothing runs. The commit is
+# then judged with C = the current HEAD and X as the head it will sit on; a backward `reset --soft` (a
+# squash) has no C that is an ancestor of X, so it passes.
 # Judged like conflict-markers: a commit after an earlier step that can change the checkout (not a git
 # add, a git read, `true`, `false` or `cd`) or after another commit in the call is not read. An earlier
 # `git add` makes the commit read the working tree, as `-a` does.
 # Limits: a path edited after the move that matches neither C nor HEAD is not caught; a commit inside
 # `sh -c` or `eval`, a link or a directory where a file was, no HEAD, and a failed read are no hit; only
-# the first STALE_PATH_CAP carried paths are read.
+# the first STALE_PATH_CAP carried paths are read. With no HEAD log of its own, two moves made in other
+# worktrees give only the newest one's C. Two chained moves, or one whose target holds a substitution,
+# are not read.
 # Cost: per commit segment, one `git rev-parse`, and two small file reads. Only when a candidate C
 # exists: one `git merge-base --is-ancestor`, one `git diff-index`, two `git ls-tree`, one `git ls-files`
-# or `git hash-object`. No log, no process left running.
+# or `git hash-object`; a chained move adds one `git rev-parse`. No log, no process left running.
 STALE_INDEX_REASON = (
-    "Rule (Git, stale-index; decision commit-refuses-stale-index): HEAD moved on from {old} and this "
-    "checkout did not follow, so this commit would revert the newer commit's version of: {files}. "
+    "Rule (Git, stale-index; decision commit-refuses-stale-index): this checkout still holds the tree of "
+    "{old}, but HEAD is ahead of it, so this commit would revert the newer commit's version of: {files}. "
     "Remedy: run `git read-tree -m -u {old} HEAD`, re-stage your own edits, then retry."
 )
 STALE_PATH_CAP = 1000
@@ -878,33 +884,34 @@ def _old_heads(gitdir, common, head, ref):
             found.append(new)
         elif message.startswith("reset: moving to") or not message:
             found.append(old)
+    # With no HEAD log of its own this worktree cannot say what it last held, so the branch's newest step is
+    # the only signal. With one, the log above already covers every move this worktree missed.
     if ref.startswith("refs/heads/"):
         shared = _last_log_entry(os.path.join(common, "logs", *ref.split("/")))
-        if shared and shared[1] == head and shared[:2] != (own[:2] if own else None):
+        if shared and shared[1] == head and not own:
             found.append(shared[0])
     return [sha for index, sha in enumerate(found)
             if sha != head and set(sha) != {"0"} and sha not in found[:index]]
 
 
-def _carried_paths(top, where, specs, from_tree):
-    """The paths a commit carries: those differing from HEAD in the index, or in the working tree when the
-    commit reads it. None on a failed read."""
+def _carried_paths(top, where, specs, from_tree, new):
+    """The paths a commit carries against the head it will sit on, NEW: those differing in the index, or in
+    the working tree when the commit reads it. None on a failed read."""
     if specs:
-        args = ["diff-index", "--name-only", "-z", "HEAD", "--", *specs]
-        done = _git(where, *args)
+        done = _git(where, "diff-index", "--name-only", "-z", new, "--", *specs)
     else:
-        done = _git(top, "diff-index", *([] if from_tree else ["--cached"]), "--name-only", "-z", "HEAD")
+        done = _git(top, "diff-index", *([] if from_tree else ["--cached"]), "--name-only", "-z", new)
     if done is None or done.returncode != 0:
         return None
     return [name for name in done.stdout.split("\0") if name][:STALE_PATH_CAP]
 
 
-def _stale_paths(top, where, old, head, specs, from_tree):
-    """The carried paths whose entry is C's while HEAD's differs, [] when none, None on a failed read."""
-    paths = _carried_paths(top, where, specs, from_tree)
+def _stale_paths(top, where, old, new, specs, from_tree):
+    """The carried paths whose entry is OLD's while NEW's differs, [] when none, None on a failed read."""
+    paths = _carried_paths(top, where, specs, from_tree, new)
     if not paths:
         return paths
-    at_old, at_head = _tree_entries(top, old, paths), _tree_entries(top, head, paths)
+    at_old, at_head = _tree_entries(top, old, paths), _tree_entries(top, new, paths)
     if at_old is None or at_head is None:
         return None
     if specs:
@@ -920,7 +927,44 @@ def _stale_paths(top, where, old, head, specs, from_tree):
             if current.get(name) == at_old.get(name) and at_head.get(name) != at_old.get(name)]
 
 
-def _stale_commit(where, args, from_tree):
+_MOVE_FLAGS = {"update-ref": ("--no-deref", "--create-reflog"), "reset": ("-q", "--quiet", "--soft")}
+
+
+def _move_of(call):
+    """`(ref, value)` when the git call moves HEAD's branch and leaves the index and the working tree alone:
+    `update-ref <ref> <value>` and `reset --soft <value>` (the ref is then HEAD). Else None."""
+    verb, args = call
+    if verb not in _MOVE_FLAGS or "--" in args:
+        return None
+    rest, skip = [], False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg == "-m" and verb == "update-ref":
+            skip = True
+        elif arg.startswith("-"):
+            if arg not in _MOVE_FLAGS[verb]:
+                return None
+        else:
+            rest.append(arg)
+    if skip or any(set(word) & set("$`()*?[{\\") for word in rest):
+        return None
+    if verb == "reset":
+        return ("HEAD", rest[0]) if "--soft" in args and len(rest) == 1 else None
+    return (rest[0], rest[1]) if len(rest) in (2, 3) else None
+
+
+def _chained_move(top, where, ref, moves):
+    """The sha a chained move of this checkout's branch reaches, else None: the one move in `moves` made
+    in `where` that names HEAD or `ref`, resolved by `git rev-parse` and never run."""
+    mine = [value for at, name, value in moves if at == where and name in ("HEAD", ref)]
+    if len(mine) != 1 or mine[0].startswith("-"):
+        return None
+    done = _git(top, "rev-parse", "--verify", "-q", mine[0] + "^{commit}")
+    return done.stdout.strip() if done is not None and done.returncode == 0 else None
+
+
+def _stale_commit(where, args, from_tree, moves):
     """`(old, paths)` when this commit, run in `where`, would revert a moved head's files, else None."""
     read = _git(where, "rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir", "HEAD",
                 "--symbolic-full-name", "HEAD")
@@ -930,14 +974,19 @@ def _stale_commit(where, args, from_tree):
     if len(lines) != 5:
         return None
     top, gitdir, common, head, ref = lines
-    common = os.path.join(where, common)
+    top = os.path.normpath(top)
     all_flag, specs = _commit_shape(args)
     from_tree = from_tree or all_flag
-    for old in _old_heads(os.path.normpath(gitdir), common, head, ref):
-        ancestor = _git(top, "merge-base", "--is-ancestor", old, head)
-        if ancestor is None or ancestor.returncode != 0:
+    # Each pair is (the head the index matches, the head the commit will sit on).
+    pairs = [(old, head) for old in _old_heads(os.path.normpath(gitdir), os.path.join(where, common), head, ref)]
+    if moves:
+        target = _chained_move(top, where, ref, moves)
+        if target and target != head:
+            pairs.insert(0, (head, target))
+    for old, new in pairs:
+        if branch_is_ancestor(top, new, old) is not True:
             continue
-        paths = _stale_paths(os.path.normpath(top), where, old, head, specs, from_tree)
+        paths = _stale_paths(top, where, old, new, specs, from_tree)
         if paths:
             return old, paths
     return None
@@ -946,20 +995,24 @@ def _stale_commit(where, args, from_tree):
 def stale_index_hit(stripped: str, cwd: str):
     """`(old head, [paths])` for the first commit whose tree would revert a moved head's files, else None."""
     readable, added = True, False   # every segment so far cannot change the checkout / a git add came before
+    moves = []                      # (folder, ref, value) of each earlier update-ref or reset --soft
     ends = []
     segments = split_segments(stripped, ends)
     for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         call = git_call_of(segment)
+        move = _move_of(call) if call is not None else None
+        if move:
+            moves.append((_segment_where(segments, number, cwd, ends), *move))
         if call is None or call[0] != "commit":
             added = added or (call is not None and call[0] == "add")
-            readable = readable and _chain_safe(segment)
+            readable = readable and (bool(move) or _chain_safe(segment))
             continue
         judged, readable = readable, False   # a later commit follows this one's own move
         where = _segment_where(segments, number, cwd, ends) if judged else None
         if where and os.path.isdir(where):
-            hit = _stale_commit(where, call[1], added)
+            hit = _stale_commit(where, call[1], added, moves)
             if hit:
                 return hit
     return None
