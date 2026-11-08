@@ -5,7 +5,7 @@
 A Cost sentence may name a file or state a count only when the same sentence backs it:
 
 - For a file: a test file that exists and holds the file's name.
-- For a count: a code span in the sentence that a test file holds as a whole name, or a bound ("at most", "up to", "no more than", "fewer", "at least"), or a mark.
+- For a count: a code span in the sentence that a test file holds as a whole name, a bound, or a mark. The docstring lists the bounds.
 - For either: a mark, "not pinned", "unpinned", "unmeasured" or "no test".
 
 A check refuses any Cost sentence that does none of these. A count with no code span needs a bound or a mark.
@@ -20,9 +20,9 @@ Use "(not pinned)" only where a figure was measured. Use "(unmeasured)" where it
 - Each sentence is read alone. A sentence ends at a full stop, `!` or `?` outside backticks, with any `)`, `*`, `"` or `'` after it, then a space or the end. `e.g.` and `i.e.` end no sentence. A test named in a neighbouring sentence pins nothing.
 - A file token is a backticked name that ends in a known extension in any case, or starts with `~/` or `.git/`. A trailing `:<digits>` is dropped before the test, and the token is reported as written. A test file name (`test_*`, `*_test.*`, `*.test.*`, `*Tests.swift`, and `*.spec.*` ending in js, jsx, ts, tsx, mjs, cjs, mts or cts) is a pin, not a file token. A token is flagged whether or not its file exists.
 - A file token is pinned when a test file named in the same sentence exists and holds the token's name as a whole name: its basename, or for a `<placeholder>` basename the folder before it. `box.json` does not pin `x.json`, and `HEADER` does not pin `HEAD`.
-- A count is a count word: one to six, digits, once, twice or thrice. It needs a cost noun with at most three words between it and the noun: read, call, process, spawn, `ps`, write, file, run, start, times, line, command, request, lookup or query, plural too. Once, twice and thrice count only after a verb of work (read, run, call, start, spawn, write, fetch) within two words. "one" before "of" is no count. "a single", "Nx" and the verb "stat" are counts.
-- A count passes on a test only through a code span in the same sentence that the test holds as a whole name.
-- Code spans, dates (YYYY-MM-DD), times (HH:MM), line references (`name.ext:123`) and ids (ruling, item, rule, step or decision with a number; `#` with a number) are not read as part of a count. Decimals, numbers with a time unit, "Round N of M" and "PR N" are not counts.
+- A count word is zero to six, ten, a single, digits, once, twice, thrice or Nx. A count word needs a cost noun with at most three words between. Once, twice, thrice and Nx count only after a verb of work, with at most three words between, never before a noun. The docstring of `lint/check_cost_pins.py` lists every count word, cost noun and verb of work.
+- A count passes on a test only through a code span in the same sentence that the test holds as a whole name. A test-name span never counts.
+- Code spans, dates, times, versions, decimals, numbers with a time unit or a size unit, line references, ids, "Round N of M", "PR N" and "one" before "of" are not read as part of a claim. The docstring lists each unit and id form.
 - A finding is one line on the token's own line: `<record>:<line>: <token> named in a Cost sentence with no pin`. A count with no backing is one finding per sentence, on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`. Exit 1 when there is a finding.
 
 ## Why and harm
@@ -45,8 +45,11 @@ Cost: one python start per CI run, and no file written (unmeasured). It reads `l
 - A test named in the sentence pins nothing unless the counted thing is a code span it holds; a sentence that only names the test needs a mark.
 - The check does not tell "(not pinned)" from "(unmeasured)". The writer picks the mark.
 - A count whose noun comes first, as in "starts one `git diff`", is missed.
+- A plain word can be the pinned span when the test holds it. Debt note: `cost-count-hollow-pin`.
+- Secs, hrs, KiB, days, weeks, "line N of" and "N percent" are flagged as counts; the unit lists lack them. Debt note: `cost-count-units-gap`.
+- Seven to nine, twelve, fetch, stat, invocation, append and round trip as nouns, "two-process", "reads: 3", "once per session" and "a second time" are missed, and "up to date" or "at least" passes as a bound. Debt note: `cost-count-misses`.
 - A leading once, twice or thrice is no claim.
-- A trailing once, twice or thrice counts only after a verb of work within two words.
+- A trailing once, twice, thrice or Nx counts only after a verb of work, with at most three words between.
 - A refusal reason in ordinary prose is not read. Fix: none in this lane. Triage holds it as a separate finding.
 - A pin is the file's whole name found in the test text. The test may hold the name and not prove the claim. Review reads that.
 - Only these extensions mark a file: md, py, mjs, js, ts, tsx, json, jsonl, sh, ps1, cmd, bat, html, css, swift, jsx, cjs, mts, cts, yml, yaml, toml, txt, log, csv, tmpl, sql, cfg, ini, lock and xml. A file with another extension is not seen.
