@@ -23348,6 +23348,7 @@ SPO_RUNNER_FORMS = (
     ("deno", "deno run F", "probe2.ts", TS_TEXT, "deno run %s"),
     ("pytest", "pytest F", "probe2.py", PY_TEXT, "pytest %s"),
     ("pytest-m", "python3 -m pytest F", "probe2.py", PY_TEXT, "python3 -m pytest %s"),
+    ("pytest-k", "pytest -k expr F", "probe2.py", PY_TEXT, "pytest -k expr %s"),
     ("stdbuf", "stdbuf -oL python3 F", "probe2.py", PY_TEXT, "stdbuf -oL python3 %s"),
     # `setsid python3 F` is not here: detached-launch denies it for every agent, the writer's own run too, so this
     # rule is never reached and the case could not go red for it.
@@ -23496,6 +23497,83 @@ spo_register("scratchpad-owner: cp-mv 2 agent B's run of a file agent A moved to
              spo_mv_carry_case)
 spo_register("scratchpad-owner: cp-mv 3 agent B copies agent A's file with cp, and runs its own copy: allowed",
              spo_cp_own_case)
+
+
+def spo_mv_approved_case():
+    """Agent A writes probe2.py. Agent B's mv of it to m.py is asked, then the owner's override lifts it and the mv
+    lands. The mv carries A's record to m.py: A's run of m.py is allowed and B's run of it is asked."""
+    fx = spo_fixture("mv-approved")
+    config = ov_config("spo-mv-approved")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    moved = os.path.join(fx["scratch"], "m.py")
+    banned = (fx["scratch"], "probe2.py", "m.py")
+    problems = [spo_scope(fx, "mv approved", probe)] + spo_wrote(fx, "mv approved", SPO_WRITER, probe, PY_TEXT)
+
+    def call(agent, tool, tool_input, seconds):
+        return ov_call(tool, tool_input, fx["work"], config, fx["sid"], seconds, agent_id=agent, temp=fx["tmp"])
+
+    mv = {"command": "mv %s %s" % (probe, moved)}
+    got, reason = call(SPO_OTHER, "Bash", mv, 0)
+    problems.append(spo_asked("mv approved, B's mv before the override", got, reason, banned))
+    note = ov_type(config, fx["sid"], "override 15m", 30)
+    got, reason = call(SPO_OTHER, "Bash", mv, 60)
+    problems.append(spo_allowed("mv approved, B's mv under the override", got, reason))
+    if got == "allow":
+        os.rename(probe, moved)   # the approved mv lands its file at the new name
+    later = OV_TIMED_SECONDS + 120   # the override typed at 30 s has ended by now
+    got, reason = call(SPO_WRITER, "Bash", {"command": "python3 %s" % moved}, later)
+    problems.append(spo_allowed("mv approved, A's run of m.py", got, reason))
+    got, reason = call(SPO_OTHER, "Bash", {"command": "python3 %s" % moved}, later)
+    problems.append(spo_asked("mv approved, B's run of m.py", got, reason, banned))
+    if note and any(problems):
+        problems.append("the override was not typed through override.grant: " + note)
+    return spo_result(problems, "an approved mv carries agent A's record to m.py: A's run is allowed, B's is asked")
+
+
+def spo_mv_in_case():
+    """Agent A moves a file from outside the scratchpad into the scratchpad as o.py. The move is A's write, so the
+    record names A: B's run of o.py is asked, and A's run is allowed."""
+    fx = spo_fixture("mv-in")
+    source = os.path.join(fx["work"], "s_src.py")   # outside the scratchpad, in this case's folder
+    write(source, PY_TEXT)
+    dest = os.path.join(fx["scratch"], "o.py")
+    problems = [spo_scope(fx, "mv in", dest)]
+    got, reason = spo_call(fx, "Bash", SPO_WRITER, command="mv %s %s" % (source, dest))
+    problems.append(spo_allowed("mv in, A's mv into the scratchpad", got, reason))
+    if got == "allow":
+        os.rename(source, dest)   # the mv lands its file at the new name
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % dest)
+    problems.append(spo_asked("mv in, B's run of o.py", got, reason, (fx["scratch"], "o.py")))
+    got, reason = spo_run(fx, SPO_WRITER, "python3 %s" % dest)
+    problems.append(spo_allowed("mv in, control: A's run of o.py", got, reason))
+    return spo_result(problems, "agent B's run of a file agent A moved in from outside the scratchpad is asked")
+
+
+def spo_cp_dir_case():
+    """Agent A copies s.py into the scratchpad's dir/ folder with cp, so the copy lands at dir/s.py. Agent B's run of
+    dir/s.py is asked, and A's run is allowed."""
+    fx = spo_fixture("cp-dir")
+    source = os.path.join(fx["work"], "s.py")   # outside the scratchpad, in this case's folder
+    write(source, PY_TEXT)
+    folder = os.path.join(fx["scratch"], "dir")
+    os.makedirs(folder, exist_ok=True)
+    dest = os.path.join(folder, "s.py")
+    problems = [spo_scope(fx, "cp dir", dest)]
+    problems += spo_wrote(fx, "cp dir", SPO_WRITER, dest, PY_TEXT, tool="Bash",
+                          command="cp %s %s/" % (source, folder))
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % dest)
+    problems.append(spo_asked("cp dir, B's run of dir/s.py", got, reason, (fx["scratch"], "s.py")))
+    got, reason = spo_run(fx, SPO_WRITER, "python3 %s" % dest)
+    problems.append(spo_allowed("cp dir, control: A's run of dir/s.py", got, reason))
+    return spo_result(problems, "agent B's run of a script agent A copied into a folder of the scratchpad is asked")
+
+
+spo_register("scratchpad-owner: cp-mv 4 agent B's mv of agent A's file to m.py, approved by the owner: A's run of "
+             "m.py is allowed and B's is asked", spo_mv_approved_case)
+spo_register("scratchpad-owner: cp-mv 5 agent B's run of a file agent A moved in from outside the scratchpad: asked",
+             spo_mv_in_case)
+spo_register("scratchpad-owner: cp-mv 6 agent B's run of dir/s.py, a copy agent A made into a scratchpad folder: asked",
+             spo_cp_dir_case)
 
 
 # =========================================================================== mask_script lexemes
