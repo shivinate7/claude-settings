@@ -10247,8 +10247,8 @@ step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topi
 # A marker brief to a lane names a session id for each role. Each refusal below misses one role, and the other two stay
 # valid in it, so a failure names the one cause it tests.
 ROLE_TOP = "Lane brief: icon-b. Topic: icons."  # the first line a step-topic-lane fixture clears
-ROLE_GAP_80 = " " + "x" * 79  # 80 characters, the most a label's gap may hold
-ROLE_GAP_81 = " " + "x" * 80  # 81 characters, one over
+ROLE_GAP_80 = " " + "." * 79  # 80 characters, the most a label's gap may hold. Dots: the gap takes punctuation, no words
+ROLE_GAP_81 = " " + "." * 80  # 81 characters, one over
 BRIEF_TEMPLATE_PATH = os.path.join(REPO, "skills", "project-ops", "templates", "brief.md")
 with open(BRIEF_TEMPLATE_PATH, encoding="utf-8") as handle:
     BRIEF_TEMPLATE = handle.read()
