@@ -14749,6 +14749,7 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
     NOFIX_HEAD = "6f" * 20  # the Head of a record with no Fix check line, which cuts a chain off
     FIRST_HEAD, SECOND_HEAD = "4d" * 20, "5d" * 20  # the Heads of a chain of two records on this pull request
     LATER_LIVE = "e7" * 20  # a live head past the second record of a chain
+    SOURCE_MIDDLE = "4f" * 20  # the Head of the source pull request's second PASS record, whose fix base is EARLIER
 
     def tree_map(self, live=TREE):
         """The tree of every head a case names: TREE, except the live head, which holds `live`, and EARLIER, the source's fix base, which holds
@@ -14978,6 +14979,54 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
         rc, out, err, host = self.run_chain(self.SECOND_HEAD, comments, diffs=diffs)
         self.assertEqual(host.tree_reads, [], "scope: a fix check on a chain whose oldest fix base is an earlier Head read a tree")
         self.assertEqual(rc, 0, "a second fix check on a chain of one, whose fix base is an earlier Head, was refused:\n" + out + err)
+
+    def passed_source(self, cid, head, base):
+        """A record of the source pull request at `head`, with a PASS fix check from `base` and REVIEW_PASS rounds."""
+        return review_comment(cid, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=head, rounds=REVIEW_PASS,
+                                                              fix=(fix_check_line(verdict="PASS", head=base),)))
+
+    def plain_copy(self, cid, head):
+        """A record of the source pull request at `head` with no Fix check line and REVIEW_PASS rounds, the copy of the record before it."""
+        return review_comment(cid, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=head, rounds=REVIEW_PASS))
+
+    def chain_trees(self):
+        """The trees the source-chain cases read: the source Head and the second PASS record's Head hold TREE, and the older record's fix base holds
+        TREE while its Head holds EARLIER_TREE, so the older record is a plain stand-in and counts one link."""
+        return {self.OLD_BASE: self.TREE, self.EARLIER: self.EARLIER_TREE, self.SOURCE_MIDDLE: self.TREE, self.NEWEST: self.TREE, self.LIVE: self.TREE}
+
+    def comment_reads(self, host):
+        """The number of comment-list reads a run made: each one lists the repo's issue comments."""
+        return len([rel for rel, _ in host.list_calls if rel == "issues/comments"])
+
+    def test_a_plain_copy_of_a_source_chain_of_two_is_refused_at_the_cap(self):
+        # the source's newest record is a plain copy of the record before it, so it keeps the count at two. Control, green on the built code: the chain
+        # holds one PASS fix check before the copy, so the carry is written
+        chain_of_one = (self.passed_source(1, self.EARLIER, self.OLD_BASE), self.plain_copy(3, self.NEWEST))
+        chain_of_two = (self.passed_source(1, self.EARLIER, self.OLD_BASE), self.passed_source(2, self.SOURCE_MIDDLE, self.EARLIER), self.plain_copy(3, self.NEWEST))
+        rc, out, err = self.carried(self.carry_host(*chain_of_one, trees=self.chain_trees()), url=self.link(cid=3), rounds=round_args(REVIEW_PASS),
+                                    guard="no", net="not owed")
+        self.assertEqual(rc, 0, "control: a plain copy after a chain of one was refused:\n" + out + err)
+        rc, out, err = self.carried(self.carry_host(*chain_of_two, trees=self.chain_trees()), url=self.link(cid=3), rounds=round_args(REVIEW_PASS),
+                                    guard="no", net="not owed")
+        self.assert_cap_refused(rc, out, err)
+
+    def test_a_plain_stand_in_reads_one_more_comment_list_and_trees_only_when_the_chain_is_between_zero_and_the_cap(self):
+        # a plain stand-in reads this pull request's records, the source's newest record, and then the source chain: three comment lists. Trees are read
+        # only when the chain count is between zero and the cap: one link reads its fix base and its Head, and a chain of two or none reads none
+        chain_of_one = (self.passed_source(1, self.EARLIER, self.OLD_BASE), self.plain_copy(3, self.NEWEST))
+        host = self.carry_host(*chain_of_one, trees=self.chain_trees())
+        rc, out, err = self.carried(host, url=self.link(cid=3), rounds=round_args(REVIEW_PASS), guard="no", net="not owed")
+        self.assertEqual(rc, 0, "control: a plain copy after a chain of one was refused:\n" + out + err)
+        self.assertEqual(self.comment_reads(host), 3, "a plain stand-in did not read three comment lists, so the source chain was not read once")
+        self.assertEqual(sorted(host.tree_reads), sorted([self.OLD_BASE, self.EARLIER]), "a chain of one did not read its link's fix base and Head once each")
+        chain_of_two = (self.passed_source(1, self.EARLIER, self.OLD_BASE), self.passed_source(2, self.SOURCE_MIDDLE, self.EARLIER), self.plain_copy(3, self.NEWEST))
+        host = self.carry_host(*chain_of_two, trees=self.chain_trees())
+        self.carried(host, url=self.link(cid=3), rounds=round_args(REVIEW_PASS), guard="no", net="not owed")
+        self.assertEqual(self.comment_reads(host), 3, "a chain of two did not read the source's comment lists once more than the plain stand-in")
+        self.assertEqual(host.tree_reads, [], "a chain of two at the cap read a tree")
+        host = self.carry_host(self.source(), source_state="closed")
+        self.carried(host, url=self.link(), rounds=("1:reviewer:sonnet:PASS",), guard="no", net="not owed")
+        self.assertEqual(host.tree_reads, [], "a source with no PASS fix check, a chain of none, read a tree")
 
 class ReviewFixKeepsRounds(ReviewChainFixture):
     """A fix check record copies every Round line of the record it follows (rule roles-review-cap-three, decision pr-review-record). That record is the
