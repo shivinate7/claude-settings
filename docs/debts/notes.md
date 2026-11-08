@@ -1514,3 +1514,6 @@
 - reviewed-head-push-config-silent: when git cannot read the push remote (corrupt config), the guard lets the push through with no stderr line, though its record says one line (hooks/guard_merge.py `reviewed_head_push_hit`). Decision: pr-review-record.
 - reviewed-head-push-multi-source: a push of several refspecs asks unless every source equals the PR head, so `git push origin feat other` asks about feat's PR even when feat sends nothing (hooks/guard_merge.py `_sends_nothing`). Decision: pr-review-record.
 - reviewed-head-push-cases-thin: no case sets `branch.<b>.pushRemote`, `remote.pushDefault` against an origin branch remote, several refspecs or a detached HEAD, so a mutant of the remote order may live (hooks/test_guard.py). Decision: pr-review-record.
+- mail-not-merged-text: docs/decisions/session-messages.md ("it is not in main", "(not merged)") and skill waiting-page section "Message another session" ("not merged") turn false when PR 1371 merges. Decision: session-messages.
+- mail-comment-bug-term: a hooks/mail.py comment says "a bug"; the glossary term is "defect". Decision: none.
+- mail-store-named-public: the public repo names the private mailbox store by its repo name (decision session-messages); a name only, no secret. Decision: session-messages.
