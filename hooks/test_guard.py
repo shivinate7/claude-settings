@@ -27228,6 +27228,24 @@ role_model_allow("role-model: granted round 4 on sonnet with a Grant line after 
            "reviewer", "sonnet", GRANT_ROUND_4 + "\nDon't skip /* the // check # now.\n" + GRANT_CITE)
 role_model_refuse("role-model: granted round 4 on sonnet with no Grant line is denied", "reviewer", "sonnet",
            GRANT_ROUND_4)
+# The granted marker is read off the brief's first line alone. A marker on a later line is no grant, even with a valid
+# Grant line.
+role_model_refuse("role-model: granted round 4 on sonnet with the marker on line two is denied (line one only counts)",
+           "reviewer", "sonnet", "Check the diff.\nRound 4 of 4\n" + GRANT_CITE)
+# Markup ahead of the marker on line one reads as it does for the Round N of 3 markers. Each red case below has a green
+# control with the same markup on a Round N of 3 line, which holds that reading with no grant.
+role_model_allow("role-model: granted round 4 on sonnet with a heading mark on line one and a Grant line is allowed",
+           "reviewer", "sonnet", "# Round 4 of 4. Re-check the diff.\n" + GRANT_CITE)
+role_model_allow("role-model: granted round 4 on sonnet with bold markup on line one and a Grant line is allowed",
+           "reviewer", "sonnet", "**Round 4 of 4**. Re-check the diff.\n" + GRANT_CITE)
+role_model_allow("role-model: reviewer on sonnet with a heading mark on line one of Round 2 of 3 is allowed",
+           "reviewer", "sonnet", "# Round 2 of 3. Re-check the diff.")
+role_model_allow("role-model: reviewer on sonnet with bold markup on line one of Round 2 of 3 is allowed",
+           "reviewer", "sonnet", "**Round 2 of 3**. Re-check the diff.")
+# A Workflow agent() call reads the granted marker the same way: a multi-line template whose first line holds it.
+add("role-model: granted round 4 in a Workflow template on sonnet with the marker on line one is allowed", "allow",
+    tool="Workflow", config=ROLE_REAL_CFG,
+    script=_step_flow("`" + GRANT_ROUND_4 + "\n" + GRANT_CITE + "`", "agentType: 'reviewer', model: 'sonnet'"))
 # A malformed cite is refused, whatever its shape: the pattern and a real date both have to hold (grant_valid).
 for _label, _cite in (("with an upper-case item letter in its Grant line", "Grant: item 396 A, owner, 2026-11-08 06:08 CST"),
                       ("with an approver other than owner in its Grant line", "Grant: item 396 a, lead, 2026-11-08 06:08 CST"),
