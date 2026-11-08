@@ -1223,17 +1223,17 @@ BRIEF_PR_HEAD_REASON = (
     "this brief pairs #%d with a branch that is not that pull request's head ref, in the shape %s. A brief that "
     "names a pull request and a branch sends its reader to the branch's code, and a wrong branch sends it to the "
     "wrong code. Read the head with `%s` and brief that branch, or name the pull request alone. "
-    "(decision brief-claim-has-probe, a brief's claim carries the probe that showed it)"
+    "(decision brief-pr-head, a brief's PR and branch pair must name the PR's head ref)"
 )
 BRIEF_PR_HEAD_UNREAD_REASON = (
     "this brief pairs #%d with a branch in the shape %s, and the head ref of that pull request could not be read, "
     "so whether the branch is its head is unknown. Retry once gh answers, or read the head with `%s` and brief "
-    "that branch. (decision brief-claim-has-probe, a brief's claim carries the probe that showed it)"
+    "that branch. (decision brief-pr-head, a brief's PR and branch pair must name the PR's head ref)"
 )
 BRIEF_PR_HEAD_NO_REPO_REASON = (
     "this brief pairs #%d with a branch in the shape %s, and the guard cannot read this checkout's repo, so "
     "whether the branch is the head of that pull request is unknown. Write the pull request with its repo, as "
-    "`owner/name#N`, or name the pull request alone. (decision brief-claim-has-probe, a brief's claim carries the probe that showed it)"
+    "`owner/name#N`, or name the pull request alone. (decision brief-pr-head, a brief's PR and branch pair must name the PR's head ref)"
 )
 _NOT_A_PR = object()  # a read that answered 404: the number is no pull request there
 
