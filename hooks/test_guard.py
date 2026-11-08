@@ -14882,6 +14882,16 @@ def _open_test_conflict_edited(w):
     write(os.path.join(w, TEST_A), LANE_TEXT)
 
 
+def _open_test_conflict_mode(w):
+    """The open merge of _f2_conflict_open, where the builder sets the exec bit on the conflicted test file and keeps
+    git's bytes. The file stays unmerged in the index, so the mode change is the builder's only change to it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    os.chmod(os.path.join(w, TEST_A), 0o755)
+    if not os.stat(os.path.join(w, TEST_A)).st_mode & 0o111:
+        sys.exit("fixture setup failed: chmod +x did not land on %r" % TEST_A)
+
+
 # An empty test file is still a test file. text_at reads '' for a missing file and for an empty one alike, so a merge
 # check that compares text alone reads an empty file added or deleted in a merge as no change. Line endings and
 # invalid bytes are the same kind of change: the bytes differ, and the text, read in text mode, does not.
@@ -14968,10 +14978,10 @@ def _invalid_byte_open(w):
 
 
 # A gitlink (a submodule entry) and a mode-only change are changes to a test path, refused as on main. merge_resolved
-# keeps a path whose bytes differ at its two sides. A gitlink to a commit the clone does not hold has no bytes to read
-# at either side, and a mode-only change has the same bytes, so a merge drops both. A gitlink to a commit the clone
-# holds reads at the merge commit's side, so the path is kept (its case is a control). The fixtures read each change
-# back with git first: a change that did not land would give an allow for the wrong reason.
+# keeps a path whose mode differs at its two sides, whatever its bytes. A gitlink has no bytes in this repository, and
+# a mode-only change keeps the same bytes, so the mode alone keeps each of these paths: a gitlink to a commit the clone
+# lacks, a gitlink to a commit the clone holds, and a mode-only change. The fixtures read each change back with git
+# first: a change that did not land would give an allow for the wrong reason.
 GITLINK = "tests/sub_lib"
 GITLINK_MISSING = "0123456789abcdef0123456789abcdef01234567"   # a commit this clone does not hold
 
@@ -15461,13 +15471,23 @@ _bd_m_edited = diff_repo("bd-m-test-edited", _open_test_conflict_edited)
 sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file to its own side is denied "
    "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_edited, agent_id="bld1", agent_type="builder")
 
+# The same two merges, run from a subfolder. The guard reads each file from the top of the checkout, whatever folder
+# the command runs in: a conflicted test file left as git wrote it is allowed, and one rewritten to the builder's side
+# is denied.
+sh("builder-refuse: a builder's merge in progress, with a conflicted test file left as git wrote it, is allowed at "
+   "commit from a subfolder", COMMIT, "allow", cwd=os.path.join(_bd_m_left, "src"), agent_id="bld1",
+   agent_type="builder")
+sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file is denied at commit from a "
+   "subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_edited, "src"), agent_id="bld1",
+   agent_type="builder")
+
 # A merge in progress where the merged branch added twenty test files that merged clean is git's, and allowed.
 _bd_m_many = diff_repo("bd-m-many-clean", _c1_many_clean)
 sh("builder-refuse: a builder's merge in progress, with twenty test files that merged clean and a product file "
    "resolved, is allowed at commit", COMMIT, "allow", cwd=_bd_m_many, agent_id="bld1", agent_type="builder")
 
 # An empty test file that a builder adds or deletes is a builder's change in a merge as in a plain change. The two
-# plain cases are the controls: the same change, outside a merge, is refused now and stays refused.
+# plain cases are the controls: the same change, outside a merge, is refused.
 _bd_empty_plain_add = diff_repo("bd-empty-plain-add", _put(EMPTY_TEST, ""))
 sh("builder-refuse: a new empty test file in a builder's plain change is denied at commit",
    COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_add, agent_id="bld1", agent_type="builder")
@@ -15504,8 +15524,7 @@ sh("builder-refuse: a builder's merge in progress that changes only an invalid U
    "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_byte, agent_id="bld1", agent_type="builder")
 
 # A gitlink under tests/, and a mode-only change to a test file, are the builder's changes in a merge, refused as on
-# main. Each red fails on the old code: merge_resolved drops the path. The plain changes are the controls: the same
-# change outside a merge is refused now and stays refused.
+# main. The plain changes are the controls: the same change outside a merge is refused.
 _bd_m_gitlink = diff_repo("bd-m-gitlink", _gitlink_open)
 sh("builder-refuse: a builder's merge in progress that adds a gitlink under tests/ is denied at commit",
    COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink, agent_id="bld1", agent_type="builder")
@@ -15525,14 +15544,21 @@ _MODE_OPEN_CASE = ("builder-refuse: a builder's merge in progress that changes o
                    "is denied at commit")
 _MODE_PLAIN_CASE = ("builder-refuse: a builder's plain change that changes only the mode of a test file (chmod +x) "
                     "is denied at commit")
+# The conflicted test file of an open merge, unmerged in the index, whose only change is the exec bit: the mode change
+# is the builder's change, whatever git's raw entry for an unmerged path holds.
+_MODE_CONFLICT_CASE = ("builder-refuse: a builder's merge in progress that only sets the exec bit on a conflicted test "
+                       "file, keeping git's bytes, is denied at commit")
 if os.name != "nt":
     _bd_m_mode = diff_repo("bd-m-mode", _mode_exec_open)
     sh(_MODE_OPEN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode, agent_id="bld1", agent_type="builder")
     _bd_mode_plain = diff_repo("bd-mode-plain", _mode_exec(TEST_A))
     sh(_MODE_PLAIN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_mode_plain, agent_id="bld1", agent_type="builder")
+    _bd_m_conf_mode = diff_repo("bd-m-conflict-mode", _open_test_conflict_mode)
+    sh(_MODE_CONFLICT_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_conf_mode, agent_id="bld1", agent_type="builder")
 else:
     skip_case(_MODE_OPEN_CASE, NO_EXEC_BIT)
     skip_case(_MODE_PLAIN_CASE, NO_EXEC_BIT)
+    skip_case(_MODE_CONFLICT_CASE, NO_EXEC_BIT)
 _bd_m_mode_c = diff_repo("bd-m-mode-commit", _mode_exec_committed)
 sh("builder-refuse: a builder's merge commit that changes only the mode of a test file is denied at commit",
    COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode_c, agent_id="bld1", agent_type="builder")
@@ -15570,6 +15596,9 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merg
 if os.name != "nt":
     LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge in progress "
                              "reaches the merge check", lambda: _reaches_merge_check_case(_bd_m_mode, TEST_A, False)))
+    LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's exec-bit change on a conflicted test file in a merge in "
+                             "progress reaches the merge check",
+                             lambda: _reaches_merge_check_case(_bd_m_conf_mode, TEST_A, False)))
 
 
 # The readers a guard call goes through. `_git` always; `_git_bytes` once a bytes read has its own reader. A name the
