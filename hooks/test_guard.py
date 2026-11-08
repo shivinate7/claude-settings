@@ -11698,6 +11698,36 @@ sh("frozen: an ionice -c3 wrapped cp onto the config hook is denied",
    "ionice -c3 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a runuser -u u -- wrapped cp onto the config hook is denied",
    "runuser -u u -- cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# A QUOTED ASSIGNMENT AFTER A WRAPPER, A LEADING FD REDIRECT, OR A WRAPPER OUTSIDE COMMAND_WRAPPERS IS STILL A
+# WRITE TO ITS PATH. A wrapper row is kept only where main denies it, or where guard-command-position names it.
+sh("frozen: an env -i wrapped cp with a quoted spaced assignment onto the config hook is denied",
+   'env -i FOO="a b" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an env -i wrapped cp with quoted HOME and PATH values onto the config hook is denied",
+   'env -i HOME=/tmp/h PATH="$PATH" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo wrapped cp with a quoted spaced assignment onto the config hook is denied",
+   'sudo FOO="a b" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a bare assignment before env, then a quoted spaced assignment, before a cp onto the config hook is denied",
+   'FOO=1 env BAR="x y" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a 2>&1 redirect ahead of a cp onto the config hook is denied",
+   "2>&1 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an &>f redirect ahead of a cp onto the config hook is denied",
+   "&>f cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a taskset wrapped cp onto the config hook is denied",
+   "taskset -c 0 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a chrt wrapped cp onto the config hook is denied",
+   "chrt -i 0 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a fakeroot wrapped cp onto the config hook is denied",
+   "fakeroot cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a pkexec wrapped cp onto the config hook is denied",
+   "pkexec cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv run wrapped cp onto the config hook is denied",
+   "uv run cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an env -i wrapped ls of the config hook, with a plain assignment, is a read and is allowed",
+   "env -i FOO=a ls " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a sudo wrapped cat of the config hook is a read and is allowed",
+   "sudo cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a taskset wrapped cat of the config hook is a read and is allowed",
+   "taskset -c 0 cat " + CFG_HOOK, "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -21908,6 +21938,8 @@ sh("other-checkout: a cp in a function body that is called at once, into a separ
    "f() { cp x " + OTHER_WRITE_TARGET + "; }; f", "deny", "other-checkout", cwd=XCL_PRIMARY)
 sh("other-checkout: a setsid -w wrapped cp into a separate clone is refused",
    "setsid -w cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an env wrapped cp with a quoted spaced assignment, into a separate clone, is refused",
+   'env FOO="a b" cp x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
 
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
