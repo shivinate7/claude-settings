@@ -186,6 +186,8 @@
 - mods-session-board-timer-margins: two real-timer margins, within(200) against 100 ms grace, unproven on a slow runner (mods/session-board/session-board.test.mjs)
 - mods-step-order-unpinned: no test pins the mod test CI step as last in the checks job (checks.yml)
 - moved-kind-path-forgets-numbers: after a kind folder moves, claim ignores old-path numbers and may reuse one (actions/stamp/stamp.mjs)
+- mutate-control-split-green-unpinned: no case has all four GUARD_SHARD sub-runs of a guard-suite control pass and the control read green, so a mutant that forces every sub-run red passes the suite; CI would show it at once as every guard mutant UNKNOWN (hooks/test_mutate_shared.py GuardControlSplitTests).
+- mutate-control-split-wait-unpinned: the claim that a sub-run's exception propagates only after every sub-run has ended has no case; the stub sub-runs return at once, so a pool that does not wait passes (hooks/mutate_guard.py `run_suite`).
 - mutate-shard-blank-runs-all: a blank MUTATE_SHARD runs every mutant, so a shard job whose env line is lost runs all of them under a 25 min cap. lint/test_windows_split.py pins the env on each shard job, which holds CI (hooks/mutate_guard.py `parse_shard`).
 - mutate-sweep-no-control: `run_mutant` in janitor/mutate_sweep.py has no clean-layout control, so a scaffold that crashes on every case reads as a kill (hooks/mutate_guard.py `run_controls` has one)
 - mutate-tree-paths-uncollided: the `tree_` folders of ruling and decision mutants are not in the path-collision check of `main` (hooks/mutate_guard.py `lay_out`)
