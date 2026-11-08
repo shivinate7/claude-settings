@@ -10877,8 +10877,8 @@ mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated
 # The same rule on more tools. Only these written values are judged, as ISO-8601 instants with an offset (`Z` or
 # +-HH:MM): `added` in an ArtifactData write (set, update, each write of a batch) to collection `items`; `updatedAt`
 # in a Write (the content's JSON) or an Edit (the new_string) to a roadmap step file; and a literal `updatedAt` in a
-# Bash command, read as text, quoted or not. A value more than 1 minute ahead of the clock is refused. A value behind
-# the clock passes, because a kept old value is always behind. Quoted times in prose and any other field pass.
+# Bash command, read as text, inside shell quotes or not. A value more than 1 minute ahead of the clock is refused.
+# A value behind the clock passes, because a kept old value is always behind. Quoted times in prose and other fields pass.
 # The cases mirror the incident in decision local-time-central: `added` 20:16Z written to items at a clock of 20:14Z,
 # and a roadmap step `updatedAt` ahead of the clock, in the shape 2026-11-07T14:15:00-06:00.
 MTC_WRITE_CLOCK = "2026-11-07T14:14:00-06:00"  # 14:14 CST, which is 20:14Z: the clock of every case below
@@ -11167,8 +11167,8 @@ mtc_bash("a Bash python3 -c assignment with a single-quoted updatedAt key, 14:30
 # Refused: a jq |= assignment of updatedAt 14:30 at -06:00. The `|` sits between the key and the value.
 mtc_bash("a Bash jq |= assignment of updatedAt 14:30 at -06:00 is refused", "deny",
          r"""jq '.updatedAt |= "2026-11-07T14:30:00-06:00"' roadmap/data/steps/silent-undo-edit-pass.json""")
-# Refused: a single-quoted key and value, 16 minutes ahead. The shell reads the quotes, so the quote style does not
-# hide the literal from the clock.
+# Refused: a single-quoted key and value, 16 minutes ahead. The scan reads the command as text, not as shell tokens,
+# so the quote style does not hide the literal from the clock.
 mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:30 at -06:00, is refused", "deny",
          r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:30:00-06:00'"''')
 # Passes: the same assignment 4 minutes behind the clock. A value behind the clock passes.
@@ -11208,6 +11208,12 @@ mtc_bash("a Bash command with <p>Don't</p> text, beside a behind updatedAt, is a
 # Passes: an instant 16 minutes ahead in prose, beside a behind updatedAt. Only a literal updatedAt value is judged.
 mtc_bash("a Bash command with an instant 16 minutes ahead in prose, beside a behind updatedAt, is allowed", "allow",
          r'''echo "due 2026-11-07T14:30:00-06:00 for the step" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: `!=` is a compare, not a write, so the value after it is not judged, even 16 minutes ahead at 14:14 CST.
+mtc_bash("a Bash != compare of updatedAt to 14:30 at -06:00 is allowed: a compare writes no value", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); print(d['updatedAt'] != '2026-11-07T14:30:00-06:00')"''')
+# Passes: `>` is a compare too, so the value after it is not judged, even 16 minutes ahead at 14:14 CST.
+mtc_bash("a Bash > compare of updatedAt to 14:30 at -06:00 is allowed: a compare writes no value", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); print(d['updatedAt'] > '2026-11-07T14:30:00-06:00')"''')
 # Refused at a CDT clock: the reason prints the clock with its -05:00 offset, and no CST offset.
 mtc_set("an added 14 minutes ahead in items, at a CDT clock of 09:26, is refused: the reason prints -05:00", "deny",
         {"id": "silent-undo-edit-pass", "added": "2026-07-08T14:40:00Z"},
