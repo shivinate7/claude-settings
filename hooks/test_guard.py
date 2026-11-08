@@ -7685,6 +7685,10 @@ sh("archive gate: pipefail alone does not stop the delete, the delete is refused
    "set -o pipefail; " + VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b",
    "deny", GATE_RULE, cwd=PUSHFEAT)
 
+sh("archive gate: names that match through quotes and braces are refused, the delete is refused",
+   VCS + ' push origin "${b}:archive/${b}"; ' + VCS + ' push origin --delete "$b"', "deny", GATE_RULE,
+   cwd=PUSHFEAT)
+
 # REFUSED, zsh. In zsh an unbraced `$name:` followed by a letter takes a filename modifier (zsh manual,
 # Parameter Expansion, Modifiers: `:a`, `:r`, `:e` and the rest), so `$b:archive/` or `$b:refs/` changes the
 # word the push sends. Unmeasured here: the container has no zsh. A brace ends the name, so `${b}:archive`
@@ -7718,6 +7722,9 @@ sh("archive gate: an if holds the archive push, the delete is in the then branch
 sh("archive gate: each delete pairs with the nearest earlier archive push, silent",
    VCS + " push origin a:archive/a && " + VCS + " push origin --delete a; " + VCS + " push origin c:archive/c && "
    + VCS + " push origin --delete c", "allow", cwd=PUSHFEAT, silent=True)
+sh("archive gate: a delete whose name no archive push names keeps the fence, silent",
+   VCS + " push origin a:archive/a && " + VCS + " push origin --delete a; " + VCS + " push origin --delete c",
+   "allow", cwd=PUSHFEAT, silent=True)
 sh("archive gate: a braced ${b} gives no zsh modifier, silent",
    VCS + " push origin ${b}:archive/${b} && " + VCS + " push origin --delete ${b}", "allow", cwd=PUSHFEAT,
    silent=True)
