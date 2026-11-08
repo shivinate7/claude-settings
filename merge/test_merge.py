@@ -14956,6 +14956,41 @@ class ProseJudgePrompt(unittest.TestCase):
         self.assertEqual(excerpt_rows(text, NAMED)[-1:], ["15: xs015 = 15"], "the excerpt of %s does not end at its last numbered row" % NAMED)
         self.assertFalse("left out" in text, "the prompt has a marker line though no row of %s was left out" % NAMED)
 
+    MJS_PATH = "harness/tests/thousands-marker.test.mjs"
+    MJS_FIXTURE = os.path.join(HERE, "fixtures", "q_max", "harness", "tests", "thousands-marker.test.mjs.txt")
+    TITLE = "every table whose cells render Thousands has exactly one money head that carries the unit"
+
+    def mjs_text(self):
+        with open(self.MJS_FIXTURE, encoding="utf-8") as f:
+            return f.read()
+
+    def test_a_quoted_test_title_gets_its_test_row_in_the_named_excerpt(self):
+        # A line names the test file in backticks and quotes the test's title in double quotes. The title is row 103 of the fixture, and
+        # its body follows it at 104. The excerpt of the named file must hold both, or the judge cannot back the line.
+        raw = self.mjs_text()
+        self.assertTrue(raw.split("\n")[102].startswith("test('" + self.TITLE + "'"), "scope: row 103 of the fixture is not the title's test")
+        line = "- `FoundLines.tsx`, `LinesCard.tsx` and `ScopeSheetRows.tsx`: the table test in `%s`, \"%s\". It parses every `.tsx` file in `src/components`." % (self.MJS_PATH, self.TITLE)
+        text, reads = self.prompt({68: (line, [])}, {self.MJS_PATH: raw})
+        self.assertIn("Line 68: " + line, text, "scope: the prompt does not carry the judged line")
+        shown = excerpt_rows(text, self.MJS_PATH)
+        self.assertTrue(shown, "scope: no excerpt of %s, so the title row cannot be shown" % self.MJS_PATH)
+        numbers = [int(r.split(":", 1)[0]) for r in shown if re.match(r"\d+: ", r)]
+        self.assertIn(103, numbers, "the excerpt of %s shows rows %s, not row 103, the row of the title the line quotes" % (self.MJS_PATH, numbers))
+        self.assertIn(104, numbers, "the excerpt of %s shows rows %s, not row 104, the first row of the title's test body" % (self.MJS_PATH, numbers))
+
+    def test_a_quoted_title_the_file_never_names_gets_no_excerpt_row_with_that_title(self):
+        # A line quotes a title that the file does not hold. No row of the named file's excerpt may carry that title.
+        absent = "every table whose cells render Dollars has exactly one money head"
+        raw = self.mjs_text()
+        self.assertNotIn(absent, raw, "scope: the absent title is in the fixture, so the case does not probe absence")
+        line = "- `FoundLines.tsx`, `LinesCard.tsx` and `ScopeSheetRows.tsx`: the table test in `%s`, \"%s\". It parses every `.tsx` file in `src/components`." % (self.MJS_PATH, absent)
+        text, reads = self.prompt({68: (line, [])}, {self.MJS_PATH: raw})
+        self.assertIn("Line 68: " + line, text, "scope: the prompt does not carry the judged line")
+        shown = excerpt_rows(text, self.MJS_PATH)
+        self.assertTrue(shown, "scope: no excerpt of %s, so the absent title is not tested against any row" % self.MJS_PATH)
+        claims = [r for r in shown if absent in r]
+        self.assertEqual(claims, [], "an excerpt row of %s carries the absent title, so the line gets false backing: %r" % (self.MJS_PATH, claims))
+
 
 class OrderLock(merge.GitLock):
     """A GitLock that appends "release" to `events` on each release, so a case can order a model call against it."""
