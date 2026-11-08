@@ -13217,6 +13217,18 @@ class ReviewedList(ReviewEnv):
                 self.assertIn("unknown", out, "a failed follow-up read did not print unknown")
                 self.assertIn("#8", line, "the unknown line does not name the follow-up pull request that could not be read")
 
+    def test_findings_unknown_keeps_the_batch_age_limit(self):
+        # A `findings unknown` line counts against the batch limit: merge.py red_of reads PR_STATE_AGE_HOURS["batch"] for it. Green one hour
+        # inside that limit, RED one hour past it. The cause wording is not pinned, only the act's kind and its age.
+        for hours, rc in ((inside("batch"), 0), (past("batch"), 1)):
+            with self.subTest(hours=hours):
+                comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="2, follow-up #8"), created=ago(hours))]
+                host, got, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True,
+                                                   pull_errors={8: "gh: Server Error (HTTP 502)"})
+                self.assertEqual(got, rc, "the exit of a findings unknown line at its age is not the one its batch limit gives:\n" + out + err)
+                self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 findings unknown: .+ {hours}h{' RED' if rc else ''}$",
+                                 f"the findings unknown line at {hours}h does not read {'RED' if rc else 'clear of RED'} under the batch limit:\n" + out)
+
     def test_findings_follow_up_needs_every_named_pr_to_pass(self):
         host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA, draft=True), batch_pull(9, OTHER_SHA, draft=True)])  # control: both open
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
