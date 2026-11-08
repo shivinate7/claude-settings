@@ -562,6 +562,72 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
+    def test_cc_red_nt_this_session_isnt_allowed_to_is_a_claim(self):
+        # Catches: "isn't allowed to" missing. The record lists "not allowed to", and its n't form counts.
+        line = "This session isn't allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_arent_allowed_to_is_a_claim(self):
+        # Catches: "aren't allowed to" missing, the present plural of the listed "not allowed to".
+        line = "We aren't allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_arent_allowed_to_with_a_curly_apostrophe_is_a_claim(self):
+        # Catches: the curly apostrophe missing from "aren't allowed to", so a straight-quote-only fix passes the other reds.
+        line = "We aren’t allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_werent_allowed_to_is_a_claim(self):
+        # Catches: "weren't allowed to" missing, the past plural of the listed "not allowed to".
+        line = "We weren't allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_i_wasnt_allowed_to_is_a_claim(self):
+        # Catches: "wasn't allowed to" missing, the singular past of the listed "not allowed to".
+        line = "I wasn't allowed to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_this_session_isnt_permitted_to_is_a_claim(self):
+        # Catches: "isn't permitted to" missing. The record lists "not permitted to", and its n't form counts.
+        line = "This session isn't permitted to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_arent_permitted_to_is_a_claim(self):
+        # Catches: "aren't permitted to" missing, the present plural of the listed "not permitted to".
+        line = "We aren't permitted to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_werent_permitted_to_is_a_claim(self):
+        # Catches: "weren't permitted to" missing, the past plural of the listed "not permitted to".
+        line = "We weren't permitted to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_this_session_isnt_going_to_be_able_to_is_a_claim(self):
+        # Catches: "isn't going to be able to" missing. The listed "not going to be able to" has its n't form.
+        line = "This session isn't going to be able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_i_wasnt_going_to_be_able_to_is_a_claim(self):
+        # Catches: "wasn't going to be able to" missing, the singular past of the listed "not going to be able to".
+        line = "I wasn't going to be able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_nt_we_werent_going_to_be_able_to_is_a_claim(self):
+        # Catches: "weren't going to be able to" missing, the past plural of the listed "not going to be able to".
+        line = "We weren't going to be able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
     def test_cc_green_be_n_t_able_to_forms_pass_after_a_failed_merge(self):
         # Control: each new form passes after a failed `gh pr merge 12` that the line names as its check.
         # Each form has its own run, so one form's block cannot hide another's pass.
@@ -569,7 +635,12 @@ class CannotClaimTests(unittest.TestCase):
                      "We aren't able to merge PR 12: `gh pr merge 12` exited 1.",
                      "We aren’t able to merge PR 12: `gh pr merge 12` exited 1.",
                      "This session isn't able to merge PR 12: `gh pr merge 12` exited 1.",
-                     "We aren't going to be able to merge PR 12: `gh pr merge 12` exited 1."):
+                     "We aren't going to be able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "This session isn't going to be able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We weren't going to be able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We weren't allowed to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren't permitted to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren’t allowed to merge PR 12: `gh pr merge 12` exited 1."):
             with self.subTest(line=line):
                 out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
                 self.assert_passes(out, "a failed gh pr merge 12, named as its check, with the form: %r" % line)
