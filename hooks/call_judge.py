@@ -248,12 +248,13 @@ def sets_options(write):
 
 def is_pick_of_one(write):
     """True for a judged set or update whose data holds 2+ options the owner picks one of: no task (kind "task" or
-    `steps`) and no truthy `multi`."""
+    `steps`) and no truthy `multi` or `ranked` (`ranked` implies `multi`)."""
     if not sets_options(write):
         return False
     data = write["data"]
     return (isinstance(data["options"], list) and len(data["options"]) >= 2
-            and data.get("kind") != "task" and not data.get("steps") and not data.get("multi"))
+            and data.get("kind") != "task" and not data.get("steps") and not data.get("multi")
+            and not data.get("ranked"))
 
 
 def is_reask(write):
