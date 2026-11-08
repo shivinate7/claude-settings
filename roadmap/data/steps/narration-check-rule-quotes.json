@@ -1,11 +1,11 @@
 {
   "title": "The comment-narration check passes a \"round N\" that names a rule",
   "why": "lint/check_comment_narration.py flags \"round 3\" and \"after round 3\" in a comment that states a rule, such as \"a passing fix keeps the net value round 3 gave\", which quotes decision hold-unsafe-after-round-3 (net-value hold after round 3). Lane fail-record-ancestor-head reworded around it on #1829 at 016dfb24a (that lane, 02:05 CST; coordinator, 01:49 CST Nov 8). A guard false alarm (rule verification-cry-wolf-guard-is-spent).",
-  "note": "Fix: a \"round N\" that names a rule or decision passes; a \"round N\" that tells history is still flagged. Red case first on the example line; control: a history line such as \"fixed in round 2\" stays flagged. Starts after lane comment-check-scans-shell merges (same file). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 02:19 CST Nov 8.",
+  "note": "Fix: a \"round N\" that names a rule or decision passes; a \"round N\" that tells history is still flagged. Red case first on the example line; control: a history line such as \"fixed in round 2\" stays flagged. Starts after lane comment-check-scans-shell merges (same file). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 02:19 CST Nov 8. Built with the other of comment-shell-round2-fixes / narration-check-rule-quotes as one follow-up PR from #1834's head, in lane session_013NEJL37UFXTQuAcox7s8fD (coordinator, 02:05 CST Nov 8).",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 568,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T01:49:00-06:00"
+  "lane": "session_013NEJL37UFXTQuAcox7s8fD",
+  "updatedAt": "2026-11-08T02:05:00-06:00"
 }
