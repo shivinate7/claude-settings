@@ -1460,7 +1460,7 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block", item)
 
     def test_cc_red_pr_source_without_a_hash_is_no_source(self):
-        # Catches: a PR with no "#" passes as a source: "PR<n>", "PR<n>", "PR   <n>" (spaces), "PR <n>", "GitHub PR <n>",
+        # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   <n>" (spaces), "PR <n>", "GitHub PR <n>",
         # "pr 2 of the plan", "the PR 3 times", and a bare PR beside a page or git word, which that word does not
         # rescue: "PR <n> on the page", "PR <n> (page)", "PRs <n> (page)", "PR no. <n> (page)", "PR-<n> on the page",
         # "PR: 978 (git)", "PR number 978 (git)". The "#" form is the source
@@ -1485,6 +1485,15 @@ class CompactionCarryTests(unittest.TestCase):
         out = self.stop(self.compacted_turn(reply))
         self.assertBlocksNaming(out, "ruling X from PR 978 (git)")
         self.assertIn("PR #<n>", out["reason"], "the refusal for a PR with no # does not name PR #<n> as the fix")
+
+    def test_cc_red_pr_past_sixty_characters_still_names_the_hash_fix(self):
+        # Catches: a bare PR past character 60 of a Recovered item is judged on the cut-off text, so the refusal
+        # names no PR and gives no "PR #<n>" fix. The item is over 60 characters and its bare PR starts past 60.
+        item = "ruling X from the planning thread the owner signed off in March, see PR 978"
+        self.assertGreater(item.index("PR 978"), 60, "the fixture must put the bare PR past character 60")
+        out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+        self.assertBlocksForRecovered(out)
+        self.assertIn("PR #<n>", out["reason"], "a bare PR past character 60 is refused without the PR #<n> fix")
 
     def test_cc_red_issue_without_a_hash_is_no_source(self):
         # Catches: "issue <n>" with no "#" passes as a source, so a plain "issue 2 of the plan" names no issue.
@@ -1541,11 +1550,13 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
 
     def test_cc_green_git_pull_with_a_number_is_no_bare_pr(self):
-        # Catches: a git pull with a number after it is refused as a bare PR: "pull 2" in "git pull 2 rebases (git)"
-        # and "pull 3" in "pull 3 files from git". Each names git, so it is a source. The control "git pull rebases
-        # (git)" has no number and passes on base. The bare "pull 978 (git)" stays refused
-        # (test_cc_red_pull_without_a_hash_is_no_source).
-        items = ["git pull rebases (git)", "git pull 2 rebases (git)", "pull 3 files from git"]
+        # Catches: the git-verb exemption (the lookbehind in BARE_PR_RE) is dropped, so "git pull 2" and
+        # "ruling X from git pull 2 (git)" read as a bare PR. Neither has a word after the number, so only that
+        # exemption passes them. "git pull 2 rebases (git)" and "pull 3 files from git" have a word after the number,
+        # which passes them on its own, so they are controls. "git pull rebases (git)" has no number. The bare
+        # "pull 978 (git)" stays refused (test_cc_red_pull_without_a_hash_is_no_source).
+        items = ["git pull rebases (git)", "git pull 2", "ruling X from git pull 2 (git)",
+                 "git pull 2 rebases (git)", "pull 3 files from git"]
         for item in items:
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
