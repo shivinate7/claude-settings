@@ -13169,6 +13169,7 @@ add("builder-test: a builder Write of a test file from no repository is refused 
 # the state those cases rely on, the first time a case names one of them.
 CD_CREATED = os.path.join(NOGIT, "made-by-the-call")
 CD_MISSING = os.path.join(NOGIT, "no-such-folder")
+CD_EMPTY = os.path.join(NOGIT, "empty-folder")   # made empty by _build_cd_empty: `ls` of it prints nothing
 
 
 def _check_cd_children():
@@ -13183,6 +13184,15 @@ def _check_cd_children():
 
 
 lazy_fixture([CD_CREATED, CD_MISSING], _check_cd_children)
+
+
+def _build_cd_empty():
+    os.makedirs(CD_EMPTY, exist_ok=True)
+    if os.listdir(CD_EMPTY):
+        sys.exit("fixture setup failed: CD_EMPTY holds %r" % os.listdir(CD_EMPTY))
+
+
+lazy_fixture([CD_EMPTY], _build_cd_empty)
 SHELL_CD = "builder-test (shell-cd): "
 sh(SHELL_CD + "a probe that cds into a folder in no repository, then writes a test-shaped path there, is allowed",
    'P=%s && mkdir -p "$P/tests" && cd "$P" && for f in x_test.mjs y-test.cjs; do : > "tests/$f"; done'
@@ -13217,6 +13227,28 @@ sh(SHELL_CD + "a test write after a cd that `&&` skips is refused",
 sh(SHELL_CD + "a test write to $R/hooks/test_guard.py after a cd, with $R a command substitution, is refused",
    'R=$(git rev-parse --show-toplevel) && cd %s && : > "$R/hooks/test_guard.py"' % slash(NOGIT),
    "deny", rule=BT, **B)
+# A cd inside a compound body the shell may skip (an if branch, a loop body, an else branch) is not certain
+# to run, though the separator before the write is `&&` or the `;` after a compound header. The write lands
+# in the builder's own worktree, so each one is refused. A loop body that runs once per item of a folder
+# listing is the same: an empty listing skips the body.
+sh(SHELL_CD + "a test write after a cd in an if branch that never runs is refused",
+   "if false; then cd %s; fi && : > tests/x_test.py" % slash(NOGIT), "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd in a for body over an empty folder listing is refused",
+   "for d in $(ls %s); do cd %s; done && : > tests/x_test.py" % (slash(CD_EMPTY), slash(NOGIT)),
+   "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd in a while body that never runs is refused",
+   "while false; do cd %s; done && : > tests/x_test.py" % slash(NOGIT), "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd in an until body that never runs is refused",
+   "until true; do cd %s; done && : > tests/x_test.py" % slash(NOGIT), "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd in an else branch that `if true` skips is refused",
+   "if true; then true; else cd %s; fi && : > tests/x_test.py" % slash(NOGIT), "deny", rule=BT, **B)
+# The same compound shapes, where the cd does run before the write, stay allowed.
+sh(SHELL_CD + "a write after a cd chained with `&&` in each pass of a for loop is allowed",
+   "for f in a b; do cd %s && : > tests/$f; done" % slash(NOGIT), "allow", **B)
+sh(SHELL_CD + "a write in the then branch of an if whose condition is a cd is allowed",
+   "if cd %s; then : > tests/x_test.py; fi" % slash(NOGIT), "allow", **B)
+sh(SHELL_CD + "a write in an if body after a cd chained with `&&` is allowed",
+   "cd %s && if true; then : > tests/x_test.py; fi" % slash(NOGIT), "allow", **B)
 # The link sits in no repository and points at the worktree's hooks folder. A cd into it, logical or physical
 # (`-P`), puts the write in that folder, so the guard must read where the link leads.
 CD_LINK = os.path.join(NOGIT, "hooks-link")
