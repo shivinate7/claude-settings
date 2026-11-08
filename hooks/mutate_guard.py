@@ -19,14 +19,16 @@ the source moved on and the mutation no longer proves anything. That must fail
 loudly, not be skipped, so it exits 1 with an error line instead of counting the
 mutation either way.
 
-SHARDS. `MUTATE_SHARD=<i>/<n>` runs leg i of n (CI: checks-mutate-guard, -2, -3). Every anchor, required-name and path
-check still reads the whole list, so a stale or colliding mutant fails whichever leg holds it. A leg runs only its own
-mutants and only the clean-layout controls of its own targets (`shard_entries`). Each mutant is in exactly one leg: a target
-other than guard stays whole in one leg, filled in order of first appearance, and guard's mutants go round-robin. Unset runs
-every mutant. A malformed value exits 1 with an ERROR line before any suite runs.
+SHARDS. `MUTATE_SHARD=<i>/<n>` runs shard i of n (CI: checks-mutate-guard, -2, -3). Every anchor, required-name and path
+check still reads the whole list, so a stale or colliding mutant fails whichever shard holds it. A shard runs only its own
+mutants and only the clean-layout controls of its own targets (`shard_entries`). Each mutant is in exactly one shard. Guard's
+mutants go round-robin: the k-th guard mutant (from 0) goes to shard k mod n + 1. Each other target stays whole in one shard:
+its place among the other targets, in order of first appearance, mod n, plus 1. Unset runs every mutant. A malformed value
+exits 1 with an ERROR line before any suite runs.
 
 THE GUARD SUITES. The guard, override and simlease targets run every hooks/test_guard*.py, one process per file, test_guard.py
-first (`guard_suites`). A FAIL line from any file is red for the mutant, so a case in test_guard_load_os.py can kill one.
+first (`guard_suites`). A FAIL line from any file is red for the mutant. The load_os cases skip off Windows, so on the Linux
+job only the other test_guard*.py files can kill a mutant.
 
 The mutants run IN PARALLEL, one suite process per mutant, up to the CPU count at once
 (MUTATE_JOBS overrides). Each mutant gets its own guard copy and its own config directory, so
@@ -2913,7 +2915,7 @@ def run_suite_file(suite: str, variable: str, copy_path: str, config_dir: str, o
     """Run one suite file once. `run_suite` joins these."""
     env = dict(os.environ)
     for shard in ("MUTATE_SHARD", "GUARD_SHARD", "MERGE_SHARD"):
-        env.pop(shard, None)  # a leg's own value must not shard the suites its mutants run
+        env.pop(shard, None)  # a shard's own value must not shard the suites its mutants run
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
     env.pop("DECISION_WATCH_UNDER_TEST", None)
@@ -2968,6 +2970,7 @@ def mutation_parts(entry):
 
 def parse_shard(value):
     """Read MUTATE_SHARD: (i, n) for `i/n` with 1 <= i <= n, None for unset or blank. Anything else raises ValueError."""
+    # A blank value runs everything, for local runs. CI sets MUTATE_SHARD on every shard job.
     if value is None or not value.strip():
         return None
     match = re.fullmatch(r"([0-9]+)/([0-9]+)", value.strip())
@@ -2977,21 +2980,21 @@ def parse_shard(value):
 
 
 def shard_entries(entries, i, n):
-    """The entries of leg i of n (1-based): each entry in exactly one leg. A target other than guard stays whole in one leg,
-    by its place among those targets in order of first appearance, modulo n. Guard's entries go round-robin by their place
-    among guard's. A leg then pays only for the controls of the targets it holds (`run_controls`)."""
+    """The entries of shard i of n (1-based): each entry in exactly one shard. A target other than guard stays whole in one
+    shard, by its place among those targets in order of first appearance, modulo n. Guard's entries go round-robin by their
+    place among guard's. A shard then pays only for the controls of the targets it holds (`run_controls`)."""
     other_targets = []
-    legs, guard_seen = [], 0
+    shards, guard_seen = [], 0
     for entry in entries:
         target = mutation_parts(entry)[3]
         if target == "guard":
-            legs.append(guard_seen % n + 1)
+            shards.append(guard_seen % n + 1)
             guard_seen += 1
         else:
             if target not in other_targets:
                 other_targets.append(target)
-            legs.append(other_targets.index(target) % n + 1)
-    return [entry for entry, leg in zip(entries, legs) if leg == i]
+            shards.append(other_targets.index(target) % n + 1)
+    return [entry for entry, shard in zip(entries, shards) if shard == i]
 
 
 def lay_out_guard_reads(root: str) -> None:
@@ -3101,7 +3104,8 @@ def run_controls(sources, work: str, entries):
 
     Cost (rule outcomes-mechanize-rules): one extra full suite run and one temp tree per target per run, each
     inside the job cap. A guard-suite target (guard, override, simlease) measured about 870 s alone beside the
-    other controls, so a run adds up to three such suites; the time added to the CI step is unmeasured. It
+    other controls. The one job paid 3 such controls. The 3 shards pay 5: guard in each shard, override in one,
+    simlease in one. The time per shard in CI is unmeasured. It
     writes no log and starts no timer, thread or other long-lived process beyond the run's own pool."""
     targets = []
     for entry in entries:
