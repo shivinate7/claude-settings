@@ -94,7 +94,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-needs-review-record  deny. A `git push` (not a dry run) while the session's own transcript shows a PR and a reviewer or
                        design-reviewer report with no later posted review record holding that role, verdict and round, or a push to
                        the head branch of a PR whose posted record already holds a Fix check line.
-  env-file             deny. Any read or write of an environment file.
+  push-owes-review-record  ask. A `git push` (not a dry run) in a merge-tool repo to a branch that a reviewer's stop left an entry
+                       for (state/owed-review-records), when its remote-tracking ref is still the reviewed head, the pushed source
+                       is another commit, and no posted review record that merge's parse_review accepts holds that head on its open
+                       pull request. An entry or a read that cannot be read asks, noting owed-record-unread. The stop writes the
+                       entry and never blocks. An override lifts the ask. (pr-review-record)
+  env-file            deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
@@ -385,7 +390,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool,
+            undrafted_pr_create, uses_merge_tool, owed_record_hit, owed_record_write,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -2311,11 +2316,14 @@ def judge_stop(payload) -> None:
     its tree never loops. A builder's logged change and the other roles' offences log under the role's
     rule and never refuse. A cwd that is the main checkout and a change that could not be read log too,
     and allow. A missing cwd logs nothing."""
-    role = agent_role(payload)
-    if not role:
-        return
     where = str(payload.get("cwd") or "")
-    if not where:
+    if where and payload.get("agent_id") and str(payload.get("agent_type") or "").strip().lower() == "reviewer":
+        failed = owed_record_write(where, session_id_of(payload), time.time())   # rule push-owes-review-record
+        if failed:
+            record("SubagentStop", "noted", "owed-record-unwritten", failed)
+        return
+    role = agent_role(payload)
+    if not role or not where:
         return
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
@@ -3522,6 +3530,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 record_hit, record_reason = review_record_hit(transcript, lambda: push_destinations(args, where, overrides))
                 if record_hit:
                     refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)
+                owed = owed_record_hit(args, where, overrides)
+                if owed:
+                    ask_command("push-owes-review-record", owed[1], owed[0], "push past an unrecorded review")
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),

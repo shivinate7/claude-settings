@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import datetime
 import fnmatch
 import json
 import os
@@ -13,7 +14,7 @@ from guard_core import (
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import LANE_TAG, TOPIC_TAG, config_dir, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1126,6 +1127,137 @@ def brief_hit(tool: str, tool_input, transcript: str):
     steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
+    return None
+
+
+# ---- push-owes-review-record: a reviewer's stop owes a posted record for the head it read
+#
+# A reviewer's SubagentStop writes one entry, `<config>/state/owed-review-records/<sha>.json`, for the head it read.
+# A push lists that folder. With no entry it makes no gh call and reads no repo. gh runs only for an entry whose branch
+# is the push's destination, whose remote-tracking ref still names the entry's head H, and when the push source is
+# another commit. Then two REST reads: the open pull request whose head is H, and its issue comments.
+OWED_DIR = ("state", "owed-review-records")
+OWED_KEEP_SECONDS = 14 * 86400
+_OWED_NAME = re.compile(r"[0-9a-f]{40}\.json")
+OWED_REASON = (
+    "a reviewer stopped at head %s of pull request %d, and no posted review record holds that head. A push now moves "
+    "past a review that was never recorded. Remedy: render the record with `merge %d --review-record --head %s` "
+    "(add --kind, --guard and one --round per reviewer line), post it with the GitHub MCP comment tool, then push. "
+    "(decision pr-review-record, a record for each reviewed head)"
+)
+OWED_UNREAD_REASON = (
+    "owed-record-unread: the guard could not read whether a review record is owed (%s), so this push would move past "
+    "a reviewed head unchecked. Remedy: fix the read, or confirm this push."
+)
+
+
+def _owed_folder():
+    return os.path.join(config_dir(), *OWED_DIR)
+
+
+def owed_record_write(where, session, now):
+    """Write the entry for the head a reviewer read in `where`; return '' or why none was written. `now` is a unix
+    time, injected so a test fixes the clock. Entries older than OWED_KEEP_SECONDS go in the same pass. Never
+    blocks: the stop that calls it only logs a failure."""
+    done = _git(where, "rev-parse", "HEAD")
+    sha = done.stdout.strip() if done is not None and done.returncode == 0 else ""
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        return "head unread"
+    done = _git(where, "branch", "-r", "--points-at", "HEAD")
+    if done is None or done.returncode:
+        return "branches unread"
+    branches = [line.split()[0] for line in done.stdout.splitlines() if line.strip() and "->" not in line]
+    if not branches:
+        return ""   # no remote branch holds the head, so no push can move one past it
+    folder = _owed_folder()
+    stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        for name in os.listdir(folder):
+            path = os.path.join(folder, name)
+            if os.path.getmtime(path) < now - OWED_KEEP_SECONDS:
+                os.remove(path)
+        temp = os.path.join(folder, sha + ".json.tmp")   # a whole file or none: a push never reads a torn entry
+        with open(temp, "w", encoding="utf-8") as handle:
+            json.dump({"branches": branches, "time": stamp, "session": session}, handle)
+        os.replace(temp, os.path.join(folder, sha + ".json"))
+    except OSError as e:
+        return "entry unwritten: " + e.__class__.__name__
+    return ""
+
+
+def _owed_branches(path):
+    """The branch list of one entry file, or None when it cannot be read as the entry form."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            branches = json.load(handle)["branches"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return branches if isinstance(branches, list) and all(isinstance(b, str) for b in branches) else None
+
+
+def _newest_record(comments, merge_mod):
+    """The newest review record, parsed, among the issue comments `comments` (oldest first) that merge's own
+    parse_review accepts, else None."""
+    for comment in reversed(comments):
+        body = comment.get("body") if isinstance(comment, dict) else None
+        record = merge_mod.parse_review(body) if isinstance(body, str) else None
+        if record:
+            return record
+    return None
+
+
+def _owed_open(where, sha, merge_mod, memo):
+    """(number, comments) of the lowest open pull request whose head is `sha`, else None. The open list is read once
+    per push, in `memo`. A failed read raises."""
+    host = merge_mod.Host(cwd=where)
+    with merge_mod.shared_deadline(MERGE_READ_TIMEOUT):
+        if "pulls" not in memo:
+            memo["pulls"] = host.pages("pulls", fields={"state": "open"})
+        numbers = sorted(int(row["number"]) for row in memo["pulls"] if row["head"]["sha"] == sha)
+        return (numbers[0], host.pages("issues/%d/comments" % numbers[0])) if numbers else None
+
+
+def owed_record_hit(args, where, overrides=None):
+    """(matched, reason) when this `git push` moves a branch past a head a reviewer read and nobody recorded, else
+    None. The record is satisfied when the newest comment merge's parse_review accepts holds Head == the reviewed
+    head, as merge's fix-check head compare reads it. An entry that cannot be read as the entry form, or a read that
+    fails, asks with owed-record-unread: the guard-wide crash path fails open, so nothing here passes on an error."""
+    try:
+        names = [n for n in os.listdir(_owed_folder()) if _OWED_NAME.fullmatch(n)]
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        return "owed folder unread", OWED_UNREAD_REASON % e.__class__.__name__
+    named = push_refspecs(args)
+    if not names or named is None or not where or not os.path.isdir(where) or not uses_merge_tool(where):
+        return None
+    remote = named[0] or "origin"
+    pairs = [(_plain_source(spec.lstrip("+").partition(":")[0]), "refs/remotes/%s/%s" % (remote, dest), "%s/%s" % (remote, dest))
+             for spec, dest in zip(named[1] or [""], push_destinations(args, where, overrides)) if dest]
+    memo = {}
+    try:
+        for name in sorted(names):
+            sha = name[:-len(".json")]
+            branches = _owed_branches(os.path.join(_owed_folder(), name))
+            if branches is None:   # a torn entry counts only where its head is a commit of this repo
+                if _ref_sha(where, sha):
+                    return "unreadable owed entry", OWED_UNREAD_REASON % "an entry is torn"
+                continue
+            for source, tracking, label in pairs:
+                if label not in branches or _ref_sha(where, tracking) != sha or _ref_sha(where, source) == sha:
+                    continue
+                merge_mod = merge_module()
+                if merge_mod is None:
+                    raise RuntimeError("the merge tool could not be loaded")
+                found = _owed_open(where, sha, merge_mod, memo)
+                if found is None:
+                    continue
+                record = _newest_record(found[1], merge_mod)
+                if not record or record["head"] != sha:
+                    return "push past unrecorded head " + sha[:12], OWED_REASON % (sha[:12], found[0], found[0], sha)
+    except (Exception, SystemExit) as e:
+        return "owed record unread", OWED_UNREAD_REASON % e.__class__.__name__
     return None
 
 
