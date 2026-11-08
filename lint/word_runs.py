@@ -11,6 +11,9 @@ Two normal forms read the same spans in one left-to-right pass, so a mark inside
 Both lowercase, keep letters as words, and turn a line break into a space. A comment opener inside a code span, a lone
 quote and a `//` in text change no word.
 
+`mask_code_spans` is the one masker of inline code for a reader that keeps line and word positions (the report guard's
+model-name check); `code_mask` and `mask_fences` do the same for code blocks.
+
 `units` cuts a Markdown text into the places a rule id may exempt a copy: a paragraph, a list item, a table row, a
 blockquote, a heading and a fenced block.
 """
@@ -57,6 +60,22 @@ def _copy_form_span(match):
     inner, gloss = match.group("inner"), match.group("gloss") or ""
     short = len(re.findall(r"[a-z0-9]+", gloss.lower())) < COPY_FLOOR
     return inner + (GAP if gloss and short and ID_SPAN.match(inner) else gloss)
+
+
+def mask_code_spans(text):
+    """`text` with each inline code span (its ticks and inner text, not a gloss after it) turned into NUL characters of
+    the same length, line breaks kept. A reader that matches words on the result never reads a word inside a span, and a
+    mask is never a space, so "builder `x` sonnet" never joins into the pair "builder sonnet". A lone backtick masks
+    nothing, a span stops at a blank line (SPANS), and a comment opener inside a span stays inside it. An HTML comment is
+    left as it is: it is no code span.
+    Cost: one pass of SPANS over `text`; no file read, no state."""
+    def mask(match):
+        span = match.group(0)
+        if not match.group("tick"):
+            return span
+        gloss = match.group("gloss") or ""
+        return re.sub(r"[^\n]", "\0", span[:len(span) - len(gloss)]) + gloss
+    return SPANS.sub(mask, text)
 
 
 def tokens(text, keep=False):

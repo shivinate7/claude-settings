@@ -26,9 +26,11 @@ guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
-test-author or record-writer spawned since the last human message goes unnamed in Done, or a
-named "role model" pair matches no spawn of that role anywhere in the transcript
-(`reports-done-names-models`), or when
+test-author or record-writer spawned since the last human message goes unnamed in Done, or ran
+on a model family that Done does not name for that role, or a named "role model" pair matches no
+spawn of that role anywhere in the transcript. A spawn's model is the run's own resolvedModel from
+its tool result, else the call's model, the agent pin or the env. A role word inside a code span
+counts as no role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
 When the report is there, each of these blocks asks for only the corrected lines, never the report again.
 
@@ -136,6 +138,7 @@ from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
+from word_runs import mask_code_spans  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -571,12 +574,32 @@ def agent_pin(role):
     return ""
 
 
+def resolved_models(records):
+    """{tool_use_id: model family the run reported} from the tool_result records in `records`.
+
+    A spawn's result carries `toolUseResult.resolvedModel` at the top level of its record. Only a record
+    with exactly one tool_result block is paired, so a parallel batch never gives one id another's model.
+    A record that lacks the field, or holds it unreadable, adds nothing."""
+    found = {}
+    for rec in records:
+        results = list(tool_results(rec))
+        info = rec.get("toolUseResult")
+        if len(results) != 1 or not isinstance(info, dict):
+            continue
+        name = info.get("resolvedModel")
+        family = model_family(name if isinstance(name, str) else "")
+        if family and results[0].get("tool_use_id"):
+            found[results[0]["tool_use_id"]] = family
+    return found
+
+
 def spawn_models(records):
     """Map each named role spawned in `records` to the set of model families it ran on.
 
-    A spawn's model is its call's `model` field, else its agent file's pin, else
-    CLAUDE_CODE_SUBAGENT_MODEL; Claude Code reads them in that order. A spawn none of them
-    resolve adds '' (unknown), which never counts as a mismatch.
+    A spawn's model is, in order, the resolvedModel its tool result reports (paired by tool_use_id), its
+    call's `model` field, its agent file's pin, then CLAUDE_CODE_SUBAGENT_MODEL. A source that is missing or
+    names no known family gives way to the next. A spawn none of them resolve adds '' (unknown), which never
+    counts as a mismatch. A background spawn's launch result may lack resolvedModel; the next source answers.
     """
     failed = set()  # a denied or errored spawn ran no agent, so it counts for nothing
     for rec in records:
@@ -584,6 +607,7 @@ def spawn_models(records):
         for b in content if isinstance(content, list) else []:
             if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
                 failed.add(b.get("tool_use_id"))
+    resolved = resolved_models(records)
     found = {}
     for rec in records:
         for b in tool_uses(rec):
@@ -593,8 +617,8 @@ def spawn_models(records):
             role = str(inp.get("subagent_type") or "").lower()
             if role not in NAMED_ROLES:
                 continue
-            model = model_family(inp.get("model")) or model_family(agent_pin(role)) or \
-                model_family(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL"))
+            model = resolved.get(b.get("id")) or model_family(inp.get("model")) or \
+                model_family(agent_pin(role)) or model_family(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL"))
             found.setdefault(role, set()).add(model)
     return found
 
@@ -602,34 +626,44 @@ def spawn_models(records):
 def done_models_problem(text, spawned, records=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
-    `spawned` holds the spawns since the last report; a role in it must be named in Done. A named
-    pair passes when its model is in the set of any spawn of that role in `records`, the whole
-    transcript (a reviewer in an earlier window may be named beside this window's), or when this
-    window's set for that role holds '' (a spawn whose model is unknown). A spawned role that the Next
-    label names is still running and is reported there, so its missing Done model is waived; Next's
-    pairs are never judged. An earlier unknown spawn
-    excuses nothing. A named role with no spawn anywhere is skipped. `records` defaults to the
-    window, so `spawned` alone is judged by itself.
+    `spawned` holds the spawns since the last report. Each role in it must be named in Done for every
+    known family it ran on in this window: "no model named for builder opus". A role whose only spawns
+    are unknown ('') needs just a name. A named pair passes when its model is in the set of any spawn of
+    that role in `records`, the whole transcript (a reviewer in an earlier window may be named beside
+    this window's), or when this window's set for that role holds '' (a spawn whose model is unknown).
+    A family that ran only in an earlier window may be named but is never required. A spawned role that
+    the Next label names is still running and is reported there, so its missing Done model is waived;
+    Next's pairs are never judged. An earlier unknown spawn excuses nothing. A named role with no spawn
+    anywhere is skipped. `records` defaults to the window, so `spawned` alone is judged by itself.
+    A role word inside a code span counts in neither Done nor Next (word_runs.mask_code_spans).
     Cost: a window with no spawn returns at once. Otherwise one more spawn_models pass over records
-    already in memory, and no transcript read. The agents/<role>.md pin read is cached per role,
-    so each role's file is opened once per process.
+    already in memory, resolvedModel included, and no transcript read. The agents/<role>.md pin read is
+    cached per role, so each role's file is opened once per process.
     """
     if not spawned:
         return ""
     all_spawned = spawn_models(records) if records is not None else spawned
     block = block_text(text, keep_indent=True)
-    done = " ".join(label_items(block, "Done"))
-    running = {r.lower() for r in ROLE_RE.findall(" ".join(label_items(block, "Next")))}
+    done = " ".join(mask_code_spans(item) for item in label_items(block, "Done"))
+    running = {r.lower() for r in ROLE_RE.findall(
+        " ".join(mask_code_spans(item) for item in label_items(block, "Next")))}
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles) if r.lower() in NAMED_ROLES}
-    missing = sorted(r for r in spawned if r not in running and not any(nr == r for nr, _ in named))
-    if missing:
-        return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
         ran = all_spawned.get(role)
         if ran is not None and model not in ran and "" not in spawned.get(role, ()):
             known = ", ".join(sorted(m for m in ran if m)) or "an unknown model"
             return f"'{role} {model}' matches no {role} spawn, which ran {known}"
+    unnamed = []
+    for role in sorted(r for r in spawned if r not in running):
+        families = sorted(m for m in spawned[role] if m)
+        gaps = [m for m in families if (role, m) not in named]
+        if gaps:
+            unnamed += [f"{role} {m}" for m in gaps]
+        elif not families and not any(nr == role for nr, _ in named):
+            unnamed.append(role)
+    if unnamed:
+        return "no model named for " + ", ".join(unnamed)
     return ""
 
 
