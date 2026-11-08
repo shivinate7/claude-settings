@@ -14306,9 +14306,9 @@ class ReviewStampSince(unittest.TestCase):
         self.assertIn("ZQ7", stop, "the Stop does not carry git's failure reason:\n" + stop)
 
     def test_a_deepen_by_another_process_after_the_log_never_returns_the_old_boundary_as_the_cutover(self):
-        # Depth 1 holds only commit 3, the boundary. The first salt commit is commit 2, at 2026-10-21. Commit 3's time, 2026-10-22, is the old
-        # boundary's. Another process deepens the clone after git log and before the boundary read. The read must read again and give commit 2's
-        # time, or stop. Giving commit 3's time is the bug.
+        # Depth 1 holds only commit 3, the boundary. The first salt commit is commit 2, and its committer time is the true cutover. Commit 3's
+        # time is the boundary's, and it is the wrong answer. Another process deepens the clone after git log and before the boundary read. The read
+        # must read again and give commit 2's time, or stop. Giving commit 3's time is the bug.
         clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=1)
         self.assert_shallow_boundary(clone, "HEAD")
         got, stop, _, _, raced = self.cutover_read(clone, race=True)
