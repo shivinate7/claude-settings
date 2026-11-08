@@ -6,6 +6,8 @@
 A decision record's Cost sentence may name a file only when a test pins it. The check reads
 docs/decisions/*.md under --root and prints one line per unpinned file token:
 `<record path>:<line>: <file token> named in a Cost sentence with no pin`.
+A count claim in a Cost sentence prints `<record path>:<line>: count in a Cost sentence with no reader`.
+The file cases compare file rows only; a count case passes counts=True to compare count rows too.
 
 Each case builds a temp tree holding the records and test files it reads, then runs the real script
 with --root on that tree. The corpus case runs it on this repo with no --root. COST_PINS_UNDER_TEST
@@ -28,6 +30,8 @@ MODULE = os.environ.get("COST_PINS_UNDER_TEST") or os.path.join(HERE, "check_cos
 DEC = "docs/decisions/"
 NAMED = " named in a Cost sentence with no pin"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
+# The count rule's row. The file cases leave it out, so a count the rule flags fails only the count cases.
+COUNT = "count in a Cost sentence with no reader"
 FINDING = re.compile(r"^(?P<path>.+\.md):(?P<line>[0-9]+): (?P<what>.+)$")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -48,9 +52,10 @@ def record_of(path):
     return path[cut:] if cut >= 0 else path
 
 
-def findings(out):
+def findings(out, counts=False):
     """(record, line, what) for each finding line in the output, in the order printed. `what` is the file token,
-    or the unbalanced-backtick message, so a case compares one value."""
+    the count message, or the unbalanced-backtick message, so a case compares one value. Count rows are left out
+    unless `counts` is true."""
     rows = []
     for text in out.splitlines():
         m = FINDING.match(text.strip())
@@ -58,6 +63,8 @@ def findings(out):
             what = m.group("what")
             if what.endswith(NAMED):
                 what = what[:-len(NAMED)]
+            if what == COUNT and not counts:
+                continue
             rows.append((record_of(m.group("path")), int(m.group("line")), what))
     return rows
 
@@ -73,6 +80,11 @@ def lineno(text, needle):
 def row(name, text, needle, token):
     """The finding that record `name`, with `text`, must print for `token`, on the line holding `needle`."""
     return (DEC + name, lineno(text, needle), token)
+
+
+def count_row(name, text, needle):
+    """The count finding that record `name`, with `text`, must print on the line holding `needle`."""
+    return row(name, text, needle, COUNT)
 
 
 class CostPinTests(unittest.TestCase):
@@ -101,19 +113,19 @@ class CostPinTests(unittest.TestCase):
     def assert_clean(self):
         rc, out = self.lint()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(findings(out), [], out)
+        self.assertEqual(findings(out, counts=True), [], out)
 
-    def assert_found(self, expected):
+    def assert_found(self, expected, counts=False):
         rc, out = self.lint()
         self.assertEqual(rc, 1, "exit 1 expected with findings %r; got exit %d:\n%s" % (expected, rc, out))
-        self.assertEqual(sorted(findings(out)), sorted(expected), out)
+        self.assertEqual(sorted(findings(out, counts)), sorted(expected), out)
 
-    def assert_has(self, expected):
+    def assert_has(self, expected, counts=False):
         """Each expected finding is printed. Other findings may print too: the case names only its own cause."""
         rc, out = self.lint()
         self.assertEqual(rc, 1, "exit 1 expected with findings %r; got exit %d:\n%s" % (expected, rc, out))
         for wanted in expected:
-            self.assertIn(wanted, findings(out), out)
+            self.assertIn(wanted, findings(out, counts), out)
 
     def test_founding_incident_is_flagged(self):
         # The Proof sentence names a test that holds layout.json. It is another sentence, so it pins nothing here.
