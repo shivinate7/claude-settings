@@ -1,0 +1,11 @@
+{
+  "title": "The comment-narration check stops flagging a review round written inside or beside a decision gloss",
+  "why": "#1840's fresh round 1 left three findings in lint/check_comment_narration.py (lane comment-check-scans-shell, session_013NEJL37UFXTQuAcox7s8fD, 04:14 CST Nov 8). Finding 2 is a false alarm Claude can hit in normal work.",
+  "note": "Fix: (1) ROUND, near :58-60: `(decision hold-unsafe-after-round-3, review round 3)` still flags inside a gloss, because the \"review round\" alternative takes the digits; skip it inside a gloss as the decision-id case does. (2) OPENS, near :63: `(see decision X, round 3)`, `(decision X: ... round 3)` and `Holds a change after round 3 (decision X).` flag; treat a round that the same parenthesis or sentence ties to a decision id as a gloss. (3) near :82-88: only the checked repo's docs/decisions counts, so a pinning repo cannot gloss a claude-settings decision; also read the pinned claude-settings decisions. Red cases first: each form above flags today; control: plain history narration (\"fixed in round 2\") still flags. Related: steps narration-check-rule-quotes (#1840) and narration-gloss-id-test (#1856); the fourth finding is already in note comment-narration-limits. Queue fix (owner 13:20 CST Nov 7). Filed 04:24 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 594,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T04:16:00-06:00"
+}
