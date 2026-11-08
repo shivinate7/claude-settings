@@ -5047,6 +5047,37 @@ sh("git-after-cd: set -e on its own line, then a failed cd, then ; a git push, p
 # set +e turns the exit off again, so the failed cd leaves the shell running and the push after ; runs.
 sh("git-after-cd: set -e then set +e, then a failed cd, then ; a git push is refused",
    "set -e; set +e; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A failed cd skips the whole group, loop or nested group it heads, and the push after ; runs stranded.
+# Each command below is checked under bash with a stub git and a missing folder: the push runs.
+sh("git-after-cd: a failed cd, then && a brace group holding a for loop of git adds, then ; a git push is refused",
+   'cd /tmp/w && { for f in a; do %s add "$f"; done }; %s push' % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then && a brace group of a git add with a redirect, then ; a git push is refused",
+   "cd /tmp/w && { %s add -A; }>/dev/null; %s push" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then && a for loop with a redirect, then ; a git push is refused",
+   "cd /tmp/w && for f in a; do :; done>/dev/null; %s push" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then && nested brace groups of a git add, then ; a git push is refused",
+   "cd /tmp/w && { { %s add -A; } }; %s push" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+# A set +e inside a group or an if still turns the exit off, so the failed cd leaves the shell running.
+sh("git-after-cd: set -e, then a set +e inside an if, then a failed cd, then ; a git push is refused",
+   "set -e; if true; then set +e; fi; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, then a set +e inside a brace group, then a failed cd, then ; a git push is refused",
+   "set -e; { set +e; }; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+# A set -e in a function that is never called does not turn the exit on.
+sh("git-after-cd: a set -e in a function never called, then a failed cd, then ; a git push is refused",
+   "f() { set -e; }; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A set -e behind a test that fails never runs, so the failed cd leaves the shell running.
+sh("git-after-cd: a set -e behind a failing test, then a failed cd, then ; a git push is refused",
+   '[ -n "$CI" ] && set -e; cd /tmp/w; %s push' % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+# A set with an empty argument once raised IndexError in the errexit read, and the guard failed open.
+sh("git-after-cd: set with an empty argument, then a failed cd, then ; a git push is refused",
+   'set -- ""; cd /tmp/w; %s push' % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
