@@ -593,7 +593,8 @@ class Range:
         self.added_lines = lines or {}  # the .md lines the range adds, by path
         self.unknowns = []
         self.added = set(added)
-        self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
+        self.tree = None  # the head tree entries once a read listed the tree (the flag reader also lists it); the report reuses it
+        self.whole = False  # find_stale read every tracked Markdown page, so an untouched line was read too
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
@@ -801,7 +802,7 @@ class ValueReader:
         state.seen[key] += 1
         # The nth copy of a line is added when base holds fewer than n copies, so a second copy of an old line counts.
         added = state.fresh is not None and state.seen[key] > state.fresh[key]
-        whole = state.rng.tree is not None  # every tracked page is read: an untouched line is read too
+        whole = state.rng.whole  # every tracked page is read: an untouched line is read too
         messages = []
 
         def cannot_read(why, finding):
@@ -1414,6 +1415,7 @@ def find_stale(rng):
     if any(getattr(r, "needs_tree", lambda state: True)(state) for r, state in judges):
         if rng.tree is None:
             rng.tree = tracked_entries(rng.head)
+        rng.whole = True
         files = markdown_files(rng.tree, excludes)
     else:  # only the pages some reader names, and only those readers read them
         active = judges
