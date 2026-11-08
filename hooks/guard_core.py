@@ -1087,16 +1087,20 @@ def _head_word(segment: str) -> str:
 EXIT_BODY_PLAIN_WORDS = ("echo", "printf", "true", ":")
 
 
-# A redirect that copies one open descriptor onto another (`>&2`, `2>&1`): it opens no file, so it cannot fail. `>&-` is no copy: it closes the descriptor, so `echo >&-` fails.
-FD_COPY = re.compile(r"\d*[<>]&\d+(?=\s|$|[;&|)])")
+# A redirect that copies stdout or stderr onto the other (`>&2`, `1>&2`, `2>&1`): both are open in a plain
+# shell, so the copy opens no file and cannot fail. Any other descriptor may be closed (`>&3`), and `>&-` closes
+# one, so the echo fails.
+FD_COPY = re.compile(r"(?<!\d)(?:1?>&2|2>&1)(?=\s|$|[;&|)])")
 
 
-def is_print_step(segment: str, redirect_ok: bool) -> bool:
-    """True when SEGMENT, past a leading `then`, is a bare `echo`, `printf`, `true` or `:` that cannot fail the
-    list it stands in, or leave a body: a substitution in it is fine, since the step's status is its own
-    (`echo "$(exit 1)"` is 0). A redirect to a file can fail (`echo x > /no/dir`), so with REDIRECT_OK false it
-    is no print step. An fd copy (`FD_COPY`) cannot fail and is fine either way. Not a print step: a pipe into it, a substitution or quote that this segment leaves open
-    (the split cut `echo $(a; exit 1)` in two), and any other command."""
+def is_print_step(segment: str, may_fail: bool) -> bool:
+    """True when SEGMENT, past a leading `then`, is a bare `echo`, `printf`, `true` or `:` that cannot leave a
+    body: a substitution in it is fine, since the step's status is its own (`echo "$(exit 1)"` is 0). MAY_FAIL
+    true means the step's own failure is harmless where it stands (before `;`, or a check the caller fails
+    closed on). With MAY_FAIL false the step must not fail either: a redirect to a file can fail
+    (`echo x > /no/dir`), and so can `printf` (`printf '%d' abc` returns 1), so neither is a print step. An fd copy
+    (`FD_COPY`) cannot fail and is fine either way. Not a print step: a pipe into it, a substitution or quote that
+    this segment leaves open (the split cut `echo $(a; exit 1)` in two), and any other command."""
     tokens = segment_tokens(segment) or []
     word = tokens[1:2] if tokens[:1] == ["then"] else tokens[:1]
     if not word or word[0] not in EXIT_BODY_PLAIN_WORDS:
@@ -1104,8 +1108,10 @@ def is_print_step(segment: str, redirect_ok: bool) -> bool:
     marks = segment_parens(segment)
     if segment.count("`") % 2 or marks.count("(") != marks.count(")"):
         return False
-    if redirect_ok:
+    if may_fail:
         return True
+    if word[0] == "printf":
+        return False
     bare = "".join("x" if quote else char for _, char, quote in walk_quotes(segment))
     return not any(char in "<>" for char in FD_COPY.sub("", bare))
 
@@ -1114,7 +1120,8 @@ def _leaves_body_never(tokens, segment: str, end: str, in_pipe: bool) -> bool:
     """True when a then-body step, joined to the next by `;`, a newline or `&&`, is a print step
     (`is_print_step`): it cannot `exit`, `return`, `break` or fail, so an `exit` later in the body still runs
     whenever the body does. After a `;` or newline a redirect is fine, since the exit runs whether or not the
-    step fails. Before `&&` a redirect to a file is not, since a failed redirect skips the exit; an fd copy (`>&2`) is. A `&&` join counts only because
+    step fails. Before `&&` a redirect to a file is not, and neither is `printf`, since a failed step skips the
+    exit; an fd copy (`>&2`) is. A `&&` join counts only because
     each step before it is such a print step (the walk stops at the first step that is not); a `||` join never
     counts."""
     return end in (";", "\n", "&&") and not in_pipe and is_print_step(segment, end != "&&")
@@ -1122,7 +1129,7 @@ def _leaves_body_never(tokens, segment: str, end: str, in_pipe: bool) -> bool:
 
 def _exits_on_failure(segments, ends, at: int) -> bool:
     """True when the `||` after `segments[at]` runs a bare `exit` as its first command (past a `then` line
-    when `segments[at]` is an `if` test, and past `echo`, `printf`, `true` or `:` steps of that then body
+    when `segments[at]` is an `if` test, and past print steps (`is_print_step`) of that then body
     that cannot leave it: `if ! X; then echo bad; exit 1; fi`), or as a
     `;`-joined step of a `{ ... }` group that is not piped: the shell stops there when the command
     before the `||` fails, so nothing later runs in the folder it stayed in. Not read: a top-level

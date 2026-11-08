@@ -4819,8 +4819,14 @@ def _push_segment_inert(segment: str):
         return True
     head = re.split(r"[<>&]", words[0].lstrip("({"))[0].rstrip(")}")   # `done>>/dev/null` closes a loop
     if head in GIT_PUSH_PLAIN_WORDS:
-        return not any("`" in word or "$(" in word or "<(" in word or ">(" in word for word in words)
+        return not _runs_substitution(words)
     return not head or head in CD_WORDS or head in GIT_PUSH_INERT_WORDS
+
+
+def _runs_substitution(words) -> bool:
+    """True when a word of WORDS (from `segment_tokens`) runs a command: `$( )`, backticks, `<( )` or `>( )`.
+    The tokens have lost their quotes, so a single-quoted `'$(x)'` reads as one too, which fails closed."""
+    return any("`" in word or "$(" in word or "<(" in word or ">(" in word for word in words)
 
 
 def git_push_after_check_hit(command: str) -> str:
@@ -4834,11 +4840,12 @@ def git_push_after_check_hit(command: str) -> str:
     opener is walked into, so a check inside `{ }` or `( )` refuses. A `|| exit`, the tail of
     `|| { ...; exit N; }` or `if ! X; then exit N; fi` (`_push_exit_tails`), and the test of the compound that
     holds the push (`_push_body_head`) each clear only the commands they cover: the walk goes on back past
-    them, so a `;`-joined check further back still refuses. An `exit` inside a `( )` group leaves only that
+    them, so a `;`-joined check further back still refuses. A substitution in a command they cover is a check
+    they do not cover (`echo $(make x) || exit 1`), so it refuses. An `exit` inside a `( )` group leaves only that
     group, so neither it nor an exit tail inside one clears anything. Any other command refuses, a subshell
     included. The walk ends and passes at the start of the command line.
     A `||` or `|` before the start of the push's chain is no `;` join and passes, except `A || echo x && push`
-    (`_push_hidden_by_print`): the print succeeds when the check A fails, so the push runs. A dry run
+    (`_push_hidden_by_print`): the print succeeds when the check A fails, so the chain runs on to the push. A dry run
     (`git_write_verb`) and an unreadable segment pass."""
     ends = []
     segments = split_segments(command, ends)
@@ -4885,8 +4892,11 @@ def git_push_after_check_hit(command: str) -> str:
             elif start - 1 in tails and not subshell_depth(segments, start - 1):
                 covered = tails[start - 1]
             if covered is not None:
+                checked = covered
                 while covered > 0 and ends[covered - 1] in ("&&", "||", "|"):
                     covered -= 1   # the exit guards the whole `A || B` or `A | B` list, and no check before it
+                if any(_runs_substitution(segment_tokens(part) or []) for part in segments[covered:checked + 1]):
+                    return "push"   # `echo $(make x) || exit 1`: the exit reads echo's status, never make's
                 position, first = covered, True
                 continue
             position, first = start - 1, False
@@ -4894,10 +4904,11 @@ def git_push_after_check_hit(command: str) -> str:
 
 
 def _push_hidden_by_print(segments, ends, start: int, position: int) -> bool:
-    """True for `A || echo x && push`: the `||` before the push's `&&` chain runs only print steps
-    (`is_print_step`) up to the push, so when the check A fails the print runs, succeeds, and the `&&` goes
-    on to the push. A is a check when its `&&` and `||` list holds a command that is not inert."""
-    if start >= position or not all(is_print_step(part, True) for part in segments[start:position]):
+    """True for `A || echo x && ... && push`: the `||` before the push's `&&` chain runs a print step first
+    (`is_print_step`), so when the check A fails the print runs, succeeds, and the `&&` chain goes on to the
+    push, whatever steps stand between them. A is a check when its `&&` and `||` list holds a command that is
+    not inert."""
+    if start >= position or not is_print_step(segments[start], True):
         return False
     left = start - 1
     while left > 0 and ends[left - 1] in ("&&", "||"):
