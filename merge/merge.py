@@ -29,7 +29,7 @@
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
-                          --lint-unknown-ok gives a reason; it is then printed on stderr and no `PASS:` line prints. Takes no lock, merges
+                          --lint-unknown-ok gives a reason; it is then printed on stdout and no `PASS:` line prints. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
   merge --idle-lanes --live FILE
@@ -158,6 +158,10 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
 
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
+
+def fetch_branch(root, name):
+    """-> (exit code, output) of the one fetch of origin's branch `name` into refs/remotes/origin/<name>: the home of this refspec."""
+    return git(root, "fetch", "-q", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -2296,7 +2300,7 @@ def load_config(root, base, path):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
     No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops."""
     ref = f"origin/{base}"
-    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    c, out = fetch_branch(root, base)
     if c:
         raise Stop(f"git fetch origin {base} failed: {out}")
     c, listed = git(root, "ls-tree", "--name-only", ref, "--", path)
@@ -2368,7 +2372,7 @@ def refuse_bad_pr(info):
 def open_worktree(root, info, base):
     """Fetch, check that the head is the one gh named, and make a detached worktree there."""
     for ref in (base, info["branch"]):
-        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
+        c, out = fetch_branch(root, ref)
         if c:
             raise Stop(f"git fetch origin {ref} failed: {out}")
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
@@ -2398,7 +2402,7 @@ def lane_head_and_base(root, target, base):
     """-> (head sha, base branch) of a --lane-lint ref target: the commit or ref `target`, linted against `base` (default main).
     The base is fetched, and the target too when this clone lacks it."""
     base = base or "main"
-    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    c, out = fetch_branch(root, base)
     if c:
         raise Stop(f"git fetch origin {base} failed: {out} {LANE_LINT_CITE}")
     if not re.fullmatch(r"[0-9a-fA-F]{7,64}", target):  # a bare branch name means the pushed branch, never a local one that may differ
@@ -2447,7 +2451,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
-    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
+    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then printed on stdout, with no PASS line."""
     if target.isdigit():
         info = (host or Host()).pr(int(target))
         head, base = info["head"], info["base"]
@@ -3079,32 +3083,59 @@ def review_marked(text):
 
 
 _stamp_since = {}
+_default_branch = {}
+
+def default_branch_once(root):
+    """-> the repo's default branch name, asked of gh once per root in a process: fetch_default_branch and review_stamp_since share the answer."""
+    if root not in _default_branch:
+        _default_branch[root] = host_default_branch(root)
+    return _default_branch[root]
 
 def fetch_default_branch(root):
     """-> the repo's default branch name, with origin/<name> fetched. The review stamp merged into the default branch, so its cutover reads that
     branch's history, and a stale or shallow origin/<name> would give a later cutover or none."""
-    name = host_default_branch(root)
-    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
+    name = default_branch_once(root)
+    c, out = fetch_branch(root, name)
     if c:
         raise Stop(f"git fetch origin {name} failed: {out} " + REVIEW_CITE)
     return name
+
+def shallow_boundary(root):
+    """-> the set of commit shas whose parents this clone cut off (its `shallow` file); empty for a full clone."""
+    # A file read, not a git call: the one `git log` is the whole cost of the cutover read (a test pins it). A linked worktree's `.git` is a
+    # file naming its git dir, and the `shallow` file lives in that dir's common dir.
+    try:
+        gitdir = os.path.join(root, ".git")
+        if os.path.isfile(gitdir):
+            with open(gitdir, encoding="utf-8") as f:
+                gitdir = os.path.join(root, f.read().split("gitdir:", 1)[1].strip())
+            if os.path.isfile(os.path.join(gitdir, "commondir")):
+                with open(os.path.join(gitdir, "commondir"), encoding="utf-8") as f:
+                    gitdir = os.path.join(gitdir, f.read().strip())
+        with open(os.path.join(gitdir, "shallow"), encoding="utf-8") as f:
+            return set(f.read().split())
+    except (OSError, IndexError):
+        return set()
 
 def review_stamp_since(root, base):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
     `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A read that cannot run
-    (git errors, or no origin/<default branch> ref) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
+    (git errors, no origin/<default branch> ref, or a shallow clone whose first salt commit is the boundary) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
     created before this time may carry no Stamp line."""
     key = (root, base)
     if key not in _stamp_since:
-        default = host_default_branch(root)
-        c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%ct", f"origin/{default}", "--", "merge/merge.py")
+        default = default_branch_once(root)
+        c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
         if c:
             raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
-        first = out.split()[:1]
-        _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[0]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                             if first and first[0].isdigit() else None)
+        first = out.split()[:2]
+        if first and first[0] in shallow_boundary(root):  # its parent is missing, so an older salt commit may exist: the cutover is unknown
+            raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary. "
+                       "Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
+        _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                             if len(first) == 2 and first[1].isdigit() else None)
     return _stamp_since[key]
 
 def parse_review(text, created=None, cutover=None):
@@ -3328,7 +3359,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
-    p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint or --review-record: go on when a lint step is unknown (never when one FAILs); the reason is printed on stderr")
+    p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint or --review-record: go on when a lint step is unknown (never when one FAILs); the reason is printed, on stdout under --lane-lint and on stderr under --review-record")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
