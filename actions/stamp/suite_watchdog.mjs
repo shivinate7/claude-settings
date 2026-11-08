@@ -26,7 +26,7 @@
 //    with every member in it. The child waits on a go-file until the helper has put it in the job, so
 //    on CI no test runs outside it: a run that cannot get a job fails by name. Off CI the child is
 //    released anyway, and leftovers are found by a walk of the process tree, with a printed note.
-//    A child whose go-file never appears fails by name and runs no test, so no test runs unwatched.
+//    A child whose go-file never appears fails by name (see waitForGo).
 // An unreadable sweep is unknown, never "nothing found": on CI it exits 1 too.
 // Cost: one extra PowerShell process on Windows, for the suite's own run only.
 
@@ -43,7 +43,7 @@ const RUN = "STAMP_SUITE_RUN";
 const GO = "STAMP_SUITE_GO"; // Windows: the child starts its tests when this file exists
 const NO_JOB = "STAMP_SUITE_NO_JOB"; // "1": Windows: the watchdog makes no job object, as if it could not
 const GO_WAIT_MS = "STAMP_SUITE_GO_WAIT_MS"; // ms the child waits for the go file before it fails; default 40000
-const GO_FAIL ="STAMP_SUITE_GO_FAIL"; // "1": Windows: the go-file write fails, as if the disk refused it
+const GO_FAIL = "STAMP_SUITE_GO_FAIL"; // "1": Windows: the go-file write fails, as if the disk refused it
 // A seam for the wiring test, not a feature. A clean fixture leaves nothing, so no real run reaches
 // the "pid still alive after the kill" or "sweep could not read" results. "alive" or "unknown" makes
 // the sweep report that result on top of what it really found, and the real leftoverExit wiring then
@@ -52,6 +52,8 @@ const SWEEP_FAULT = "STAMP_SUITE_SWEEP_FAULT";
 export const DEFAULT_CAP_S = 180; // the slowest normal run took 102 s (run 42456407663); the slowest of 28 earlier runs, 90 s
 export const HARD_STOP_AFTER_CAP_S = 30; // see the budget above
 const LEFTOVER_GRACE_MS = 3000; // a process may still be exiting when the suite closes
+// The go file is written at most ASSIGN_WAIT_MS after the child spawns. The child's go wait (the
+// GO_WAIT_MS default in waitForGo) must stay above it: a longer assign would fail a healthy off-CI run.
 const ASSIGN_WAIT_MS = 25_000;
 const SWEEP_WAIT_MS = 20_000;
 
@@ -91,7 +93,7 @@ export function waitForGo(env = process.env) {
   const waitMs = Number(env[GO_WAIT_MS]) || 40_000;
   for (const t0 = Date.now(); !existsSync(env[GO]);) {
     if (Date.now() - t0 >= waitMs) {
-      console.error(`FAIL - no go file at ${env[GO]} after ${waitMs} ms, so the watchdog is not running and no test ran`);
+      console.error(`FAIL - no go file at ${env[GO]} after ${waitMs} ms, so the watchdog is dead or stuck and no test ran`);
       process.exit(1);
     }
     sleepMs(50);
