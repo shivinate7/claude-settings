@@ -564,9 +564,9 @@ case4() {
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c4err)
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/c4err")
   rc=$?
-  errsize=$(wc -c < /tmp/c4err | tr -d '[:space:]'); rm -f /tmp/c4err
+  errsize=$(wc -c < "$work/c4err" | tr -d '[:space:]'); rm -f "$work/c4err"
   lines=$(printf '%s\n' "$out" | grep -c 'differ from this checkout')
 
   if [ $rc -ne 0 ]; then
@@ -590,9 +590,9 @@ case5() {
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$other" > "$cfg/CLAUDE.md"
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c5err)
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/c5err")
   rc=$?
-  errsize=$(wc -c < /tmp/c5err | tr -d '[:space:]'); rm -f /tmp/c5err
+  errsize=$(wc -c < "$work/c5err" | tr -d '[:space:]'); rm -f "$work/c5err"
   lines=$(printf '%s\n' "$out" | grep -c 'differ from this checkout')
 
   if [ $rc -ne 0 ]; then
@@ -614,9 +614,9 @@ case6() {
 
   # CLAUDE_CODE_REMOTE and CLAUDE_CODE_REMOTE_SESSION_ID unset: a cloud session prints its session-tier line by design.
   out=$(cd "$outside" && CLAUDE_CONFIG_DIR="$cfg" GIT_CEILING_DIRECTORIES="$outside" \
-        env -u CLAUDE_CODE_REMOTE -u CLAUDE_CODE_REMOTE_SESSION_ID sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c6err)
+        env -u CLAUDE_CODE_REMOTE -u CLAUDE_CODE_REMOTE_SESSION_ID sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/c6err")
   rc=$?
-  errsize=$(wc -c < /tmp/c6err | tr -d '[:space:]'); rm -f /tmp/c6err
+  errsize=$(wc -c < "$work/c6err" | tr -d '[:space:]'); rm -f "$work/c6err"
 
   if [ $rc -ne 0 ]; then
     bad "$name" "exit $rc"
@@ -639,9 +639,9 @@ case9() {
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$pointer_co" > "$cfg/CLAUDE.md"
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c9err)
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/c9err")
   rc=$?
-  errsize=$(wc -c < /tmp/c9err | tr -d '[:space:]'); rm -f /tmp/c9err
+  errsize=$(wc -c < "$work/c9err" | tr -d '[:space:]'); rm -f "$work/c9err"
   lines=$(printf '%s\n' "$out" | grep -c 'differ from this checkout')
 
   if [ $rc -ne 0 ]; then
@@ -666,9 +666,9 @@ case10() {
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$pointer_co" > "$cfg/CLAUDE.md"
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c10err)
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/c10err")
   rc=$?
-  errsize=$(wc -c < /tmp/c10err | tr -d '[:space:]'); rm -f /tmp/c10err
+  errsize=$(wc -c < "$work/c10err" | tr -d '[:space:]'); rm -f "$work/c10err"
   lines=$(printf '%s\n' "$out" | grep -c 'differ from this checkout')
 
   if [ $rc -ne 0 ]; then
@@ -1541,9 +1541,9 @@ caseF2() {
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF2err)
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/cF2err")
   rc=$?
-  errsize=$(wc -c < /tmp/cF2err | tr -d '[:space:]'); rm -f /tmp/cF2err
+  errsize=$(wc -c < "$work/cF2err" | tr -d '[:space:]'); rm -f "$work/cF2err"
   lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
 
   if [ $rc -ne 0 ]; then
@@ -1567,9 +1567,9 @@ caseF3() {
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF3err)
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/cF3err")
   rc=$?
-  errsize=$(wc -c < /tmp/cF3err | tr -d '[:space:]'); rm -f /tmp/cF3err
+  errsize=$(wc -c < "$work/cF3err" | tr -d '[:space:]'); rm -f "$work/cF3err"
   branch_lines=$(printf '%s\n' "$out" | grep -c 'is on feature-branch, not main')
   stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
 
@@ -1600,9 +1600,9 @@ caseF4() {
   mkdir -p "$cfg"
   printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
 
-  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF4err)
+  out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/cF4err")
   rc=$?
-  errsize=$(wc -c < /tmp/cF4err | tr -d '[:space:]'); rm -f /tmp/cF4err
+  errsize=$(wc -c < "$work/cF4err" | tr -d '[:space:]'); rm -f "$work/cF4err"
   stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
   unknown_lines=$(printf '%s\n' "$out" | grep -c 'freshness unknown')
 
@@ -1646,9 +1646,9 @@ EOF
   printf '@%s/CLAUDE.md\n' "$co" > "$cfg/CLAUDE.md"
 
   out=$(cd "$co" && CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_FETCH_TIMEOUT=0 \
-        sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF6err)
+        sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/cF6err")
   rc=$?
-  errsize=$(wc -c < /tmp/cF6err | tr -d '[:space:]'); rm -f /tmp/cF6err
+  errsize=$(wc -c < "$work/cF6err" | tr -d '[:space:]'); rm -f "$work/cF6err"
   stale_lines=$(printf '%s\n' "$out" | grep -c 'commits behind origin/main')
   unknown_lines=$(printf '%s\n' "$out" | grep -c 'freshness unknown')
 
@@ -2870,9 +2870,9 @@ caseF5() {
 
   # CLAUDE_CODE_REMOTE and CLAUDE_CODE_REMOTE_SESSION_ID unset: a cloud session prints its session-tier line by design.
   out=$(cd "$outside" && CLAUDE_CONFIG_DIR="$cfg" GIT_CEILING_DIRECTORIES="$outside" \
-        env -u CLAUDE_CODE_REMOTE -u CLAUDE_CODE_REMOTE_SESSION_ID sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF5err)
+        env -u CLAUDE_CODE_REMOTE -u CLAUDE_CODE_REMOTE_SESSION_ID sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>"$work/cF5err")
   rc=$?
-  errsize=$(wc -c < /tmp/cF5err | tr -d '[:space:]'); rm -f /tmp/cF5err
+  errsize=$(wc -c < "$work/cF5err" | tr -d '[:space:]'); rm -f "$work/cF5err"
 
   if [ $rc -ne 0 ]; then
     bad "$name" "exit $rc"
