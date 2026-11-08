@@ -5,7 +5,7 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases: a squash that carries the pre-deletion copy of a file (a revert nobody wrote), and a
 merge that drops a parent's added line.
 """
-import atexit, contextlib, inspect, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, contextlib, inspect, io, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -15,6 +15,7 @@ import check_debt_retire as D  # noqa: E402  the debt-close check: the scope eac
 from test_check_debt_retire import PROSE, RUN_URL, Runs, debt  # noqa: E402  one home of the debt shape and the fake run reader
 sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import check_silent_undo as C  # noqa: E402
+from workflow_steps import job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
@@ -2137,6 +2138,8 @@ class RecordsPage(unittest.TestCase):
 
 
 NO_EXCUSE = "check() takes no run_state: a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
+CASE_BODY = "CASE_BODY"  # the env var the flag names in the CLI cases: not PR_BODY, so a build that reads PR_BODY fails them
+PR_BODY = "PR_BODY"  # the env var CI and the composite action pass the PR body in
 
 
 class RetireCite(unittest.TestCase):
@@ -2397,6 +2400,161 @@ class RetireCite(unittest.TestCase):
         flagged = Runs(("success", head))
         self.silent(head, body, flagged, strict=True)
         self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
+
+    def cited_close(self):
+        """The #1099 shape as CI sees it: a debt landed by a PR and deleted on the branch, with a green cite in the body. -> (head, body)."""
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        return head, self.CITE % (self.SLUG, RUN_URL)
+
+    def cli(self, head, runs, flag=True, env=None):
+        """main() on `head` as CI runs it: `--pr-body-env CASE_BODY` when flag is set, the merge tool's Host.cited_run as the run
+        reader `runs` (a Runs fake), and `env` for the run's variables. PR_BODY, CASE_BODY and CI start unset. -> (exit code, printed text).
+        A build without the flag exits through argparse: that is a named failure here, not a crash."""
+        import merge  # lazy: merge.Host holds the one run read, reached through the ../merge path inserted at the top
+        argv = ["--repo", self.r.dir, "--upstream", "origin/main", "--head", head]
+        if flag:
+            argv += ["--pr-body-env", CASE_BODY]
+        out = io.StringIO()
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(out):
+            for name in (PR_BODY, CASE_BODY, "CI"):
+                os.environ.pop(name, None)
+            os.environ.update(env or {})
+            with unittest.mock.patch.object(merge.Host, "cited_run", lambda host, url: runs(url)):
+                try:
+                    code = C.main(argv)
+                except SystemExit as e:
+                    self.fail("main() refuses %s (exit %s): the CLI takes no PR body yet" % (" ".join(argv[-2:]), e.code))
+        return code, out.getvalue()
+
+    def test_the_flag_reads_the_body_and_its_run_and_excuses_the_debt_delete(self):
+        head, body = self.cited_close()
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the debt-close check does not clear this close")
+        runs = Runs(("success", head))
+        code, out = self.cli(head, runs, env={CASE_BODY: body})
+        self.assertIn(RUN_URL, runs.urls, "the run reader was not asked for the cited run, so the excuse was never read")
+        self.assertIn("ALLOWED %s:" % self.DEBT, out, "no ALLOWED line for the debt delete:\n" + out)
+        self.assertEqual(code, 0, out)
+
+    def test_the_run_is_read_against_the_head_the_flag_gives(self):
+        head, body = self.cited_close()
+        below = self.r.sh("rev-parse", "origin/main")  # the parent of the head: a green run there excuses nothing
+        runs = Runs(("success", below))
+        code, out = self.cli(head, runs, env={CASE_BODY: body})
+        self.assertIn(RUN_URL, runs.urls, "the run reader was not asked for the cited run, so the case proves nothing")
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL: %s:" % self.DEBT, out, "the green run below the head excused the debt delete:\n" + out)
+
+    def test_the_flag_with_no_body_excuses_nothing(self):
+        head, body = self.cited_close()
+        for label, env in (("unset", {PR_BODY: body}), ("empty", {CASE_BODY: "", PR_BODY: body})):  # PR_BODY holds the cite: it must not be read
+            with self.subTest(label):
+                runs = Runs(("success", head))
+                code, out = self.cli(head, runs, env=env)
+                self.assertEqual(runs.urls, [], "the run reader was asked with no body in %s: there is no cite to read" % CASE_BODY)
+                self.assertEqual(code, 1, out)
+                self.assertIn("FAIL: %s:" % self.DEBT, out, "the debt delete was excused with no body in %s:\n%s" % (CASE_BODY, out))
+
+    def test_the_cli_run_reader_that_raises_excuses_nothing(self):
+        head, body = self.cited_close()
+        runs = Runs(RuntimeError("the run read failed: HTTP 502"))
+        code, out = self.cli(head, runs, env={CASE_BODY: body})
+        self.assertIn(RUN_URL, runs.urls, "the cited run was never read, so the case proves nothing")
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL: %s:" % self.DEBT, out, "a failed run read excused the debt delete:\n" + out)
+
+    def test_a_drops_lines_line_in_the_env_body_excuses_its_path(self):
+        head, _ = self.cited_close()
+        drops = "Drops-lines: %s -- the owner retired this debt by hand\n" % self.DEBT
+        runs = Runs(("success", head))
+        code, out = self.cli(head, runs, env={CASE_BODY: drops})
+        self.assertEqual(runs.urls, [], "premise: the body names no run, so only the Drops-lines line can excuse the delete")
+        self.assertIn("ALLOWED %s:" % self.DEBT, out, "no ALLOWED line for the Drops-lines line in the body:\n" + out)
+        self.assertEqual(code, 0, out)
+
+    def test_the_same_drops_lines_line_without_the_flag_excuses_nothing(self):  # control
+        head, _ = self.cited_close()
+        drops = "Drops-lines: %s -- the owner retired this debt by hand\n" % self.DEBT
+        code, out = self.cli(head, Runs(("success", head)), flag=False, env={CASE_BODY: drops})
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL: %s:" % self.DEBT, out, "the body excused the delete with no flag:\n" + out)
+
+    def test_without_the_flag_the_body_and_the_run_are_not_read(self):  # control
+        head, body = self.cited_close()
+        runs = Runs(("success", head))
+        code, out = self.cli(head, runs, flag=False, env={CASE_BODY: body})
+        self.assertEqual(runs.urls, [], "the run reader was asked with no flag: the CLI must read no run")
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL: %s:" % self.DEBT, out, "the cited delete was excused with no flag:\n" + out)
+
+
+CHECKS_YML = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+ACTION_YML = os.path.join(HERE, "..", "actions", "silent-undo", "action.yml")
+STEP = "Silent undo check"
+INLINE_BODY = re.compile(r"\$\{\{[^}]*body")  # a body expression: a template injection when it sits in a run: line
+
+
+def squash(value):
+    """A map value with its whitespace removed, so `${{ x }}` and `${{x}}` read alike. None reads as empty."""
+    return re.sub(r"\s+", "", value or "")
+
+
+def action_steps(text):
+    """action.yml's steps, re-indented to checks.yml's layout: the action's steps sit two spaces left of it, and the shared
+    step parser (lint/workflow_steps.py) reads that layout."""
+    return ["\n".join("  " + ln if ln.strip() else ln for ln in piece.split("\n"))
+            for piece in re.split(r"^(?=    - )", text, flags=re.M)[1:]]
+
+
+class CheckStepPins(unittest.TestCase):
+    """The silent-undo check gets the PR body in its env var PR_BODY, and no run: line inlines it (zizmor's template injection).
+    The checks job's step and the composite action's step both pass it. Steps are read through lint/workflow_steps.py."""
+
+    def setUp(self):
+        with open(CHECKS_YML, encoding="utf-8") as f:
+            self.checks = f.read()
+        with open(ACTION_YML, encoding="utf-8") as f:
+            self.action = f.read()
+
+    def checks_step(self):
+        step = next((st for st in step_blocks(job_block(self.checks, "checks")) if step_key(st, "name") == STEP), None)
+        self.assertIsNotNone(step, "the checks job has no step named %r" % STEP)
+        return step
+
+    def action_step(self):
+        steps = action_steps(self.action)
+        self.assertEqual(len(steps), 1, "action.yml has %d steps, want the one check" % len(steps))
+        return steps[0]
+
+    def assert_env(self, step, label):
+        env = step_env(step)
+        self.assertEqual(squash(env.get("PR_BODY")), squash("${{ github.event.pull_request.body }}"),
+                         "%s: env PR_BODY is not the PR body" % label)
+        self.assertEqual(squash(env.get("GH_TOKEN")), squash("${{ github.token }}"), "%s: env GH_TOKEN is not the workflow token" % label)
+
+    def test_the_checks_step_passes_the_body_by_name(self):
+        self.assertRegex(run_body(self.checks_step()) or "", r"--pr-body-env\s+PR_BODY\b",
+                         "the checks step's run: does not pass --pr-body-env PR_BODY")
+
+    def test_the_checks_step_maps_the_body_and_the_token_in_its_env(self):
+        self.assert_env(self.checks_step(), "checks step")
+
+    def test_the_action_step_maps_the_body_and_the_token_in_its_env(self):
+        self.assert_env(self.action_step(), "action step")
+
+    def test_no_run_line_in_either_file_inlines_the_pr_body(self):
+        runs = [(step_key(st, "name") or "unnamed step", run_body(st)) for st in step_blocks(self.checks)]
+        runs.append(("action.yml step", run_body(self.action_step())))
+        read = [label for label, run in runs if run is not None]
+        self.assertGreater(len(read), 50, "the scan read %d run: lines, so it covered nothing" % len(read))
+        for label, run in runs:
+            with self.subTest(step=label):
+                self.assertIsNone(INLINE_BODY.search(run or ""), "%s inlines the PR body in its run: line" % label)
+
+    def test_the_scan_flags_an_inline_body_in_a_run(self):  # control: the pattern is not vacuous
+        self.assertIsNotNone(INLINE_BODY.search('echo "${{ github.event.pull_request.body }}"'))
+        self.assertIsNone(INLINE_BODY.search('echo "${{ env.PR_BODY }}"'))
 
 
 if __name__ == "__main__":

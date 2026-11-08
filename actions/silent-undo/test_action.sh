@@ -19,6 +19,9 @@
 #  - unpersisted-local-base-red: origin/main is local and origin is unreachable. The run uses the
 #    local ref and names the file. A check.sh that fetches first goes UNKNOWN.
 #  - shallow-unknown-red: a depth-1 clone is UNKNOWN, exit 1.
+#  - pr-body-drops-lines-green: the pull request body (env PR_BODY) holds the Drops-lines line for rules.md, so the
+#    revert passes and prints ALLOWED. check.sh passes the body to the lint with --pr-body-env PR_BODY.
+#  - pr-body-other-path-red, pr-body-no-reason-red: a body line for another path, or with no reason, excuses nothing.
 # Without a check.sh every case fails with "not built": that is the red on the old code.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -84,11 +87,12 @@ quiet git clone -q --no-local --depth 1 -b topic-revert "$remote" "$work/shallow
 quiet git -C "$work/unpersisted" remote set-url origin "$work/unreachable.git"
 head_rev="$(git -C "$work/revert" rev-parse HEAD)"
 fails=0
-expect() { # label want-exit work-dir base-ref want-text [head-sha]: runs check.sh as action.yml does
+expect() { # label want-exit work-dir base-ref want-text [head-sha [pr-body]]: runs check.sh as action.yml does
   label=$1 want=$2 dir=$3 base=$4 text=$5 head=${6:-$(git -C "$3" rev-parse HEAD)}
   if [ ! -f "$check" ]; then echo "FAIL $label: check.sh is not built at $check"; fails=$((fails + 1)); return; fi
   # env -u CI: GitHub sets CI, which makes the lint red on UNKNOWN even without --strict. The cases must test --strict itself.
-  out="$(cd "$dir" && env -u CI BASE_REF="$base" HEAD_SHA="$head" bash "$check" 2>&1)"; got=$?
+  # PR_BODY is always set: empty reads as no body, so an inherited value never reaches a case that names none.
+  out="$(cd "$dir" && env -u CI BASE_REF="$base" HEAD_SHA="$head" PR_BODY="${7-}" bash "$check" 2>&1)"; got=$?
   if [ "$got" -ne "$want" ]; then
     echo "FAIL $label: exit $got, wanted $want"; printf '%s\n' "$out" | sed 's/^/     /'; fails=$((fails + 1))
   elif [ -n "$text" ] && ! printf '%s' "$out" | grep -q -F -- "$text"; then
@@ -106,5 +110,8 @@ expect pr-head-sha-read-red 1 "$work/base" main "FAIL: rules.md" "$head_rev"
 expect unreadable-base-red 1 "$work/revert" no-such-base "UNKNOWN"
 expect unpersisted-local-base-red 1 "$work/unpersisted" main "FAIL: rules.md"
 expect shallow-unknown-red 1 "$work/shallow" main "UNKNOWN"
+expect pr-body-drops-lines-green 0 "$work/revert" main "ALLOWED rules.md" "" "Drops-lines: rules.md -- the rules are rolled back on purpose for this test"
+expect pr-body-other-path-red 1 "$work/revert" main "FAIL: rules.md" "" "Drops-lines: other.md -- a reason for a file that did not change"
+expect pr-body-no-reason-red 1 "$work/revert" main "FAIL: rules.md" "" "Drops-lines: rules.md"
 echo "silent-undo suite: $fails failed"
 exit $((fails > 0))
