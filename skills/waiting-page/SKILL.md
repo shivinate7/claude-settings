@@ -234,8 +234,12 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   The box counts only in a repo with no page. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
 - A question sent to both the chat and the page carries the same option text in the same order: the page's
   letters are positions, so letter a on the page must mean letter a in the chat. The chat form writes a line
-  `Page item: <id>` and one line per option, `a) <the option's label>`. The page item carries that id and those
-  labels. The writer refuses a write of that item whose label for a letter differs from the chat's text for it
+  `Page item: <id>` and one line per option, `a) <the option's label>`. Put every cite in a reply on one side of
+  its options: each above its options, or each below them. With a cite below, the reply ends with a cite. The
+  writer reads a reply that has an option line before its first cite and none after its last cite as cites
+  below. Each cite then owns the option lines between the cite before it and itself. Any other reply is read as
+  cites above, and each cite owns the option lines after it, up to the next cite. The page item carries that id
+  and those labels. The writer refuses a write of that item whose label for a letter differs from the chat's text for it
   (guard rule `option-labels-match-chat`, decision option-keys-are-letters). The chat may shorten a label to its
   start; it may not name another option. A question asked in the chat first and written to the page later cites
   the id the page item will get.
@@ -565,11 +569,15 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
-3. If the answer is `none` with no clear direction, and you write the new `options`, `recommended` and `why` from the
-   note in this same turn (a `multi` item's new `recommended` is a list), set `added` to now. Write `lastAnswer` from
-   the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
-   `answers/<id>` (pinned to its version), and
-   leave the item open. Ask the chat question again with the new options, citing `Page item: <id>` and writing one `a) <label>` line per new option: the earlier chat question still cites the id, and the guard (rule `option-labels-match-chat`) compares the new labels to its old lines. Say in the terminal that the item has new options. If you cannot write them in this turn,
+3. If the answer is `none` with no clear direction, and you can write new `options`, `recommended` and `why` from the
+   note in this same turn, act in this order. A `multi` item's new `recommended` is a list. First ask the chat
+   question again with the new options, citing `Page item: <id>` and writing one `a) <label>` line per new option.
+   Do this before the write:
+   the earlier chat question still cites the id, and the guard (rule `option-labels-match-chat`) compares the new
+   labels to the newest chat question's lines. Then write the new options and set `added` to now. Write `lastAnswer`
+   from the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
+   `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal that the item has new
+   options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
    ready. A `none` answer with a clear direction never takes this fallback: the busy-lane rule sorts it. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.

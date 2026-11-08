@@ -1309,20 +1309,30 @@ def _cited_ids(text) -> set:
 
 
 def _own_option_lines(text, item_id) -> dict:
-    """{letter: text} of the option lines that belong to page item `item_id` in `text`: the lines after each cite
-    of that id, up to the next "Page item:" cite of any item, so two questions in one reply read apart."""
+    """{letter: text} of the option lines that belong to page item `item_id` in `text`. A reply writes its cites
+    on one side of their options. When an option line comes before the first cite and none comes after the last
+    cite, each cite sits under its options: it owns the option lines between the cite before it (or the text's
+    start) and itself. Else each cite owns the option lines after its own line, up to the next cite. Either way two
+    questions in one reply read apart. The side is read per reply, not per cite: the text between two cites reads
+    the same in both shapes, and only the reply's ends tell them apart."""
     cites = list(PAGE_ITEM_CITE.finditer(text))
+    options = list(CHAT_OPTION_LINE.finditer(text))
+    if not cites or not options:
+        return {}
+    under = options[0].start() < cites[0].start() and options[-1].start() < cites[-1].start()
     lines = {}
     for i, cite in enumerate(cites):
         if cite.group(1).rstrip(".,;:)") != item_id:
             continue
-        end = cites[i + 1].start() if i + 1 < len(cites) else len(text)
-        # The rest of the cite's own line is no option line: start at the next line.
-        start = text.find("\n", cite.end(), end)
-        if start < 0:
-            continue
-        for m in CHAT_OPTION_LINE.finditer(text, start + 1, end):
-            lines.setdefault(m.group(1).lower(), m.group(2))
+        if under:
+            start, end = (cites[i - 1].end() if i else 0), cite.start()
+        else:
+            # An option line starts at a line start, so one that starts before the cite's end is on the cite's own
+            # line, or above it, and is not this cite's.
+            start, end = cite.end(), (cites[i + 1].start() if i + 1 < len(cites) else len(text))
+        for m in options:
+            if start <= m.start() < end:
+                lines.setdefault(m.group(1).lower(), m.group(2))
     return lines
 
 
