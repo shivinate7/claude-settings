@@ -1189,6 +1189,45 @@ def case_powershell_hash_mid_token_is_no_comment():
          entry_of(ps_task("$h = @'\n# x 'y\n'@\ngit log | head -5")), refused)
 
 
+def case_powershell_pipe_then_newline_then_head():
+    # A pipe at a line end continues into the next line, so `|`, a newline, then `head` is the bash pipe of `| head`.
+    # A pipe to a PowerShell cmdlet on the next line passes, and a pipe inside a string is text.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, git log |, then head on the next line, is refused as a bash operator", "set",
+         entry_of(ps_task("git log |\nhead -5")), refused)
+    page("a PowerShell command, Get-ChildItem |, then Select-Object on the next line, passes", "set",
+         entry_of(ps_task("Get-ChildItem |\nSelect-Object -First 5")), None)
+    page("a PowerShell string holding a pipe, then head on the next line with no pipe, passes", "set",
+         entry_of(ps_task('Write-Host "a |"\nhead x')), None)
+
+
+def case_powershell_param_attribute_at_line_start():
+    # The named arguments of an attribute may wrap, so a line can start with `Mandatory=$true, Position=0`. That is
+    # PowerShell, not a NAME=value prefix before a command, so it passes. The one-line attribute passes too.
+    page("a PowerShell [Parameter( attribute wrapped so a line starts Mandatory=$true, Position=0, passes", "set",
+         entry_of(ps_task("[Parameter(\n    Mandatory=$true, Position=0)]")), None)
+    page("a PowerShell one-line [Parameter(Mandatory=$true, Position=0)] passes", "set",
+         entry_of(ps_task("[Parameter(Mandatory=$true, Position=0)]")), None)
+
+
+def case_powershell_bash_prefix_command_substitution():
+    # A NAME=value prefix may hold `$(...)` with a space in it, so `X=$(date +%s) node x` runs `node` after the
+    # substitution and is a bash form. A PowerShell assignment with a subexpression passes.
+    page("a PowerShell command, X=$(date +%s) node x, is refused as a bash operator", "set",
+         entry_of(ps_task("X=$(date +%s) node x")), ("command-in-item", "bash operator"))
+    page("a PowerShell assignment with a subexpression, $x = $(Get-Date); git push, passes", "set",
+         entry_of(ps_task("$x = $(Get-Date); git push")), None)
+
+
+def case_powershell_bash_prefix_two_deep_expansion():
+    # A NAME=value prefix may hold an expansion nested two levels deep, as in `A=${A:-${B:-${C}}}`, which is a bash
+    # form. The same text in single quotes is a string and passes.
+    page("a PowerShell command, A=${A:-${B:-${C}}} node x, is refused as a bash operator", "set",
+         entry_of(ps_task("A=${A:-${B:-${C}}} node x")), ("command-in-item", "bash operator"))
+    page("a PowerShell string holding ${A:-${B:-${C}}}, single-quoted, passes", "set",
+         entry_of(ps_task("$cfg = '${A:-${B:-${C}}}'")), None)
+
+
 def case_step_shell_programs_partial():
     # A single-span step is a shell line only when its first word is in SHELL_PROGRAMS, so a cloud CLI, a span with a
     # flag after its word, or chmod passes. Each of the six spans below is refused. Controls pass: a bare tool name, a flag alone and a minus between two words. The chained span
@@ -1205,6 +1244,23 @@ def case_step_shell_programs_partial():
     # A program at a path is judged by its bare name, as `chmod` is alone: the word after the directory is the program.
     page("a step holding `/usr/bin/chmod +x f` is refused as a shell line", "set",
          entry_of(task_item(["Check the output of `/usr/bin/chmod +x f`"])), ("command-in-item", "shell line"))
+
+
+def case_step_path_cmdlet_is_a_shell_line():
+    # A command word at a path is read by its basename, as `/usr/bin/chmod +x f` is. A Verb-Noun cmdlet at a path is
+    # then a shell line on its own. A file name at a path is text.
+    page("a step holding `/opt/bin/Get-Thing` is refused as a shell line", "set",
+         entry_of(task_item(["Check the output of `/opt/bin/Get-Thing`"])), ("command-in-item", "shell line"))
+    page("a step holding `docs/Read-Me.md` alone is text and passes", "set",
+         entry_of(task_item(["Check the output of `docs/Read-Me.md`"])), None)
+
+
+def case_step_span_flag_without_a_program_is_text():
+    # A lowercase word then a flag is a shell line when the word is a program (`grep -r x` and `chmod +x f` stay
+    # shell lines in case_step_shell_programs_partial). A span whose word names no program is text.
+    for span in ("ok --force", "mode -v", "the -x flag"):
+        page("a step holding `%s` is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
 
 
 # ------------------------------------------------------------------ a question says how it departs from main
@@ -1861,7 +1917,10 @@ def main():
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
-                 case_task_str_replace_prose_label_passes):
+                 case_task_str_replace_prose_label_passes,
+                 case_powershell_pipe_then_newline_then_head, case_powershell_param_attribute_at_line_start,
+                 case_powershell_bash_prefix_command_substitution, case_powershell_bash_prefix_two_deep_expansion,
+                 case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_without_a_program_is_text):
         try:
             case()
         except Exception as exc:
