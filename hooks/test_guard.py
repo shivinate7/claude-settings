@@ -10444,8 +10444,8 @@ npr_refuse("a linked worktree reads the github remote in its common config: a br
 npr_refuse("a reviewer on round 2 with no pull request is refused",
            "Agent", npr_spawn("reviewer", NPR_NO_PR, "sonnet", round_line="Round 2 of 3"), npr_path("github-https"))
 # Refused: the role is matched without case and without surrounding space (role_name), so each spelling is judged.
-# A spelling other than `reviewer` is not in HAIKU_ROLES, so the model floor refuses a haiku spawn first. Round 2 on
-# sonnet clears the floor and the above-row check, so the case reaches this rule.
+# A spelling other than `reviewer` is not in HAIKU_ROLES, so the model floor refuses a haiku spawn first. A round
+# marker on sonnet clears the model floor and the step-up check, so the case reaches this rule.
 npr_refuse("a role spelled `Reviewer` with a round marker and no pull request is refused",
            "Agent", npr_spawn("Reviewer", NPR_NO_PR, "sonnet", round_line="Round 2 of 3"), npr_path("github-https"))
 npr_refuse("a role spelled ` reviewer ` with spaces around it, with a round marker and no pull request, is refused",
