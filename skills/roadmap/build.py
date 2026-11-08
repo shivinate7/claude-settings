@@ -191,14 +191,14 @@ from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.R
 
 
 def git(repo, *args, stdin=None, err=None):
-    """git's stdout, or None when git cannot run or fails. A list `err` takes git's stderr when it fails."""
+    """git's stdout, or None when git cannot run or fails. A list `err` takes (exit code, stderr) when it fails."""
     try:
         done = _nowindow.run(["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
     except OSError:
         return None
     if done.returncode != 0 and err is not None:
-        err.append(done.stderr.strip())
+        err.append((done.returncode, done.stderr.strip()))
     return done.stdout if done.returncode == 0 else None
 
 
@@ -275,19 +275,22 @@ def fetch_origin_record(repo, branch):
     remote-tracking ref. Origin holding the branch but not answering, or not fetching, exits non-zero: a page
     baked from an unread branch would claim the repo has no roadmap.
     """
-    if git(repo, "remote", "get-url", "origin") is None:
-        return None
+    err = []
+    if git(repo, "remote", "get-url", "origin", err=err) is None:
+        if err and err[0][0] == 2:  # "No such remote": the only failure that means there is no origin
+            return None
+        raise SystemExit("Cannot read the origin remote, so nothing was written: %s" % (err[0][1] if err else "git did not run"))
     err = []
     heads = git(repo, "ls-remote", "--heads", "origin", branch, err=err)
     if heads is None:
         raise SystemExit("Cannot ask origin whether it has the %s branch, so nothing was written: %s"
-                         % (branch, " ".join(err) or "git ls-remote failed"))
+                         % (branch, err[0][1] if err else "git ls-remote failed"))
     want = "refs/heads/" + branch
     if not any(line.split("\t")[-1] == want for line in heads.splitlines()):
         return None
     if git(repo, "fetch", "--quiet", "origin", "+%s:refs/remotes/origin/%s" % (want, branch), err=err) is None:
         raise SystemExit("Origin has the %s branch but fetching it failed, so nothing was written: %s"
-                         % (branch, " ".join(err) or "git fetch failed"))
+                         % (branch, err[0][1] if err else "git fetch failed"))
     return "origin/" + branch
 
 
