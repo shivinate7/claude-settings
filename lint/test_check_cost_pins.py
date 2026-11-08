@@ -26,7 +26,9 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 MODULE = os.environ.get("COST_PINS_UNDER_TEST") or os.path.join(HERE, "check_cost_pins.py")
 
 DEC = "docs/decisions/"
-FINDING = re.compile(r"^(?P<path>.+\.md):(?P<line>[0-9]+): (?P<token>.+) named in a Cost sentence with no pin$")
+NAMED = " named in a Cost sentence with no pin"
+UNBALANCED = "unbalanced backtick in a Cost paragraph"
+FINDING = re.compile(r"^(?P<path>.+\.md):(?P<line>[0-9]+): (?P<what>.+)$")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
@@ -47,12 +49,16 @@ def record_of(path):
 
 
 def findings(out):
-    """(record, line, token) for each finding line in the output, in the order printed."""
+    """(record, line, what) for each finding line in the output, in the order printed. `what` is the file token,
+    or the unbalanced-backtick message, so a case compares one value."""
     rows = []
     for text in out.splitlines():
         m = FINDING.match(text.strip())
         if m:
-            rows.append((record_of(m.group("path")), int(m.group("line")), m.group("token")))
+            what = m.group("what")
+            if what.endswith(NAMED):
+                what = what[:-len(NAMED)]
+            rows.append((record_of(m.group("path")), int(m.group("line")), what))
     return rows
 
 
@@ -99,8 +105,15 @@ class CostPinTests(unittest.TestCase):
 
     def assert_found(self, expected):
         rc, out = self.lint()
-        self.assertEqual(rc, 1, out)
+        self.assertEqual(rc, 1, "exit 1 expected with findings %r; got exit %d:\n%s" % (expected, rc, out))
         self.assertEqual(sorted(findings(out)), sorted(expected), out)
+
+    def assert_has(self, expected):
+        """Each expected finding is printed. Other findings may print too: the case names only its own cause."""
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, "exit 1 expected with findings %r; got exit %d:\n%s" % (expected, rc, out))
+        for wanted in expected:
+            self.assertIn(wanted, findings(out), out)
 
     def test_founding_incident_is_flagged(self):
         # The Proof sentence names a test that holds layout.json. It is another sentence, so it pins nothing here.
@@ -222,6 +235,72 @@ class CostPinTests(unittest.TestCase):
         os.remove(os.path.join(self.tree, *(DEC + "control.md").split("/")))
         self.put("docs/debts/some-debt.md", "# Debt\n\n" + line)
         self.assert_clean()
+
+    def test_cost_word_before_a_non_letter_starts_a_paragraph(self):
+        # Costs and Costly are a word that only starts with Cost: they start no paragraph.
+        text = self.decide("cost-words.md",
+                           "- Cost, per call: reads `state/c1.json` once.\n"
+                           "\n"
+                           "Cost (per run): reads `state/c2.json` once.\n"
+                           "\n"
+                           "**Cost**: reads `state/c3.json` once.\n"
+                           "\n"
+                           "Cost of a run: reads `state/c4.json` once.\n"
+                           "\n"
+                           "Costs: reads `state/c5.json` once.\n"
+                           "\n"
+                           "Costly: reads `state/c6.json` once.\n")
+        self.assert_found([row("cost-words.md", text, "state/c%d.json" % n, "state/c%d.json" % n)
+                           for n in (1, 2, 3, 4)])
+
+    def test_odd_backticks_in_a_cost_paragraph_are_a_finding_on_its_first_line(self):
+        text = self.decide("ticks.md",
+                           "- **Cost:** It reads `state/x.json once. It also reads `state/y.json` once.\n")
+        self.assert_has([row("ticks.md", text, "- **Cost:**", UNBALANCED)])
+
+    def test_nested_bullet_stays_and_a_bullet_at_the_same_or_lesser_indent_ends_the_paragraph(self):
+        text = self.decide("nest.md",
+                           "- **Cost:** It reads `state/n1.json` once.\n"
+                           "  - It also reads `state/n2.json` each run.\n"
+                           "- Writes `state/n3.json` on each run.\n"
+                           "\n"
+                           "- Parent item\n"
+                           "  - **Cost:** It reads `state/m1.json` once.\n"
+                           "    - Nested under the cost: reads `state/m2.json` each run.\n"
+                           "- Lesser bullet: reads `state/m3.json` each run.\n")
+        self.assert_found([row("nest.md", text, "state/n1.json", "state/n1.json"),
+                           row("nest.md", text, "state/n2.json", "state/n2.json"),
+                           row("nest.md", text, "state/m1.json", "state/m1.json"),
+                           row("nest.md", text, "state/m2.json", "state/m2.json")])
+
+    def test_sentence_ends_at_dot_paren_dot_star_and_dot_quote(self):
+        # Each sentence ends at its closing mark, so the exemption words in the next sentence pin nothing.
+        text = self.decide("ends-sentence.md",
+                           "- **Cost:** It reads `state/q1.json` (once.) Unmeasured for now.\n"
+                           "- **Cost:** **It reads `state/q2.json` once.** Unmeasured for now.\n"
+                           "- **Cost:** *It reads `state/q3.json` once.* Unmeasured for now.\n"
+                           "- **Cost:** It says \"It reads `state/q4.json` once.\" Unmeasured for now.\n")
+        self.assert_found([row("ends-sentence.md", text, "state/q%d.json" % n, "state/q%d.json" % n)
+                           for n in (1, 2, 3, 4)])
+
+    def test_pin_name_must_match_whole(self):
+        # box.json holds x.json as a substring, and HEADER holds HEAD: neither is a pin for the whole name.
+        text = self.decide("whole.md",
+                           "- **Cost:** Reads `state/x.json`; `lint/test_box.py` proves it.\n"
+                           "- **Cost:** Reads `.git/HEAD`; `lint/test_head.py` proves it.\n"
+                           "- **Cost:** Reads `state/z.json`; `lint/test_z.py` proves it.\n")
+        self.put("lint/test_box.py", "# box cases\n\nbox.json is read\n")
+        self.put("lint/test_head.py", "# head cases\n\nHEADER is read\n")
+        self.put("lint/test_z.py", "# z cases\n\nreads z.json once\n")
+        self.assert_found([row("whole.md", text, "state/x.json", "state/x.json"),
+                           row("whole.md", text, ".git/HEAD", ".git/HEAD")])
+
+    def test_extensions_match_any_case_and_a_line_suffix_is_stripped(self):
+        text = self.decide("case.md",
+                           "- **Cost:** It reads `state/UP.JSON` once.\n"
+                           "- **Cost:** It reads `hooks/guard.py:42` once.\n")
+        self.assert_found([row("case.md", text, "state/UP.JSON", "state/UP.JSON"),
+                           row("case.md", text, "hooks/guard.py:42", "hooks/guard.py:42")])
 
 
 class CorpusTests(unittest.TestCase):
