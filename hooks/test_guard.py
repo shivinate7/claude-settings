@@ -13728,18 +13728,24 @@ DOTROOT = os.path.join(ROOT, "dotroot")
 
 
 def _build_dotroot():
-    make_repo(DOTROOT, {"tests/test_a.py": "def test_a():\n    assert True\n",
-                        "src/app.py": "x = 1\n", "README.md": "base\n",
-                        # A root .py that no test pattern matches, so a shell glob `*.py` expands to a file.
-                        "main.py": "x = 1\n",
-                        # hooks/ holds a test beside product code, as this repo's hooks/ folder does.
-                        "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n",
-                        # A .ts and a .tsx beside the test, so a `*.{ts,tsx}` name filter over hooks has files to match.
-                        "hooks/guard.ts": "x = 1\n", "hooks/guard.tsx": "x = 1\n",
-                        # A test whose name holds brackets, so an escaped `\[` in a -name filter has a literal `[` to name.
-                        "hooks/test_[x].py": "def test_x():\n    assert True\n",
-                        # docs/ holds no test. Its gen.py is product code, so a walk of docs reads one file.
-                        "docs/gen.py": "x = 1\n"})
+    files = {"tests/test_a.py": "def test_a():\n    assert True\n",
+             "src/app.py": "x = 1\n", "README.md": "base\n",
+             # A root .py that no test pattern matches, so a shell glob `*.py` expands to a file.
+             "main.py": "x = 1\n",
+             # hooks/ holds a test beside product code, as this repo's hooks/ folder does.
+             "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n",
+             # A .ts and a .tsx beside the test, so a `*.{ts,tsx}` name filter over hooks has files to match.
+             "hooks/guard.ts": "x = 1\n", "hooks/guard.tsx": "x = 1\n",
+             # A test whose name holds brackets, so an escaped `\[` in a -name filter has a literal `[` to name.
+             "hooks/test_[x].py": "def test_x():\n    assert True\n",
+             # docs/ holds no test. Its gen.py is product code, so a walk of docs reads one file.
+             "docs/gen.py": "x = 1\n"}
+    # A literal `*` or `?` in a file name, which Windows cannot hold, so only POSIX adds these two tests. They
+    # are the files that `test_[\*].py` and `test_[\?]*` name.
+    if os.name != "nt":
+        files["hooks/test_*.py"] = "def test_star():\n    assert True\n"
+        files["hooks/test_?x.py"] = "def test_question():\n    assert True\n"
+    make_repo(DOTROOT, files)
 
 
 lazy_fixture([DOTROOT], _build_dotroot)
@@ -13854,7 +13860,7 @@ for _name, _command in (
        carries=("test-author",), **DR)
 # A quoted `--include` or `-name` value with `{...}` or a backslash is a name filter too, read as the same
 # globs an unquoted one is. `*.{ts,tsx}` and `guard.{py,sh}` name only guard.ts, guard.tsx and guard.py, none a
-# test. The guard reads `guard\*.py` as `guard*.py`, which names guard.py and no test, so each walk of hooks is allowed.
+# test. The guard reads `guard\*.py` as `guard[*].py`, which names no file in hooks, so each walk of hooks is allowed.
 for _name, _command in (
     ("grep -rl over hooks, --include=\"*.{ts,tsx}\" quoted, sed -i", "grep -rl old hooks --include=\"*.{ts,tsx}\" | xargs sed -i s/a/b/"),
     ("grep -rl over hooks, --include='guard.{py,sh}' quoted, sed -i", "grep -rl old hooks --include='guard.{py,sh}' | xargs sed -i s/a/b/"),
@@ -13891,10 +13897,23 @@ for _name, _command in (
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
 # A `\[` in a single-quoted -name is an escaped literal `[`, so this find names hooks/test_[x].py. The guard reads
-# the escape out, then reads `[x]` as an fnmatch class, which matches test_x.py and misses the file, so it allows.
+# the escape as a one-character class, `[[]`, which matches that file, so it is refused.
 sh("builder-test: shell write, find hooks -name with an escaped bracket, sed -i, is refused",
    r"find hooks -name 'test_\[x].py' | xargs sed -i s/a/b/", "deny", rule=BT,
    carries=("test-author",), **DR)
+# An escaped glob character inside a bracket expression is still a literal, so `[\[]` is a class of `[` and names
+# hooks/test_[x].py. The guard must not read the escape as a second class inside that class.
+sh("builder-test: shell write, find hooks -name with an escaped bracket inside a class, sed -i, is refused",
+   r"find hooks -name 'test_[\[]x].py' | xargs sed -i s/a/b/", "deny", rule=BT,
+   carries=("test-author",), **DR)
+# `[\*]` and `[\?]` name a file with a literal `*` or `?` in its name. _build_dotroot holds one of each on POSIX.
+if os.name != "nt":
+    for _name, _command in (
+        ("find hooks -name with an escaped star inside a class, sed -i", r"find hooks -name 'test_[\*].py' | xargs sed -i s/a/b/"),
+        ("find hooks -name with an escaped question mark inside a class, sed -i", r"find hooks -name 'test_[\?]*' | xargs sed -i s/a/b/"),
+    ):
+        sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+           carries=("test-author",), **DR)
 # A `!` or `-not` inverts `-name`, so a find of hooks that holds one reads test_a.py. Each pin is refused,
 # and each mutant that drops the inverter goes red on it.
 for _name, _command in (
