@@ -18450,6 +18450,8 @@ def agent_worktree_noted_case(command):
         input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": AGENTWT}),
         capture_output=True, text=True, env=env, timeout=60,
     )
+    if result.returncode != 0:
+        return False, "guard exited %d" % result.returncode
     if result.stdout.strip():
         return False, "expected a silent allow, got %r" % result.stdout.strip()[:200]
     if not os.path.exists(path):
