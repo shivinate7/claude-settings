@@ -40,7 +40,7 @@ CANNOT_FORMS = ("can't", "cannot", "can not", "unable to", "could not", "couldn'
                 "don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
                 "lack permission to", "lacks permission to", "blocked from", "forbidden from")
 # The nouns that make a checks noun an outage, not a CI check ("the network checks are failing"), and the verbs that make
-# "failing to <verb>" an outage, not a red check. The cannot-claim check reads each blocker state through them.
+# "failing to <verb>" an outage, not a red check. They live here, a shared lexicon, so each caller reads an outage alike.
 OUTAGE_NOUNS = ("connection", "network", "connectivity", "api", "auth", "authentication", "proxy", "health")
 OUTAGE_VERBS = ("start", "connect", "run", "load", "reach", "respond", "authenticate", "fetch", "launch", "initialize",
                 "initialise", "clone")

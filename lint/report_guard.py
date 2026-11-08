@@ -1524,8 +1524,8 @@ def hand_off_problem(hook, text):
 # name its check. A notice (a connect-failure attachment, say) is no try: only a tool call with a failed result is.
 # Why: a notice alone can make a reply hand the owner an act the session can do, such as a PR that the GitHub MCP
 # create-PR tool opens on its first call. Record: decision claims-carry-backing.
+_ADVERB = "(?:%s)" % "|".join(_clause.ADVERBS)  # the listed adverbs only; lint/test_clause.py pins them against ADVERBS
 _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
-_ADVERB = "(?:%s)" % "|".join(_clause.ADVERBS)  # the adverbs have one home, lint/_clause.py
 # The phrases are _clause.CANNOT_FORMS; the permission forms vary in their words, so they stay a pattern of their own.
 _PERMISSION_FORM = r"do(?:es)?(?:n['’]t| not)\s+have\s+(?:the\s+)?(?:permission|authori[sz]ation|authority|ability) to"
 CANNOT_RE = re.compile(
@@ -1598,7 +1598,7 @@ CANNOT_EMPHASIS_RE = re.compile(r"(?<!\w)(?:\*\*|__|\*|_)|(?:\*\*|__|\*|_)(?!\w)
 CANNOT_VERB_SPAN_RE = re.compile(r"^`(open|create|make|raise|file|submit|merge|push|close|comment|mark|edit|update)`", re.I)
 _PR = r"(?:PRs?|pull[- ]requests?)"
 # A preposition ends the pr-open object: "open the logs for PR 12" opens the logs, not a PR.
-_PREPOSITION = r"(?:for|of|in|on|to|from|with|about|against|at|by|per)"
+_PREPOSITION = "(?:%s)" % "|".join(_clause.PREPOSITIONS)  # the prepositions have one home, lint/_clause.py
 CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
@@ -1666,7 +1666,7 @@ CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
 CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push|merge)\b")
 # Before the phrase, a bare check word with the writer as subject names no call: "I tried; I cannot push." names no check,
 # while "the push failed, so I could not push" does.
-CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _ADVERB, re.I)
+CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _clause.ADVERB_PATTERN, re.I)  # any -ly adverb too
 _CHECK_WORD = r"(?:tried|ran|returned|refused|denied|failed|errored|returns|refuses|denies|rejects|fails|errors)"
 CANNOT_CHECK_WORD_RE = re.compile(_CHECK_WORD, re.I)
 _BACK = _clause.BACK_PATTERN  # "sent back 403": a status the call answered with; the words have one home, lint/_clause.py
@@ -1962,10 +1962,10 @@ def _script_tries(tokens):
 def _gh_target(verb, args, branch=""):
     """The target of a `gh pr <verb>` call. A create names no PR, so its target is its --head branch, else `branch` (the
     branch the same command checked out). Any other verb names its PR by number or URL wherever it sits among the flags,
-    else by its first plain argument; a URL names its number, and a number is qualified by its --repo, so a PR of another
-    repo is another target. A call that names no target is keyed by its own arguments, tagged so they match no named
-    target: an identical retry is the same call, and a call with other arguments is not. A call with no arguments has
-    the empty target ''."""
+    else by its first plain argument; a number is qualified by its --repo and a URL by its own repo, so a PR of another
+    repo is another target, and a URL matches a number only when --repo names the URL's repo. A call that names no
+    target is keyed by its own arguments, tagged so they match no named target: an identical retry is the same call, and
+    a call with other arguments is not. A call with no arguments has the empty target ''."""
     flags = {"--head": "head", "-H": "head", "--repo": "repo", "-R": "repo"}
     named, plain = {}, []
     for k, token in enumerate(args):
@@ -1981,9 +1981,9 @@ def _gh_target(verb, args, branch=""):
         return named.get("head") or branch or own
     for token in plain:
         if re.fullmatch(r"#?\d+", token) or "/pull/" in token:
-            url = re.search(r"/pull/(\d+)", token)
-            number = url.group(1) if url else token.lstrip("#")  # a PR's URL and its number are one target
-            return (named["repo"] + "#" if named.get("repo") and not url else "") + number
+            url = re.search(r"([^/]+/[^/]+)/pull/(\d+)", token)
+            repo = url.group(1) if url else named.get("repo", "")  # a PR's URL names its repo, as --repo does
+            return (repo + "#" if repo else "") + (url.group(2) if url else token.lstrip("#"))
     return (named["repo"] + "#" if named.get("repo") else "") + plain[0] if plain else own
 
 
