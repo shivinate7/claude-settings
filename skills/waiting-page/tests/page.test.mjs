@@ -144,7 +144,8 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
-  await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
+  // Attached, not visible: an answered card sits in the Answered section, which starts closed, so its card is drawn but hidden.
+  await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`, { state: "attached" });
   return page;
 }
 const card = (page, it) => page.locator(`#item-${it.id}`);
@@ -287,6 +288,7 @@ test("Send shows a stamp with the Chicago time, and Undo takes back exactly what
 
 test("Undo puts back the answer a change had replaced", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   await card(page, DECISION).getByRole("button", { name: "Change" }).click();
   await choose(page, DECISION, "b");
   await send(page);
@@ -1256,6 +1258,7 @@ const clearCount = (page) => page.getByRole("button", { name: "Clear" }).count()
 
 test("no Clear button renders, on a fresh card, a drafted pick, a note, a task or a changed answer", async (t) => {
   const page = await open(t, { items: [{ ...DECISION, added: ASKED_AFTER_SEND }, TASK], answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   assert.equal(await clearCount(page), 0);
   await choose(page, DECISION, "a"); await addNote(page, DECISION, "a thought");
   assert.equal(await clearCount(page), 0);
@@ -1298,6 +1301,7 @@ test("emptying a note drops it", async (t) => {
 
 test("a changed answer left empty makes Send withdraw it", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
   assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "withdraw is offered with the draft in place");
@@ -1314,6 +1318,7 @@ test("a changed answer left empty makes Send withdraw it", async (t) => {
 test("a task's done mark is withdrawn the same way", async (t) => {
   const page = await open(t, { answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } } });
   if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   await card(page, TASK).getByRole("button", { name: "Change" }).click();
   await card(page, TASK).getByRole("button", { name: "Mark done" }).click();
   assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
@@ -1324,6 +1329,7 @@ test("a task's done mark is withdrawn the same way", async (t) => {
 
 test("a withdraw the store refuses keeps the answer and says so", async (t) => {
   const page = await open(t, { answers: SAVED_A, failDelete: true }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
   await choose(page, DECISION, "a");
@@ -1336,6 +1342,7 @@ test("a withdraw the store refuses keeps the answer and says so", async (t) => {
 test("the note box is open on every unseen open card, with no Add a note button, and a sent card shows no box until Change", async (t) => {
   const FRESH = mk("fresh-decision", 29, { added: ASKED_AFTER_SEND });
   const page = await open(t, { items: [DECISION, FRESH, { ...TASK, added: ASKED_AFTER_SEND }], answers: SAVED_A }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   assert.equal(await page.locator(`#n-${DECISION.id}`).count(), 0, "a sent card shows a note box");
   for (const it of [FRESH, TASK]) {
     assert.equal(await page.locator(`#n-${it.id}`).isVisible(), true, `${it.id}: the note box is not open on a fresh card`);
@@ -1373,6 +1380,7 @@ test("a note with no option picked is an answer: choice none plus the note", asy
 test("a saved none note does not ride along when the owner picks an option", async (t) => {
   const page = await open(t, { answers: { [DECISION.id]: { item: DECISION.id, n: 27, at: "2026-10-26T01:00:00Z", choice: "none", note: "Green" } } });
   if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, DECISION);
   // The saved note sits in the fold, closed on load (answered-sink notes, pick 2): open it to read the note.
   await need(c.locator("button.unfold"), "the saved note has no fold control");
@@ -1426,6 +1434,7 @@ test("a note-only task sends its note with no done; the notice says note, not do
 
 test("a saved note-only answer shows Not marked done with its note, and Change keeps the note", async (t) => {
   const page = await open(t, { answers: NOTE_ONLY }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, TASK);
   assert.match(await c.locator(".receipt").textContent(), /Not marked done/);
   // The note sits in the fold, closed on load (answered-sink notes, pick 2): open it to read the note.
@@ -1452,6 +1461,7 @@ test("the Copy line names a note-only task as note, not done", async (t) => {
 
 test("the Copy line keeps a saved done when a draft under Change would not send", async (t) => {
   const page = await open(t, { items: [{ ...DECISION, added: ASKED_AFTER_SEND }, TASK], answers: { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" } }, failSet: true }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   await card(page, TASK).getByRole("button", { name: "Change" }).click();
   await card(page, TASK).getByRole("button", { name: "Mark done" }).click(); // the draft is no longer done
   await addNote(page, TASK, "   ");
@@ -1841,6 +1851,7 @@ for (const width of [1440, 390]) {
 
 test("a withdraw opens the 8-second Undo panel, and Undo puts the answer back", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
   await choose(page, DECISION, "a");
@@ -1856,6 +1867,7 @@ test("a withdraw opens the 8-second Undo panel, and Undo puts the answer back", 
 
 test("a withdraw leaves an answer that changed since the page read it", async (t) => {
   const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
   await choose(page, DECISION, "a");
@@ -2038,6 +2050,7 @@ test("the seen divider reads Asked before, and never claims a card is not answer
 test("a sunk decision with one option, taken to Change, labels its fold Show the 1 option", async (t) => {
   const it = mk("sunk-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
   const page = await open(t, { items: [it], answers: answerOf(it) }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
   await card(page, it).getByRole("button", { name: "Change" }).click();
   const fold = card(page, it).locator("button.unfold");
@@ -2049,6 +2062,7 @@ test("a sunk decision with one option, taken to Change, labels its fold Show the
 test("a sunk task with one step, taken to Change, labels its fold Show the 1 step", async (t) => {
   const it = { ...TASK, id: "sunk-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
   const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: ANSWERED_AT, done: true, note: "" } } }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
   await card(page, it).getByRole("button", { name: "Change" }).click();
   const fold = card(page, it).locator("button.unfold");
@@ -2060,6 +2074,7 @@ test("a sunk task with one step, taken to Change, labels its fold Show the 1 ste
 test("a sunk task with no steps and no command, taken to Change, labels its fold Show Mark done and the note, not a zero count", async (t) => {
   const it = { ...TASK, id: "sunk-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
   const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: ANSWERED_AT, done: true, note: "" } } }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
   await card(page, it).getByRole("button", { name: "Change" }).click();
   const fold = card(page, it).locator("button.unfold");
@@ -2264,6 +2279,7 @@ test("a reload that keeps storage drops the first load's marks: the card and the
   const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
   steps.a2.updatedAt = REPLIED_AT;
   const page = await open(t, { pageHtml: phasePage(steps), items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT, keepStorage: true, clock: LOAD_AT }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const fold = card(page, it).locator("button.unfold");
   await need(fold, `No. ${it.n} has no fold control on the first load`);
   assert.equal(await fold.getAttribute("aria-expanded"), "true", "the first load does not open the reply card");
@@ -2275,7 +2291,8 @@ test("a reload that keeps storage drops the first load's marks: the card and the
   // The reload runs the page's load again, with the visit the first load wrote (storage is kept, not reset).
   await page.reload();
   await page.waitForFunction("state.items.length > 0");
-  await page.waitForSelector(`#item-${it.id}`);
+  // Attached, not visible: after a reload the Answered section starts closed, so this card is drawn but hidden.
+  await page.waitForSelector(`#item-${it.id}`, { state: "attached" });
   assert.equal(await markName(page, it), null, `after a reload No. ${it.n} still draws the New reply mark`);
   const again = card(page, it).locator("button.unfold");
   await need(again, `No. ${it.n} has no fold control after a reload`);
@@ -2305,6 +2322,13 @@ const sectionIds = (page) => page.evaluate(() => [...document.querySelectorAll("
 const layout = (page) => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.closest("section.tier")?.id ?? null, c.id]));
 // The href of the rail row that a chip sits in, or null.
 const railRowOf = (page, it) => page.evaluate((id) => { const c = document.getElementById("c-" + id); const row = c && c.closest(".ov-tier"); const a = row && row.querySelector("a.ov-head"); return a ? a.getAttribute("href") : null; }, it.id);
+// Opens the Answered section when it is closed; does nothing when no section is drawn yet. A case that works on its answered cards calls this first,
+// so its claim does not depend on whether the section starts open or closed.
+const openAnswered = async (page) => {
+  const head = page.locator("#b-answered");
+  if (!(await head.count()) || (await head.getAttribute("aria-expanded")) === "true") return;
+  await head.click();
+};
 
 // ---------------------------------------------------------------- answered sink: arrivals on top, and a card sent on this visit
 // The names start "answered-sink:", so `--test-name-pattern answered-sink:` runs this block. An arrival (an item not on the page at load)
@@ -2516,6 +2540,7 @@ test("in the Answered section, a group sinks only when every member is answered;
 test("Change on a folded card in the Answered section keeps it there, open, with its fold locked open", async (t) => {
   const it = mk("change-sunk", 1, { added: at(5) }), other = mk("change-open", 2, { added: NEW_ADDED });
   const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept it." }) }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
   const c = page.locator(`#tier-answered #item-${it.id}`);
   await c.getByRole("button", { name: "Change" }).click();
@@ -2549,6 +2574,7 @@ test("the rail gives the Answered section its own row, takes answered items out 
 test("unfold in the Answered section shows what the fold holds, and a card with nothing to hide has no unfold control", async (t) => {
   const withNote = mk("fold-note", 1, { added: at(5), reply: "Thanks, noted." }), bare = mk("fold-none", 2, { added: at(6) });
   const page = await open(t, { items: [withNote, bare], answers: { ...answerOf(withNote, "a", { note: "Kept the red one." }), ...answerOf(bare) } }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   assert.equal(await sectionOf(page, withNote), "tier-answered", `No. ${withNote.n} is not in the Answered section`);
   assert.equal(await sectionOf(page, bare), "tier-answered", `No. ${bare.n} is not in the Answered section`);
   const c = page.locator(`#tier-answered #item-${withNote.id}`), fold = c.locator("button.unfold");
@@ -2570,6 +2596,7 @@ test("unfold in the Answered section shows what the fold holds, and a card with 
 test("Answered section: a sunk card with a restored draft opens its fold, or shows it locked open, never a dead button", async (t) => {
   const it = mk("draft-sunk", 1, { added: at(5) }), other = mk("draft-other", 2, { added: NEW_ADDED });
   const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept it." }), storage: { "waiting.draft": JSON.stringify({ [it.id]: { choice: "b" } }) } }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
   const c = page.locator(`#tier-answered #item-${it.id}`), fold = c.locator("button.unfold");
   await need(fold, `No. ${it.n} has a note but no fold control`);
@@ -2585,8 +2612,9 @@ test("Answered section: with the section folded by its head, a rail chip of a su
   const page = await open(t, { items: [...filler, it], answers: answerOf(it), viewport: { width: 1280, height: 400 } }); if (!page) return;
   assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
   const head = page.locator("#b-answered");
-  await head.click();
-  assert.equal(await head.getAttribute("aria-expanded"), "false", "the head did not fold the section, so the chip case cannot start");
+  // Answered starts closed, so fold it only when it is open: the chip below then has a folded section to open, on either default.
+  if ((await head.getAttribute("aria-expanded")) === "true") await head.click();
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the section is open and did not fold, so the chip case cannot start");
   await page.locator(`#c-${it.id}`).click();
   assert.equal(await head.getAttribute("aria-expanded"), "true", `the rail chip for No. ${it.n} did not open the folded Answered section`);
   // A smooth scroll takes a moment; the wait ends when the card is in view, and the check below reads where it landed.
@@ -2616,6 +2644,85 @@ test("Answered section: a fully answered group's bundle head reads Answered toge
   await need(head, "the fully answered group has no bundle head in the Answered section");
   const words = (await head.textContent()).trim();
   assert.equal(words, "Answered together", `the bundle head reads "${words}"`);
+});
+
+// ---------------------------------------------------------------- answered folded: closed on load, opens on a New reply or a press
+
+// The Answered section starts closed. Its head is a press-to-open line: the name, the count, and the hint "Show to change one", which shows only
+// while the section is closed. Its sub line and its list are hidden. The Arbiter rulings section stays open on load. A closed section keeps its
+// cards in the DOM, so these cases read them with sectionOf and cardsIn, never with a visibility check on a card.
+test("answered-folded: the Answered section starts closed, its head gives the count and the hint, its list and sub line are hidden, and the rulings stay open", async (t) => {
+  const ans = mk("fold-closed", 1, { added: at(5) }), open1 = mk("fold-closed-open", 3, { added: NEW_ADDED });
+  const page = await open(t, { items: [ans, open1, ARBITER], answers: answerOf(ans, "a", { note: "Kept the red one." }) }); if (!page) return;
+  assert.equal(await sectionOf(page, ans), "tier-answered", `No. ${ans.n} is not in the Answered section`);
+  const head = page.locator("#b-answered");
+  await need(head, "the Answered section has no head button (#b-answered)");
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the Answered section is open on load, with no New reply in it");
+  assert.equal(flat(await head.locator(".ct").textContent()), "1", "the closed head's count is not the section's size");
+  assert.match(flat(await head.textContent()), /^Answered/, "the closed head does not name the section Answered");
+  await need(head.locator(".rhint"), "the closed head has no hint");
+  assert.equal(flat(await head.locator(".rhint").textContent()), "Show to change one", "the closed head's hint is not Show to change one");
+  assert.equal(await page.locator("#tier-answered .rsub").isHidden(), true, "the sub line shows while the section is closed");
+  assert.equal(await page.locator("#ab").isHidden(), true, "the Answered list shows while the section is closed");
+  assert.equal(await page.locator("#tier-ruled #rb").isVisible(), true, "the Arbiter rulings list is closed on load");
+});
+
+// The section opens on load only when a card in it carries the New reply mark. That card's fold opens with it; the other card's fold stays folded.
+test("answered-folded: the Answered section opens on load only with a New reply in it, and only that card's fold opens", async (t) => {
+  const plain = mk("fold-plain", 1, { added: at(5) }), open1 = mk("fold-plain-open", 3, { added: NEW_ADDED });
+  const closed = await open(t, { items: [plain, open1], answers: answerOf(plain, "a", { note: "Kept the red one." }), storage: VISIT }); if (!closed) return;
+  assert.equal(await closed.locator("#b-answered").getAttribute("aria-expanded"), "false", "the Answered section opens on load with no New reply in it");
+  const reply = repliedCard(), other = mk("fold-other", 2, { added: at(6) });
+  const page = await open(t, { items: [reply, other, open1], answers: { ...answerOf(reply, "a", { note: "Kept the red one." }), ...answerOf(other, "a", { note: "Kept it." }) }, storage: VISIT }); if (!page) return;
+  assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "true", "the Answered section is closed on load, though a card in it has a New reply");
+  assert.equal(await card(page, reply).locator("button.unfold").getAttribute("aria-expanded"), "true", `No. ${reply.n}, with a New reply, is folded on load`);
+  assert.equal(await card(page, other).locator("button.unfold").getAttribute("aria-expanded"), "false", `No. ${other.n}, with no New reply, opened on load`);
+});
+
+// A reply that lands after load opens its card's fold, as on the open page, but not the Answered section: the section is decided once, at load.
+test("answered-folded: a reply that lands after load does not open the closed Answered section", async (t) => {
+  const it = mk("fold-late", 1, { added: at(5) }), open1 = mk("fold-late-open", 3, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, open1], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const head = page.locator("#b-answered");
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the Answered section is open on load, with no New reply in it");
+  await page.evaluate((item) => window.__putItem(item), { ...it, reply: "Thanks, noted.", replied: REPLIED_AT });
+  await card(page, it).locator(".newmark").waitFor({ state: "attached" });
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "a reply that landed after load opened the Answered section");
+});
+
+// Pressing the closed head opens the section: its list and sub line show, and the hint gives way to the open head.
+test("answered-folded: pressing the closed Answered head opens the section, and its hint gives way to the open head", async (t) => {
+  const it = mk("fold-press", 1, { added: at(5) }), open1 = mk("fold-press-open", 3, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, open1], answers: answerOf(it, "a", { note: "Kept the red one." }) }); if (!page) return;
+  const head = page.locator("#b-answered");
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the Answered section is open on load, with no New reply in it");
+  await head.click();
+  assert.equal(await head.getAttribute("aria-expanded"), "true", "pressing the closed Answered head did not open the section");
+  assert.equal(await page.locator("#ab").isVisible(), true, "the Answered list is still hidden after the press opened the section");
+  assert.equal(await page.locator("#tier-answered .rsub").isVisible(), true, "the sub line is still hidden after the press opened the section");
+  assert.equal(await head.locator(".rhint").count(), 0, "the open head still says Show to change one");
+});
+
+// The rail's Answered row opens the closed section too, as its chips do.
+test("answered-folded: pressing the Answered row in the rail opens the closed section", async (t) => {
+  const it = mk("fold-rail", 1, { added: at(5) }), open1 = mk("fold-rail-open", 3, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, open1], answers: answerOf(it, "a", { note: "Kept the red one." }) }); if (!page) return;
+  const head = page.locator("#b-answered");
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the Answered section is open on load, with no New reply in it");
+  const row = page.locator('#rail a.ov-head[href="#tier-answered"]');
+  await need(row, "the rail has no Answered row");
+  await row.click();
+  assert.equal(await head.getAttribute("aria-expanded"), "true", "the rail's Answered row did not open the closed section");
+});
+
+// An Answered number chip opens the closed section from load, as the rail's row does.
+test("answered-folded: pressing the Answered number chip of a sunk card opens the closed section", async (t) => {
+  const it = mk("fold-chip", 1, { added: at(5) }), open1 = mk("fold-chip-open", 3, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, open1], answers: answerOf(it, "a", { note: "Kept the red one." }) }); if (!page) return;
+  const head = page.locator("#b-answered");
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the Answered section is open on load, with no New reply in it");
+  await page.locator(`#c-${it.id}`).click();
+  assert.equal(await head.getAttribute("aria-expanded"), "true", `the chip for No. ${it.n} did not open the closed Answered section`);
 });
 
 // ---------------------------------------------------------------- round 2 looks
@@ -6211,6 +6318,7 @@ test("a saved multi answer lists each pick with its letter and title in order, a
   const m = digest(), r = ranked("rk-saved", 32);
   const at = "2026-10-26T01:00:00Z";
   const page = await open(t, { items: [m, r], answers: { [m.id]: { item: m.id, n: 31, at, choice: ["a", "c"], note: "" }, [r.id]: { item: r.id, n: 32, at, choice: ["c", "a", "d"], note: "" } } }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const rows = async (c, tag) => (await c.locator(`.receipt ${tag} li`).allTextContents()).map((s) => s.replace(/\s+/g, " ").trim());
   const mr = await rows(card(page, m), "ul"), rr = await rows(card(page, r), "ol");
   assert.equal(mr.length, 2, "the saved card does not list the picks as a bullet list: " + mr);
@@ -6840,6 +6948,7 @@ test("a card with a saved answer keeps its receipt where it lands today, holds t
   const it = mk("rc-thread", 7, { lane: "ci-done-comment", lastAnswer: { choice: "b", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
   const plain = mk("rc-plain", 8);
   const page = await open(t, { items: [it, plain], answers: { ...laSaved(it, "a"), ...laSaved(plain, "a") } }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, it), rc = c.locator(".receipt:has(.changebtn)");
   await need(rc, "the saved answer's receipt (with its Change button) is gone");
   assert.match(await c.getAttribute("class"), /answered/);
@@ -6865,6 +6974,7 @@ test("a card with a saved answer keeps its receipt where it lands today, holds t
 test("pressing Change on a saved card with a thread opens the card with one panel, between the title and the context", async (t) => {
   const it = mk("rc-change", 7, { lastAnswer: { choice: "b", at: LA_AT }, reply: "I added option C. Pick again." });
   const page = await open(t, { items: [it], answers: laSaved(it, "a") }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, it);
   await laText(page, it);
   await c.getByRole("button", { name: "Change", exact: true }).click();
@@ -7061,6 +7171,7 @@ test("page-item-waits-on: itemFields lists waits, and No. 154 with waits draws n
 test("page-item-waits-on: No. 154 waiting on a run: Change reopens it on lastAnswer, an emptied pick offers no Withdraw, and a Send writes its answer and deletes nothing", async (t) => {
   const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
   const page = await open(t, { items: [it] }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, it), change = c.getByRole("button", { name: "Change", exact: true });
   await need(change, "No. 154 has no Change button");
   await change.click();
@@ -7831,6 +7942,7 @@ test("a two-pick with an option that has no label names that option by its lette
 // thread line coming back fails here.
 test("a withdraw the store refuses says to paste the answer in chat, and names no thread", async (t) => {
   const page = await open(t, { answers: SAVED_A, failDelete: true }); if (!page) return;
+  await openAnswered(page); // Answered starts closed: this case works on its answered cards, so it opens the section first.
   const c = card(page, DECISION);
   await c.getByRole("button", { name: "Change" }).click();
   await choose(page, DECISION, "a");
