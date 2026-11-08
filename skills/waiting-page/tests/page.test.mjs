@@ -6366,6 +6366,40 @@ test("the row tint: a paused row's title has the in-progress title's font weight
   const paused = await computedOf(page.locator("#s-a3 .rrow .ttl"), "fontWeight"), active = await computedOf(page.locator("#s-a4 .rrow .ttl"), "fontWeight");
   assert.equal(paused, active, `the paused step's title is weight ${paused}, not the in-progress title's ${active}`);
 });
+// A paused row keeps no tint at rest, but takes the hover fill when the pointer is on it. The rule that gives it the fill is
+// .rsteps .pzd-row > .rrow:hover: it outranks the paused row's own background: none, which the plain .rrow:hover fill cannot beat.
+// The fill is read on the hovered row and compared with a probe of the same colour. The probe must not read transparent, or the
+// test would pass on a page that draws no fill at all.
+const HOVER_FILL = "color-mix(in srgb, var(--chip) 60%, transparent)";
+test("the row tint: a paused row takes the hover fill when the pointer is on it, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "step a3 is not marked Paused: there is no paused row to hover");
+  const row = page.locator("#s-a3 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await row.hover();
+    const wantBg = await probeOf(row, "backgroundColor", HOVER_FILL);
+    assert.notEqual(wantBg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the hover fill ${HOVER_FILL} reads as transparent here, so the fill cannot be read`);
+    const bg = await computedOf(row, "backgroundColor");
+    assert.equal(bg, wantBg, `in ${scheme} the hovered paused row's background is ${bg}, not the hover fill ${wantBg}`);
+  }
+});
+// Control: a hovered to-do row takes the same fill, and no rule overrides it. It stays green on a page without the paused-row hover rule.
+test("control: the row tint: a to-do row takes the hover fill when the pointer is on it, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
+  await openStatus(page);
+  assert.match(await page.locator("#s-t7 .rrow").getAttribute("aria-label"), /To do/, "step t7 does not read To do");
+  const row = page.locator("#s-t7 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await row.hover();
+    const wantBg = await probeOf(row, "backgroundColor", HOVER_FILL);
+    assert.notEqual(wantBg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the hover fill ${HOVER_FILL} reads as transparent here, so the fill cannot be read`);
+    const bg = await computedOf(row, "backgroundColor");
+    assert.equal(bg, wantBg, `in ${scheme} the hovered to-do row's background is ${bg}, not the hover fill ${wantBg}`);
+  }
+});
 
 test("merged_page.py --live hands its JSON to the build as the live file", () => {
   const live = { readAt: new Date().toISOString(), threads: [], pulls: [] };

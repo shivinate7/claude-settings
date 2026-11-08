@@ -344,6 +344,33 @@ test("the row tint: a paused row's title has the in-progress title's font weight
   const paused = await computedOf(page.locator("#s-a3 .ttl"), "fontWeight"), active = await computedOf(page.locator("#s-a .ttl"), "fontWeight");
   assert.equal(paused, active, `the paused step's title is weight ${paused}, not the in-progress title's ${active}`);
 });
+// The Stalled pill sits on its row's --bad-soft tint. Its own fill is --bad-soft too, so it vanishes unless the rule that sets it to --surface applies.
+// The pill's fill is read on .tag.stl and the row's on .rw. Each expected value is a probe of the page's own token, taken on the element it is compared with.
+test("the Stalled pill on a stalled row has its own fill, --surface, not the row's --bad-soft tint, in light and dark", async (t) => {
+  const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "doing", 1) }, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  assert.equal(await page.locator("#s-c1 .tag.stl").count(), 1, "step c1 has no Stalled pill in its row: there is no pill fill to read");
+  const pill = page.locator("#s-c1 .tag.stl"), row = page.locator("#s-c1 .rw");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const fill = await computedOf(pill, "backgroundColor"), rowFill = await computedOf(row, "backgroundColor");
+    assert.notEqual(fill, rowFill, `in ${scheme} the Stalled pill's fill is ${fill}, the same as its stalled row's: the pill does not show on its row`);
+    const wantFill = await probeOf(pill, "backgroundColor", "var(--surface)");
+    assert.equal(fill, wantFill, `in ${scheme} the Stalled pill's fill is ${fill}, not --surface ${wantFill}`);
+  }
+});
+// Control for the pill fill above: the Stalled label on the same pill is --bad, so the locator and the probe read the pill right.
+test("control: the Stalled pill's label on a stalled row computes to --bad, in light and dark", async (t) => {
+  const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "doing", 1) }, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  assert.equal(await page.locator("#s-c1 .tag.stl").count(), 1, "step c1 has no Stalled pill in its row: there is no pill label to read");
+  const pill = page.locator("#s-c1 .tag.stl");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const colour = await computedOf(pill, "color"), wantColour = await probeOf(pill, "color", "var(--bad)");
+    assert.equal(colour, wantColour, `in ${scheme} the Stalled pill's label is ${colour}, not --bad ${wantColour}`);
+  }
+});
 
 // One cell per step, in the order done, in progress, stalled, paused, blocked, to do. Three bars: the Now card, the rail's cleanup
 // button and the phase head. The fixture is a full phase of 30 steps: 1 done, a2 live (in progress), s3 stalled, p4 paused, 26 to do.
