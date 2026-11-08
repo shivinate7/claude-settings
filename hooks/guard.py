@@ -1748,10 +1748,40 @@ def workflow_changed_lines(old_text: str, new_text: str):
     return [(old[i1:i2], new[j1:j2]) for tag, i1, i2, j1, j2 in ops if tag != "equal"]
 
 
+WORKFLOW_CONFLICT_MARKERS = (re.compile(r"<{7}(?:[ \t].*)?"), re.compile(r"\|{7}(?:[ \t].*)?"),
+                             re.compile(r"={7}[ \t]*"), re.compile(r">{7}(?:[ \t].*)?"))
+# The marker kinds that may follow each marker kind (opener 0, base 1, divider 2, closer 3; None before an opener).
+WORKFLOW_CONFLICT_NEXT = {None: (0,), 0: (1, 2), 1: (2,), 2: (3,), 3: (0,)}
+
+
+def workflow_strip_conflicts(old_text: str) -> str:
+    """`old_text` without its git conflict marker lines, when every marker belongs to a whole block (opener, optional
+    base, divider, closer) and every side of each block is whole test-run steps. A marker line is not content, so
+    a resolution that drops one changes no step. The sides are judged here, because a kept side is unchanged once the
+    markers go and the diff never reaches it. Any other text comes back as it is, markers included, to be judged as
+    content."""
+    kept, sides, last = [], [], None
+    for line in old_text.splitlines():
+        kind = next((i for i, mark in enumerate(WORKFLOW_CONFLICT_MARKERS) if mark.fullmatch(line)), None)
+        if kind is None:
+            kept.append(line)
+            if last not in (None, 3):
+                sides[-1].append(line)
+        elif kind in WORKFLOW_CONFLICT_NEXT[last]:
+            last = kind
+            if kind != 3:
+                sides.append([])
+        else:
+            return old_text
+    if last not in (None, 3) or not all(workflow_step_chunk(side) for side in sides):
+        return old_text
+    return "\n".join(kept)
+
+
 def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
     """True when every added and removed non-blank line of the change forms whole test-run steps."""
     return all(workflow_step_chunk(removed) and workflow_step_chunk(added)
-               for removed, added in workflow_changed_lines(old_text, new_text))
+               for removed, added in workflow_changed_lines(workflow_strip_conflicts(old_text), new_text))
 
 
 WORKFLOW_COMMAND_SPLIT = re.compile(r"&&|\|\||[;|]")
