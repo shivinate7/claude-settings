@@ -31,8 +31,9 @@ excuses its path. A trailer or line with no reason excuses nothing. A deleted de
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
 the debts folder. Only the merge tool passes a run reader, so the CLI never excuses a Retire-run line. The CLI reads the PR body
-from `--pr-body <text>`, else from env PR_BODY (CI sets it from the pull request body, as `merge --lane-lint` does), so a
-Drops-lines line in the body counts there as it does at the merge. Each use prints
+from `--pr-body <text>`, else from the event file that env GITHUB_EVENT_PATH names (`.pull_request.body`; CI writes it, and
+bin/ci-job writes one for a local lint run), so a Drops-lines line in the body counts there as it does at the merge. No path is an
+empty body; a path that cannot be read as an event file is UNKNOWN, never an empty body. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
@@ -42,6 +43,7 @@ A read that cannot run prints UNKNOWN. Exit 0 locally, exit 1 when env CI is set
 import argparse
 import collections
 import difflib
+import json
 import os
 import re
 import shutil
@@ -695,6 +697,25 @@ def say(line):
     print(line.encode(enc, "backslashreplace").decode(enc))
 
 
+def event_body(environ=None):
+    """The pull request body of the event file that GITHUB_EVENT_PATH names, "" when no path is set. Raises Unknown when the file
+    cannot be read, is not JSON, or holds no pull request: the body is then unread, never empty."""
+    path = (os.environ if environ is None else environ).get("GITHUB_EVENT_PATH")
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            pull = json.load(f).get("pull_request")
+        if not isinstance(pull, dict):
+            raise ValueError("no pull_request object")
+        body = pull.get("body")
+        if body is not None and not isinstance(body, str):
+            raise ValueError("pull_request.body is not text")
+    except (OSError, ValueError, AttributeError) as e:
+        raise Unknown("cannot read the pull request body from the event file %s: %s" % (path, e))
+    return body or ""
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--upstream", default="origin/main")
@@ -703,10 +724,10 @@ def main(argv):
     ap.add_argument("--strict", action="store_true", help="unknown exits 1 (also when env CI is set)")
     ap.add_argument("--history", nargs="?", const="HEAD", metavar="REV")
     ap.add_argument("--repo", default=os.getcwd())
-    ap.add_argument("--pr-body", default=None, metavar="TEXT", help="the pull request body, read as the merge tool reads it (default: env PR_BODY)")
+    ap.add_argument("--pr-body", default=None, metavar="TEXT", help="the pull request body (default: the event file named by env GITHUB_EVENT_PATH)")
     a = ap.parse_args(argv)
-    pr_body = a.pr_body if a.pr_body is not None else os.environ.get("PR_BODY", "")
     try:
+        pr_body = a.pr_body if a.pr_body is not None else event_body()
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
             say("\n".join(hits))

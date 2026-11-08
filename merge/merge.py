@@ -1597,13 +1597,14 @@ def records_proof(wt, base_ref):
             git(wt, "clean", "-fdq")
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
-CI_JOB_BODY_VARS = ("CI_JOB_PR_BODY", "CI_JOB_PR_BODY_FILE")  # the two ways bin/ci-job reads the PR body; a caller's copy of either is never the PR's
+CI_JOB_BODY_VARS = ("CI_JOB_PR_BODY_FILE", "GITHUB_EVENT_PATH")  # the two ways bin/ci-job reads the PR body; a caller's copy of either is never the PR's
 
 @contextlib.contextmanager
 def ci_job_env(env, pr_body):
     """The env for one `bin/ci-job` run, the one home of how the PR body reaches it: `env` (default: this process's) without any inherited body
     variable, plus CI_JOB_PR_BODY_FILE naming a UTF-8 temp file that holds `pr_body` (an env string past 128 KB does not exec on Linux, and
-    a 65536-character body can be 256 KB). The file is removed on exit. Cost: one small temp file per ci-job run."""
+    a 65536-character body can be 256 KB). bin/ci-job gives each lint step that body in its own event file (GITHUB_EVENT_PATH), as CI does.
+    The file is removed on exit. Cost: one small temp file per ci-job run."""
     base = os.environ if env is None else env
     out = {k: v for k, v in base.items() if k not in CI_JOB_BODY_VARS}
     fd, path = tempfile.mkstemp(prefix="merge-body-", suffix=".txt")
@@ -2556,7 +2557,7 @@ def lane_head_and_base(root, target, base):
 
 def ci_job_run(wt, *args, pr_body=""):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
-    `pr_body` reaches ci-job through `ci_job_env`, as its value for `${{ github.event.pull_request.body }}`: a step that reads the PR body (silent-undo) sees what CI gives it.
+    `pr_body` reaches ci-job through `ci_job_env`, and each step gets it in an event file: a step that reads the PR body (silent-undo) sees what CI gives it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its

@@ -16,8 +16,8 @@
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. The check reads it from the
 commit trailers of the branch, and from the last paragraph of the PR body through the reader the merge tool
-uses (one home). Commit trailers still count. CI (env `PR_BODY`) and the lane lint pass the body in;
-`--pr-body` covers a local run. A bare path excuses nothing, and no reason excuses nothing. Each use prints
+uses (one home). Commit trailers still count. The check reads the body from the event file that `GITHUB_EVENT_PATH` names: CI writes it, and `bin/ci-job`
+writes one per step for the lane lint, from the body file the merge tool hands it. `--pr-body` covers a local run. A bare path excuses nothing, and no reason excuses nothing. Each use prints
 `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every reason. No switch turns the
 check off. Cost: one string read of the body per check run. No process starts.
 
