@@ -21,7 +21,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
   - PASS: the head merges on green, with no further round.
   - FAIL, or a diff wider than the finding: the fix starts a new lane at round 1.
   - FAIL also when the diff touches a guard or check path (the list below) while the review record says `Guard or check: no`. The merge tool reads no diff, so a wrong `no` would skip the net-value test (owner, 2026-11-05 07:45 CST, typed "go" in the lane).
-  - A fix check is not a review round. It runs on the reviewer row of the model table (decision `agent-model-cap`), haiku. Its brief carries no `Round N of 3` marker, so no guard changes.
+  - A fix check is not a review round. It runs on sonnet, on every PR (owner item 444 a, 2026-11-08 15:04 CST). Its brief starts with the `Fix check` marker and carries no `Round N of 3` marker.
   - Owner item 271 b, 2026-11-05 21:31 CST: a fix check may follow a FAIL in any round. The lane's reading, not the owner's words: a PASS before round 3 counts as that round passing, so no net-value test is owed then, and the design-reviewer hold (decision `pr-review-record`) stays.
   - A passing fix check is the review of the new head. It does not repeat the net-value test (owner, 2026-11-05 08:41 CST, typed in the lane; page item 232 a). A guard or check change keeps the net value that round 3 gave it.
 - A change changes a guard or check when it edits one of these. The list is the orchestrator's brief, not an owner grant. Test files alone never count (owner, 2026-10-15 22:39 and 22:55 CDT).
