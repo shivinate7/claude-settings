@@ -2188,3 +2188,4 @@
 - cost-pins-mid-line-cost-unread: a `Cost:` after other text on its line starts no Cost paragraph, so `Then the Cost: reads x.json` is not read (lint/check_cost_pins.py `COST_START`). Decision: cost-line-pinned.
 - cost-pins-eg-splits-sentence: `e.g.` and `i.e.` end a sentence, so a "not pinned" mark or a test name in one half misses a token in the other half. A false alarm only (lint/check_cost_pins.py `read_paragraph`). Decision: cost-line-pinned.
 - cost-pins-double-backtick-hidden: a double-backtick span reads as two empty spans, so the file name inside it is not seen (lint/check_cost_pins.py `read_paragraph`). Decision: cost-line-pinned.
+- cost-pins-hash-line-ends-cost: a wrapped line that starts with `#` (such as `#1850`) reads as a heading, so it ends a Cost paragraph and a Cost section; file names after it are not read (lint/check_cost_pins.py `HEADING`). Decision: cost-line-pinned.
