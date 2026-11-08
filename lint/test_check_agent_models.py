@@ -34,7 +34,7 @@ MODELS = ("haiku", "claude-haiku-5-5", "Haiku")
 # The model table of docs/decisions/agent-model-cap.md, reduced to its lane session row. Only the effort cell varies.
 RECORD_RELPATH = os.path.join("docs", "decisions", "agent-model-cap.md")
 LANE_RECORD = ("| Point | Model | Effort |\n|---|---|---|\n"
-               "| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT | %s |\n")
+               "| lane session (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | %s |\n")
 
 
 def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x", pinned=True):
