@@ -2850,6 +2850,12 @@ class LostSentence(unittest.TestCase):
     RETIRE_X_SIBLING = "- sibling-x: The sleep scan reads fake timers the same way. Decision: test-practices (P5)."
     RETIRE_X_READD = "- retire-x: The sleep scan reads fake timers the same way."
     RETIRE_X_TRAILER = "Drops-lines: docs/debts/notes.md -- the calendar-read sentence is retired - retire-x"
+    # An id token, a rule number or a key label, is part of the claim the note makes: changing it changes what the note says.
+    ID_OLD = "- id-claim-note: The finder lists each calendar read in the sweep. Decision: test-practices (P5)."
+    ID_NEW = "- id-claim-note: The finder lists each calendar read in the sweep. Decision: test-practices (P6)."
+    KEY_OLD = "- key-claim-note: The finder reads each calendar column for key Q4 once."
+    KEY_NEW = "- key-claim-note: The finder reads each calendar column for key Q5 once."
+    ID_UNRELATED = "- id-unrelated-note: The finder prints its rows in file order."
 
     def start(self, lines):
         """The notes file holds the filler and `lines` on main, then an unrelated main commit, so the fork point is that commit and
@@ -3205,6 +3211,42 @@ class LostSentence(unittest.TestCase):
         self.assertTrue(self.named(got, "retire-x", "finder lists each calendar read once"),
                         "a retired slug re-added with its second sentence dropped was not refused by a problem that names the slug "
                         "and the dropped sentence: %r" % got)
+
+    def test_an_id_token_changed_in_a_note_is_refused_and_names_the_claim(self):
+        self.start([self.ID_OLD])
+        head = self.rewrite("Renumber the test-practices rule in the id note", [self.ID_NEW])
+        self.premises(head, self.ID_OLD, "id-claim-note", "test-practices (P5).")
+        got = self.r.verdict()
+        self.assertTrue(self.named(got, "id-claim-note", "test-practices (P5)"),
+                        "a note whose rule number changed from P5 to P6, with nothing else changed, was not refused by a problem that "
+                        "names the note and the claim: %r" % got)
+
+    def test_a_key_label_changed_in_a_note_is_refused_and_names_the_claim(self):
+        self.start([self.KEY_OLD])
+        head = self.rewrite("Move the key note from Q4 to Q5", [self.KEY_NEW])
+        self.premises(head, self.KEY_OLD, "key-claim-note", "key Q4 once.")
+        got = self.r.verdict()
+        self.assertTrue(self.named(got, "key-claim-note", "key Q4"),
+                        "a note whose key label changed from Q4 to Q5, with nothing else changed, was not refused by a problem that "
+                        "names the note and the claim: %r" % got)
+
+    def test_an_id_note_kept_unchanged_passes(self):  # control: the same note with its id token kept
+        self.start([self.ID_OLD])
+        head = self.rewrite("Add an unrelated note beside the id note", [self.ID_OLD, self.ID_UNRELATED])
+        self.assertIn(self.ID_OLD, self.body(head), "premise: the head changed the id note")
+        self.assertEqual(sum(line.startswith("- id-unrelated-note:") for line in self.body(head)), 1,
+                         "premise: the head does not hold the unrelated note once")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a note kept with its id token was refused: %r" % got)
+
+    def test_a_key_note_kept_unchanged_passes(self):  # control: the same note with its key label kept
+        self.start([self.KEY_OLD])
+        head = self.rewrite("Add an unrelated note beside the key note", [self.KEY_OLD, self.ID_UNRELATED])
+        self.assertIn(self.KEY_OLD, self.body(head), "premise: the head changed the key note")
+        self.assertEqual(sum(line.startswith("- id-unrelated-note:") for line in self.body(head)), 1,
+                         "premise: the head does not hold the unrelated note once")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a note kept with its key label was refused: %r" % got)
 
 
 if __name__ == "__main__":
