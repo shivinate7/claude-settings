@@ -450,8 +450,7 @@ def _kind(words, plain: str) -> str:
 
 
 def _sed_program_safe(script: str) -> bool:
-    """True when every command of the sed program, split by `;` or a newline, is one `_SED_COMMAND`
-    accepts."""
+    """True when every command of the sed program, split by `;`, is one `_SED_COMMAND` accepts."""
     position = 0
     while True:
         found = _SED_COMMAND.match(script, position)
@@ -460,10 +459,9 @@ def _sed_program_safe(script: str) -> bool:
         position = found.end()
         if position >= len(script):
             return True
-        # The command's trailing whitespace ends at a newline, which separates like `;`.
-        if script[position] != ";" and "\n" not in found.group()[len(found.group().rstrip()):]:
+        if script[position] != ";":
             return False
-        position += script[position] == ";"
+        position += 1
         if position >= len(script):
             return True
 
