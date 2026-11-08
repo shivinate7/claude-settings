@@ -12033,6 +12033,22 @@ sh("frozen shell: pwsh-c-text-mode, the PowerShell tool's smart-quoted config se
 sh("frozen shell: pwsh-c-text-mode, a Bash echo of an escaped quote with no PowerShell is allowed "
    "[pwsh-c-text-mode green]",
    "echo \"a \\\" b\"", "allow", cwd=NOGIT)
+# NESTED-SCRIPT PIN. `_shell_write_hit` judges the PowerShell text that `iex` runs by PowerShell's rules,
+# through `_powershell_script_of`. This DENIES on that step alone.
+sh("frozen shell: pwsh-c-text-mode pin, iex runs a smart-quoted config settings write whose comment holds a "
+   "double quote, and denies [pwsh-c-text-mode pin]",
+   "iex 'Set-Content -Path " + SMART_CFG_SETTINGS + " -Value 1 # don\"t'", "deny", "frozen-path", cwd=NOGIT)
+# NESTED SHELL. A Bash, sh or env -S call that runs `pwsh -c` hands that text on as a plain string, which
+# `_powershell_script_of` does not read as PowerShell. Each DENIES.
+sh("frozen shell: pwsh-c-text-mode, bash -c runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "bash -c \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, sh -c runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "sh -c \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: pwsh-c-text-mode, env -S runs a pwsh -c smart-quoted config settings write and denies "
+   "[pwsh-c-text-mode red]",
+   "env -S \"pwsh -c '" + SMART_CFG_WRITE + "'\"", "deny", "frozen-path", cwd=NOGIT)
 
 
 # ================================================================ 6a-2. cap-ask-fix (frozen)
