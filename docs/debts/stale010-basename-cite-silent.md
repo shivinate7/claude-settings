@@ -1,6 +1,6 @@
 # A cite with no folder dodges the dead-name check
 
-**What.** A cite such as `(guard.py missing_fn)` names a file with no folder part. `FILE_CITE` rejects it, so STALE010 and STALE002 never read it and a dead name passes. Claude writes this form in normal work: docs/debts/notes.md holds `(guard.py impeccable_command_hit)`. <!-- ste-disable-line STALE010 -->
+**What.** A cite such as `(guard.py missing_fn)` names a file with no folder part. `FILE_CITE` rejects it, so STALE010 never reads it and a dead name passes. STALE002 never uses `FILE_CITE`: a basename cite matches no path key there. Claude writes this form in normal work: docs/debts/notes.md holds `(guard.py impeccable_command_hit)`. <!-- ste-disable-line STALE010 -->
 
 **Where.** lint/stale_cites.py `dead_name_cites`, and the `FILE_CITE` test it shares with STALE003.
 

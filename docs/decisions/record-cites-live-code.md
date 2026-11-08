@@ -6,7 +6,7 @@ How does a record's claim about what code does stay true, and how does a cite to
 
 ## The ruling
 
-Owner ruling, waiting-page item 386, titled "Make merges keep pace with reviews: which parts do you want?", answered 2026-11-08T04:25:43Z, which is 2026-11-07 22:25 CST. Its choice was a, b and c. Option b, "Findings ride in their lane (recommended)", reads: "A lane's findings join its next commit, or one follow-up PR per topic, not one new lane each." Option b is why the dead-cite guard was built in this lane. The item does not rule on cite forms.
+Owner ruling, waiting-page item 386, titled "Make merges keep pace with reviews: which parts do you want?", answered 2026-11-08T04:25:43Z, which is 2026-11-07 22:25 CST. Its choice was a, b and c. Option b, "Findings ride in their lane (recommended)", reads: "A lane's findings join its next commit, or one follow-up PR per topic, not one new lane each." Option b is why the dead-cite check, STALE010, was built in this lane. The item does not rule on cite forms.
 
 Coordinator readings:
 
@@ -19,7 +19,7 @@ Lane pick, 2026-11-08 04:16 CST, process-only, under the 04:03 reading: a dead c
 
 ## The mistakes and the harm
 
-- Pull request #1419 at commit 7156e9a3 said the ledger reads no CI state, but the merge tool reads main's latest CI run (merge/merge.py run_state). A reader who trusts the record misjudges what the tool does.
+- Pull request #1419 at commit 7156e9a3 said the ledger reads no CI state, but the merge tool reads main's latest CI run (merge/merge.py base_state). A reader who trusts the record misjudges what the tool does.
 - #1553 merged a note citing lint/stale_cites.py `CODE_CLAIM` before #1539 added it. CI was green. A dead cite sends the reader to a name that is not there.
 
 Claude writes both in normal work: it states what code does from memory, and it cites names from a branch that has not landed.

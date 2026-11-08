@@ -50,7 +50,7 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             value, so a set cite ignores order. A head value that is no literal, such as a call, gives no finding.
             A name no module-level assignment ever bound is no removal: only an added line says so, without "removed".
             A .py cite the check cannot read is never skipped. On an added line, a cite whose value is no JSON literal
-            (MAP9 reads none) or whose path no tracked file has is a finding. A cite of a name that holds no literal at
+            (MAP9 reads none) or whose path no tracked file has is a finding, except a path led by `..`, `~` or `/`, which is unknown. A cite of a name that holds no literal at
             head, or of a file that does not parse, is unknown. An untouched line prints each of these as unknown too,
             only when the whole tree is read. A cite of a path the range removed is STALE001's.
   STALE009  (decision record-cites-live-code; range mode only, report only) a SENTENCE of an added line of a decision
@@ -116,9 +116,10 @@ a code-only range pays only for the patch text. An added governed line that hold
 file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
 the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
 for a range with no such line. So a range that adds a `docs/decisions` line holding a code verb (CODE_VERB_WORD,
-STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file). A Markdown range starts 3 when it adds
-none of these: a STALE005 claim line, a decision-record code claim, a folder .py name cite. It starts 4 with any of them
-(CostTests pins the 3 and the 4 for a STALE005 line or a code claim, NameCiteTests the 4 for a name cite). A range that changes the rows file reads it at base and head through the same `cat-file`;
+STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file). A full claim is not needed: "- Run the tests." in a
+decision record starts 4. A Markdown range starts 3 when it adds none of these: a line in a decision record holding a code
+verb, a STALE005 capability verb or route word, a folder .py name cite. It starts 4 with any of them
+(CostTests pins the 3 and the 4 for a STALE005 line or a code verb, NameCiteTests the 4 for a name cite). A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
