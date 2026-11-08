@@ -2984,13 +2984,18 @@ test("the Ask seen stamp moves when the tab hides with the answers list on scree
 // A tab hides with the answers list on screen, then the page is restored from the back-forward cache and is visible again. The restore
 // sends visibilitychange only when visibilityEvent is true. The browser's own event order on a restore is unmeasured: this models both paths.
 const TAB_LATER = "2026-10-31T07:00:00Z", TAB_LATER_STAMP = "2026-10-31T07:00:00.000Z";
-async function hideThenRestore(t, visibilityEvent) {
+// The shared start of the restore cases: the tab hides with the answers list on screen, and the page goes into the back-forward cache.
+async function hiddenAndCached(t) {
   const page = await tabOpen(t); if (!page) return null;
   await page.locator("#asks").scrollIntoViewIfNeeded();
   assert.equal(await listOnScreen(page), true, "the answers list is off screen at the first hide, so this case cannot show a hide that stamps");
   await hideTab(page);
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "the first hide with the answers list on screen did not stamp, so this case cannot show the later switch");
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+  return page;
+}
+async function hideThenRestore(t, visibilityEvent) {
+  const page = await hiddenAndCached(t); if (!page) return null;
   await page.evaluate((sendEvent) => {
     Object.defineProperty(document, "hidden", { value: false, configurable: true });
     window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
@@ -3061,6 +3066,71 @@ test("the Ask seen stamp moves when the tab hides with a fresh answer in view: c
   assert.equal(await rowOnScreen(page, FRESH_OLD.id), true, "the fresh answer is not in view, so this case cannot show a hide that stamps");
   await hideTab(page);
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with a fresh answer in view did not stamp the asks as seen");
+});
+
+// A New answer row the owner saw, then scrolled above the fold while the answers list stays on screen. The row was read, so the hide stamps.
+// NARROW is a 300 px wide screen.
+const SEEN_ROW = { id: "ask-seen-row", text: "New row the owner scrolls past", at: "2026-10-30T12:00:00Z", owner: "triage", answered: "2026-10-31T03:00:00Z", reply: "The reply the owner reads." };
+const NARROW = { width: 300, height: 400 };
+const seenRowOpen = (t) => open(t, { dbExtra: { asks: { ...TAB_ASKS(), [SEEN_ROW.id]: SEEN_ROW } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: NARROW });
+test("a New answer row the owner saw, then scrolled above the fold, still stamps the asks as seen on the hide", async (t) => {
+  const page = await seenRowOpen(t); if (!page) return;
+  await page.locator("#asks").scrollIntoViewIfNeeded();
+  await page.locator("#row-" + SEEN_ROW.id).scrollIntoViewIfNeeded();
+  assert.equal(await page.locator(`#row-${SEEN_ROW.id} .newmark`).count(), 1, "the row has no New answer mark, so this case cannot show a New row scrolled away");
+  assert.equal(await rowOnScreen(page, SEEN_ROW.id), true, "the New row is not in view before the owner scrolls past it, so this case cannot show a row seen and then scrolled away");
+  await page.evaluate((k) => window.scrollBy(0, document.getElementById("row-" + k).getBoundingClientRect().bottom + 30), SEEN_ROW.id);
+  assert.equal(await rowOnScreen(page, SEEN_ROW.id), false, "the New row is still in view after the scroll, so this case cannot show a row above the fold");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen after the scroll, so this case cannot show a hide with the list on screen");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "the owner saw the New answer row and scrolled past it, and the hide did not stamp the asks as seen");
+});
+test("the Ask seen stamp moves when the tab hides with the New answer row in view, 300 px wide: control", async (t) => {
+  const page = await seenRowOpen(t); if (!page) return;
+  await page.locator("#row-" + SEEN_ROW.id).scrollIntoViewIfNeeded();
+  assert.equal(await rowOnScreen(page, SEEN_ROW.id), true, "the New row is not in view, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the New answer row in view did not stamp the asks as seen");
+});
+
+// A reply in a folded thread is answered after the seen mark. Its answer shows as a folded reply row (.fwait), which carries no New answer
+// mark, so the stamp check does not see it. Below the fold it has not been read, so the hide must not stamp past it.
+const FOLD_ROOT = { id: "ask-fold-root", text: "Folded thread root", at: "2026-09-20T09:00:00Z", owner: "triage", answered: "2026-10-02T08:00:00Z", reply: "Folded root reply." };
+const FOLD_REPLY = { id: "ask-fold-reply", text: "Follow-up in the folded thread", at: "2026-10-20T09:00:00Z", re: FOLD_ROOT.id };
+const FOLD_REPLY_ANSWERED = { ...FOLD_REPLY, reply: "Follow-up answer.", answered: "2026-10-31T05:00:00Z" };
+const foldNoticeOnScreen = (page, k) => page.evaluate((id) => { const r = document.querySelector("#row-" + id + " .fwait").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; }, k);
+test("a folded thread's fresh reply answer below the fold does not move the Ask seen stamp, and its notice shows at the next load", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [FOLD_ROOT.id]: FOLD_ROOT, [FOLD_REPLY.id]: FOLD_REPLY } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  assert.equal(await page.locator(`#row-${FOLD_ROOT.id}.folded`).count(), 1, "the thread is not folded at load, so this case cannot show a folded reply's answer");
+  await page.evaluate((a) => window.__putDoc("asks", a.id, a), FOLD_REPLY_ANSWERED);
+  await page.waitForFunction((s) => /Answer from/.test(document.querySelector(s) ? document.querySelector(s).textContent : ""), `#row-${FOLD_ROOT.id} .fwait`);
+  await page.evaluate((k) => window.scrollBy(0, document.querySelector("#row-" + k + " .fwait").getBoundingClientRect().top - innerHeight - 10), FOLD_ROOT.id);
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  assert.equal(await foldNoticeOnScreen(page, FOLD_ROOT.id), false, "the folded reply's answer is in view, so this case cannot show an answer below the fold");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_SEED, "hiding the tab with a folded reply's answer below the fold moved the Ask seen stamp past it");
+  await page.evaluate((asks) => localStorage.setItem("__stub.asks", JSON.stringify(asks)), { ...TAB_ASKS(), [FOLD_ROOT.id]: FOLD_ROOT, [FOLD_REPLY.id]: FOLD_REPLY_ANSWERED });
+  await page.clock.setFixedTime(new Date(TAB_CLOSE));
+  await page.reload();
+  await shownBox(page, "Seen answer 1");
+  assert.equal(await page.locator(`#row-${FOLD_ROOT.id} .newmark`).count(), 1, "the folded reply's answer has no New answer mark at the next load: the hide stamped it as seen");
+});
+
+// The restore's pageshow is still queued when the tab hides. The page's record of visibility is the one from before the restore, so the
+// hide must still stamp.
+test("the Ask seen stamp moves on a tab hide that runs before the queued pageshow after a bfcache restore", async (t) => {
+  const page = await hiddenAndCached(t); if (!page) return;
+  await page.clock.setFixedTime(new Date(TAB_LATER));
+  await page.evaluate(() => Object.defineProperty(document, "hidden", { value: false, configurable: true }));
+  assert.equal(await page.evaluate(() => document.hidden), false, "the restored page reads as hidden, so this case cannot show a hide after a restore");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen after the restore, so this case cannot show a hide that stamps");
+  // The hide runs, then the queued pageshow is delivered.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  assert.equal(await seenStamp(page), TAB_LATER_STAMP, "the hide that ran before the queued pageshow did not stamp the asks as seen");
 });
 
 test("Send ask never cuts a text over 4000 characters: it stores the full text, or writes nothing and shows a notice", async (t) => {
