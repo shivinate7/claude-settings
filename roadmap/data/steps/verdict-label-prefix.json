@@ -1,11 +1,11 @@
 {
-  "title": "verdict-label-prefix (lane verdict-format-line follow-up after #1968)",
+  "title": "Refuse a prior verdict after an earlier label on its line",
   "phase": "next",
   "status": "doing",
   "order": 647,
   "owner": "lane verdict-format-line",
   "lane": "session_013NEJL1BCgLVUACYU5ujv9A",
-  "why": "Named by the coordinator (07:20 CST Nov 8; items 386 and 410 a) as a follow-up of #1968, built in lane verdict-format-line.",
-  "note": "Follow-up PR after #1968; not to be queued elsewhere. Triage asked the lane for the title and done check (07:20 CST Nov 8).",
-  "updatedAt": "2026-11-08T07:19:00-06:00"
+  "why": "A brief that relays a report, such as `Done: FAIL, round 1 of 3` or `Prior review: verdict: FAIL`, passes the blind-brief guard and anchors the reviewer (lane verdict-format-line, 07:20 CST Nov 8).",
+  "note": "Done check: refuse cases for those lines are red first, then green, in the reviewer-brief-blind family of hooks/test_guard.py; note verdict-label-prefix-passes is deleted. Follow-up PR after #1968, in lane verdict-format-line (coordinator, 07:20 CST Nov 8; items 386 and 410 a).",
+  "updatedAt": "2026-11-08T07:20:00-06:00"
 }
