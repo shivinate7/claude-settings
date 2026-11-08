@@ -1,0 +1,11 @@
+{
+  "title": "The waiter guard allows one bounded background wait for a clock time, and its remedy names only allowed forms",
+  "phase": "now",
+  "status": "todo",
+  "order": 40,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "Owner ask ask-mw74y9cw3z, 19:10 CST Nov 7, from a Degen lane on 2026-11-06 16:40-16:44 CST: a wait of about 8 min for a known clock time was refused three times. Read on main: waiter_verdict (hooks/guard_stream.py:210) refuses a sleep of 25 s or more and any sleep loop even under run_in_background, yet WAITER_REASON (line 248) offers 'run the long command in the background'. A remedy the guard refuses is a false alarm (rule verification-cry-wolf-guard-is-spent). No allowed form waits for a clock time; only wait-pid exists.",
+  "note": "Fix: add a `wait-until <ISO time> [--timeout S]` helper beside bin/wait-pid and name it in the remedy; allow a backgrounded single bounded wait; a foreground poll loop still refuses. Unverified: (b) the owner's `override` did not lift the refusal (no guard.log here; override.py names no waiter exclusion); and whether the guard sees the Monitor tool today (no Monitor matcher found in hooks/guard.py or settings.json). Done check: red first on main: forms 1 and 2 (backgrounded, single run, deadline-bounded) pass, a foreground poll loop refuses, one owner override lifts one waiter refusal, and the remedy names only allowed forms.",
+  "updatedAt": "2026-11-07T19:12:00-06:00"
+}
