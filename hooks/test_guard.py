@@ -13288,6 +13288,10 @@ TEST_HEADER_COMMENT = "      - name: Guard tests\n        run: | # note\n       
 add("builder-test: a whole test step with a comment on its run header is refused when deleted from checks.yml",
     "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + TEST_HEADER_COMMENT, new_string=LINT,
     carries=("test-author", "Report"), **B)
+# A builder may reword the comment on a run header: the block and its test run stay, so no test is dropped.
+add("builder-test: a run header comment reworded in a whole test step in checks.yml is allowed", "allow",
+    tool="Edit", file_path=WF, old_string=LINT + TEST_HEADER_COMMENT,
+    new_string=LINT + TEST_HEADER_COMMENT.replace("| # note", "| # reworded"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
     old_string=LINT + TEST_LINUX + CLEAN, new_string=LINT + CLEAN + TEST_LINUX, **B)
 add("builder-test: a test step's if: changed to another condition is allowed", "allow", tool="Edit",
@@ -14004,6 +14008,10 @@ RUN_HEADER_CHECKS = (
     ("workflow run header: a `run: | # c` block running ruff on tests/ reads no test path",  # P2 green control
      run_header_tests_check("      - name: Ruff\n        run: | # c\n          ruff check tests/ --ignore E501\n", [],
                             "a `run: | # c` block that runs ruff")),
+    ("workflow run header: an inline `run:` with a trailing comment is read as a command, not a block header",
+     run_header_tests_check("      - run: python3 hooks/test_x.py  # c\n      - name: Second\n        run: python3 hooks/test_y.py\n",
+                            ["hooks/test_x.py", "hooks/test_y.py"],
+                            "an inline `run:` with a trailing comment and the step after it")),
 )
 for _label, _check in RUN_HEADER_CHECKS:
     FIXTURELESS_CHECKS.add(_check)  # it loads the module and builds no fixture
