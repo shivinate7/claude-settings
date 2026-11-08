@@ -2643,6 +2643,10 @@ sh("run-dir heredoc-kept-tail: a body written to run.sh, then a cd into a dirty 
 sh("run-dir heredoc-kept-tail: a body written to run.sh, then a cd into a repo whose branch holds the only copy of its work, then a branch delete, denies",
    "cat > run.sh <<'EOT'\necho hi\nEOT\ncd " + slash(BRANCHREPO) + " && " + VCS + " branch -D unmerged-work",
    "deny", "shared-tree", cwd=SUBJCLEAN)
+# A body no command runs is dropped with its closer, and the cd after it is still swallowed by the second strip.
+sh("run-dir heredoc-tail: a body written to notes.md, then a cd into a dirty tree and a hard reset, denies",
+   "cat > notes.md <<'EOT'\necho hi\nEOT\ncd " + slash(SUBJDIRTY) + " && " + VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
 # PER PATH for `restore` and `checkout <path>`: the pathspec goes to git, and an empty answer
 # proves the write changes nothing. Both named paths sit in the SAME dirty tree.
 sh("subject: restoring a clean path inside a dirty tree changes nothing",
