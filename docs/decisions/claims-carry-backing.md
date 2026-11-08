@@ -14,7 +14,7 @@ Code spans, 2026-11-06 12:28 CST, process-only: a code span used as a claim's su
 
 Part (v), the owner hand-off check. Coordinator agreed 2026-11-06 12:00 and 12:21 CST, process-only.
 
-- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow (read lint/report_guard.py:1461-1470).
+- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow (read lint/report_guard.py:1481-1490).
 - (b) `hooks/reply_judge.py` (the reply judge) judges the hand-off's cite against the cited route row and the act's alternates. When the cited id has no row on this surface, it reads the act from the other surface's row and carries neither that row nor its alternates (read hooks/reply_judge.py:146-152; read hooks/reply_judge.py:174-176).
 
 Lane ruling, 2026-11-06 12:34 CST, process-only: layer (a) checks only "Why yours" lines. A route cite passes only when the row's outcome is refused or asks. A row whose outcome is works refuses the cite. An unknown outcome reads UNKNOWN.
@@ -26,6 +26,16 @@ Lane ruling, 2026-11-06 12:47 CST, process-only: the rows path has one home, `ro
 Coordinator, 2026-11-06 12:59 CST, process-only (option b of the coordinator's cite question): a "Why yours" line with a capability reason needs one of these cites. A capability reason uses a word such as can not, cannot, refuses, blocked or not available. The cites: `(route <id>)` with outcome refused or asks, a refusal from this session, or `(measured <date>, <check and result>)`. A choice, login or safety-kept reason needs no cite.
 
 Lane ruling, 2026-11-06 13:25 CST, process-only, under coordinator pick Q1 (b): a choice, login or safety phrase exempts the line. The capability verbs widen to refused, unable to, denied, forbidden, no access, not allowed or permitted, unavailable and 403. "blocked until" and "not available until" are dependencies, not capabilities. Layer (a) is built in `lint/report_guard.py` (`hand_off_problem`). It reads the reply text. It reads this session's refusals file and the route rows file only for a capability line that needs them.
+
+Part (vi), the cannot-claim check. Lane ruling, 2026-11-07 22:37 CST, process-only. Owner, 2026-11-07 21:52 CST: "dont we know to just use the rest api etc theres tons of ways how did u make a bad assumption".
+
+- The mistake. At 21:47 CST on 2026-11-07 a coordinator reported that it could not open a pull request. Its only evidence was one notice that the GitHub MCP server failed to connect. A notice is a system record, not a tool call. The act had no try. `mcp__github__create_pull_request` then worked on its first call.
+- The harm. The owner was told to do an act the session could do. He then spent time on a step that needed none of his.
+- What the check reads. At Stop, `cannot_problem` in `lint/report_guard.py` reads each prose line of the reply. A line is a claim when it says cannot, could not, unable to, no way to or not able to, and an act follows within six words. It reads the turn after the last human message. A claim passes when that turn holds a failed try of the same act. It also passes when the line carries a hand-off cite: a route row that says refused or asks, a dated `(measured ...)`, or a tool the classifier refused. The line must also name its check: a backtick span, an MCP tool name, or a word such as returned or refused. A try is a tool call whose result is an error, an exit code above zero, an HTTP 4xx or 5xx, or a denial. A relayed agent result counts when its text names the route.
+- What it skips. A question. A Why yours line, which the hand-off check reads. Quoted or coded text. A line with another party as subject. A conditional. A dependency (until, before). A line that names a rule id. The Unvetted line the past-ruling check asks for.
+- What it cannot see. A claim outside the phrase list, such as "only the owner can" or "it is impossible". A passive claim such as "the PR cannot be opened". For an act outside the table, whether the failure was a real try of that act. A try before the last human message, or in a sidechain, unless a cite backs the line. A failure with no error flag and no failure marker in its text. A subject named in an earlier sentence. A shell command that chains routes counts as a try of each route it holds.
+- Refuse once. The block lists the lines, and its remedy names no act (rule `git-remedy-never-names-target`). The rewrite that follows runs the report checks only, so the claim is not refused a second time.
+- Cost. A regex over the reply. On a claim line, one pass over the transcript this hook already holds, and one read of the refusals file. No file is written, and no timer or log runs.
 
 ## Incident
 
@@ -96,8 +106,9 @@ No daemon and no timer.
 Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
-- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1327-1345).
-- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1461-1470; read lint/report_guard.py:1928).
+- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1345-1363).
+- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:1712-1730; read lint/report_guard.py:2220-2225).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1481-1490; read lint/report_guard.py:2167).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:759-764).
 - The merge's model judge, report-only (see Model judge at merge).
