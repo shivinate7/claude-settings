@@ -4,6 +4,15 @@
   "home": "pr-backlog-clear",
   "id": "merge-follows-review",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T04:25:43.586Z",
+    "choice": [
+      "a",
+      "b",
+      "c"
+    ],
+    "note": ""
+  },
   "multi": true,
   "n": 386,
   "options": [
@@ -31,8 +40,10 @@
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "steps pr-backlog-clear and pr-state-is-on-the-pr; #1561 (the PR ledger)",
+  "replied": "2026-11-08T04:28:00Z",
+  "reply": "Routed, all three parts. (a) Step merge-builds-batches: the merge tool builds each batch from PR state. (b) Step findings-ride-in-lane: a lane's findings ride in its own PR. (c) The three backlog counts in every report go on step pr-state-is-on-the-pr. All three are queue fixes, so the hold lets them start. Sent to the coordinator. Triage, 22:28 CST.",
   "short": "Merges keep pace with reviews",
-  "status": "open",
+  "status": "closed",
   "title": "Make merges keep pace with reviews: which parts do you want?",
   "why": "The coordinator recommends all three: part a alone drains the queue but does not slow new PRs, and part b alone does not drain it."
 }
