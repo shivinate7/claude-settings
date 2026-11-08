@@ -159,7 +159,7 @@ FIRST_PARENT_BRANCH = "notes-first-base"
 LAST_PARENT_PR = 1742  # the second of the two
 LAST_PARENT_BRANCH = "notes-last-base"
 BELOW_START = "c05c0e626"  # the start #1969's body names: a placeholder that each case replaces with a real commit
-PR_1969_BODY = """Lane notes-fix-page, step silent-undo-cli-ignores-pr-body. Owner ruling: item 411 a, 2026-11-08 06:11 CST, "The CLI reads the body through the merge tool's reader". This branch stacks on #1785. Review only `git diff c05c0e626 nfp-undo-pr-body` (its base is #1785 at c05c0e626).
+PR_1969_BODY = """Lane notes-fix-page, step silent-undo-cli-ignores-pr-body. Owner ruling: item 411 a, 2026-11-08 06:11 CST, "The CLI reads the body through the merge tool's reader". This branch stacks on #1785. Review only `git diff c05c0e626 feat` (its base is #1785 at c05c0e626).
 
 Merge after: #1785
 
@@ -715,7 +715,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
         good = h["P"][:9]
-        body = body_at(good) + "\nAlso `git diff %s nfp-undo-pr-body`.\n" % h["O"]
+        body = body_at(good) + "\nAlso `git diff %s feat`.\n" % h["O"]
         self.assertIn("`git diff %s " % good, body, "the good range is not in the body")
         self.assert_review_range_refused(body, h["O"], "the second range", one_parent(h["P"]))
 
@@ -723,8 +723,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
         for sep in ("..", "..."):
-            rng = "`git diff %s%snfp-undo-pr-body`" % (h["O"], sep)
-            body = body_at(h["O"]).replace("`git diff %s nfp-undo-pr-body`" % h["O"], rng)
+            rng = "`git diff %s%sfeat`" % (h["O"], sep)
+            body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
             self.assertIn(rng, body, "the fixture did not take the %r form" % sep)
             self.assert_review_range_refused(body, h["O"], "the range " + rng, one_parent(h["P"]))
 
@@ -753,7 +753,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         h = self.fork_history()
         short = h["P"][:9]
         body = body_at(short).replace("Merge after: #1785", "merge after #1785").replace(
-            "`git diff %s nfp-undo-pr-body`" % short, "`git diff %s..nfp-undo-pr-body`" % short)
+            "`git diff %s feat`" % short, "`git diff %s..feat`" % short)
         self.assertIn("merge after #1785", body, "the fixture did not take the lowercase line")
         self.use_review_range_host(body, one_parent(h["P"]))
         rc, out = self.lint_run("--lane-lint", "7")
@@ -763,8 +763,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
     def test_review_range_passes_a_full_sha_start_with_the_triple_dot_form(self):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
-        body = body_at(h["P"]).replace("`git diff %s nfp-undo-pr-body`" % h["P"], "`git diff %s...nfp-undo-pr-body`" % h["P"])
-        self.assertIn("`git diff %s...nfp-undo-pr-body`" % h["P"], body, "the fixture did not take the triple-dot form")
+        body = body_at(h["P"]).replace("`git diff %s feat`" % h["P"], "`git diff %s...feat`" % h["P"])
+        self.assertIn("`git diff %s...feat`" % h["P"], body, "the fixture did not take the triple-dot form")
         self.use_review_range_host(body, one_parent(h["P"]))
         rc, out = self.lint_run("--lane-lint", "7")
         self.assertEqual(rc, 0, out)
@@ -776,7 +776,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         cases = (
             ("the #1969 body without its Merge after line", body_at(h["O"]).replace("Merge after: #1785\n", "")),
             ("an empty body", ""),
-            ("a body at the largest size GitHub keeps", "x" * 65536 + "\n`git diff %s nfp-undo-pr-body`\n" % h["O"]),
+            ("a body at the largest size GitHub keeps", "x" * 65536 + "\n`git diff %s feat`\n" % h["O"]),
         )
         for name, body in cases:
             with self.subTest(name):
@@ -813,7 +813,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         h = self.fork_history()
         body = ("Merge after: #1785\n\n"
                 "Review the range `git diff <start> <end>`, or `git diff {reviewed-head}..{head}`, against the parent. "
-                "The range to read is `git diff %s nfp-undo-pr-body`.\n") % h["P"][:9]
+                "The range to read is `git diff %s feat`.\n") % h["P"][:9]
         self.assert_review_range_passes(body, "a body with placeholder ranges in prose beside a real range", one_parent(h["P"]))
 
     def test_review_range_passes_a_git_diff_inside_a_fenced_block(self):
@@ -821,8 +821,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
         body = ("Merge after: #1785\n\n"
-                "```\n`git diff %s nfp-undo-pr-body`\n```\n\n"
-                "Review only `git diff %s nfp-undo-pr-body`.\n") % (h["O"], h["P"][:9])
+                "```\n`git diff %s feat`\n```\n\n"
+                "Review only `git diff %s feat`.\n") % (h["O"], h["P"][:9])
         self.assert_review_range_passes(body, "a body whose only wrong range sits in a fenced block", one_parent(h["P"]))
 
     def test_review_range_passes_every_number_on_a_merge_after_line(self):
@@ -880,46 +880,46 @@ class LaneLint(CiJobStub, tm.CloudSession):
     def test_review_range_refuses_a_start_followed_by_a_flag(self):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
-        body = body_at(h["O"]).replace("`git diff %s nfp-undo-pr-body`" % h["O"], "`git diff %s nfp-undo-pr-body --stat`" % h["O"])
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], "`git diff %s feat --stat`" % h["O"])
         self.assertIn("--stat`", body, "the fixture did not take the flag")
         self.assert_review_range_refused(body, h["O"], "the #1969 range followed by --stat", one_parent(h["P"]))
 
     def test_review_range_refuses_a_start_followed_by_a_path(self):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
-        body = body_at(h["O"]).replace("`git diff %s nfp-undo-pr-body`" % h["O"], "`git diff %s nfp-undo-pr-body -- merge/merge.py`" % h["O"])
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], "`git diff %s feat -- merge/merge.py`" % h["O"])
         self.assertIn("-- merge/merge.py`", body, "the fixture did not take the path")
         self.assert_review_range_refused(body, h["O"], "the #1969 range followed by a path", one_parent(h["P"]))
 
     def test_review_range_passes_a_stat_flag_before_the_range_with_the_right_start(self):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
-        rng = "`git diff --stat %s..nfp-undo-pr-body`" % h["P"][:7]
-        body = body_at(h["O"]).replace("`git diff %s nfp-undo-pr-body`" % h["O"], rng)
+        rng = "`git diff --stat %s..feat`" % h["P"][:7]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
         self.assertIn(rng, body, "the fixture did not take the --stat range")
         self.assert_review_range_passes(body, "a --stat range that starts at the parent head", one_parent(h["P"]))
 
     def test_review_range_passes_a_context_flag_before_the_range_with_the_right_start(self):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
-        rng = "`git diff -U0 %s nfp-undo-pr-body`" % h["P"][:7]
-        body = body_at(h["O"]).replace("`git diff %s nfp-undo-pr-body`" % h["O"], rng)
+        rng = "`git diff -U0 %s feat`" % h["P"][:7]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
         self.assertIn(rng, body, "the fixture did not take the -U0 range")
         self.assert_review_range_passes(body, "a -U0 range that starts at the parent head", one_parent(h["P"]))
 
     def test_review_range_refuses_a_stat_flag_before_the_range_with_a_wrong_start(self):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
-        rng = "`git diff --stat %s..nfp-undo-pr-body`" % h["O"]
-        body = body_at(h["O"]).replace("`git diff %s nfp-undo-pr-body`" % h["O"], rng)
+        rng = "`git diff --stat %s..feat`" % h["O"]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
         self.assertIn(rng, body, "the fixture did not take the --stat range")
         self.assert_review_range_refused(body, h["O"], "a --stat range that starts below the parent head", one_parent(h["P"]))
 
     def test_review_range_refuses_a_context_flag_before_the_range_with_a_wrong_start(self):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
-        rng = "`git diff -U0 %s nfp-undo-pr-body`" % h["O"]
-        body = body_at(h["O"]).replace("`git diff %s nfp-undo-pr-body`" % h["O"], rng)
+        rng = "`git diff -U0 %s feat`" % h["O"]
+        body = body_at(h["O"]).replace("`git diff %s feat`" % h["O"], rng)
         self.assertIn(rng, body, "the fixture did not take the -U0 range")
         self.assert_review_range_refused(body, h["O"], "a -U0 range that starts below the parent head", one_parent(h["P"]))
 
@@ -928,8 +928,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
         body = ("Merge after: #1785\n\n"
-                "~~~\n`git diff %s nfp-undo-pr-body`\n~~~\n\n"
-                "Review only `git diff %s nfp-undo-pr-body`.\n") % (h["O"], h["P"][:9])
+                "~~~\n`git diff %s feat`\n~~~\n\n"
+                "Review only `git diff %s feat`.\n") % (h["O"], h["P"][:9])
         self.assert_fence_rule(body, "git diff %s" % h["O"], fenced=True)
         self.assert_review_range_passes(body, "a body whose only wrong range sits in a tilde fence", one_parent(h["P"]))
 
@@ -939,8 +939,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
         body = ("Merge after: #1785\n\n"
-                "Review only `git diff %s nfp-undo-pr-body`.\n\n"
-                "```\n```python\n`git diff %s nfp-undo-pr-body`\n") % (h["P"][:9], h["O"])
+                "Review only `git diff %s feat`.\n\n"
+                "```\n```python\n`git diff %s feat`\n") % (h["P"][:9], h["O"])
         self.assert_fence_rule(body, "git diff %s" % h["O"], fenced=True)
         self.assert_review_range_passes(body, "a body whose wrong range follows an unclosed fence", one_parent(h["P"]))
 
@@ -950,7 +950,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         h = self.fork_history()
         body = ("Merge after: #1785\n\n"
                 "```\ncode\n```\n\n"
-                "Review only `git diff %s nfp-undo-pr-body`.\n") % h["O"]
+                "Review only `git diff %s feat`.\n") % h["O"]
         self.assert_fence_rule(body, "git diff %s" % h["O"], fenced=False)
         self.assert_review_range_refused(body, h["O"], "the range after a closed fence", one_parent(h["P"]))
 
