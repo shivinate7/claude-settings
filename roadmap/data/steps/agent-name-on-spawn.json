@@ -1,11 +1,11 @@
 {
   "title": "A lane messages its agents by a name given at spawn, never a bare id",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 665,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL1Aq6pKaCrB1kxda68",
   "why": "Lane notes-fix-page sent three overlap lists to the wrong agents, because it messaged them by bare id (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8).",
-  "note": "Done check: a red test where a SendMessage to a bare agent id from a lane is refused or asked, and a spawn with no name is flagged. Build lane. Filed by triage 08:14 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:14:00-06:00"
+  "note": "Done check: a red test where a SendMessage to a bare agent id from a lane is refused or asked, and a spawn with no name is flagged. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL1Aq6pKaCrB1kxda68.",
+  "updatedAt": "2026-11-08T08:16:00-06:00"
 }
