@@ -23298,25 +23298,34 @@ def session_home_lived_file_count_case():
     return True, "one lived lane leaves exactly one .lived file beside its record, and ExitWorktree removes both"
 
 
-def session_home_visit_no_lived_file_case():
-    """The empty state: a lane that is only visited, with no act that marks it lived, leaves no `.lived`
-    file. A primary call drops the record, so the session holds no file in the folder."""
-    primary = sh_new_primary("visitnone")
-    lane, branch = sh_add_lane(primary, "lane-visitnone")
+def sh_visit_case(tag, make_command):
+    """The visit step: a lane call with no act that marks it lived leaves no `.lived` file, and a primary
+    call drops the record, so the session holds no file in the folder. `tag` names the fixture (a word).
+    `make_command(lane)` builds the lane call, which runs in the lane. Scope first: the call is allowed and
+    the record names the lane. Subject: no `.lived` file beside the record."""
+    primary = sh_new_primary("visit" + tag)
+    lane, _ = sh_add_lane(primary, "lane-visit" + tag)
     session = sh_session()
     problems = []
-    got, reason = _decide_full("Bash", lane, session=session, command="echo hi")
+    got, reason = _decide_full("Bash", lane, session=session, command=make_command(lane))
     if got != "allow":
         problems.append("the lane call: want allow, got %s (%s)" % (got, reason[:120]))
     if not sh_holds(primary, session, lane):
         problems.append("the lane call wrote no session record naming the lane")
+    if problems:
+        return False, "; ".join(problems)
+    if os.path.exists(sh_record(primary, session) + ".lived"):
+        return False, "the lane call marked the lane lived: a .lived file exists"
     _decide_full("Bash", primary, session=session, command="echo hi")
     left = _sh_folder_names(primary, session)
     if left:
-        problems.append("a visit with no lived act left %s in the session-homes folder" % left)
-    if problems:
-        return False, "; ".join(problems)
+        return False, "a visit with no lived act left %s in the session-homes folder" % left
     return True, "a visit with no lived act leaves no .lived file and no record"
+
+
+def session_home_visit_no_lived_file_case():
+    """The empty state: a lane that is only visited, with no act that marks it lived, leaves no `.lived` file."""
+    return sh_visit_case("none", lambda lane: "echo hi")
 
 
 def session_home_lived_folder_stands_case():
@@ -23378,6 +23387,49 @@ LOG_CHECKS_EXTRA.append(("session-home: a visit with no lived act leaves no .liv
                          session_home_visit_no_lived_file_case))
 LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree folder stands, with its lane lived, writes into "
                          "the primary checkout", session_home_lived_folder_stands_case))
+
+
+# A CALL OF PRINTERS AND `cd` ALONE IS A VISIT. A shell call that may write marks its lane lived. A trailing
+# newline, a trailing `;` or a heredoc's closing line leaves an empty segment, which is no printer, so the call is
+# read as a write. A printer with a write hidden in its words, inside `$(...)` or `<(...)`, is a write.
+def session_home_visit_trailing_newline_case():
+    return sh_visit_case("newline", lambda lane: "echo hi\n")
+
+
+def session_home_visit_trailing_semicolon_case():
+    return sh_visit_case("semicolon", lambda lane: "echo hi;")
+
+
+def session_home_visit_cd_semicolon_case():
+    return sh_visit_case("cdsemi", lambda lane: "cd " + slash(lane) + ";")
+
+
+def session_home_visit_heredoc_case():
+    return sh_visit_case("heredoc", lambda lane: "cat <<'EOF'\nhi\nEOF\n")
+
+
+def session_home_lane_command_substitution_case():
+    return sh_lane_then_visit_case("cmdsub", 'echo "$(make)"')
+
+
+def session_home_lane_process_substitution_case():
+    return sh_lane_then_visit_case("procsub", "cat <(make)")
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of echo with a trailing newline is a visit, so no .lived file "
+                         "is written", session_home_visit_trailing_newline_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of echo with a trailing semicolon is a visit, so no .lived "
+                         "file is written", session_home_visit_trailing_semicolon_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of cd into the lane with a trailing semicolon is a visit, so no "
+                         ".lived file is written", session_home_visit_cd_semicolon_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of a quoted heredoc that only prints is a visit, so no .lived "
+                         "file is written", session_home_visit_heredoc_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of echo with a command substitution makes the lane home, so a "
+                         "primary Write is refused once the lane is removed",
+                         session_home_lane_command_substitution_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane call of cat with a process substitution makes the lane home, so a "
+                         "primary Write is refused once the lane is removed",
+                         session_home_lane_process_substitution_case))
 
 
 # =========================================================================== mask_script lexemes
