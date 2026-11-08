@@ -925,7 +925,8 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-FAKE_GH_PY = r'''import json, os, re, sys, time
+FAKE_GH_PY = r'''import io, json, os, re, sys, time
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")  # the bytes go out as written: a text-mode stdout on Windows turns each \n into \r\n, which real gh never does
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
 if state.get("count_file"):  # a test that counts the calls names the file: one line per call, its argv
     with open(state["count_file"], "a", encoding="utf-8") as handle:
@@ -933,6 +934,7 @@ if state.get("count_file"):  # a test that counts the calls names the file: one 
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
+REPO_ID = 424242424  # the numeric id GitHub names in a Link header; the cloud agent proxy refuses paths that carry it
 GRAPHQL = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
     state["broken"] = True
@@ -959,19 +961,33 @@ def parse(argv):
 
 
 def api_error(code, message):
+    if "-i" in flags:  # gh api -i prints the reply's status line and headers before the body: the status line ends \n, the headers and the blank line \r\n
+        sys.stdout.write("HTTP/1.1 %d %s\nContent-Type: application/json\r\n\r\n" % (code, "Not Found" if code == 404 else "Internal Server Error"))
     print(json.dumps({"message": message, "status": str(code)}, separators=(",", ":")) + "gh: %s (HTTP %d)" % (message, code))
     sys.exit(1)
 
 
-def listing(items, key, fields, flags, top=None):
-    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages."""
+def listing(items, key, fields, flags, top=None, rel=""):
+    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
+    With -i the status line and headers come first, and a page that more pages follow carries the Link header GitHub sends, on the numeric route."""
     size = max(1, min(int(fields.get("per_page", 30)), state["page_cap"]))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
-    chosen = pages if "--paginate" in flags else [pages[max(1, int(fields.get("page", 1))) - 1] if int(fields.get("page", 1)) <= len(pages) else []]
+    asked = max(1, int(fields.get("page", 1)))
+    chosen = pages if "--paginate" in flags else [pages[asked - 1] if asked <= len(pages) else []]
     bodies = [c if key is None else dict(top or {}, **{key: c}) for c in chosen]
     if "--slurp" in flags:
-        return json.dumps(bodies)
-    return json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+        body = json.dumps(bodies)
+    else:
+        body = json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+    if "-i" not in flags:
+        return body
+    link = None
+    if "--paginate" not in flags and asked < len(pages):
+        def url(page):
+            parts = ["%s=%s" % kv for kv in fields.items() if kv[0] != "page"] + ["page=%d" % page]
+            return "<https://api.github.com/repositories/%d/%s?%s>" % (REPO_ID, rel, "&".join(parts))
+        link = '%s; rel="next", %s; rel="last"' % (url(asked + 1), url(len(pages)))
+    return "HTTP/1.1 200 OK\nContent-Type: application/json\r\n%s\r\n%s" % ("Link: %s\r\n" % link if link else "", body)
 
 
 RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "pending": ("in_progress", None),
@@ -1016,20 +1032,20 @@ else:
         rows = [dict(state["pr"], number=state["number"])] + others
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
-        print(listing(rows, None, fields, flags))
+        print(listing(rows, None, fields, flags, rel=rel))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
             runs = [{"id": i, "name": c["name"], "status": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[0],
                      "conclusion": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[1], "details_url": c["link"] or None,
                      "started_at": None, "completed_at": None} for i, c in enumerate(checks)]
-            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}))
+            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}, rel=rel))
         else:
             sts = [{"id": 50 + i, "context": c["name"], "state": STATUS_OF.get(c["bucket"], c["bucket"]), "target_url": c["link"] or None}
                    for i, c in enumerate(statuses)]
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
-            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
+            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}, rel=rel))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
@@ -9071,6 +9087,21 @@ sh("draft-pr: a perl body whose backtick span runs on past a backslash-newline i
 sh("draft-pr: a perl body with a backtick span left unclosed, holding a $( ) gh pr create, fed to perl, is refused",
    "\n".join(["perl - <<'EOF'", "print `echo $(gh pr create -t x);", "EOF"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A lone backtick inside a quoted string opens no span. The span rule must not pair it with the next backtick, or the
+# real span after it goes unread. Each body below holds such a stray backtick before a real span with the gh call.
+sh("draft-pr: a node file with a stray backtick in a single-quoted string, then an execSync gh pr create span, is refused",
+   "\n".join(["cat > f.js <<'EOF'", "const b = 'Fixes `foo';", "execSync(`gh pr create -t x`);", "EOF", "node f.js"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a ruby file with a stray backtick in a single-quoted string, then a backtick gh pr create span, is refused",
+   "\n".join(["cat > f.rb <<'EOF'", "puts 'use ` here'", "puts `gh pr create -t x`", "EOF", "ruby f.rb"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl file with an escaped backtick in a double-quoted string, then a span nesting $( gh pr create ), is refused",
+   "\n".join(["cat > f.pl <<'EOF'", r'print "\`npm\`";', "print `$(gh pr create -t x)`;", "EOF", "perl f.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A quote in a comment opens no string. A lone apostrophe in `# don't` must not swallow the real span after it.
+sh("draft-pr: a perl file with an apostrophe in a comment, then a backtick gh pr create span, is refused",
+   "\n".join(["cat > f.pl <<'EOF'", "# don't", "print `gh pr create -t x`;", "EOF", "perl f.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
@@ -11343,9 +11374,9 @@ cmk_allow("a fix script, add -A, commit and push, with no triplet in the tree be
 # A cd is a safe earlier segment: the commit is judged in the repository it names. These run from a
 # directory that is no repository, so only the cd leads to the repository.
 cmk_allow("a cd into a repo with a clean change, then add -A, commit and push",
-          "cd " + CMK_CL + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+          "cd " + slash(CMK_CL) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
 cmk_refuse("a cd into a repo with a triplet in a tracked file, then add -A, commit and push",
-           "cd " + CMK_CLT + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+           "cd " + slash(CMK_CLT) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
 
 # An earlier commit is a safe segment too, so each commit is judged and the push sees both.
 cmk_allow("two clean commits, each after an add, then a push",
