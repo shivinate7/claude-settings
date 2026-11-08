@@ -534,9 +534,13 @@ def _cp_start(raw, keywords=False, command="cp"):
 
 def _null_redirect_end(words, index):
     """The index past the redirect to the null device or onto another descriptor that starts at
-    `words[index]` (`2>/dev/null`, `2>&1`, `2> /dev/null`), else None. It writes no file, so a `cp` or
-    `rsync` reader skips it (`_copy_reads`, `_rsync_reads`)."""
+    `words[index]` (`2>/dev/null`, `2>&1`, `2> /dev/null`, `&>/dev/null`, `&>> /dev/null`), else None. It
+    writes no file, so a `cp` or `rsync` reader skips it (`_copy_reads`, `_rsync_reads`). The tokenizer
+    splits `&>` into `&` and `>`, so a lone `&` before a `>` word is read with it; else the `&` would read
+    as the last operand and hide the real destination."""
     word = words[index]
+    if word == "&" and words[index + 1:index + 2] and words[index + 1].startswith(">"):
+        return _null_redirect_end(words, index + 1)
     if _NULL_REDIRECT.fullmatch(word):
         return index + 1
     after = words[index + 1:index + 2]
@@ -1110,6 +1114,9 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         is_dd = command_position and _segment_command(words)[0] == "dd"
+        for target in (_yq_closed_targets(raw) if command_position and closed else ()):
+            if predicate(target, at, verb) if predicate_command else predicate(target, at):
+                return _from_cwd(target, at, cwd) if follow_cd else target
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
@@ -1253,15 +1260,14 @@ _YQ_VALUE_FLAGS = {"-f", "--from-file", "-I", "--indent", "-o", "--output-format
 _YQ_SUBCOMMANDS = {"eval", "e", "eval-all", "ea"}
 
 
-def _yq_expression_words(raw):
-    """The set of indexes of the word of an in-place `yq` segment that is its expression, else empty. The
-    expression is text (`.on |= "push" | .x = 1`, `.a = 1; .b = 2`): read as data, its `|` or `;` ends no
-    command in `writes_to`'s text search, so the file operand after it is judged. It is the first operand
-    after an `eval` subcommand, and only when a file follows it; with `-f` the script is in a file and the
-    first operand is the target. Empty when the segment is no `yq -i` or `--inplace`."""
+def _yq_in_place(raw):
+    """(operands, from_file) of an in-place `yq` segment (`-i` or `--inplace`, before or after an `eval` or
+    `eval-all` subcommand), else None. `operands` are the indexes of its operands past the subcommand;
+    `from_file` is True when `-f` names the script file, so no operand is the expression. The one reading
+    of a `yq` segment's flags, for `_yq_expression_words` and `_yq_closed_targets`."""
     index = resolve_command(tuple(raw))
     if index is None or _name(raw[index]) != "yq":
-        return set()
+        return None
     in_place = from_file = flags_over = False
     operands, at = [], index + 1
     while at < len(raw):
@@ -1282,7 +1288,30 @@ def _yq_expression_words(raw):
         at += 1
     if operands and _unquoted(raw[operands[0]]) in _YQ_SUBCOMMANDS:
         operands = operands[1:]
-    return {operands[0]} if in_place and not from_file and len(operands) >= 2 else set()
+    return (operands, from_file) if in_place else None
+
+
+def _yq_expression_words(raw):
+    """The set of indexes of the word of an in-place `yq` segment that is its expression, else empty. The
+    expression is text (`.on |= "push" | .x = 1`, `.a = 1; .b = 2`): read as data, its `|` or `;` ends no
+    command in `writes_to`'s text search, so the file operand after it is judged. It is the first operand
+    after an `eval` subcommand, and only when a file follows it; with `-f` the script is in a file and the
+    first operand is the target. Empty when the segment is no `yq -i` or `--inplace`."""
+    found = _yq_in_place(raw)
+    if not found:
+        return set()
+    operands, from_file = found
+    return {operands[0]} if not from_file and len(operands) >= 2 else set()
+
+
+def _yq_closed_targets(raw):
+    """The words of an in-place `yq` segment in a closed command (one that holds an `eval`, or an escaped
+    quote the scanner cannot read), each operand past the subcommand after quote removal, else empty.
+    A closed command makes no word data, so `writes_to`'s text search stops at a `|` or `;` inside the
+    expression and misses the file. `yq -i` writes its file operands, so each is judged as a target
+    with no text search; the expression is judged too, which fails closed."""
+    found = _yq_in_place(raw)
+    return [_unquoted(raw[at]) for at in found[0]] if found else []
 
 
 def _segment_command(words):
