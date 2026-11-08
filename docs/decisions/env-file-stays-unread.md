@@ -2,7 +2,7 @@
 
 ## The ruling
 
-No session reads, writes or commits the contents of an environment file. The user manages that file, and its values stay out of the session. The guard refuses a shell command that would do any of those, and a write tool call that names the file. The settings deny list refuses a Read or Edit call on it. A runner may load the file into its own process with its loader flag. A runner prints nothing, so no value reaches the session.
+No session reads, writes or commits the contents of an environment file. The user manages that file, and its values stay out of the session. The guard refuses a shell command that would do any of those, and a write tool call that names the file. The settings deny list refuses a Read or Edit call on it. A runner may load the file into its own process with its loader flag. The guard stops node, bun and deno given the file when they run inline code (`-e`, `-p`, `--eval`, `--print`, deno's `eval`) or a script read from stdin (`-`, a pipe, a heredoc, a here-string or a `<` file), since that code can print the variables. It does not catch deno's `run -`, which reads stdin after the word `run`. It does not read a script file: a script the session wrote can still print them.
 
 One scope covers every form: a write tool call, a shell command and a Read call. A name is any basename that starts with `.env`, except `.env.example`. The guard's forms read one shared basename matcher in guard_env (`names_env_file`).
 
@@ -11,7 +11,7 @@ Ruling: owner, Queue item 159 answer a, 2026-11-02 00:56 CST. Reason: `.envrc` o
 Shell form. `judge_shell` calls `env_refusal` and `env_heredoc_refusal`. A name is a word whose basename is in the scope above. A glob that could match a name counts as the name (`_glob_could_name_env`).
 
 - Refused: a redirect onto the file. A shell variable that holds its path, because the guard cannot follow a variable to its use. The file given to a command that is not a runner. Any other command that would read, write or commit it.
-- Allowed: an existence check (`ls`, `test`, `[`, `[[`). `echo` and `printf`, where the name is text. The message or body value of `git commit` and `gh pr create`. A runner in `ENV_LOADER_COMMANDS` (node, npm, npx, pnpm, bun, deno, uv, docker, podman, and their variants) given `--env-file` or `--env-file-if-exists`.
+- Allowed: an existence check (`ls`, `test`, `[`, `[[`). `echo` and `printf`, where the name is text. The message or body value of `git commit` and `gh pr create`. A runner in `ENV_LOADER_COMMANDS` (node, npm, npx, pnpm, bun, deno, uv, docker, podman, and their variants) given `--env-file` or `--env-file-if-exists`, except that node, bun and deno given the file must run a script file, not inline code or a stdin script.
 - Substitutions (`$(...)`, backticks, `<(...)`) are judged as commands of their own, at any depth up to `ENV_MAX_DEPTH` (64). A deeper nest is refused. The substitutions in an unquoted heredoc body are judged (`env_heredoc_refusal`). A quoted heredoc body is text.
 - A heredoc body is read as shell once any header of the command names a shell or an interpreter, or writes a file that a later segment runs (`strip_heredoc_bodies`). Then each body is read on its own. A body drops only when each heredoc on its header line feeds a data sink at command position (`_DATA_SINKS`: `cat`, `tee`, also behind `sudo` or `env`), piped nowhere, and the header names no shell or interpreter and writes no file that runs (`_feeds_data`). Every other body stays, so a stdin runner (`ssh host`, `make -f -`, `vim -es`) keeps its body. In a quoted python, node, perl or ruby body, a `$(...)` or a backtick in a string is text, and its shell spots are judged (`script_spots`). The frozen-path rule reads bodies the same way, and drops a python, node, perl or ruby body too, since it reads that body at its shell spots.
 
@@ -19,7 +19,7 @@ Write form. In `judge`, a write tool call (Write, Edit, MultiEdit or NotebookEdi
 
 Read form. The guard does not judge Read. It returns early for Read and Grep. The settings deny list refuses a Read call on a name that starts with `.env`, at any depth. It refuses an Edit call on the same names. Its `!` carve-outs keep `.env.example` readable and editable. That reading of the `!` carve-outs comes from Claude Code's permission docs. It is not measured.
 
-The printed refusal names no file. It names the shape of the access (`ENV_REDIRECT_REASON`, `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`) and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
+The printed refusal names no file. It names the shape of the access (`ENV_REDIRECT_REASON`, `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_INLINE_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`) and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
 
 Known false alarms: debt `env-file-rule-false-alarms` (the env-file false-alarm debt). The guard refuses `ag -f` and `ack -f`, where `-f` is a boolean flag, `grep -r --exclude=.env`, and `rg -t py .env`. All four are safe. None reads a file's contents.
 
