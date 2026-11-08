@@ -104,7 +104,8 @@ a turn end in these cases:
     newest commit on origin/<record branch> that touches the waiting copy folder (waiting_copy), unless a later
     shell run (Bash or PowerShell) of export_page.py ended with the line `same`, or with `<page id>: same`
     under --all. No commit on the folder at all counts as older. This session is the writer when the newest
-    meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
+    meta/page get of the repo's waiting page (a get of any other page counts for nothing) names the hook's
+    session id or the id the remote env names (override.remote_session_id). A
     writer named there decides alone. Only when none is named does an interpreter run of export_page.py
     (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
     writer cannot be told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
@@ -1241,6 +1242,7 @@ def export_check(cwd, transcript_path, session_id):
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
         return None, None  # nothing is read from the repo before a write is found
+    writer_known = False
     try:
         root = Homes(cwd)._cwd_root()
         if root is None:
@@ -1250,6 +1252,7 @@ def export_check(cwd, transcript_path, session_id):
             is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
         if not is_writer:
             return None, None  # receipts and answers are not this session's to export
+        writer_known = True
         is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes}}
         wrote = [w[0] for w in writes if is_page[w[2]]]
         if not wrote:
@@ -1262,6 +1265,8 @@ def export_check(cwd, transcript_path, session_id):
         run = ruling_home._run_git(root, ["log", "-1", "--format=%ct", "refs/remotes/origin/" + branch,
                                           "--", folder + "/"])
     except (layout.LayoutError, ruling_home._GitFailure) as e:
+        if not writer_known and writer_is(records, session_id) is False:
+            return None, None  # the layout failed before the writer test: a transcript that names another writer owes no note
         return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
     out = run.stdout.strip()
     if run.returncode != 0 or (out and not out.isdigit()):
