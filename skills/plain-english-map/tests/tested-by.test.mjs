@@ -880,8 +880,8 @@ export const page = path.resolve(path.dirname(__dirname), '/home.ts');
 // does, the file's name being one segment, so its first `..` reaches the file's folder (T11j, T11ah). A Python join from `__file__` keeps `..`
 // as written, so it is a place only when an outer normpath, abspath or realpath wraps it (T11ab, T11ag, T11ak); the bare join names nothing
 // (T11aa, T11af, T11aj). A negative index is no known place (T11ad).
-// Each allow case (T11g to T11i, T11k, T11o to T11s, T11y, T11an, T11z, T11aa, T11ad, T11ae, T11af, T11aj) is the twin of a should-name form, with the anchor unbound,
-// shadowed, rebound, a temp folder, a foreign function, a function-local name, outside the repository, on another URL base (T11y), a `file:` scheme (T11z),
+// Each allow case (T11g to T11i, T11k, T11o to T11s, T11y, T11an, T11ao, T11z, T11aa, T11ad, T11ae, T11af, T11aj) is the twin of a should-name form, with the anchor unbound,
+// shadowed, rebound, a temp folder, a foreign function, a function-local name, outside the repository, on another URL base (T11y), a `URL` the file shadows (T11ao), a `file:` scheme (T11z),
 // a bare join or chain from `__file__` with no outer wrap (T11aa, T11af, T11aj), a negative index (T11ad), or a parameter under normpath (T11ae).
 // The forms of these cases are known places in decision `map-tested-by-line`.
 
