@@ -23309,6 +23309,27 @@ spo_register("scratchpad-owner: cost 1 a call outside any scratchpad makes no he
              "gettempdir call", spo_cost_case)
 
 
+def spo_stdin_case():
+    """Agent A writes data.json. Agent B runs python3 with `-`, so the program is the heredoc on stdin, and passes
+    data.json as an argument: allowed. data.json is read as data, never run."""
+    fx = spo_fixture("stdin")
+    data = os.path.join(fx["scratch"], "data.json")
+    problems = [spo_scope(fx, "stdin", data)] + spo_wrote(fx, "stdin", SPO_WRITER, data, '{"a": 1}\n')
+    got, reason = spo_run(fx, SPO_OTHER, "python3 - %s <<'PY'\nprint(1)\nPY" % data)
+    problems.append(spo_allowed("stdin, agent B's python3 - with agent A's data.json as an argument", got, reason))
+    return spo_result(problems, "a file passed to python3 - as an argument is data, and the run is allowed")
+
+
+def spo_dashdash_1():
+    return spo_run_case("dash1", "dashdash 1", "x.py", lambda fx, p: "python3 -- %s" % p,
+                        "agent B's python3 -- run of agent A's script is asked")
+
+
+spo_register("scratchpad-owner: stdin 1 agent B's python3 - with a heredoc and agent A's data.json as an "
+             "argument: allowed", spo_stdin_case)
+spo_register("scratchpad-owner: dashdash 1 agent B's python3 -- run of agent A's script: asked", spo_dashdash_1)
+
+
 # =========================================================================== mask_script lexemes
 FAMILY = "mask-script"
 
