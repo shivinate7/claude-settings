@@ -208,9 +208,11 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
     return found
 
 
-def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT):
-    """{debt path at base: reason} for each close whose slug the PR body cites and whose judgment gives no Finding (the silent-undo
-    check excuses that path's delete). An uncited close is not read, so no test runs for it. Raises Unknown."""
+def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None):
+    """{debt path at base: reason} for each deleted debt whose slug the PR body cites and whose judgment gives no Finding (the
+    silent-undo check excuses that path's delete). A rename out of the folder is no delete: the file's lines live on at the new
+    path. paths, when given, limits the judged closes: an unflagged or uncited close is never judged, so its run is never read.
+    Raises Unknown."""
     cited = cites(pr_body)
     got = closes(wt, base_ref, head) if cited else None
     if not got:
@@ -219,7 +221,7 @@ def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False
     res = {}
     for old, new in closed:
         slug = os.path.basename(old)[:-3]
-        if slug in cited and judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout) is None:
+        if new == old and slug in cited and (paths is None or old in paths) and judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout) is None:
             res[old] = "%s: %s -- %s, the debt-close check holds" % (CITE, slug, cited[slug])
     return res
 

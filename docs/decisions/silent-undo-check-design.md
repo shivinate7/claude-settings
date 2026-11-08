@@ -21,8 +21,10 @@ reason. No switch turns the check off.
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
 that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
-another file. With no run reader, or a read that fails, the finding stays. Cost: a Retire test may run again
-inside this scan, only when a cited debt delete is a finding.
+another file, and only a whole delete, not a rename out of `docs/debts/`. Merge tool only: the CLI and CI pass
+no PR body, as with a `Drops-lines` line in the body; CI's way out is a `Drops-lines` commit trailer. With no
+run reader, or a read that fails, the finding stays. Cost: Retire tests run again only for a cited debt delete
+that is a finding.
 
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
   Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.

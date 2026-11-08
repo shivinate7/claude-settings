@@ -29,7 +29,9 @@ path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line 
 excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
-run reader (run_state); with none, or a read that fails, the finding stays. Each use prints
+run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
+the debts folder. Only the merge tool passes a PR body and a run reader: the CLI and CI read no body, as with a Drops-lines line
+in the body, and CI's way out is a Drops-lines commit trailer. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
@@ -599,12 +601,12 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
 def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
     """{debt path: reason} for deleted debts among `paths` whose `Retire-run` cite the debt-close check accepts (decision
     debt-close-runs-retire). Fails closed: no run reader, an unreadable debt read, or a missing check excuses nothing."""
-    if run_state is None or not re.search(r"^Retire-run:", last_paragraph(pr_body), re.I | re.M | re.ASCII):
+    if run_state is None:
         return {}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import check_debt_retire  # lazy: it imports this module at its top
-        got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True)
+        got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths)
     except Exception:  # ImportError, its Unknown, any failed read: a finding stays
         return {}
     return {p: why for p, why in got.items() if p in paths}

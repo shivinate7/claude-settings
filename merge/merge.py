@@ -273,7 +273,8 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
-    # and the default refs it reads, so the second call reuses the first when all of them are unchanged.
+    # the default refs it reads, and the cited runs (through the PR head). Reuse is safe: a green run stays green, and debt_check reads
+    # each cited run again after the scan. So the second call reuses the first when all of the key is unchanged.
     try:
         key = (wt, *(git(wt, "rev-parse", "--verify", "-q", r + "^{commit}")[1].strip() for r in ("HEAD", base_ref, "origin/HEAD", "origin/main", "main")), pr_body, retire_head)
         if not (key[1] and key[2]) or key not in UNDO_MEMO:  # a head or base that does not resolve is never reused; a hit skips the scan and its beat
