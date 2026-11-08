@@ -59,8 +59,6 @@
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py)
-- fixcheck-marker-comment-line: the comment says "first line" where the FIX_CHECK_MARKER row reads the first non-blank line (hooks/shared_names.py:35, PR #2296 round 3)
-- fixcheck-test-header-cite: block B4's header cites item 351 a, not 444 a, and narrates build history (hooks/test_guard.py, PR #2296 round 3)
 - guard-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (guard wrappers)
 - guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
