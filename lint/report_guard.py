@@ -138,7 +138,7 @@ checkout the global rules file names (the copied cloud layout); a tool it cannot
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. The comment's last edit time and the cutover (merge/merge.py review_stamp_since, for the PR's base) go to parse_review, so an unstamped
 record from before the cutover reads done, as merge --reviewed reads it; with no cwd the Stamp line is required. Cost: 2 gh reads and one git log
-(review_stamp_since, cached per base in the process) per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
+(review_stamp_since, cached per (root, base) in the process: one per distinct base per Stop), plus the guard_merge and merge module imports; no file,
 process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
