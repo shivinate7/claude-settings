@@ -2767,8 +2767,9 @@ class CutLanes(Env):
         self.assertNotIn("stray", out)
 
     def test_deleteBranch_false_keeps_every_lane_and_the_round_check_reads_no_open_prs(self):
-        # The round-3 check reads no open pull request (decision pr-review-record, the cost). The deletion's read does not run here either:
-        # cut_lanes runs only with deleteBranch on, so no open-PR read runs at all.
+        # With deleteBranch off, every lane branch stays and the run makes no open-PR read. The round-3 check reads the open PRs
+        # only to name a lane tip that has no record, and default records give each tip one (decision pr-review-record, the cost).
+        # cut_lanes, the only deletion read, runs only with deleteBranch on.
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
         rc, out = self.go()
