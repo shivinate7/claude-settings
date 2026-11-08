@@ -2919,6 +2919,16 @@ class PrBase(unittest.TestCase):
         self.assertTrue(notes, "with no base named, no line says the base is unknown and names origin/main: %r" % text)
         self.assertEqual(rc, 0, "the default run on origin/main exited %d on a lane origin/main holds" % rc)
 
+    def test_base_named_main_is_read_as_the_base_not_passed_over_as_merged(self):
+        self.r.sh("checkout", "-q", "-b", "lane")
+        self.r.commit("lane edits other", other_txt="other v2\n")
+        self.r.sh("config", "branch.lane.gh-merge-base", "main")
+        rc, text = self.run_default()
+        self.assertIn("compared against the PR base origin/main", text, "a base named main was not read as the PR base: no note says so: %r" % text)
+        self.assertNotIn("unknown", text.lower(), "a base named main fell through to the unknown-base note: %r" % text)
+        self.assertNotIn("already merged", text, "a base named main was passed over as merged into main: %r" % text)
+        self.assertEqual(rc, 0, "a clean lane read against a base named main exited %d" % rc)
+
 
 if __name__ == "__main__":
     unittest.main()
