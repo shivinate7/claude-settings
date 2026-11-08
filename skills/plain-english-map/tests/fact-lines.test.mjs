@@ -793,3 +793,40 @@ test('V8. cost: one map-check run starts git ls-files no more often than origin/
   const n = starts(shim.log);
   assert.ok(n <= MAIN_LS_FILES_STARTS, `git ls-files must start at most ${MAIN_LS_FILES_STARTS} times, as on origin/main, and it started ${n} times`);
 });
+
+// ---- T11. A uses fact through a tsconfig path alias (decision map-facts-are-checked).
+// A uses fact reads two things: that the file imports the cited file, and that it uses the symbol through that import. Both must hold through the alias.
+
+test('T11. a uses fact through an alias, import * as r from @/src/import-reader.mjs, with a matching tsconfig, reads as a use: MAP9 passes', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addFile(dir, 'tsconfig.json', '{\n  "compilerOptions": {\n    "baseUrl": ".",\n    "paths": {"@/*": ["./*"]}\n  }\n}\n');
+  addFile(dir, 'src/import-reader.mjs', 'export const code = 1;\n');
+  addFile(dir, 'src/reader.mjs', "import * as r from '@/src/import-reader.mjs';\nexport const pick = () => r.code;\n");
+  insertCore(dir, READER_LINES);
+  // The scope first: the tsconfig is on disk, and the reader imports the cited file by the alias and nothing else.
+  assert.ok(existsSync(join(dir, 'tsconfig.json')), 'tsconfig.json must exist');
+  assert.ok(read(dir, 'src/reader.mjs').includes("from '@/src/import-reader.mjs'"), "src/reader.mjs must import by '@/");
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected(), `the alias import must load the reader, and its use of code must count, so every check passes\n${out1500(r)}`);
+});
+
+// T11b. The same alias import with a host tsconfig that cannot be read: the import may be a link, so the read is unknown and never a pass.
+const TRUNCATED_TSCONFIG = '{\n  "compilerOptions": {\n    "baseUrl": ".",\n    "paths": {"@/*": ["./*"]}\n';
+
+test('T11b. a uses fact through an alias, with a truncated tsconfig: the alias read is unknown, so MAP9 FAILs and names tsconfig.json, and the fact is never read as a pass', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addFile(dir, 'tsconfig.json', TRUNCATED_TSCONFIG);
+  addFile(dir, 'src/import-reader.mjs', 'export const code = 1;\n');
+  addFile(dir, 'src/reader.mjs', "import * as r from '@/src/import-reader.mjs';\nexport const pick = () => r.code;\n");
+  insertCore(dir, READER_LINES);
+  // The scope first: the tsconfig is on disk and does not parse, and the reader reaches the cited file by the alias and by no relative import.
+  assert.ok(existsSync(join(dir, 'tsconfig.json')), 'tsconfig.json must exist');
+  assert.throws(() => JSON.parse(read(dir, 'tsconfig.json')), SyntaxError, 'the tsconfig must not parse as JSON');
+  assert.ok(read(dir, 'src/reader.mjs').includes("from '@/src/import-reader.mjs'"), "src/reader.mjs must import by '@/");
+  assert.ok(!read(dir, 'src/reader.mjs').includes("from './"), 'src/reader.mjs must hold no relative import');
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail, on the unknown read\n${out1500(r)}`);
+  assert.match(mapLine(r.out), /could not read 1 JavaScript fact: tsconfig\.json cannot be parsed/, `MAP9 must say the read is unknown and name tsconfig.json, not a missing import\n${out1500(r)}`);
+});

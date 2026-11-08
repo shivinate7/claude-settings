@@ -1419,8 +1419,10 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
           // One hop: a test loads the file when it imports one index file that imports it.
           const hops = r.value.imports.filter((i) => read1.has(i) && (INDEX_PY_RE.test(i) || INDEX_JS_RE.test(i)));
           if (hops.some((i) => read1.get(i).ok && read1.get(i).value.imports.includes(file))) continue;
-          const lost = hops.find((i) => !read1.get(i).ok);
-          if (lost) unknown.set(lost, read1.get(lost).reason);
+          // Unread tsconfig aliases (`blind`) leave a package import unresolved, so a link may hide in the test or in an index file.
+          if (r.value.blind) { unknown.set(test, r.value.blind); continue; }
+          const lost = hops.find((i) => !read1.get(i).ok || read1.get(i).value.blind);
+          if (lost) unknown.set(lost, read1.get(lost).ok ? read1.get(lost).value.blind : read1.get(lost).reason);
           problems.push(`${page}:${at} ${file} lists the test ${test}, and it does not load the file: it neither imports it, nor imports an index file that imports it, nor names its path in a string${lost ? ` (an unknown read of ${lost} may hide the link)` : ''}`);
         }
         // An unknown read is never a pass: the test was not judged.
