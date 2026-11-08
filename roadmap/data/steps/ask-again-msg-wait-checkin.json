@@ -1,10 +1,10 @@
 {
   "title": "Ask again, with better options: may a session that waits on a reply set one timed check-in?",
   "phase": "later",
-  "status": "todo",
+  "status": "done",
   "order": 91,
   "owner": "triage",
   "why": "Item 290, deferred. Owner 20:07 CST Nov 5: \"are these really the two options i should consider?\" Lane timer-rules-conflict.",
-  "note": "Re-ask with new options once the session mailbox (#1371) lands, since replies may then wake a session without a timer. Home record: docs/decisions/session-messages.md.",
-  "updatedAt": "2026-11-07T00:34:00Z"
+  "note": "Re-ask with new options once the session mailbox (#1371) lands, since replies may then wake a session without a timer. Home record: docs/decisions/session-messages.md. Fix: none — answered on main (lane session-messaging-plan, 11:40 CST Nov 8; read by triage 11:41 CST): rule outcomes-mechanize-rules in CLAUDE.md says a one-time check-in set to wait for one named outside event, such as a reply, is not tracking, and the next waits for a new named event; docs/decisions/ci-wait-reads-run-status.md ties it to the owner's item 290 note (\"shouldnt the rules first not conflict?\"). The lane writes it into decision session-messages as Q4 after #1371 merges. No page item.",
+  "updatedAt": "2026-11-08T11:40:00-06:00"
 }
