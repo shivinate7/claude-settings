@@ -15755,7 +15755,7 @@ mrf_case("a gh error on comment 222 is allowed, and the output names 222", "allo
          context=True)
 mrf_case("an ls-remote that fails is allowed, and the output names PR #7", "allow", "PR #7 has the fix.",
          cwd=MRF_BADREMOTE, carries=("#7",), context=True)
-# Round 2: the forms a sha, a pull request and a commit link take in running text.
+# The forms a sha, a pull request and a commit link take in running text, each judged by the ref it names.
 mrf_case("a made-up sha after Head, on a branch name, is refused", "deny",
          "Head 8c1f0e2a7 on lane/env-file-scope", carries=("8c1f0e2a7",))
 mrf_case("a made-up sha after Rebased on origin/main at is refused", "deny",
@@ -15862,6 +15862,16 @@ def mrf_six_links_case():
 LOG_CHECKS_EXTRA.append(("message-ref-missing: six comment links make five gh calls, and the sixth is named unchecked",
                          mrf_six_links_case))
 FIXTURELESS_CHECKS.add(mrf_six_links_case)
+
+# Pins of built behaviour, one per guard line that decides a ref's repo or its list. Each goes red under its mutant.
+mrf_case("o/r: PR #8 names this repo, so PR 8 is judged and refused", "deny",
+         "o/r: PR #8 has the fix.", carries=("#8",))
+mrf_case("PR #7, 12 files: a singular PR reads one number, so 12 is not judged", "allow",
+         "PR #7, 12 files are open.")
+mrf_case("origin/main: PR #8 names no other repo, so PR 8 is judged and refused", "deny",
+         "origin/main: PR #8 has the fix.", carries=("#8",))
+mrf_case("hooks/guard.py:100 PR #8 names no repo, so PR 8 is judged and refused", "deny",
+         "hooks/guard.py:100 PR #8 has the fix.", carries=("#8",))
 
 
 # =========================================================================== failing open
