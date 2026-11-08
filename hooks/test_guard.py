@@ -10567,8 +10567,10 @@ mcp_post("review-record: a wrong head tail is refused, MCP update_issue_comment"
          rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
 mcp_post("review-record: a stale record is refused, MCP update_issue_comment", review_record(head=REVIEW_OLD), "deny",
          rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_COMMENT)
-mcp_post("review-record: a record for another pull request is refused, MCP update_issue_comment", review_record(n=REVIEW_PR + 1),
-         "deny", rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
+# An update is refused on its edit before the pull request check, so the pull request check is pinned on a post: the record names
+# pull request 13, and the post is on 12.
+bash_post("review-record: a record for another pull request is refused, gh issue comment --body",
+          "%s --body '%s'" % (ISSUE_CMD, review_record(n=REVIEW_PR + 1)), "deny", rule=REVIEW_RULE)
 mcp_post("review-record: a marker with no record is refused, MCP update_issue_comment", REVIEW_MARKER_TEXT, "deny",
          rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
 mcp_post("review-record: a record with a round skipped is refused, MCP update_issue_comment", REVIEW_SKIPPED_ROUND, "deny",
@@ -10636,6 +10638,23 @@ for _label, _command in (("gh api -X PATCH -f body=", "%s -f 'body=%s'" % (API_E
              rule=REVIEW_RULE, carries=WITHDRAW_REMEDY)
 old_mcp("review-record: a withdrawal note over a stamped record is refused, MCP update_issue_comment", WITHDRAW, "deny",
         rule=REVIEW_RULE, carries=WITHDRAW_REMEDY)
+
+# A VARIABLE ID OR NUMBER. A comment id or an issue number held in a shell variable is still a comment or an issue, so the edit and
+# the post routes judge it. A hand-typed record under a number the guard cannot read is refused: its pull request cannot be checked.
+for _label, _command in (
+        ("gh api -X PATCH, $ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
+        ("gh api -X PATCH, ${ID}", "gh api -X PATCH repos/y/x/issues/comments/${ID} -f 'body=%s'" % review_record()),
+        ("gh api -X PATCH, quoted \"$ID\"", "gh api -X PATCH \"repos/y/x/issues/comments/$ID\" -f 'body=%s'" % review_record()),
+        ("gh api --method PATCH, $ID", "gh api --method PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
+        ("gh api post, issues/$N/comments", "gh api repos/y/x/issues/$N/comments -f 'body=%s'" % review_record())):
+    bash_post("review-record: a hand-typed record under a variable id or number is refused, %s" % _label, _command, "deny",
+              rule=REVIEW_RULE)
+
+# `-e` is gh's --editor, not --edit-last. A post with -e is a post: judged on its pull request, with one head read, and allowed.
+REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh pr comment -e --body",
+                         review_reads("Bash", {"command": "%s -e --body '%s'" % (PR_CMD, review_record())}, "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh issue comment -e --body",
+                         review_reads("Bash", {"command": "%s -e --body '%s'" % (ISSUE_CMD, review_record())}, "allow", 1)))
 
 
 # =========================================================================== 5g. archive of a lane
