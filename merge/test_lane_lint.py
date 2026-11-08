@@ -821,6 +821,25 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
 
+    @contextlib.contextmanager
+    def stalled_other_job_run(self):
+        """Each ci-job run of a picked suite in OTHER_JOB meets a stalled run: the fake raises subprocess.TimeoutExpired at once, at the
+        bound the run was given, so nothing waits. A run given no bound returns a failed exit instead, so a missing bound fails the case
+        as its assert. The checks lint runs as it is. -> {"other": the bound of OTHER_JOB's run, "checks": the bound of the checks lint}"""
+        bounds, real = {}, merge.sh
+
+        def sh(args, *rest, **kwargs):  # each ci-job run ends at once, at the bound it was given: a stall with no wait (stalled_unshallow_fetch)
+            if self.stub in args:
+                bounds["other" if OTHER_JOB in args else "checks"] = kwargs.get("timeout")
+                if OTHER_JOB in args:
+                    if kwargs.get("timeout") is None:
+                        return 124, "no bound on the picked suite's run"
+                    raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return real(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh):
+            yield bounds
+
     def other_jobs_head(self, runs_on=None):
         """The lane's head with the workflow of the other jobs committed on feat. RecordsEnv.on is the one home of that push; it
         reads only self.other and sh, so this case calls it on itself. `runs_on` (the lines of the key, as the workflow writes
@@ -856,18 +875,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         head = self.other_jobs_head()
         self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)},
                         verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
-        bounds, real = {}, merge.sh
-
-        def sh(args, *rest, **kwargs):  # each ci-job run ends at once, at the bound it was given: a stall with no wait (stalled_unshallow_fetch)
-            if self.stub in args:
-                bounds["other" if OTHER_JOB in args else "checks"] = kwargs.get("timeout")
-                if OTHER_JOB in args:
-                    if kwargs.get("timeout") is None:
-                        return 124, "no bound on the picked suite's run"
-                    raise subprocess.TimeoutExpired(args, kwargs["timeout"])
-            return real(args, *rest, **kwargs)
-
-        with unittest.mock.patch.object(merge, "sh", sh):
+        with self.stalled_other_job_run() as bounds:
             rc, out = self.run_lane("--lane-lint", head)
         self.assertIn("other", bounds, "the picked suite of %s never ran as a ci-job run of its own: %s" % (OTHER_JOB, out))
         self.assertIsNotNone(bounds["other"], "the picked suite's run has no time limit, so a stall never ends: " + out)
