@@ -4,6 +4,11 @@
   "home": "pr-backlog-clear",
   "id": "hold-covers-owner-asks",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T04:24:42.947Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 387,
   "options": [
     {
@@ -23,8 +28,10 @@
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "item 384 (lane-inflow-hold); PR #1768",
+  "replied": "2026-11-08T04:26:00Z",
+  "reply": "Routed: your own asks still start new lanes during the hold. Home: the note on step pr-backlog-clear, and the coordinator's record lane-inflow-hold on PR #1768. Blank roadmap pages and child-question-checks-home can now start. Triage, 22:26 CST.",
   "short": "Your asks during the lane hold",
-  "status": "open",
+  "status": "closed",
   "title": "Do your own asks still start new lanes during the hold?",
   "why": "The coordinator recommends a: your asks are few, so they add little to the queue."
 }
