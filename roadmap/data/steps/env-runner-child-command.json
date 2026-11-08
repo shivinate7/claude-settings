@@ -1,0 +1,11 @@
+{
+  "title": "The env guard refuses an env-file runner that prints the file through a child command",
+  "phase": "next",
+  "status": "todo",
+  "order": 60,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "`uv run --env-file`, `docker run --env-file \u2026 env` and `npm exec -c env` print the env file through a child command, and hooks/guard_env.py lets them pass.",
+  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step.",
+  "updatedAt": "2026-11-07T18:31:00-06:00"
+}
