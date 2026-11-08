@@ -160,13 +160,14 @@ function isBlank(buf) {
 }
 
 // Runs in the page: for the whole stitch, sticky elements sit in the flow (a sticky one would otherwise jump per tile), as
-// position:relative with no offsets, not static, so an absolute child keeps the element as its containing block. The root does
+// position:relative with no offsets, not static, so an absolute child keeps the element as its containing block. A sticky element
+// always makes a stacking context and a relative one with z-index auto does not, so that gets z-index 0. The root does
 // not snap (a snap point would move a tile off its scroll offset). on false restores the inline values, each with its priority.
 function settleForStitch(on) {
   const root = document.documentElement;
   if (on) { if (root.__shootSnap === undefined) root.__shootSnap = root.style.scrollSnapType; root.style.scrollSnapType = "none"; }
   else if (root.__shootSnap !== undefined) { root.style.scrollSnapType = root.__shootSnap; delete root.__shootSnap; }
-  const names = ["position", "top", "right", "bottom", "left"];
+  const names = ["position", "top", "right", "bottom", "left", "z-index"];
   const set = (el, prop, value) => {
     if (el.__shootInline === undefined) el.__shootInline = {};
     if (!(prop in el.__shootInline)) el.__shootInline[prop] = [el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)];
@@ -175,7 +176,9 @@ function settleForStitch(on) {
   for (const el of document.querySelectorAll("*")) {
     if (on) {
       if (getComputedStyle(el).position !== "sticky") continue;
+      const auto = getComputedStyle(el).zIndex === "auto";
       set(el, "position", "relative");
+      if (auto) set(el, "z-index", "0");
       for (const side of ["top", "right", "bottom", "left"]) set(el, side, "auto");
     } else if (el.__shootInline !== undefined) {
       for (const prop of names) if (prop in el.__shootInline) el.style.setProperty(prop, ...el.__shootInline[prop]);
@@ -185,11 +188,12 @@ function settleForStitch(on) {
 }
 
 // Runs in the page: hide (or restore) each fixed element, each fixed ::before or ::after, and the images of each fixed background
-// (the colour stays), so a tile after the first repeats none of them. A pseudo-element has no inline style, so its host carries a
-// mark and one style element hides the marked ones. An element that mixes fixed and scroll layers loses its scroll layers too.
+// (the colour stays), on the element or on a pseudo-element, so a tile after the first repeats none of them. A pseudo-element has
+// no inline style, so its host carries a mark and one constructed stylesheet hides the marked ones. A constructed sheet is CSSOM,
+// so a page's style-src policy does not block it, as it would a style element. An element that mixes fixed and scroll layers
+// loses its scroll layers too.
 function hideFixed(on) {
   const sides = ["before", "after"];
-  const styleId = "shoot-fixed-pseudo-style";
   for (const el of document.querySelectorAll("*")) {
     if (on) {
       if (getComputedStyle(el).position === "fixed") {
@@ -200,20 +204,26 @@ function hideFixed(on) {
         if (el.__shootBg === undefined) el.__shootBg = [el.style.getPropertyValue("background-image"), el.style.getPropertyPriority("background-image")];
         el.style.setProperty("background-image", "none", "important");
       }
-      for (const s of sides) if (getComputedStyle(el, "::" + s).position === "fixed") el.setAttribute("data-shoot-fixed-" + s, "");
+      for (const s of sides) {
+        const cs = getComputedStyle(el, "::" + s);
+        if (cs.position === "fixed") el.setAttribute("data-shoot-fixed-" + s, "");
+        if (cs.backgroundAttachment.includes("fixed")) el.setAttribute("data-shoot-fixed-bg-" + s, "");
+      }
     } else {
       if (el.__shootVis !== undefined) { el.style.visibility = el.__shootVis; delete el.__shootVis; }
       if (el.__shootBg !== undefined) { el.style.setProperty("background-image", ...el.__shootBg); delete el.__shootBg; }
-      for (const s of sides) el.removeAttribute("data-shoot-fixed-" + s);
+      for (const s of sides) { el.removeAttribute("data-shoot-fixed-" + s); el.removeAttribute("data-shoot-fixed-bg-" + s); }
     }
   }
-  const old = document.getElementById(styleId);
-  if (old) old.remove();
+  if (document.__shootSheet) {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== document.__shootSheet);
+    delete document.__shootSheet;
+  }
   if (on) {
-    const style = document.createElement("style");
-    style.id = styleId;
-    style.textContent = sides.map((s) => `[data-shoot-fixed-${s}]::${s}{visibility:hidden!important}`).join("");
-    document.head.appendChild(style);
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(sides.map((s) => `[data-shoot-fixed-${s}]::${s}{visibility:hidden!important}[data-shoot-fixed-bg-${s}]::${s}{background-image:none!important}`).join(""));
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    document.__shootSheet = sheet;
   }
 }
 
