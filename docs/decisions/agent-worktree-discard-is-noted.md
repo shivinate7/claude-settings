@@ -71,5 +71,19 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
 - An untracked entry that is a symlink does not count as work when the guard judges a remove. Removing
   a link deletes only the link.
 
+## Path reset and work-tree discards
+
+Verdicts by tree: shared | hand-made | agent-owned. Pinned by the path reset ruling block in
+`hooks/test_guard.py` (title: THE PATH RESET AND DISCARD RULING).
+
+- `git reset [-q] [HEAD] [--] <path>`, no discard flag: allow | allow | allow. It only unstages and
+  keeps the work tree. In the shared checkout it can drop another agent's staged choice, though not
+  its content. That case is under review (coordinator, 2026-11-08 07:50 CST).
+- `git reset --hard|--merge|--keep …`: deny | ask | allow, noted.
+- `git checkout -- .`, `git checkout -q -- .` and `git restore .`: deny | ask | allow, noted. The
+  agent-owned allow is the owner ruling of 2026-10-03, re-affirmed 2026-10-17 11:40 CDT. Second
+  sighting: lane `findings-ride-in-lane`, 2026-11-08. A builder discarded its own edit in its own
+  worktree. Nothing was lost, and the ruling allows it.
+
 Kind: process
 Home: hooks/guard_shared_tree.py
