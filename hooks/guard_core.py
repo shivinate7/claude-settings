@@ -8,6 +8,7 @@ git_reads.py, shared with the janitor: a test or the janitor that patches one of
 there, on the one object that every caller reads.
 """
 import ast
+import copy
 import errno
 import functools
 import io
@@ -1914,10 +1915,17 @@ CODE_READ_PAIR_CALLS = frozenset({"cmp", "spec_from_file_location"})
 # script that names it. A list that starts with another program (`cp`, `rm`, `cat`) is judged as before.
 PY_RUN_CALLS = frozenset({"run", "call", "check_call", "check_output", "Popen"})
 PY_RUN_PROGRAMS = re.compile(r"^(?:python[\d.]*|node|nodejs|bun|deno|bash|sh)(?:\.exe)?$")
-# Programs that only read the files they are given (no write flag, no write-out mode). A subprocess list
-# that starts with one reads the paths after it. Frozen reading only.
+# Programs that read the files they are given. A subprocess list that starts with one reads the paths after
+# it, unless a write flag is in the list (`PY_READ_ONLY_WRITE_FLAGS`: `less -o` copies its input to a file,
+# `file -C` writes a magic database). Frozen reading only.
 PY_READ_ONLY_PROGRAMS = frozenset({"cat", "diff", "cmp", "head", "tail", "less", "more", "wc", "ls", "stat",
                                    "file", "grep", "md5sum", "sha1sum", "sha256sum"})
+# The write flags of a program in `PY_READ_ONLY_PROGRAMS`: short flag letters (they may be bundled, `-io`) and
+# long flag names (`--log-file=x`). A call that holds one is not a read.
+PY_READ_ONLY_WRITE_FLAGS = {"less": ("oO", ("--log-file", "--LOG-FILE")), "file": ("C", ("--compile",))}
+# A shell run with `-c` (`sh -c "cat x > p"`): the next argument is a shell script. Frozen reading only.
+PY_SHELL_PROGRAMS = re.compile(r"^(?:bash|sh)(?:\.exe)?$")
+
 # `py_compile.compile(src)` reads src. It writes a `.pyc` of that same source into the `__pycache__` beside
 # it: under a frozen folder that cache is frozen too, but it holds only the compiled source the file
 # already has. The cache path (`cfile`, `dfile`) is a later argument, judged as before. Frozen reading only.
@@ -2006,15 +2014,42 @@ def _compile_read_call(call) -> bool:
     return isinstance(owner, ast.Name) and PY_COMPILE_READ_CALLS.get(_call_name(call)) == owner.id
 
 
-def _runs_program(call) -> bool:
-    """True for a subprocess call whose argument list starts with an interpreter, a shell or a read-only
-    program (`PY_READ_ONLY_PROGRAMS`): a path in that list is the script it runs or an argument it reads."""
+def _run_list(call):
+    """(program name, the constant strings after it) of a subprocess call whose first argument is a list
+    that starts with a string, else None."""
     first = call.args[0] if call.args else None
     head = first.elts[0] if isinstance(first, (ast.List, ast.Tuple)) and first.elts else None
     if not (isinstance(head, ast.Constant) and isinstance(head.value, str)):
+        return None
+    rest = [arg.value for arg in first.elts[1:] if isinstance(arg, ast.Constant) and isinstance(arg.value, str)]
+    return os.path.basename(head.value), rest
+
+
+def _has_write_flag(program: str, words) -> bool:
+    letters, longs = PY_READ_ONLY_WRITE_FLAGS.get(program, ("", ()))
+    return any((word.startswith("--") and word.startswith(longs)) or (
+        word.startswith("-") and not word.startswith("--") and any(char in letters for char in word[1:]))
+        for word in words)
+
+
+def _runs_program(call) -> bool:
+    """True for a subprocess call whose argument list starts with an interpreter, a shell or a read-only
+    program (`PY_READ_ONLY_PROGRAMS`) that holds no write flag: a path in that list is the script it runs
+    or an argument it reads."""
+    spelled = _run_list(call)
+    if spelled is None:
         return False
-    program = os.path.basename(head.value)
-    return PY_RUN_PROGRAMS.match(program) is not None or program in PY_READ_ONLY_PROGRAMS
+    program, words = spelled
+    if PY_RUN_PROGRAMS.match(program) is not None:
+        return True
+    return program in PY_READ_ONLY_PROGRAMS and not _has_write_flag(program, words)
+
+
+def _shell_script_call(call) -> bool:
+    """True for a subprocess call that runs a shell with `-c`: `["sh", "-c", script]`."""
+    spelled = _run_list(call)
+    return spelled is not None and PY_SHELL_PROGRAMS.match(spelled[0]) is not None and any(
+        re.match(r"^-[A-Za-z]*c$", word) for word in spelled[1])
 
 
 def _open_mode(call, mode_at: int) -> str:
@@ -2062,13 +2097,22 @@ def _path_method_mode(call, parents, frozen=False) -> str:
     return "write" if method.attr in PY_WRITE_CALLS else "unknown"
 
 
-PY_MODE_RANK = ("text", "exists", "read", "unknown", "write")   # the riskiest use of a name wins
+PY_MODE_RANK = ("text", "exists", "read", "shell", "unknown", "write")   # the riskiest use of a name wins
 
 
-def _live_uses(assign, uses, bound):
-    """The uses of a name that read this binding: those after it and before the next binding of the
-    name (the first binding also takes the uses before it, as `_py_bound_value` does). A binding the
-    table does not hold keeps every use."""
+def _outer_loop(node, parents):
+    """The outermost `for` or `while` that holds `node` (not past a function), else None."""
+    loop = None
+    while node is not None and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        node = parents.get(node)
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            loop = node
+    return loop
+
+
+def _straight_uses(assign, uses, bound):
+    """The uses of a name after this binding and before the next binding of the name (the first binding
+    also takes the uses before it, as `_py_bound_value` does)."""
     ends = [end for end, _ in bound.get(_assign_target(assign).id, ())]
     mine = (assign.end_lineno, assign.end_col_offset)
     if mine not in ends:
@@ -2077,6 +2121,28 @@ def _live_uses(assign, uses, bound):
     first = ends[0] == mine
     return [use for use in uses if ((use.lineno, use.col_offset) >= mine or first)
             and (later is None or (use.lineno, use.col_offset) < later)]
+
+
+def _live_uses(assign, uses, bound, parents):
+    """The uses of a name that read this binding: those after it and before the next binding of the
+    name. A binding the table does not hold keeps every use. Inside a loop a use can run under any
+    binding the loop assigns, on a later pass, so the uses of every binding of the name in the loop,
+    and every use inside the loop, count for each of them."""
+    live = _straight_uses(assign, uses, bound)
+    loop = _outer_loop(assign, parents)
+    if loop is None:
+        return live
+    start, end = (loop.lineno, loop.col_offset), (loop.end_lineno, loop.end_col_offset)
+    pooled = {id(use): use for use in live}
+    for use in uses:
+        if start <= (use.lineno, use.col_offset) < end:
+            pooled[id(use)] = use
+    for _, value in bound.get(_assign_target(assign).id, ()):
+        other = parents.get(value)
+        if other is not None and other is not assign and start <= (other.lineno, other.col_offset) < end:
+            for use in _straight_uses(other, uses, bound):
+                pooled[id(use)] = use
+    return list(pooled.values())
 
 
 def _assign_target(assign):
@@ -2092,7 +2158,7 @@ def _bound_mode(assign, path_object, parents, names, seen, frozen, bound=None) -
     target = _assign_target(assign)
     uses = names.get(target.id) if isinstance(target, ast.Name) and names is not None else None
     if uses and frozen and bound is not None:
-        uses = _live_uses(assign, uses, bound)
+        uses = _live_uses(assign, uses, bound, parents)
     if not uses:
         return "unknown"
     modes = [_python_mode(use, parents, path_object, names, seen | {assign}, frozen, bound) for use in uses]
@@ -2145,6 +2211,8 @@ def _python_mode(node, parents, path_object=False, names=None, seen=frozenset(),
         return _path_method_mode(call, parents, frozen)
     if name in PY_TEXT_CALLS or (frozen and name in PY_PATH_STRING_CALLS):
         return "text"
+    if frozen and name in PY_RUN_CALLS and _shell_script_call(call):
+        return "shell"   # the script is read by the shell write scan (`_code_literal_hit`)
     if frozen and name in PY_RUN_CALLS and _runs_program(call):
         return "text"
     position = call.args.index(value) if direct and value in call.args else -1
@@ -2208,8 +2276,19 @@ def _py_join_parts(call):
 
 def _py_format_text(call, bound, depth) -> str:
     """`"{}/x/{0}/{name}".format(a, b, name=c)` with each hole read as its argument; `_` for a hole it
-    cannot tell."""
-    args = [_py_composed_text(arg, bound, depth) for arg in call.args]
+    cannot tell: a slot with no argument, a keyword the call does not name, and every positional slot at
+    or after a star argument that is not a list or tuple literal (a `*[a, b]` is spread)."""
+    args, unknown_from = [], None
+    for arg in call.args:
+        if isinstance(arg, ast.Starred):
+            if unknown_from is not None:
+                continue
+            if isinstance(arg.value, (ast.List, ast.Tuple)):
+                args.extend(_py_composed_text(item, bound, depth) for item in arg.value.elts)
+            else:
+                unknown_from = len(args)
+        elif unknown_from is None:
+            args.append(_py_composed_text(arg, bound, depth))
     named = {key.arg: _py_composed_text(key.value, bound, depth) for key in call.keywords if key.arg}
     auto = iter(range(len(args) + 1))
 
@@ -2218,7 +2297,10 @@ def _py_format_text(call, bound, depth) -> str:
             return match.group(0)[0]
         key = match.group(1)
         if key == "":
-            key = str(next(auto))
+            key = next(auto, None)
+            if key is None:
+                return "_"
+            key = str(key)
         if key.isdigit():
             return args[int(key)] if int(key) < len(args) else "_"
         return named.get(key, "_")
@@ -2318,9 +2400,20 @@ def _py_composed_paths(tree, parents, names, bound):
             continue   # a part of a longer chain: the chain is read whole
         path_object = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) or (
             isinstance(node, ast.Call) and (_call_name(node).endswith("Path") or _call_name(node) == "joinpath"))
-        text = _py_composed_text(node, bound)
-        if text != "_":
-            found.append((text, _python_mode(node, parents, path_object, names, frozen=True, bound=bound)))
+        texts = [_py_composed_text(node, bound)]
+        loop = _outer_loop(node, parents)
+        if loop is not None:
+            # On a later pass a name in the loop holds the value the loop last bound: read the path again
+            # with each name in it taken at the end of the loop.
+            later = copy.deepcopy(node)
+            for name in ast.walk(later):
+                if isinstance(name, ast.Name):
+                    name.lineno, name.col_offset = loop.end_lineno, loop.end_col_offset
+            texts.append(_py_composed_text(later, bound))
+        texts = [text for index, text in enumerate(texts) if text != "_" and text not in texts[:index]]
+        if texts:
+            mode = _python_mode(node, parents, path_object, names, frozen=True, bound=bound)
+            found.extend((text, mode) for text in texts)
     return found
 
 

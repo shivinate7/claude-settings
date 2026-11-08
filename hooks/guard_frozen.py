@@ -953,6 +953,11 @@ def _code_literal_hit(raw: str, cwd: str, predicate, modes) -> str:
             return ""   # node code nested past JS_DEPTH: the reader names no path
         for text, mode in literals:
             text = text.strip()
+            if mode == "shell":   # `sh -c <script>` from subprocess: the shell write scan reads the script
+                found = frozen_shell_hit(text, where)
+                if found:
+                    return found
+                continue
             if mode in modes and (predicate(text, where)
                                   or (mode == "write" and predicate(text + "/_", where))):
                 return text   # a write to a bare frozen folder (rmtree, copytree, copy into it) is a write of what is in it
