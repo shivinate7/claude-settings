@@ -5750,6 +5750,12 @@ sh("check-tail: merge --review-r, a prefix of --review-record, piped to head is 
    "check-tail", cwd=NOGIT)
 sh("check-tail: merge --l, an ambiguous prefix that argparse refuses, piped to tail is allowed",
    "merge --l 7 | tail -3", "allow", cwd=NOGIT)
+# argparse splits `--name=value` at the `=` before it matches a name, so the = form names the same option
+# as the bare form: `merge --lane=7` runs --lane-lint, and `merge --lane-lint=7` runs it by its exact name.
+sh("check-tail: merge --lane=7, a prefix of --lane-lint in the = form, piped to tail, then && commit, is refused",
+   "merge --lane=7 | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint=7, the exact option in the = form, piped to tail, then && commit, is refused",
+   "merge --lane-lint=7 | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
 # `uv run` runs a script operand with no interpreter word, so the script is the command word. The check
 # reads only an interpreter's operand, so these uv spellings must still be refused.
 sh("check-tail: uv run merge/merge.py --lane-lint piped to tail in the foreground is refused",
@@ -5946,6 +5952,50 @@ sh("check-tail: a lone apostrophe in quotes does not hide a lint pipe before a c
 sh("check-tail: a lint pipe after a multi-line quote, then && commit, is refused",
    'echo "one\ntwo"\npython3 lint/ste_lint.py docs/x.md | tail -3 && git commit -m x', "deny",
    "check-tail", cwd=NOGIT)
+
+# A `cd lint` lint run is judged against the lint/ folder of the checkout the call runs in, not against the
+# folder the guard was installed from. A copy install keeps its guard set under hooks/guard.d/<id>/, with no
+# lint/ beside it, so its lint folder reads nothing, and a lint script run from another repo is not seen.
+STREAM_COPY_ID = "20261108120000424"  # the id a copy install stamps: its time and its process id
+STREAM_COPY = os.path.join(ROOT, "streamcopy")  # hooks/guard.py beside hooks/guard.d/<id>/, as install.sh lays a copy
+STREAM_COPY_GUARD = os.path.join(STREAM_COPY, "hooks", "guard.py")
+STE_CHECKOUT = os.path.join(ROOT, "stecheckout")  # a checkout whose lint/ holds ste_lint.py
+OWN_REPO = os.path.join(ROOT, "ownrepo")  # another repo: its own lint/own_check.py, and no lint/pytest.py
+
+
+def stream_copy_build():
+    """A copy install, laid out as install.sh's land_guard_set lays it: every module under
+    hooks/guard.d/<id>/, guard.py and guard_*.py stamped with <id>, and the stamped guard.py beside that
+    folder, in hooks/. The stamped modules come from _reload_copy, the one home of a stamped set."""
+    source, _good = _reload_copy("streamcopy", STREAM_COPY_ID)
+    hooks = os.path.join(STREAM_COPY, "hooks")
+    shutil.rmtree(STREAM_COPY, ignore_errors=True)
+    set_dir = os.path.join(hooks, "guard.d", STREAM_COPY_ID)
+    os.makedirs(set_dir)
+    for entry in os.listdir(source):
+        shutil.copy(os.path.join(source, entry), set_dir)
+    shutil.copy(os.path.join(source, "guard.py"), hooks)
+
+
+def lint_checkouts_build():
+    write(os.path.join(STE_CHECKOUT, "lint", "ste_lint.py"), "# lint\n")
+    write(os.path.join(OWN_REPO, "lint", "own_check.py"), "# lint\n")
+
+
+lazy_fixture([STREAM_COPY], stream_copy_build)
+lazy_fixture([STE_CHECKOUT, OWN_REPO], lint_checkouts_build)
+add("check-tail: a copy install, cd lint, then ./ste_lint.py piped to tail, then && commit, is refused",
+    "deny", "check-tail", cwd=STE_CHECKOUT, guard=STREAM_COPY_GUARD,
+    command="cd lint && ./ste_lint.py x.md | tail -3 && git commit -m x")
+# The control: the same copy refuses a lint path, which reads as lint/ whatever folder the guard holds.
+add("check-tail: a copy install, a lint path piped to tail, then && commit, is refused (control)",
+    "deny", "check-tail", cwd=STE_CHECKOUT, guard=STREAM_COPY_GUARD,
+    command="python3 lint/ste_lint.py x.md | tail -3 && git commit -m x")
+add("check-tail: another repo, cd lint, then ./own_check.py piped to tail, then && commit, is refused",
+    "deny", "check-tail", cwd=OWN_REPO, command="cd lint && ./own_check.py x | tail -3 && git commit -m x")
+# The control: another repo's `-m pytest` names no script in its lint/, so it is allowed.
+add("check-tail: another repo, cd lint, then python3 -m pytest piped to tail, then && commit, is allowed",
+    "allow", cwd=OWN_REPO, command="cd lint && python3 -m pytest | tail -3 && git commit -m x")
 
 # =========================================================================== 2c. waiter loops
 #
