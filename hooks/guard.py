@@ -2641,7 +2641,7 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # so a verdict word that opens a choice list (two or more verdict words joined by `,`, `/`, `or` or `and`, ending the line or
 # sentence) is a format line and passes; a list that runs on into other words is a verdict. A backtick right before `verdict`
 # marks a quote, so a finding that quotes `verdict: FAIL` mid-line passes; one backtick may open the line. The label scans
-# stay lazy and stop at a colon, which keeps a long line fast (debt note verdict-regex-slow-line).
+# stay lazy and stop at a colon. Some long lines are still slow (debt note verdict-regex-slow-line).
 _BRIEF_BLIND_MARK = r"[*_`]*"
 _BRIEF_BLIND_SEP = r"[ \t]*(?:,[ \t]*(?:(?:or|and)\b[ \t]*)?|/[ \t]*|(?:or|and)\b[ \t]*)"
 BRIEF_BLIND_NOT_CHOICES = (r"(?!%(m)s%(sep)s%(m)s(?:%(w)s)%(m)s(?:%(sep)s%(m)s(?:%(w)s)%(m)s)*[ \t]*(?:[.;!?]|$))"
