@@ -2210,12 +2210,13 @@ def case_closed_note_without_a_home_blocks():
     is unmeasured. A step with no file on any branch is no home either. Red today: no check reads a closed
     note's home."""
     p = homed(new_cfg(), "close-noted", ("- fb-0958-4 [note] -> noted [closed]",), text="closed without a home")
-    expect_block("close home: a closed note homed to noted blocks", p, named=("fb-0958-4",))
+    expect_block("close home: a closed note homed to noted blocks", p,
+                 named=("fb-0958-4", "is closed with no home"))
     expect_no_skipped_note("close home: noted, the repo reads, so no repo is skipped", p)
     p = homed(new_cfg(), "close-missing-step", ("- fb-0958-4 [note] -> step:no-such-step [closed]",),
               cwd=step_repo(), text="closed against a missing step")
     expect_block("close home: a closed note homed to a step with no file on any branch blocks", p,
-                 named=("fb-0958-4",))
+                 named=("fb-0958-4", "is closed with no home"))
     expect_no_skipped_note("close home: missing step, the repo reads, so no repo is skipped", p)
     for item in ("- fb-0958-4 [note] -> process-only [closed]", "- fb-0958-4 [note] -> noted [closed] (done)"):
         p = homed(new_cfg(), "close-odd", (item,), text="closed with an odd home")
