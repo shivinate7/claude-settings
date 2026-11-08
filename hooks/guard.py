@@ -1758,19 +1758,31 @@ def workflow_strip_conflicts(old_text: str) -> str:
     """`old_text` without its git conflict marker lines, when every marker belongs to a whole block (opener, optional
     base, divider, closer) and every side of each block is whole test-run steps. A marker line is not content, so
     a resolution that drops one changes no step. The sides are judged here, because a kept side is unchanged once the
-    markers go and the diff never reaches it. Any other text comes back as it is, markers included, to be judged as
+    markers go and the diff never reaches it. The first line after a closer must not be a key deeper than those steps,
+    which would continue a kept step. Any other text comes back as it is, markers included, to be judged as
     content."""
-    kept, sides, last = [], [], None
+    kept, sides, last, block, after = [], [], None, 0, None
     for line in old_text.splitlines():
         kind = next((i for i, mark in enumerate(WORKFLOW_CONFLICT_MARKERS) if mark.fullmatch(line)), None)
         if kind is None:
+            if after is not None and line.strip():
+                # git factors a key that both sides end with out of the block, onto the kept step: refuse it.
+                if len(line) - len(line.lstrip()) > after:
+                    return old_text
+                after = None
             kept.append(line)
             if last not in (None, 3):
                 sides[-1].append(line)
         elif kind in WORKFLOW_CONFLICT_NEXT[last]:
             last = kind
+            after = None
+            if kind == 0:
+                block = len(sides)
             if kind != 3:
                 sides.append([])
+            else:
+                firsts = [next(ln for ln in side if ln.strip()) for side in sides[block:] if any(map(str.strip, side))]
+                after = min((len(ln) - len(ln.lstrip()) for ln in firsts), default=0)
         else:
             return old_text
     if last not in (None, 3) or not all(workflow_step_chunk(side) for side in sides):
