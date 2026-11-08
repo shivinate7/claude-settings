@@ -14,8 +14,11 @@
 //     A route step that errors or times out fails the shot. A hidden wait passes at once when nothing matches the
 //     selector, so it alone proves nothing: pair it with a wait for real content.
 //   localStorage: {key: "value"}, strings only. Set before the page's own scripts run, in the top frame only.
-//   A route with steps or localStorage runs in its own browser context, with ignoreHTTPSErrors carried into it. The context is closed
-//     after the shot, so the route starts clean and leaves nothing behind (localStorage, cookies) for another route.
+//   stub: a path to a .js file, resolved against the config file's folder and read once, when the config loads. Its text runs as an
+//     init script before the page's own scripts, in the top frame only, so a page that needs a stand-in (window.claude) can be shot.
+//     A missing or unreadable file, or a value that is not a string, is a config error naming the route.
+//   A route with steps, localStorage or a stub runs in its own browser context, with ignoreHTTPSErrors carried into it. The context is closed
+//     after the shot, so the route starts clean and leaves nothing behind (localStorage, cookies, a stub's globals) for another route.
 // Other keys, on the config or on a route, are ignored.
 // A shot fails on a navigation error, a timeout, an HTTP status of 400 or more, or a blank image (one colour only).
 // The simulator shot runs only when that device is already booted. This tool never boots one; not booted is a skip.
@@ -58,7 +61,7 @@ function readConfig(file) {
   try { c = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { die(`cannot read config ${file}: ${e.message.split("\n")[0]}`); }
   if (!c || typeof c.baseUrl !== "string" || !c.baseUrl) die(`config ${file} needs baseUrl`);
   if (!Array.isArray(c.routes) || !c.routes.length) die(`config ${file} needs a non-empty routes list`);
-  const routes = c.routes.map((r) => (typeof r === "string" ? { path: r } : r));
+  let routes = c.routes.map((r) => (typeof r === "string" ? { path: r } : r));
   if (routes.some((r) => !r || typeof r.path !== "string")) die(`config ${file}: each route is a string or {name, path}`);
   const names = new Map();
   for (const r of routes) {
@@ -70,6 +73,9 @@ function readConfig(file) {
     if (r.steps !== undefined) checkSteps(file, r);
     if (r.localStorage !== undefined) checkStorage(file, r);
   }
+  // Read here, not at the shot, so a bad stub stops the run before any browser starts. Set on every route, so a config key
+  // named stubText never counts as a stub.
+  routes = routes.map((r) => ({ ...r, stubText: r.stub === undefined ? undefined : readStub(file, r) }));
   if (c.ignoreHTTPSErrors !== undefined && typeof c.ignoreHTTPSErrors !== "boolean") die(`config ${file}: ignoreHTTPSErrors is true or false`);
   const sizes = c.sizes ?? [1440, 820, 390];
   if (!Array.isArray(sizes) || !sizes.length || sizes.some((w) => !Number.isInteger(w) || w < 1)) die(`config ${file}: sizes is a list of widths`);
@@ -105,6 +111,19 @@ function checkStorage(file, r) {
   if (!isObject(r.localStorage) || Object.values(r.localStorage).some((v) => typeof v !== "string")) {
     die(`config ${file}: route ${r.path}: localStorage is an object of strings`);
   }
+}
+
+function readStub(file, r) {
+  const where = `config ${file}: route ${r.path}: stub`;
+  if (typeof r.stub !== "string" || !r.stub) die(`${where} is a path to a .js file`);
+  const at = path.resolve(path.dirname(path.resolve(file)), r.stub);
+  try { return fs.readFileSync(at, "utf8"); } catch (e) { die(`${where}: cannot read ${at}: ${String(e.message).split("\n")[0]}`); }
+}
+
+// The init script for a stub. A block, not a function, so the stub's own var and this behave as in a plain script.
+// The top frame only: a cross-origin frame (an embed) must not see the stand-in. The newline lets a stub end in a // comment.
+function stubScript(text) {
+  return { content: `if (window === window.top) {\n${text}\n}` };
 }
 
 // Runs in the page. The top frame only: a cross-origin frame (an embed) keeps its own, empty storage.
@@ -243,11 +262,12 @@ async function main() {
             shots++;
             const name = `${slug(r.name || r.path)}-${width}-${theme}`;
             const url = join(cfg.baseUrl, r.path);
-            // Storage and cookies are per context, so a route with steps (a click can write them) or a seed gets its own.
-            const own = r.localStorage !== undefined || r.steps !== undefined ? await browser.newContext(opts) : null;
+            // Storage and cookies are per context, so a route with steps (a click can write them), a seed or a stub gets its own.
+            const own = r.localStorage !== undefined || r.steps !== undefined || r.stubText !== undefined ? await browser.newContext(opts) : null;
             const page = await (own || ctx).newPage();
             try {
               if (r.localStorage !== undefined) await page.addInitScript(seedStorage, Object.entries(r.localStorage));
+              if (r.stubText !== undefined) await page.addInitScript(stubScript(r.stubText));
               const res = await page.goto(url, { waitUntil: "load", timeout: cfg.timeoutMs });
               if (res && res.status() >= 400) { fails.push(`${name}: HTTP ${res.status()} at ${url}`); continue; }
               for (const s of r.steps || []) {
