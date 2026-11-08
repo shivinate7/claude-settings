@@ -23352,12 +23352,11 @@ LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the pr
                          session_home_git_verbs_case))
 
 
-# `git stash create` (incident 2026-11-07). It writes a stash commit object and prints its hash. It
-# changes no entry, ref, index or tree, so it reads as `stash list` and `stash show` do. The session-home
-# reader exempts those two words by its own copy of the list, so `create` stays refused there. The create
-# case is red until that reader takes the list the shared-tree guard reads. The take case holds a pop and
-# a drop, which take or destroy an entry. The agent case holds an agent call, which this rule does not
-# judge. Each pins what the fix must keep.
+# sh_lost_lane sets up the state the stash cases below judge: a primary whose session has lost its
+# worktree. The session's lane call writes its session record naming the lane, then the lane and its
+# branch are removed, so the record names a folder that is gone. The session-home reader judges a stash
+# call in that primary by its action word. `create` reads the tree and index and writes an unreachable
+# commit with no entry, so it is allowed. `pop` and `drop` take or destroy an entry, so they stay refused.
 def sh_lost_lane(name):
     """A primary whose session has lost its worktree. The session's lane call wrote its record, then
     the harness removed the lane and its branch. Returns (primary, session, lane, recorded): `recorded`
@@ -23417,12 +23416,43 @@ def session_home_stash_agent_case():
     return True, "an agent's git stash create from the primary of a lost session is allowed"
 
 
+def session_home_stash_quiet_pop_case():
+    """Rule session-home: `git stash -q pop` in the primary of a lost session stays refused. The reader
+    skips the -q option and reads `pop` as the action, so the option does not hide the take."""
+    primary, session, lane, recorded = sh_lost_lane("stashquiet")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash -q pop"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    problems = sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git stash -q pop in the primary of a lost session stays refused, naming session-home"
+
+
+def session_home_stash_help_case():
+    """Rule session-home: a sole `git stash -h` in the primary of a lost session is allowed. The help
+    flag prints usage and reads nothing, so the call is a read."""
+    primary, session, lane, recorded = sh_lost_lane("stashhelp")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash -h"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    if got != "allow":
+        return False, "%s: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "git stash -h in the primary of a lost session is allowed"
+
+
 LOG_CHECKS_EXTRA.append(("session-home: git stash create from the primary of a lost session is allowed",
                          session_home_stash_create_case))
 LOG_CHECKS_EXTRA.append(("session-home: git stash pop and drop in the primary of a lost session stay refused, "
                          "naming session-home and EnterWorktree", session_home_stash_take_case))
 LOG_CHECKS_EXTRA.append(("session-home: an agent's git stash create from the primary of a lost session is "
                          "allowed; the rule judges top-level calls only", session_home_stash_agent_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, git stash -q pop in the primary is refused, naming "
+                         "session-home and EnterWorktree", session_home_stash_quiet_pop_case))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, git stash -h in the primary is allowed as a read",
+                         session_home_stash_help_case))
 
 
 def session_home_clean_refuses_case():
