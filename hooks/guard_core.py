@@ -1088,11 +1088,12 @@ EXIT_BODY_PLAIN_WORDS = ("echo", "printf", "true", ":")
 
 
 def _leaves_body_never(tokens, segment: str, end: str, in_pipe: bool) -> bool:
-    """True when a then-body step, `;`- or newline-joined, is a bare `echo`, `printf`, `true` or `:` with no
-    substitution, pipe, `&&` or `||` and no compound word: it cannot `exit`, `return`, `break` or skip the
-    steps after it, so an `exit` later in the body still runs whenever the body does."""
+    """True when a then-body step, joined to the next by `;`, a newline or `&&`, is a bare `echo`, `printf`,
+    `true` or `:` with no substitution and no pipe: it cannot `exit`, `return`, `break` or fail, so an `exit`
+    later in the body still runs whenever the body does. A `&&` join counts only because each step before
+    it is such a print step (the walk stops at the first step that is not); a `||` join never counts."""
     word = tokens[1:2] if tokens[:1] == ["then"] else tokens[:1]
-    return (bool(word) and word[0] in EXIT_BODY_PLAIN_WORDS and end in (";", "\n") and not in_pipe
+    return (bool(word) and word[0] in EXIT_BODY_PLAIN_WORDS and end in (";", "\n", "&&") and not in_pipe
             and not any(mark in segment for mark in ("`", "$(", "<(", ">(")))
 
 
