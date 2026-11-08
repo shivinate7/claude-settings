@@ -7911,6 +7911,38 @@ for (const scheme of ["light", "dark"]) {
   });
 }
 
+// A pressed dash button draws the solid ink edge (.btn.dash[aria-pressed="true"]). Each case reads the unpressed button first, so a
+// dashed edge is the control, then presses it. The ink colour comes from a probe that reads --ink, never from a copy of its value.
+const inkColor = (page) => page.evaluate(() => { const p = document.createElement("i"); p.style.color = "var(--ink)"; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; });
+const edgeOf = (loc) => loc.evaluate((el) => ({ style: getComputedStyle(el).borderTopStyle, color: getComputedStyle(el).borderTopColor }));
+for (const scheme of ["light", "dark"]) {
+  test(`a pressed Park on an open decision card draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [DECISION], scheme }); if (!page) return;
+    await need(card(page, DECISION), `No. ${DECISION.n} is not on the page`);
+    await need(parkPress(page, DECISION), "the decision card has no Park button");
+    const off = await edgeOf(parkPress(page, DECISION));
+    assert.equal(off.style, "dashed", "an unpressed Park does not draw a dashed edge: " + off.style);
+    await parkPress(page, DECISION).click();
+    assert.equal(await pressedOf(parkPress(page, DECISION)), "true", "a Park press did not press Park");
+    const on = await edgeOf(parkPress(page, DECISION));
+    assert.equal(on.style, "solid", "a pressed Park does not draw a solid edge: " + on.style);
+    assert.equal(on.color, await inkColor(page), "a pressed Park's edge is not the ink colour: " + on.color);
+  });
+  test(`a pressed Drop on a parked line draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [DECISION], meta: PARK_META, scheme }); if (!page) return;
+    await parkLoaded(page);
+    await need(parkLine(page, PARK_A), "the parked line is not on the page");
+    await need(parkBtn(page, PARK_A, "drop"), "the parked line has no Drop button");
+    const off = await edgeOf(parkBtn(page, PARK_A, "drop"));
+    assert.equal(off.style, "dashed", "an unpressed Drop does not draw a dashed edge: " + off.style);
+    await parkBtn(page, PARK_A, "drop").click();
+    assert.equal(await pressedOf(parkBtn(page, PARK_A, "drop")), "true", "a Drop press did not press Drop");
+    const on = await edgeOf(parkBtn(page, PARK_A, "drop"));
+    assert.equal(on.style, "solid", "a pressed Drop does not draw a solid edge: " + on.style);
+    assert.equal(on.color, await inkColor(page), "a pressed Drop's edge is not the ink colour: " + on.color);
+  });
+}
+
 // The rail rows share .ov-head (debt rail-row-touch-height). Its 44px floor is for a coarse pointer only: the fine page stays exactly 32px, so a 44px floor for every pointer fails here.
 test("each rail row is 44px tall or more on a coarse pointer, and 32px on a fine one, at 390 wide", async (t) => {
   const items = [DECISION, TASK, ARBITER];
