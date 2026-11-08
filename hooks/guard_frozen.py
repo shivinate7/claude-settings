@@ -901,9 +901,8 @@ def _first_test_under(where: str, predicate, glob: str = "", only=()) -> str:
     """The first path under the folder `where` (relative to it) that `predicate` accepts, else ''.
     With `glob`, only a path whose relative spelling matches it (a pathspec glob: `*` crosses `/`; a
     glob that starts with `_SEGMENT_GLOB`, one the shell expands: `*` stays in one segment). With
-    `only` (`_name_filters`), only a file whose own name matches one of them, as `find -name` and
-    `grep --include` match. Both are tested before `predicate` runs. Read from disk, top down,
-    skipping hidden folders, `node_modules`, `venv` and `__pycache__`.
+    `only` (`_name_filters`), only a file whose own name passes them (`_name_passes`). Both are tested
+    before `predicate` runs. Read from disk, top down, skipping hidden folders, `node_modules`, `venv` and `__pycache__`.
     ponytail: a tree of more than `_TREE_LIMIT` files with no test found early reads as holding none."""
     segmented = glob.startswith(_SEGMENT_GLOB)
     glob = glob.removeprefix(_SEGMENT_GLOB)
@@ -914,7 +913,7 @@ def _first_test_under(where: str, predicate, glob: str = "", only=()) -> str:
         prefix = "" if prefix == "." else prefix + "/"
         for name in sorted(files):
             seen += 1
-            if only and not any(fnmatch.fnmatchcase(name, wanted) for wanted in only):
+            if only and not _name_passes(name, only):
                 continue
             if glob:
                 rel = prefix + name
@@ -946,34 +945,62 @@ def _folder_root(root: str, cwd: str) -> str:
     return text
 
 
+_NAME_EXCLUDE = "\x05"   # marks an excluded glob in the tuple `_name_filters` returns
+
+
+def _name_passes(name: str, filters) -> bool:
+    """Whether a file named `name` is reached by `filters` (`_name_filters`): it matches one of the wanted
+    globs, when there are any, and none of the excluded ones, as `find -name`, `-not -name`, `grep
+    --include` and `--exclude` read."""
+    wanted = [glob for glob in filters if not glob.startswith(_NAME_EXCLUDE)]
+    dropped = [glob[len(_NAME_EXCLUDE):] for glob in filters if glob.startswith(_NAME_EXCLUDE)]
+    if wanted and not any(fnmatch.fnmatchcase(name, glob) for glob in wanted):
+        return False
+    return not any(fnmatch.fnmatchcase(name, glob) for glob in dropped)
+
+
 def _name_filters(words) -> tuple:
-    """The file-name globs that limit what a `find` or `grep` segment reads: the values of `-name`, or of
-    `--include`, so a walk of its folder roots counts only the files it reaches. () when there is none, and
-    for a `find` that holds `-o`, `!`, `-not` or a group, which can widen or invert what `-name` picks, and
-    for a value that holds `$`, a backtick, `{` or `\\`. A `find` stops at its first `-exec`."""
+    """The file-name globs that limit what a `find` or `grep` segment reads: the values of `-name` or
+    `--include`, and the values of `-not -name`, `! -name` or `--exclude`, each marked `_NAME_EXCLUDE`, so a
+    walk of its folder roots counts only the files it reaches (`_name_passes`). () when there is none, and
+    for a `find` that holds `-o`, a group, or a `-not` or `!` that does not lead straight into `-name VALUE`,
+    which can widen or invert what `-name` picks, and for a value that holds `$`, a backtick, `{` or `\\`.
+    () counts every file, so a form not read keeps the guard strict. A `find` stops at its first `-exec`."""
     index = resolve_command(tuple(words))
     if index is None:
         return ()
     name, args = _name(words[index]), list(words[index + 1:])
     values = []
     if name == "find":
-        for at, word in enumerate(args):
+        at = 0
+        while at < len(args):
+            word = args[at]
             if word in _FIND_EXEC:
                 break
-            if word in ("-o", "-or", "-not", "!", "\\!", "(", "\\("):
+            if word in ("-o", "-or", "(", "\\("):
                 return ()
+            if word in ("-not", "!", "\\!"):
+                if args[at + 1:at + 2] != ["-name"] or at + 2 >= len(args):
+                    return ()
+                values.append((True, args[at + 2]))
+                at += 3
+                continue
             if word == "-name" and at + 1 < len(args):
-                values.append(args[at + 1])
+                values.append((False, args[at + 1]))
+            at += 1
     elif name in _GREP_COMMANDS and name != "rg":
         for at, word in enumerate(args):
             if word == "--":
                 break
-            if word.startswith("--include="):
-                values.append(word.partition("=")[2])
-            elif word == "--include" and at + 1 < len(args):
-                values.append(args[at + 1])
-    values = [_unquoted(value) for value in values]
-    return () if any(re.search(r"[$`{\\]", value) for value in values) else tuple(values)
+            for flag, dropped in (("--include", False), ("--exclude", True)):
+                if word.startswith(flag + "="):
+                    values.append((dropped, word.partition("=")[2]))
+                elif word == flag and at + 1 < len(args):
+                    values.append((dropped, args[at + 1]))
+    values = [(dropped, _unquoted(value)) for dropped, value in values]
+    if any(re.search(r"[$`{\\]", value) for _dropped, value in values):
+        return ()
+    return tuple((_NAME_EXCLUDE if dropped else "") + value for dropped, value in values)
 
 
 def _dot_roots(roots, cwd: str, predicate, names=()) -> list:
