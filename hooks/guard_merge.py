@@ -427,10 +427,15 @@ def _marked_bodies(bodies):
     return (module, marked) if marked else None
 
 
+def _unparsed(module, marked):
+    """True when some marked body does not parse. It reads nothing."""
+    return any(module.parse_review(body) is None for body in marked)
+
+
 def _form_hit(module, marked, selector):
     """Return (matched, reason) when some marked body does not parse, else None. It reads nothing.
-    The refusal sits one call below its two callers, so the rule audit reads its reason within its depth limit."""
-    if all(module.parse_review(body) is not None for body in marked):
+    The form refusal has one home here, so the post check and the edit-in-place check print the same text."""
+    if not _unparsed(module, marked):
         return None
     named = "" if callable(selector) else str(selector).strip()
     return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
@@ -441,7 +446,9 @@ def review_form_hit(bodies, selector=""):
     """Return (matched, reason) when a body that opens with the record marker does not parse, else None. An edit in place
     is judged by this alone, and review_record_hit calls the same _form_hit. It makes no read."""
     found = _marked_bodies(bodies)
-    return _form_hit(*found, selector) if found else None
+    if found:
+        return _form_hit(found[0], found[1], selector)
+    return None
 
 
 def review_record_hit(bodies, repo: str, selector, where: str):
@@ -454,9 +461,8 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     if not found:
         return None
     module, marked = found
-    unparsed = _form_hit(module, marked, selector)
-    if unparsed:
-        return unparsed
+    if _unparsed(module, marked):
+        return _form_hit(module, marked, selector)
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)
