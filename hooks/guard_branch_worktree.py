@@ -7,6 +7,7 @@ Other files reach these names through `guard`.
 import fnmatch
 import os
 import shlex
+import stat
 
 from guard_core import (
     _git, _segment_git_c_target, basename, branch_is_empty, dir_before_segment, git_calls,
@@ -122,7 +123,7 @@ WORKTREE_PRUNE_ASK_REASON = (
 # and the HEAD file are read as files, so the reflog and the detached check cost no git call.
 # A commit makes at most five git calls: rev-parse, the ancestor test, what the branch changed
 # (diff-tree), the staged paths (diff-index, not for named paths), and, for `-a` or named paths,
-# one hash-object of the changed paths' work-tree copies.
+# one hash-object of the changed paths' work-tree copies. A dry run makes none.
 
 # `commit` options that take a value in the next word (or glued to a short flag).
 COMMIT_VALUE_FLAGS = {
@@ -134,10 +135,10 @@ COMMIT_VALUE_LETTERS = "mFCct"   # a short cluster ends where one of these start
 
 
 def commit_scope(args):
-    """(all, include, paths, only) of a `git commit` call's arguments. `all` is `-a`/`--all`;
+    """(all, include, paths, only, dry) of a `git commit` call's arguments. `all` is `-a`/`--all`;
     `include` is `-i`/`--include`; `only` is `-o`/`--only`; `paths` are the named pathspecs, which
-    commit the work-tree copies."""
-    every = include = only = False
+    commit the work-tree copies; `dry` is `--dry-run`, or a prefix of it that git accepts."""
+    every = include = only = dry = False
     paths = []
     ended = False
     skip = False
@@ -157,6 +158,8 @@ def commit_scope(args):
                 include = True
             elif name == "--only":
                 only = True
+            elif len(name) >= 4 and "--dry-run".startswith(name):
+                dry = True
             elif name in COMMIT_VALUE_FLAGS and "=" not in arg:
                 skip = True
         else:
@@ -172,7 +175,7 @@ def commit_scope(args):
                     break
                 elif letter in "Su":   # optional value, always glued
                     break
-    return every, include, paths, only
+    return every, include, paths, only, dry
 
 
 def _raw_pairs(where, args):
@@ -219,19 +222,23 @@ def _newest_entries(gitdir):
 
 
 def _moved_from(entries, head):
-    """X, the commit this checkout's index may still be cut from, or "" for none (decision
-    stale-tree-commit, step 1). Judged from the newest two HEAD log entries."""
+    """(X, reset_only). X is the commit this checkout's index may still be cut from, or "" for
+    none (decision stale-tree-commit, step 1), judged from the newest two HEAD log entries.
+    `reset_only` is True when a `reset:` entry alone gave X: the log writes the same message for
+    `--soft` and `--hard`, so the caller counts only a copy equal to X's."""
     if not entries:
-        return ""
+        return "", False
     old, new, message = entries[-1]
     before = entries[-2] if len(entries) > 1 else None
     if new != head:
-        return new                        # the branch moved under this checkout
+        return new, False                 # the branch moved under this checkout
     if before and old != before[1]:
-        return before[1]                  # a gap: it moved before the newest entry
-    if before and (message == "" or message.startswith("reset:")):
-        return before[1]                  # a move that leaves the index alone
-    return ""
+        return before[1], False           # a gap: it moved before the newest entry
+    if before and message == "":
+        return before[1], False           # update-ref: it leaves the index and the tree alone
+    if before and message.startswith("reset:"):
+        return before[1], True            # --soft keeps the old copies, --hard does not
+    return "", False
 
 
 def _is_detached(gitdir):
@@ -246,6 +253,9 @@ def stale_tree_hit(where, args) -> str:
     """The stale path's name when a `git commit` with these arguments, run in `where`, would undo
     a change the branch made under this checkout (decision stale-tree-commit), else ''. Every
     read that fails passes."""
+    every, include, paths, only, dry = commit_scope(args)
+    if dry:
+        return ""                         # a dry run writes no commit
     first = _git(where, "rev-parse", "--absolute-git-dir", "--show-toplevel", "HEAD")
     if first is None or first.returncode != 0:
         return ""
@@ -255,13 +265,12 @@ def stale_tree_hit(where, args) -> str:
     gitdir, top, head = lines[:3]
     if _is_detached(gitdir):
         return ""
-    moved = _moved_from(_newest_entries(gitdir), head)
+    moved, reset_only = _moved_from(_newest_entries(gitdir), head)
     if not moved.strip("0") or moved == head:
         return ""
     ancestor = _git(where, "merge-base", "--is-ancestor", moved, head)
     if ancestor is None or ancestor.returncode != 0:
         return ""                         # a squash or a reset back: not a move forward
-    every, include, paths, only = commit_scope(args)
     include = include and not only
     # The copy the commit records per path: the index's, except that `-a` takes the work tree's
     # for each path the index tracks, and named paths take the work tree's. `-i` with paths takes
@@ -288,29 +297,42 @@ def stale_tree_hit(where, args) -> str:
             reads_it = False
         if reads_it:
             reads.append(name)
-    files = [name for name in reads if os.path.isfile(os.path.join(top, name))]
+    # A symlink or a gitlink (a submodule's folder) in the work tree passes: hash-object would hash
+    # the link's target file, or fail on the folder, not the copy git records.
+    files, odd = [], set()
+    for name in reads:
+        try:
+            mode = os.lstat(os.path.join(top, name)).st_mode
+        except OSError:
+            continue                      # a file the work tree lacks records as deleted
+        if stat.S_ISREG(mode):
+            files.append(name)
+        else:
+            odd.add(name)
     shas = {}
     if files:
         hashed = _git(top, "hash-object", "--", *files)
         if hashed is None or hashed.returncode != 0:
             return ""
         shas = dict(zip(files, hashed.stdout.split()))
-    for name, (_, after) in changed.items():
+    for name, (before, after) in changed.items():
+        if name in odd:
+            continue
         if name in reads:
             copy = shas.get(name, "")     # a file the work tree lacks records as deleted
         else:
             copy = staged[name][1] if name in staged else after   # diff-index lists only differences
-        if copy != after:
+        if (copy == before) if reset_only else (copy != after):
             return name
     return ""
 
 
 def _named_by(name, paths, where, top):
     """True when a literal or glob pathspec in PATHS (relative to WHERE) covers the top-relative
-    NAME. Used only for `-i` with paths."""
+    NAME. Used only for `-i` with paths. A path that resolves to the top folder names every path."""
     for path in paths:
         full = os.path.relpath(os.path.join(where, path), top).replace(os.sep, "/")
-        if name == full or name.startswith(full.rstrip("/") + "/") or fnmatch.fnmatchcase(name, full):
+        if full == "." or name == full or name.startswith(full.rstrip("/") + "/") or fnmatch.fnmatchcase(name, full):
             return True
     return False
 
