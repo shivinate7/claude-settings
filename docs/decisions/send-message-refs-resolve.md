@@ -17,7 +17,7 @@ Home: hooks/guard.py
 The PreToolUse guard judges `mcp__claude-code-remote__send_message`, from any session, main or agent. The text is `tool_input.message`. Rule `message-ref-missing` (deny). An owner override lifts it.
 
 - **Commit sha.** The token rule of `agent-report-shas-resolve`, resolved in the repo of the payload's `cwd`. A `github.com/<owner>/<repo>/commit/<sha>` URL of this repo is judged too.
-- **Pull request.** `PR #N`, `PR N`, `PR: #N`, `PR (#N)`, `**PR** #N`, `` PR `#N` ``, `PR number N`, `pull request #N` and `#N (PR)`, in any case. Every number of a list counts, such as `PRs 7 and 8`, `PRs #7, #8 and #9`, `PRs #7 #8`, `PRs #7 or #8` and `PRs #7 + #8`. After a singular `PR`, a further number needs its own `#`, so `PR #7, 12 files` names one PR. Also a `github.com/<owner>/<repo>/pull/N` URL of this repo, with or without a scheme and with any tail such as `/files`. A bare `#N` with no `PR` word is skipped: it may be an issue or an item. A merged or closed PR keeps its `refs/pull/N/head` (measured: #1 and #1764 of this repo), so it passes.
+- **Pull request.** `PR #N`, `PR N`, `PR: #N` and `PR (#N)` (with the `#`, so `PR: 2500 lines` is no PR), `**PR** #N`, `` PR `#N` ``, `PR number N`, `pull request #N` and `#N (PR)`, in any case. Every number of a list counts, such as `PRs 7 and 8`, `PRs #7, #8 and #9`, `PRs #7 #8`, `PRs #7 or #8` and `PRs #7 + #8`. After a singular `PR`, a further number needs its own `#`, so `PR #7, 12 files` names one PR. Also a `github.com/<owner>/<repo>/pull/N` URL of this repo, with or without a scheme and with any tail such as `/files`. A bare `#N` with no `PR` word is skipped: it may be an issue or an item. A merged or closed PR keeps its `refs/pull/N/head` (measured: #1 and #1764 of this repo), so it passes.
 - **PR comment.** A `github.com/<owner>/<repo>/(pull|issues)/N#issuecomment-<id>` URL of this repo.
 
 ## Which repo
@@ -28,7 +28,7 @@ The PreToolUse guard judges `mcp__claude-code-remote__send_message`, from any se
 - A sha or PR number on a line that names another repo. A line names another repo when it holds an `owner/repo` that is not this repo, with a mark:
   - `#` or `@` right after it, in any case (`acme/widgets#5`).
   - `:` or the word `PR` right after it (`acme/widgets: PR #5`, `acme/widgets PR #5`). This mark counts only when owner and name are lowercase letters, digits, `-`, `_` or `.`, and neither is all digits. So `CI/CD:`, `Done/Next:` and `2/3:` are no marks.
-- An `owner/repo` with no mark is a branch or a path (`lane/env-file-scope`, `origin/main`, `hooks/guard_merge`). `origin/` and `upstream/` never count. An `owner/repo` whose name ends in a file extension (`hooks/guard.py`) is a path.
+- An `owner/repo` with no mark is a branch or a path (`lane/env-file-scope`, `origin/main`, `hooks/guard_merge`). `origin/` and `upstream/` never count, and nor do this repo's branch prefixes (`lane/`, `archive/`, `claude/`, `handoff/`), so `lane/x PR #5` is judged against this repo. An `owner/repo` whose name ends in a file extension (`hooks/guard.py`) is a path.
 
 With no origin, only shas are judged.
 
@@ -50,7 +50,7 @@ Per send, at most:
 - one `git ls-remote origin` for all PR numbers (5 s), a network read of about 0.6 s, measured once from a cloud container
 - one `gh api repos/<owner>/<repo>/issues/comments/<id>` per comment link, up to 5 (5 s each), a network read
 
-The worst case is 40 s: three git calls at 5 s, `ls-remote` at 5 s, and five `gh` reads at 5 s, under the guard's 60 s hook timeout. The URL-word pattern also runs on each line (5.3 s at 64 KiB, measured once). A message with no ref starts no process. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
+The worst case is 45 s: three git calls at 5 s, `ls-remote` at 5 s, and five `gh` reads at 5 s. The URL-word pattern runs twice on each line, 10.3 s on one 64 KiB unbroken line (measured once), so the total stays under the guard's 60 s hook timeout. A hook timeout allows the call. A message with no ref starts no process. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
 
 ## Known gaps
 
@@ -59,7 +59,8 @@ The worst case is 40 s: three git calls at 5 s, `ls-remote` at 5 s, and five `gh
 - A ref that exists but is the wrong one passes.
 - A sha resolves only in the cwd's local clone. A commit pushed from another clone and not yet fetched reads as missing, and the message is refused. The remedy is `git fetch`.
 - A repo whose name ends like a file extension (`vercel/next.js: PR #5`) reads as a path, so its PR is judged against this repo and can refuse.
-- A lowercase path or branch followed by `:` reads as another repo, so its line is skipped (`lane/x: head <sha>`, `hooks/guard_merge: PR #5`).
+- A lowercase path, label or branch with another prefix, followed by `:` or `PR`, reads as another repo, so its line is skipped (`hooks/guard_merge: PR #5`, `ci/cd: PR #5`).
+- With no origin, a commit URL of this repo is not judged. A payload with no `cwd` is not judged, with no notice.
 - A repo with a capital letter, marked only by `:` or `PR` (`Acme/Widgets: PR #5`), is judged against this repo and can refuse.
 - A PR list split across a line break is judged on its first line only.
 - The sha forms that `agent-report-shas-resolve` skips are skipped here too: `key=<sha>`, a URL word (this repo's compare URLs included) and a line starting `index `.
