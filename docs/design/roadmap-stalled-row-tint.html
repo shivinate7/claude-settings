@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roadmap stalled row tint</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen is the page's own CSS (#pagecss) and the picked options' CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 64px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+.tool code { overflow-wrap: anywhere; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No step, id, title, phase or time on this page is real.</div>
+<header class="tool">
+  <h1>Roadmap Plan view: a stalled or paused row in its own band colour</h1>
+  <div class="row"><span>Stalled row</span>
+    <button data-st="tint">Red tint and edge</button>
+    <button data-st="edge">Red edge only</button>
+    <button class="hide" data-hide="tint" data-name="Red tint and edge">Hide Red tint and edge</button>
+    <button class="hide" data-hide="edge" data-name="Red edge only">Hide Red edge only</button>
+  </div>
+  <div class="row"><span>Paused row</span>
+    <button data-pz="grey">Grey edge</button>
+    <button data-pz="none">No edge</button>
+    <button class="hide" data-hide="grey" data-name="Grey edge">Hide Grey edge</button>
+    <button class="hide" data-hide="none" data-name="No edge">Hide No edge</button>
+  </div>
+  <div class="row"><span>Paused title</span>
+    <button data-wt="normal">Normal weight</button>
+    <button data-wt="bold">Bold, as today</button>
+    <button class="hide" data-hide="normal" data-name="Normal weight">Hide Normal weight</button>
+    <button class="hide" data-hide="bold" data-name="Bold, as today">Hide Bold, as today</button>
+  </div>
+  <div class="row"><span>Size</span>
+    <button data-w="all">Both</button><button data-w="390">Phone 390</button><button data-w="1280">Wide 1280</button>
+  </div>
+  <div class="row"><span>Theme</span>
+    <button data-t="both">Both</button><button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#st=tint|edge, &amp;pz=grey|none, &amp;wt=normal|bold, &amp;w=all|390|1280, &amp;t=both|light|dark, &amp;lab=off, &amp;hide=edge,none,bold</code>. Focus ids: <code>pick-stalled</code>, <code>pick-paused</code>, <code>pick-weight</code>. The page CSS is an excerpt of skills/roadmap/page/index.html at 12e3ea1a1 (PR #1635 head). Phone 390 and Wide 1280 are the brief's sizes; this repo's device list is unknown. Notes: the file of the same name ending -notes.md.</p>
+</header>
+<main id="stage"></main>
+<script type="text/plain" id="pagecss">
+/* Excerpt of skills/roadmap/page/index.html at 12e3ea1a1: theme tokens, base, layout, card, step rows, tags, feed. Verbatim. */
+:root{
+  --accent:#3b4fd8; --accent-ink:#2a3aa8; --accent-soft:#e8ebfc; --on-accent:#ffffff;
+  --font-ui:"IBM Plex Sans",system-ui,sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,monospace;
+  --radius-s:3px; --radius-m:6px;
+  --bg:#f4f4f1; --surface:#ffffff; --surface-2:#f9f9f7; --line:#e2e2dc; --line-2:#cfcfc7;
+  --ink:#1b1c1f; --ink-2:#45474d; --muted:#6c6e75;
+  --good:#1f7a43; --good-soft:#e3f2e8; --warn:#9a6200; --warn-soft:#fbf0d9; --bad:#b4271f; --bad-soft:#fbe5e3;
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --accent:#8c9bff; --accent-ink:#b3bdff; --accent-soft:#232848; --on-accent:#10132b;
+  --bg:#111214; --surface:#191a1d; --surface-2:#1e1f23; --line:#2b2d32; --line-2:#3a3d44;
+  --ink:#ececee; --ink-2:#c3c4c9; --muted:#9a9ca4;
+  --good:#5fcb8a; --good-soft:#16301f; --warn:#e9b44c; --warn-soft:#33270f; --bad:#ff8a80; --bad-soft:#3a1a18;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--font-ui)}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+button:disabled{cursor:default}
+.num,.id{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.wrap{max-width:1240px;margin:0 auto;padding:0 16px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start;padding:16px 0 40px}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-m);min-width:0}
+.card>header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.card>header h3{margin:0;font-size:13px;font-weight:600}
+.phase{margin-bottom:16px}
+.ph-head{display:flex;align-items:center;gap:10px;padding:10px 12px;flex-wrap:wrap}
+.ph-head h2{margin:0;font-size:15px;font-weight:700}
+.steps{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.st{border-top:1px solid var(--line)}
+.st:first-child{border-top:0}
+.rw{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:stretch}
+.sp{display:grid;place-items:center;padding-left:8px;min-height:36px}
+.sp:disabled{opacity:.7}
+.tg{display:grid;grid-template-columns:44px minmax(0,1fr) auto 14px;gap:8px;align-items:center;width:100%;padding:7px 12px 7px 4px;min-height:36px}
+.rw:hover{background:var(--surface-2)}
+.g{width:14px;height:14px;display:grid;place-items:center;flex:none}
+.g svg{width:14px;height:14px}
+.st .ttl{min-width:0;overflow-wrap:anywhere}
+.st .meta{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted);white-space:nowrap}
+.chev{color:var(--muted);font-size:10px}
+.st.active .rw{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.st.active .ttl{font-weight:600}
+.st.blocked .rw{box-shadow:inset 3px 0 0 var(--bad)}
+.tag{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:999px;line-height:17px;white-space:nowrap}
+.tag.t-now{background:var(--accent);color:var(--on-accent)}
+.tag.next{border:1px solid var(--accent);color:var(--accent-ink)}
+.tag.blk{background:var(--bad-soft);color:var(--bad)}
+.st.done .ttl{text-decoration:line-through;text-decoration-color:var(--line-2);color:var(--muted)}
+.st.done .id{color:var(--muted)}
+.feed{list-style:none;margin:0;padding:0}
+.feed li{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;padding:6px 12px;border-top:1px solid var(--line);font-size:12.5px}
+.feed li:first-child{border-top:0}
+.feed .when{font-family:var(--font-num);font-size:11px;color:var(--muted);padding-top:1px}
+.feed .what{min-width:0}
+.feed .what .id{color:var(--accent-ink);font-size:12px}
+.kind{font-size:11px;color:var(--muted)}
+.kind.done{color:var(--good)}
+.kind.active{color:var(--accent-ink)}
+.kind.blocked{color:var(--bad)}
+.kind.stalled{color:var(--bad)}
+.tag.stl{background:var(--bad-soft);color:var(--bad)}
+.tag.pzd{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.tag.ic{display:inline-grid;place-items:center;min-width:24px;padding:0 4px}
+.tag.ic svg{width:12px;height:12px}
+@media (max-width:1000px){ .cols{grid-template-columns:minmax(0,1fr)} }
+@media (max-width:640px){
+  .rw{grid-template-columns:30px minmax(0,1fr)}
+  .sp{padding-left:6px;align-items:start;padding-top:11px}
+  .tg{grid-template-columns:34px minmax(0,1fr) 12px;gap:6px;padding:8px 10px 8px 2px}
+  .st .meta{grid-column:2;grid-row:2;margin-top:-2px;flex-wrap:wrap}
+}
+</script>
+<script type="text/plain" id="labcss">
+/* Harness labels only: dashed "Today:" and "New:" marks. They are not part of the screen. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: -2px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; right: 40px; top: -8px; padding: 0 6px; border-radius: 4px; font: 600 10.5px/1.5 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+.kind[data-new]::after, .kind[data-today]::after { right: auto; left: 0; top: -15px; }
+.kind[data-today] { outline-offset: 1px; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+</script>
+<script type="text/plain" id="css-tint">
+/* New, option Red tint and edge: the row reads in the stalled band's red. The tag pill sits on the surface, so it keeps its shape on the red tint. */
+.st.stl-row .rw{background:var(--bad-soft);box-shadow:inset 3px 0 0 var(--bad)}
+.st.stl-row .tag.stl{background:var(--surface)}
+</script>
+<script type="text/plain" id="css-edge">
+/* New, option Red edge only: no tint, a red edge, as a blocked row. */
+.st.stl-row .rw{background:none;box-shadow:inset 3px 0 0 var(--bad)}
+.st.stl-row .rw:hover{background:var(--surface-2)}
+</script>
+<script type="text/plain" id="css-grey">
+/* New, option Grey edge: no tint, a grey edge in the paused band's --muted. */
+.st.pzd-row .rw{background:none;box-shadow:inset 3px 0 0 var(--muted)}
+.st.pzd-row .rw:hover{background:var(--surface-2)}
+</script>
+<script type="text/plain" id="css-none">
+/* New, option No edge: a plain row, as a to-do row. Only the Paused tag and mark say paused. */
+.st.pzd-row .rw{background:none;box-shadow:none}
+.st.pzd-row .rw:hover{background:var(--surface-2)}
+</script>
+<script type="text/plain" id="css-normal">
+/* New, option Normal weight: a paused title is not bold. A stalled title stays bold. */
+.st.pzd-row .ttl{font-weight:400}
+</script>
+<script type="text/plain" id="css-bold"></script>
+<script>
+const SCREEN_NAME = "Roadmap Plan view";
+const WIDTHS = [390, 1280], WNAME = { 390: "Phone", 1280: "Wide" };
+const OPTS = { st: ["tint", "edge"], pz: ["grey", "none"], wt: ["normal", "bold"] };
+const DEF = { st: "tint", pz: "grey", wt: "normal", w: "all", t: "both", lab: "on", hide: [] };
+const P = { ...DEF };
+const NAME = { tint: "red tint and edge", edge: "red edge only", grey: "grey edge", none: "no edge" };
+
+/* Status marks: the page's GLYPH and the stalled band's G, verbatim at 12e3ea1a1. */
+const GLYPH = {
+  done:'<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" stroke="var(--surface)" stroke-width="1.7" fill="none"/></svg>',
+  active:'<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="var(--accent)"/></svg>',
+  todo:'<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>',
+  blocked:'<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--bad)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>',
+  stalled:'<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5a5.5 5.5 0 1 1-5.2 3.7" fill="none" stroke="var(--bad)" stroke-width="1.8" stroke-linecap="round"/><circle cx="7" cy="7" r="1.7" fill="var(--bad)"/></svg>',
+  paused:'<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M5.6 4.7v4.6M8.4 4.7v4.6" stroke="var(--muted)" stroke-width="1.6"/></svg>'
+};
+const LABEL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked", stalled: "Stalled", paused: "Paused" };
+
+/* Sample steps. status is the stored status; shown is shownState(s). A stalled or paused step keeps status active. */
+const STEPS = [
+  { id: "sx-41", t: "Sample step that a live lane is building", status: "active", shown: "active", tags: '<span class="tag t-now">Now</span>' },
+  { id: "sx-42", t: "Sample step with no live lane and no open pull request", status: "active", shown: "stalled" },
+  { id: "sx-43", t: "Sample step that triage paused until the owner rules", status: "active", shown: "paused" },
+  { id: "sx-44", t: "Sample step that waits on another step", status: "blocked", shown: "blocked", tags: '<span class="tag blk">Blocked</span>' },
+  { id: "sx-45", t: "Sample step that is first up next", status: "todo", shown: "todo", tags: '<span class="tag next">Next 1</span>' },
+  { id: "sx-40", t: "Sample step that is done", status: "done", shown: "done" }
+];
+const FEED = [
+  { when: "10:42", id: "sx-42", shown: "stalled", t: "Sample step with no live lane" },
+  { when: "10:15", id: "sx-43", shown: "paused", t: "Sample step that triage paused" },
+  { when: "09:58", id: "sx-41", shown: "active", t: "Sample step a live lane builds" },
+  { when: "09:20", id: "sx-44", shown: "blocked", t: "Sample step that waits" },
+  { when: "08:47", id: "sx-40", shown: "done", t: "Sample step that is done" }
+];
+const KINDW = { done: "Done", active: "In progress", blocked: "Blocked", stalled: "Stalled", paused: "Paused" };
+
+function stepRow(s) {
+  /* The builder's change: stepRow adds stl-row or pzd-row from shownState, beside the status class. */
+  const extra = s.shown === "stalled" ? " stl-row" : s.shown === "paused" ? " pzd-row" : "";
+  const tag = s.shown === "stalled" ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLYPH.stalled}</span>`
+    : s.shown === "paused" ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused">${GLYPH.paused}</span>` : "";
+  const id = s.shown === "stalled" ? ' id="pick-stalled"' : s.shown === "paused" ? ' id="pick-paused"' : "";
+  const lab = s.shown === "stalled" ? ` data-new="${NAME[P.st]}"` : s.shown === "paused" ? ` data-new="${NAME[P.pz]}${P.wt === "normal" ? ", normal title" : ""}"`
+    : s.shown === "active" ? ' data-today="in progress row"' : s.shown === "blocked" ? ' data-today="blocked row"' : "";
+  const ttlId = s.shown === "paused" ? ' id="pick-weight"' : "";
+  return `<li class="st ${s.status}${extra}"${id}>
+    <div class="rw"${lab}>
+      <button class="sp" disabled title="${LABEL[s.shown]}" aria-label="${s.id} status: ${LABEL[s.shown]}"><span class="g">${GLYPH[s.shown]}</span></button>
+      <button class="tg" aria-expanded="false"><span class="id">${s.id}</span><span class="ttl"${ttlId}>${s.t}</span>
+        <span class="meta">${s.tags || ""}${tag}</span><span class="chev" aria-hidden="true">&#9654;</span></button>
+    </div></li>`;
+}
+function screen() {
+  const feed = FEED.map((f) => {
+    const lab = f.shown === "stalled" ? ' data-today="red, .kind.stalled"' : f.shown === "paused" ? ' data-today="grey, --muted"' : "";
+    return `<li><span class="when">${f.when}</span><span class="what"><span class="kind ${f.shown}"${lab}>${KINDW[f.shown]}</span> · <button><span class="id">${f.id}</span> ${f.t}</button></span></li>`;
+  }).join("");
+  return `<div class="wrap"><div class="cols">
+    <div><section class="card phase"><div class="ph-head"><h2>Phase 3 · Sample phase</h2></div>
+      <ul class="steps">${STEPS.map(stepRow).join("")}</ul></section></div>
+    <aside class="side"><section class="card"><header><h3>Latest changes</h3></header><ul class="feed">${feed}</ul></section></aside>
+  </div></div>`;
+}
+
+function readHash() {
+  Object.assign(P, { ...DEF, hide: [] });
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; });
+  Object.keys(OPTS).forEach((g) => { if (!OPTS[g].includes(P[g])) P[g] = DEF[g]; });
+  if (!["both", "light", "dark"].includes(P.t)) P.t = "both";
+  if (!["all", "390", "1280"].includes(P.w)) P.w = "all";
+}
+function writeHash() {
+  const q = new URLSearchParams({ st: P.st, pz: P.pz, wt: P.wt, w: P.w, t: P.t });
+  if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(","));
+  const h = "#" + q; if (location.hash !== h) history.replaceState(null, "", h);
+}
+const css = (id) => document.getElementById(id).textContent;
+function docFor(th) {
+  const opt = css("css-" + P.st) + css("css-" + P.pz) + css("css-" + P.wt) + css("labcss");
+  return `<!doctype html><html lang="en" data-theme="${th}" class="${P.lab === "off" ? "nolab" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css("pagecss")}${opt}</style></head><body>${screen()}</body></html>`;
+}
+function frame(w, th) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = WNAME[w] + " " + w + ", " + th;
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = SCREEN_NAME + " at " + w + " wide, " + th; f.style.width = w + "px";
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = 600;
+    try { hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { fit(); setTimeout(fit, 250); });
+  f.srcdoc = docFor(th);
+  addEventListener("resize", fit);
+}
+function render() {
+  // A hidden option is never drawn: the other one in its group takes its place.
+  Object.keys(OPTS).forEach((g) => { if (P.hide.includes(P[g])) { const v = OPTS[g].find((x) => !P.hide.includes(x)); if (v) P[g] = v; } });
+  writeHash();
+  const sys = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.dataset.theme = P.t === "both" ? sys : P.t;
+  Object.keys(OPTS).forEach((g) => document.querySelectorAll(`[data-${g}]`).forEach((b) => { const v = b.dataset[g]; b.hidden = P.hide.includes(v); b.setAttribute("aria-pressed", String(v === P[g])); }));
+  document.querySelectorAll("[data-hide]").forEach((b) => { const off = P.hide.includes(b.dataset.hide); b.textContent = (off ? "Show " : "Hide ") + b.dataset.name; b.setAttribute("aria-pressed", String(off)); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === P.t)));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  const themes = P.t === "both" ? ["light", "dark"] : [P.t];
+  (P.w === "all" ? WIDTHS : [Number(P.w)]).forEach((w) => themes.forEach((th) => frame(w, th)));
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  Object.keys(OPTS).forEach((g) => { if (b.dataset[g]) P[g] = b.dataset[g]; });
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.id === "labBtn") P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const id = b.dataset.hide; P.hide = P.hide.includes(id) ? P.hide.filter((i) => i !== id) : [...P.hide, id]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (P.t === "both") render(); });
+readHash(); render();
+</script>
+</body>
+</html>

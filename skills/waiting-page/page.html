@@ -507,6 +507,8 @@ body.sheet-open { overflow: hidden; }
 .now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
 .now .ph { font: 700 19px/1.2 var(--body); }
 .now .lead { padding: 0; font-size: 14px; color: var(--muted); }
+/* The count line breaks only between groups ("2 in progress,"): a group never splits. */
+.now .lead .grp { white-space: nowrap; }
 .now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 .now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
 .now li .id { flex: none; font-size: 13px; color: var(--muted); }
@@ -523,6 +525,8 @@ body.sheet-open { overflow: hidden; }
 .segbar i.done { background: var(--acc); }
 .segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
 .segbar i.blk { background: var(--holds); }
+.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }
+.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 
 /* The view switch sits right above the view it changes. What every view shares sits above the switch. */
 .views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
@@ -601,7 +605,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
 .rsteps .active .ttl { font-weight: 700; }
 .rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
-.rsteps .stl-row > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .stl-row > .rrow { background: color-mix(in srgb, var(--holds) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--holds); }
+/* A paused step keeps status active: no tint, and a muted edge in the paused band's grey. */
+.rsteps .pzd-row > .rrow { background: none; box-shadow: inset 3px 0 0 var(--muted); }
+.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
 .rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
 .rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
 .rsteps li.open .rbody { display: block; }
@@ -3058,7 +3065,11 @@ const phaseName = (k) => (PH.find((p) => p.k === k) || {}).n || k;
 const unknownRead = (r) => String(r).startsWith("unknown");
 // "unknown (why)" shows as its why, so the word "unknown" appears once on the screen, at the plan.
 const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == null ? "" : r)); return m ? m[1] : String(r == null ? "" : r); };
-const segs = (d, a, b, n) => '<i class="done"></i>'.repeat(d) + '<i class="act"></i>'.repeat(a) + '<i class="blk"></i>'.repeat(b) + "<i></i>".repeat(Math.max(0, n - d - a - b)) + (n ? "" : "<i></i>");
+const segs = (c, n) => ["done", "act", "stl", "pzd", "blk"].map((k) => `<i class="${k}"></i>`.repeat(c[k])).join("") + "<i></i>".repeat(Math.max(0, n - c.done - c.act - c.stl - c.pzd - c.blk)) + (n ? "" : "<i></i>");
+// The bar's cell counts for a phase's steps, one per cell kind. shownState decides in progress, stalled and paused; the tallies read status for done and blocked.
+const tally = (ss) => ({ done: ss.filter((s) => s.status === "done").length, act: ss.filter((s) => shownState(s) === "active").length, stl: ss.filter((s) => shownState(s) === "stalled").length, pzd: ss.filter((s) => shownState(s) === "paused").length, blk: ss.filter((s) => s.status === "blocked").length });
+// ", 3 stalled, 1 paused, 1 blocked", with a kind left out when it has no steps.
+const stallWords = (c) => (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "") + (c.blk ? ", " + c.blk + " blocked" : "");
 
 /* Status marks: shape and colour together, never colour alone. */
 const GLY = {
@@ -3236,7 +3247,10 @@ function stalledBand() {
     return `<div class="livenone" id="stBand"><p><span class="lh">Stalled steps</span> <span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${esc(stall.plain)}</span></p>`
       + `<details><summary>What the build said</summary><pre>${esc(reason(stall.why))}</pre></details></div>`;
   }
-  const items = stall.items, n = stall.steps.length + (items ? items.length : 0);
+  // The band takes a listed step only when shownState says it is that kind. A listed id with no step in the plan stays.
+  const holds = (id, k) => { const s = steps.find((x) => x.id === id); return !s || shownState(s) === k; };
+  const stl = stall.steps.filter((x) => holds(x.id, "stalled")), pzd = stall.paused.filter((id) => holds(id, "paused"));
+  const items = stall.items, n = stl.length + (items ? items.length : 0);
   const title = (id) => { const s = steps.find((x) => x.id === id); return s && s.title ? s.title : "Untitled step"; };
   const head = n
     ? `<div class="sth"><h3>${rg("stalled")}Stalled: <span class="num">${n}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>`
@@ -3247,14 +3261,14 @@ function stalledBand() {
     if (marks.length) return `<span class="fx land">done: landed in ${esc(marks.join(", "))}</span>`;
     return Object.prototype.hasOwnProperty.call(stall.bad, x.id) ? `<span class="fx bad">Pause not counted: ${esc(stall.bad[x.id])}.</span>` : "";
   };
-  const stepRows = stall.steps.map((x) => `<li><span class="k"><span class="id">${esc(x.id)}</span></span><span><button type="button" class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join("");
+  const stepRows = stl.map((x) => `<li><span class="k"><span class="id">${esc(x.id)}</span></span><span><button type="button" class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join("");
   const itemPart = !items
     ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: no item carries its lane yet</span>`
       + (reason(stall.itemsWhy) ? `<details><summary>What the build said</summary><pre>${esc(reason(stall.itemsWhy))}</pre></details>` : "") + "</li></ul>"
     : items.length ? `<h4>Waiting items</h4><ul>${items.map((it) => `<li class="it"><span class="k"><span>Item <span class="num">${esc(it.n)}</span></span></span><span>Answer routed to <span class="ln">${esc(it.lane)}</span>; lane gone</span></li>`).join("")}</ul>` : "";
-  const stepPart = stall.steps.length ? (items && !items.length ? `<ul>${stepRows}</ul>` : `<h4>Steps</h4><ul>${stepRows}</ul>`) : "";
-  const pz = stall.paused.length
-    ? `<details class="pz"${n ? "" : " open"}><summary>${rg("paused")}Paused: <span class="num">${stall.paused.length}</span></summary><ul>${stall.paused.map((id) => {
+  const stepPart = stl.length ? (items && !items.length ? `<ul>${stepRows}</ul>` : `<h4>Steps</h4><ul>${stepRows}</ul>`) : "";
+  const pz = pzd.length
+    ? `<details class="pz"${n ? "" : " open"}><summary>${rg("paused")}Paused: <span class="num">${pzd.length}</span></summary><ul>${pzd.map((id) => {
       const p = (steps.find((x) => x.id === id) || {}).paused || {}, at = when(p.at), who = DECIDES[p.decides];
       const line = [who ? who + " decides" : "", at ? `paused <span class="num">${esc(fmt(at.toISOString()))}</span>` : ""].filter(Boolean).join("; ");
       return `<li><span class="k"><span class="id">${esc(id)}</span></span><span><button type="button" class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ""}${line ? `<span class="fx">${line}</span>` : ""}</span></li>`;
@@ -3265,15 +3279,15 @@ function stalledBand() {
 
 /* ---------- where you are ---------- */
 function renderNow() {
-  const cur = curPhase(), ss = byPhase(cur.k), done = ss.filter((s) => s.status === "done").length, act = ss.filter((s) => shownState(s) === "active").length;
+  const cur = curPhase(), ss = byPhase(cur.k), c = tally(ss), done = c.done, act = c.act;
   const tot = steps.length, tdone = steps.filter((s) => s.status === "done").length;
   const active = workOrder(steps.filter((s) => s.status === "active")), nu = nextUp(), off = offTrack();
   $("svNow").innerHTML = `
   <div><h3>Phase${cur.none ? "" : ` <span class="num">${numbered().indexOf(cur) + 1}/${numbered().length}</span>`}</h3><div class="ph">${esc(cur.n)}</div>
-    <div class="lead"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act ? `, <span class="num">${act}</span> in progress` : ""}</div>
-    <div class="segbar" aria-hidden="true">${segs(done, act, 0, ss.length)}</div>
+    <div class="lead">${[`<span class="num">${done}</span> of <span class="num">${ss.length}</span> done`, ...[[act, "in progress"], [c.stl, "stalled"], [c.pzd, "paused"], [c.blk, "blocked"]].filter((x) => x[0]).map((x) => `<span class="num">${x[0]}</span> ${x[1]}`)].map((g) => `<span class="grp">${g}</span>`).join(", ")}</div>
+    <div class="segbar" aria-hidden="true">${segs(c, ss.length)}</div>
     <div class="lead">Whole plan <span class="num">${tdone}/${tot}</span> done</div></div>
-  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${stalledIds.has(s.id) ? rgl("stalled") : pausedIds.has(s.id) ? rgl("paused") : rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
+  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${["stalled", "paused"].includes(shownState(s)) ? rgl(shownState(s)) : rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
   <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing left to start in this phase.</li>'}</ol></div>
   <div class="offt"><h3>Off track <span class="num" style="color:${off.length ? "var(--holds)" : "var(--muted)"}">${off.length}</span></h3><ul>${off.map((o) => {
     const s = steps.find((x) => x.id === o.id);
@@ -3285,9 +3299,9 @@ function renderNow() {
 function renderRail() {
   const cur = curPhase(), shown = shownPhase();
   $("svRail").innerHTML = PH.map((p) => {
-    const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => shownState(s) === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+    const ss = byPhase(p.k), c = tally(ss), d = c.done;
     const u = ss.filter(stepNew).length;
-    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}${u ? ", " + u + " updated since your last visit" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="nmr">${u ? countMark(u) : ""}<span class="num" aria-hidden="true">${d}/${ss.length}</span></span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
+    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${stallWords(c)}${p === cur && !p.none ? ", current phase" : ""}${u ? ", " + u + " updated since your last visit" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="nmr">${u ? countMark(u) : ""}<span class="num" aria-hidden="true">${d}/${ss.length}</span></span></span><span class="segbar" aria-hidden="true">${segs(c, ss.length)}</span></button>`;
   }).join("");
 }
 
@@ -3348,10 +3362,10 @@ const countMark = (n) => `<span class="newmark ct" aria-hidden="true" title="${n
 const landed = (id) => { const w = B && B.landed && B.landed[id]; return Array.isArray(w) && w.length ? w : null; };
 function stepRow(s, nextIds) {
   const ni = nextIds.indexOf(s.id), lw = landed(s.id);
-  const stl = stalledIds.has(s.id), pzd = pausedIds.has(s.id), isNew = stepNew(s);
+  const stl = shownState(s) === "stalled", pzd = shownState(s) === "paused", isNew = stepNew(s);
   const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : "", stl ? "Stalled" : "", pzd ? "Paused" : "", isNew ? "Updated since your last visit" : ""];
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = stl ? LBL.stalled : pzd ? LBL.paused : LBL[s.status] || LBL.todo;
-  return `<li class="${s.status}${stl ? " stl-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
+  return `<li class="${s.status}${stl ? " stl-row" : ""}${pzd ? " pzd-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
     <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(stl ? "stalled" : pzd ? "paused" : s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
       <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}${stl ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLY.stalled}</span>` : ""}${pzd ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused: ${esc((s.paused || {}).why || "")}">${GLY.paused}</span>` : ""}${isNew ? stepMark(s) : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
     <div class="rbody"><dl>
@@ -3374,7 +3388,7 @@ const defaultPage = (list) => { const ix = list.findIndex((s) => s.status !== "d
 function renderPhase() {
   stepWords = true;
   const k = shownPhase(), p = PH.find((x) => x.k === k), ss = byPhase(k);
-  const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => shownState(s) === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+  const open = openList(k), done = doneList(k), d = done.length, c = tally(ss);
   const nextIds = nextUp().map((s) => s.id), size = pageSize();
   const pages = Math.max(1, Math.ceil(open.length / size));
   if (ui.page[k] == null) ui.page[k] = defaultPage(open);
@@ -3391,7 +3405,7 @@ function renderPhase() {
   // "Phase 13" for steps with no phase would be false, so that group is headed by its name alone.
   const n = numbered().indexOf(p) + 1;
   $("svPhases").innerHTML = `<section class="box phase" id="p-${p.none ? "none" : esc(k)}" aria-label="${p.none ? "No phase" : `Phase ${n}, ${esc(p.n)}`}">
-    <div class="ph-head"><h3>${p.none ? "No phase" : `Phase ${n}<span class="sr">, ${esc(p.n)}</span>`}</h3><div class="prog"><span class="num" aria-hidden="true">${d}/${ss.length}</span><span class="sr">${d} of ${ss.length} steps done</span><div class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</div></div></div>
+    <div class="ph-head"><h3>${p.none ? "No phase" : `Phase ${n}<span class="sr">, ${esc(p.n)}</span>`}</h3><div class="prog"><span class="num" aria-hidden="true">${d}/${ss.length}</span><span class="sr">${d} of ${ss.length} steps done${stallWords(c)}</span><div class="segbar" aria-hidden="true">${segs(c, ss.length)}</div></div></div>
     ${asof ? `<div class="asof">${asof}</div>` : ""}
     ${k === "cleanup" && ui.how && cull && cull.note ? `<div class="howbody">${esc(cull.note)}</div>` : ""}
     <div class="tiles">${tiles}</div>
