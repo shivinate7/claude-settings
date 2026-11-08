@@ -12,6 +12,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
+import ast
 import os
 import shutil
 import subprocess
@@ -103,6 +104,59 @@ class DerivedFlags(unittest.TestCase):
     def test_unreadable_diff_turns_the_derived_flags_on(self):
         self.check(run(["hooks/guard.py"], base="0" * 40))
         self.assertEqual(run(["hooks/guard.py"], base="0" * 40)["checks_guard"], "true")
+
+
+# The export suite (skills/waiting-page/test_export_page.py) runs in checks-shoot, which runs only on `shoot`. The walk below
+# lists the repo files the suite reaches. Each of them must set `shoot` alone.
+EXPORT_SUITE = "skills/waiting-page/test_export_page.py"
+# The four folders the suite's modules put on sys.path. A bare module name resolves to a file in one of them, and any other
+# name (a stdlib module, a function) resolves to nothing, so the walk counts repo files only.
+EXPORT_SUITE_DIRS = ("skills/waiting-page", "lint", "hooks", "janitor")
+# Run or read by the suite, never imported, so the walk cannot reach them.
+EXPORT_SUITE_FILES = ("skills/waiting-page/check_designs.mjs", "skills/waiting-page/page.html")
+
+
+def imported_names(tree):
+    """Each module name the tree imports, at any depth: `import a.b`; `from a import b` (`a`, and `a.b` in case `b` is a
+    module); a string literal given to importlib.import_module or __import__."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            yield from (alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            yield node.module
+            yield from (node.module + "." + alias.name for alias in node.names)
+        elif isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant) \
+                and isinstance(node.args[0].value, str):
+            fn = node.func
+            if (isinstance(fn, ast.Name) and fn.id == "__import__") or \
+                    (isinstance(fn, ast.Attribute) and fn.attr == "import_module"
+                     and isinstance(fn.value, ast.Name) and fn.value.id == "importlib"):
+                yield node.args[0].value
+
+
+def repo_module(root, name):
+    """The repo file a module name stands for in EXPORT_SUITE_DIRS, or None: a/b.py, or a/b/__init__.py for a package."""
+    rel = name.replace(".", "/")
+    for folder in EXPORT_SUITE_DIRS:
+        for cand in ("%s/%s.py" % (folder, rel), "%s/%s/__init__.py" % (folder, rel)):
+            if os.path.isfile(os.path.join(root, cand)):
+                return cand
+    return None
+
+
+def export_suite_files():
+    """-> the repo files the export suite reaches, sorted: its import closure from its own file, plus EXPORT_SUITE_FILES."""
+    root = os.path.realpath(os.path.join(HERE, ".."))
+    found, todo = {EXPORT_SUITE}, [EXPORT_SUITE]
+    while todo:
+        with open(os.path.join(root, todo.pop()), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        for name in imported_names(tree):
+            hit = repo_module(root, name)
+            if hit and hit not in found:
+                found.add(hit)
+                todo.append(hit)
+    return sorted(found | set(EXPORT_SUITE_FILES))
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -390,6 +444,22 @@ class Scope(unittest.TestCase):
         for p in ("hooks/mutate_shared.py", "hooks/config_watch.py"):
             with self.subTest(path=p):
                 self.assertFlags(run([p], existing=[p]), want_false=["shoot"])
+
+    # Named failure: a file the suite reaches sets `shoot` off, so a pull request that changes only that file skips the suite.
+    # The scope asserts come first. Named failure: a walk that reaches too little passes every file below and proves nothing.
+    def test_every_file_the_export_suite_reaches_sets_shoot_alone(self):
+        reached = export_suite_files()
+        for want in ("skills/waiting-page/export_page.py", "skills/waiting-page/page_check.py", "lint/_test_temp.py",
+                     "hooks/_nowindow.py", "janitor/sweep.py") + EXPORT_SUITE_FILES:
+            self.assertIn(want, reached, "the export suite's walk does not reach %s" % want)
+        # The sibling control above pins these two with `shoot` off, so the walk must not reach them.
+        for not_want in ("hooks/mutate_shared.py", "hooks/config_watch.py"):
+            self.assertNotIn(not_want, reached,
+                             "the export suite's walk reaches %s, which the sibling control pins off" % not_want)
+        missing = [p for p in reached if run([p], existing=[p]).get("shoot") != "true"]
+        if missing:
+            self.fail("shoot stays off when a pull request changes only one of these export suite files, "
+                      "so the suite is skipped:\n  " + "\n  ".join(missing))
 
     # checks-guard and checks-shoot both install actions/playwright-setup, and checks-guard gates on checks_guard
     # alone (checks.yml). An edit to the action must set checks_guard directly, with `shoot` for checks-shoot.
