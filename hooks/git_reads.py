@@ -11,6 +11,7 @@ library only, plus `_nowindow` and `shared_names`, and it imports no guard modul
 import calendar
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -284,11 +285,72 @@ def origin_slug(url):
     return "%s/%s" % (owner, name) if owner and name else None
 
 
-def github_repo(root, extras=_READ_EXTRAS):
+def checkout_root_by_stat(folder: str) -> str:
+    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
+    worktree's file), found by stat alone, else ''. No git is spawned."""
+    while folder:
+        if os.path.exists(os.path.join(folder, ".git")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return ""
+        folder = parent
+    return ""
+
+
+def git_common_dir_by_files(root: str) -> str:
+    """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
+    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
+    one, relative to `<dir>`. No git is spawned."""
+    dot = os.path.join(root, ".git")
+    try:
+        if os.path.isdir(dot):
+            return os.path.realpath(dot)
+        with open(dot, encoding="utf-8") as handle:
+            first = handle.readline(4096).strip()
+        if not first.startswith("gitdir:"):
+            return ""
+        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
+        try:
+            with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
+                git_dir = os.path.join(git_dir, handle.readline(4096).strip())
+        except OSError:
+            pass  # no commondir: a submodule's or a bare-style git dir is its own common dir
+        return os.path.realpath(git_dir)
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def origin_url_by_files(common: str) -> str:
+    """The `[remote "origin"]` url in COMMON's config file, else '' (no file, no origin, no url)."""
+    try:
+        with open(os.path.join(common, "config"), encoding="utf-8") as handle:
+            lines = handle.read(1 << 20).splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    in_origin = False
+    for line in lines:
+        line = line.strip()
+        if line.startswith("["):
+            in_origin = re.fullmatch(r'\[remote\s+"origin"\]', line, re.IGNORECASE) is not None
+        elif in_origin:
+            found = re.match(r"url\s*=\s*(.+)$", line, re.IGNORECASE)
+            if found:
+                return found.group(1).strip().strip('"')
+    return ""
+
+
+def github_repo(root, extras=_READ_EXTRAS, use_git=True):
     """The `owner/name` of the GitHub repo of the checkout at `root`, as written, or None. A string under the extras'
     "github" key wins; else the origin is read and parsed (`origin_slug`). The roadmap build passes the extras it
     already found; the guard passes none, so this reads the "roadmap" object of `root`'s layout extras file: one
-    file read. The origin costs one git start, and only when the extras name no repo."""
+    file read. The origin costs one git start, and only when the extras name no repo. `use_git=False` starts no git:
+    `root` is first lifted to the checkout that holds it (a subfolder is fine), and the origin is read from the
+    config file (origin_url_by_files). It works when a narrow PATH has no git, and is the path of rule brief-pr-head."""
+    if not use_git:
+        root = checkout_root_by_stat(str(root)) if root else ""
+        if not root:
+            return None
     if extras is _READ_EXTRAS:
         try:
             with open(os.path.join(root, *LAYOUT_EXTRAS), encoding="utf-8") as handle:
@@ -297,6 +359,8 @@ def github_repo(root, extras=_READ_EXTRAS):
             extras = None
     if isinstance(extras, dict) and isinstance(extras.get("github"), str):
         return extras["github"]
+    if not use_git:
+        return origin_slug(origin_url_by_files(git_common_dir_by_files(root)))
     done = _git(str(root), "remote", "get-url", "origin")
     if done is None or done.returncode != 0:
         return None

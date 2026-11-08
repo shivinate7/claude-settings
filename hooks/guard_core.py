@@ -1531,6 +1531,13 @@ def set_override_veto(veto) -> None:
 
 
 _override_veto = lambda: True  # noqa: E731 - fail closed until judge() registers its own
+_lift_gate = [None]
+
+
+def set_lift_gate(gate) -> None:
+    """Register a refusal that a lifted refusal must still meet: gate() refuses and exits. refuse() calls it once, just
+    before it lets a lifted act through, so no lift skips the check the gate holds (rule brief-pr-head). None clears it."""
+    _lift_gate[0] = gate
 
 
 def _vetoed() -> bool:
@@ -1557,6 +1564,9 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         if lifted:
             record(tool, lifted, rule, matched + " step " + step if step else matched)
             if lifted in override.LIFTS:
+                gate, _lift_gate[0] = _lift_gate[0], None  # one use: the gate's own refusal may be lifted too
+                if gate:
+                    gate()
                 sys.exit(0)
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason

@@ -123,18 +123,24 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        Incident 2026-11-07, lane notes-fix-large-3: a brief paired #1687 with its base branch; two false
                        review FAILs, a false debt and a duplicate step followed. Grammar (guard_merge.brief_pairings):
                        adjacent words only, with backticks, `origin/` and `refs/heads/` dropped: `PR #N, branch X`,
-                       `PR #N branch X`, `#N (branch X)`, `#N on branch X`, `#N, head X`, `branch X (#N)`,
-                       `branch X, PR #N`. #N may carry `owner/name#N`, or a short name that holds `_`, `-` or `.`
-                       and reads as <the checkout's owner>/<name>. A base word right before the branch (base, based
-                       on, onto, stacked on, into) is no pairing, and a branch equal to the PR's base is not allowed
-                       by that fact. The head is read once per distinct (repo, N) with `gh api repos/<o>/<r>/pulls/<N>`
-                       through the merge tool, pinned to the repo. A read that fails (gh missing too) is a refusal
-                       that says unknown, except for a short-name pairing, which passes. The refusal names #N, the
-                       shape and the read command, and neither branch. Cost: one gh read per distinct pairing, zero
-                       with no pairing, and the repo is read from the checkout's config file, so no git starts. The
-                       count_file cases prove it. Misses: a Workflow prompt held in a variable, a pairing outside the
-                       shapes above, a checkout with no readable origin, and an in-process SendMessage (another
-                       matcher). An override lifts it.
+                       `PR #N branch X`, `PR #N from branch X`, `PR #N with branch X`, `#N (branch X)`,
+                       `#N on branch X`, `#N, head X` (also `head branch X`, `head ref X`), `branch X (#N)`,
+                       `branch X, PR #N`, `branch X for PR #N`. `from`, `with` and `for` pair after `PR #N` only. A base
+                       word right before the branch (base, based on, onto, stacked on, into), a rebase, retarget or stack
+                       verb before `#N on branch X`, and `against branch X` make no pairing. A branch paired to its left is
+                       not paired again to its right (`PR #N, branch X (#M)`). #N may carry `owner/name#N`, or a short name
+                       that holds `_`, `-` or `.`: that guess reads <the checkout's owner>/<name> first, and a 404 there
+                       reads the checkout's repo. The head is one `gh api repos/<o>/<r>/pulls/<N>` through the merge tool,
+                       pinned to the repo, once per distinct (repo, N). A 404 on the pull request means the number is no
+                       PR: allowed. Any other failed read (gh missing too), and a bare #N where the checkout's repo cannot
+                       be read, refuse and say unknown. A mismatch is read before every spawn check (9a) and refused after
+                       lane-one-topic (9e); a lifted refusal in between still meets it (guard_core.set_lift_gate), so no
+                       lift skips it. The refusal names #N, the shape and the read command, and neither branch.
+                       Cost: one gh read per distinct (repo, N), two at most when a short name falls back, zero with no
+                       pairing, and no git start: the repo is git_reads.github_repo(use_git=False), the one reading the
+                       lane-repo-tag rule shares (it keeps git, which applies url rewrites). The count_file cases prove it.
+                       Misses: a Workflow prompt held in a variable, a create_session `prompt` (unread), a pairing outside the
+                       shapes above, and an in-process SendMessage (another matcher). An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -4274,66 +4280,10 @@ def _owning_checkout(path: str, roots) -> str:
     return max(owners, key=len) if owners else ""
 
 
-def _checkout_root_by_stat(folder: str) -> str:
-    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
-    worktree's file), found by stat alone, else ''. No git is spawned."""
-    while folder:
-        if os.path.exists(os.path.join(folder, ".git")):
-            return folder
-        parent = os.path.dirname(folder)
-        if parent == folder:
-            return ""
-        folder = parent
-    return ""
-
-
-def _git_common_dir(root: str) -> str:
-    """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
-    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
-    one, relative to `<dir>`. No git is spawned."""
-    dot = os.path.join(root, ".git")
-    try:
-        if os.path.isdir(dot):
-            return os.path.realpath(dot)
-        with open(dot, encoding="utf-8") as handle:
-            first = handle.readline(4096).strip()
-        if not first.startswith("gitdir:"):
-            return ""
-        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
-        try:
-            with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
-                git_dir = os.path.join(git_dir, handle.readline(4096).strip())
-        except OSError:
-            pass  # no commondir: a submodule's or a bare-style git dir is its own common dir
-        return os.path.realpath(git_dir)
-    except (OSError, UnicodeDecodeError):
-        return ""
-
-
-def _clone_origin(common: str) -> str:
-    """The `[remote "origin"]` url in COMMON's config file, else '' (no file, no origin, no url)."""
-    try:
-        with open(os.path.join(common, "config"), encoding="utf-8") as handle:
-            lines = handle.read(1 << 20).splitlines()
-    except (OSError, UnicodeDecodeError):
-        return ""
-    in_origin = False
-    for line in lines:
-        line = line.strip()
-        if line.startswith("["):
-            in_origin = re.fullmatch(r'\[remote\s+"origin"\]', line, re.IGNORECASE) is not None
-        elif in_origin:
-            found = re.match(r"url\s*=\s*(.+)$", line, re.IGNORECASE)
-            if found:
-                return found.group(1).strip().strip('"')
-    return ""
-
-
-def checkout_repo(cwd: str):
-    """The `owner/name` of the origin of the checkout that holds `cwd`, read from files alone (no git starts, so it works
-    when a narrow PATH has no git), else None."""
-    root = _checkout_root_by_stat(cwd) if cwd else ""
-    return git_reads.origin_slug(_clone_origin(_git_common_dir(root))) if root else None
+# The config-file reads of a checkout's origin have one home, git_reads, beside github_repo; none of them starts a process.
+_checkout_root_by_stat = git_reads.checkout_root_by_stat
+_git_common_dir = git_reads.git_common_dir_by_files
+_clone_origin = git_reads.origin_url_by_files
 
 
 def _origin_local(url: str) -> str:
@@ -4851,6 +4801,16 @@ def judge(payload) -> None:
     if floor_model:
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
+    # 9a. A brief that pairs PR #N with a branch that is not #N's head ref (rule brief-pr-head). Read here, before every
+    # spawn check below, and refused at 9e. A lifted refusal exits refuse() at once, so the gate makes it meet this refusal
+    # first: no lift skips the check. The repo is read from the checkout's files, so no git starts.
+    paired = brief_pr_head_hit(brief_texts(tool, tool_input), lambda: git_reads.github_repo(cwd, use_git=False))
+
+    def brief_refusal():
+        refuse(tool, "deny", "brief-pr-head", paired[1], paired[0])
+    if paired:
+        guard_core.set_lift_gate(brief_refusal)
+
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
     step_up = step_up_hit(tool, tool_input)
@@ -4928,10 +4888,9 @@ def judge(payload) -> None:
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
-    # A brief that pairs PR #N with a branch that is not #N's head ref (rule brief-pr-head).
-    paired = brief_pr_head_hit(brief_texts(tool, tool_input), lambda: checkout_repo(cwd))
+    # 9e. The brief that pairs PR #N with a branch that is not its head ref, read at 9a.
     if paired:
-        refuse(tool, "deny", "brief-pr-head", paired[1], paired[0])
+        brief_refusal()
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
