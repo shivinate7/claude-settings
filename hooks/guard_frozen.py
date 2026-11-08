@@ -641,7 +641,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words, shown = [], []
+        words, shown, held = [], [], []
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
@@ -654,6 +654,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
+                if "'" in word or '"' in word:
+                    held.extend(_quoted_commands(word))
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         commands = [_segment_command(start) for start in _command_starts(words)]
@@ -663,9 +665,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and any(
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and (any(
                     writes_to(word, text, *(position if command_position or predicate_command else ()))
-                    for position in commands):
+                    for position in commands) or (
+                    (command_position or predicate_command)
+                    and any(writes_to(word, piece, *position) for piece, position in held))):
                 return word
     return ""
 
@@ -689,6 +693,19 @@ def _command_starts(words):
     return [[word for word in start if word] for start in starts]
 
 
+def _quoted_commands(word: str):
+    """(text, (command, plain words after it)) for each command that a quoted word holds in a string of
+    its own, so `os.system("tee P")` and `iex "Set-Content P"` read as a write of P. The text is that
+    string alone: a write word in one string and a path in another (`print('tee', open(P))`) is no write."""
+    out = []
+    for piece in re.split(r"""['"()]""", word):
+        for part in split_segments(piece, []):
+            words = REDIRECT.sub(r" \1 ", part).split()
+            if words:
+                out.append((" ".join(words), _segment_command(words)))
+    return out
+
+
 def _segment_command(words):
     """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
     index = resolve_command(tuple(words))
@@ -700,7 +717,7 @@ def _segment_command(words):
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
     """Return the frozen (config-dir) path a shell command writes to, else ''."""
-    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
+    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen, command_position=True)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
