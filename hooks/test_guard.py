@@ -1033,8 +1033,13 @@ else:
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
         # Every row names its repos, as GitHub does: the base is y/x, and a row's head is y/x unless it names head_repo (a fork).
+        # A head_repo of None is a row whose head repo is JSON null, and no repo at all.
+        def head_repo_of(o):
+            if "head_repo" in o and o["head_repo"] is None:
+                return None
+            return {"full_name": o.get("head_repo", "y/x")}
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False),
-                       head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"], "repo": {"full_name": o.get("head_repo", "y/x")}},
+                       head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"], "repo": head_repo_of(o)},
                        base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main"), "full_name": "y/x"}},
                        state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
         rows = [dict(state["pr"], number=state["number"])] + others
@@ -14160,6 +14165,10 @@ rpush_case("reviewed-head-push: a branch with no pull request allows, after the 
 # and its record is never read.
 rpush_case("reviewed-head-push: a fork's pull request with the lane's head name allows, after the list read only",
            "allow", (RPUSH_PULLS,), others=[dict(RPUSH_OPEN, head_repo=RPUSH_FORKED)],
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+# A head repo that is JSON null names no other repo, so the row is this repo's own: it is judged, and its record asks.
+rpush_case("reviewed-head-push: a pull request whose head repo is null asks, after both reads",
+           "ask", RPUSH_BOTH, others=[dict(RPUSH_OPEN, head_repo=None)],
            comments=rpush_record_comments({"fix": RPUSH_FIX}))
 
 # The fail-open reads. A read that fails allows the push and prints exactly one line, naming the rule.
