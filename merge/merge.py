@@ -2489,8 +2489,10 @@ def unshallow_for_lint(root):
     if c:
         stop(f"this clone is shallow, so the lint cannot read the history, and `git fetch --unshallow origin` failed: {out}")
     if shallow():
-        stop("this clone is still shallow after the fetch, because origin itself is shallow and has no more history to send, so the lint cannot read the history.",
-             "Lint from a clone whose origin has full history (a clone of the real remote, not of a shallow copy), then run `merge --lane-lint` again.")
+        stop("this clone is still shallow after the fetch, so the lint cannot read the history. Two causes: origin itself is shallow and has no more history to send, "
+             "or a fetch refspec in remote.origin.fetch leaves history out (a single-branch clone's refspec names one branch).",
+             "For a shallow origin, lint from a clone whose origin has full history (a clone of the real remote, not of a shallow copy). "
+             "For a refspec, set remote.origin.fetch to `+refs/heads/*:refs/remotes/origin/*`. Then run `merge --lane-lint` again.")
 
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
