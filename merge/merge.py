@@ -3343,7 +3343,7 @@ def source_record_problem(h, root, a, own_records):
     if h.review_comments(c["created_at"]).get(c["issue_number"], [""])[-1] != c["body"]:
         return None, f"--fix-base-record: that record is not the newest on #{c['issue_number']}"
     if rec["fix"]:
-        return None, "--fix-base-record: that record has a Fix check line, and a fix never follows a fix"
+        return None, "--fix-base-record: that record has a Fix check line, and a chain never runs through --fix-base-record, so a replacement pull request gets a fresh round 1 on its whole diff"
     return rec, None
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
@@ -3550,13 +3550,14 @@ def main(argv, host=None, lock=None):
                         problem = f"the newest earlier review record's Fix check is {last['fix'][3]}, so a new fix check may not follow it"
                 if not problem and last["head"] != a.fix_check[0]:
                     problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
-                if not problem and last["fix"] and not a.fix_base_record:  # a chained fix diff must start inside the live head's history
+                if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
                     found = h.compare_files(a.fix_check[0], info["head"])
                     if found["behind_by"]:
                         problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
-                if not problem and last["fix"] and not a.fix_base_record and max((i for i, *_ in last["rounds"]), default=0) >= REVIEW_LAST_ROUND \
-                        and a.net_value != last["net"]:  # a passing fix keeps the net value the final round gave (decision hold-unsafe-after-round-3); a chain may not relaunder it
-                    problem = f"the newest earlier review record is at round {REVIEW_LAST_ROUND} with Net value {last['net']}, and a chained fix check keeps it, so --net-value may not be {a.net_value}"
+                if not problem and max((i for i, *_ in last["rounds"]), default=0) >= REVIEW_LAST_ROUND:  # a passing fix keeps what the final round gave (decision hold-unsafe-after-round-3); the record it follows is the newest earlier one, or the --fix-base-record source, first fix check or chained
+                    moved = [f"{flag} may not be {new}, the record it follows has {old}" for flag, old, new in (("--net-value", last["net"], a.net_value), ("--guard", last["guard"], a.guard), ("--kind", last["kind"], a.kind)) if old != new]
+                    if moved:
+                        problem = f"the record on head {last['head'][:9]} is at the final round, and a fix check keeps its net value, guard and kind: " + "; ".join(moved)
                 if problem:
                     print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
                     return 2
