@@ -12643,11 +12643,11 @@ class ReviewRecordAncestorHead(ReviewEnv):
     FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
     PASS_ONE = ("1:reviewer:sonnet:PASS",)
 
-    def review_at(self, head, rounds, status="ahead", comments=(), extra=()):
+    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal"):
         """The record for --head `head` with `rounds` (N:ROLE:MODEL:VERDICT each), `extra` after them. The compare of `head` and the live head
         answers `status`. -> (rc, out, err, host)."""
         host = self.record_host(*comments, diffs={(head, self.LIVE): compare_of(status)})
-        argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", head]
+        argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", head]
         for rnd in rounds:
             argv += ["--round", rnd]
         rc, out, err = self.run_args(*argv, *extra, host=host)
@@ -12667,8 +12667,8 @@ class ReviewRecordAncestorHead(ReviewEnv):
         self.assertIn((self.ANC, self.LIVE), host.compare_reads, "the ancestry was not read as compare(head, live)")
 
     def test_a_fix_check_on_the_live_head_follows_an_ancestor_fail_record(self):
-        # The lane's next record after its FAIL on the ancestor head: the fix check names that head as its base, so no compare is read. Green on
-        # the base too, since the base already accepts a fix check whose base is the newest earlier record's Head. Kept as the control of the ancestor FAIL case.
+        # The fix check's base is the Head of the earlier FAIL record, so the check needs no compare read. This case controls the ancestor FAIL
+        # case above: the live head with its fix line is accepted.
         fail = review_comment(1, 7, record_text(head=self.ANC, rounds=("Round 1: reviewer, sonnet, FAIL",)))
         host = self.record_host(fail)
         rc, out, err = self.run_args("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.LIVE, "--round", "1:reviewer:sonnet:FAIL",
@@ -12689,6 +12689,15 @@ class ReviewRecordAncestorHead(ReviewEnv):
         rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
         self.assertEqual(rc, 0, "control: a FAIL record on the same ancestor was refused:\n" + out + err)
 
+    def test_a_partial_round_on_an_ancestor_head_is_refused_with_no_compare(self):
+        # A PARTIAL line reads open, so only the every-line-FAIL clause refuses this record, and it does so before any compare is read.
+        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:PARTIAL",), status="ahead")
+        self.assert_head_refused(rc, out, err, "a PARTIAL-only round on an ancestor head")
+        self.assertEqual(host.compare_reads, [], "a PARTIAL-only round read a compare")
+        # control: the same ancestor with a FAIL round is accepted, so the refusal is for the PARTIAL line
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: a FAIL-only round on the same ancestor was refused:\n" + out + err)
+
     def test_a_fail_record_on_a_diverged_head_is_refused_after_its_compare_is_read(self):
         rc, out, err, host = self.review_at(self.DIVERGED, self.FAIL_ONE, status="diverged")
         self.assertIn((self.DIVERGED, self.LIVE), host.compare_reads, "the diverged head was not compared with the live head before the refusal")
@@ -12706,23 +12715,42 @@ class ReviewRecordAncestorHead(ReviewEnv):
         self.assertEqual(rc, 0, "control: a FAIL-only round on the same ancestor was refused:\n" + out + err)
 
     def test_a_round_three_fail_on_an_ancestor_head_is_refused_as_held(self):
-        # rounds 1 to 3 all FAIL read held; rounds 1 and 2 all FAIL read open, so the final round is the disputed factor
+        # A FAIL in the final allowed round reads held. The control stops at the first two rounds, which read open, so the final round is the
+        # factor under test.
         rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL"), status="ahead")
         self.assert_head_refused(rc, out, err, "a round-3 all-FAIL record on an ancestor head")
         self.assertEqual(host.compare_reads, [], "a round-3 all-FAIL record read a compare, so the held rule came after the ancestry read")
         rc, out, err, _ = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL"), status="ahead")
         self.assertEqual(rc, 0, "control: a rounds 1-2 all-FAIL record on the same ancestor was refused:\n" + out + err)
 
+    def test_a_delete_only_fail_record_on_an_ancestor_head_is_refused_with_no_compare(self):
+        # A delete-only change with no guard or check reads done after its first round, so only the reads-open clause refuses this record,
+        # and it does so before any compare is read. The control is the same record as a normal change, which reads open.
+        rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE, kind="delete-only")
+        self.assert_head_refused(rc, out, err, "a delete-only FAIL record on an ancestor head")
+        self.assertEqual(host.compare_reads, [], "a delete-only FAIL record that reads done read a compare")
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: the normal-kind FAIL record on the same ancestor was refused:\n" + out + err)
+
+    def test_a_net_negative_fail_record_on_an_ancestor_head_is_refused_with_no_compare(self):
+        # A negative net value holds the change, so only the reads-open clause refuses this record, and it does so before any compare is read.
+        # The control is the same record with the net value at its default.
+        rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE, extra=("--net-value", "negative"))
+        self.assert_head_refused(rc, out, err, "a net-negative FAIL record on an ancestor head")
+        self.assertEqual(host.compare_reads, [], "a net-negative FAIL record read a compare")
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: the same ancestor record with its default net value was refused:\n" + out + err)
+
     def test_a_pass_then_fail_round_two_on_an_ancestor_head_prints_that_head(self):
-        # the top round is all FAIL, though the first round passed: the rule reads the highest round only
+        # The top round is all FAIL, though the first round passed. The rule reads only the highest round.
         rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:FAIL"), status="ahead")
         self.assertEqual(rc, 0, "a record whose top round is all FAIL, after a passed round 1, was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.ANC, "the record does not print the head the review read")
         self.assertIn((self.ANC, self.LIVE), host.compare_reads, "the ancestry was not read as compare(head, live)")
 
     def test_a_record_with_no_round_on_an_ancestor_head_is_refused_with_no_compare(self):
-        # no round is recorded, so the ancestor rule does not apply: refused, and the refusal reads no compare. Both kinds are checked, so the
-        # no-round clause decides it alone
+        # With no round recorded, the ancestor rule never reads a compare. The normal kind reads open with no round, so only the no-round clause
+        # refuses it. The docs-only kind reads done with no round, and the no-round clause refuses it first.
         for kind in ("docs-only", "normal"):
             with self.subTest(kind=kind):
                 host = self.record_host(diffs={(self.ANC, self.LIVE): compare_of("ahead")})
@@ -13013,7 +13041,7 @@ class ReviewChainFixture(ReviewEnv):
     NOTES_FILE = file_entry("docs/debts/notes.md")
 
     def pair(self, verdict, rounds=REVIEW_PASS, net="not owed", guard="no", kind="normal"):
-        """Pull request 7's comments in the shape of a second small fix after a passed fix check: an older record at EARLIER, then the
+        """Pull request 7's comments for a second small fix after a passed fix check: an older record at EARLIER, then the
         newest record at NEWEST, whose fix check of `verdict` reviewed EARLIER. A `verdict` of None leaves the newest record with no fix check line.
         `rounds`, `net`, `guard` and `kind` set the newest record's fields."""
         fix = (fix_check_line(verdict=verdict, head=self.EARLIER),) if verdict else ()
@@ -13096,7 +13124,7 @@ class ReviewFixPassChain(ReviewChainFixture):
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NOTES, "reviewer", "haiku", "PASS"))
 
     def test_a_chain_after_a_round_3_record_may_not_change_its_net_value(self):
-        # the final-round hold (decision hold-unsafe-after-round-3): a passing fix keeps the net value the final round gave. A chained fix check with another
+        # the final round's hold (decision hold-unsafe-after-round-3): a passing fix keeps the net value that round gave. A chained fix check with another
         # net value would turn a held negative into done, so each other value is refused, and the refusal names both values
         diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
         comments = self.pair("PASS", rounds=REVIEW_FAILED_THREE, net="negative")

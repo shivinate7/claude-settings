@@ -3422,7 +3422,7 @@ def idle_lanes(live):
 def open_fail_on_ancestor(h, live, a):
     """True when the record for --head `a.head` may be written although the pull request's `live` head differs: it has no fix check, every line of
     its highest round is FAIL, it reads open (a round-3 all-FAIL record reads held), and `a.head` is an ancestor of `live` (the compare is ahead
-    with no behind). The record then prints no pass, and the lane's next record names this head as its fix base. The cheap clauses run first, so a
+    with no behind). The record then reads open, so it clears nothing, and the lane's next record names this head as its fix base. The cheap clauses run first, so a
     record that cannot qualify reads no compare. Any other record keeps the equal-head rule (decision pr-review-record)."""
     if a.fix_check or not a.round:
         return False
@@ -3533,7 +3533,7 @@ def main(argv, host=None, lock=None):
         if a.review_record:
             if info["state"] != "OPEN":
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
-            if info["head"] != a.head and not open_fail_on_ancestor(h, info["head"], a):  # a push after the review must not relabel the old rounds as current; only an open all-FAIL record may name an ancestor, because it prints no pass
+            if info["head"] != a.head and not open_fail_on_ancestor(h, info["head"], a):  # a push after the review must not relabel the old rounds as current; only an open all-FAIL record may name an ancestor, because it reads open and clears nothing
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # a fix follows no FAIL or WIDE fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
                 recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
@@ -3555,7 +3555,7 @@ def main(argv, host=None, lock=None):
                     if found["behind_by"]:
                         problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
                 if not problem and last["fix"] and not a.fix_base_record and max((i for i, *_ in last["rounds"]), default=0) >= REVIEW_LAST_ROUND \
-                        and a.net_value != last["net"]:  # a passing fix keeps the net value round 3 gave (decision hold-unsafe-after-round-3); a chain may not relaunder it
+                        and a.net_value != last["net"]:  # a passing fix keeps the net value the final round gave (decision hold-unsafe-after-round-3); a chain may not relaunder it
                     problem = f"the newest earlier review record is at round {REVIEW_LAST_ROUND} with Net value {last['net']}, and a chained fix check keeps it, so --net-value may not be {a.net_value}"
                 if problem:
                     print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
