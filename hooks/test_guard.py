@@ -8291,6 +8291,52 @@ sh("env: interpreter code follow-ups: allow, python3 -c, a listing that drops th
    "python3 -c \"import os\nfor f in os.listdir('.'):\n    if f != '" + ENV + "': print(open(f).read())\"",
    "allow", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code", follow-ups, third set: npx's call flags, uv run with a
+# value flag before its python, a heredoc piped into a script runner, and the JS and python forms that
+# compare the name and then read it, or that read every name but the file's. Each deny reads the file; each
+# allow reads no file or skips the name.
+sh("env: interpreter code follow-ups: deny, npx -c, a shell string that cats the file",
+   "npx -c 'cat " + ENV + "'", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, npx --call, a shell string that cats the file",
+   "npx --call 'cat " + ENV + "'", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, uv run with --cache-dir, python -c, an open of the file",
+   "uv run --cache-dir /tmp/c python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, a heredoc piped to python3 runner.py whose body is the file's name",
+   "cat <<'PY' | python3 runner.py\n" + ENV + "\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, an equal test of argv against the file, then a read",
+   "node -e \"const fs=require('fs'); const f=process.argv[1]; if (f === '" + ENV + "') "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, an equal test of argv against the file, then a read in an and arm",
+   "node -e \"const fs=require('fs'); const f=process.argv[1]; f === '" + ENV + "' && fs.readFileSync(f)\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, an endsWith test of the file's name, then a read",
+   "node -e \"const fs=require('fs'); const f=process.argv[1]; if (f.endsWith('" + ENV + "')) "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, an equal test of the file and a print of it in an and arm",
+   "python3 -c \"import sys; f=sys.argv[1]; f == '" + ENV + "' and print(open(f).read())\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, a conditional arm that opens the file",
+   "python3 -c \"import sys; f=sys.argv[1]; print(open(f).read() if f == '" + ENV + "' else '')\"",
+   "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: allow, a heredoc piped to python3 runner.py whose body is a word",
+   "cat <<'PY' | python3 runner.py\nhello\nPY", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a read of the file under a not-equal test",
+   "node -e \"const fs=require('fs'); const f=process.argv[1]; if (f !== '" + ENV + "') "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a read under a not-startsWith test of the name",
+   "node -e \"const fs=require('fs'); const f=process.argv[1]; if (!f.startsWith('" + ENV + "')) "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a loop that continues past the file's name, then a read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) { if (f === '" + ENV + "') continue; "
+   "console.log(fs.readFileSync(f,'utf8')) }\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, an if-pass arm for the file and an else read",
+   "python3 -c \"import sys\nf=sys.argv[1]\nif f == '" + ENV + "': pass\nelse: print(open(f).read())\"",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, a read under a not-startswith test of the name",
+   "python3 -c \"import sys\nf=sys.argv[1]\nif not f.startswith('" + ENV + "'): print(open(f).read())\"",
+   "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
