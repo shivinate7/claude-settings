@@ -1335,6 +1335,15 @@ class JsCalendarTest(FinderCase):
         calendar_judge(self, "tests/bare_date.test.js", text,
                        listed=["const b_0 = Date();", "let b_1 = Date();"])
 
+    def test_bare_date_call_with_an_argument_is_listed(self):
+        text = src(
+            "const a_0 = Date(x);",
+            'const a_1 = Date("2026-01-01");',
+        )
+        self.put("tests/bare_date_arg.test.js", text)
+        calendar_judge(self, "tests/bare_date_arg.test.js", text,
+                       listed=["const a_0 = Date(x);", 'const a_1 = Date("2026-01-01");'])
+
     def test_bare_date_in_a_comment_or_a_string_is_not_listed(self):
         text = src(
             "// const note = Date();",
