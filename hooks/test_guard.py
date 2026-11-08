@@ -27038,7 +27038,7 @@ ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
 ROLE_RULES_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                    "reviewer": "haiku", "builder": "sonnet", "planner": "sonnet",
                    "general-purpose": "sonnet", "claude": "sonnet"}
-# The refuter role (owner ruling, page item 279, pick d, 2026-11-06 12:43 CST): read-only, and it runs Opus by its own
+# The refuter role (decision plan-refuter): read-only, and it runs Opus by its own
 # standing grant. Its name is guard_core's REFUTER_ROLE, the one home of the name, read here and never typed. A guard_core
 # with no such name reads as REFUTER_MISSING: a spawn of that name is then refused as a role with no grant, and
 # refuter_name_check fails on the missing name itself (the same reading as the PowerShellScript cases).
@@ -27933,7 +27933,7 @@ WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_c
 
 # --------------------------------------------------------------------------- a reviewer's brief holds no report
 #
-# Decision reviewer-brief-blind (owner ruling, waiting-page item 279, pick a, 2026-11-06 12:43 CST). A reviewer that
+# Decision reviewer-brief-blind. A reviewer that
 # reads the builder's report, or a prior round's verdict, anchors on it and confirms it. So a reviewer spawn (Agent
 # or Task) is refused when its brief holds a report-shaped block or a verdict line, and so is each Workflow agent()
 # call whose agentType is a reviewer. The check reads shapes at line start, never words. The owner's override lifts
@@ -28073,7 +28073,7 @@ rbb_allow("reviewer-brief-blind: allowed: Round 2 of 3: check PASS or FAIL, the 
 rbb_allow("reviewer-brief-blind: allowed: a brief line that opens with BUILT-IN check, not a BUILT item",
           "Check the floor fix.\nBUILT-IN check: the floor reads the role before the model.\nFiles: hooks/guard.py.")
 # A verdict word that opens a line is a quoted result, not a verdict line, unless the line is the report form
-# `FAIL, round 1 of 3, ...`. A pasted test line that starts with FAIL is a quote too.
+# `FAIL, round <n> of 3, ...`. A pasted test line that starts with FAIL is a quote too.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a line that opens PASS: and names the diff",
           "Re-check the floor fix.\nPASS: the diff fixes the finding.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a pasted test line, FAIL: test_x",

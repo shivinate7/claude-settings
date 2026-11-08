@@ -114,6 +114,12 @@
       },
       "test": "hooks/test_guard.py::floor step-up: builder Round 3 of 3 on sonnet is denied"
     },
+    "roles-plan-gets-refuter": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook sees that a Plan agent returned and that a refuter was spawned after it with only the task brief and the plan, word for word. The guard (hooks/guard.py) only lets a refuter spawn on Opus. The check that fails a plan record with no `Refuter:` line is pending in lane step-done-needs-check."
+      }
+    },
     "roles-resume-by-name": {
       "mechanism": {
         "kind": "guard",
