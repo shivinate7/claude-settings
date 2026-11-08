@@ -10182,10 +10182,14 @@ lazy_fixture([pfr_path(name) for name in PFR_LINES] + [PFR_UNREADABLE], write_pf
 
 
 # The PR head's history for the held reports. A is on main. B is on PFR_BRANCH, with A as its parent. C is on
-# main, off A, so B's history does not hold it. A held report names a sha, and a sha exists only once its commit
-# is made, so the builder writes these transcripts after the commits.
+# main, off A, so B's history does not hold it. PFR_OTHER_BRANCH is a branch at C: a PR for it holds no sha B
+# names. A held report names a sha, and a sha exists only once its commit is made, so the builder writes these
+# transcripts after the commits.
 PFR_HIST = os.path.join(ROOT, "pfrhist")
-PFR_HELD = ("held-ancestor", "held-ancestor-record", "held-off-history", "held-no-sha")
+PFR_OTHER_BRANCH = "notes-other"
+PFR_HELD = ("held-ancestor", "held-head-record", "held-off-history", "held-no-sha", "held-agent-trailer",
+            "held-path-then-off-history", "held-base-then-head", "held-head-then-two-prs",
+            "held-label-round", "held-label-head")
 
 
 def _pfr_step(*args):
@@ -10214,20 +10218,42 @@ def _build_pfr_history():
     _pfr_step("add", "-A")
     _pfr_step(*IDENT, "commit", "-q", "-m", "c")
     sha_c = _pfr_step("rev-parse", "HEAD")
+    _pfr_step("branch", PFR_OTHER_BRANCH)
     _pfr_step("checkout", "-q", PFR_BRANCH)
+    sha_b = _pfr_step("rev-parse", "HEAD")
     if run_vcs(PFR_HIST, "merge-base", "--is-ancestor", sha_a, "HEAD").returncode != 0:
         sys.exit("fixture setup failed in _build_pfr_history: A is not in the PR head's history")
     if run_vcs(PFR_HIST, "merge-base", "--is-ancestor", sha_c, "HEAD").returncode == 0:
         sys.exit("fixture setup failed in _build_pfr_history: C is in the PR head's history")
 
     report_a = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_a, PFR_FINDING)
+    report_b = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_b, PFR_FINDING)
     report_c = pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % sha_c, PFR_FINDING)
     held = {
+        # A is on main, so it never counts for PR head B: a report that names only it is dropped.
         "held-ancestor": pfr_call("toolu_rev1", report_a) + pfr_pr(),
-        "held-ancestor-record": pfr_call("toolu_rev1", report_a) + pfr_pr() + pfr_post("toolu_c1", PFR_FAIL_RECORD),
+        "held-head-record": pfr_call("toolu_rev1", report_b) + pfr_pr() + pfr_post("toolu_c1", PFR_FAIL_RECORD),
         "held-off-history": pfr_call("toolu_rev1", report_c) + pfr_pr(),
         "held-no-sha": pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1), "Reviewed the lane's latest push.",
                                                          PFR_FINDING)) + pfr_pr(),
+        # The agentId trailer's hex word resolves to no commit, so it is skipped and no sha counts.
+        "held-agent-trailer": pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1), PFR_FINDING)
+                                       + "\nagentId: a8970de98355e6dce") + pfr_pr(),
+        # c91cf3c2 is a path word that resolves to no commit, so it is skipped; C is off PR head B's history.
+        "held-path-then-off-history": pfr_call("toolu_rev1", pfr_report(
+            pfr_verdict("FAIL", 1), "Read notes/c91cf3c2.md first.", "Reviewed at head %s" % sha_c, PFR_FINDING))
+                                      + pfr_pr(),
+        # The diff base A is skipped as a commit on main; the head B counts, so the report is held for B's PR.
+        "held-base-then-head": pfr_call("toolu_rev1", pfr_report(
+            pfr_verdict("FAIL", 1), "Diff base %s, head %s." % (sha_a, sha_b), PFR_FINDING)) + pfr_pr(),
+        # Read before two PRs. PR X is for a branch that holds no B, so the report stays held for PR Y, which holds B.
+        "held-head-then-two-prs": pfr_call("toolu_rev1", report_b) + pfr_pr_open("toolu_pr0", 1466, PFR_OTHER_BRANCH)
+                                  + pfr_pr_open("toolu_pr1", 1467, PFR_BRANCH),
+        # Done label lines that name head B. Their verdict word is the only thing the cases below test.
+        "held-label-round": pfr_call("toolu_rev1", "Done: Round 1 reviewer haiku FAIL\nReviewed at head %s\n%s"
+                                     % (sha_b, PFR_FINDING)) + pfr_pr(),
+        "held-label-head": pfr_call("toolu_rev1", "Done: HEAD round 1 FAIL\nReviewed at head %s\n%s"
+                                    % (sha_b, PFR_FINDING)) + pfr_pr(),
     }
     for name in PFR_HELD:
         write(pfr_path(name), "".join(line + "\n" for line in held[name]))
@@ -10342,17 +10368,89 @@ pfr_allow("a reviewer FAIL round 1 on the Done label line, its FAIL record poste
           pfr_path("label-haiku-record"))
 pfr_refuse("a Done label line reading see below, then a ruled FAIL round 1 line, no record, then the push", PFR_PUSH,
            pfr_path("see-below-ruled"))
+# Each held label report names head B, so the held sha is counted and the verdict word alone decides the refusal.
+pfr_refuse("a Done label line reading Round 1 with a capital R, naming head B, then the PR, no record, then the push",
+           PFR_PUSH, pfr_path("held-label-round"), cwd=PFR_HIST)
+pfr_refuse("a Done label line whose first all-capitals word is HEAD, naming head B, then the PR, no record, then the push",
+           PFR_PUSH, pfr_path("held-label-head"), cwd=PFR_HIST)
 
 
-# A report read before any PR is known is held by the sha it names. When a PR later becomes known, the held report
-# counts when its sha is that PR's head or an ancestor of it. The push runs in the PR head's checkout (PFR_HIST).
-pfr_refuse("a FAIL naming sha A, the parent of PR head B, then the PR, no record, then the push", PFR_PUSH,
-           pfr_path("held-ancestor"), cwd=PFR_HIST)
-pfr_allow("a FAIL naming sha A, then the PR, then its FAIL record posted, then the push", PFR_PUSH,
-          pfr_path("held-ancestor-record"), cwd=PFR_HIST)
+# A report read before any PR is known is held by the sha it names. A sha candidate is a hex word above the report's
+# agentId trailer. It counts only when it resolves to a commit that is the PR head or an ancestor of it, and is not
+# an ancestor of origin/main, so a diff base on main never counts. A report with no counting candidate is dropped.
+# A report that one PR does not count stays held for the next PR. The push runs in the PR head's checkout (PFR_HIST).
+# Lane ruling, refining coordinator ruling 16:25 CST: held-ancestor was a deny under the old rule.
+pfr_allow("a FAIL naming only diff base A, on main and the parent of PR head B, then the PR, no record, then the push",
+          PFR_PUSH, pfr_path("held-ancestor"), cwd=PFR_HIST)
+pfr_refuse("a FAIL naming diff base A then head B, then the PR, no record, then the push", PFR_PUSH,
+           pfr_path("held-base-then-head"), cwd=PFR_HIST)
+pfr_allow("a FAIL naming head B, then the PR, then its FAIL record posted, then the push", PFR_PUSH,
+          pfr_path("held-head-record"), cwd=PFR_HIST)
+pfr_allow("a FAIL naming a path word, then a commit off main, then the PR, no record, then the push", PFR_PUSH,
+          pfr_path("held-path-then-off-history"), cwd=PFR_HIST)
+pfr_allow("a FAIL naming no sha but an agentId trailer, then the PR, no record, then the push", PFR_PUSH,
+          pfr_path("held-agent-trailer"), cwd=PFR_HIST)
 pfr_allow("a FAIL naming a commit off main that PR head B does not hold, then the PR, then the push", PFR_PUSH,
           pfr_path("held-off-history"), cwd=PFR_HIST)
 pfr_allow("a FAIL naming no sha, then the PR, then the push", PFR_PUSH, pfr_path("held-no-sha"), cwd=PFR_HIST)
+pfr_refuse("a FAIL naming head B, then a PR for another branch, then the PR for B, no record, then the push", PFR_PUSH,
+           pfr_path("held-head-then-two-prs"), cwd=PFR_HIST)
+
+
+PFR_COST_LABEL = ("push-needs-review-record: a push reads git for a held report only when one is held, and the count "
+                  "sees those reads")
+
+
+def _load_push_guard():
+    """guard_push_delete.py, loaded fresh from the folder GUARD sits in, so a mutant copy is the module measured."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "guard_push_delete_cost_case", os.path.join(os.path.dirname(GUARD), "guard_push_delete.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def pfr_held_cost_case():
+    """The git reads of a push's held-report check, counted in-process with guard_core._git patched. A transcript
+    with a PR and a report after it reaches the held check. With no report held, the check must read no git. A
+    transcript that holds a report must read git, which shows the count sees the reads it counts."""
+    push = _load_push_guard()
+    materialize(PFR_HIST)
+    materialize(pfr_path("incident"))
+
+    def measure(transcript):
+        reads, entries = [], []
+        real_git, real_held = push.guard_core._git, push._held_counts
+
+        def counting_git(where, *args):
+            reads.append(args)
+            return real_git(where, *args)
+
+        def watching_held(held, head, where):
+            before = len(reads)
+            counted = real_held(held, head, where)
+            entries.append(len(reads) - before)
+            return counted
+
+        with mock.patch.object(push.guard_core, "_git", counting_git), \
+                mock.patch.object(push, "_held_counts", watching_held):
+            verdict = push.review_record_hit(transcript, lambda: [], PFR_HIST)
+        return verdict, reads, entries
+
+    problems = []
+    verdict, reads, entries = measure(pfr_path("incident"))
+    if not verdict[0] or not entries:
+        problems.append("the no-held transcript did not reach the held check (refused %s, held checks %d)"
+                        % (bool(verdict[0]), len(entries)))
+    elif reads:
+        problems.append("%d git read(s) with no report held, want 0: %r" % (len(reads), reads[:3]))
+    _, held_reads, _ = measure(pfr_path("held-head-then-two-prs"))
+    if not held_reads:
+        problems.append("the held transcript's count saw no git read, so the zero above proves nothing")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "no git read with no report held, and the held transcript's count saw %d" % len(held_reads)
 
 
 def pfr_fix_refuse(name, command, transcript):
@@ -14250,6 +14348,9 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The held-report cost check sits in the push-needs-review-record section, whose family is set by hand here.
+LOG_CHECKS_EXTRA.append((PFR_COST_LABEL, pfr_held_cost_case))
+LOG_FAMILY[PFR_COST_LABEL] = PFR_RULE
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
