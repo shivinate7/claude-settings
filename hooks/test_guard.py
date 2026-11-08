@@ -25643,6 +25643,7 @@ CS_LEGACY_KEPT = [(repo, kind, cs_kept_file(path)) for repo, kept in sorted(CS_L
                   for kind, path in sorted(kept.items()) if kind in CS_KINDS]
 CS_LEGACY_TODO_FILE = next(rel for _, kind, rel in CS_LEGACY_KEPT if kind == "todo" and os.path.splitext(rel)[1])  # a kept file
 CS_LEGACY_DECISIONS = cs_layout()["legacy"][cs_layout()["kinds"]["decisions"]["path"]]   # the legacy spelling of decisions
+CS_LEGACY_PLANS = cs_layout()["legacy"][cs_layout()["kinds"]["plans"]["path"]]           # the legacy spelling of plans
 CS_NAMED_WRITE = cs_guard_names("COORDINATOR_MCP_WRITE_TOOLS")
 for _tool in CS_NAMED_WRITE:
     _short = _tool.replace("mcp__github__", "")
@@ -25653,10 +25654,18 @@ for _tool in CS_NAMED_WRITE:
     for _repo, _kind, _rel in CS_LEGACY_KEPT:   # RED: that repo's own checkout writes the same path for another repo: denied
         cs_named_call("named_repo_legacy_checkout_%s_%s_%s_other_repo_denied" % (_short, _repo.split("/")[1], _kind), "deny", _tool,
                       _rel, cwd=_cs_legacy_checkout(_repo))
-    # RED: a rolled-out checkout writes the legacy spelling of decisions for another repo: allowed, as the layout's legacy
-    # spelling is a record home of every repo.
-    cs_named_call("named_repo_rolled_checkout_%s_legacy_decisions_other_repo_allowed" % _short, "allow", _tool,
+    # A legacy spelling is a home only for a repo that the layout lists under legacy-repos (decision one-layout-every-repo, the
+    # paragraph that begins "A repo that has not rolled out"). The named repo, acme/widgets, is not listed: a rolled-out
+    # checkout's write of the legacy decisions or plans spelling for it is refused.
+    cs_named_call("named_repo_rolled_checkout_%s_legacy_decisions_unlisted_repo_denied" % _short, "deny", _tool,
                   CS_LEGACY_DECISIONS + "/x.md", cwd=CS_ROLLED)
+    cs_named_call("named_repo_rolled_checkout_%s_legacy_plans_unlisted_repo_denied" % _short, "deny", _tool,
+                  CS_LEGACY_PLANS + "/app.py", cwd=CS_ROLLED)
+    # Green: a listed repo keeps its legacy spelling, so the same write named as that repo is allowed.
+    for _repo in sorted(CS_LEGACY_REPOS):
+        _owner, _name = _repo.split("/")
+        cs_named_call("named_repo_rolled_checkout_%s_%s_legacy_decisions_listed_allowed" % (_short, _name), "allow", _tool,
+                      CS_LEGACY_DECISIONS + "/x.md", cwd=CS_ROLLED, named={"owner": _owner, "repo": _name})
     # Green: the rolled-out checkout names its own repo, and writes a path only another repo keeps: denied, as before.
     cs_named_call("named_repo_rolled_checkout_%s_own_repo_other_kept_path_denied" % _short, "deny", _tool, CS_LEGACY_TODO_FILE,
                   cwd=CS_ROLLED, named={"owner": "acme", "repo": "gizmo"})
@@ -26319,6 +26328,122 @@ for _who, _role, _env in (("a lane session", "lane", CS_REMOTE),
                       % _who, cs_merge_count_check(CS_MCP_MERGE[0], _role, _env)))
 CS_CHECKS.append(("coordinator-scope cost: a coordinator's write naming another repo opens no extras file of its checkout, and "
                   "the own-repo control does", cs_extras_open_check))
+
+
+def cs_repo_git_files():
+    """The git files a merge reads of this suite's checkout (REPO): its config, or for a linked worktree its `.git` file, the
+    gitdir's commondir and the common config. The shape is read from the checkout, so a clone and a worktree both pass."""
+    dotgit = os.path.join(REPO, ".git")
+    if not os.path.isfile(dotgit):
+        return [os.path.join(dotgit, "config")]
+    with open(dotgit, encoding="utf-8") as handle:
+        gitdir = os.path.normpath(os.path.join(REPO, handle.read().split(":", 1)[1].strip()))
+    commondir = os.path.join(gitdir, "commondir")
+    with open(commondir, encoding="utf-8") as handle:
+        common = os.path.normpath(os.path.join(gitdir, handle.read().strip()))
+    return [dotgit, commondir, os.path.join(common, "config")]
+
+
+def cs_call_pins(config, checkout, remote, stamp):
+    """The paths a GitHub MCP call opens in a session of `config`, in the checkout it runs in: the session's own record of that
+    checkout, the config folder's CLAUDE.md (the pointer to the settings clone), the checkout's git config, the role file of a
+    cloud session, and the checkout's stamp when `stamp` is true."""
+    pins = [os.path.join(checkout, ".git", "session-homes", CS_PAYLOAD_SID), os.path.join(config, "CLAUDE.md"),
+            os.path.join(checkout, ".git", "config")]
+    if remote:
+        pins.append(os.path.join(config, "state", "merge-role.json"))
+    if stamp:
+        pins.append(os.path.join(checkout, ".github", "stamp.json"))
+    return pins
+
+
+def cs_refusal_pins(config):
+    """The reads of a refusal or an ask, which a call makes on top of its own: the session's override file and its guard.log."""
+    return [os.path.join(config, "state", "override", CS_PAYLOAD_SID + ".json"), os.path.join(config, "guard.log")]
+
+
+def cs_merge_repo_pins():
+    """The reads the merge tool makes of this suite's checkout (REPO): the layout, its extras file, the CI alarm file, and the git
+    files of the checkout."""
+    reads = ("lint/layout.json", cs_layout()["extras"], "actions/ci-alarm/events.json")
+    return [os.path.join(REPO, *read.split("/")) for read in reads] + cs_repo_git_files()
+
+
+def cs_merge_gh_path():
+    """The PATH of a merge: a counted fake gh that answers green, then the python folder."""
+    return merge_counted_gh() + os.pathsep + PY_PATH
+
+
+def cs_show(path):
+    """A path with its fixture or suite root named, so a failure message reads short."""
+    for base, label in ((ROOT, "<ROOT>"), (os.path.realpath(ROOT), "<ROOT>"),
+                        (REPO, "<REPO>"), (os.path.realpath(REPO), "<REPO>")):
+        if path.startswith(base):
+            return label + path[len(base):]
+    return path
+
+
+def cs_open_set_check(want, pins, config, tool, tool_input, cwd, env, env_path=None):
+    """A check that a call gets the `want` decision and opens exactly the `pins` paths, no more and no fewer. The probe counts
+    every open, the rule's and every other rule's, so the set is the whole cost of the call. A path counts once however often
+    the call opens it, and a symlinked spelling counts as the path it names. `env_path` is a PATH string, or a function that
+    makes one when the check runs (a merge needs its fake gh folder then). The control is the set itself: a spy that saw no
+    open would fail on the pins."""
+    def check():
+        gh_path = env_path() if callable(env_path) else env_path
+        got, reason, report = cs_probe_report(config, tool, dict(tool_input), cwd, env=env, env_path=gh_path)
+        if "opens" not in report:
+            return False, "the probe wrote no opens: %s" % reason[:90]
+        if got != want:
+            return False, "the call was %s, want %s: %s" % (got, want, reason[:90])
+        opened = {os.path.realpath(path) for path in report["opens"]}
+        pinned = {os.path.realpath(path) for path in pins}
+        problems = []
+        extra = sorted(opened - pinned)
+        if extra:
+            problems.append("it opened %s, which the pinned set does not hold" % ", ".join(cs_show(path) for path in extra))
+        missing = sorted(pinned - opened)
+        if missing:
+            problems.append("it never opened %s, which the pinned set holds" % ", ".join(cs_show(path) for path in missing))
+        return not problems, "; ".join(problems) or "it opened the %d pinned paths, and no other" % len(pinned)
+    return check
+
+
+# The open set of the GitHub MCP arm and merge calls, in a session that is not a coordinator (rule coordinator-scope, decision
+# session-tiers). Each pin is the call's whole open set: the rule's reads and every other rule's. The cost rows above subtract a
+# local run of the same call, and judge()'s merge block reads the checkout's git config in that run as well, so an extra read
+# there is subtracted and those rows cannot see it. These pins can. The stamp is read by a merge always, and by an arm only when
+# the checkout's origin is the repo the call names.
+CS_LOCAL_ENV = dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None)   # the env of a local session: no cloud marker
+CS_OTHER_REPO_ASK = {"owner": "y", "repo": "x", "pullNumber": 12}   # the repo whose origin STAMPORIGIN holds
+CS_CHECKS.append(("coordinator-scope cost: enable_pr_auto_merge by a lane session in another repo's checkout, the pinned "
+                  "open set",
+                  cs_open_set_check("allow", cs_call_pins(CS_CONFIG["lane"], GITMAIN, True, False), CS_CONFIG["lane"],
+                                    CS_MCP_ENABLE_TOOL, CS_MCP_NUMBERED, GITMAIN, CS_REMOTE)))
+CS_CHECKS.append(("coordinator-scope cost: enable_pr_auto_merge by a local session in another repo's checkout, the pinned "
+                  "open set",
+                  cs_open_set_check("allow", cs_call_pins(CS_CONFIG["coordinator"], GITMAIN, False, False),
+                                    CS_CONFIG["coordinator"], CS_MCP_ENABLE_TOOL, CS_MCP_NUMBERED, GITMAIN, CS_LOCAL_ENV)))
+CS_CHECKS.append(("coordinator-scope cost: enable_pr_auto_merge by a lane session in the named repo's checkout, which asks, "
+                  "the pinned open set",
+                  cs_open_set_check("ask", cs_call_pins(CS_CONFIG["lane"], STAMPORIGIN, True, True)
+                                    + cs_refusal_pins(CS_CONFIG["lane"]), CS_CONFIG["lane"], CS_MCP_ENABLE_TOOL,
+                                    CS_OTHER_REPO_ASK, STAMPORIGIN, CS_REMOTE)))
+CS_CHECKS.append(("coordinator-scope cost: enable_pr_auto_merge by a local session in the named repo's checkout, which asks, "
+                  "the pinned open set",
+                  cs_open_set_check("ask", cs_call_pins(CS_CONFIG["coordinator"], STAMPORIGIN, False, True)
+                                    + cs_refusal_pins(CS_CONFIG["coordinator"]), CS_CONFIG["coordinator"], CS_MCP_ENABLE_TOOL,
+                                    CS_OTHER_REPO_ASK, STAMPORIGIN, CS_LOCAL_ENV)))
+CS_CHECKS.append(("coordinator-scope cost: the merge tool by a lane session in another repo's checkout, the pinned open set "
+                  "with the merge tool's reads",
+                  cs_open_set_check("allow", cs_call_pins(CS_CONFIG["lane"], GITMAIN, True, True) + cs_merge_repo_pins(),
+                                    CS_CONFIG["lane"], CS_MCP_MERGE[0], CS_MCP_NUMBERED, GITMAIN, CS_REMOTE,
+                                    env_path=cs_merge_gh_path)))
+CS_CHECKS.append(("coordinator-scope cost: the merge tool by a local session in another repo's checkout, the pinned open set "
+                  "with the merge tool's reads",
+                  cs_open_set_check("allow", cs_call_pins(CS_CONFIG["coordinator"], GITMAIN, False, True) + cs_merge_repo_pins(),
+                                    CS_CONFIG["coordinator"], CS_MCP_MERGE[0], CS_MCP_NUMBERED, GITMAIN, CS_LOCAL_ENV,
+                                    env_path=cs_merge_gh_path)))
 for _label, _check in CS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)  # decide() builds the fixtures each call names
