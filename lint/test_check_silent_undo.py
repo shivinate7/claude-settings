@@ -3030,6 +3030,42 @@ class MergedMain(unittest.TestCase):
         rc, out = self.run_main("origin/main")
         self.assertEqual(rc, 0, out)
 
+    def test_a_lane_that_takes_out_a_base_line_still_fails_when_main_touched_the_file(self):  # control: the file filter reads a lane edit
+        r = self.r
+        self.cut_base("B adds a base line", app_txt=card("base line"))
+        fork = r.sh("rev-parse", "origin/main")
+        r.commit("main edits the top line", app_txt=BODY.replace("line 1\n", "main top\n", 1) + "function Card() {}\n")
+        r.push()
+        self.lane_from_base()
+        r.sh("merge", "-q", "--no-edit", "origin/main")
+        r.commit("lane takes its base line out and edits line 2",
+                 app_txt=BODY.replace("line 1\n", "main top\n", 1).replace("line 2\n", "lane two\n", 1) + "function Card() {}\n")
+        self.assertIn("app.txt", r.sh("diff", "--name-only", fork, "origin/main").split(), "scope: main did not touch app.txt")
+        self.assertNotEqual(r.sh("show", "HEAD:app.txt"), r.sh("show", "origin/main:app.txt"),
+                            "scope: the lane's app.txt equals main's, so the file filter would read nothing")
+        rc, out = self.run_main("origin/B")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("undoing", out)
+
+    def test_an_unpushed_main_merge_is_read_when_the_upstream_is_origin_main(self):
+        r = self.r
+        self.assertEqual(r.sh("rev-parse", "--verify", "-q", "origin/HEAD", ok=False), "",
+                         "scope: origin/HEAD is set, so the default is not the local main")
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat adds a line", app_txt=card("feature line"))
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-commit", "--no-ff", "feat")
+        merge = r.commit("Merge feat, drop its line", app_txt=card())  # local main only: never pushed
+        self.assertFalse(self.listed("origin/main", merge), "scope: the merge is already on origin/main")
+        self.assertTrue(self.listed("main", merge), "scope: the merge is not on local main")
+        r.sh("checkout", "-q", "-b", "lane", "origin/main")
+        r.commit("lane edits other", other_txt="other v2\n")
+        r.sh("merge", "-q", "--no-edit", "main")
+        self.assertIn(merge, r.sh("rev-list", "--merges", "origin/main..HEAD").split(), "scope: the lane's range does not reach the unpushed merge")
+        rc, out = self.run_main("origin/main")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("feature line", out)
+
 
 if __name__ == "__main__":
     unittest.main()
