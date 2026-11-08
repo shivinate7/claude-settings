@@ -55,7 +55,9 @@
 # detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names,
 # fetched from that clone's origin when it lacks the sha. A remote ste-lint, code-check or zizmor step runs from the
 # worktree of its own pin only (ste-lint as its bin/ste-changed), as CI downloads each pinned sha separately.
-# CLAUDE_SETTINGS_DIR is set to the tree only when the job has exactly one distinct pin (the step's own env: wins).
+# CLAUDE_SETTINGS_DIR is set to the tree only when the job has exactly one distinct pin (the step's own env: wins). A local
+# `uses:` step never gets it. Under --lint the count covers the pins of the steps --lint runs; when none of them pins, it covers
+# the job's other pins.
 # With two or more pins, a plain run step is one `unknown` line naming the shas (merge/merge.py lint_steps parses the `would run` lines). A ref that is no sha, a sha that cannot
 # be fetched or a failed `npm ci` makes each step that needs that tree one `unknown` line; the other steps run. With no
 # pin, a step runs as before. Each worktree is removed on every exit.
@@ -593,7 +595,9 @@ def run(argv, stack):
     asked = [n for n, st in enumerate(steps) if (names[n] in wanted if wanted else
                                                   lint and is_lint(st) and plan(st, bool(base), values, top)[0] != "skipped")]
     if asked:
-        plain_sha, plain_why = pin_of(block)  # the pins of this job's steps only
+        plain_sha, plain_why = pin_of("".join(steps[n] for n in asked) if lint else block)  # --lint reads the steps it runs
+        if lint and plain_sha is None and plain_why is None:
+            plain_sha, plain_why = pin_of(block)  # none of them pins: a pin on a step it leaves out is all the job has
         for n in asked:
             if LOCAL_ACTION.fullmatch(uses(steps[n])):
                 continue  # a local uses: runs the repo under test's own file: it needs no pin, tree or fetch

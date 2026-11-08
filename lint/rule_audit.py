@@ -76,6 +76,8 @@ import subprocess
 import sys
 from typing import List
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from workflow_steps import yaml_scalar  # noqa: E402  the one home of the quote reader
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
@@ -409,7 +411,7 @@ def emitted_rule_ids(root: str = ROOT) -> set:
 
 
 def ci_step_names(text: str):
-    return {m.group(1).strip().strip('"').strip("'") for m in CI_STEP_RE.finditer(text)}
+    return {yaml_scalar(m.group(1)) for m in CI_STEP_RE.finditer(text)}
 
 
 def check(
