@@ -18,7 +18,14 @@ on=" "
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
+  # hooks/guard.py's import closure comes from merge.py, the one home (merge --guard-closure), read once. A read that fails or prints
+  # nothing turns everything on: a real closure always holds hooks/guard.py.
+  merge_py="${CI_SCOPE_MERGE:-$(dirname "${BASH_SOURCE[0]}")/../../merge/merge.py}"
+  closure=$(python3 "$merge_py" --guard-closure 2>/dev/null) && [ -n "$closure" ] || { closure=""; on="$on $ALL "; }
   while IFS= read -r f; do
+    # A closure member gets guard.py's flags whatever arm it falls to below (that arm adds its own on top).
+    # Whole-line match, so a member is never a substring of another path.
+    if [ -n "$closure" ] && grep -Fxq -- "$f" <<< "$closure"; then on="$on $W $R $Z $X code guard sweep "; fi
     case "$f" in
       # Fail safe: this script, the workflow, and git settings that change every checkout.
       .github/scripts/ci-scope.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
@@ -84,7 +91,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       skills/plain-english-map/*.md) on="$on $W $X mods " ;;
       # Docs: nothing runs on them but the lints in `checks`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;
-      *) on="$on $ALL " ;;
+      *) grep -Fxq -- "$f" <<< "$closure" || on="$on $ALL " ;;
     esac
   done <<< "$files"
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and

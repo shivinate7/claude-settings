@@ -3555,6 +3555,17 @@ def guard_hits(paths):
     closure = guard_import_closure(REPO_ROOT, hook_guard.is_test_rel)
     return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES or p in closure) and not hook_guard.is_test_rel(p))
 
+def guard_closure_lines():
+    """merge --guard-closure: print the guard import closure, sorted, one path per line. A failed read prints nothing and exits 1."""
+    import guard as hook_guard  # here, not at the top: it loads the whole guard set
+    try:
+        paths = sorted(guard_import_closure(REPO_ROOT, hook_guard.is_test_rel))
+    except Stop as e:
+        print(f"merge: {e}", file=sys.stderr)
+        return 1
+    say(*paths)
+    return 0
+
 def kind_misfits(kind, files):
     """-> the sorted paths that break the kind, over (path, status, additions) triples. docs-only: a path not ending .md. delete-only: a path that adds lines or is new (added, renamed, copied)."""
     if kind == "docs-only":
@@ -3600,6 +3611,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("--confirm", action="store_true")
+    p.add_argument("--guard-closure", action="store_true", help="print the repo-relative paths in hooks/guard.py's import closure, one per line; reads only, takes no lock (the scope detector .github/scripts/ci-scope.sh reads it)")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
@@ -3621,6 +3633,8 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
+    if a.guard_closure:
+        return guard_closure_lines()
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if (a.head or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
         p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
