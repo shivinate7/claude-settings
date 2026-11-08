@@ -48,6 +48,7 @@ expects silence also runs a control that must list a stale job, so a mode that i
 silent everywhere cannot pass it.
 """
 
+import ast
 import atexit
 import builtins
 import contextlib
@@ -1727,6 +1728,44 @@ def A10_full_size_each_quiet_agent_is_listed_once():
     msg = system_message(out, problems)
     for aid in ids:
         problems += listed_once(msg, aid, by_line=True)
+    return problems
+
+
+# Top-level functions that take arguments and call expect. A case calls them, so they are not cases.
+GUARD_HELPERS = {"stop_listing", "listed_once", "finished_job_is_silent_without_the_notice_tag"}
+
+
+def calls_expect(fn):
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "expect"
+               for n in ast.walk(fn))
+
+
+def has_case(fn):
+    return any(isinstance(d, ast.Name) and d.id == "case" for d in fn.decorator_list)
+
+
+def expect_callers_without_case(source):
+    """One row per top-level function that calls expect, is not a helper, and has no @case."""
+    rows = []
+    for fn in ast.parse(source).body:
+        if (isinstance(fn, ast.FunctionDef) and fn.name not in GUARD_HELPERS
+                and calls_expect(fn) and not has_case(fn)):
+            rows.append("%s (line %d)" % (fn.name, fn.lineno))
+    return rows
+
+
+@case
+def every_expect_function_carries_case():
+    """Guard. Each top-level function that calls expect, and is not a known helper, carries @case, so
+    the runner collects it. The scan first checks itself on a bare caller and a helper."""
+    with open(os.path.abspath(__file__), encoding="utf-8") as fh:
+        source = fh.read()
+    control = ("def bare():\n    expect(True, 'm')\n\n"
+               "def stop_listing(a, b, c):\n    expect(True, 'm')\n")
+    problems = expect(expect_callers_without_case(control) == ["bare (line 1)"],
+                      "self-test: the scan did not flag the bare caller, or flagged the helper")
+    for row in expect_callers_without_case(source):
+        problems.append("%s: calls expect but has no @case, so the runner never collects it" % row)
     return problems
 
 
