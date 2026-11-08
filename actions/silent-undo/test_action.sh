@@ -22,6 +22,8 @@
 #  - pr-body-drops-lines-green: the pull request body (env PR_BODY) holds the Drops-lines line for rules.md, so the
 #    revert passes and prints ALLOWED. check.sh passes the body to the lint with --pr-body-env PR_BODY.
 #  - pr-body-other-path-red, pr-body-no-reason-red: a body line for another path, or with no reason, excuses nothing.
+#  - single-branch-fetches-base: a single-branch clone of topic-revert holds no origin/main. check.sh
+#    fetches the base and reads the real verdict, exit 1 and the file named.
 # Without a check.sh every case fails with "not built": that is the red on the old code.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -71,6 +73,7 @@ quiet git clone -q -b topic-noreason "$remote" "$work/noreason"
 quiet git clone -q -b topic-otherpath "$remote" "$work/otherpath"
 quiet git clone -q -b main "$remote" "$work/base"
 quiet git clone -q --no-local --depth 1 -b topic-revert "$remote" "$work/shallow"
+quiet git clone -q --single-branch -b topic-revert "$remote" "$work/single"
 # The fixture must hold what each case claims, or the verdicts below prove nothing.
 [ "$(git -C "$work/revert" diff --name-only origin/main...HEAD)" = rules.md ] ||
   { echo "fixture setup failed: topic-revert must change only rules.md"; exit 1; }
@@ -84,6 +87,8 @@ quiet git clone -q --no-local --depth 1 -b topic-revert "$remote" "$work/shallow
   { echo "fixture setup failed: the shallow clone is not shallow"; exit 1; }
 [ -n "$(git -C "$work/unpersisted" rev-parse --verify -q origin/main)" ] ||
   { echo "fixture setup failed: the unpersisted clone has no local origin/main"; exit 1; }
+[ -z "$(git -C "$work/single" rev-parse --verify -q refs/remotes/origin/main)" ] ||
+  { echo "fixture setup failed: the single-branch clone holds origin/main, so the base fetch is not exercised"; exit 1; }
 quiet git -C "$work/unpersisted" remote set-url origin "$work/unreachable.git"
 head_rev="$(git -C "$work/revert" rev-parse HEAD)"
 fails=0
@@ -113,5 +118,6 @@ expect shallow-unknown-red 1 "$work/shallow" main "UNKNOWN"
 expect pr-body-drops-lines-green 0 "$work/revert" main "ALLOWED rules.md" "" "Drops-lines: rules.md -- the rules are rolled back on purpose for this test"
 expect pr-body-other-path-red 1 "$work/revert" main "FAIL: rules.md" "" "Drops-lines: other.md -- a reason for a file that did not change"
 expect pr-body-no-reason-red 1 "$work/revert" main "FAIL: rules.md" "" "Drops-lines: rules.md"
+expect single-branch-fetches-base 1 "$work/single" main "FAIL: rules.md"
 echo "silent-undo suite: $fails failed"
 exit $((fails > 0))
