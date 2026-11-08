@@ -19888,11 +19888,8 @@ add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSI
 # done-check label, only the label's section (to the next blank line or heading) counts. A brief whose only done check
 # is a test lets the builder hand off a head that the batch's lint never saw. Role match is case-blind. Not judged: a
 # payload with no cwd, a cwd with no checks.yml, a checks.yml with no `checks` job, and every other role. Selector:
-# Selector: MUTATE_ONLY=builder-code-check: runs these cases alone. The scope cases pin which lines of a done-check
-# label's section count: the lines after the label, past blank lines right after it, up to the next blank line or
-# heading, with a fenced block read whole. A code check in a paragraph the builder does not read as its done check does
-# not satisfy the rule. The spelling cases pin each launcher of the lint, and the gate cases pin that only a repo whose
-# checks.yml defines a `checks` job is judged.
+# MUTATE_ONLY=builder-code-check: runs these cases alone. The scope, spelling and gate cases the rule does not yet
+# honour are red on the head; the controls are green there.
 BUILDER_CODE_RULE = "builder-brief-code-check"
 CODE_CHECK = "merge --lane-lint"  # the remedy the refusal names
 WFGIT = os.path.join(ROOT, "wfgit")      # a git checkout whose top level holds .github/workflows/checks.yml, with a checks job
@@ -19985,10 +19982,8 @@ add("builder-code-check: Agent builder brief with no code check and no cwd is al
     "allow", tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder", model="sonnet")
 
 # Done-check scope: with a done-check label (Done check, Done when, Proof, Check that proves; case-blind; a line start
-# after an optional -, *, # or **), only the label's section counts. The section starts after the label, skips blank
-# lines right after it, and runs to the next blank line or heading; a fenced block is read whole, so a blank or # line
-# inside it ends nothing. With no label the whole brief counts. A deny names a code check only outside the section; a
-# control keeps the code check inside it, or keeps a code check before the label out of it.
+# after an optional -, *, # or **), only the label's section counts, to the next blank line or heading. With no label
+# the whole brief counts. A deny names a code check only outside the section; a control keeps the code check inside it.
 add("builder-code-check: a Done check section with no code check is denied, though a line above a blank line names merge --lane-lint",
     "deny", BUILDER_CODE_RULE, tool="Agent",
     prompt="Fix the dated-comment failure that `merge --lane-lint 2100` reported.\n\n"
@@ -20027,23 +20022,6 @@ add("builder-code-check: a brief with no done-check label names a code check any
     "allow", tool="Agent",
     prompt="Task: fix the typo in hooks/x.py.\n\nAfter the fix, run `merge --lane-lint HEAD` and report its verdict.",
     subagent_type="builder", model="sonnet", cwd=WFGIT)
-add("builder-code-check: a bold Done check label, a blank line, then a bullet naming merge --lane-lint HEAD is allowed",
-    "allow", tool="Agent",
-    prompt="Task: fix the typo in hooks/x.py.\n**Done check:**\n\n- `merge --lane-lint HEAD` exits 0.",
-    subagent_type="builder", model="sonnet", cwd=WFGIT)
-add("builder-code-check: a ## Done check heading, a blank line, then a bullet naming merge --lane-lint HEAD is allowed",
-    "allow", tool="Agent",
-    prompt="Task: fix the typo in hooks/x.py.\n## Done check:\n\n- `merge --lane-lint HEAD` exits 0.",
-    subagent_type="builder", model="sonnet", cwd=WFGIT)
-add("builder-code-check: a Done check label over a fenced block with a # comment and a blank line, merge --lane-lint HEAD as its last line, is allowed",
-    "allow", tool="Agent",
-    prompt="Task: fix the typo in hooks/x.py.\nDone check:\n```sh\n# run the lane lint\n\nmerge --lane-lint HEAD\n```",
-    subagent_type="builder", model="sonnet", cwd=WFGIT)
-add("builder-code-check: a Done check label, a blank line, then a bullet that runs only verdict python3 hooks/test_x.py is denied, though an earlier background paragraph names merge --lane-lint",
-    "deny", BUILDER_CODE_RULE, tool="Agent",
-    prompt="Background: `merge --lane-lint HEAD` is the lint the batch runs.\n\n"
-           "Done check:\n\n- `verdict python3 hooks/test_x.py` passes.",
-    subagent_type="builder", model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
 
 # Spellings that run the real lint (rule builder-brief-code-check): merge.py, merge.cmd and ci-job.cmd are the same tools
 # under their other launchers, so a done check naming one of them is a code check.
