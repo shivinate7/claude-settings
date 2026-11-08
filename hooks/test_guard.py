@@ -13736,6 +13736,8 @@ def _build_dotroot():
                         "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n",
                         # A .ts and a .tsx beside the test, so a `*.{ts,tsx}` name filter over hooks has files to match.
                         "hooks/guard.ts": "x = 1\n", "hooks/guard.tsx": "x = 1\n",
+                        # A test whose name holds brackets, so an escaped `\[` in a -name filter has a literal `[` to name.
+                        "hooks/test_[x].py": "def test_x():\n    assert True\n",
                         # docs/ holds no test. Its gen.py is product code, so a walk of docs reads one file.
                         "docs/gen.py": "x = 1\n"})
 
@@ -13877,15 +13879,22 @@ for _name, _command in (
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
-# Pins, each refused. A backslash escape reads as its literal character, so `test\_a.py` in single quotes names
-# test_a.py, and a brace list of _BRACE_LIMIT words or more reads no filter, so a walk counts test_a.py.
-# The first goes red when the backslash pass in `_name_filters` goes, the second when its _BRACE_LIMIT check goes.
+# Pins, each refused. The first, `test\_a.py` in single quotes, reads as `test_a.py`, which names test_a.py. It goes
+# red only when both backslash checks in `_name_filters` go. Dropping only the unescape pass leaves the leftover
+# refusal denying it (the `guard\*.py` allow pin catches that); dropping only the refusal leaves the unescape
+# reading it (the two double-escape pins catch that).
+# The second, a brace list of _BRACE_LIMIT words or more, goes red only when its _BRACE_LIMIT refusal goes.
 for _name, _command in (
     ("find hooks -name escaped in single quotes, sed -i", r"find hooks -name 'test\_a.py' | xargs sed -i s/a/b/"),
     ("grep -rl over hooks, 300-word brace list, sed -i", "grep -rl old hooks --include={" + ",".join(["w%d.py" % n for n in range(299)] + ["test_a.py"]) + "} | xargs sed -i s/a/b/"),
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
+# A `\[` in a single-quoted -name is an escaped literal `[`, so this find names hooks/test_[x].py. The guard reads
+# the escape out, then reads `[x]` as an fnmatch class, which matches test_x.py and misses the file, so it allows.
+sh("builder-test: shell write, find hooks -name with an escaped bracket, sed -i, is refused",
+   r"find hooks -name 'test_\[x].py' | xargs sed -i s/a/b/", "deny", rule=BT,
+   carries=("test-author",), **DR)
 # A `!` or `-not` inverts `-name`, so a find of hooks that holds one reads test_a.py. Each pin is refused,
 # and each mutant that drops the inverter goes red on it.
 for _name, _command in (
