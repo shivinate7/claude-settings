@@ -11836,6 +11836,29 @@ def hand_built(*lines):
     fix lines. Their refusal holds for a missing stamp too."""
     return "\n".join(lines) + "\n"
 
+def without_stamp(text):
+    """The record with its Stamp line taken out: the shape of a body typed by hand, as the body of PR #1512 was."""
+    return "\n".join(line for line in text.splitlines() if not line.startswith("Stamp: ")) + "\n"
+
+def stamp_index(test, text):
+    """The index of the record's one Stamp line. It must follow Net value and sit just above the CI line, and be 16 lower-case hex digits."""
+    lines = text.splitlines()
+    found = [i for i, line in enumerate(lines) if line.startswith("Stamp: ")]
+    test.assertEqual(len(found), 1, "the record has no one Stamp line:\n" + text)
+    i = found[0]
+    test.assertRegex(lines[i], r"^Stamp: [0-9a-f]{16}$", "the Stamp line is not `Stamp: <16 lower-case hex>`:\n" + text)
+    test.assertTrue(i >= 1 and lines[i - 1].startswith("Net value: "), "the Stamp line does not follow Net value:\n" + text)
+    test.assertTrue(i + 1 < len(lines) and lines[i + 1] == REVIEW_CI_LINE, "the Stamp line is not just above the CI line:\n" + text)
+    return i
+
+def replace_line(test, text, prefix, line):
+    """`text` with its one line that starts with `prefix` replaced by `line`. Every other line stays as it was."""
+    lines = text.splitlines()
+    found = [i for i, old in enumerate(lines) if old.startswith(prefix)]
+    test.assertEqual(len(found), 1, f"want one line starting {prefix!r} in the record:\n" + text)
+    lines[found[0]] = line
+    return "\n".join(lines) + "\n"
+
 def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
     return f"Fix check: {head}, {role}, {model}, {verdict}"
@@ -11920,7 +11943,8 @@ class ReviewFixForm(unittest.TestCase):
 
     def test_review_body_prints_the_fix_line_after_the_rounds_and_before_net_value(self):
         body = body_with_fix(self, [(1, "reviewer", "sonnet", "PASS")], "not owed", REVIEW_FIX_PASS)
-        self.assertEqual(body.splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
+        stamp_index(self, body)
+        self.assertEqual(without_stamp(body).splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
                                              "Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
 
     def test_the_full_form_with_a_fix_line_round_trips(self):
@@ -11974,8 +11998,9 @@ class ReviewRecordForm(unittest.TestCase):
 
     def test_the_lines_follow_the_contract_order(self):
         body = review_fn(self, "review_body")(**parse_text(self, record_text()))
-        self.assertEqual(body.splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
-                                             "Round 1: reviewer, sonnet, PASS", "Net value: not owed", REVIEW_CI_LINE])
+        stamp_index(self, body)
+        self.assertEqual(without_stamp(body).splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
+                                                            "Round 1: reviewer, sonnet, PASS", "Net value: not owed", REVIEW_CI_LINE])
 
     def test_the_ci_line_holds_no_ci_value(self):
         body = review_fn(self, "review_body")(**parse_text(self, record_text()))
@@ -12042,6 +12067,60 @@ class ReviewRecordForm(unittest.TestCase):
                 self.assertIsNone(review_fn(self, "parse_review")(body + "\n" + field + REVIEW_FOOTER))
         with self.subTest(field="a malformed field above the CI line"):  # the footer does not rescue a malformed record part
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
+
+class ReviewStampForm(unittest.TestCase):
+    """The Stamp line (decision pr-review-record): review_body prints one `Stamp: <16 hex>` line after Net value and just above the CI line. The
+    stamp hashes the lines above it, so parse_review refuses a body with no stamp (typed by hand, as PR #1512's was) and a stamped body whose
+    lines were edited. Each refusal edits one field and sits beside a good record that parses."""
+
+    SIX_ROUNDS = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, FAIL",
+                  "Round 2: design-reviewer, opus, PASS", "Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PASS")
+
+    def sizes(self):
+        """The empty record, the plain one and the full-size one, each with the stamp it prints."""
+        return (dict(rounds=(), kind="docs-only"), dict(rounds=REVIEW_PASS),
+                dict(rounds=self.SIX_ROUNDS, guard="yes", net="positive", fix=(fix_check_line(),)))
+
+    def test_a_body_from_review_body_parses_with_its_stamp_and_prints_back_the_same(self):
+        for case in self.sizes():
+            with self.subTest(case=case):
+                text = record_text(**case)
+                stamp_index(self, text)
+                rec = parse_text(self, text)
+                self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
+
+    def test_a_body_typed_without_a_stamp_is_not_a_record(self):
+        # PR #1512: the body was typed, so no stamp says the merge tool printed it. Its fields are well formed, so only the stamp is missing.
+        parse_text(self, record_text(rounds=REVIEW_PASS))  # control: the stamped record parses
+        text = without_stamp(record_text(rounds=REVIEW_PASS))
+        self.assertIsNone(review_fn(self, "parse_review")(text), "parse_review accepted a body with no Stamp line:\n" + text)
+        self.assertEqual(review_fn(self, "review_state")(None, REVIEW_HEAD)[0], "bad")
+
+    def test_an_edited_head_in_a_stamped_body_is_not_a_record(self):
+        text = record_text(rounds=REVIEW_PASS)
+        parse_text(self, text)  # control
+        edited = replace_line(self, text, "Head: ", f"Head: {REVIEW_OLD_HEAD}")
+        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a stamped record whose Head was edited:\n" + edited)
+
+    def test_an_edited_round_verdict_in_a_stamped_body_is_not_a_record(self):
+        text = record_text(rounds=REVIEW_PASS)
+        parse_text(self, text)  # control
+        edited = replace_line(self, text, "Round 1: ", "Round 1: reviewer, sonnet, FAIL")
+        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a stamped record whose round verdict was edited:\n" + edited)
+
+    def test_an_edited_stamp_is_not_a_record(self):
+        text = record_text(rounds=REVIEW_PASS)
+        parse_text(self, text)  # control
+        value = text.splitlines()[stamp_index(self, text)].split(": ", 1)[1]
+        edited = replace_line(self, text, "Stamp: ", f"Stamp: {value[:-1]}{'0' if value[-1] != '0' else '1'}")
+        self.assertIsNone(review_fn(self, "parse_review")(edited), "parse_review accepted a record whose Stamp hex was edited:\n" + edited)
+
+    def test_the_stamp_is_review_stamp_of_the_lines_above_it(self):
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        i = stamp_index(self, text)
+        self.assertEqual(lines[i].split(": ", 1)[1], review_fn(self, "review_stamp")(lines[:i]),
+                         "the Stamp line is not review_stamp of the lines above it:\n" + text)
 
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
@@ -12454,7 +12533,9 @@ class ReviewFixFlag(ReviewEnv):
     def test_the_printed_record_carries_the_fix_line_after_the_rounds(self):
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
         self.assertEqual(rc, 0, "merge refused --fix-check:\n" + out + err)
-        self.assertEqual(posted_body(self, out).splitlines()[5:], ["Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
+        posted = posted_body(self, out)
+        stamp_index(self, posted)
+        self.assertEqual(without_stamp(posted).splitlines()[5:], ["Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
 
     def test_the_printed_fix_line_parses_back_to_the_flag_value(self):
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
@@ -12554,6 +12635,12 @@ class ReviewFixBase(ReviewEnv):
         older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
+        self.assert_refused(rc, out, err)
+
+    def test_a_newest_earlier_record_typed_without_a_stamp_is_refused_as_the_base(self):
+        # PR #1512: the newest earlier record was typed by hand, so it is not a record and names no reviewed head for the fix diff to start from
+        typed = review_comment(1, 7, without_stamp(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(typed))
         self.assert_refused(rc, out, err)
 
 class ReviewedList(ReviewEnv):
