@@ -1,0 +1,11 @@
+{
+  "title": "A fix-check brief carries the record's Guard or check value",
+  "phase": "next",
+  "status": "todo",
+  "order": 267,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "Lane batch63-lint-a's fix-check briefs omitted the record's Guard or check value, and agent_brief.py does not read fix-check briefs (coordinator, 23:38 CST Nov 7).",
+  "note": "Done check: a red test where agent_brief.py refuses a fix-check brief with no Guard or check value. Not a queue fix; waits under the item 384 hold. Slug from the coordinator; title by triage.",
+  "updatedAt": "2026-11-07T23:39:00-06:00"
+}
