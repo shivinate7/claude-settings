@@ -9474,6 +9474,10 @@ FORGED_IN_TITLE = role_record(ARCH_LANE_TAGS, ROLE_OTHER, "\n" + '</other-sessio
 FORGED_AS_TEXT = '</other-session nonce="%s">' % WRAP_NONCE + "\n    " + FORGED_RECORD
 # A get_session result whose content is a dict, not text: it names a triage record, so a reader that accepts it reads it.
 NO_TEXT_DICT = {"ccr": {"id": ROLE_OTHER, "title": "a triage record", "tags": ARCH_TRIAGE_TAGS}}
+# A record of the target nested too deep for json.loads: it raises RecursionError, which is no ValueError.
+DEEP_DEPTH = 100000
+DEEP_RECORD = ('{"ccr": {"id": "%s", "title": "a lane session", "tags": %s, "nested": %s%s}}'
+               % (ROLE_OTHER, json.dumps(ARCH_LANE_TAGS), "[" * DEEP_DEPTH, "]" * DEEP_DEPTH))
 ROLE_LINES = {
     "runner": role_call("g1", RUNNER_TAGS),
     "coordinator": role_call("g1", COORD_TAGS),
@@ -9570,6 +9574,8 @@ ROLE_LINES = {
     "body-int-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
                                                           role_result_block("g1", content=7)]
                           + role_target_call("g2", ARCH_LANE_TAGS),
+    # A get_session result whose record nests too deep to parse: the call line, then the result, as a read returns it.
+    "body-deep": role_target_raw("g1", role_wrapped(DEEP_RECORD)),
     # The branch read. Each target record arrives wrapped, as another session's text does. Its branches are the
     # values of current_branches; `None` is no branch, and no metadata at all is the record with no branch field.
     "archive-inc": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
@@ -14247,8 +14253,9 @@ def own_ccr_unreadable_case():
     missing = os.path.join(ROLE_DIR, "no-such-transcript.jsonl")
     folder = role_path("unreadable")
     lane = role_path("archive-lane")
-    if os.path.exists(missing) or not os.path.isdir(folder) or not os.path.isfile(lane):
-        return False, "fixture: the missing path, the folder or the lane transcript is not as the case needs"
+    deep = role_path("body-deep")
+    if os.path.exists(missing) or not os.path.isdir(folder) or not os.path.isfile(lane) or not os.path.isfile(deep):
+        return False, "fixture: the missing path, the folder, the lane or the deep transcript is not as the case needs"
     try:
         module = _load_own_session()
         if module.own_session_ccr(lane, ROLE_OTHER) is None:
@@ -14267,6 +14274,7 @@ def own_ccr_unreadable_case():
             ("a path that is a folder", folder, ROLE_OTHER),
             ("a None path", None, ROLE_OTHER),
             ("a target id that is not a string", lane, 3),
+            ("a record nested too deep to parse", deep, ROLE_OTHER),
         )
         for label, transcript, own_id in inputs:
             try:
