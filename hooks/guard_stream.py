@@ -173,7 +173,8 @@ def check_stage(segment: str, background: bool) -> str:
 
 def _pipeline_hit(stages, background: bool) -> str:
     """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
-    between them keeps every byte, so it ends that check's reach."""
+    between them does not end the reach, since the filter after it still cuts what the agent reads. A
+    `tee` with no `tail` or `head` after it is not a hit."""
     for first, segment in enumerate(stages):
         stage = check_stage(segment, background)
         if not stage:
@@ -184,8 +185,6 @@ def _pipeline_hit(stages, background: bool) -> str:
             if at is None:
                 continue
             word = basename(tokens[at])
-            if word == "tee":
-                break
             if word in TRUNCATING_FILTERS:
                 return stage + " | " + word
     return ""

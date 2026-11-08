@@ -9,7 +9,7 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 - `merge --confirm` stays with the narrated-tail rule (`live-stream`, in the same file), so it is never refused twice. A plain `merge <pr>` preview, which returns in seconds, passes.
 - `ci-job` is refused only in a call with `run_in_background`. In the foreground it passes.
 - Filters between the check and the `tail` or `head` do not hide it: `merge --lane-lint 7 | grep -v DEBUG | tail -8` is refused.
-- A `tee` stage between them ends the check's reach, because `tee` keeps every byte. A pipeline ends at any separator other than `|`.
+- A `tee` stage between them does not end the check's reach: `merge --lane-lint 7 | tee x | tail -3` is refused, because `tail` still cuts what the agent reads, which is the incident's form (coordinator ruling, 2026-11-08 05:15 CST). A `tee` with no `tail` or `head` after it passes. `verdict` keeps the full log, so the remedy names it. A pipeline ends at any separator other than `|`.
 - The remedy is `verdict <cmd>` with nothing after it (decision verdict-pipe-refused refuses a pipe out of it). It keeps the full log and prints the verdict itself.
 - The rule reads the call at start, so a foreground `ci-job` the harness later moves to the background is not checked.
 - The roster is named, as built:
