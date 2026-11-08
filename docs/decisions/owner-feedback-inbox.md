@@ -77,8 +77,9 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   a repo whose git or layout read fails, and a block reason names it. Step and closed-note homes
   (`Homes._held`) skip a repo whose git read fails only, and a block reason names it. A repo whose
   `rev-parse` exits non-zero is dropped with no skip and no name (`Homes._root`). A `rev-parse` that cannot
-  run stands the whole check down. Homes pass unchecked, with a systemMessage line, only when no repo
-  reads: neither folder is in a git repo (a failed `rev-parse` counts as none), or every repo is unreadable.
+  run stands the whole check down, passing its homes unchecked with a systemMessage line. Homes also pass
+  unchecked when no repo reads: neither folder is in a git repo (a dropped one counts as none), or every
+  repo is unreadable.
 - **Pages.** `page` (the owner's ruling answers waiting-page item n): the home is `page:<n>`. The guard
   checks each open one, in every block that holds one, burst or not. A `[closed]` one is never checked.
   It blocks until the transcript shows a send after the owner's message. The send is a send_message or
