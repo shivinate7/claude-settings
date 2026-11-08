@@ -1994,6 +1994,26 @@ class PinnedSettings(Job):
         self.assertEqual(by_step(lines).get("read pinned"), "PASS",
                          "the lint step read the marker %r, not the pinned tree's:\n%s" % (self.root_file("seen.txt"), out))
 
+    def test_lint_reads_only_the_pins_of_its_lint_steps_so_a_plain_lint_step_runs_in_its_own_pins_tree(self):
+        # The job's second pin, B, is on a step --lint does not run, so it must not make the plain lint step unknown. The
+        # control beside this, test_lint_runs_a_lint_step_in_the_pinned_tree, is the same lint step with one pin.
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        self.assertNotEqual(self.sha_a, self.sha_b, "precondition: the two pins are one commit")
+        rc, lines, out = self.run_pinned(
+            step("code check", uses=PIN_USES % self.sha_a),
+            step("pin b", uses=PIN_ONLY_USES % self.sha_b),
+            self.lint_step("read pinned", "read_marker", MARKER_SCRIPT, "pinned"),
+            args=("--lint", "--base", "origin/main"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "precondition: the code check under pin A did not run:\n" + out)
+        self.assertEqual(by_step(lines).get("pin b"), "not run",
+                         "precondition: the step at pin B is not one --lint leaves out:\n" + out)
+        self.assertEqual(by_step(lines).get("read pinned"), "PASS",
+                         "the plain lint step did not run in the tree of its own pin A; its line is %r, so the pin of a "
+                         "step --lint does not run counted:\n%s" % (line_of(lines, "read pinned"), out))
+        self.assertEqual((rc, self.root_file("seen.txt")), (0, "pinned"),
+                         "the lint step must read pin A's marker, and the job must exit 0:\n" + out)
+
     def test_lint_runs_a_remote_ste_lint_from_the_pinned_tree_only(self):
         self.settings(extra={"bin/ste-changed": STE_CHANGED_STUB}, executable=("bin/ste-changed",))
         rc, lines, out = self.run_pinned(
@@ -2428,6 +2448,33 @@ class PinnedSettings(Job):
         self.assertEqual(self.root_file("local-code-check.txt"), self.decoy,
                          "the local code check got CLAUDE_SETTINGS_DIR set to a pinned tree, not the caller's value:\n" + out)
 
+    def local_zizmor(self):
+        """Write the repo under test's own run.sh, which a local $/actions/zizmor step runs. It leaves local-zizmor.txt, which
+        names the settings dir the step got. Returns that step."""
+        run_sh = os.path.join(self.root, "actions", "zizmor", "run.sh")
+        os.makedirs(os.path.dirname(run_sh), exist_ok=True)
+        with open(run_sh, "w", encoding="utf-8", newline="\n") as f:
+            f.write(LOCAL_RUN_SH)
+        return step("local zizmor", uses="$/actions/zizmor")
+
+    def test_lint_a_local_zizmor_beside_a_pinned_remote_step_runs_its_own_run_sh_and_never_a_pinned_settings_dir(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A, "actions/zizmor/run.sh": RUN_SH_A})
+        self.assertIn("zizmor-A.txt", fixture_git(self.clone, "show", self.sha_a + ":actions/zizmor/run.sh"),
+                      "precondition: pin A's run.sh is not the stub that writes zizmor-A.txt")
+        local = self.local_zizmor()
+        rc, lines, out = self.run_pinned(step("code check", uses=PIN_USES % self.sha_a), local,
+                                         args=("--lint", "--base", "origin/main"), env=pipx_stub_env())
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "precondition: the pinned code check did not run, so no pinned tree existed:\n" + out)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "local-zizmor.txt")),
+                        "the local zizmor step did not run the repo's own run.sh:\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "zizmor-A.txt")),
+                         "the local zizmor step ran pin A's run.sh, not the repo's own:\n" + out)
+        self.assertEqual(self.root_file("local-zizmor.txt"), self.decoy,
+                         "the local zizmor step got CLAUDE_SETTINGS_DIR other than the caller's value:\n" + out)
+        self.assertEqual(by_step(lines).get("local zizmor"), "PASS", "the local zizmor step did not PASS:\n" + out)
+        self.assertEqual(rc, 0, "both lint steps pass, so --lint must exit 0:\n" + out)
+
     def test_step_a_local_code_check_alone_keeps_the_callers_settings_dir_beside_one_pin(self):  # control: no tree under --step
         self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
         local = self.local_code_check("./actions/code-check", 0)
@@ -2474,12 +2521,9 @@ class PinnedSettings(Job):
 
     def test_lint_a_local_zizmor_runs_the_repos_own_run_sh_under_two_pins_with_no_clone(self):
         self.two_pin_settings()
-        run_sh = os.path.join(self.root, "actions", "zizmor", "run.sh")
-        os.makedirs(os.path.dirname(run_sh), exist_ok=True)
-        with open(run_sh, "w", encoding="utf-8", newline="\n") as f:
-            f.write(LOCAL_RUN_SH)
+        local = self.local_zizmor()
         missing = os.path.join(self.fixture, "no-such-clone")  # no pinned tree can be made, and the local step needs none
-        rc, lines, out = self.run_pinned(*self.two_pin_steps(step("local zizmor", uses="$/actions/zizmor")),
+        rc, lines, out = self.run_pinned(*self.two_pin_steps(local),
                                          args=("--lint", "--base", "origin/main"), clone=missing, env=pipx_stub_env())
         self.assertEqual(by_step(lines).get("code check"), "unknown",
                          "precondition: the missing clone must refuse the pinned steps:\n" + out)

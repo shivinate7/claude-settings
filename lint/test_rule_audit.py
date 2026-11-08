@@ -200,6 +200,16 @@ class RuleAuditTests(unittest.TestCase):
         problems = run(rule_map=rule_map)
         self.assertEqual(problems, [])
 
+    def test_a_quoted_ci_step_name_with_a_comment_reads_as_its_name(self):
+        self.assertEqual(rule_audit.ci_step_names('      - name: "Lint" # c\n'), {"Lint"},
+                         "a quoted step name must read without its quotes or its comment, as YAML reads it")
+
+    def test_a_ci_step_name_with_a_hash_in_quotes_or_a_lone_quote_reads_whole(self):  # P2 green controls: pass on the old code
+        self.assertEqual(rule_audit.ci_step_names('      - name: "a # b"\n'), {"a # b"},
+                         "a # inside quotes is text, not a comment")
+        self.assertEqual(rule_audit.ci_step_names("      - name: Don't lint\n"), {"Don't lint"},
+                         "a lone quote in a plain name is text")
+
     def test_unmechanized_with_a_thin_reason_fails(self):
         rule_map = {
             "rules": {
