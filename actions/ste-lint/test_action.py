@@ -19,7 +19,9 @@ matches is not linted, and a clean tree still passes. A non-ASCII untracked name
 base names it, and an uncommitted removal that a tracked doc cites fails bin/ste-changed as the committed removal fails the step.
 Also asserts a push whose HEAD is a root commit exits 0 with an unknown stale-cites line, a Markdown file that is untracked and cites
 an uncommitted removal is named unknown and never PASS, a held .git/index.lock prints one ste-lint unknown line that names the lock,
-a name with a space is linted, and a run with no merge base writes unknown to the step summary, not "No markdown changed"."""
+a name with a space is linted, and a run with no merge base writes unknown to the step summary, not "No markdown changed".
+Also asserts a stat-only change (a touched tracked file, the same bytes) still fails on a committed STE001, and an untracked
+markdown file that .ste-lint-exclude matches is not named unknown."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -666,6 +668,61 @@ check("space in name: STE001 names sp ace.md:3", "sp ace.md:3: STE001 " in out, 
 rc, out = run("changed", base={"space.md": "# S\n\nShort line.\n"}, change=long_sentence("space.md"))
 check("space control: space.md with the same sentence exits 1 and names space.md:3",
       rc == 1 and "space.md:3: STE001 " in out, out)
+
+
+# A stat-only change: a tracked file is touched, so its mtime moves and its content does not. The committed STE001 in the PR
+# range is still a finding. The stat refresh is not an unknown read: the step lints the range and exits 1, as main does.
+# The touch is the change's last act, since a commit refreshes the index first. The scope facts read no index (P7).
+STAT_BASE = {**UNCOMMITTED_BASE, "long-note.md": "# S\n\nShort line.\n"}
+stat = {}
+
+
+def stat_only(work):
+    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    path = os.path.join(work, "data.txt")
+    before = os.stat(path)
+    os.utime(path, (before.st_atime, before.st_mtime + 60))  # touch: the mtime moves, the content does not
+    with open(path, encoding="utf-8") as f:
+        stat["same"] = f.read() == git_read(work, "show", "HEAD:data.txt")
+    stat["committed"] = "long-note.md" in git_read(work, "ls-tree", "--name-only", "HEAD").split()
+    stat["moved"] = os.stat(path).st_mtime != before.st_mtime
+
+
+rc, out = run("changed", base=STAT_BASE, change=stat_only)
+check("stat-only scope: long-note.md is committed, data.txt has a new mtime and its committed bytes",
+      stat.get("committed") and stat.get("moved") and stat.get("same"), str(stat))
+check("stat-only: exits 1 on the committed STE001, as main does", rc == 1, out)
+check("stat-only: the log names long-note.md:3 STE001", "long-note.md:3: STE001 " in out, out)
+check("stat-only: no ste-lint unknown line, so the stat refresh did not stop the read",
+      "ste-lint: unknown" not in out, out)
+rc, out = run("changed", base=STAT_BASE, change=long_sentence("long-note.md"))
+check("stat-only control: the same committed STE001 with no touch exits 1 and names long-note.md:3",
+      rc == 1 and "long-note.md:3: STE001 " in out, out)
+
+
+# An untracked Markdown file that .ste-lint-exclude matches is not read, so it is no unknown read. The step printed
+# "untracked Markdown is not read" for any untracked .md, excluded or not. The control has no exclude entry: there the same
+# file is named unknown. The exclude file is committed, so the scope facts come from ls-files (P7).
+EXCL_BASE = {"a.md": "# T\n\nShort line.\n", ".ste-lint-exclude": "gen/**\n"}
+excl = {}
+
+
+def untracked_gen(work):
+    write(work, "gen/x.md", "# G\n\n" + LONG42 + "\n", "w")  # untracked, never git-added, matched by gen/**
+    excl["untracked"] = git_read(work, "ls-files", "--others", "--exclude-standard").split()
+    excl["tracked"] = git_read(work, "ls-files").split()
+
+
+rc, out = run("changed", base=EXCL_BASE, change=untracked_gen)
+check("untracked excluded scope: gen/x.md is untracked and .ste-lint-exclude is committed",
+      "gen/x.md" in excl.get("untracked", []) and ".ste-lint-exclude" in excl.get("tracked", []), str(excl))
+check("untracked excluded: exits 0, as an excluded file is not read", rc == 0, out)
+check("untracked excluded: no line says untracked Markdown is not read",
+      "untracked Markdown is not read" not in out, out)
+check("untracked excluded: the stale-cites line says PASS", "stale-cites: PASS" in out, out)
+rc, out = run("changed", base={"a.md": "# T\n\nShort line.\n"}, change=untracked_gen)
+check("untracked excluded control: with no exclude entry, gen/x.md is named unknown",
+      any(l.startswith("stale-cites: unknown,") and "gen/x.md" in l for l in out.splitlines()), out)
 
 
 # No merge base. The topic branch starts a history of its own, so origin/main and HEAD share no commit. The
