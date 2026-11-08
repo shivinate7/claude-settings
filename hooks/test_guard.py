@@ -9310,6 +9310,13 @@ for _name, _where in (("no merge tool in the repo", NOGIT), ("a repo with a merg
 # False alarms, each must stay allowed and silent: the disable spellings, a read of the merge path, and text that names it.
 sh("auto-merge: gh pr merge --disable-auto is not an auto-merge", "gh pr merge 5 --disable-auto", "allow",
    silent=True, cwd=NOGIT, **_AUTO_GREEN)
+# --disable-auto merges nothing (orchestrator call), so it is no merge: no merge-checks read and no bare-merge ask, on any head.
+sh("auto-merge: gh pr merge --disable-auto allows on a pending head", "gh pr merge 5 --disable-auto", "allow",
+   silent=True, cwd=NOGIT, **_AUTO_PENDING)
+sh("auto-merge: gh pr merge --disable-auto allows on a red head", "gh pr merge 5 --disable-auto", "allow",
+   silent=True, cwd=NOGIT, **_AUTO_RED)
+sh("auto-merge: gh pr merge --disable-auto allows in a repo with a merge block", "gh pr merge 5 --disable-auto", "allow",
+   silent=True, cwd=STAMPREPO, **_BARE_GUARD)
 sh("auto-merge: the graphql disable mutation is allowed",
    "gh api graphql -f query='mutation{disablePullRequestAutoMerge(input:{pullRequestId:\"PR_x\"}){clientMutationId}}'",
    "allow", silent=True, cwd=NOGIT, config=MERGECFG)
