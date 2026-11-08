@@ -7,6 +7,7 @@ checkout, a tree's status, the default branch, a branch's proof, session livenes
 git_reads.py, shared with the janitor: a test or the janitor that patches one of them patches it
 there, on the one object that every caller reads.
 """
+import collections
 import errno
 import functools
 import json
@@ -1054,35 +1055,49 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
-    """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
+CdWalk = collections.namedtuple("CdWalk", "where stranded skipped")
 
-    Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
-    real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
-    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
-    where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
-    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
+
+def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+    """What one pass over the segments ahead of `segments[number]` says about the shell when it
+    runs: a `CdWalk` of `where` (the directory the shell is in, or None when it cannot be told),
+    `stranded` and `skipped`.
+
+    Walks the segments the way `_run_dir` reads them, but keeps the state a real shell keeps:
+    `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes back, a `cd` inside
+    `( ... )` ends with the parenthesis, `popd` or a path that holds a variable is not tracked, and
+    a `cd` into a folder that does not exist is not trusted (the shell stays where it was, and a
+    `;` runs the next command there). `ends` is what `split_segments` gave: in bash each part of a
+    pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
-    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`
+    that ends it at the group the cd stands in (a `( ... )` inside the chain does not end it, and a
+    group that closes on the failed cd leaves its status a failure): the segment is `skipped`,
+    its `where` is None, and its own `cd` moves nothing. `stranded` is true when a `cd` that failed
+    ran ahead of the segment and the shell is still where it stayed: no `cd` to a full path, home
+    or `-` has moved it since, and a relative `cd` does not, because it is read against the
+    wrong folder. Off by default (`stranded` and `skipped` stay false), so a rule that fails
+    closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
-    skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    stranded = False
+    skip_depth = None   # a failed cd ended in `&&`: the group depth the skipped chain stands at
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        stack.extend([(where, prev, stranded)] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            return None if skipping else where
-        if skipping:
-            skipping = end in ("&&", "|")
+            if skip_depth is not None:
+                return CdWalk(None, False, True)
+            return CdWalk(where, stranded and where is not None, False)
+        if skip_depth is not None:
             for _ in range(marks.count(")")):
                 if stack:
-                    where, prev = stack.pop()
-                    skipping = False
+                    where, prev, stranded = stack.pop()
+            skip_depth = min(skip_depth, len(stack))
+            if end not in ("&&", "|") and len(stack) <= skip_depth:
+                skip_depth = None
             continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
@@ -1090,29 +1105,38 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
         if tokens is None:
-            where = None
+            where, stranded = None, False
         elif move is not None:
             old = where
-            if move is CD_UNKNOWN:
-                where = None
+            if move is CD_UNKNOWN or any(mark in move for mark in "$%`"):
+                where, stranded = None, False
             elif move == "-":
-                where = prev
-            elif any(mark in move for mark in "$%`"):
-                where = None
+                where, stranded = prev, False
             else:
                 target = shell_abs(move or "~", where)
                 if target and os.path.isdir(target):
+                    stranded = stranded and shell_abs(move or "~", None) is None
                     where = target
                 elif target and failed_cd_stays:
-                    skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    skip_depth = len(stack) if end == "&&" else None   # the shell stays, and an `&&` chain stops
+                    stranded = True
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
-                    where = None
+                    where, stranded = None, False
             prev = old
         for _ in range(marks.count(")")):
             if stack:
-                where, prev = stack.pop()
-    return where
+                where, prev, stranded = stack.pop()
+        if skip_depth is not None:
+            skip_depth = min(skip_depth, len(stack))
+    return CdWalk(where, stranded and where is not None, False)
+
+
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+    """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
+    A `cd` into a folder that does not exist is not trusted: the folder is then None (`cd_walk`
+    holds the walk, and the read that trusts it)."""
+    return cd_walk(segments, number, shell_cwd, ends).where
 
 
 def _segment_git_c_target(tokens):

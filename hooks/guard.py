@@ -355,11 +355,11 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
+            _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            BRANCH_DELETE_DENY_REASON, BRANCH_DELETE_FLAGS, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
             worktree_remove_forced,
         )
         _loading = "guard_shared_tree"
@@ -4567,7 +4567,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
 # already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
-# and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
+# and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_write.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
                           "stash", "cherry-pick", "revert", "am", "apply", "clean")
 SESSION_HOME_REASON = (
@@ -4670,7 +4670,17 @@ GIT_AFTER_CD_REASON = (
 
 
 # The `branch` flags that move, rename or delete a ref (a force, a move, a delete).
-GIT_BRANCH_WRITE_FLAGS = ("-f", "--force", "-m", "-M", "--move", "-d", "-D", "--delete")
+GIT_BRANCH_WRITE_FLAGS = BRANCH_DELETE_FLAGS | {"-f", "--force", "-m", "-M", "--move"}
+
+
+def session_home_write(verb: str, args) -> bool:
+    """True when a call of a verb of SESSION_HOME_GIT_VERBS changes the files or the branch: a
+    `stash list`, a `stash show` and a `clean` that deletes nothing only read."""
+    if verb == "stash":
+        return args[:1] not in (["list"], ["show"])
+    if verb == "clean":
+        return clean_deletes_files(args)
+    return True
 
 
 def git_write_verb(verb: str, args) -> bool:
@@ -4685,19 +4695,17 @@ def git_write_verb(verb: str, args) -> bool:
         return any(arg in GIT_BRANCH_WRITE_FLAGS for arg in args)
     if verb == "fetch":
         return fetch_moves_branch(args)
-    if verb == "stash":
-        return args[:1] not in (["list"], ["show"])
-    if verb == "clean":
-        return clean_deletes_files(args)
-    return verb in ("push", "update-ref") or verb in GIT_FILE_VERBS or verb in SESSION_HOME_GIT_VERBS
+    if verb in SESSION_HOME_GIT_VERBS:
+        return session_home_write(verb, args)
+    return verb in ("push", "update-ref") or verb in GIT_FILE_VERBS
 
 
 def git_after_cd_hit(command: str, cwd: str) -> str:
     """The verb of a git write in COMMAND that runs in the folder the shell stayed in after a cd
-    into a folder that is not there (decision git-after-cd-joins-with-and), else ''. One read of
-    `dir_before_segment` trusts a failed cd to leave the shell in place and one does not: a
-    segment is flagged when the first gives a folder and the second none. A `&&` chain skips the
-    write when the cd fails, a `)` ends a subshell's cd, and a cd that lands leaves both reads equal.
+    into a folder that is not there (decision git-after-cd-joins-with-and), else ''. One `cd_walk`
+    that trusts a failed cd to leave the shell in place says whether the segment runs in a folder
+    the shell stayed in (`stranded`). A `&&` chain skips the write when the cd fails, a `)` ends a
+    subshell's cd, and a cd to a full path that lands moves the shell out of the stranded folder.
     `git -C <full path>` names its own folder and passes; a `-C` that holds a variable is unknown and
     passes; a relative `-C` is joined to the stranded folder and is refused."""
     ends = []
@@ -4708,9 +4716,7 @@ def git_after_cd_hit(command: str, cwd: str) -> str:
         verbs = [verb for verb, args in calls if git_write_verb(verb, args)]
         if not verbs:
             continue
-        if dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True) is None:
-            continue
-        if dir_before_segment(segments, number, cwd, ends, failed_cd_stays=False) is not None:
+        if not cd_walk(segments, number, cwd, ends, failed_cd_stays=True).stranded:
             continue
         tokens = segment_tokens(segment)
         if tokens is None:
@@ -4740,11 +4746,7 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
         if not folder:
             continue
         for verb, args in verbs:
-            if verb == "stash" and args[:1] in (["list"], ["show"]):
-                continue
-            if verb == "clean" and not clean_deletes_files(args):
-                continue
-            if in_primary(folder, folder):
+            if session_home_write(verb, args) and in_primary(folder, folder):
                 return verb
     return ""
 

@@ -9,8 +9,8 @@ import os
 import re
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, cd_walk, command_root, GIT_WORK_TREE_RE,
+    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -695,10 +695,18 @@ def _untracked_findings(where, top, specs):
     return found
 
 
+# An `echo` or `printf` that holds no redirect, backtick or `$(` only prints. It is read as text, so a
+# quote the tokenizer cannot read (an ANSI-C quote with an escaped quote) does not make it a step that may change the tree.
+_PRINT_ONLY = re.compile(r"\s*(echo|printf)\s")
+_REACHES_TREE = re.compile(r"[<>`]|\$\(")
+
+
 def _chain_safe(segment):
     """True when the segment cannot change the tree a later commit reads: a git add, a git read,
-    `true`, `false` or `cd` (the root already resolves through a cd). A commit is judged on its own, so
-    the caller never asks about one."""
+    `true`, `false`, `cd` (the root already resolves through a cd) or a print-only `echo` or `printf`.
+    A commit is judged on its own, so the caller never asks about one."""
+    if _PRINT_ONLY.match(segment) and not _REACHES_TREE.search(segment):
+        return True
     call = git_call_of(segment)
     if call is not None:
         return call[0] == "add" or call[0] in _READ_VERBS
@@ -752,7 +760,10 @@ def conflict_markers_hit(stripped: str, cwd: str):
             conflict_step = conflict_step or (call is not None and _makes_conflict(call))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
+        walk = cd_walk(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
+        if walk.skipped:
+            continue   # a failed `cd` ended the `&&` chain: this segment never runs
+        where = walk.where or command_root(stripped, cwd)   # a segment the walk cannot read: the last cd, as before
         if c_target is not None:
             where = _absolute(c_target, where or "")
             where = where if os.path.isabs(where) else None
