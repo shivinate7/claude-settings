@@ -118,7 +118,7 @@ WORKTREE_PRUNE_ASK_REASON = (
 # worktree of the clone holds <b>, git 2.43 moves the ref under that worktree anyway: its files and
 # index keep the old commit, so its next `git status` shows the reverse of the reset as staged work
 # (lane #1777 incident, Nov 7, reproduced Nov 8). The worktree the command runs in is not that case:
-# on git 2.43.0 its own -B resets cleanly (measured in PR 1889 round 2), so its own branch passes.
+# on git 2.43.0 its own -B resets cleanly, so its own branch passes (decision checkout-b-held-branch).
 # The ref lives in the COMMON git directory, so the holder may be any worktree of the clone, and one
 # `git worktree list --porcelain` names them all.
 #

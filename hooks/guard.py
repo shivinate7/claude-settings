@@ -59,7 +59,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
-  checkout-b-current-branch
+  checkout-b-held-branch
                        deny. A `checkout -B` or `switch -C` of a branch a worktree other than the
                        one the command runs in holds. Its own branch passes, and so does the
                        pointer checkout, for pointer-head to judge. (checkout-b-held-branch)
@@ -3361,7 +3361,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if segment.strip() and held_branch_names(segment) and not in_pointer_checkout(head_where):
             matched = held_branch_hit(segment, head_where)
             if matched:
-                refuse(tool, "deny", "checkout-b-current-branch", HELD_BRANCH_REASON, matched)
+                refuse(tool, "deny", "checkout-b-held-branch", HELD_BRANCH_REASON, matched)
 
     # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
     # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the
