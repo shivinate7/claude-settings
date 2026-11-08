@@ -2340,15 +2340,22 @@ const ASK_SEEN = readStamp("waiting.askSeen");
 const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
 const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
-// The stamp moves only while the answer list (#askList, below the form) is on screen and every New answer row in it is in view: an answer that lands on a hidden tab or below the fold has not been seen.
+// The stamp moves only while the answer list (#askList, below the form) is on screen and every new answer in it has been in view: an answer that lands on a hidden tab or below the fold has not been seen.
+// A new answer is a row marked New answer, or the notice of a fresh reply answer under a folded thread. Each carries data-new, the id of the row and the time of its answer.
+// One that was in view since it was drawn counts as seen, though the owner has scrolled past it. A newer answer to the same row carries a new data-new, so it is unseen.
 // Hiding the tab stamps once, at the hide time. A visibilitychange or pagehide of a tab already hidden stamps nothing.
-// A placeholder (Loading, cannot be read) lists no answer, and a row marked New answer that sits below the fold has not been read.
+// A placeholder (Loading, cannot be read) lists no answer, so it has nothing to be seen.
 const inView = (el) => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
-const asksOnScreen = () => askKnown() && inView($("askList")) && [...$("askList").querySelectorAll("li.askc")].filter((li) => li.querySelector(".newmark")).every(inView);
+const askSeenNew = new Set();
+const askNewIo = typeof IntersectionObserver === "function" ? new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting && e.target.dataset.new) askSeenNew.add(e.target.dataset.new); })) : null;
+const askNewEls = () => [...$("askList").querySelectorAll("[data-new]")];
+const watchNewAsks = () => { if (askNewIo) { askNewIo.disconnect(); askNewEls().forEach((el) => askNewIo.observe(el)); } };
+const asksOnScreen = () => askKnown() && inView($("askList")) && askNewEls().every((el) => askSeenNew.has(el.dataset.new) || inView(el));
 const markAsksSeen = () => { if (asksOnScreen()) writeStamp("waiting.askSeen"); };
 let tabWasHidden = document.hidden;
 document.addEventListener("visibilitychange", () => { const hiding = document.hidden && !tabWasHidden; tabWasHidden = document.hidden; if (hiding) markAsksSeen(); });
-window.addEventListener("pagehide", () => { if (!document.hidden) markAsksSeen(); });
+// A page that goes into the back-forward cache comes back visible, and a hide can run before its queued pageshow, so it is no longer a hidden tab.
+window.addEventListener("pagehide", (e) => { if (!document.hidden) markAsksSeen(); if (e.persisted) tabWasHidden = false; });
 // A restore from the back-forward cache may send no visibilitychange, so the page reads its visibility again.
 window.addEventListener("pageshow", () => { tabWasHidden = document.hidden; });
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
@@ -2587,7 +2594,7 @@ function renderAskList() {
   const n = askWaiting(), ct = $("askCount");
   ct.hidden = !n; ct.textContent = n ? String(n) : ""; ct.setAttribute("aria-label", n + (n === 1 ? " ask waiting" : " asks waiting") + " for an answer");
   // The cards were rebuilt, so each thread's forms and result line are set again before focus returns.
-  syncReplyForms(); renderLine();
+  syncReplyForms(); renderLine(); watchNewAsks();
   if (keep) {
     const f = root.querySelector('[data-ask="' + CSS.escape(keep) + '"]') || $(keep);
     if (f) { f.focus({ preventScroll: true }); if (caret && f.tagName === "TEXTAREA") f.setSelectionRange(caret[0], caret[1]); }
@@ -2614,7 +2621,7 @@ function askMine(r) {
 function askFoldedMine(r) {
   const answered = askReply(r);
   if (answered && !askFresh(r)) return null;
-  return h("p", { class: "fwait" }, glyph(answered ? "done" : "wait"), h("span", { class: "ftext" }, "Your reply: " + r.text),
+  return h("p", { class: "fwait", "data-new": answered ? r.id + "@" + r.answered : null }, glyph(answered ? "done" : "wait"), h("span", { class: "ftext" }, "Your reply: " + r.text),
     h("span", { class: "astate" }, ...(answered ? ["Answer from " + askOwner(r) + (fmt(r.answered) ? ", " + fmt(r.answered) : "") + ". Show answer to read it."] : askWaitWords(r))));
 }
 /* Dismiss and Restore: one write of `dismissed` on the thread's root ask, with update. It never sets, deletes or touches the text or a reply (SKILL.md, "The database"). */
@@ -2686,7 +2693,8 @@ function askItem(t, dl) {
     latest && askFresh(latest) ? h("span", { class: "newmark" }, "New answer") : null,
     answered ? h("button", { class: "morebtn", type: "button", "aria-expanded": "true", "data-ask": t.id, onclick: press }, "Fold") : null);
   const body = [...(answered ? askAnswer(t) : []), ...t.reps.flatMap(askMine)];
-  return h("li", { class: "askc", id: "row-" + k }, head, t.orphan ? h("p", { class: "reline" }, "Re: an ask not on this page") : null, h("p", { class: "atext" }, t.text),
+  const fresh = latest && askFresh(latest);
+  return h("li", { class: "askc", id: "row-" + k, "data-new": fresh ? k + "@" + latest.answered : null }, head, t.orphan ? h("p", { class: "reline" }, "Re: an ask not on this page") : null, h("p", { class: "atext" }, t.text),
     answered ? null : h("p", { class: "astate" }, ...askWaitWords(t)), body.length ? h("div", { class: "thread" }, body) : null, latest ? askReplyEnd(t, dl) : null);
 }
 function renderAsks() { renderAskForm(); renderStack(); renderAskList(); renderRail(); }
