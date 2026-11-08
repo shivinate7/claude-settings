@@ -11984,6 +11984,15 @@ SI_A7P = os.path.join(STALEROOT, "a7")
 SI_A7A = os.path.join(STALEROOT, "a7-wt")           # the R1 move, with this worktree's HEAD log unreadable
 SI_R8P = os.path.join(STALEROOT, "r8")
 SI_R8A = os.path.join(STALEROOT, "r8-wt")           # the R1 move, with this worktree's HEAD log deleted
+SI_F1AP = os.path.join(STALEROOT, "f1a")            # a primary on park; the worktree below switches away and back
+SI_F1AW = os.path.join(STALEROOT, "f1a-wt")         # ... then stages a revert of its head
+SI_F1BP = os.path.join(STALEROOT, "f1b")
+SI_F1BW = os.path.join(STALEROOT, "f1b-wt")         # ... then stages a checkout of HEAD~1's f.py
+SI_F1CP = os.path.join(STALEROOT, "f1c")
+SI_F1CW = os.path.join(STALEROOT, "f1c-wt")         # ... then removes k.py, which its head added
+SI_F2P = os.path.join(STALEROOT, "f2")              # the primary holds branch next, one commit ahead of topic
+SI_F2A = os.path.join(STALEROOT, "f2-wt")           # a worktree on topic, at the old head
+SI_F2SQ = os.path.join(STALEROOT, "f2sq")           # a clean topic with two commits, for a chained squash
 SI_COSTP = os.path.join(STALEROOT, "cost")          # no move, one staged change
 NEW_HEAD = {"f.py": "x = 2\n", "h.py": "z = 1\n"}  # what the moved head N changes and adds
 NEW_ADD = {"k.py": "k = 1\n"}                       # a moved head that only adds k.py
@@ -12022,6 +12031,23 @@ def _si_proof(where, want):
     if done.returncode != 0 or got != sorted(want):
         sys.exit("fixture setup failed: %r stages %s against HEAD, want %s. stderr: %s"
                  % (where, got, sorted(want), done.stderr.strip()))
+
+
+def _si_switched(where, wt):
+    """Primary `where` on park, and worktree `wt` on topic with two commits of its own: X1 changes g.py, and X2
+    changes f.py and adds k.py. Then `switch main` and `switch topic` in `wt`. The shared topic log's newest step
+    is X1 to X2, and the worktree's own newest step is main to X2, so the two differ."""
+    make_repo(where, {"f.py": "x = 1\n", "g.py": "y = 1\n"})
+    _cmk_run(where, "switch", "-q", "-c", "park")
+    _cmk_run(where, "branch", "topic", "main")
+    _cmk_run(where, "worktree", "add", "-q", wt, "topic")
+    _cmk_stage(wt, "g.py", "y = 2\n")
+    _cmk_run(wt, "commit", "-q", "-m", "x1")
+    _cmk_stage(wt, "f.py", "x = 2\n")
+    _cmk_stage(wt, "k.py", "k = 1\n")
+    _cmk_run(wt, "commit", "-q", "-m", "x2")
+    _cmk_run(wt, "switch", "-q", "main")
+    _cmk_run(wt, "switch", "-q", "topic")
 
 
 def _build_stale_index():
@@ -12133,6 +12159,31 @@ def _build_stale_index():
         sys.exit("fixture setup failed: the shared log %r does not hold the move to %s" % (shared, n))
     _si_proof(SI_R8A, ["f.py", "h.py"])
 
+    # F1: after a switch away and back, the shared log's old step is taken as the old head. Each edit below is a
+    # legitimate fix, so the commit is allowed.
+    _si_switched(SI_F1AP, SI_F1AW)
+    _cmk_run(SI_F1AW, "revert", "--no-commit", "HEAD")
+    _si_proof(SI_F1AW, ["f.py", "k.py"])
+
+    _si_switched(SI_F1BP, SI_F1BW)
+    _cmk_run(SI_F1BW, "checkout", "HEAD~1", "--", "f.py")
+    _si_proof(SI_F1BW, ["f.py"])
+
+    _si_switched(SI_F1CP, SI_F1CW)
+    _cmk_run(SI_F1CW, "rm", "-q", "k.py")
+    _si_proof(SI_F1CW, ["k.py"])
+
+    # F2: the chained rows judge the command against the head before the move, so the state is that head. Branch
+    # next is one commit ahead of topic's head O.
+    _si_base(SI_F2P)
+    _cmk_run(SI_F2P, "worktree", "add", "-q", SI_F2A, "topic")
+    n = _si_new_head(SI_F2P, NEW_HEAD)
+    _cmk_run(SI_F2P, "branch", "next", n)
+    _si_proof(SI_F2A, [])
+
+    _si_clean(SI_F2SQ)
+    _si_proof(SI_F2SQ, [])
+
     # The cost row: no move, one staged change.
     _si_base(SI_COSTP)
     _cmk_run(SI_COSTP, "checkout", "-q", "topic")
@@ -12142,7 +12193,7 @@ def _build_stale_index():
 
 lazy_fixture([SI_R1P, SI_R1A, SI_R3P, SI_R3A, SI_R4P, SI_R4A, SI_R4X, SI_R5P, SI_R5A, SI_R6P, SI_R6A,
               SI_R7P, SI_R7A, SI_R8P, SI_R8A, SI_A1P, SI_A1A, SI_A2P, SI_A3P, SI_A4P, SI_A5P, SI_A6P, SI_A7P,
-              SI_A7A, SI_COSTP],
+              SI_A7A, SI_F1AP, SI_F1AW, SI_F1BP, SI_F1BW, SI_F1CP, SI_F1CW, SI_F2P, SI_F2A, SI_F2SQ, SI_COSTP],
              _build_stale_index)
 
 
@@ -12171,6 +12222,11 @@ stale_refuse("a moved head that changes 200 files, so every path the commit carr
              SI_R7A)
 stale_refuse("the moved branch is in the shared log only, with this worktree's HEAD log gone, then a plain commit",
              VCS + " commit -m x", SI_R8A)
+# A chained move is judged before its commit: the head the move reaches is ahead of this worktree's HEAD.
+stale_refuse("a chained update-ref of the checked-out branch to a head ahead, then a plain commit",
+             VCS + " update-ref refs/heads/topic next && " + VCS + " commit -m x", SI_F2A)
+stale_refuse("a chained reset --soft to a head ahead, then a plain commit",
+             VCS + " reset --soft next && " + VCS + " commit -m x", SI_F2A)
 
 # 2. The fixed index, the backward squash, and the forms that carry no stale path.
 stale_allow("a read-tree of the old head to the new one, then a plain commit", VCS + " commit -m x", SI_A1A)
@@ -12181,6 +12237,16 @@ stale_allow("a backward reset --soft to HEAD~2, a squash, then a plain commit", 
 stale_allow("the R5 move, and a commit by path that names only g.py", VCS + " commit -m x -- g.py", SI_R5A)
 stale_allow("a staged file in a repository with no commits yet", VCS + " commit -m x", SI_A6P)
 stale_allow("the R1 move, with the worktree's HEAD log unreadable", VCS + " commit -m x", SI_A7A)
+
+# 3. A switch away and back: the shared log's old step is no stale head, so each legitimate fix is allowed.
+stale_allow("after a switch away and back, a staged revert of the head, then a plain commit",
+            VCS + " commit -m x", SI_F1AW)
+stale_allow("after a switch away and back, a checkout of an older file, then a plain commit",
+            VCS + " commit -m x", SI_F1BW)
+stale_allow("after a switch away and back, a removal of a file the head added, then a plain commit",
+            VCS + " commit -m x", SI_F1CW)
+stale_allow("a chained backward reset --soft to HEAD~2, then a squash commit",
+            VCS + " reset --soft HEAD~2 && " + VCS + " commit -m squash", SI_F2SQ)
 
 
 # The commit check reads the index once more than before, for a commit segment with no move. STALE_COST_BASE is the
