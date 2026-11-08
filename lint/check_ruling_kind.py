@@ -217,10 +217,14 @@ for a in args:  # an option left over is a typo: fail, never read it as a file n
         sys.exit(1)
 files = args or changed(base)
 bad = 0
+read_count = 0
 for f in files:
     f = f.strip()
     if os.path.normpath(f).replace("\\", "/").startswith(DIR) and f.endswith(".md"):
+        read_count += 1
         for p in problems(os.path.normpath(f).replace("\\", "/")):
             bad = 1
             print("check_ruling_kind: FAIL: %s: %s" % (f, p))
+# A zero-record run is a check that ran, not a silent pass: say how many records it read and against which base.
+print("check_ruling_kind: read %d record(s) against %s" % (read_count, "the files named" if args else base))
 sys.exit(bad)
