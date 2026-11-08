@@ -5,8 +5,9 @@ Other files reach these names through `guard`.
 """
 import shlex
 
+import guard_core
 from guard_core import (
-    branch_is_empty, resolve_default_base,
+    branch_is_empty, git_calls, resolve_default_base,
 )
 
 
@@ -108,6 +109,98 @@ WORKTREE_PRUNE_ASK_REASON = (
     "longer exists. It deletes no files, but the record it drops could belong to another "
     "session. "
     "The click in this prompt is the grant."
+)
+
+# ------------------------------------------------------------------ a held branch, reset in place
+#
+# `git checkout -B <b>` and `git switch -C <b>` move branch <b> to the start point. When a worktree
+# of the clone holds <b> (the running checkout included), git 2.43 moves the ref under that worktree
+# anyway: its files and index keep the old commit, so its next `git status` shows the reverse of the
+# reset as staged work. The ref lives in the COMMON git directory, so the holder may be any worktree
+# of the clone, and one `git worktree list --porcelain` names them all.
+#
+# THE READ RUNS ONLY FOR A -B/-C CALL. The text predicate comes first, so every other git command
+# costs no process. FAIL OPEN: a list that cannot be read judges nothing, this family's stance for an
+# unread subject (see branch_delete_subject above).
+#
+# NOT HERE: the pointer checkout. Its reset of `main` onto `origin/main` is the session-start
+# recovery path, and guard.py leaves that checkout to the pointer-head rule
+# (decision recovery-independent-of-state). That exemption lives at the call site, because
+# guard_pointer loads after this module.
+FORCE_CREATE_FLAGS = {"checkout": ("-B",), "switch": ("-C", "--force-create")}
+
+
+def forced_branch_names(subcommand: str, args):
+    """Return the branch names a `git checkout -B` or `git switch -C` call would reset, else [].
+
+    Reads the spaced form (`-B name`), the glued short form (`-Bname`) and, for switch, the long
+    option with `=` or a space. Arguments after `--` name paths, so they are not read.
+    """
+    flags = FORCE_CREATE_FLAGS.get(subcommand)
+    if not flags:
+        return []
+    names = []
+    take = False
+    for arg in args:
+        if take:
+            names.append(arg)
+            take = False
+            continue
+        if arg == "--":
+            break
+        if arg in flags:
+            take = True
+            continue
+        for flag in flags:
+            if flag.startswith("--"):
+                if arg.startswith(flag + "="):
+                    names.append(arg[len(flag) + 1:])
+            elif arg.startswith(flag) and not arg.startswith("--"):
+                names.append(arg[len(flag):])
+    return [name for name in names if name]
+
+
+def held_branch_names(segment: str):
+    """The branch names a segment's `checkout -B` and `switch -C` calls would reset. The cheap text
+    read: no git process runs here."""
+    names = []
+    for subcommand, args in git_calls(segment):
+        names.extend(forced_branch_names(subcommand, args))
+    return names
+
+
+def worktree_held_branches(where: str):
+    """Return the set of branch names the worktrees of `where`'s clone hold, or None when unread."""
+    answer = guard_core._git(where, "worktree", "list", "--porcelain")
+    if answer is None or answer.returncode != 0:
+        return None
+    prefix = "branch refs/heads/"
+    return {line[len(prefix):].strip() for line in answer.stdout.splitlines()
+            if line.startswith(prefix)}
+
+
+def held_branch_hit(segment: str, where: str) -> str:
+    """Return the matched text when one segment resets a branch some worktree of the clone holds,
+    else ''. One `worktree list` read, and only for a segment that holds a -B/-C call."""
+    names = held_branch_names(segment)
+    if not names:
+        return ""
+    held = worktree_held_branches(where)
+    if not held:
+        return ""
+    if any(name in held for name in names):
+        return segment.strip()
+    return ""
+
+
+HELD_BRANCH_REASON = (
+    "Rule (shared trees): this call resets a branch that a working tree of this clone has checked "
+    "out, this one or a linked one. Git moves the branch under that tree, whose files and index keep "
+    "the old commit, so its next status shows the reset as staged changes and its work is easy to "
+    "lose. "
+    "Remedy: choose a new branch name for the reset, one no working tree holds. Or do the reset "
+    "inside the working tree that holds the branch, where the files move with it "
+    "(decision checkout-b-held-branch, a reset must not move a branch under the tree that holds it)."
 )
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

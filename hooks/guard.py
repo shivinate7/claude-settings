@@ -59,6 +59,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
+  checkout-b-current-branch
+                       deny. A `checkout -B` or `switch -C` of a branch any worktree of the clone
+                       holds, the running one included. The pointer checkout passes, for
+                       pointer-head to judge. (checkout-b-held-branch)
   hand-made-worktree   deny. A real worktree add whose new tree lands outside
                        `<primary>/.claude/worktrees/`. A repo under the temp folder passes.
                        (lanes-start-in-tool-worktrees)
@@ -359,8 +363,8 @@ while True:
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
-            worktree_remove_forced,
+            BRANCH_DELETE_DENY_REASON, HELD_BRANCH_REASON, WORKTREE_PRUNE_ASK_REASON,
+            WORKTREE_REMOVE_DENY_REASON, held_branch_hit, held_branch_names, worktree_remove_forced,
         )
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
@@ -370,7 +374,7 @@ while True:
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_head_hit,
+            POINTER_HEAD_REASON, head_root, in_pointer_checkout, pointer_checkout, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -3348,6 +3352,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = pointer_head_hit(segment, head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
+
+    # 1b2. A `checkout -B` or `switch -C` that resets a branch a worktree of the clone holds. The
+    # pointer checkout is left to the pointer-head rule above: its reset of main is the recovery
+    # act. The text read runs first, so the pointer and worktree reads cost nothing for any other call.
+    for segment in split_segments(stripped):
+        if segment.strip() and held_branch_names(segment) and not in_pointer_checkout(head_where):
+            matched = held_branch_hit(segment, head_where)
+            if matched:
+                refuse(tool, "deny", "checkout-b-current-branch", HELD_BRANCH_REASON, matched)
 
     # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
     # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the
