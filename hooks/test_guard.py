@@ -13614,6 +13614,25 @@ sh("builder-test: shell, r3 gap L3, sed e command runs head on tests/x, no -i, o
    "sed 'e head tests/x' src/app.py", "allow", **BR)
 sh("builder-test: shell, r3 gap L3, sed e command runs ls on tests, no -i, on src/app.py, is allowed",
    "sed 'e ls tests' src/app.py", "allow", **BR)
+# r4 gap A: a lone & ends a background job, so the write after it is its own command. The head in the e
+# command reads README.md, and the tee after the & writes tests/test_a.py, so the call is refused. The control
+# runs the same shape, and its tee writes a product file, so it is allowed.
+sh("builder-test: shell write, r4 gap A, sed e command runs head & tee on tests/test_a.py, no -i, on src/app.py, is refused",
+   "sed 'e head README.md & tee tests/test_a.py' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell, r4 gap A control, sed e command runs head & tee on src/out.txt, no -i, on src/app.py, is allowed",
+   "sed 'e head README.md & tee src/out.txt' src/app.py", "allow", **BR)
+# r4 gap B: a path inside a dash word of a writing command (sort -o, sort --output=) names the file the command
+# writes. The e command and sort alone are each refused, and the control runs sort on a product file, which is allowed.
+sh("builder-test: shell write, r4 gap B, sed e command runs sort -otests/test_a.py, no -i, on src/app.py, is refused",
+   "sed 'e sort -otests/test_a.py' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, r4 gap B, sed e command runs sort --output=tests/test_a.py, no -i, on src/app.py, is refused",
+   "sed 'e sort --output=tests/test_a.py' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, r4 gap B, sort -otests/test_a.py on src/x, is refused",
+   "sort -otests/test_a.py src/x", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, r4 gap B, sort --output=tests/test_a.py on src/x, is refused",
+   "sort --output=tests/test_a.py src/x", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell, r4 gap B control, sed e command runs sort on src/x, no -i, on src/app.py, is allowed",
+   "sed 'e sort src/x' src/app.py", "allow", **BR)
 # Text after a, i or c is text, not a command: a line of it that begins with w names a test as text, and writes nothing.
 sh("builder-test: shell, sed a with a text line that names tests/x, on src/app.py, is allowed",
    "sed '1a\\\nw tests/x' src/app.py", "allow", **BR)
