@@ -12307,8 +12307,8 @@ for _n, _c in (
 # Pin: a sed flag spelled as the text of grep, after a pipe, allows.
 sh("frozen shell: cat | grep sed spells an in-place flag as text on the config settings, allows [r2 pin]",
    "cat " + CFG_SETTINGS + " | grep sed", "allow", cwd=NOGIT)
-# Denied on this head, allowed on origin/main: the quoted word 'perl -i' holds a space, so it reads as a script
-# (_commands_run), and the perl -i in rg's pattern reads as an edit of the config settings. rg writes nothing.
+# rg writes nothing, so the perl -i inside its quoted pattern is text and the command allows. A quoted word that holds
+# a space makes _commands_run return None, so the text fallback reads the pattern as an edit of the config settings.
 sh("frozen shell: r2, rg perl -i spells an in-place flag as text on the config settings, allows [r2 red]",
    "rg 'perl -i' " + CFG_SETTINGS, "allow", cwd=NOGIT)
 
