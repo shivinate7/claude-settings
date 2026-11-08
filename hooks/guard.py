@@ -3987,20 +3987,15 @@ def _here_string_is_run(found) -> bool:
     return word in ("iex", "invoke-expression") or (word in ("pwsh", "powershell") and _pwsh_reads_stdin(tokens))
 
 
-# A local copy of `_substitutions`' backtick-span rule (guard_env.py), which is a scan loop with no regex to
-# reuse: a span runs to the next unescaped backtick, an escaped char may be a newline (re.S), and an unclosed
-# span, or one that ends in a lone backslash, runs to the end of the text.
-_BACKTICK_SPAN = re.compile(r"(`(?:\\.|[^`\\])*(?:`|\\?\Z))", re.S)
-
-
 def shell_run_texts(raw: str) -> list:
     """The texts a shell reads from a whole command, for a rule that judges shell lines. A body a shell
     reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
-    backticks it runs. A quoted body that an interpreter runs joins as its backtick spans alone, since perl,
-    ruby and node run those as a shell; a body that only python runs adds nothing, since a python span is no
-    shell. A here-string that iex, Invoke-Expression, pwsh or a scriptblock runs (`_here_string_is_run`)
-    joins as its lines. The limits: a quoted body that no shell runs is not read as shell lines, and a
-    here-string held in a variable is not read, even when a later line runs the variable."""
+    backticks it runs. A quoted body that only an interpreter keeps in view, and that holds a backtick, joins
+    as its pieces split at every backtick, since perl, ruby and node run a backtick span as a shell. A body
+    that python alone runs adds nothing. The limits: a body with no backtick is not read, and a body with
+    one is read anywhere, unless python alone runs it.
+    A here-string that iex, Invoke-Expression, pwsh or a scriptblock runs (`_here_string_is_run`) joins as its
+    lines; one held in a variable is not read, even when a later line runs the variable."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
@@ -4022,13 +4017,12 @@ def shell_run_texts(raw: str) -> list:
             elif ("`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw)
                   and not python_runs_body(raw, header, nth)):
                 # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
-                # backtick span as a shell, `$(` and `<(` inside the span too. Outside a span they stay
-                # text: no interpreter reads them as a shell. The split follows _substitutions' span
-                # rule (see _BACKTICK_SPAN).
-                parts = _BACKTICK_SPAN.split(body)
-                inert = "".join(part if at % 2 else re.sub(r"([$<>])\(", r"\1 (", part)
-                                for at, part in enumerate(parts))
-                texts.extend(t for t, _ in _substitutions(inert, heredoc=True)[0][:-1])
+                # backtick span as a shell. Quote rules differ by language, so no pairing of backticks is
+                # trusted: a lone backtick in a string would hide the real span. Each piece between
+                # backticks is read as its own text, with its `$(` and `<(` live.
+                for piece in body.split("`"):
+                    texts.append(piece)
+                    texts.extend(t for t, _ in _substitutions(piece, heredoc=True)[0][:-1])
     return texts
 
 
