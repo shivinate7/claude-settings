@@ -426,11 +426,6 @@ MUTATIONS = [
      'and not _quote_closes(line, index):',
      'and False:', "guard",
      "heredoc-keep: a body in f, then a lone apostrophe unquoted, then cat f and a python probe, allows"),
-    # _run_files: a quote that spans two lines is one logical line.
-    ("heredoc: the lines split before the quotes, so the closing quote of a span reads as an opener",
-     '_list_pieces(_WRITE_TARGET.sub(" ", text), by_line=True)',
-     '_WRITE_TARGET.sub(" ", text).split("\\n")', "guard",
-     "heredoc-keep: a body in f, then a double quote that spans two lines, then cat f and a python probe, allows"),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',

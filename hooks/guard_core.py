@@ -1048,12 +1048,11 @@ def _quote_closes(text: str, index: int) -> bool:
     return False
 
 
-def _list_pieces(line: str, by_line: bool = False):
+def _list_pieces(line: str):
     """The pieces of LINE between `;`, `&&`, `||` and `&` that sit outside every quote, `$(`, `(` and backtick. A
     mark inside one stays in its piece, so `python3 -c "import os; $(cat f)"` and `python3 -c "$(cd d && cat f)"`
     are one piece each. A paren or backtick left open keeps the rest of the line in one piece: a reader of it can
-    only run more files, never fewer. `by_line` cuts at each newline outside them instead, so a quote that spans
-    two lines is one piece."""
+    only run more files, never fewer. A quote with no closer on the line is text (`_quote_closes`)."""
     pieces = []
     stack = ""
     begin = 0
@@ -1080,10 +1079,7 @@ def _list_pieces(line: str, by_line: bool = False):
             stack = stack[:-1]
         elif char == "`":
             stack += char
-        elif by_line and not stack and char == "\n":
-            pieces.append(line[begin:index])
-            begin = index + 1
-        elif not by_line and not stack and char in ";&|":
+        elif not stack and char in ";&|":
             mark = line[index:index + 2] if line[index:index + 2] in ("&&", "||") else char
             redirect = mark == "&" and (line[index - 1:index] in ("<", ">") or line[index + 1:index + 2] == ">")
             if mark != "|" and not redirect:   # a pipe joins its stages, a `2>&1` or `&>` redirects
@@ -1132,8 +1128,7 @@ def _run_files(text: str, written) -> set:
     and an operand after the script of an interpreter (`python3 check.py f`). The word is compared as written,
     so `$HOME/f` matches only itself."""
     ran = set()
-    # A line is a logical line: a quote that spans two lines keeps them together, so its closing mark is no opener.
-    for line in _list_pieces(_WRITE_TARGET.sub(" ", text), by_line=True) if written else ():
+    for line in _WRITE_TARGET.sub(" ", text).split("\n") if written else ():
         # A shell word runs the files named in its own pipeline only: `source ./env.sh && cat brief.md` runs env.sh.
         shell_words = set()
         for pipeline in re.split(r";|&&|\|\||&", line):
