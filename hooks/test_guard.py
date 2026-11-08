@@ -25654,9 +25654,9 @@ for _tool in CS_NAMED_WRITE:
     for _repo, _kind, _rel in CS_LEGACY_KEPT:   # RED: that repo's own checkout writes the same path for another repo: denied
         cs_named_call("named_repo_legacy_checkout_%s_%s_%s_other_repo_denied" % (_short, _repo.split("/")[1], _kind), "deny", _tool,
                       _rel, cwd=_cs_legacy_checkout(_repo))
-    # A legacy spelling is a home only for a repo that the layout lists under legacy-repos (decision uniform-over-variants, owner,
-    # 2026-10-27 12:51 CDT: a shared tool never grows a second accepted form to fit one repo). The named repo, acme/widgets, is not
-    # listed: a rolled-out checkout's write of the legacy decisions or plans spelling for it is refused.
+    # A legacy spelling is a home only for a repo that the layout lists under legacy-repos (decision uniform-over-variants: a
+    # shared tool never grows a second accepted form to fit one repo). The named repo, acme/widgets, is not listed: a rolled-out
+    # checkout's write of the legacy decisions or plans spelling for it is refused.
     cs_named_call("named_repo_rolled_checkout_%s_legacy_decisions_unlisted_repo_denied" % _short, "deny", _tool,
                   CS_LEGACY_DECISIONS + "/x.md", cwd=CS_ROLLED)
     cs_named_call("named_repo_rolled_checkout_%s_legacy_plans_unlisted_repo_denied" % _short, "deny", _tool,
