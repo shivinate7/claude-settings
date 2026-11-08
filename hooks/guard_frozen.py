@@ -520,15 +520,17 @@ _SORT_OUT_CLUSTER = re.compile(r"-[A-Za-z]*o")
 _UNIQ_VALUE_FLAGS = frozenset(("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"))
 
 
-def _sorts_or_uniqs_to_a_file(words) -> bool:
+def _sorts_or_uniqs_to_a_file(words, keep=None) -> bool:
     """True for `sort -o FILE` (also `-oFILE`, `--output FILE`, `--output=FILE`) and for `uniq [IN] OUT`,
-    which write their output onto a file as a redirect does, not onto a null device."""
+    which write their output onto a file as a redirect does, not onto a null device. `keep(target)`, when
+    given, must also accept the file."""
     if not words:
         return False
     name = _name(words[0])
 
     def real(target: str) -> bool:
-        return target.strip("'\"").lower() not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target)
+        return (target.strip("'\"").lower() not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target)
+                and (keep is None or keep(target)))
 
     if name == "sort":
         for index, word in enumerate(words[1:], 1):
@@ -558,20 +560,29 @@ def _sorts_or_uniqs_to_a_file(words) -> bool:
     return False
 
 
-def _writes_a_file(words) -> bool:
+def _writes_a_file(words, keep=None) -> bool:
     """True when the segment redirects output onto a file, or tees it to one, not a null device or a
-    descriptor."""
+    descriptor. `keep(target)`, when given, must also accept the file (`_is_test_file`)."""
+    keep = keep or (lambda _target: True)
     if words and _name(words[0]) == "tee" and any(
-            not w.startswith("-") and w.strip("'\"").lower() not in _NULL_TARGETS for w in words[1:]):
+            not w.startswith("-") and w.strip("'\"").lower() not in _NULL_TARGETS and keep(w) for w in words[1:]):
         return True
-    if _sorts_or_uniqs_to_a_file(words):
+    if _sorts_or_uniqs_to_a_file(words, keep):
         return True
     for index, word in enumerate(words):
         if ">" in word and _is_redirect(word) and not word.endswith("&"):
             target = words[index + 1].strip("'\"").lower() if index + 1 < len(words) else ""
-            if target not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target):
+            if target not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target) and keep(target):
                 return True
     return False
+
+
+_TEST_FILE = re.compile(r"conftest\.py|test_[^/\\]*\.py|[^/\\]*_test\.py")
+
+
+def _is_test_file(target: str) -> bool:
+    """True for a file a test runner loads: `conftest.py`, `test_*.py` or `*_test.py`, in any folder."""
+    return bool(_TEST_FILE.fullmatch(re.split(r"[/\\]", _unquoted(target).lower())[-1]))
 
 
 def _data_words(kind: str, words):
@@ -749,8 +760,8 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 def _parse_call(cmd: str):
     """(segments, ends, words of each, scan of each, closed, kind of each, may_run) of a command, read
-    once for the data rule. `may_run`: some segment is no printer, filter, `cd` or reader, so it may run
-    a file the call wrote."""
+    once for the data rule. `may_run`: some segment is no printer, filter, `cd` or reader, or is a test
+    runner and the call writes a test file (`_is_test_file`), so it may run a file the call wrote."""
     ends = []
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
@@ -758,9 +769,11 @@ def _parse_call(cmd: str):
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
+    # A test runner runs only the files it loads, so it counts only when the call writes one of them.
+    writes_test_file = any(_writes_a_file(words, _is_test_file) for words in parsed)
     may_run = any(words and kind not in ("printer", "cd", "filter")
                   and (not _reads_only(*_segment_command([_unquoted(w) for w in words]))
-                       or _runs_test_files(*_segment_command([_unquoted(w) for w in words])))
+                       or writes_test_file and _runs_test_files(*_segment_command([_unquoted(w) for w in words])))
                   for kind, words in zip(kinds, parsed))
     return segments, ends, parsed, scans, closed, kinds, may_run
 
