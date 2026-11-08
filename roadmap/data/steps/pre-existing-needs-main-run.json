@@ -1,11 +1,11 @@
 {
   "title": "A report that calls a failure \"pre-existing\" names a run on the base branch's tip",
   "why": "Lane silent-undo-ci-body (session_013NEJL4TDRWqka4aSU2Bv7L) called test SmallBaseMove pre-existing on 32b5f8b8e, which is #1712's own head, not main. That hid two red tests that reach #1726, #1743, #1753 and #1869 (coordinator, 03:51 CST Nov 8).",
-  "note": "Fix: the report guard refuses a report that calls a failure pre-existing unless the same line names a run (id or URL) whose head is the base branch's tip, and a lane brief says the same. Red case first: a report naming a run on a PR head as pre-existing passes today; control: a report naming a run on main's tip passes. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:52 CST Nov 8.",
+  "note": "Fix: the report guard refuses a report that calls a failure pre-existing unless the same line names a run (id or URL) whose head is the base branch's tip, and a lane brief says the same. Red case first: a report naming a run on a PR head as pre-existing passes today; control: a report naming a run on main's tip passes. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:52 CST Nov 8. Lane session_013NEJL4TDRWqka4aSU2Bv7L (silent-undo-reads-retire-run) started it, stacked on #1712's fixed head 6caf393cb (lane, 03:55 CST Nov 8).",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 584,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T03:51:00-06:00"
+  "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
+  "updatedAt": "2026-11-08T03:55:00-06:00"
 }
