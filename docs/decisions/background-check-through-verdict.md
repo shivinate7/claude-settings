@@ -13,9 +13,11 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 - The remedy is `verdict <cmd>`. It keeps the full log and prints the verdict itself.
 - The rule reads the call at start, so a foreground `ci-job` the harness later moves to the background is not checked.
 - The roster is named, as built:
-  - `merge --lane-lint` and `merge --review-record`, in every spelling of the narrating roster in `hooks/guard_stream.py`: `merge`, `merge.cmd`, and `merge/merge.py` or `merge/launch.py` run by `python`, `python3` or `py`. A command that only names the script, such as `grep x merge/merge.py`, is not the check.
+  - `merge --lane-lint` and `merge --review-record`, in every spelling of the narrating roster in `hooks/guard_stream.py`: `merge`, `merge.cmd`, and `merge/merge.py` or `merge/launch.py` run by `python`, any `python3.N`, `pythonw` or `py`. A `uv run` ahead of any of these is read through, so `uv run merge --lane-lint 7` and `uv run python merge/merge.py --lane-lint 7` are refused. An interpreter that runs a path ending in `bin/ci-job` counts as `ci-job`. A command that only names the script, such as `grep x merge/merge.py`, is not the check.
   - `ci-job`, in any use. This is deliberate: every `ci-job` run prints one verdict per step, and a pipe into `tail` or `head` cuts them.
-- A call through `verdict` passes, including `python3 .../verdict`. A file read back later, and every other command piped into `tail`, pass.
+- A call through `verdict` passes behind every wrapper: `env FOO=1 verdict ...`, `uv run verdict ...`, `python3 .../verdict`. A file read back later, and every other command piped into `tail`, pass.
+
+Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job` forms, at the coordinator's request (2026-11-07 18:09 CST).
 
 ## The incident
 

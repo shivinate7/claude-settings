@@ -82,7 +82,7 @@ LIVE_STREAM_REASON = (
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
-SCRIPT_INTERPRETERS = ("python", "python3", "py")
+SCRIPT_INTERPRETER = re.compile(r"(?:python[\d.]*w?|py)$")
 
 
 def narrating_stage(segment: str) -> str:
@@ -100,12 +100,12 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
     NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
-    both match. `interpreter_only` keeps the word to python, python3 or py: the check rule needs it, so
-    `grep -n x merge/merge.py` is no run of the script."""
+    both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER): the check
+    rule needs it, so `grep -n x merge/merge.py` is no run of the script."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
-    if interpreter_only and word.removesuffix(".exe") not in SCRIPT_INTERPRETERS:
+    if interpreter_only and not SCRIPT_INTERPRETER.match(word.removesuffix(".exe")):
         return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
@@ -152,6 +152,25 @@ NARRATED_TAIL_REASON = (
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record")
 VERDICT_WRAPPER = "verdict"
+CHECK_SCRIPT_TAIL = "bin/ci-job"
+# `uv run` flags that take the next word as their value, so `uv run --with x python ...` skips `x`.
+UV_RUN_VALUE_FLAGS = ("--with", "--python", "-p", "--directory", "--project", "--env-file",
+                      "--group", "--extra", "--package", "--index", "--with-requirements")
+
+
+def _skip_uv_run(tokens, index: int) -> int:
+    """The index of the command `uv run ...` starts, read through `resolve_command` again, else `index`.
+    `uv` is no entry of COMMAND_WRAPPERS: adding it would move every rule that reads the command word,
+    and only the check rule needs it."""
+    while index < len(tokens) and basename(tokens[index]) == "uv" and tokens[index + 1:index + 2] == ["run"]:
+        start = index + 2
+        while start < len(tokens) and tokens[start].startswith("-"):
+            start += 2 if tokens[start] in UV_RUN_VALUE_FLAGS else 1
+        at = resolve_command(tokens[start:])
+        if at is None:
+            break
+        index = start + at
+    return index
 
 
 def check_stage(segment: str, background: bool) -> str:
@@ -166,10 +185,14 @@ def check_stage(segment: str, background: bool) -> str:
     # resolve_command skips `verdict` like any wrapper, and the wrapper walk skips the `verdict` after
     # `python3` without recording it, so read the words ahead of the command word: a check run through
     # it, alone or as `python3 .../verdict`, keeps its full log.
+    index = _skip_uv_run(tokens, index)
     if any(basename(token) == VERDICT_WRAPPER for token in tokens[:index]):
         return ""
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
+    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and any(
+            token.replace("\\", "/").endswith(CHECK_SCRIPT_TAIL) for token in tokens[index + 1:]):
+        return CHECK_COMMANDS[0] if background else ""
     if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
         return ""
     return _roster_word(tokens, index, interpreter_only=True)
