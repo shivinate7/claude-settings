@@ -179,14 +179,16 @@ def _result_text(block):
 
 # A refused act: a failed tool result whose first line says a hook or a permission turned it away:
 # "<Event>:<Tool> hook error", the user's "doesn't want to proceed" / "tool use was rejected",
-# "Permission to use <Tool> [with <x>] has been denied", "Permission for this action has been
-# denied", "was denied by the Claude Code auto mode classifier", "Refusing to run it", or a first
-# line that starts "denied:" or "refused:". A plain failure ("Exit code 1", ECONNREFUSED, an OS
-# "Permission denied") is not one.
+# "Permission to use <Tool> [with <x>] has been denied", "Permission to read|edit|write <path> has
+# been denied", "Permission for this action|tool use|command has been|was denied", "was denied by
+# the Claude Code auto mode classifier", "Refusing to run it", or a first line that starts
+# "denied:" or "refused:". A plain failure ("Exit code 1", ECONNREFUSED, an OS "Permission
+# denied") is not one.
 _REFUSAL = re.compile(
     r"hook error|(?:doesn['\u2019]t|does not) want to proceed|tool use was rejected"
     r"|permission to use \S+(?: with .*?)? has been denied"
-    r"|permission for this action has been denied"
+    r"|permission for this (?:action|tool use|command) (?:has been|was) denied"
+    r"|permission to (?:read|edit|write) .+? has been denied"
     r"|was denied by the claude code auto mode classifier|refusing to run it"
     r"|^(?:denied|refused):", re.I)
 
