@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -210,14 +211,138 @@ def join_all(parts, rel, scopes, depth):
     return [posixpath.join(*combo) for combo in itertools.product(*options)]
 
 
+class UnresolvedLoad(Exception):
+    """A load the closure reader cannot follow. It is raised, never dropped: a dropped load leaves its file out of the closure, and a
+    change to that file then gets no merge flag."""
+
+
+# A by-path load whose path the reader cannot read, allowed by naming the module constant that holds the path. The reader reads the
+# value from the file that holds the constant. A constant that reads to no file the repo loads still fails, naming the file and the
+# constant. A constant is named here, not copied.
+ALLOWED_CONSTANT_LOADS = {
+    "hooks/guard_merge.py": ("MERGE_TOOL_REL",),  # the merge tool under a settings root; the constant names merge/merge.py
+}
+# A constant set from the environment: os.environ.get, which names no file, so the reader does not follow its path. The default branch of
+# hooks/decision_watch.py imports guard by name, so hooks/guard.py is in the closure through that import.
+ENV_PATH_CONSTANTS = {
+    "hooks/decision_watch.py": ("_GUARD_PATH",),  # GUARD_UNDER_TEST, an environment path that names a throwaway copy of guard.py
+}
+# A loader helper whose parameter path is read at its callers. The helper's own by-path load names no file; each literal call of the
+# helper names one, and the reader reads that call. The table names the helper by LOADER, so the name is not copied.
+NAMED_LOADER_HELPERS = {"merge/merge.py": (LOADER,)}
+PACKAGE_WHY = "a package-qualified load the reader cannot place: its folder names no module, or its dotted name has no file in the repo"
+DYNAMIC_WHY = "a module name that is not a literal; the reader reads a module name only as a literal"
+PARAM_WHY = "a path built from a parameter, outside a named loader helper; the reader does not follow the caller"
+COMPUTED_WHY = "a by-path load whose path it cannot read; name the file, or allow-list the constant the path names"
+MISSING_WHY = "a by-path load to a path that names no file the repo loads: a typo, or a folder outside LOAD_ROOTS"
+
+
+def unresolved(rel, node, why):
+    return UnresolvedLoad(f"{rel}: cannot follow the load {ast.unparse(node)}: {why}")
+
+
+def package_loads(dotted, rel, node, files, by_name):
+    """-> the files a load of the dotted module name `dotted` names. A top that is no folder in LOAD_ROOTS names the file of that basename.
+    A folder in LOAD_ROOTS that shares its name with a module (merge/ and merge/merge.py) names the file of a dotted name under it
+    (`merge.records` names merge/records.py). A folder with no such module, or a dotted name with no file, raises: the reader cannot place it."""
+    parts = dotted.split(".")
+    top = parts[0]
+    if top not in LOAD_ROOTS:
+        return by_name.get(top, set())
+    if top not in by_name:
+        raise unresolved(rel, node, PACKAGE_WHY)
+    if len(parts) == 1:
+        return by_name.get(top, set())
+    path = "/".join(parts) + ".py"
+    if path not in files:
+        raise unresolved(rel, node, PACKAGE_WHY)
+    return {path}
+
+
+def in_named_helper(rel, node, scopes):
+    """-> True when `node` sits in the function that NAMED_LOADER_HELPERS names for the file `rel`."""
+    parents, _ = scopes
+    cur = parents.get(node)
+    while cur is not None and not isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        cur = parents.get(cur)
+    return cur is not None and cur.name in NAMED_LOADER_HELPERS.get(rel, ())
+
+
+def is_parameter(name_node, parents):
+    """-> True when the name is a parameter of a function that holds it."""
+    cur = parents.get(name_node)
+    while cur is not None:
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                isinstance(a, ast.arg) and a.arg == name_node.id for a in ast.walk(cur.args)):
+            return True
+        cur = parents.get(cur)
+    return False
+
+
+def reached_names(node, scopes, depth=0):
+    """-> the Name nodes `node` reads, and the Name nodes of the values its local names are assigned from, to depth 8. A path such as
+    `path` reads the names its own assignment reads, so a constant named in that assignment is reached from the path."""
+    parents, values = scopes
+    out = []
+    if depth > 8:
+        return out
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Name):
+            continue
+        out.append(n)
+        cur = parents.get(n)
+        while cur is not None:
+            if isinstance(cur, SCOPES) and n.id in values.get(cur, {}):
+                for v in values[cur][n.id]:
+                    out.extend(reached_names(v, scopes, depth + 1))
+                break
+            cur = parents.get(cur)
+    return out
+
+
+def mentions_parameter(node, scopes):
+    """-> True when `node` reads a parameter, directly or through a local name. Such a path is the caller's value: a named loader helper's
+    literal callers name its file, so only inside that helper does the reader take the path as no load."""
+    parents, _ = scopes
+    return any(is_parameter(n, parents) for n in reached_names(node, scopes))
+
+
+def named_constant(table, rel, node, scopes):
+    """-> the name node of a constant `table` (ALLOWED_CONSTANT_LOADS or ENV_PATH_CONSTANTS) names for the file `rel`, which `node`
+    reads, or None."""
+    names = table.get(rel, ())
+    return next((n for n in reached_names(node, scopes) if n.id in names), None)
+
+
+def definitions(name_node, scopes):
+    """-> the value nodes the nearest scope that assigns the name gives it, or [] when none does."""
+    parents, values = scopes
+    cur = parents.get(name_node)
+    while cur is not None:
+        if isinstance(cur, SCOPES) and name_node.id in values.get(cur, {}):
+            return values[cur][name_node.id]
+        cur = parents.get(cur)
+    return []
+
+
+def env_read(node):
+    """-> True when `node` is os.environ.get("<name>"): a value the environment sets, which names no file."""
+    return isinstance(node, ast.Call) and dotted(node.func) == "os.environ.get" and len(node.args) == 1 \
+        and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+
+
 # A subprocess target (bin/ci-job, run as a child process) is no load and stays out of the closure (decision ci-scope-merge-closure).
 def file_loads(rel, source, files):
     """-> the files in `files` that the file `rel`, with this `source`, loads when it runs. A load is: an import at any depth
-    (`import x`, `import x.y`, `from x import y`, `from . import y`) that names a file x.py in `files`; LOADER("<name>") as
-    hooks/<name>.py; `__import__("x")` and `importlib.import_module("x")` with a literal name; and a by-path load,
+    (`import x`, `import x.y`, `from x import y`, `from . import y`) that names a file in `files` (package_loads); LOADER("<name>")
+    as hooks/<name>.py; `__import__("x")` and `importlib.import_module("x")` with a literal name; and a by-path load,
     `spec_from_file_location(name, path)` or `SourceFileLoader(name, path)`, whose path names a file in `files`, by a string
     constant in the call, or by a path read from this file (read_values). module_from_spec takes no path: its load is read where
-    its spec or loader is made. A name in a comment or a string is no load, and a path that cannot be read is no load."""
+    its spec or loader is made. A name in a comment or a string is no load. A load the reader cannot follow raises UnresolvedLoad:
+    a package-qualified load it cannot place, a module name that is not a literal, or a by-path load whose path it cannot read.
+    That last one passes only when the path is built from a parameter inside a NAMED_LOADER_HELPERS function, or when the path
+    is allow-listed by the constant it names (ALLOWED_CONSTANT_LOADS, which must read to a file the repo loads), or named as an
+    environment path (ENV_PATH_CONSTANTS, which must be an os.environ.get read and adds no file)."""
     tree = ast.parse(source)
     by_name = {}
     for p in files:
@@ -235,10 +360,14 @@ def file_loads(rel, source, files):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
-                out |= by_name.get(a.name.split(".")[0], set())
+                out |= package_loads(a.name, rel, node, files, by_name)
         elif isinstance(node, ast.ImportFrom):
             if node.level == 0 and node.module:
-                out |= by_name.get(node.module.split(".")[0], set())
+                out |= package_loads(node.module, rel, node, files, by_name)
+                # `from merge import records` names merge/records.py. A name that is no submodule file is an attribute of the module,
+                # which package_loads already reads.
+                if "." not in node.module and node.module in LOAD_ROOTS:
+                    out |= {f"{node.module}/{a.name}.py" for a in node.names if f"{node.module}/{a.name}.py" in files}
             elif node.level:  # a sibling of this file
                 for name in ([node.module] if node.module else [a.name for a in node.names]):
                     out.add(posixpath.normpath(posixpath.join(here, name.replace(".", "/") + ".py")))
@@ -247,10 +376,13 @@ def file_loads(rel, source, files):
             fn = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
             first = node.args[0] if node.args else None
             literal = first.value if isinstance(first, ast.Constant) and isinstance(first.value, str) else ""
-            if fn == LOADER and literal:
-                out.add(f"hooks/{literal}.py")
-            elif fn in ("__import__", "import_module") and literal:
-                out |= by_name.get(literal.split(".")[0], set())
+            if fn == LOADER or fn in ("__import__", "import_module"):
+                if not literal:
+                    raise unresolved(rel, node, DYNAMIC_WHY)
+                if fn == LOADER:
+                    out.add(f"hooks/{literal}.py")
+                else:
+                    out |= package_loads(literal, rel, node, files, by_name)
             elif fn in ("spec_from_file_location", "SourceFileLoader"):
                 strings = []
                 for arg in [*node.args, *(k.value for k in node.keywords)]:
@@ -264,7 +396,26 @@ def file_loads(rel, source, files):
                 path_arg = node.args[1] if len(node.args) > 1 else next(
                     (k.value for k in node.keywords if k.arg in ("location", "path")), None)
                 if path_arg is not None:
-                    out |= {posixpath.normpath(s) for s in read_values(path_arg, rel, scopes)}
+                    got = read_values(path_arg, rel, scopes)
+                    env = named_constant(ENV_PATH_CONSTANTS, rel, path_arg, scopes)
+                    named = named_constant(ALLOWED_CONSTANT_LOADS, rel, path_arg, scopes)
+                    if env is not None:  # an environment path names no file; its default branch's import names one
+                        if not definitions(env, scopes) or not all(env_read(d) for d in definitions(env, scopes)):
+                            raise unresolved(rel, node, f"the environment path {env.id} is not an os.environ.get read")
+                    elif got:
+                        names = {posixpath.normpath(s) for s in got}
+                        if not names & files:
+                            raise unresolved(rel, node, MISSING_WHY)
+                        out |= names
+                    elif named is not None:
+                        vals = read_values(named, rel, scopes)
+                        if not vals or any(posixpath.normpath(s) not in files for s in vals):
+                            raise unresolved(rel, node, f"the allow-listed constant {named.id} reads to no file the repo loads")
+                        out |= {posixpath.normpath(s) for s in vals}
+                    elif not mentions_parameter(path_arg, scopes):
+                        raise unresolved(rel, node, COMPUTED_WHY)
+                    elif not in_named_helper(rel, node, scopes):  # inside the helper, the literal callers name the file
+                        raise unresolved(rel, node, PARAM_WHY)
     return out & files
 
 
@@ -364,18 +515,202 @@ class FileLoads(unittest.TestCase):
         self.assertEqual(self.loads(src, rel="merge/merge.py"), {"janitor/sweep.py"},
                          "file_loads does not read a by-path load's path through parents[N] of __file__")
 
-    def test_a_path_built_from_a_parameter_is_no_load(self):
-        # Control: the caller passes root, which this file cannot read. A reader that guessed would add janitor/sweep.py.
+    def test_a_path_built_from_a_parameter_outside_a_named_helper_fails_loud(self):
+        # Control: the caller passes root, which this file cannot read. A reader that guessed would add janitor/sweep.py, and one that
+        # passed the load would leave it out of the closure. Named failure: the load raises, so no parameter path reads as no load.
         src = ("import importlib.util, os\n"
                "def load(root):\n"
                "    return importlib.util.spec_from_file_location(\"sweep\", os.path.join(root, \"janitor\", \"sweep.py\"))\n")
-        self.assertEqual(self.loads(src), set(), "file_loads guesses a by-path load from a path part it cannot read")
+        with self.assertRaises(UnresolvedLoad, msg="file_loads guesses or drops a by-path load built from a parameter"):
+            self.loads(src)
+
+    # Green control: merge.py's loader helper takes a parameter path. Its literal caller names the file, and the helper's own load adds
+    # no file of its own.
+    def test_a_named_loader_helper_passes_its_path_to_the_caller(self):
+        src = ("import importlib.util, os\n"
+               "def _load_hooks_module(name):\n"
+               "    path = os.path.join(\"hooks\", name + \".py\")\n"
+               "    return importlib.util.spec_from_file_location(\"merge_\" + name, path)\n"
+               "_load_hooks_module(\"deep\")\n")
+        self.assertEqual(self.loads(src), {"hooks/deep.py"}, "the named loader helper's parameter path stopped reading at its caller")
 
     def test_the_closure_follows_loads_to_the_end_and_stops_at_its_start(self):
         files = {"merge/merge.py", "hooks/mid.py", "hooks/leaf.py", "hooks/unused.py"}
         source = {"merge/merge.py": "def f():\n    import mid\n", "hooks/mid.py": "import leaf\n",
                   "hooks/leaf.py": "import merge\n", "hooks/unused.py": "import leaf\n"}
         self.assertEqual(closure("merge/merge.py", files, source.__getitem__), {"hooks/mid.py", "hooks/leaf.py"})
+
+
+class UnresolvedLoads(unittest.TestCase):
+    """A load the reader cannot resolve fails the closure loudly, and the failure names the file and the load. The reader must not
+    drop it: a dropped load leaves its file out of the closure, so a change to that file gets no merge flag. Each case puts the load
+    in hooks/mid.py, which merge/merge.py imports, so the failure comes through closure(), the closure reader the check runs."""
+
+    def closure_of(self, mid_src, allowed=()):
+        """The closure from merge/merge.py over the fixture files. `allowed` are the constants allow-listed for hooks/mid.py."""
+        files = {"merge/merge.py", "hooks/mid.py", "hooks/deep.py"}
+        source = {"merge/merge.py": "import mid\n", "hooks/mid.py": mid_src, "hooks/deep.py": "X = 1\n"}
+        with mock.patch.dict(ALLOWED_CONSTANT_LOADS, {"hooks/mid.py": tuple(allowed)}):
+            return closure("merge/merge.py", files, source.__getitem__)
+
+    def assert_fails_loud(self, mid_src, load, allowed=()):
+        """The closure raises UnresolvedLoad, and its message names hooks/mid.py and the load's text."""
+        with self.assertRaises(UnresolvedLoad, msg=f"the closure drops the unresolvable load {load!r} without a failure") as cm:
+            self.closure_of(mid_src, allowed)
+        self.assertIn("hooks/mid.py", str(cm.exception), f"the failure for {load!r} does not name the file hooks/mid.py")
+        self.assertIn(load, str(cm.exception), f"the failure does not name the load {load!r}")
+
+    def test_a_package_qualified_from_import_fails_loud(self):
+        self.assert_fails_loud("from hooks import deep\n", "from hooks import deep")
+
+    def test_a_package_qualified_dotted_import_fails_loud(self):
+        self.assert_fails_loud("import hooks.deep\n", "import hooks.deep")
+
+    def test_an_importlib_load_of_a_package_qualified_name_fails_loud(self):
+        self.assert_fails_loud('import importlib\nimportlib.import_module("hooks.deep")\n', "hooks.deep")
+
+    def test_a_by_path_load_with_a_concatenated_path_fails_loud(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'SPEC = importlib.util.spec_from_file_location("deep", os.environ["X"] + ".py")\n',
+                               "spec_from_file_location")
+
+    def test_a_by_path_load_with_an_f_string_path_fails_loud(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'SPEC = importlib.util.spec_from_file_location("deep", f"hooks/{os.environ[\'X\']}.py")\n',
+                               "spec_from_file_location")
+
+    def test_a_by_path_load_with_a_format_path_fails_loud(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'SPEC = importlib.util.spec_from_file_location("deep", "hooks/{}.py".format(os.environ["X"]))\n',
+                               "spec_from_file_location")
+
+    # A readable by-path load whose path names no file in the repo's load set, here a typo. The reader read the path, then dropped it
+    # when it kept only the files in the set. Named failure: a by-path load to hooks/nope.py passes with no file, so the file the
+    # author meant gets no merge flag.
+    def test_a_by_path_load_to_a_missing_file_fails_loud(self):
+        self.assert_fails_loud('import importlib.util\n'
+                               'SPEC = importlib.util.spec_from_file_location("nope", "hooks/nope.py")\n',
+                               "spec_from_file_location")
+
+    # An allow-listed constant that reads to nothing. The allow list names the constant that holds the path, so the reader must
+    # fail on an empty read of it, not pass the load with no file. Named failure: an allow-listed load passes with no file added.
+    def test_an_allow_listed_constant_that_reads_to_nothing_fails_loud(self):
+        # The decision_watch.py shape: a module constant holds an environment read, and a by-path load names it.
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'MID_PATH = os.environ.get("MID_UNDER_TEST")\n'
+                               'SPEC = importlib.util.spec_from_file_location("deep", MID_PATH)\n',
+                               "MID_PATH", allowed=("MID_PATH",))
+
+    # An allow-listed constant that reads to a file no closure holds. The merge_module shape: a local path joins a loop variable
+    # and the constant. Named failure: the read file is dropped by the closure filter, and no failure names it.
+    def test_an_allow_listed_constant_that_reads_to_no_closure_file_fails_loud(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'MID_PATH = os.path.join("hooks", "nope.py")\n'
+                               'def load(roots):\n'
+                               '    for root in roots:\n'
+                               '        path = os.path.join(root, MID_PATH)\n'
+                               '        return importlib.util.spec_from_file_location("nope", path)\n',
+                               "MID_PATH", allowed=("MID_PATH",))
+
+    # Fix 1: a load through a parameter, outside a named loader helper, fails loud. The reader does not follow the caller, so a
+    # parameter path must not pass with no file. Named failure: `_load(p)` passes its load with no file.
+    def test_a_parameter_path_outside_a_named_helper_fails_loud(self):
+        self.assert_fails_loud('import importlib.util\n'
+                               'def _load(p):\n'
+                               '    return importlib.util.spec_from_file_location("deep", p)\n'
+                               '_load("hooks/deep.py")\n',
+                               "spec_from_file_location")
+
+    # Fix 1: the helper's name exempts its parameter path in its own file only. Named failure: the same helper in hooks/mid.py passes.
+    def test_the_named_helper_exemption_holds_only_in_its_own_file(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'def _load_hooks_module(name):\n'
+                               '    path = os.path.join("hooks", name + ".py")\n'
+                               '    return importlib.util.spec_from_file_location("deep", path)\n',
+                               "spec_from_file_location")
+
+    # Fix 2: a non-literal module name fails loud. The reader reads a name only as a literal, so a dynamic name must not pass.
+    # Named failure: importlib.import_module(name) passes with no file.
+    def test_an_import_module_with_a_non_literal_name_fails_loud(self):
+        self.assert_fails_loud('import importlib\n'
+                               'def load(name):\n'
+                               '    return importlib.import_module(name)\n',
+                               "import_module(name)")
+
+    # Fix 2. Named failure: __import__(f"hooks.{n}") passes with no file.
+    def test_a_dunder_import_with_an_f_string_name_fails_loud(self):
+        self.assert_fails_loud('def load(n):\n'
+                               '    return __import__(f"hooks.{n}")\n',
+                               "__import__")
+
+    # Fix 2. Named failure: _load_hooks_module(name) passes with no file.
+    def test_a_loader_helper_with_a_non_literal_name_fails_loud(self):
+        self.assert_fails_loud('def load(name):\n'
+                               '    return _load_hooks_module(name)\n',
+                               "_load_hooks_module(name)")
+
+    # Fix 3: a dotted name under a folder that shares its name with a module reads the submodule. Named failure: `from merge.records`
+    # reads merge/merge.py, the module of the folder's name, and drops merge/records.py.
+    def test_a_dotted_import_of_a_folder_named_like_a_module_reads_the_submodule(self):
+        self.assertEqual(file_loads("hooks/mid.py", "from merge.records import X\n", {"merge/merge.py", "merge/records.py"}),
+                         {"merge/records.py"}, "the dotted import of merge.records drops merge/records.py")
+
+    # Fix 3: a name imported from such a folder reads the submodule of that name. Named failure: `from merge import records` reads only
+    # merge/merge.py, and drops merge/records.py.
+    def test_a_from_import_of_a_submodule_of_a_folder_named_like_a_module_reads_the_submodule(self):
+        got = file_loads("hooks/mid.py", "from merge import records\n", {"merge/merge.py", "merge/records.py"})
+        self.assertIn("merge/records.py", got, "the from-import of merge's records drops merge/records.py")
+
+    # Fix 3: a missing submodule of such a folder fails loud. Named failure: the reader falls back to merge/merge.py and passes.
+    def test_a_dotted_import_of_a_missing_submodule_of_such_a_folder_fails_loud(self):
+        with self.assertRaises(UnresolvedLoad, msg="the dotted import of merge.nope passes with merge/merge.py in its place") as cm:
+            file_loads("hooks/mid.py", "from merge.nope import X\n", {"merge/merge.py", "merge/records.py"})
+        self.assertIn("merge.nope", str(cm.exception), "the failure does not name the load merge.nope")
+
+    # The environment path names no file, so only an environment read may take its name. Named failure: a literal path under the
+    # environment path's name is read as a path, so a path that is no environment read passes unchecked.
+    def test_the_env_path_constant_must_be_an_environment_read(self):
+        src = 'import importlib.util\n_GUARD_PATH = "hooks/deep.py"\nSPEC = importlib.util.spec_from_file_location("g", _GUARD_PATH)\n'
+        with self.assertRaises(UnresolvedLoad, msg="a literal path under the environment path's name is read, not refused"):
+            file_loads("hooks/decision_watch.py", src, {"hooks/deep.py"})
+
+    # Green controls: the same call shapes with a path or a name the reader can read, and loads it must ignore.
+
+    def test_an_allow_listed_constant_that_reads_to_a_closure_file_still_resolves(self):
+        src = ('import importlib.util, os\n'
+               'MID_PATH = os.path.join("hooks", "deep.py")\n'
+               'def load(roots):\n'
+               '    for root in roots:\n'
+               '        path = os.path.join(root, MID_PATH)\n'
+               '        return importlib.util.spec_from_file_location("deep", path)\n')
+        # Scope first: without the allow list this load is unreadable, so the case below tests the allow-listed path.
+        with self.assertRaises(UnresolvedLoad, msg="the load reads without the allow list, so this control tests nothing"):
+            self.closure_of(src)
+        self.assertEqual(self.closure_of(src, allowed=("MID_PATH",)), {"hooks/mid.py", "hooks/deep.py"},
+                         "an allow-listed constant that reads to a closure file no longer resolves")
+
+    def test_a_literal_by_path_load_still_resolves(self):
+        src = 'import importlib.util\nSPEC = importlib.util.spec_from_file_location("deep", "hooks/deep.py")\n'
+        self.assertEqual(self.closure_of(src), {"hooks/mid.py", "hooks/deep.py"}, "a literal by-path load stopped resolving")
+
+    def test_stdlib_loads_are_no_load(self):
+        src = "import os.path\nimport json\nfrom collections import abc\nimport importlib\nimportlib.import_module('json')\n"
+        self.assertEqual(self.closure_of(src), {"hooks/mid.py"}, "a stdlib load was read as a load of a closure file, or raised")
+
+    def test_a_load_text_in_a_comment_or_a_string_is_no_load(self):
+        src = ("# don't import hooks.deep\n"
+               'NOTE = "from hooks import deep"\n'
+               'DOC = """\n'
+               "import hooks.deep\n"
+               'importlib.import_module("hooks.deep")\n'
+               '"""\n')
+        self.assertEqual(self.closure_of(src), {"hooks/mid.py"}, "a load named in a comment or a string was read as a load")
+
+    def test_the_real_merge_closure_reads_without_an_unresolved_load(self):
+        # Green on base. It stays green only once each known computed load is resolved or allow-listed by the constant it names.
+        loads = closure("merge/merge.py", repo_load_files(), read_repo)
+        missing = [p for p in REACHED if p not in loads]
+        self.assertFalse(missing, f"the closure from merge.py misses {missing}")
 
 
 # The files the closure must reach, one per kind of load the reader sorts: a module-level import, a by-path load, a load through a

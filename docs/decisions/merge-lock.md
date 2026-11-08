@@ -27,14 +27,16 @@ new name. So it can hold the old name while a new run holds the new one. Code: `
   `refuse_or_take_over`, `refuse_old_lock`.
 - **Backend.** `GitLock` on every host. Leased pushes take, swap and release the lock.
 - **Release.** The run's `finally` releases its lock. The release removes the ref only while the ref holds
-  one of this run's commits, which it learns from the remote's ref listing alone, never a commit read. It deletes the ref with a leased push. A cloud proxy refuses ref deletes (HTTP
-  403). There the release pushes an expired commit under the same lease instead: the ref stays, and any run
-  may take it. A release that fails prints one line. It stops nothing.
+  one of this run's commits, which it learns from the remote's ref listing alone, never a commit read. It
+  deletes the ref with a leased push. A cloud proxy refuses ref deletes (HTTP 403). There the release
+  pushes an expired commit under the same lease instead: the ref stays, and any run may take it. A
+  release that fails prints one line. It stops nothing.
 - **Unlock.** `merge --unlock [branch]` removes the lock for the branch, or for the default branch when no
   branch is named. It removes the lock whether its holder is live or not, and even when its commit cannot be
-  read. The delete is a leased push on the sha it listed, so a lock taken after the listing stays. It prints
-  "removed", or "nothing to remove" when no lock is there or the lock is already released (expires 0). A
-  released lock whose commit cannot be read is released again, and it prints "removed".
+  read. It needs a full sha in the remote's listing of the ref. The delete is a leased push on the sha it
+  listed, so a lock taken after the listing stays. It prints "removed", or "nothing to remove" when no lock
+  is there or the lock is already released (expires 0). A released lock whose commit cannot be read is
+  released again, and it prints "removed".
   Where the delete is refused, it releases the lock to an expired commit instead, and it still prints
   "removed".
 
@@ -45,7 +47,7 @@ carries no such label. The code raises the exception named in each item.
   or a lost take race.
 - Lock unreadable (sweep row `lock-acquire-unreadable`; `Stop`, or `NetStop` on a network error): the ref
   cannot be read, the lock commit cannot be read over the network, or the lock commit or the take cannot be
-  made. A non-network fetch failure, or a failed `git log` of the listed sha, re-lists once, then `Stop`.
+  made. A listing with no full sha stops the same way. A non-network fetch failure, or a failed `git log` of the listed sha, re-lists once, then `Stop`.
   The take push runs once, by design: a network error on it stops the run only when the take did not
   land. A take that landed with a lost reply proceeds.
 - Extend failed (sweep row `lock-extend-failed`; `NetStop`): the lock expired before the wait, the

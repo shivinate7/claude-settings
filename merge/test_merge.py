@@ -875,7 +875,30 @@ class Race(Env):
         with self.assertRaises(merge.Held):
             self.lock.acquire("main", 600)
 
-class CloudProxy(Env):
+class FetchFault:
+    """The fetch fault that the lock read and release tests share: a patch of merge.git, the fault every fetch gets, and the read that
+    must stop on it. Each class that runs a lock under the fault mixes this in, so the helpers have one home."""
+    NON_NET_FETCH = "fatal: remote error: upload-pack: not our ref " + "a" * 40  # a fetch failure that no network produced
+
+    def git_hook(self, hook):
+        """Patch merge.git so every call goes to hook(args, run). The hook returns the (code, output) the caller sees; run() runs that call for real."""
+        real = merge.git
+        def git(cwd, *args, input=None):
+            return hook(args, lambda: real(cwd, *args, input=input))
+        return unittest.mock.patch.object(merge, "git", side_effect=git)
+
+    def fail_every_fetch(self):
+        """-> the patch under which every fetch fails with a text no network produced. ls-remote and the other git calls run for real."""
+        self.assertFalse(merge.is_net(128, self.NON_NET_FETCH), "scope: the faked fetch output is a network error line")
+        return self.git_hook(lambda args, run: (128, self.NON_NET_FETCH) if args[:1] == ("fetch",) else run())
+
+    def assert_read_stops_on_the_fetch_fault(self):
+        """scope: under fail_every_fetch, the lock read stops with a plain Stop, so release's read is the one that fails."""
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock.read("main")
+        self.assertNotIsInstance(cm.exception, merge.NetStop, f"scope: the fetch fault reads as a network stop: {cm.exception}")
+
+class CloudProxy(FetchFault, Env):
     """The cloud proxy, measured on throwaway branches (c53): a push to refs/heads/* passes, any other ref and any ref delete get
     HTTP 403, and every REST write under git/ is refused. A pre-receive hook on the origin refuses the same pushes."""
     def setUp(self):
@@ -943,7 +966,20 @@ class CloudProxy(Env):
                 label = "unset" if remote is None else repr(remote)
                 self.assertIsInstance(merge.default_lock(self.co), merge.GitLock, f"CLAUDE_CODE_REMOTE {label} does not pick GitLock")
 
-class LockRetake(Env):
+    def test_release_expires_its_lock_when_the_commit_fetch_fails(self):
+        """The proxy refuses the ref delete, so release swaps this run's lock for an expired commit, and it does so even when the
+        commit fetch fails. The ref stays on origin, and the lock reads as released."""
+        tok = self.lock.acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), tok)  # scope: this run's lock is on origin
+        self.assertIn(tok, self.lock.mine)  # scope: this run took the lock, so release may swap it
+        with self.fail_every_fetch():
+            self.assert_read_stops_on_the_fetch_fault()
+            release_out(self, self.lock, tok)
+        self.assertTrue(self.lock_ref(), "scope: the proxy refused the delete, so the ref is still on origin")
+        self.assertNotEqual(self.head("merge-lock/main"), tok, "release left this run's live lock on origin when the commit fetch failed")
+        self.assertEqual(merge.expiry_of(self.lock_text()), 0, "release did not end the lock as released when the commit fetch failed")
+
+class LockRetake(FetchFault, Env):
     """GitLock.acquire when its lease push fails (decision merge-lock). The ref is read again: a moved ref is another run's take and stays Held;
     an unchanged ref is a refused push, which stops and prints the push output. Held is a Stop too, so each refusal case asserts it is not a Held.
     Release reads the same ref: when its commit fetch fails, it still removes this run's lock and leaves a rival's."""
@@ -984,15 +1020,6 @@ class LockRetake(Env):
         self.assertIn(merge.LOCK_CITE, str(cm.exception), "the Stop drops the lock cite")
 
     NET_DROP = "fatal: unable to access 'https://example.invalid/origin.git/': Failed to connect to example.invalid port 443 after 21 ms"
-    NON_NET_FETCH = "fatal: remote error: upload-pack: not our ref " + "a" * 40  # a fetch failure that no network produced
-
-    def git_hook(self, hook):
-        """Patch merge.git so every call goes to hook(args, run). The hook returns the (code, output) the caller sees; run() runs that call for real."""
-        real = merge.git
-        def git(cwd, *args, input=None):
-            return hook(args, lambda: real(cwd, *args, input=input))
-        return unittest.mock.patch.object(merge, "git", side_effect=git)
-
     def drop_lock_pushes(self):
         """Every push of the lock ref fails as a dropped network call: the origin never sees it, so the ref stays as it was.
         Other git calls run for real. -> (the patch, the list that receives each faked push)."""
@@ -1100,17 +1127,6 @@ class LockRetake(Env):
                 self.assertNotIsInstance(e, merge.NetStop, f"a fetch that failed without the network stopped the lock read as a network stop: {e}")
             else:
                 self.fail(f"a fetch that failed without the network read the lock as {got}, not as a stop")
-
-    def fail_every_fetch(self):
-        """-> the patch under which every fetch fails with a text no network produced. ls-remote and the other git calls run for real."""
-        self.assertFalse(merge.is_net(128, self.NON_NET_FETCH), "scope: the faked fetch output is a network error line")
-        return self.git_hook(lambda args, run: (128, self.NON_NET_FETCH) if args[:1] == ("fetch",) else run())
-
-    def assert_read_stops_on_the_fetch_fault(self):
-        """scope: under fail_every_fetch, the lock read stops with a plain Stop, so release's read is the one that fails."""
-        with self.assertRaises(merge.Stop) as cm:
-            self.lock.read("main")
-        self.assertNotIsInstance(cm.exception, merge.NetStop, f"scope: the fetch fault reads as a network stop: {cm.exception}")
 
     def test_release_removes_its_lock_when_the_commit_fetch_fails(self):
         tok = self.lock.acquire("main", 600)
@@ -1340,8 +1356,8 @@ def module_as(name, module):
             sys.modules.pop(name, None)
 
 class StaleGitReads(unittest.TestCase):
-    """merge.py imports hooks/git_reads.py by name. A copy-mode install can leave an older git_reads in sys.modules, with no lists_refs
-    or listing_text. merge.py must still load over it, and its sh must read a successful ls-remote from stdout alone (decision merge-lock).
+    """merge.py loads its own private copy of hooks/git_reads.py by path. A copy-mode install can leave an older git_reads in sys.modules,
+    with no lists_refs or listing_text. merge.py must still load over it, and its sh must read a successful ls-remote from stdout alone (decision merge-lock).
     The control loads merge.py over the real git_reads and must pass, so the stale case goes red only on the stale module."""
 
     def load_fresh(self, git_reads_module):
@@ -1397,6 +1413,36 @@ class StaleGitReads(unittest.TestCase):
         except Exception as e:
             self.fail(f"merge.py's loader raised {type(e).__name__} for a missing hooks/git_reads.py, not ImportError: {e}")
         self.fail("merge.py's loader loaded hooks/git_reads.py from a checkout that has none")
+
+    def older_and_newer(self):
+        """-> a fresh repo with two commits in the run folder: (its folder, the older commit's sha, the newer commit's sha)."""
+        d = tempfile.mkdtemp(prefix="ancestor-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, d, True)
+        sh(d, "git", "init", "-q", "-b", "main")
+        sh(d, "git", "commit", "-q", "--allow-empty", "-m", "older")
+        older = sh(d, "git", "rev-parse", "HEAD")
+        sh(d, "git", "commit", "-q", "--allow-empty", "-m", "newer")
+        return d, older, sh(d, "git", "rev-parse", "HEAD")
+
+    def test_ancestor_answers_with_the_real_git_reads(self):
+        d, older, newer = self.older_and_newer()
+        self.assertIs(merge.ancestor(d, older, newer), True, "ancestor did not report the older commit as reachable from the newer one")
+
+    def test_ancestor_answers_over_a_stale_git_reads_that_lacks_branch_is_ancestor(self):
+        """merge.ancestor imports git_reads when it is called, so an older git_reads in sys.modules answers for it. merge's own load
+        of hooks/git_reads.py has branch_is_ancestor, so ancestor must read that load, not the import."""
+        import git_reads  # hooks/git_reads.py: its other names are copied into the stand-in, so only branch_is_ancestor is missing
+        stale = types.ModuleType("git_reads")
+        stale.lists_refs, stale.listing_text = git_reads.lists_refs, git_reads.listing_text
+        self.assertFalse(hasattr(stale, "branch_is_ancestor"), "scope: the stand-in has branch_is_ancestor, so the case proves nothing")
+        d, older, newer = self.older_and_newer()
+        with module_as("git_reads", stale):
+            self.assertIs(sys.modules.get("git_reads"), stale, "scope: the stale git_reads is not the module the call imports")
+            try:
+                got = merge.ancestor(d, older, newer)
+            except AttributeError as e:
+                self.fail(f"ancestor reads branch_is_ancestor from the stale git_reads in sys.modules: {e}")
+        self.assertIs(got, True, "ancestor did not report the older commit as reachable from the newer one over a stale git_reads")
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
@@ -2518,23 +2564,27 @@ class CutLanes(Env):
         self.assertEqual(len(hits), 1, f"{b}: {len(hits)} delete pushes")
         return hits[0]
 
+    @contextlib.contextmanager
     def proof_fails_for(self, tip):
-        """-> a patch under which the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real.
-        c110: read_lanes asks merge-base against origin/main before the claim, and a failure there refuses; that read stays real."""
-        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
-        real = git_reads._git
+        """Under the context, the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real.
+        -> the list that receives each simulated failure. c110: read_lanes asks merge-base against origin/main before the claim, and
+        a failure there refuses; that read stays real. The patch sits on merge's private git_reads copy, the one merge reads through."""
+        real, hits = merge._git_reads_home._git, []
         def broken(where, *args, **k):
             if "merge-base" in args and tip in args and "origin/main" not in args:
+                hits.append(args)
                 return subprocess.CompletedProcess(args, 128, "", "fatal: simulated: the ancestry proof cannot run")
             return real(where, *args, **k)
-        return unittest.mock.patch.object(git_reads, "_git", broken)
+        with unittest.mock.patch.object(merge._git_reads_home, "_git", broken):
+            yield hits
 
     def test_a_stack_whose_middle_lane_has_an_unproven_tip_keeps_the_base_below_it(self):
         # Fixpoint: lane2's tip cannot be proven, so lane2 is kept. Its open PR still needs lane1, so lane1 is kept too.
         # lane3 gets one line that matches its state. The proof is made to fail for lane2 only.
         tips = self.stack_of_three()
-        with self.proof_fails_for(tips["lane2"]):
+        with self.proof_fails_for(tips["lane2"]) as hits:
             rc, out = self.go()
+        self.assertTrue(hits, "scope: no ancestry proof of lane2 reached the simulated failure, so the case proves nothing")
         self.assertEqual(rc, 0, out)
         self.assertIn(LANE_PROOF_NOT_RUN, kept_line(self, out, "lane2"))
         self.assertNotEqual(self.head("lane2"), "", "lane2 was deleted")
@@ -2748,14 +2798,15 @@ class CutLanes(Env):
     def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
         # c110: a merge-base failure is a failed read, never "not an ancestor".
         tips = lane_batch(self, "lane1", "lane2")
-        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
-        real = git_reads._git
+        real, hits = merge._git_reads_home._git, []  # merge's private git_reads copy: the ancestry read merge makes goes through its _git
         def broken(where, *args, **k):
             if "merge-base" in args and tips["lane1"] in args and "origin/main" in args:
+                hits.append(args)
                 return subprocess.CompletedProcess(args, 128, "", "fatal: simulated")
             return real(where, *args, **k)
-        with unittest.mock.patch.object(git_reads, "_git", broken):
+        with unittest.mock.patch.object(merge._git_reads_home, "_git", broken):
             rc, out = self.go()
+        self.assertTrue(hits, "scope: no merge-base read of lane1 reached the simulated failure, so the case proves nothing")
         self.assertEqual(rc, 1, out)
         self.assertIn("git merge-base failed", out)
         self.assertEqual(self.claims("feat"), 0)
