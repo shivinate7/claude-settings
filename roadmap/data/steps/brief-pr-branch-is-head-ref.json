@@ -1,11 +1,11 @@
 {
   "title": "A brief that names PR #N with a branch other than PR #N's head ref is refused",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 60.5,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKyooYBqTh9KkQWNHwe",
   "why": "A branch guessed from a lane name sends reviewers to the wrong code: two false review FAILs, a false debt and a duplicate step followed.",
-  "note": "Fix idea: the agent-brief hook, or a brief check, reads PR #N's head ref once from GitHub and refuses a brief that pairs PR #N with another branch. Incident: lane notes-fix-large-3 briefed reviewers and a Plan agent with branch mcp-tools-in-guard-matcher, guessed from the lane name; the head ref was mcp-safety-gaps (#1707, #1722). Related: debt brief-fact-unread (#1720). Filed from lane notes-fix-large-3, 19:43 CST Nov 7 (decision cull-rules: a found gap gets a fix).",
-  "updatedAt": "2026-11-07T19:43:00-06:00"
+  "note": "Fix idea: the agent-brief hook, or a brief check, reads PR #N's head ref once from GitHub and refuses a brief that pairs PR #N with another branch. Incident: lane notes-fix-large-3 briefed reviewers and a Plan agent with branch mcp-tools-in-guard-matcher, guessed from the lane name; the head ref was mcp-safety-gaps (#1707, #1722). Related: debt brief-fact-unread (#1720). Filed from lane notes-fix-large-3, 19:43 CST Nov 7 (decision cull-rules: a found gap gets a fix). Topic guards. Lane started by the coordinator, 19:45 CST.",
+  "updatedAt": "2026-11-07T19:44:00-06:00"
 }
