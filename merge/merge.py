@@ -1782,9 +1782,7 @@ def python_suite_hits(source, rel, paths, read=None, depth=1):
     return False
 
 def lint_steps(root, base_ref, env=None):
-    """-> the names of the lint and install `checks` steps `ci-job --lint` runs, from its own `--plan`: ci-job is the one home of
-    that choice. It reads only the `would run` lines. ci-job plans a suite step the diff picks as `suite would run`, which this
-    leaves out on purpose, so those suites are not in the set and hit_suites still runs them on the merged tree."""
+    """-> the names of the `checks` steps `ci-job --lint` runs, from its own plan: ci-job is the one home of that choice."""
     c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--plan", "--base", base_ref], cwd=root, env=env, timeout=120)
     if c:
         raise Unread(f"the lint steps cannot be listed (exit {c}) {BASE_CITE}")
