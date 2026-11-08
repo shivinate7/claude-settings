@@ -22,6 +22,7 @@ except ImportError:  # install-hooks-whole: the guard set lands whole, the helpe
 LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
 LINT_INPUTS = ("paths", "exclude", "changed_paths", "decisions-dir")
 EXCLUDE_FILE = ".ste-lint-exclude"
+EXCLUDE_ENV = "STE_CHANGED_EXCLUDE"   # extra `exclude` pathspecs for bin/ste-changed: the pinned step's own `exclude` input
 LINT_SECONDS = 40   # under the hook's own 60 s limit; measured 1.2 s for a small push, 7.6 s for 138 files
 VERDICT = re.compile(r"^ste-lint: (PASS|FAIL),", re.M)
 FINDING = re.compile(r"^::error file=([^,]*)(?:,line=(\d+))?::(.*)$", re.M)
@@ -86,10 +87,11 @@ def ci_runs_lint(top):
     return os.path.isfile(os.path.join(top, LINT_ACTION)) or bool(workflow_pins(top, LINT_PIN))
 
 
-def scope_pathspecs(top):
+def scope_pathspecs(top, extra=""):
     """The pathspecs after `--` in `git diff --name-only <range> --`, read from `top`, that select the files
-    the lint step lints: `changed_paths`, then one `:(exclude,glob)` for each line of .ste-lint-exclude and
-    each item of the `exclude` default. None when action.yml or its defaults cannot be read."""
+    the lint step lints: `changed_paths`, then one `:(exclude,glob)` for each line of .ste-lint-exclude, each
+    item of the `exclude` default and each item of `extra` (the pinned step's `exclude` input). None when
+    action.yml or its defaults cannot be read."""
     root = find_checkout(own_checkout())
     try:
         with open(os.path.join(root, LINT_ACTION), encoding="utf-8") as handle:
@@ -104,9 +106,61 @@ def scope_pathspecs(top):
             lines = handle.read().splitlines()
     except OSError:
         pass
-    lines += inputs["exclude"].replace(",", "\n").splitlines()
+    lines += (inputs["exclude"] + "\n" + extra).replace(",", "\n").splitlines()
     patterns = [line.strip() for line in lines if line.strip() and not line.strip().startswith("#")]
     return [inputs["changed_paths"]] + [":(exclude,glob)" + pattern for pattern in patterns]
+
+
+def _unquoted(value):
+    value = value.strip()
+    return value[1:-1] if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"" else value
+
+
+def pinned_with(top):
+    """{input: unquoted value} of the `with:` block of the first workflow step of the checkout at `top` that
+    pins the ste-lint action, {} when that step has none or no step pins it. The step reader is
+    lint/workflow_steps.py, beside this folder. Raises when it cannot be read."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import workflow_steps
+    folder = os.path.join(top, ".github", "workflows")
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else ():
+        if not name.endswith((".yml", ".yaml")):
+            continue
+        with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+        for step in workflow_steps.step_blocks(text):
+            if LINT_PIN.search((workflow_steps.step_key(step, "uses") or "").split("#", 1)[0]):
+                return {key: _unquoted(value) for key, value in workflow_steps.step_with(step).items()}
+    return {}
+
+
+def pinned_plan(top):
+    """(state, exclude, why) for the pinned step's `with:` inputs, as CI applies them. state is "lint" (run the
+    lint; `exclude` holds the step's own `exclude` input to apply), "off" (`fail: false`: the step reports and
+    never fails, so no lint is needed) or "unknown" (an input this guard does not apply, or a read that failed:
+    `why` says which). An input at the action's default is no input; a `${{ }}` expression is not evaluated."""
+    try:
+        given = pinned_with(top)
+        with open(os.path.join(find_checkout(own_checkout()), LINT_ACTION), encoding="utf-8") as handle:
+            action = handle.read()
+    except Exception as err:
+        return "unknown", "", "the pinned step's inputs could not be read (%s)" % type(err).__name__
+    for name, value in given.items():
+        if "${{" in value:
+            return "unknown", "", "the pinned input %s is an expression the guard cannot evaluate" % name
+    if given.get("fail", "").lower() == "false":
+        return "off", "", ""
+    exclude = ""
+    for name, value in given.items():
+        if value == action_default(action, name) or (name == "fail" and value.lower() == "true"):
+            continue
+        if name == "exclude":
+            exclude = value
+            continue
+        return "unknown", "", "the pinned input %s: %s is one the guard does not apply" % (name, value or "empty")
+    return "lint", exclude, ""
 
 
 def program_path(top):
@@ -142,14 +196,15 @@ def _kill_tree(proc):
             pass
 
 
-def run_lint(program, base, top, seconds=None):
+def run_lint(program, base, top, seconds=None, exclude=""):
     """((exit code, stdout, stderr), '') after the lint ran in `top`, else (None, why). A lint past its time
-    limit is killed with its children and reads as no result."""
+    limit is killed with its children and reads as no result. `exclude` reaches the program as EXCLUDE_ENV."""
     seconds = LINT_SECONDS if seconds is None else seconds
+    env = dict(os.environ, **{EXCLUDE_ENV: exclude})
     try:
         proc = _nowindow.Popen(_argv(program, base), cwd=top, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                               start_new_session=os.name != "nt")
+                               start_new_session=os.name != "nt", env=env)
     except OSError as err:
         return None, "the lint program did not start (%s)" % (err.strerror or type(err).__name__)
     try:

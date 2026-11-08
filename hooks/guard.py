@@ -131,15 +131,18 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
-  ste-push             deny. A `git push` whose net range (the conflict-markers range) changes a file the
-                       ste-lint step lints (`changed_paths` and `exclude` of actions/ste-lint/action.yml, and
-                       .ste-lint-exclude), when `bin/ste-changed <base>` run in the pushed checkout (or
-                       STE_CHANGED_BIN) prints `ste-lint: FAIL`. Not judged: a dry run, a delete, a tag or a
-                       tags-only push, a destination `archive/*` or the record branch, and a checkout whose
-                       CI runs no ste-lint (no pin in .github/workflows, and not claude-settings itself).
-                       A push of a ref other than HEAD, an exit other than 0, 1 or 3, no verdict line, a
-                       lint past 40 s and a base that is not origin's read as unknown: allowed, with one
-                       guard.log line and a stderr line that say unknown. Exit 3 (pin drift) never
+  ste-push             deny. A `git push` whose range from origin's default branch (CI's base, not the
+                       destination) changes a file the ste-lint step lints (`changed_paths` and `exclude` of
+                       actions/ste-lint/action.yml, the pinned step's `exclude` input, and .ste-lint-exclude),
+                       when `bin/ste-changed <base>` run in the pushed checkout (or STE_CHANGED_BIN) prints
+                       `ste-lint: FAIL`. A commit in the same call, with an in-scope file staged or dirty, is
+                       denied: push in a call of its own. Not judged: a dry run, a delete, a tag or a
+                       tags-only push, a destination `archive/*` or the record branch, a pinned step with
+                       `fail: false`, and a checkout whose CI runs no ste-lint (no pin in .github/workflows,
+                       and not claude-settings itself). A push of a ref other than HEAD, a pinned input the
+                       guard does not apply (such as `scope: all`), an exit other than 0, 1 or 3, no verdict
+                       line, a lint past 40 s and a base that is not origin's read as unknown: allowed, with
+                       one guard.log line and a stderr line that say unknown. Exit 3 (pin drift) never
                        refuses. An override lifts it.
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)

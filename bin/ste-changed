@@ -3,7 +3,8 @@
 # It runs actions/ste-lint/run.sh, the one home of the step, with the step's env and defaults
 # read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
 # Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
-# input default, so an EXCLUDE in the caller's environment is ignored.
+# input default, so an EXCLUDE in the caller's environment is ignored. STE_CHANGED_EXCLUDE (guard_ste.EXCLUDE_ENV) adds
+# pathspecs to it: the rule ste-push passes the pinned step's own `exclude` input there.
 # TREE_CITES=true in the env runs tree mode, as an opted-in repo's CI does; the workflow's tree-cites setting is not read.
 # Pin check: when the repo's CI pins this repo's ste-lint or zizmor action at a commit whose files for that
 # action differ from this copy's, it says so on stderr and exits 3 even if the lint passed, so a session moves
@@ -120,7 +121,8 @@ def main(argv):
         fault("ste-changed: action.yml has no default for input %s" % ", ".join(missing))
     env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF=base, DEFAULT_BRANCH=base,
                REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
-               PATHS_GLOB=defaults["paths"], EXCLUDE=defaults["exclude"],
+               PATHS_GLOB=defaults["paths"],
+               EXCLUDE="\n".join(filter(None, (defaults["exclude"], os.environ.get(guard_ste.EXCLUDE_ENV, "")))),
                CHANGED_PATHS_GLOB=defaults["changed_paths"], DECISIONS_DIR=defaults["decisions-dir"])
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
     # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
