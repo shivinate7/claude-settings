@@ -15,10 +15,17 @@ THE SEAMS THE GUARD HONORS.
                    its working folder (the child's cwd). Unset, it is the repo's own bin/ste-changed. This file
                    sets it to a stub that reads STE_STUB_MODE. `real` execs bin/ste-changed of this clone, so
                    its output and exit code pass through. `unexpected` exits 7 with a traceback. `no-verdict`
-                   prints the scope line only and exits 0. `pin` prints a PASS verdict and exits 3.
+                   prints the scope line only and exits 0. `pin` prints a PASS verdict and exits 3. `pin-fail`
+                   prints a FAIL verdict and exits 3, the pin drift that comes with a failing lint.
   Verdict line     `ste-lint: PASS, ...` or `ste-lint: FAIL, ...` on stdout, as actions/ste-lint/run.sh prints it.
   Scope            the `paths`, `changed_paths` and `exclude` defaults of actions/ste-lint/action.yml, plus the
                    pushed checkout's .ste-lint-exclude.
+  Chain            a commit that the same call makes before its push is not in the push's range, so a push
+                   after such a commit is refused when the commit would send in-scope prose, and it is told to
+                   push in a call of its own.
+  Lint base        origin's default branch, as CI's base is: a lane that merged main is judged on its own changes.
+  Pinned inputs    the `with:` block under the pinned step: fail and exclude are applied as CI applies them, and an
+                   input the guard cannot apply (scope: all) is noted unknown.
   Record branch    the "record-branch" key of the checkout's extras file (lint/layout.py), else `roadmap`.
   CI pin           a `claude-settings/actions/ste-lint@<sha>` line in .github/workflows, or the checkout itself
                    holds actions/ste-lint/action.yml.
@@ -93,6 +100,11 @@ if mode == "pin":
     print("ste-lint: PASS, 0 error(s), 0 warning(s) on changed lines")
     sys.stderr.write("ste-changed: CI pins ste-lint at 1111111 (stub)\\n")
     sys.exit(3)
+if mode == "pin-fail":
+    print("::error file=docs/notes/c.md,line=3::STE001 sentence has 38 words, the limit is 30")
+    print("ste-lint: FAIL, 1 error(s), 0 warning(s) on changed lines")
+    sys.stderr.write("ste-changed: CI pins ste-lint at 1111111 (stub)\\n")
+    sys.exit(3)
 sys.exit(9)
 '''
 
@@ -134,16 +146,16 @@ def git(where, *args):
     return done
 
 
-def make_pair(case_dir, main, topic, pin=True):
+def make_pair(case_dir, main, topic, pin=True, workflow=WORKFLOW):
     """A bare origin, and a clone whose `main` is pushed to it. Branch `topic` then holds `topic`, committed
-    on top of main, or no commit at all when `topic` is None."""
+    on top of main, or no commit at all when `topic` is None. `workflow` is the checks file when `pin` is set."""
     origin = os.path.join(case_dir, "origin.git")
     clone = os.path.join(case_dir, "clone")
     git(case_dir, "init", "-q", "--bare", "-b", "main", origin)
     git(case_dir, "init", "-q", "-b", "main", clone)
     files = dict(main)
     if pin:
-        files[".github/workflows/checks.yml"] = WORKFLOW
+        files[".github/workflows/checks.yml"] = workflow
     for rel, text in files.items():
         write(os.path.join(clone, rel), text)
     git(clone, "add", "-A")
@@ -159,12 +171,12 @@ def make_pair(case_dir, main, topic, pin=True):
     return clone
 
 
-def require_range(clone, expected):
-    """Fixture check: the push's net range holds exactly `expected`."""
-    done = git(clone, "diff", "--name-only", "origin/main...topic")
+def require_range(clone, expected, base="origin/main"):
+    """Fixture check: the net range of `topic` from `base` holds exactly `expected`."""
+    done = git(clone, "diff", "--name-only", base + "...topic")
     got = sorted(line for line in done.stdout.splitlines() if line)
     if got != sorted(expected):
-        sys.exit("fixture error: the push's range holds %r, want %r" % (got, sorted(expected)))
+        sys.exit("fixture error: the range %s...topic holds %r, want %r" % (base, got, sorted(expected)))
 
 
 def require_lint(clone, flagged, clean):
@@ -265,18 +277,46 @@ def want_denied(out, label):
     return None
 
 
-def want_unknown_note(out, label):
-    """Allowed, after one lint start, with a guard.log line for ste-push that says unknown."""
+def want_unknown_note(out, label, lints=1):
+    """Allowed, with a guard.log line for ste-push that says unknown. `lints` is the lint starts wanted, or None
+    when the case does not say whether the guard lints."""
     if out.error:
         return out.error
     if out.decision != "allow":
-        return "decision is %r, want allow: an unreadable lint never blocks (%s)" % (out.decision, label)
-    if len(lint_starts(out)) != 1:
-        return "%d lint starts, want exactly 1 (%s)" % (len(lint_starts(out)), label)
+        return "decision is %r, want allow: an unreadable lint never blocks (%s; %s)" % (
+            out.decision, label, out.reason[:160])
+    if lints is not None and len(lint_starts(out)) != lints:
+        return "%d lint starts, want exactly %d (%s)" % (len(lint_starts(out)), lints, label)
     if not any("unknown" in line.lower() for line in out.notes):
         return "no guard.log line names ste-push and unknown (%s)" % label
     if "unknown" not in (out.reason + out.stderr).lower():
         return "neither the reason nor stderr says unknown (%s)" % label
+    return None
+
+
+def want_allowed_no_note(out, label):
+    """Allowed, and no note says unknown: the pinned input was applied, so nothing was left unread."""
+    if out.error:
+        return out.error
+    if out.decision != "allow":
+        return "decision is %r, want allow (%s; %s)" % (out.decision, label, out.reason[:160])
+    if any("unknown" in line.lower() for line in out.notes):
+        return "a guard.log line says unknown, want none: the input is applied (%s)" % label
+    if "unknown" in (out.reason + out.stderr).lower():
+        return "the reason or stderr says unknown, want none (%s)" % label
+    return None
+
+
+def want_chain_denied(out, label):
+    """Denied by ste-push, for a commit in the same call that the push cannot judge. The lint may not start."""
+    if out.error:
+        return out.error
+    if out.decision != "deny":
+        return "decision is %r, want deny (%s)" % (out.decision, label)
+    if "ste-push" not in out.reason:
+        return "the deny reason does not name rule ste-push (%s)" % label
+    if "call of its own" not in out.reason:
+        return "the deny reason does not say to push in a call of its own (%s)" % label
     return None
 
 
@@ -494,6 +534,90 @@ def case_run_folder_sweep(case_dir):
     return None
 
 
+# ---- a commit that the same call makes before its push: the push's range does not hold it
+
+CHAIN_ADD = "git add -A && git commit -m x && git push origin topic"
+CHAIN_AM = "git commit -am x && git push origin topic"
+CHAIN_STAGED = "git commit -m x && git push origin topic"
+TRACKED_C = {"docs/notes/c.md": note(CLEAN)}   # main holds the note clean, so an edit to it is a tracked change
+
+
+def write_c_bad(clone):
+    write(os.path.join(clone, "docs/notes/c.md"), note(BAD))
+
+
+def stage_c_bad(clone):
+    write_c_bad(clone)
+    git(clone, "add", "docs/notes/c.md")
+
+
+def write_src_bad(clone):
+    write(os.path.join(clone, "src/notes.py"), '"""%s"""\n' % BAD)
+
+
+def chain_case(command, dirty, main=None, flagged=(), want=want_chain_denied):
+    """A commit then a push in one call. The push's range holds nothing new, so the prose the commit adds is in no
+    range the guard reads. `want(out, label)` judges the decision the call gets."""
+    def check(case_dir):
+        clone = make_pair(case_dir, dict(MAIN, **(main or {})), None)
+        dirty(clone)
+        require_range(clone, [])
+        if flagged:
+            require_lint(clone, list(flagged), [])
+        return want(guard_run(clone, command, case_dir), command)
+    return check
+
+
+# ---- the lint base: origin's default branch, as CI's base is, never the push's own destination
+
+def case_merged_main_allowed(case_dir):
+    """Main gains a bad note after the lane pushed its branch, and the lane merges main and pushes again. CI's base
+    is origin's default branch, so the bad note is outside the push's range: the lane's own note is the one linted,
+    against main, and the push is allowed."""
+    clone = make_pair(case_dir, MAIN, {"docs/notes/a.md": note(CLEAN)})
+    git(clone, "push", "-q", "origin", "topic")   # origin/topic exists before main moves, as a lane's does
+    git(clone, "checkout", "-q", "main")
+    write(os.path.join(clone, "docs/notes/c.md"), note(BAD))
+    git(clone, "add", "-A")
+    git(clone, "commit", "-q", "-m", "bad note on main")
+    git(clone, "push", "-q", "origin", "main")
+    git(clone, "checkout", "-q", "topic")
+    git(clone, "merge", "-q", "--no-edit", "origin/main")
+    require_range(clone, ["docs/notes/a.md"], base="origin/main")
+    require_range(clone, ["docs/notes/c.md"], base="origin/topic")
+    require_lint(clone, ["docs/notes/c.md"], ["docs/notes/a.md"])
+    out = guard_run(clone, "git push origin topic", case_dir)
+    if out.error:
+        return out.error
+    if out.decision != "allow":
+        return "decision is %r, want allow: the bad note came from main, not from this push (%s)" % (
+            out.decision, out.reason[:160])
+    if any("unknown" in line.lower() for line in out.notes):
+        return "a guard.log line says unknown, want none: the base is known"
+    starts = lint_starts(out)
+    if len(starts) != 1:
+        return "%d lint starts, want exactly 1: the lane's own note is in scope" % len(starts)
+    if "main" not in [arg.replace("origin/", "") for arg in starts[0]["argv"]]:
+        return "the lint base is not main: argv %r" % (starts[0]["argv"],)
+    return None
+
+
+# ---- the pinned step's `with:` inputs
+
+def pinned_with(*lines):
+    """WORKFLOW with a `with:` block under its ste-lint step, one `key: value` line for each argument."""
+    return WORKFLOW + "        with:\n" + "".join("          %s\n" % line for line in lines)
+
+
+def with_case(label, workflow, want):
+    """Push the bad note with the pinned step as `workflow` says. `want(out, label)` judges the decision."""
+    def check(case_dir):
+        clone = make_pair(case_dir, MAIN, BLOAT_NOTES, workflow=workflow)
+        require_bloat(clone)
+        return want(guard_run(clone, "git push origin topic", case_dir), label)
+    return check
+
+
 def write_stub():
     write(STUB, STUB_SOURCE % REAL_STE_CHANGED)
     os.chmod(STUB, 0o755)
@@ -538,6 +662,31 @@ CASES = [
     ("ste-push: a pushed ref that is not HEAD is allowed, noted unknown, and not linted", case_other_ref_not_linted),
     ("ste-push: a repo whose CI runs no ste-lint step starts no lint", skip_case("git push origin topic", pin=False)),
     ("ste-push: a checkout that is claude-settings itself is linted", case_claude_settings_itself_linted),
+    ("ste-push: a commit the same call pushes, with an in-scope note added by git add -A, is denied to push in "
+     "its own call", chain_case(CHAIN_ADD, write_c_bad, flagged=["docs/notes/c.md"])),
+    ("ste-push: commit -am then push, with an in-scope tracked note edited, is denied to push in its own call",
+     chain_case(CHAIN_AM, write_c_bad, main=TRACKED_C, flagged=["docs/notes/c.md"])),
+    ("ste-push: a staged in-scope note committed and pushed in one call is denied to push in its own call",
+     chain_case(CHAIN_STAGED, stage_c_bad, flagged=["docs/notes/c.md"])),
+    ("ste-push: the same add-commit-push chain with only a code file dirty is allowed, with no lint",
+     chain_case(CHAIN_ADD, write_src_bad, want=want_quiet)),
+    ("ste-push: a lane that merged origin/main is linted against main, not its own destination, and allowed",
+     case_merged_main_allowed),
+    ("ste-push: a pinned fail: false (report only) is allowed with no unknown note",
+     with_case("with: fail: false", pinned_with('fail: "false"'), want_allowed_no_note)),
+    ("ste-push: a pinned exclude naming the bad note is allowed with no unknown note",
+     with_case("with: exclude: docs/notes/c.md", pinned_with('exclude: "docs/notes/c.md"'), want_allowed_no_note)),
+    ("ste-push: a pinned fail: true still denies the bad note",
+     with_case("with: fail: true", pinned_with('fail: "true"'), want_denied)),
+    ("ste-push: a pinned exclude that names another file still denies the bad note",
+     with_case("with: exclude: docs/notes/d.md", pinned_with('exclude: "docs/notes/d.md"'), want_denied)),
+    ("ste-push: a commented-out fail: false in the pinned step is ignored, and the bad note is denied",
+     with_case("with: # fail: false", pinned_with('# fail: "false"'), want_denied)),
+    ("ste-push: a pinned input the guard cannot apply (scope: all) is allowed, noted unknown",
+     with_case("with: scope: all", pinned_with('scope: "all"'),
+               lambda out, label: want_unknown_note(out, label, lints=None))),
+    ("ste-push: exit 3 with a FAIL verdict (pin drift with a failing lint) is allowed, noted unknown",
+     case_unreadable_lint("pin-fail")),
     ("test-temp: the run-folder sweep removes an old sibling and keeps a new one", case_run_folder_sweep),
 ]
 
