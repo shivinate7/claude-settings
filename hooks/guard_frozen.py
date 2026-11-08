@@ -692,6 +692,10 @@ _COPY_NAMES = ("copy", "copy2", "copyfile", "copytree", "move")
 _PY_WRITE_CALL = re.compile(
     r"""open\s*\([^)]*['"][rwabt]*[wax+][rwabt+]*['"]|write_text|write_bytes|shutil\s*\.\s*(?:copy|move)"""
     r"""|os\s*\.\s*(?:replace|rename)""")
+# The calls `_py_shell_lines` reads, and the names `_py_unaliased` takes from `os` and `shutil`.
+_PY_SHELL_HINT = re.compile(
+    r"""\bsubprocess\b|\bos\s*\.\s*(?:system|popen)\b"""
+    r"""|from\s+os\s+import[^\n]*\b(?:system|popen|replace|rename)\b|from\s+shutil\s+import\b""")
 _STRING_LITERAL = re.compile(r"""'([^'\n]+)'|"([^"\n]+)\"""")
 
 
@@ -798,11 +802,65 @@ def _py_written(tree, env_at):
     return [(call, expression) for call, expression in out if expression is not None]
 
 
+# A python call that hands a string, or an argument list, to a shell or a program. It is judged as a
+# shell line by `_shell_write_hit`, the one reader of what a shell line writes.
+_PY_SHELL_CALLS = {"os": ("system", "popen"),
+                   "subprocess": ("run", "call", "check_call", "check_output", "Popen", "getoutput",
+                                  "getstatusoutput")}
+
+
+def _py_unaliased(tree):
+    """The tree with each name taken from `os`, `shutil` or `subprocess` (`from shutil import copy as c`)
+    or each alias of those modules (`import subprocess as sp`) written as `module.name`, so the readers
+    below see one spelling. A name bound by anything else is left as it is."""
+    import ast
+    modules, names = {}, {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update({a.asname: a.name for a in node.names
+                            if a.asname and a.name in ("os", "shutil", "subprocess")})
+        elif isinstance(node, ast.ImportFrom) and node.module in ("os", "shutil", "subprocess") and not node.level:
+            names.update({a.asname or a.name: (node.module, a.name) for a in node.names})
+
+    class Unalias(ast.NodeTransformer):
+        def visit_Name(self, node):
+            if not isinstance(node.ctx, ast.Load):
+                return node
+            if node.id in names:
+                module, name = names[node.id]
+                return ast.copy_location(ast.Attribute(
+                    value=ast.copy_location(ast.Name(id=module, ctx=ast.Load()), node), attr=name,
+                    ctx=ast.Load()), node)
+            if node.id in modules:
+                return ast.copy_location(ast.Name(id=modules[node.id], ctx=ast.Load()), node)
+            return node
+    return Unalias().visit(tree) if modules or names else tree
+
+
+def _py_shell_lines(tree, env_at):
+    """The shell line each `os.system`, `os.popen` and `subprocess.*` call of a script runs: its string
+    argument, or its list argument joined (an element it cannot tell reads as `x`)."""
+    import ast
+    import shlex
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.attr in _PY_SHELL_CALLS.get(node.func.value.id, ())):
+            continue
+        arg = _py_arg(node, 0, "args" if node.func.value.id == "subprocess" else "command")
+        env = env_at(node)
+        if isinstance(arg, (ast.List, ast.Tuple)):
+            parts = [(_py_paths(element, env) or ["x"])[0] for element in arg.elts]
+            yield " ".join(shlex.quote(part) for part in parts)
+        elif arg is not None:
+            yield from _py_paths(arg, env)
+
+
 def _py_hit(body: str, cwd: str, predicate) -> str:
     import ast
     import textwrap
     try:
-        tree = ast.parse(textwrap.dedent(body))
+        tree = _py_unaliased(ast.parse(textwrap.dedent(body)))
     except (SyntaxError, ValueError):
         # Unparsable (a shell variable in an unquoted body, a Python 2 line): a literal path the
         # predicate accepts, beside a write call in the same body, counts.
@@ -817,6 +875,10 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
         for path in _py_paths(expression, env_at(call)):
             if predicate(path, cwd):
                 return path
+    for line in _py_shell_lines(tree, env_at):
+        hit = _shell_write_hit(line, cwd, predicate)
+        if hit:
+            return hit
     return ""
 
 
@@ -882,7 +944,7 @@ def interpreter_may_write(raw: str) -> bool:
     """True when `raw` holds a heredoc or an inline flag and a write call an interpreter body could make:
     the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
     return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
-        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
+        _PY_WRITE_CALL.search(raw) or _PY_SHELL_HINT.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
