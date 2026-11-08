@@ -11126,8 +11126,10 @@ mtc_write("a str_replace that moves added in items to exactly 20:14Z is allowed"
           url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
           field="added", old_str="2026-11-07T20:04:00Z", new_str="2026-11-07T20:14:00Z")
 
-# ---- written forms the check misses: a value with no updatedAt key, a date-less fragment, and a shell assignment
-# that is not a double-quoted JSON pair. The check judges the value a write lands, not the key beside it.
+# ---- written forms the check judges: a value with no updatedAt key in a roadmap step Edit, a date-less fragment in a
+# str_replace, and a shell assignment with a single-quoted pair. The check judges the value a write lands, not the key
+# beside it. A shell command is judged only through a literal updatedAt key with a quoted value. An unquoted value, or a
+# value with no key, is still missed.
 # Refused: an Edit of a step file that writes 14:30 at -06:00 over an older instant. Its new_string has no key.
 mtc_write("a roadmap step Edit that writes 14:30 at -06:00 over an older instant, with no updatedAt key, is refused",
           "deny", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
@@ -11172,6 +11174,10 @@ mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:30
 # Passes: the same assignment 4 minutes behind the clock. A value behind the clock passes.
 mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:10 at -06:00, is allowed", "allow",
          r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:10:00-06:00'"''')
+# Passes: the value opens on a single quote and closes on a double one, 16 minutes ahead. The `\1` backreference holds
+# the close to the open quote, so this mismatched pair is not a literal the scan reads.
+mtc_bash("a Bash value opened on a single quote and closed on a double, 14:30 at -06:00, is allowed: the pair must match",
+         "allow", r'''d['updatedAt']='2026-11-07T14:30:00-06:00"''')
 # Refused: a dict literal with a single-quoted key and value, 16 minutes ahead.
 mtc_bash("a Bash python3 -c dict literal with a single-quoted updatedAt, 14:30 at -06:00, is refused", "deny",
          r'''python3 -c "d={'updatedAt': '2026-11-07T14:30:00-06:00'}"''')
