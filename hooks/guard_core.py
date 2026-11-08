@@ -1056,6 +1056,28 @@ def shell_abs(path: str, base):
     return path
 
 
+def _in_background_list(segments, ends, at: int) -> bool:
+    """True when `segments[at]` is in a list that a lone `&` ends (an end of `&`, as `_split_jobs` gives
+    it). Bash runs that whole list in a subshell: in `cd a && b &` the `cd` moves no shell, as in
+    `cd a &`. The list runs on through `&&`, `||` and `|` up to its first other end. A `&` inside a
+    `( ... )` that opens after the segment ends that group's own list, not this one."""
+    depth = 0
+    for later in range(at, len(segments)):
+        for _, char, quote in walk_quotes(segments[later]):
+            if not quote and char in "()":
+                depth += 1 if char == "(" else -1
+        if depth < 0:
+            return False   # the group that holds the segment closes: its own paren restores the folder
+        end = ends[later] if later < len(ends) else ""
+        if depth:
+            continue
+        if end == "&":
+            return True
+        if end not in ("&&", "||", "|"):
+            return False
+    return False
+
+
 def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
@@ -1065,7 +1087,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe. A
-    segment that `_split_jobs` ended with a lone `&` is a background job: its `cd` moves nothing.
+    `cd` in a list that a lone `&` ends is a background job: its `cd` moves nothing
+    (`_in_background_list`).
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
@@ -1092,7 +1115,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
-        if move is not None and at < len(ends) and ends[at] == "&":
+        if move is not None and not is_powershell(segment) and _in_background_list(segments, ends, at):
             move = None   # a backgrounded `cd` runs in a subshell, so the shell stays where it was
         if tokens is None:
             where = None

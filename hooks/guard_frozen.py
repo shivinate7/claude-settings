@@ -458,7 +458,8 @@ def _split_background(segment):
     quote that bash leaves open at the end of the segment is read again with each apostrophe after a letter
     or digit as text, so `echo don't&sed ...` still splits at its `&`."""
     steps = list(guard_core.walk_quotes(segment))
-    unclosed = bool(steps) and bool(steps[-1][2]) and steps[-1][1] != steps[-1][2]
+    # The quote open after the last step, as `quote_advance` reads it: `$'c'` closes at its last `'`.
+    unclosed = bool(steps) and bool(steps[-1][2]) and bool(guard_core.quote_advance(segment, *steps[-1][::2])[1])
     parts, start = [], 0
     for at, char, quote in (guard_core.walk_quotes(segment, True) if unclosed else steps):
         if char != "&" or quote:
@@ -474,17 +475,20 @@ def _split_background(segment):
 def _split_jobs(segments, ends):
     """(segments, ends) with each segment cut at its lone `&` (`_split_background`), so `echo x&sed -i s/a/b/ P`
     reads as two commands, as `echo x&&sed ...` already does. A part cut at a `&` ends with `&`; the last part
-    keeps the end of the segment it came from. A segment with no lone `&` stays as it is."""
+    keeps the end of the segment it came from, unless the segment ends with its `&` (`cd sub &` before a
+    newline): that part ends with `&`, so `dir_before_segment` reads it as a background job. A segment with
+    no lone `&` stays as it is."""
     cut, cut_ends = [], []
     for at, segment in enumerate(segments):
         end = ends[at] if at < len(ends) else ""
-        parts = [part for part in _split_background(segment) if part.strip()]
-        if len(parts) < 2:
+        pieces = _split_background(segment)
+        parts = [part for part in pieces if part.strip()]
+        if len(pieces) < 2 or not parts:
             cut.append(segment)
             cut_ends.append(end)
             continue
         cut.extend(parts)
-        cut_ends.extend(["&"] * (len(parts) - 1) + [end])
+        cut_ends.extend(["&"] * (len(parts) - 1) + [end if pieces[-1].strip() else "&"])
     return cut, cut_ends
 
 
@@ -1765,9 +1769,10 @@ def _names_run(tokens):
     return found
 
 
-# Perl text that starts a command: `system`, `exec`, a backtick or `qx`, a pipe `open` (`open2`, `open3`), `readpipe`, `eval`, `fork`, `syscall`.
+# Perl text that starts a command: `system`, `exec`, `POSIX::execvp`, a backtick or `qx`, a pipe `open` (`open2`, `open3`), `readpipe`,
+# `eval`, `fork`, `syscall`, and the `run(` of IPC::Run and IPC::Cmd.
 # A script with one of them is code that may run `sed -i`, so a spelling of it is no longer text.
-_PERL_RUNS_COMMANDS = re.compile(r"\b(?:system|exec|qx|open|open2|open3|readpipe|eval|fork|syscall)\b|`")
+_PERL_RUNS_COMMANDS = re.compile(r"\b(?:system|exec|execvp|qx|open|open2|open3|readpipe|eval|fork|syscall)\b|\brun\s*\(|`")
 _PERL_SCRIPT_SWITCH = r"-[0-9aCcFlnpsStTuUvwW]*[eE]"
 
 
@@ -1881,8 +1886,9 @@ def _segment_command(words):
 
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
-    """Return the frozen (config-dir) path a shell command writes to, else ''."""
-    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
+    """Return the frozen (config-dir) path a shell command writes to, else ''. A relative path is judged in the
+    folder a foreground `cd` moved the shell to (`dir_before_segment`), or in `cwd` when that folder cannot be told."""
+    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen, follow_cd=True)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
