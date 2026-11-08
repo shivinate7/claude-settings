@@ -5276,6 +5276,29 @@ sh("git-after-cd: a check and a push inside a subshell, joined by ;, is refused"
 sh("git-after-cd: a cd into a missing folder, then && braces holding a check and a push joined by ;, is refused",
    "cd x && { pytest -q; %s push -u origin b; }" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
+# A PUSH AFTER A CHECK THAT A COMPOUND OR A SUBSHELL HIDES. A `for` body and an `if` body open before the walk reads
+# the check before them, and an if test that is no check guards nothing. A subshell's exit leaves only the subshell,
+# so the push after its `)` still runs when the check fails. Each push here is refused.
+sh("git-after-cd: a check, then ; a for loop with a git push in its body, is refused",
+   "pytest -q; for r in a b; do %s push -u origin $r; done" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then ; an if on a test that is no check, with a git push in its body, is refused",
+   'pytest -q; if [ -n "$X" ]; then %s push -u origin b; fi' % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check in a subshell that exits on failure, then ; a git push, is refused",
+   "( pytest -q || exit 1 ); %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+# A COMMAND THAT CANNOT FAIL A CHECK, AND AN IF THAT EXITS ON ITS FAILURE. An export or an echo before the push runs
+# no check, so the push after it passes. An `if !` whose body exits stops the shell on a failure, over newlines too.
+# A push in the then branch of an if on the check guards its own body, and passes.
+sh("git-after-cd: an export, then ; a git push -u, passes",
+   "export A=1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an echo, then ; a git push -u, passes",
+   "echo hi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an if ! check whose body exits, over newlines, then a git push -u, passes",
+   "if ! pytest -q; then\n  exit 1\nfi\n%s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a push in the then branch of an if on the check, on one line, passes",
+   "if pytest -q; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
