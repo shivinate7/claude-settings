@@ -1,0 +1,11 @@
+{
+  "title": "The lane sweep reads session summaries first, and messages only lanes whose status is unclear",
+  "why": "Lane token-spend-sources (session_013NEJL2ffE4xixcyVkMbpuV), 12:16 CST Nov 8, measured: each sweep reply cost $1.45-$2.42, all to reload an expired one-hour cache, and the post_turn_summary from get_session or list_sessions already held the answer; the 11:28 sweep cost about $125-$610 on the lane side. Related: step idle-lane-archive-at-merge.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 779,
+  "updatedAt": "2026-11-08T12:19:00-06:00"
+}

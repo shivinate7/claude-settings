@@ -1,0 +1,11 @@
+{
+  "title": "Lanes post status where the coordinator reads them in one pass, not one Opus turn per message",
+  "why": "Lane token-spend-sources (session_013NEJL2ffE4xixcyVkMbpuV), 12:16 CST Nov 8, measured: the coordinator spends about $40 an hour on Opus, and a lane message woke it for 54 of its 56 turns between 11:28 and 12:06 CST. Fix: lanes post status to their session summary or the page, and the coordinator reads them in one pass at a check-in.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 778,
+  "updatedAt": "2026-11-08T12:19:00-06:00"
+}
