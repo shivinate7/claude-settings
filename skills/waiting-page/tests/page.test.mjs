@@ -8503,6 +8503,24 @@ for (const width of [390, 1280]) for (const scheme of ["light", "dark"]) for (co
   else assert.equal(cellsDrawn.length, 30, `${name} at ${width} wide draws ${cellsDrawn.length} cells, not one per step (30)`);
 });
 
+// ---------------------------------------------------------------- the runs clip (lane nfp-narrow-paused-cell)
+// `.segbar > .runs` sets overflow hidden. The case reads that declaration on each phase bar, at 390 wide where the runs draw and at 1280 wide
+// where the layer is 0px. It reads the declaration, not paint: a paint check would pass with the clip and without it.
+test("the runs layer of each phase bar clips its runs: its computed overflow-x is hidden or clip, at 390 and at 1280 wide", async (t) => {
+  const problems = [];
+  for (const width of [390, 1280]) {
+    const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
+    await openStatus(page);
+    for (const [name, scope] of BARS_W) {
+      assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+      assert.equal(await page.locator(`${scope} > .runs`).count(), 1, `${name} at ${width} wide has no runs layer (${scope} > .runs)`);
+      const overflowX = await page.locator(`${scope} > .runs`).evaluate((el) => getComputedStyle(el).overflowX);
+      if (overflowX !== "hidden" && overflowX !== "clip") problems.push(`${name} at ${width} wide: its runs layer's overflow-x is "${overflowX}"`);
+    }
+  }
+  assert.deepEqual(problems, [], "the runs layer does not clip its runs:\n  " + problems.join("\n  "));
+});
+
 // ---------------------------------------------------------------- the edge width (lane nfp-npc-edge)
 // The roadmap's edge-width cases, on the Status tab's bars. The cases set a bar 1px under, 0.02px under, at, and 1px over steps x 5px - 2px.
 // Each checks that exactly one layer draws, that the layer spans the bar, and that each run shows RUN_MIN_PX or more. The 0.02px case
