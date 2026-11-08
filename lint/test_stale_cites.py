@@ -1961,6 +1961,9 @@ class RouteClaimTests(StaleCase):
         self.assert_route_claims(rng, flagged)
 
     def test_route_claim_read_or_test_backing_naming_a_file_absent_at_head_is_a_dead_backing(self):
+        """Class (d), a test re-pointed by a ruling. Coordinator ruling, 2026-11-08 04:03 CST (item 386): "a cite to a code
+        name missing there is red". Lane pick, 04:16 CST: a dead cite has one home, STALE010. The node id is that dead
+        cite, so the exit is 1. The read backing names no code name, so it keeps only its STALE005 report."""
         rows = [
             ("- The cloud cannot push to main (read hooks/guard.py:12).", False),  # the file exists at head: backed
             ("- The cloud cannot push to main (read hooks/gone.py:12).", True),  # no such file: a dead backing
@@ -3216,6 +3219,32 @@ class NameCiteTests(StaleCase):
         self.assertIsNone(binding_kind(guard, "missing_fn"))  # scope: the twin's name is unbound there
         self.assertNotIn("guard.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope: no root file
         self.assert_flags(rng, [(NOTES, 2, "STALE010")])
+
+    def test_a_dotdot_led_cite_is_no_path_cite_and_a_dead_cite_in_the_same_range_is_still_stale010(self):
+        """A cite whose path normalizes to a `..`-led path names a file outside the repo, so it is no path cite, as a
+        basename cite is not. The run must not read it as a blob. The twin in the same range proves that a dead cite
+        beside it still prints its finding."""
+        dotdot = [
+            ("- (../lint/x.py check)", False),
+            ("- `../lint/x.py` `check`", False),
+            ("- `../lint/x.py::check`", False),
+            ("- (../lint/x.py nope)", False),  # a stripped `..` would find nope unbound here: silence shows no path cite
+        ]
+        rng, _ = self.route_range(dotdot)
+        self.assertIsNone(binding_kind(CODE["lint/x.py"], "nope"))  # scope: lint/x.py does not bind nope
+        self.assertIn(NOTES, touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertNotIn("stale-cites: UNKNOWN, git cat-file ended early", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(parse(out), [], out)
+
+        rng, flagged = self.route_range(dotdot + [("- (lint/x.py missing)", True)])  # the twin: a dead cite, same range
+        self.assertIsNone(binding_kind(CODE["lint/x.py"], "missing"))  # scope: the twin's name is unbound at head
+        rc, out = self.run_check(rng)
+        self.assertNotIn("stale-cites: UNKNOWN, git cat-file ended early", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, flagged[0], "STALE010")], out)
 
     def test_a_range_that_adds_one_py_name_cite_and_removes_nothing_starts_exactly_four_git_processes_with_one_cat_file(self):
         rng, _ = self.route_range([("- (lint/x.py check)", False)])
