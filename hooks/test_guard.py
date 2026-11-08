@@ -22537,6 +22537,14 @@ sh("other-checkout: a git -C log into a separate clone of the same repo is allow
    VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C show HEAD into a separate clone of the same repo is allowed",
    VCS + " -C " + slash(XCL_SEP) + " show HEAD", "allow", cwd=XCL_PRIMARY)
+# `git stash create` (incident 2026-11-07) writes a stash commit object and takes no entry, so it is a
+# read here too. The clone's stack is judged as its own: a pop and a drop stay refused.
+sh("other-checkout: a git -C stash create into a separate clone of the same repo is allowed",
+   VCS + " -C " + slash(XCL_SEP) + " stash create", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C stash pop into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " stash pop", "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a git -C stash drop into a separate clone of the same repo is refused",
+   VCS + " -C " + slash(XCL_SEP) + " stash drop", "deny", "other-checkout", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C commit into a clone of a different repo is allowed",
    VCS + " -C " + slash(XCL_DIFF) + " commit -m x", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
@@ -23342,6 +23350,79 @@ LOG_CHECKS_EXTRA.append(("session-home: a write to the lost home path is refused
 LOG_CHECKS_EXTRA.append(("session-home: while lost, git verbs that change the primary's files or branch are "
                          "refused; reads, fetch, branch, worktree add and a live -C commit pass",
                          session_home_git_verbs_case))
+
+
+# `git stash create` (incident 2026-11-07). It writes a stash commit object and prints its hash. It
+# changes no entry, ref, index or tree, so it reads as `stash list` and `stash show` do. The session-home
+# reader exempts those two words by its own copy of the list, so `create` stays refused there. The create
+# case is red until that reader takes the list the shared-tree guard reads. The take case holds a pop and
+# a drop, which take or destroy an entry. The agent case holds an agent call, which this rule does not
+# judge. Each pins what the fix must keep.
+def sh_lost_lane(name):
+    """A primary whose session has lost its worktree. The session's lane call wrote its record, then
+    the harness removed the lane and its branch. Returns (primary, session, lane, recorded): `recorded`
+    is False when the lane call wrote no record naming the lane."""
+    primary = sh_new_primary(name)
+    lane, branch = sh_add_lane(primary, "lane-" + name)
+    session = sh_session()
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    recorded = sh_holds(primary, session, lane)
+    sh_lose_lane(primary, lane, branch)
+    return primary, session, lane, recorded
+
+
+def session_home_stash_create_case():
+    """Rule session-home: `git stash create` in the primary checkout of a session whose worktree is gone
+    is allowed, with a real entry on the stack. It reads the stack and takes no entry."""
+    primary, session, lane, recorded = sh_lost_lane("stashcreate")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    write(os.path.join(primary, "src", "app.py"), "print(2)\n")
+    if run_vcs(primary, *IDENT, "stash", "push", "-m", "cases").returncode != 0:
+        return False, "fixture setup failed: the stash push in the primary"
+    command = VCS + " stash create"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    if got != "allow":
+        return False, "%s: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "git stash create in the primary of a lost session is allowed"
+
+
+def session_home_stash_take_case():
+    """Rule session-home: while the record is lost, `git stash pop` and `git stash drop` in the primary
+    checkout are refused, naming session-home and EnterWorktree. A take and a drop are the stack's own
+    acts, so the create allowance does not reach them."""
+    primary, session, lane, recorded = sh_lost_lane("stashtake")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    problems = []
+    for verb in ("pop", "drop"):
+        command = VCS + " stash " + verb
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        problems += sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git stash pop and drop in the primary of a lost session stay refused, naming session-home"
+
+
+def session_home_stash_agent_case():
+    """Rule session-home: an agent's `git stash create` from the primary of a lost session is allowed.
+    The rule judges a top-level call only, so the agent's call is not refused by it."""
+    primary, session, lane, recorded = sh_lost_lane("stashagent")
+    if not recorded:
+        return False, "the lane call wrote no session record naming the lane"
+    command = VCS + " stash create"
+    got, reason = _decide_full("Bash", primary, agent_id=SH_AGENT, session=session, command=command)
+    if got != "allow":
+        return False, "%s from an agent: want allow, got %s (%s)" % (command, got, reason[:120])
+    return True, "an agent's git stash create from the primary of a lost session is allowed"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: git stash create from the primary of a lost session is allowed",
+                         session_home_stash_create_case))
+LOG_CHECKS_EXTRA.append(("session-home: git stash pop and drop in the primary of a lost session stay refused, "
+                         "naming session-home and EnterWorktree", session_home_stash_take_case))
+LOG_CHECKS_EXTRA.append(("session-home: an agent's git stash create from the primary of a lost session is "
+                         "allowed; the rule judges top-level calls only", session_home_stash_agent_case))
 
 
 def session_home_clean_refuses_case():
