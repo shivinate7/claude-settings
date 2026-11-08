@@ -7308,6 +7308,16 @@ sh("delete: a heredoc body given to bash runs the delete", "bash <<EOF\nrm -rf .
 sh("delete: a lone apostrophe in a quoted heredoc body does not hide a delete after it",
    "cat <<'EOF' > notes.md\nit's the note\nEOF\nrm -rf ./*", "deny", "destructive-delete", cwd=NOGIT)
 
+# A file whose name ends in `py` is no interpreter: `cat > gen.py <<'EOF'` writes its body to the file, so a delete
+# or a forced push in the body runs nothing. `py -` reads its script from stdin, so its body is a script and a
+# delete in it is refused.
+sh("delete: a heredoc written to gen.py names a delete, deletes nothing",
+   "cat > gen.py <<'EOF'\nrm -rf /\nEOF", "allow", cwd=NOGIT)
+sh("push: a heredoc written to gen.py names a forced push, pushes nothing",
+   "cat > gen.py <<'EOF'\n" + VCS + " push --force origin main\nEOF", "allow", cwd=NOGIT)
+sh("delete: a py heredoc body given to py - runs as a script, so its delete is refused",
+   "py - <<'EOF'\nrm -rf /\nEOF", "deny", "destructive-delete", cwd=NOGIT)
+
 # THE POWERSHELL ALIASES. `remove-item`, `ri`, `rd` and `rmdir` already matched the dash-flag
 # pattern before this change. `del`, `erase` and `rm` did not: PowerShell's own aliases for
 # Remove-Item, taking its `-Recurse`/`-Force` parameters rather than `rm`'s combined `-rf`.
@@ -12759,6 +12769,11 @@ sh("ask-alone: a settings write that names neither cap variable, chained, allows
    "allow", cwd=PROJ)
 sh("ask-alone: a chain of git reads in a worktree allows",
    VCS + " status && " + VCS + " diff --stat", "allow", cwd=GITWT)
+# A forced push in a heredoc body is text, even when the file it writes is later formatted by npx. The formatter
+# reads the file and runs nothing in it, so the chain holds no live ask command.
+sh("ask-alone: a heredoc body holding a forced push, written to a file npx formats, chained, allows",
+   "cat > notes.md <<'EOF'\n" + VCS + " push --force origin main\nEOF\nnpx prettier --write notes.md",
+   "allow", cwd=NOGIT)
 
 # (e) A DENY ANYWHERE STILL WINS, in either order: a deny that stands after the ask in the guard's own
 # rule order (kill, env file, a stash push) still prints. The printed reason is the deny rule's own,
@@ -13326,6 +13341,15 @@ add("test-author: a whole new test step with if: false is refused", "deny", rule
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
     carries=("builder", "Report"), **A)
+
+# bash takes no value after -k or -p, so the test path after either flag is the script: a builder that drops
+# that run drops its test.
+R3_BASH_K = "      - name: Unit\n        run: bash -k tests/test_a.sh\n"
+R3_BASH_P = "      - name: Unit\n        run: bash -p tests/test_a.sh\n"
+add("builder-test: a bash -k test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_BASH_K, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a bash -p test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_BASH_P, new_string=LINT, carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
@@ -23360,6 +23384,12 @@ SPO_RUNNER_FORMS = (
     ("pipe", "cat F | python3", "probe2.py", PY_TEXT, "cat %s | python3"),
     ("bash-c", 'bash -c "python3 F"', "probe2.py", PY_TEXT, 'bash -c "python3 %s"'),
     ("sh-c", 'sh -c "python3 F"', "probe2.py", PY_TEXT, 'sh -c "python3 %s"'),
+    # A flag whose value follows a space (`-n 2`, `--cov-report html`, `--with x`), and `ionice`, a wrapper no
+    # runner list names. Each is a run of the file.
+    ("pytest-n", "pytest -n 2 F", "probe2.py", PY_TEXT, "pytest -n 2 %s"),
+    ("pytest-cov", "pytest --cov-report html F", "probe2.py", PY_TEXT, "pytest --cov-report html %s"),
+    ("uv-with", "uv run --with x F", "probe2.py", PY_TEXT, "uv run --with x %s"),
+    ("ionice", "ionice -c3 python3 F", "probe2.py", PY_TEXT, "ionice -c3 python3 %s"),
 )
 
 
