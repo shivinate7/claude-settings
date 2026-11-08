@@ -404,7 +404,7 @@ copy, so no CI gap.
 ### 11. mjs-load-files
 
 - **cs files:** actions/code-check covers .mjs imports. Its standard, lint/code_check_standard.json, skips the javascript
-  typecheck (line 53: checkJs not adopted). Tests: new case in actions/code-check/test_action.py.
+  typecheck (checkJs not adopted). Tests: new case in actions/code-check/test_action.py.
 - **Done check:** a .mjs file with a broken import is red on the current code, green after.
 - **Child removals:** q_max row 18 (harness/load-files.mjs) stays, partly. PR #1135 (lane mjs-load-files) found that the shared check misses a bare package absent from node_modules, and .ts files run through tsx. The child keeps its own check for those until its own tsc covers them.
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
