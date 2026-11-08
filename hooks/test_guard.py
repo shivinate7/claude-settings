@@ -105,7 +105,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "lane-lint-send": "a lane's hand-off to a batch runner: a send_message whose message names an open pull request with no review record at its live head is refused; a closed or merged pull request, an issue, a target that is no runner, a message with no pull request and an owner override pass; an unknown read passes with one note",
+    "lane-lint-send": "a lane's hand-off to a batch runner: a send_message whose message names an open pull request with no review record at its live head is refused; a closed or merged pull request, an issue, a target that is no runner, a message with no pull request and an owner override are allowed; an unknown read passes with one note",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "red-run": "a git push judged on the test commits it sends: a test commit with no Red-run line, a malformed Red-run line (zero count, or no arrow and no sha), or a lane's own untrailered test commit beside main's is refused; a valid red-run or none line, a docs-only, deletion-only, merged-main, rebased-onto-main, pre-rollout or unreadable-range push passes",
@@ -10880,7 +10880,7 @@ ll_allow("item 431 with no # names no pull request, so it is not judged",
 # Allowed: a message with no pull request reads none.
 ll_allow("a message with no pull request is allowed",
          role_path("ll-runner"), "Status: batch 3 is green.", ll_gh("none"))
-# Refused: the pull request reference forms the guard judges. `PR#1463` names the number after a PR prefix. The two URL
+# Refused: the pull request reference forms the guard judges. The PR-prefix form puts the number right after `PR#`. The two URL
 # forms name their repo, and `need` makes the fake tool answer only for o/n: a repo read from the runner's tag instead
 # finds nothing, the read is unknown, and the hand-off passes, which fails the case.
 ll_refuse("PR#1463 is judged: a hand-off naming it with no record is refused",

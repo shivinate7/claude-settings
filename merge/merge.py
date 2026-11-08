@@ -3368,7 +3368,7 @@ def hand_off_read(h, numbers):
                 if c or "pull_request" in json.loads(out):
                     raise ValueError(out)
             except (ValueError, TypeError):
-                raise Stop(f"#{n} is neither a pull request nor an issue of this repo: {' '.join(str(e).split())}") from None
+                raise Stop(f"#{n} is neither a pull request nor an issue of this repo: {' '.join(str(e).split())} (decision lane-lint-send)") from None
     open_rows = {n: row for n, row in live.items() if row["state"] == "OPEN"}
     records = h.review_comments(min(row.get("created") or HAND_OFF_EPOCH for row in open_rows.values())) if open_rows else {}
     found = {n: "skip" for n in numbers}
