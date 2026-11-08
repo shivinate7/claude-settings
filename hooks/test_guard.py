@@ -13668,6 +13668,15 @@ add("builder-set: Edit of hooks/guard.py that adds %s to AUTHOR_MUTATION_TESTS i
     new_string=_set_line(AUTHOR_SET_NAMES + [PROBE_NAME]), **SET_BUILDER)
 add("builder-set: Edit of hooks/guard.py elsewhere, on a line outside the set, is allowed", "allow", tool="Edit",
     file_path=SET_FILE, old_string="OTHER_CONSTANT = 1", new_string="OTHER_CONSTANT = 2", **SET_BUILDER)
+# The empty state: a set with no names is written set(). A Write that empties the set refuses, and an Edit that
+# adds the first name to an empty set is allowed.
+SET_EMPTY_TEXT = "AUTHOR_MUTATION_TESTS = set()\nOTHER_CONSTANT = 1\n"
+add("builder-set: Write of hooks/guard.py that empties AUTHOR_MUTATION_TESTS is refused", "deny", rule=BT,
+    tool="Write", file_path=SET_FILE, content=SET_EMPTY_TEXT, carries=("test-author",), **SET_BUILDER)
+_set_empty = diff_repo("g-set-empty", lambda w: None, files={**BASE_FILES, SET_FILE: SET_EMPTY_TEXT})
+add("builder-set: Edit of hooks/guard.py that adds the first name to an empty AUTHOR_MUTATION_TESTS is allowed",
+    "allow", tool="Edit", file_path=SET_FILE, old_string="AUTHOR_MUTATION_TESTS = set()",
+    new_string=_set_line([PROBE_NAME]), **dict(B, cwd=_set_empty))
 
 # Every other file the set lists: a change of an existing line is refused, and an add of a line is allowed.
 for _name in AUTHOR_SET_OTHERS:
