@@ -13283,6 +13283,11 @@ add("builder-test: if: false added under a test step is refused", "deny", rule=B
     carries=("test-author", "Report"), **B)
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
+# A run header with a comment after it (`run: | # note`) is a block, as YAML reads it: its body holds a test run.
+TEST_HEADER_COMMENT = "      - name: Guard tests\n        run: | # note\n          python3 hooks/test_guard.py\n"
+add("builder-test: a whole test step with a comment on its run header is refused when deleted from checks.yml",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + TEST_HEADER_COMMENT, new_string=LINT,
+    carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
     old_string=LINT + TEST_LINUX + CLEAN, new_string=LINT + CLEAN + TEST_LINUX, **B)
 add("builder-test: a test step's if: changed to another condition is allowed", "allow", tool="Edit",
@@ -13965,6 +13970,44 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+
+# ---- workflow run headers: `run: | # note`, `run: > # c` and `run: |- # c` open a block, as YAML reads them, so the
+# test paths in their body lines are the ones the workflow runs. The guard read the header as an inline command, so
+# workflow_invoked_tests read none of the body. The plain `run: |` and a ruff run on tests/ are the controls.
+FAMILY = "paths"
+WF_RUN_STEP = "      - run: %s\n          python3 hooks/test_x.py\n"
+
+
+def run_header_tests_check(text, want, claim):
+    """A log check: workflow_invoked_tests reads exactly `want` from `text`, a workflow whose run block is `claim`."""
+    def check():
+        guard = _load_guard_module()
+        got = guard.workflow_invoked_tests(text)
+        if got != set(want):
+            return False, "workflow_invoked_tests reads %r from %s, want %r" % (sorted(got), claim, sorted(want))
+        return True, "workflow_invoked_tests reads %r from %s" % (sorted(want), claim)
+    return check
+
+
+RUN_HEADER_CHECKS = (
+    ("workflow run header: the test path in a `run: | # note` block is read",
+     run_header_tests_check(WF_RUN_STEP % "| # note", ["hooks/test_x.py"], "a `run: | # note` block")),
+    ("workflow run header: the test path in a `run: > # c` block is read",
+     run_header_tests_check(WF_RUN_STEP % "> # c", ["hooks/test_x.py"], "a `run: > # c` block")),
+    ("workflow run header: the test path in a `run: |- # c` block is read",
+     run_header_tests_check(WF_RUN_STEP % "|- # c", ["hooks/test_x.py"], "a `run: |- # c` block")),
+    ("workflow run header: the test path in a comment-free `run: |` block is still read",  # P2 green control
+     run_header_tests_check(WF_RUN_STEP % "|", ["hooks/test_x.py"], "a plain `run: |` block")),
+    ("workflow run header: a `run: | # c` block ends at the next step, and both test paths are read",
+     run_header_tests_check(WF_RUN_STEP % "| # c" + "      - name: Second\n        run: python3 hooks/test_y.py\n",
+                            ["hooks/test_x.py", "hooks/test_y.py"], "a `run: | # c` block and the step after it")),
+    ("workflow run header: a `run: | # c` block running ruff on tests/ reads no test path",  # P2 green control
+     run_header_tests_check("      - name: Ruff\n        run: | # c\n          ruff check tests/ --ignore E501\n", [],
+                            "a `run: | # c` block that runs ruff")),
+)
+for _label, _check in RUN_HEADER_CHECKS:
+    FIXTURELESS_CHECKS.add(_check)  # it loads the module and builds no fixture
+    LOG_CHECKS_EXTRA.append((_label, _check))  # its family is "paths", set above
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
