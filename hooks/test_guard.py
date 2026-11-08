@@ -11303,7 +11303,7 @@ records_refuse("a lane commit of a staged page that differs from the base's, und
              VCS + " commit -m x", "staged", tool="PowerShell")
 records_refuse("a builder's commit of a staged page that differs from the base's", VCS + " commit -m x",
              "staged", agent_id="bld1", agent_type="builder")
-# A merge commit is no exemption: only the base's own page rides in on a merge.
+# A merge commit is no exemption for a page rebuilt by hand: only the merged-in branch's page rides in on a merge.
 records_refuse("a merge commit whose page was rebuilt by hand", VCS + " commit -m x", "merge-rebuilt")
 # Stage then commit in one call (beyond the brief's five cases): the page is staged when the commit runs.
 records_refuse("stage then commit: commit -am with an edited page", VCS + ' commit -am x', "unstaged")
