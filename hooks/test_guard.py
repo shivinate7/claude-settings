@@ -11969,6 +11969,42 @@ sh("frozen: a python heredoc that opens a frozen hook for write is denied",
 sh("frozen: python -c that opens a frozen install.py for write is denied",
    "python3 -c \"open('" + CFG_INSTALL_HOOK + "','w').write('x')\"", "deny", "frozen-path", cwd=NOGIT)
 
+# OTHER PYTHON AND NODE WRITES. Each deny below writes a frozen file through a call the `open(p, 'w')`
+# rows above do not name: a link, a raw descriptor, a codec, a rename onto the path, a node
+# descriptor. A mode held in a variable is refused too, since the guard cannot read what it writes.
+sh("frozen: python -c that symlinks onto a frozen hook is a write, and is denied",
+   "python3 -c \"import os; os.symlink('/tmp/x', '" + CFG_HOOK + "')\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: python -c that opens a frozen hook with os.O_WRONLY is denied",
+   "python3 -c \"import os; os.open('" + CFG_HOOK + "', os.O_WRONLY)\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: python -c that opens a frozen hook with codecs.open for write is denied",
+   "python3 -c \"import codecs; codecs.open('" + CFG_HOOK + "','w')\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: python -c that renames a scratch file onto a frozen hook is denied",
+   "python3 -c \"from pathlib import Path; Path('/tmp/x').rename('" + CFG_HOOK + "')\"", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: a python heredoc that opens a frozen hook with os.O_WRONLY is denied",
+   "python3 - <<'EOF'\nimport os\nos.open('" + CFG_HOOK + "', os.O_WRONLY)\nEOF", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: node -e that opens a frozen hook with fs.openSync for write is denied",
+   "node -e \"require('fs').openSync('" + CFG_HOOK + "','w')\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: python -c that opens a frozen hook with a mode held in a variable is denied",
+   "python3 -c \"import sys; open('" + CFG_HOOK + "', sys.argv[1]).write('x')\"", "deny", "frozen-path",
+   cwd=NOGIT)
+# A PYTHON SCRIPT THAT ONLY READS A FROZEN FILE, WRITES SCRATCH, OR PRINTS A FROZEN PATH IS NOT A
+# WRITE. Each row below is a green control, and each stays allowed beside the deny rows above.
+sh("frozen: python -c that reads a frozen hook with open is allowed",
+   "python3 -c \"print(open('" + CFG_HOOK + "').read())\"", "allow", cwd=NOGIT)
+sh("frozen: python -c that reads a frozen hook with Path.read_text is allowed",
+   "python3 -c \"from pathlib import Path; print(Path('" + CFG_HOOK + "').read_text())\"", "allow",
+   cwd=NOGIT)
+sh("frozen: python -c that checks a frozen settings file with os.path.exists is allowed",
+   "python3 -c \"import os; print(os.path.exists('" + CFG_SETTINGS + "'))\"", "allow", cwd=NOGIT)
+sh("frozen: a python heredoc that reads a frozen hook is allowed",
+   "python3 - <<'EOF'\nprint(open('" + CFG_HOOK + "').read())\nEOF", "allow", cwd=NOGIT)
+sh("frozen: python -c that writes a non-frozen scratch path is allowed",
+   "python3 -c \"open('/tmp/scratch.txt','w').write('x')\"", "allow", cwd=NOGIT)
+sh("frozen: python -c that prints a frozen path as text is allowed",
+   "python3 -c \"print('" + CFG_HOOK + "')\"", "allow", cwd=NOGIT)
+
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
 # worktree `<clone>-live-<12 hex>`. The links in ~/.claude load from it, so a write into either one
