@@ -330,7 +330,10 @@ def stale_tree_hit(where, args) -> str:
 
 def _named_by(name, paths, where, top):
     """True when a literal or glob pathspec in PATHS (relative to WHERE) covers the top-relative
-    NAME. Used only for `-i` with paths. A path that resolves to the top folder names every path."""
+    NAME. Used only for `-i` with paths. A path that resolves to the top folder names every path.
+    WHERE and TOP are resolved first: git's top is a real path, and the cwd may reach it through a
+    symlink (macOS /var -> /private/var). The paths stay as typed."""
+    where, top = os.path.realpath(where), os.path.realpath(top)
     for path in paths:
         full = os.path.relpath(os.path.join(where, path), top).replace(os.sep, "/")
         if full == "." or name == full or name.startswith(full.rstrip("/") + "/") or fnmatch.fnmatchcase(name, full):

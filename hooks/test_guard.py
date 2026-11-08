@@ -3796,6 +3796,8 @@ ES = os.path.join(STDIR, "estree")          # the stale pair: b's stale f.txt is
 ES_B = os.path.join(ES, "b")
 EU = os.path.join(STDIR, "eutree")          # the pair: b's f.txt is synced, then edited in the tree only
 EU_A, EU_B = os.path.join(EU, "a"), os.path.join(EU, "b")
+EU_LINK = os.path.join(STDIR, "eulink")     # a symlink to EU: the cwd spelling a macOS temp folder gives
+EU_LINK_A, EU_LINK_B = os.path.join(EU_LINK, "a"), os.path.join(EU_LINK, "b")
 DL = os.path.join(STDIR, "dltree")          # the pair: the move deletes f.txt, b's stale index keeps it
 DL_A, DL_B = os.path.join(DL, "a"), os.path.join(DL, "b")
 KP = os.path.join(STDIR, "kptree")          # the pair: b's f.txt is synced, and g.txt (kept by the move) is staged
@@ -4117,6 +4119,11 @@ def _build_eutree():
     _st_require_entry(EU_B, "f.txt", "moved\n", "moved\n", "")
     unstaged = _st_git(EU_B, "diff", "--name-only").split()
     _st_must(unstaged == ["f.txt"], "%r: the unstaged paths are %r, want f.txt alone" % (EU_B, unstaged))
+    if LINKS_MADE:   # the same pair, named through a link whose spelling is not the folder git names as the top
+        os.symlink(EU, EU_LINK, target_is_directory=True)
+        _st_must(os.path.islink(EU_LINK), "%r: the link was not made" % EU_LINK)
+        _st_must(os.path.realpath(EU_LINK_B) == os.path.realpath(EU_B),
+                 "%r: the link does not resolve to %r" % (EU_LINK_B, EU_B))
 
 
 def _build_dltree():
@@ -4240,7 +4247,7 @@ lazy_fixture([RF_B], _build_rfmtree)
 lazy_fixture([RE_B], _build_rfetree)
 lazy_fixture([RSM_B], _build_rsmtree)
 lazy_fixture([ES_B], _build_estree)
-lazy_fixture([EU_A, EU_B], _build_eutree)
+lazy_fixture([EU_A, EU_B, EU_LINK], _build_eutree)
 lazy_fixture([DL_A, DL_B], _build_dltree)
 lazy_fixture([KP_B], _build_kptree)
 lazy_fixture([PF_D], _build_pftree)
@@ -4350,6 +4357,17 @@ _st_allow("control: commit -i -m x f.txt of the same edit, in the fresh checkout
 _st_refuse("commit -i -m x . of a moved file edited in the work tree only is refused",
            VCS + " commit -i -m x .", EU_B)
 _st_allow("control: commit -i -m x . in the fresh checkout is allowed", VCS + " commit -i -m x .", EU_A)
+_st_refuse("control: commit -i -m x f.txt of the same edit, named by its real path, is refused",
+           VCS + " commit -i -m x f.txt", EU_B)
+# The same state, named through EU_LINK. On macOS the temp folder is a link (/var is /private/var), so the cwd
+# the guard reads is not the folder git names as the top. Here a link makes that mismatch on any platform.
+if LINKS_MADE:
+    _st_refuse("commit -i -m x . of a moved file edited in the work tree only is refused, cwd through a symlink",
+               VCS + " commit -i -m x .", EU_LINK_B)
+    _st_refuse("commit -i -m x f.txt of a moved file edited in the work tree only is refused, cwd through a symlink",
+               VCS + " commit -i -m x f.txt", EU_LINK_B)
+    _st_allow("control: commit -i -m x . through the same symlink, in the fresh checkout, is allowed",
+              VCS + " commit -i -m x .", EU_LINK_A)
 
 # A dry run writes no commit. A symlink is the link itself, so the moved link is the copy to compare.
 _st_allow("git commit --dry-run in a stale tree is allowed", VCS + " commit --dry-run -m x", ST_B)
