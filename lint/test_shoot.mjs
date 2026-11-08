@@ -107,6 +107,20 @@ Object.assign(PAGES, {
   "/touch-banded.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
     #hero{height:100vh;background:#0f0}#rest{height:2000px;background:repeating-linear-gradient(#f00 0 100px,#00f 100px 200px)}
     #bar{position:fixed;bottom:0;left:0;right:0;height:50px;background:#ff0}</style><div id="hero"></div><div id="rest"></div><div id="bar"></div>`,
+  // A sticky header at page y 100 (60 px tall) with an absolute child at top:100%: the child sits at y 160.
+  "/abs-header.html": `<!doctype html><style>body{margin:0;background:#00f}#sp{height:100px}#hdr{position:sticky;top:0;height:60px;background:#0f0}
+    #badge{position:absolute;top:100%;left:0;width:200px;height:40px;background:#ff0}#rest{height:2400px}</style>
+    <div id="sp"></div><div id="hdr"><div id="badge"></div></div><div id="rest"></div>`,
+  // A sticky element at page y 1500 (200 px tall) with an absolute child at top:10px, right:10px: the child sits at y 1510.
+  // The child is 380 px wide, so it covers column 5 at a 390 px width.
+  "/sticky-chip.html": `<!doctype html><style>body{margin:0;background:#00f}#top{height:1500px}#stk{position:sticky;top:0;height:200px;background:#0f0}
+    #chip{position:absolute;top:10px;right:10px;width:380px;height:30px;background:#ff0}#after{height:1000px}</style>
+    <div id="top"></div><div id="stk"><div id="chip"></div></div><div id="after"></div>`,
+  // A fixed pseudo-element strip at the top of a 2500 px page: it shows once, at y 0 to 300.
+  "/before-fixed.html": `<!doctype html><style>body{margin:0;background:#00f}body::before{content:"";position:fixed;top:0;left:0;right:0;height:300px;background:#0f0}
+    #c{height:2500px}</style><div id="c"></div>`,
+  // A fixed background gradient on a 2500 px page, over a green canvas: the gradient is drawn once, from the top.
+  "/bg-fixed.html": `<!doctype html><style>body{margin:0;background:linear-gradient(#f00,#00f) fixed,#0f0}#c{height:2500px}</style><div id="c"></div>`,
 });
 let server, base, tmp, browser, tls;
 
@@ -671,6 +685,66 @@ test("tile offsets: a touch page banded every 100 px in two colours keeps every 
   assert.equal(px.width, 390, "scope: the shot is at 390");
   assert.equal(px.height, 2900, "scope: the PNG is the full page");
   assert.equal(px.column, `G@0 Y@850 ${bandRuns(900, 20)}`, `a band is at the wrong page y: a tile is drawn at the wrong y (runs ${px.column})`);
+});
+
+// ---- Pinned elements in a touch stitch: what sits in the page, shown where it sits ----
+// The stitch hides fixed elements on tiles after the first, and sets sticky elements to static for the whole stitch.
+// Each case reads its own shot from one shared run, at 390 with touch, and asserts the page height before the column.
+// The expected runs are what a plain full-page capture gives at 1440 (no touch), or the page's own geometry.
+const PINNED_SHOTS = {
+  routes: [
+    { name: "abs-header", path: "/abs-header.html" },
+    { name: "sticky-chip", path: "/sticky-chip.html" },
+    { name: "before-fixed", path: "/before-fixed.html" },
+    { name: "bg-fixed", path: "/bg-fixed.html" },
+  ],
+  sizes: [390], themes: ["light"],
+};
+let pinnedShots;
+const shotsForPinned = () => (pinnedShots ??= run(PINNED_SHOTS));
+
+test("an absolute child of a sticky header sits under the header, not at the viewport's bottom, in the full-page PNG", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForPinned();
+  assert.ok(r.pngs.includes("abs-header-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "abs-header-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2560, "scope: the PNG is the full page (100 + 60 + 2400)");
+  assert.equal(px.column, "B@0 G@100 Y@160 B@200", `the child of the sticky header is not at its bottom, y 160 (runs ${px.column})`);
+});
+
+test("an absolute child at top 10px of a sticky element sits 10px below that element's top, in the full-page PNG", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForPinned();
+  assert.ok(r.pngs.includes("sticky-chip-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "sticky-chip-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2700, "scope: the PNG is the full page (1500 + 200 + 1000)");
+  assert.equal(px.column, "B@0 G@1500 Y@1510 G@1540 B@1700", `the child is not at y 1510, under its sticky element (runs ${px.column})`);
+});
+
+test("a fixed pseudo-element strip shows once, at y 0 to 300, in the full-page PNG", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForPinned();
+  assert.ok(r.pngs.includes("before-fixed-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "before-fixed-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2500, "scope: the PNG is the full page");
+  assert.equal(px.column, "G@0 B@300", `the fixed strip repeats in the full-page PNG, once per viewport tile (runs ${px.column})`);
+});
+
+test("a fixed background gradient is drawn once, from the top, in the full-page PNG", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForPinned();
+  assert.ok(r.pngs.includes("bg-fixed-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "bg-fixed-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2500, "scope: the PNG is the full page");
+  assert.equal(px.column, "R@0 B@447 G@900", `the fixed gradient repeats in the full-page PNG, once per viewport tile (runs ${px.column})`);
 });
 
 // A self-signed https fixture. The certificate is built here, into the run folder, and never committed.
