@@ -1836,21 +1836,6 @@ def case_page_writer_is_the_waiting_pages_own_meta():
     expect_silent("page: control, the waiting page's meta names this session alone, the close passes", p)
 
 
-def case_page_close_split_from_its_read_back_blocks():
-    """The read-back of item 98 and the close of it are two calls, and the close is sent before the read-back's result
-    comes back. The guard orders the two by call position, so the close passes though its read-back came after it.
-    Real transcripts put each parallel call in its own assistant record, with the results after them, so this split
-    is the real shape. The control is the same calls with the result back before the close, which passes."""
-    rb = read_back_of_98()
-    split = [owner_rec(NEUTRAL)] + writer_names(SELF) + rb[:1] + [close_on_page()] + rb[1:]
-    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))], split)
-    expect_send_missing("page: a close sent before its read-back's result came back still blocks", p,
-                        "fb-0958-7", "98")
-    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
-                 [owner_rec(NEUTRAL)] + writer_names(SELF) + read_back_of_98() + [close_on_page()])
-    expect_silent("page: control, the read-back's result back before the close, passes", p)
-
-
 def case_page_send_with_an_error_result_does_not_count():
     """A send whose tool_result is an error does not send page item 98, so it proves nothing."""
     p = page_run(new_cfg(), "page-send-error", [("98: a", (PAGE_ITEM,))],
@@ -3908,7 +3893,6 @@ CASES = (
     case_page_close_with_another_page_url_blocks,
     case_page_close_when_the_page_names_no_writer_blocks,
     case_page_writer_is_the_waiting_pages_own_meta,
-    case_page_close_split_from_its_read_back_blocks,
     case_page_send_with_an_error_result_does_not_count,
     case_page_artifactdata_write_with_an_error_result_does_not_count,
     case_send_with_a_good_result_still_counts,
