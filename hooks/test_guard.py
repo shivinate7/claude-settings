@@ -11889,8 +11889,10 @@ def _build_conflict_markers():
     _cmk_topic(CMK_STAGED, {"src/app.py": "x = 1\n"})
     stage(CMK_STAGED, "src/app.py", "x = 1\n" + CM_TRIPLET)
 
-    _cmk_topic(CMK_AM, {"src/app.py": "x = 1\n", "src/other.py": "y = 1\n"})
-    write(os.path.join(CMK_AM, "src", "app.py"), "x = 1\n" + CM_TRIPLET)   # tracked, modified, unstaged
+    # The triplet file sits in lib/, not beside the staged src/other.py: a plain commit asks on a left-out
+    # edit in the same folder as a staged path (commit-leaves-edit-unstaged), and this case tests markers only.
+    _cmk_topic(CMK_AM, {"lib/app.py": "x = 1\n", "src/other.py": "y = 1\n"})
+    write(os.path.join(CMK_AM, "lib", "app.py"), "x = 1\n" + CM_TRIPLET)   # tracked, modified, unstaged
     stage(CMK_AM, "src/other.py", "y = 2\n")                                # a clean change, staged
 
     _cmk_topic(CMK_CLEAN, {"src/app.py": "x = 1\n"})
@@ -11941,8 +11943,8 @@ cmk_refuse("commit -am with the triplet in a tracked, modified file", VCS + " co
 cmk_refuse("add . and commit with the triplet in a tracked, modified file",
          VCS + " add . && " + VCS + " commit -m x", CMK_AM)
 cmk_refuse("add of the file and commit, the triplet in that file",
-         VCS + " add src/app.py && " + VCS + " commit -m x", CMK_AM)
-cmk_refuse("a commit by path that names the file with the triplet", VCS + " commit -m x src/app.py", CMK_AM)
+         VCS + " add lib/app.py && " + VCS + " commit -m x", CMK_AM)
+cmk_refuse("a commit by path that names the file with the triplet", VCS + " commit -m x lib/app.py", CMK_AM)
 
 # 3. Scope: the commit holds what it names, and the markers in an unstaged file it does not name are no hit.
 cmk_allow("a commit with the triplet unstaged in another file, and a clean change staged",
