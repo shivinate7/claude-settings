@@ -9,39 +9,17 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 - `merge --confirm` stays with the narrated-tail rule (`live-stream`, in the same file), so it is never refused twice. A plain `merge <pr>` preview, which returns in seconds, passes.
 - `ci-job` is refused only in a call with `run_in_background`. In the foreground it passes.
 - Filters between the check and the `tail` or `head` do not hide it: `merge --lane-lint 7 | grep -v DEBUG | tail -8` is refused.
-- A `tee` stage between them ends the check's reach, because `tee` keeps every byte. A pipeline ends at any separator other than `|`.
-- The remedy is `verdict <cmd>`. It keeps the full log and prints the verdict itself.
+- A `tee` stage between them does not end the check's reach: `merge --lane-lint 7 | tee x | tail -3` is refused, because `tail` still cuts what the agent reads, which is the incident's form (coordinator ruling, 2026-11-08 05:15 CST). A `tee` with no `tail` or `head` after it passes. `verdict` keeps the full log, so the remedy names it. A pipeline ends at any separator other than `|`.
+- A lint script piped into `tail` or `head` is refused when a later segment of the same call runs `git commit` or `git push`, after `;` or `&&`. A script is a `.py` under `lint/` run by an interpreter, read through the same wrappers and `uv run` as the roster. The filter's exit hides a red lint, so the commit or push runs on it. Incident: lane `windows-tests-for-touched-files`, 2026-11-08 07:12 CST. A lint piped to `tail`, then a commit, in one call: `ste_lint` exited 1, `tail` returned 0, and the commit and push ran. The same lint piped with no commit or push after it passes, as do `verdict <lint>` then a commit, and a lint with no pipe then a commit. The `git commit` and `git push` words are read by the one reader of git calls (`git_calls` in `hooks/guard_core.py`).
+- The remedy is `verdict <cmd>` with nothing after it (decision verdict-pipe-refused refuses a pipe out of it). It keeps the full log and prints the verdict itself.
 - The rule reads the call at start, so a foreground `ci-job` the harness later moves to the background is not checked.
 - The roster is named, as built:
-  - `merge --lane-lint` and `merge --review-record`, in every spelling of the narrating roster in `hooks/guard_stream.py`: `merge`, `merge.cmd`, and `merge/merge.py` or `merge/launch.py` run by `python`, any `python3.N`, `pythonw` or `py`. Only the interpreter's script operand counts: its first word that is no flag, with `-W` and `-X` taking a value. `-m <module>` and `-c <code>` run no script, so `python3 -m pytest -k bin/ci-job` and `grep x merge/merge.py` are not the check.
-  - A `uv run` ahead of any of these is read through, with the `uv` and `uv run` flags that take a value (`uv run --help`) and the global flags before `run`. So `uv run -w pytest merge --lane-lint 7`, `uv --quiet run merge --lane-lint 7` and `uv run python merge/merge.py --lane-lint 7` are refused. The narrated rule (`live-stream`) does not read through `uv`.
+  - `merge --lane-lint` and `merge --review-record`, in these spellings: `merge`, `merge.cmd`, and `merge/merge.py` or `merge/launch.py` run by `python`, any `python3.N`, `pythonw` or `py` (the roster read in `hooks/guard_stream.py`). Only the interpreter's script operand counts: its first word that is no flag, with `-W` and `-X` taking a value. `-m <module>` and `-c <code>` run no script, so `python3 -m pytest -k bin/ci-job` and `grep x merge/merge.py` are not the check.
+  - A `uv run` ahead of any of these is read through, with the `uv` and `uv run` flags that take a value (`uv run --help`) and the global flags before `run`. So `uv run -w pytest merge --lane-lint 7`, `uv --quiet run merge --lane-lint 7`, `uv run python merge/merge.py --lane-lint 7` and `uv run merge/merge.py --lane-lint 7` are refused. The `.py` operand `uv run` runs with no interpreter word is read as the script, by the same reader as an interpreter's operand. The narrated rule (`live-stream`) reads through `uv run merge/merge.py` the same way, but not through `uv run merge`.
   - `ci-job`, in the background only, as the bullet above says. This is deliberate: every `ci-job` run prints one verdict per step, and a pipe into `tail` or `head` cuts them. An interpreter whose script operand ends in `bin/ci-job`, such as `python3 bin/ci-job checks --lint`, counts as `ci-job`.
-- A call through `verdict` passes `check-tail` behind every wrapper: `env FOO=1 verdict ...`, `uv run verdict ...`, `python3 .../verdict`, `verdict.cmd`. Rule `verdict-pipe-exit`, below, reads such a call. A file read back later, and every other command piped into `tail`, pass.
+- A call through `verdict`, including `python3 .../verdict`, is not a check-tail refusal, because a pipe after `verdict` is refused first by decision verdict-pipe-refused. So `verdict <cmd>` with nothing after it passes, behind any wrapper or `uv run`. A file read back later, and every other command piped into `tail`, pass.
 
 Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job` forms, at the coordinator's request (2026-11-07 18:09 CST).
-
-## A verdict call piped onward
-
-The coordinator asked for rule `verdict-pipe-exit` at 18:39 CST on 2026-11-07, as step `verdict-pipe-exit`. The owner may change it.
-
-The coordinator widened it at 23:38 CST on 2026-11-07, as step `guard-pipe-on-merge-lint`: a lint command run without `verdict` is refused like a verdict call, with the lint forms below.
-
-Ruling (coordinator, 2026-11-07 19:09 CST, option a: "my brief was wrong on `;`"): the rule does not refuse `;`. It keeps `&&` and `||`.
-
-Incident: lane `silent-undo-reads-retire-run` ran `~/.claude/bin/verdict python3 lint/ste_lint.py <file> 2>&1 | tail -1 && git add ... && git commit ...`. Commit 7ae6f0e1c went in with a hidden lint error.
-
-Incident, lint forms: a lane ran `ste_lint ... | tail`, then a commit and a push, and the pipe masked the lint's exit. Commit b613b336c on PR #1754 went up with an STE error. The coordinator asked for the lint commands to be refused the same way.
-
-Harm: a pipeline's exit status is its last stage's. `verdict` prints FAIL and exits non-zero, `tail` exits 0, so the `&&` after it runs. The check protects nothing.
-
-- A pipeline whose first stage is a `verdict` call (any spelling, behind any wrapper or `uv run`) and that has a later stage is refused when `&&` or `||` follows it and another command comes after. The rule id is `verdict-pipe-exit`, in `hooks/guard_stream.py`.
-- A pipeline whose first stage is a lint command run without `verdict` is refused the same way: it has a later stage, `&&` or `||` follows, and the last `set` left pipefail off. The lint commands are `ste_lint` (an interpreter running a script operand that ends `lint/ste_lint.py`), `ste-changed` (any path, `.cmd` too), `ci-job` with `--lint`, and `merge --lane-lint`. They are read through the same wrappers as `check-tail`: `uv run <command>` (such as `uv run python`, `uv run ste-changed` or `uv run ci-job --lint`), `env` and the python forms. A `.py` script run straight by `uv run` is not read (note check-tail-uv-script). A `merge --lane-lint` pipe into `tail` or `head` is refused by `check-tail` first. The forms that reach this rule are `merge --lane-lint` piped into another filter, such as `grep`.
-- The rule id stays `verdict-pipe-exit`. One id names one harm, a hidden check exit, so the owner's off switch and the guard log keep one name. The reason text says the lint forms are covered.
-- It is refused in the foreground and in the background.
-- `set -o pipefail` (or a cluster such as `set -euo pipefail`) earlier in the same command passes. The last `set` that sets or clears pipefail before the pipeline decides, so `set +o pipefail` after `set -o pipefail` does not pass.
-- A `;` after the pipeline is not read. Without `set -e`, the next command runs after a red check with or without the pipe. Under `set -e`, the pipe hides the failure and the next command runs: a known gap, note verdict-pipe-newline.
-- A bare `verdict <cmd>`, `verdict <cmd> && ...` with no pipe, and a verdict pipe that is the command's last pass.
-- The remedy is to run `verdict <cmd>` with no pipe, or to set pipefail first.
 
 ## The incident
 
@@ -57,9 +35,13 @@ A rule on every `| tail` would refuse `make check 2>&1 | tail -40` and many othe
 
 The rule stops a mistake Claude made in normal work (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker). It reads no form that only an attacker would write.
 
+## What check-tail reads
+
+For an interpreter, check-tail reads the script operand only: the first word that is no flag. `grep -n x merge/merge.py` and `python3 -m pytest -k merge/merge.py` run no roster script, so they pass. An unquoted `$(` or backtick substitution splits into several words. So the operand reads on to the word that closes it. The roster tail is judged on the joined word (`_whole_word` in `hooks/guard_stream.py`).
+
 ## Known gaps
 
-Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-powershell-select`, `check-tail-trailing-amp`, `verdict-pipe-if`, `verdict-pipe-substitution` and `narrated-tail-no-uv`. No incident has shown any of them.
+Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-powershell-select`, `check-tail-uv-flag-value`, `check-tail-trailing-amp` and `narrated-tail-no-uv`. No incident has shown any of them.
 
 Why: a merge or lane verdict is the one line the orchestrator needs. A pipe into a truncating filter hides it, and the lane must run the check again.
 

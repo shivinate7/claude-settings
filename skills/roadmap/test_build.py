@@ -2024,6 +2024,16 @@ class ReadyAndDraftRows(UpkeepFixture):
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
 
+    def test_draft_on_a_lane_branch_with_a_live_step_is_not_listed(self):
+        # The head ref lane/c1 is the lane of step c1, as c1 is. Its live session carries the step's tag.
+        # lone-draft is the control: no live step, so it stays listed.
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")],
+                     pulls=[self.draft(1001, "lane/c1", self.created_before(780)),
+                            self.draft(1002, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
+
     def test_draft_whose_title_holds_a_live_step_id_is_still_listed(self):
         # Only the draft's branch can lane it. The title "Follow-up for c91" holds the live step c91 and stays listed.
         # c91 is the control: its branch is the step, so it is laned.
@@ -2306,10 +2316,11 @@ class MockupFiles(UpkeepFixture):
             return real(repo, *args, stdin=stdin)
         return mock.patch.object(build, "git", read)
 
-    def check_starts(self):
+    def check_starts(self, expect=(1,)):
         """One build, with its mockup check wrapped to count the git processes the check starts. Each process is counted
         at subprocess.Popen, the one start every helper of the build reaches, so a git call made any way is counted.
-        The rest of the build is outside the count. Returns (build output, the check's (misses, unread), the git argv
+        The rest of the build is outside the count. `expect` is the build's exit codes: (1,) when a miss exits it, (0,)
+        when every file is on origin. Returns (build output, the check's (misses, unread), the git argv
         the check started). The check's result is None when the check did not run."""
         real = build.mockup_misses
         seen = {}
@@ -2321,7 +2332,7 @@ class MockupFiles(UpkeepFixture):
             return seen["result"]
 
         with mock.patch.object(build, "mockup_misses", check):
-            _, out = self.build_from_main(expect=(1,))
+            _, out = self.build_from_main(expect=expect)
         return out, seen.get("result"), seen.get("argv", [])
 
     def write_extras(self, text):
@@ -2586,6 +2597,27 @@ class MockupFiles(UpkeepFixture):
                          "the check did not judge all five entries as misses")
         self.assertEqual(unread, [], "the check read an entry as unknown")
         self.assertLessEqual(len(argv), 4, "the mockup check started %d git processes for 5 entries over 50 origin refs, "
+                                           "want at most 4" % len(argv))
+
+    def test_five_files_on_origin_over_fifty_origin_refs_start_at_most_four_git_processes(self):
+        # The on-origin path, not the all-miss path: each of the five files is on origin/main, so the check reads them.
+        for k in range(1, 6):
+            item = "item%d-a" % (40 + k)
+            self.commit_step("c%d" % k, order=k, title="Picker %d" % k, note="Shape the %s picker." % item,
+                             mockups={item: "docs/design/item%d/a.html" % (40 + k)})
+        for k in range(1, 6):
+            self.commit_design("docs/design/item%d/a.html" % (40 + k))
+        self.fetch_origin("main")
+        for n in range(1, 50):
+            self.fetch_origin("main", name="lane-%02d" % n)  # 50 origin refs in all, as open PR branches leave them
+        out, result, argv = self.check_starts(expect=(0,))
+        self.steps_line(out, 5)
+        self.assertIsNotNone(result, "the mockup check did not run")
+        misses, unread = result
+        self.assertEqual(misses, [], "a file on origin read as a miss")
+        self.assertEqual(unread, [], "a file on origin read as unknown")
+        self.assertTrue(any("cat-file" in call for call in argv), "the check never read origin's files: %r" % argv)
+        self.assertLessEqual(len(argv), 4, "the mockup check started %d git processes for 5 files on origin over 50 origin refs, "
                                            "want at most 4" % len(argv))
 
     def test_a_malformed_extras_file_reads_the_design_entry_unknown_and_the_build_writes_the_page(self):

@@ -9,9 +9,10 @@ import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, inline_script, inner_commands, resolve_command, segment_tokens,
-    split_segments,
+    bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
+    git_calls, segment_tokens, split_segments,
 )
+from guard_env import _substitutions
 
 
 # ------------------------------------------------------------------ a stream that never ends
@@ -109,7 +110,22 @@ def _script_operand(tokens, index: int) -> str:
         if flag in ("-m", "-c"):
             return ""
         at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
-    return tokens[at] if at < len(tokens) else ""
+    return _whole_word(tokens, at) if at < len(tokens) else ""
+
+
+def _whole_word(tokens, at: int) -> str:
+    """The word at `at`, joined across the tokens an unquoted substitution split. A `$(` or a backtick
+    opens a substitution that reads as several tokens, so the word reads on to the token that closes it
+    and the roster tail is judged on the joined word. A quoted substitution is one token and joins nothing."""
+    word = tokens[at]
+    depth = word.count("$(") - word.count(")")
+    ticks = word.count("`") % 2
+    while (depth > 0 or ticks) and at + 1 < len(tokens):
+        at += 1
+        word += " " + tokens[at]
+        depth += tokens[at].count("$(") - tokens[at].count(")")
+        ticks = (ticks + tokens[at].count("`")) % 2
+    return word
 
 
 def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
@@ -124,6 +140,8 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
         return word
     if interpreter_only:
         script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+        if not script and word.endswith(".py"):
+            script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
         if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(script)
         return ""
@@ -166,12 +184,13 @@ NARRATED_TAIL_REASON = (
 # verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the verdict
 # itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
 # cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
-# (`--lane-lint`, `--review-record`, in each spelling of the roster above) are refused in the
-# foreground too. `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused
-# twice. `ci-job` is refused in the background only.
+# (`--lane-lint`, `--review-record`) are refused in the foreground too. They count as `merge`,
+# `merge.cmd`, or `merge/merge.py` or `merge/launch.py` run by `python`, a `python3.N`, `pythonw` or
+# `py`, behind a wrapper or `uv run`. A call through `verdict` is verdict-pipe's, never read here.
+# `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused twice.
+# `ci-job` is refused in the background only.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record")
-VERDICT_WRAPPERS = ("verdict", "verdict.cmd")
 CHECK_SCRIPT_TAIL = "bin/ci-job"
 # The `uv` and `uv run` flags that take the next word as their value (`uv run --help`, uv 0.11), so
 # `uv run -w pytest python x.py` skips `pytest`. The global flags that sit before `run` are in this list too.
@@ -209,28 +228,14 @@ def _skip_uv_run(tokens, index: int) -> int:
     return index
 
 
-def _through_verdict(tokens) -> bool:
-    """True when a segment runs its command through `verdict`, behind any wrapper or `uv run`.
-    resolve_command skips `verdict` like any wrapper, and the wrapper walk skips the `verdict` after
-    `python3` without recording it, so read the words ahead of the command word, and the word itself
-    for `verdict.cmd`."""
-    index = resolve_command(tokens)
-    if index is None:
-        return False
-    index = _skip_uv_run(tokens, index)
-    return any(basename(token) in VERDICT_WRAPPERS for token in tokens[:index + 1])
-
-
 def check_stage(segment: str, background: bool) -> str:
-    """The command word when one segment runs a named check outside `verdict`, else ''. `ci-job` counts
+    """The command word when one segment runs a named check, else ''. `ci-job` counts
     only in the background."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
     index = resolve_command(tokens)
     if index is None:
-        return ""
-    if _through_verdict(tokens):
         return ""
     index = _skip_uv_run(tokens, index)
     if basename(tokens[index]) in CHECK_COMMANDS:
@@ -243,11 +248,29 @@ def check_stage(segment: str, background: bool) -> str:
     return _roster_word(tokens, index, interpreter_only=True)
 
 
-def _pipeline_hit(stages, background: bool) -> str:
-    """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
-    between them keeps every byte, so it ends that check's reach."""
+LINT_SCRIPT = re.compile(r"(?:^|/)lint/[^/]+\.py$")
+
+
+def lint_stage(segment: str, background: bool) -> str:
+    """`lint` when one segment runs a script under `lint/` through an interpreter, else ''. The
+    `background` argument keeps the signature of check_stage, the other stage reader."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return ""
+    index = _skip_uv_run(tokens, index)
+    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and LINT_SCRIPT.search(
+            _script_operand(tokens, index).replace("\\", "/")):
+        return "lint"
+    return ""
+
+
+def _pipeline_hit(stages, background: bool, stage_of=check_stage) -> str:
+    """The matched text when a stage that `stage_of` names, in one pipeline's stages, reaches
+    `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
+    what the agent reads. A `tee` with no `tail` or `head` after it is not a hit."""
     for first, segment in enumerate(stages):
-        stage = check_stage(segment, background)
+        stage = stage_of(segment, background)
         if not stage:
             continue
         for later in stages[first + 1:]:
@@ -256,130 +279,112 @@ def _pipeline_hit(stages, background: bool) -> str:
             if at is None:
                 continue
             word = basename(tokens[at])
-            if word == "tee":
-                break
             if word in TRUNCATING_FILTERS:
                 return stage + " | " + word
     return ""
 
 
+def _commits_or_pushes(segment: str) -> bool:
+    """True when one segment runs a commit or a push, read by the one reader of git calls."""
+    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))
+
+
 def check_tail_hit(stripped: str, background: bool) -> str:
     """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
-    filters. A pipeline ends at any separator other than `|`."""
+    filters. A pipeline ends at any separator other than `|`. A lint script piped into `tail`/`head`
+    counts only when a later segment of the call runs a commit or a push: the filter's exit hides a
+    red lint, and the commit or push runs on it (incident, lane windows-tests-for-touched-files)."""
     ends = []
     segments = split_segments(stripped, ends)
+    pipelines = []
     stages = []
     for segment, end in zip(segments, ends):
         stages.append(segment)
         if end != "|":
-            hit = _pipeline_hit(stages, background)
-            if hit:
-                return hit
+            pipelines.append(stages)
             stages = []
-    return _pipeline_hit(stages, background)
+    pipelines.append(stages)
+    for stages in pipelines:
+        hit = _pipeline_hit(stages, background)
+        if hit:
+            return hit
+    for at, stages in enumerate(pipelines):
+        hit = _pipeline_hit(stages, background, lint_stage)
+        if hit and any(_commits_or_pushes(segment) for later in pipelines[at + 1:] for segment in later):
+            return hit + " then a commit or push"
+    return ""
 
 
 CHECK_TAIL_REASON = (
     "this check's output goes into a filter that keeps one end, so the filter holds everything "
     "until the check exits and the verdict can be lost "
     "(decision background-check-through-verdict). "
-    "Remedy: run the check through verdict, as `verdict <cmd>`. It keeps the full log and "
-    "prints the verdict itself."
+    "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
+    "full log and prints the verdict itself."
 )
 
 
-# A VERDICT CALL, OR A LINT COMMAND RUN WITHOUT IT, PIPED ONWARD, then `&&` or `||` (decision
-# background-check-through-verdict). A pipeline's exit status is its last stage's, so
-# `verdict <cmd> | tail -1 && <next>` runs the next command after a red check: verdict's own exit status
-# is hidden. A lint command run bare hides its status the same way. `set -o pipefail` earlier in the same
-# command keeps it, unless a later `set +o pipefail` clears it. A `;` is not read: without errexit it
-# gates nothing. Under `set -e` it does, and that form is a known gap (note verdict-pipe-newline). A
-# pipeline that ends the command is safe, since nothing reads its status, and so is a bare call. The rule
-# id stays `verdict-pipe-exit`: one id for one harm, a hidden check exit, so the owner's off switch and
-# the guard log keep one name.
-CONTINUING_ENDS = ("&&", "||")
-PIPEFAIL_FLAGS = re.compile(r"[-+][A-Za-z]*o$")
-LINT_SCRIPT_TAIL = "lint/ste_lint.py"
-STE_CHANGED_COMMANDS = ("ste-changed", "ste-changed.cmd")
+# A PIPE OUT OF `verdict`. A pipeline's exit is its last stage's, so `verdict CMD | tail` returns
+# tail's exit and a red run reads 0. verdict prints its `FAIL ... rc=` line first, and a filter
+# that keeps the end of the stream (or anything that selects lines) can cut it. Every command after
+# the pipe counts, not only TRUNCATING_FILTERS: grep, tee and cat all return their own exit.
+# `verdict` is a COMMAND_WRAPPERS entry, so `resolve_command` skips it and names the program it
+# runs; the verdict word is read from the tokens up to that program (`timeout 600 verdict x`,
+# `python bin/verdict x`, `VAR=1 verdict x`). A verdict that closes a segment on something other
+# than `|` (`&&`, `;`, a redirect target, the last stage) has no pipe out of it.
+VERDICT_WORDS = ("verdict", "verdict.cmd")
 
 
-def _pipefail_change(segment: str):
-    """True when one segment turns pipefail on (`set -o pipefail`, or a cluster such as `set -euo
-    pipefail`), False when it turns it off (`set +o pipefail`), else None. The last change in a segment wins."""
-    tokens = segment_tokens(segment)
-    at = resolve_command(tokens) if tokens else None
-    if at is None or basename(tokens[at]) != "set":
-        return None
-    rest = tokens[at + 1:]
-    change = None
-    for i, word in enumerate(rest):
-        if i and word == "pipefail" and PIPEFAIL_FLAGS.match(rest[i - 1]):
-            change = rest[i - 1].startswith("-")
-    return change
+def _is_lookup(tokens) -> bool:
+    """True for `command -v NAME` / `command -V NAME`: the shell names a program and runs none."""
+    at = _skip_assignments_and_keywords(tokens)
+    return (at < len(tokens) and basename(tokens[at]) == "command"
+            and any(token in ("-v", "-V") for token in tokens[at + 1:]))
 
 
-def _lint_stage(tokens) -> str:
-    """The lint command a segment runs outside `verdict`, else ''. Read through the wrappers and `uv run`
-    that check_stage reads. The merge form reuses `_roster_word`, so no roster is copied."""
-    index = resolve_command(tokens)
-    if index is None:
-        return ""
-    index = _skip_uv_run(tokens, index)
-    word = basename(tokens[index])
-    interpreter = SCRIPT_INTERPRETER.match(word.removesuffix(".exe"))
-    script = _script_operand(tokens, index).replace("\\", "/") if interpreter else ""
-    if script.endswith(LINT_SCRIPT_TAIL):
-        return "ste_lint"
-    if word in STE_CHANGED_COMMANDS:
-        return word
-    if "--lint" in tokens and (word in CHECK_COMMANDS or script.endswith(CHECK_SCRIPT_TAIL)):
-        return CHECK_COMMANDS[0]
-    if "--lane-lint" in tokens:
-        return _roster_word(tokens, index, interpreter_only=True)
-    return ""
-
-
-def _pipe_exit_stage(segment: str) -> str:
-    """The name of a pipeline's first stage when it is a `verdict` call or a lint command, else ''. The
-    one stage test that both kinds share."""
-    tokens = segment_tokens(segment)
-    if not tokens:
-        return ""
-    if _through_verdict(tokens):
-        return "verdict"
-    return _lint_stage(tokens)
-
-
-def verdict_pipe_exit_hit(stripped: str) -> str:
-    """The matched text when a pipeline that starts with a `verdict` call or a lint command has a later
-    stage and is followed by `&&` or `||` and more commands, with no `set -o pipefail` in force before
-    it: the last `set` that sets or clears pipefail decides."""
+def _verdict_pipe_in(text: str) -> str:
+    """One command text, no substitution left in it (they are read apart): the `verdict |` match, else ''."""
     ends = []
-    segments = split_segments(stripped, ends)
-    start = 0
-    for at, end in enumerate(ends):
-        if end == "|":
+    segments = split_segments(text, ends)
+    for index, segment in enumerate(segments):
+        # A pipe at a line end (`verdict x |` then a newline) still pipes into the next line.
+        if ends[index] != "|":
             continue
-        stages, first, start = segments[start:at + 1], start, at + 1
-        if len(stages) < 2 or end not in CONTINUING_ENDS or not any(s.strip() for s in segments[start:]):
+        tokens = segment_tokens(segment)
+        if not tokens:
             continue
-        name = _pipe_exit_stage(stages[0])
-        if not name:
+        at = resolve_command(tokens)
+        if at is None and _is_lookup(tokens):
             continue
-        changes = [c for c in map(_pipefail_change, segments[:first]) if c is not None]
-        if changes and changes[-1]:
-            continue
-        return name + " | " + (stages[1].split() or [""])[0] + " " + end
+        # `uv` is no wrapper, so `uv run verdict x` names `uv`; _skip_uv_run reads on to the program.
+        reach = tokens if at is None else tokens[:_skip_uv_run(tokens, at) + 1]
+        if any(basename(token.lstrip("(")) in VERDICT_WORDS for token in reach):
+            return "verdict |"
+    # A shell's script (`bash -c '...'`) is its own command text, read the way the live-stream rule reads it.
+    for segment in segments:
+        tokens = segment_tokens(segment)
+        hit = tokens and next((h for inner in inner_commands(tokens)
+                               if (h := verdict_pipe_hit(inner))), "")
+        if hit:
+            return hit
     return ""
 
 
-VERDICT_PIPE_EXIT_REASON = (
-    "a pipe after verdict, or after a lint command run without it, hides the check's exit status, so "
-    "the command after it still runs when the check is red "
-    "(decision background-check-through-verdict). "
-    "The rule id stays verdict-pipe-exit: one id for one harm, a hidden check exit. "
-    "Remedy: run `verdict <cmd>` with no pipe, or set pipefail first, "
-    "as `set -o pipefail; verdict <cmd> | tail -1 && ...`."
+def verdict_pipe_hit(stripped: str) -> str:
+    """Return the matched text when a `verdict` stage is piped into another command, else ''.
+    Each command substitution (`$(...)`, backticks, in double quotes too) is its own text, read
+    through the one reader in guard_env, as the draft-pr rule reads it."""
+    texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
+    if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
+        texts = [(stripped, False)]
+    return next((hit for text, _in_message in texts if (hit := _verdict_pipe_in(text))), "")
+
+
+VERDICT_PIPE_REASON = (
+    "a pipe out of verdict hides its result: the pipeline returns the last command's exit, so a "
+    "failed run reads as exit 0, and verdict prints its FAIL line first, which a filter can cut. "
+    "Remedy: run `verdict <cmd>` with nothing after it. Its output is already short. "
+    "(rule tokens-run-through-verdict, verdict keeps the full output in a log)"
 )
 
 

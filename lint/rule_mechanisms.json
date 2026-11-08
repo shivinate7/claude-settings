@@ -71,7 +71,7 @@
     "roles-one-role-per-agent": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook judges it. A prompt hook sees only the event input, never what an agent did, and no check reads an agent's roles."
+        "reason": "No prompt hook judges it. By agent type, the guard (hooks/guard.py) refuses a builder's test-file write, a test-author's or designer's write outside its paths, and a record-writer's non-Markdown write. floor_hit reads a Haiku spawn's agent type only to judge its model. No check sees one agent do a second role's work inside its own paths."
       }
     },
     "roles-model-per-role-table": {
@@ -353,7 +353,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "check-tail",
-        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint` or `merge --review-record` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, unless the call runs through verdict or a tee sits between them. A second guard (verdict-pipe-exit, hooks/guard_stream.py verdict_pipe_exit_hit) refuses a verdict call, or a lint command run without verdict (ste_lint, ste-changed, ci-job --lint, merge --lane-lint), piped onward and followed by `&&` or `||` with no pipefail in force. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
+        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint` or `merge --review-record` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes), and a script under lint/ run by an interpreter and piped into tail or head when a git commit or git push follows later in the same call, and it reads the check through `uv run`, a versioned python such as `python3.11`, and an `env` or python wrapper. A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a lint piped into tail or head with no commit or push after it, or a command run outside verdict with no pipe."
       },
       "test": "hooks/test_guard.py::check-tail: the incident line, backgrounded, is refused"
     },
