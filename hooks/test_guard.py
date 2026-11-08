@@ -28294,6 +28294,11 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Verdict - FAI
            "Check the floor fix.\nVerdict - FAIL\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict — FAIL line, em dash",
            "Check the floor fix.\nRound 1 verdict — FAIL\nFiles: hooks/guard.py.")
+# A bold label before the colon (`**Done**:`) is a short label too. A round result with no space at its dash is a verdict line.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold **Done**: FAIL line, round 1 of 3",
+           "Check the floor fix.\n**Done**: FAIL, round 1 of 3\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Context: prior round result—FAIL line, no space at the dash",
+           "Check the floor fix.\nContext: prior round result—FAIL\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: line that asks for a verdict, PASS or FAIL",
           "Check the floor fix.\nDone: read the diff, then give a verdict: PASS or FAIL.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Context: line saying the prior verdict is in the PR thread",
