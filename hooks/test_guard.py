@@ -5492,6 +5492,18 @@ sh("git-after-cd: a make a, then || command true, then || exit 1 and ; a git pus
 sh("git-after-cd: a make a, then || (true), then || exit 1 and ; a git push -u, is refused",
    "make a || (true) || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
+# A PUSH THAT RUNS ON A FAILED CHECK, AND A PIPE THAT HIDES ONE. A brace group after `||` runs when pytest fails, so
+# the push in it runs on that failure. A pipe's status is its last command's, so `pytest | tail` clears the `&&` whatever
+# pytest did, and the push runs on its failure too. `set -o pipefail` makes the pipe fail when pytest fails, so the `&&`
+# stops the push, and the same pipe passes.
+sh("git-after-cd: a check, then || a brace group that runs a git push -u, is refused",
+   "pytest -q || { echo x && %s push -u origin b; }" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check piped to tail, then && a git push -u, is refused",
+   "pytest -q | tail -5 && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: set -o pipefail, a check piped to tail, then && a git push -u, passes",
+   "set -o pipefail; pytest -q | tail -5 && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 # A SUBSTITUTION ASSIGNED TO A NAME, AND A TEST OF GIT STATUS. The assignment's status is its substitution's, so the
 # `|| exit 1` runs when make fails and the push after `;` is never reached. The test is true only on a clean tree, so
 # the `|| exit 1` stops the push on a dirty one. Both push forms pass.
