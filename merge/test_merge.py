@@ -893,6 +893,7 @@ class CloudProxy(Env):
         self.now += 601
         self.assertTrue(self.lock.acquire("main", 600))
 
+    # coordinator pick, 2026-11-07, lane merge-lock-expired-delete-race
     def test_every_session_picks_the_git_lock(self):
         for remote in ("true", "", None):  # None: CLAUDE_CODE_REMOTE unset
             with unittest.mock.patch.dict(os.environ):
@@ -1199,6 +1200,37 @@ class LockRetake(Env):
         self.assertEqual(rc, 1, out)
         self.assertIsNone(lock.sha, "the lost take is still recorded on the lock, so the release would act on another run's lock")
         self.assertNotIn("not this run's any more", out, "the release reports the lock this run lost as removed by someone")
+
+class GitLockListing(Env):
+    """GitLock.listed and GitLock.read take the lock sha from ls-remote's stdout alone (decision merge-lock). A listing with no ref is no lock,
+    even when git writes a stderr line. A stdout token that is no 40-hex sha stops the run: a lock that cannot be read is never read as no lock."""
+
+    def test_a_stderr_line_with_no_listed_ref_is_no_lock(self):
+        ref = merge.lock_ref("main")
+        traced = dict(os.environ, GIT_TRACE="1")  # git writes its trace lines to stderr: a stderr line on a listing that has no ref
+        r = subprocess.run(["git", "-C", self.co, "ls-remote", "origin", ref], capture_output=True, text=True, env=traced)
+        self.assertEqual((r.returncode, r.stdout), (0, ""), "scope: the origin lists a ref, so the case proves nothing")
+        self.assertTrue(r.stderr.strip(), "scope: ls-remote wrote no stderr line, so the case proves nothing")
+        with unittest.mock.patch.dict(os.environ, {"GIT_TRACE": "1"}):
+            self.assertIsNone(self.lock.listed(ref), "a stderr line with no listed ref read as the lock sha")
+            try:
+                got = self.lock.read("main")
+            except merge.Stop as e:
+                self.fail(f"read stopped on a stderr line with no listed ref: {e}")
+        self.assertIsNone(got, "read takes a stderr line with no listed ref for a lock")
+
+    def test_a_listed_first_token_that_is_no_sha_is_a_stop(self):
+        ref = merge.lock_ref("main")
+        real, seen = merge.sh, []
+        def sh_with_garbled_listing(args, *a, **kw):
+            if "ls-remote" in args:
+                seen.append(args)
+                return 0, "not-a-sha\t" + ref  # stdout's first token is no 40-hex sha
+            return real(args, *a, **kw)
+        with unittest.mock.patch.object(merge, "sh", sh_with_garbled_listing):
+            with self.assertRaises(merge.Stop, msg="listed read a stdout token that is no sha as the lock sha, not a Stop"):
+                self.lock.listed(ref)
+        self.assertTrue(seen, "scope: ls-remote never ran through the faked call, so the case proves nothing")
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
