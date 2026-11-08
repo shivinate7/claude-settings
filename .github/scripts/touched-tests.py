@@ -7,9 +7,10 @@ Output: lines written to $GITHUB_OUTPUT (stdout when unset):
   files_windows, any_windows    the tests the Windows job runs
   files_macos, any_macos        the tests the macOS job runs
   matrix                        {"include": [{"os", "files"}]}, one entry per OS that has tests; files is a JSON list as text
-  commands                      {path: cmd} over every selected file: the tokens before the path on the checks.yml run line
-                                (mod-tests.sh files: `node` for a mods test, `node --test` for a map skill test). A file
-                                both systems run with different commands keeps the Windows one.
+  commands_windows, commands_macos   {path: cmd} over that OS's files. cmd is the interpreter its checks.yml run line starts
+                                with: sh, bash, node, node --test, python, python3, powershell or pwsh (mod-tests.sh files:
+                                `node` for a mods test, `node --test` for a map skill test). Each OS names its own, so a
+                                test run as `python` on Windows and `python3` on macOS has both.
 Stdout also names every touched path and what became of it, so the run log shows each decision.
 
 A touched path selects:
@@ -17,7 +18,8 @@ A touched path selects:
   dir/x.py                                                                   -> dir/test_x.py
   dir/x.sh                                                                   -> dir/test_x.sh, dir/x.test.sh
   dir/x.ps1                                                                  -> dir/x.test.ps1, dir/x-*.test.ps1
-  any non-.md path under mods/<mod>/                                         -> every *.test.mjs under mods/<mod>/, not node_modules
+  any non-.md, non-test path under mods/<mod>/                               -> every *.test.mjs under mods/<mod>/, not node_modules
+                                                                               (that mod's tests only: mod-tests.sh runs every mod's)
   dir/x.mjs, dir/x.js                                                        -> dir/x.test.{mjs,js}, dir/tests/x.test.{mjs,js}; x.mjs also dir/test_x.mjs
   any non-.md path under skills/plain-english-map/                           -> every test in its tests folder
   any non-.md, non-test path under a folder named tests                      -> every test under that folder
@@ -27,8 +29,10 @@ Each selected test then lands in one of these places, each printed with its reas
   per OS          listed for an OS when a job of checks.yml at HEAD runs on that OS and names it (see os_runs);
                   skipped on each other OS, and on both with "no CI job runs it" when no Windows or macOS job names it
 An unreadable diff (no BASE_SHA, git fails) or a checks.yml it cannot read exits 1 and writes no output
-(decision ci-unknown-is-red). A checks.yml it cannot read is a runs-on it cannot place, no jobs, a tab indent, or a
-flow-style step (`- {`). A step with `shell: powershell` or `pwsh` is read with each backslash as a slash.
+(decision ci-unknown-is-red). A checks.yml it cannot read is a runs-on it cannot place, no jobs, a tab indent, a
+flow-style step (`- {`), a one-line `steps: [...]`, a `defaults:` block, or a run line that names a test after anything but
+an interpreter (`FOO=x node t`, `cd a && node t`). The exit names the line. A step with `shell: powershell` or `pwsh` is read
+with each backslash as a slash.
 """
 import fnmatch
 import json
@@ -159,10 +163,11 @@ def one_line_scalar(value):
 
 
 def ci_jobs(text):
-    """{job: (runs-on, [run text])} for each job under the top-level `jobs:` of a workflow. A hand parser: the runner
-    image has no YAML module. A run text is the line's value plus every deeper line after it, so a block scalar
-    (`run: |`), a folded one and a plain continuation are each read whole. A job this cannot read exits 1: a job
-    read as no job would drop its tests in silence."""
+    """{job: (runs-on, [(line, run text)])} for each job under the top-level `jobs:` of a workflow. A hand parser: the
+    runner image has no YAML module. A run text is the line's value plus every deeper line after it, so a block scalar
+    (`run: |`), a folded one and a plain continuation are each read whole. `line` is the number of the `run:` key's line,
+    so the nth line of its text is line + n - 1. A job this cannot read exits 1: a job read as no job would drop its
+    tests in silence."""
     jobs, job, job_indent, prop_indent, in_jobs = {}, None, None, None, False
     in_steps, step_indent, step_col, step_no = False, None, None, 0
     lines = text.splitlines()
@@ -177,6 +182,8 @@ def ci_jobs(text):
             fail(f"{CI_PATH} line {i} is indented with a tab")
         m = KEY_LINE.match(line)
         if indent == 0:
+            if m and m["key"] == "defaults":
+                fail(f"{CI_PATH} line {i} sets workflow-level defaults, which this cannot read: a default shell would change how a step reads")
             in_jobs = bool(m) and m["key"] == "jobs" and not m["dash"] and one_line_scalar(m["value"]) is None
             job = None
             continue
@@ -200,6 +207,10 @@ def ci_jobs(text):
         if indent == prop_indent and m and not m["dash"]:
             in_steps = m["key"] == "steps"
             step_indent, step_col, step_no = None, None, 0
+            if m["key"] == "defaults":
+                fail(f"{CI_PATH} line {i} sets job {job}'s defaults, which this cannot read: a default shell would change how a step reads")
+            if in_steps and m["value"] and not m["value"].startswith("#"):
+                fail(f"{CI_PATH} line {i} writes job {job}'s steps on one line, which this cannot read: {line.strip()!r}")
         if in_steps and re.match(r"-[ \t]+\{", line.lstrip(" ")) and step_indent in (None, indent):
             fail(f"{CI_PATH} line {i} is a flow-style step, which this cannot read; the job {job} would be misread: "
                  f"{line.strip()!r}")
@@ -216,19 +227,19 @@ def ci_jobs(text):
         elif m["key"] == "shell" and in_steps and key_col == step_col:
             jobs[job][2][step_no] = one_line_scalar(m["value"])
         elif m["key"] == "run":
-            body = [m["value"] or ""]
+            start, body = i, [m["value"] or ""]
             while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip(" ")) > key_col):
                 body.append(lines[i])
                 i += 1
-            jobs[job][1].append((step_no if in_steps else 0, "\n".join(body)))
+            jobs[job][1].append((step_no if in_steps else 0, start, "\n".join(body)))
     if not jobs:
         fail(f"{CI_PATH} has no jobs this can read")
     for name, (runner, _, _) in jobs.items():
         if runner is None:
             fail(f"{CI_PATH} job {name} has no runs-on this can read; the OS lists would be unknown")
     # A powershell step names a path with a backslash (lint\\test_x.py). Read it as the slash form the lists use.
-    return {name: (runner, [text.replace("\\", "/") if shells.get(step) in ("powershell", "pwsh") else text
-                            for step, text in runs])
+    return {name: (runner, [(start, text.replace("\\", "/") if shells.get(step) in ("powershell", "pwsh") else text)
+                            for step, start, text in runs])
             for name, (runner, runs, shells) in jobs.items()}
 
 
@@ -246,13 +257,25 @@ def name_match(text, path):
     return re.search(rf"(?<![\w./\\-])(?:\./)?{re.escape(path)}(?![\w./\\-])", text)
 
 
-def line_command(text, match):
-    """The command a run line names before the path `match` found: the tokens after the line's last `&&`, `||`, `;`,
-    `|` or `(` and before the path. It is the run line's own words, such as `node --test`. Empty when the path starts
-    its command."""
-    before = text[text.rfind("\n", 0, match.start()) + 1:match.start()]
-    before = re.split(r"&&|\|\||[;|(]", before)[-1].strip().rstrip("\"'").strip()
-    return " ".join(before.split())
+# The interpreters a run line may start with. The command a test runs with is this word (`node --test` for node's runner).
+INTERPRETERS = ("sh", "bash", "node", "python", "python3", "powershell", "pwsh")
+
+
+def line_command(start, text, match):
+    """The command the run line that names the path `match` found starts with: a word of INTERPRETERS, or `node --test`
+    for node's test runner. `start` is the line number of text's first line. The line is the logical line, so a
+    trailing backslash joins the next line. Anything else before the interpreter (an env prefix, `cd a &&`, `if`, the
+    path itself) exits 1 naming the line: the run could not be reproduced from its command word alone."""
+    rows = text.split("\n")
+    index = text.count("\n", 0, match.start())
+    first = index
+    while first > 0 and rows[first - 1].rstrip().endswith("\\"):
+        first -= 1
+    words = " ".join(row.rstrip().rstrip("\\") for row in rows[first:index + 1]).split()
+    if not words or words[0] not in INTERPRETERS:
+        fail(f"{CI_PATH} line {start + first} names a test after {words[0] if words else 'nothing'!r}, not an interpreter "
+             f"({', '.join(INTERPRETERS)}), so its command cannot be read: {' '.join(words)!r}")
+    return "node --test" if words[0] == "node" and words[1:2] == ["--test"] else words[0]
 
 
 def script_globs(text):
@@ -269,7 +292,7 @@ def script_globs(text):
 
 
 def os_runs():
-    """{OS word: [run text]} for the Windows and macOS jobs of checks.yml at HEAD."""
+    """{OS word: [(line, run text)]} for the Windows and macOS jobs of checks.yml at HEAD."""
     texts = {word: [] for word in OS_RUNNERS.values()}
     for job, (runner, runs) in ci_jobs(git("show", f"HEAD:{CI_PATH}")).items():
         word = os_of(job, runner)
@@ -279,12 +302,12 @@ def os_runs():
 
 
 def command_for(test, runs):
-    """The command a run text of `runs` runs `test` with: the words before its path on the run line, or the command of
-    the runner script whose globs cover it. None when no run text names it."""
-    for text in runs:
+    """The command a run text of `runs` runs `test` with: the interpreter its run line starts with, or the command of
+    the runner script whose globs cover it. None when no run text names it. `runs` is [(line, run text)]."""
+    for start, text in runs:
         found = name_match(text, test)
         if found:
-            return line_command(text, found)
+            return line_command(start, text, found)
         for glob, cmd in script_globs(text):
             if fnmatch.fnmatchcase(test, glob):
                 return cmd
@@ -300,11 +323,11 @@ def write_outputs(windows, macos, cmds):
     files = sorted(set(windows) | set(macos))
     matrix = [{"os": name, "files": json.dumps(sorted(listed))}
               for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
-    commands = {t: cmds["windows"][t] if t in cmds["windows"] else cmds["macos"][t] for t in files}
     lines = (f"files={json.dumps(files)}\nany={flag(files)}\n"
              f"files_windows={json.dumps(windows)}\nany_windows={flag(windows)}\n"
              f"files_macos={json.dumps(macos)}\nany_macos={flag(macos)}\n"
-             f"matrix={json.dumps({'include': matrix})}\ncommands={json.dumps(commands)}\n")
+             f"matrix={json.dumps({'include': matrix})}\n"
+             f"commands_windows={json.dumps(cmds['windows'])}\ncommands_macos={json.dumps(cmds['macos'])}\n")
     target = os.environ.get("GITHUB_OUTPUT")
     if target:
         with open(target, "a", encoding="utf-8", newline="\n") as f:
