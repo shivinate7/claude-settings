@@ -13140,7 +13140,7 @@ class ReviewGuardFiles(ReviewGuardEnv):
         self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
 
 class ReviewGuardHostFiles(unittest.TestCase):
-    """merge.Host.pr_files(n, changed) and Host.pr(n) over the real Host and a scripted gh. pr_files reads pulls/<n>/files in one paged read, as
+    """merge.Host.pr_files(n, changed) and Host.pr(n) over the real Host and a scripted gh. pr_files reads pulls/<n>/files page by page, one call per page of 100, as
     (path, status) pairs: each filename with its status, and for a rename also its previous_filename as removed. The list must hold `changed`
     file entries, the pull request's changed_files count, or it is a Stop. GitHub caps the list at 3000 entries. A failed read is a Stop."""
 
@@ -13159,11 +13159,14 @@ class ReviewGuardHostFiles(unittest.TestCase):
     def test_no_files_is_an_empty_list(self):
         self.assertEqual(pr_files_of(self, self.host([]))(7, 0), [])
 
-    def test_every_page_is_listed_in_one_read(self):
-        names = [f"docs/p{i}.md" for i in range(250)]
-        host = self.host([pr_file(n) for n in names])
-        self.assertEqual(sorted(pr_files_of(self, host)(7, 250)), sorted((n, "modified") for n in names))
-        self.assertEqual(host.gh_calls, ["pulls/7/files"], "the files list is one paged read")
+    def test_every_page_is_read(self):
+        # 250 files: GitHub pages them 100 to a page, so the list takes three reads, one per page. The rename is on the last page, so its
+        # previous_filename is listed from the third read.
+        names = [f"docs/p{i}.md" for i in range(249)]
+        host = self.host([pr_file(n) for n in names] + [pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed")])
+        want = sorted([(n, "modified") for n in names] + [("docs/moved.md", "renamed"), ("hooks/moved.md", "removed")])
+        self.assertEqual(sorted(pr_files_of(self, host)(7, 250)), want, "every filename and every previous_filename, from every page")
+        self.assertEqual(host.gh_calls, ["pulls/7/files"] * 3, "one read per page of 100: 250 files are three pages")
 
     def test_a_short_list_is_a_stop_that_names_the_changed_files(self):
         fn = pr_files_of(self, self.host([pr_file("hooks/a.py")]))
@@ -13204,9 +13207,11 @@ class ReviewGuardCost(ReviewEnv):
     every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
 
     def test_the_record_makes_two_gh_reads(self):
-        for guard in ("no", "yes"):
-            with self.subTest(guard=guard):
-                host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True)
+        # a PR of 100 files is one page, so its whole list is still one read: two reads for any PR of up to 100 files
+        hundred = [pr_file(f"docs/f{i}.md") for i in range(100)]
+        for guard, files in (("no", None), ("yes", None), ("no", hundred)):
+            with self.subTest(guard=guard, files=len(files) if files else 1):
+                host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files)
                 rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", guard,
                                              "--round", "1:reviewer:sonnet:PASS", host=host)
                 self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
