@@ -1528,7 +1528,7 @@ TEST_BASENAME = re.compile(
 JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
 SWIFT_TEST = re.compile(r"^\w+Tests\.swift$")
 XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
-TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support", "testing"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
