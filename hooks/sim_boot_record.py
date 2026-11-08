@@ -19,6 +19,12 @@ No snapshot, an unreadable snapshot or an unreadable list records nothing.
 Record mode: `sim_boot_record.py --record <UDID>`, which bin/sim-test calls after its own boot, appends
 one record line for that device, read with the same devices() and launchd(). It prints nothing and
 exits 0. It writes no line when the device is not listed or its launchd_sim is unclear.
+
+Check mode: `sim_boot_record.py --check <UDID>`, which bin/sim-test calls after `--record` on its own boot (owner
+ruling, page item 433 pick a, 2026-11-08 12:00 CST; decision sim-boot-is-verified). It runs sim_ok(UDID) once, the
+same first-frame check as the hook modes, the one home of it. A pass prints nothing and exits 0. A fail prints one
+stderr line naming the UDID and exits 1. It retries, shuts down and boots nothing. With no UDID it exits 2 and
+calls no simctl. Cost: one bootstatus (up to 90 s) and one screenshot.
 """
 import json
 import os
@@ -317,7 +323,13 @@ def main():
 
 
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["--record"]:
+    if sys.argv[1:2] == ["--check"]:
+        if len(sys.argv) < 3 or not sys.argv[2]:
+            sys.exit(2)
+        if not sim_ok(sys.argv[2]):
+            print("sim_boot_record: first-frame check failed for %s" % sys.argv[2], file=sys.stderr)
+            sys.exit(1)
+    elif sys.argv[1:2] == ["--record"]:
         if len(sys.argv) > 2:
             record_one(sys.argv[2])
     else:
