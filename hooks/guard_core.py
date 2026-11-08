@@ -850,6 +850,7 @@ _CODE_FLAGS = {"-c": "", "-e": "", "-p": "node", "--print": "node", "--eval": "n
 _SHELL_SCRIPT = re.compile(r"(?:^|[./])(?:" + _SHELLS + r")$").search
 _STDIN_FILE = re.compile(r"(?<![<\d&])<(?![<(])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _SUBSTITUTION = re.compile(r"\$\(|<\(|`")
+_SUBSTITUTION_READ = re.compile(r"\$\([ \t]*<(?![<(])[ \t]*")
 
 
 def _plain_words(words):
@@ -1032,11 +1033,27 @@ def _data_positions(words) -> set:
     return data
 
 
-def _list_pieces(line: str):
+def _quote_closes(text: str, index: int) -> bool:
+    """True when the quote at TEXT[index] has a closing one after it. A quote that never closes is no quote: bash
+    stops at the end of input with a syntax error and runs nothing, so the mark is text (`echo don't`)."""
+    quote = text[index]
+    at = index + 1
+    while at < len(text):
+        if text[at] == "\\" and quote == '"':
+            at += 2
+        elif text[at] == quote:
+            return True
+        else:
+            at += 1
+    return False
+
+
+def _list_pieces(line: str, by_line: bool = False):
     """The pieces of LINE between `;`, `&&`, `||` and `&` that sit outside every quote, `$(`, `(` and backtick. A
     mark inside one stays in its piece, so `python3 -c "import os; $(cat f)"` and `python3 -c "$(cd d && cat f)"`
-    are one piece each. A quote or paren left open keeps the rest of the line in one piece: a reader of it can
-    only run more files, never fewer."""
+    are one piece each. A paren or backtick left open keeps the rest of the line in one piece: a reader of it can
+    only run more files, never fewer. `by_line` cuts at each newline outside them instead, so a quote that spans
+    two lines is one piece."""
     pieces = []
     stack = ""
     begin = 0
@@ -1055,13 +1072,18 @@ def _list_pieces(line: str):
                 index += 1
             elif char in '"`':
                 stack = stack[:-1] if char == '"' else stack + char
+        elif char in "'\"" and not _quote_closes(line, index):
+            pass   # a lone quote mark in text
         elif char in "'\"(":
             stack += char
         elif char == ")" and top == "(" or char == "`" and top == "`":
             stack = stack[:-1]
         elif char == "`":
             stack += char
-        elif not stack and char in ";&|":
+        elif by_line and not stack and char == "\n":
+            pieces.append(line[begin:index])
+            begin = index + 1
+        elif not by_line and not stack and char in ";&|":
             mark = line[index:index + 2] if line[index:index + 2] in ("&&", "||") else char
             redirect = mark == "&" and (line[index - 1:index] in ("<", ">") or line[index + 1:index + 2] == ">")
             if mark != "|" and not redirect:   # a pipe joins its stages, a `2>&1` or `&>` redirects
@@ -1110,7 +1132,8 @@ def _run_files(text: str, written) -> set:
     and an operand after the script of an interpreter (`python3 check.py f`). The word is compared as written,
     so `$HOME/f` matches only itself."""
     ran = set()
-    for line in _WRITE_TARGET.sub(" ", text).split("\n") if written else ():
+    # A line is a logical line: a quote that spans two lines keeps them together, so its closing mark is no opener.
+    for line in _list_pieces(_WRITE_TARGET.sub(" ", text), by_line=True) if written else ():
         # A shell word runs the files named in its own pipeline only: `source ./env.sh && cat brief.md` runs env.sh.
         shell_words = set()
         for pipeline in re.split(r";|&&|\|\||&", line):
@@ -1120,7 +1143,8 @@ def _run_files(text: str, written) -> set:
         ran.update(_substitution_runs(line, written))
         # A substitution is a command of its own: `cat f` inside `python3 -c "$(cat f)"` reads f, and the line above
         # decides whether the runner runs what it prints. A `)` ends no pipeline, so `(cat f) | python3 -` pipes f.
-        for pipeline in re.split(r";|&&|\|\||&|\$\(|<\(|`", line):
+        # `$(< f)` reads f and runs nothing, so it splits as the reader `$(cat f)`.
+        for pipeline in re.split(r";|&&|\|\||&|\$\(|<\(|`", _SUBSTITUTION_READ.sub("$(cat ", line)):
             stages = pipeline.split("|")
             words = [_plain_words(_WORDS(stage)) for stage in stages]
             # A find's `-exec ./f {} \\;` is a stage of its own that runs f.

@@ -383,6 +383,54 @@ MUTATIONS = [
      '                if stdin or interp or _stdin_shell(stage_words):',
      '                if stdin or _stdin_shell(stage_words):', "guard",
      'heredoc-keep: pin, a body in f run by a pipe into python3 check.py, denies'),
+    # _list_pieces: a double quote opens a span, so a mark inside it splits no piece.
+    ("heredoc: a double quote opens no span, a ; inside one splits a list piece",
+     '        elif char in "\'\\"(":\n            stack += char',
+     '        elif char in "\'(":\n            stack += char', "guard",
+     "heredoc-keep: reader, a body in f run by a quoted semicolon before $(cat f) in python3 -c, denies"),
+    # _stdin_shell: the value of a wrapper (`timeout 5 sudo -s`) is no command word.
+    ("heredoc: a wrapper's value is read as a command word, timeout 5 sudo -s reads no stdin shell",
+     '        if name not in _VALUE_FLAGS_OF and at < len(words) and not _RUNNER(_basename_word(words[at])):',
+     '        if False:', "guard",
+     "heredoc-keep: a written file holding gh pr create --title x, piped to timeout 5 sudo -s, denies"),
+    # _CODE_FLAGS: `-E` gives code to perl only.
+    ("heredoc: python3 -E takes code, so python3 -E check.py runs the files after it",
+     '"--eval": "node", "-E": "perl"}',
+     '"--eval": "node", "-E": ""}', "guard",
+     "heredoc-keep: retire, a gh pr create line written then run by python3 -E check.py f, allowed"),
+    # _LEADING_KEYWORDS: every shell keyword before a command word is skipped.
+    ("heredoc: only if and do lead a command, so then ./f, while ./f and ! ./f name no command",
+     '_LEADING_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "{"}',
+     '_LEADING_KEYWORDS = {"if", "do"}', "guard",
+     "heredoc-keep: pin, a body in f run by while ./f in a loop, denies"),
+    # _EXEC_FLAGS: find runs the command after -execdir, -ok and -okdir too.
+    ("heredoc: only -exec runs a command, find -execdir, -ok and -okdir run nothing",
+     '_EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}',
+     '_EXEC_FLAGS = {"-exec"}', "guard",
+     "heredoc-keep: pin, a body in f run by find -execdir ./f, denies"),
+    # _WRAPPER_VALUE_FLAGS: a flag's value after nice, env, timeout and xargs is no command word.
+    ("heredoc: no wrapper takes a flag value, nice -n 5 cat f reads 5 as the command",
+     '    "timeout": {"-s", "-k", "--signal", "--kill-after"},\n'
+     '    "nice": {"-n", "--adjustment"},\n'
+     '    "env": {"-u", "-C", "-S", "--unset", "--chdir", "--split-string"},\n'
+     '    "xargs": {"-n", "-P", "-L", "-d", "-E", "-s", "-a", "-I", "--max-args", "--max-procs", "--delimiter"},\n',
+     '', "guard",
+     "heredoc-keep: pin, a body in f run by nice -n 5 cat f, allows"),
+    # _SUBSTITUTION_READ: `$(< f)` splits as a command at f, so a read of f runs it.
+    ("heredoc: $(< f) leaves f at command position, so echo \"$(< f)\" runs f",
+     '_SUBSTITUTION_READ.sub("$(cat ", line)',
+     'line', "guard",
+     "heredoc-keep: a body in f, then a redirect read in echo, echo \"$(< f)\", allows"),
+    # _quote_closes: a quote with no closer opens a span that swallows the rest of the text.
+    ("heredoc: a lone quote opens a span, so echo don't swallows the lines after it",
+     'and not _quote_closes(line, index):',
+     'and False:', "guard",
+     "heredoc-keep: a body in f, then a lone apostrophe unquoted, then cat f and a python probe, allows"),
+    # _run_files: a quote that spans two lines is one logical line.
+    ("heredoc: the lines split before the quotes, so the closing quote of a span reads as an opener",
+     '_list_pieces(_WRITE_TARGET.sub(" ", text), by_line=True)',
+     '_WRITE_TARGET.sub(" ", text).split("\\n")', "guard",
+     "heredoc-keep: a body in f, then a double quote that spans two lines, then cat f and a python probe, allows"),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
