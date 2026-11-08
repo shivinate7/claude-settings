@@ -16,12 +16,14 @@ a naive time on the reading machine's clock; `Row.at` is the aware instant. A li
 was written has no zone: `when` is its naked time and `at` is None, never assumed Central.
 --between START END (aware ISO 8601 times) prints the rows whose `at` falls in [START, END], and the
 count of old lines that could fall in it under some zone, for the batch pace read (window()).
---rule narrows --between to one rule id (the pace read uses load-brake).
+--rule narrows --between to one rule id (the pace read uses load-brake). With --rule past-ruling-run it adds a
+summary of the rows: count, median ms, max ms, max chars.
 In a cloud session (CLAUDE_CODE_REMOTE=true) that read prints `n/a (cloud)` and no count.
 The brake guards the owner's own machine."""
 import argparse
 import os
 import re
+import statistics
 import sys
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
@@ -37,6 +39,7 @@ FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first l
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
 BRAKE_RULE = "load-brake"
+RUN_RULE = "past-ruling-run"  # lint/report_guard.py writes one line per past-ruling model run
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
 MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
@@ -105,6 +108,24 @@ def window(lines, start, end, rule=None):
         elif low <= row.when <= high:
             unknown += 1
     return rows, unknown
+
+
+def run_summary(rows):
+    """The summary lines for a window of past-ruling-run rows: the count, the median and max ms, the max chars.
+    A row whose matched text has no ms or chars counts but adds no number."""
+    ms, chars = [], []
+    for row in rows:
+        for key, bucket in (("ms", ms), ("chars", chars)):
+            found = re.search(r"\b%s=(\d+)" % key, row.matched)
+            if found:
+                bucket.append(int(found.group(1)))
+    lines = ["count: %d" % len(rows)]
+    if ms:
+        lines.append("median ms: %g" % statistics.median(ms))
+        lines.append("max ms: %d" % max(ms))
+    if chars:
+        lines.append("max chars: %d" % max(chars))
+    return lines
 
 
 def summarize(lines, days, now, session=None):
@@ -229,6 +250,8 @@ def main(argv):
             if args.between:
                 rows, unknown = window(handle, args.between[0], args.between[1], args.rule)
                 print("\n".join(row.line for row in rows))
+                if args.rule == RUN_RULE:
+                    print("\n".join(run_summary(rows)))
                 print("unknown (old lines with no zone that could fall inside): %d" % unknown)
                 return 0
             print(render(summarize(handle, args.days, datetime.now(), args.session), args.by_session, ids))
