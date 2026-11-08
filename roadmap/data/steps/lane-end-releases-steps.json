@@ -1,0 +1,11 @@
+{
+  "title": "A lane that ends releases or names each roadmap step still doing under its id",
+  "why": "Lane session_013NEJL1N3YkCMouc1pELXyu reported its end at 02:48 CST Nov 8 while step checkout-b-current-branch still named it as doing, so the step sat with a dead lane until the coordinator noticed (coordinator, 03:17 CST Nov 8). The 43 idle lanes of step idle-lane-steps-unknown are the reverse case.",
+  "note": "Fix: a lane's end report, or its archive, refuses or lists each roadmap step whose lane is that session and whose status is doing, so the coordinator moves or closes it. Red case first: an end or archive with one doing step under the lane's id passes today; control: no such step passes. Related done step lane-closes-after-records (a lane does not close before its records PR merges). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:24 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 580,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T03:16:00-06:00"
+}
