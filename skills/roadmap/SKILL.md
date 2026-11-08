@@ -262,17 +262,18 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
     its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
     The page writes `open` and `closed` only, so only `closed` releases a lane;
-  - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main). A lane that passes the other tests reads a hold line instead.
+  - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main). A landed pull on the step's own head refs, a `Step:` trailer on main or status `done` clears that hold; a body-named pull does not. A lane that passes the other tests reads a hold line instead.
 
   An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three.
   `no cs-step tag`: the archive guard refuses such a lane. A step id that is off the record branch with no
   `Step:` trailer on main, naming any other `cs-repo:` tag the lane carries. `step <ids> still doing under this lane`:
-  each step whose `lane` is the session, with status doing or active, not landed on main. The last clears when the
-  coordinator moves or closes the step. A lane that waits (a step not done, an
+  each step whose `lane` is the session, with status doing or active, not landed on main. A landed pull on the step's own head refs, a `Step:` trailer on main or status `done` clears it; a body-named pull does not. The coordinator moving or closing the step also clears it. A lane that waits (a step not done, an
   open pull, an open item) prints no line. The row's count leaves holds out. A live file with no `items` list makes the row unknown. An `items` row with the
   wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
   sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
   - `--live` is missing or unreadable;
+  - `--sessions` or `--items` whose last page says more pages follow (a truthy `has_more`, `next_cursor`, `next_page_token` or `next`);
+  - `--sessions` and `--items`: the older file's modification time is over 60 minutes old;
   - `readAt` is bad, over 60 minutes old or in the future;
   - there is no `sessions` list, or a session or pull row has the wrong shape (a pull `branch` that is not text or null counts);
   - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
