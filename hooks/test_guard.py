@@ -10341,6 +10341,62 @@ def dup_noise(count):
     return lines
 
 
+# The pull request and step-record reads, for the cases that brief a step. A whole list read with no carrier does not prove
+# a step is free: an open pull request in the cs-repo whose head is the step slug holds it (lane_head_refs), and the step
+# record's lane names the session that holds it. The stand-ins below answer for the pull request tool and for the record
+# on origin/roadmap.
+DUP_PRS_OPEN = os.path.join(ROOT, "dup-prs-open")      # an open pull request in o/r whose head is the slug dup-step-a
+DUP_PRS_NONE = os.path.join(ROOT, "dup-prs-none")      # no open pull request on the slug
+DUP_PRS_BROKEN = os.path.join(ROOT, "dup-prs-broken")  # every call answers text that is not JSON
+DUP_STEP_ROUTE = os.path.join(ROOT, "grant", "dupstep-route")  # the route repo's step records: each lane names no session
+DUP_STEP_OTHER = os.path.join(ROOT, "grant", "dupstep-other")  # dup-step-a's record: its lane names another session
+DUP_STEP_EMPTY = os.path.join(ROOT, "grant", "dupstep-empty")  # origin/roadmap reads, and holds no step record
+DUP_STEP_NOREF = os.path.join(ROOT, "grant", "dupstep-noref")  # a step record in the checkout, with no origin/roadmap ref
+DUP_ROUTE_STEPS = ("dup-step-a", "dup-step-c", "icon-a", "icon-b")  # the steps the route repo holds
+
+
+def dup_gh_path(folder):
+    """A PATH with the stand-in pull request tool in `folder` first, then the runner's own PATH, which holds git for the
+    step record's read. The stand-in answers before any real gh on the runner's PATH."""
+    return folder + os.pathsep + os.environ.get("PATH", "")
+
+
+def dup_step_file(step, lane):
+    """The step record for `step` as the roadmap holds it, its lane field as given."""
+    body = {"id": step, "title": "Step " + step, "status": "in_progress", "lane": lane, "grants": []}
+    return "roadmap/data/steps/%s.json" % step, json.dumps(body, indent=2) + "\n"
+
+
+def build_dup_prs():
+    """The three pull request stand-ins. `need` pins each call to o/r, as the archive cases pin theirs."""
+    make_fake_gh(DUP_PRS_OPEN, "main", need=["o/r"], others=[{"number": 21, "head": "f" * 40, "ref": "dup-step-a"}])
+    make_fake_gh(DUP_PRS_NONE, "main", need=["o/r"])
+    make_fake_gh(DUP_PRS_BROKEN, "main", need=["o/r"], broken=True)
+
+
+def build_dup_steps():
+    """The two step repositories on origin/roadmap. The route repo holds each step under a lane that names no session;
+    the other repo holds dup-step-a under a lane that names another session."""
+    gs_repo("dupstep-route", dict(dup_step_file(step, "coordinator, to route the step") for step in DUP_ROUTE_STEPS))
+    gs_repo("dupstep-other", dict([dup_step_file("dup-step-a", "session_DUPOTHERLANE01")]))
+
+
+def build_dup_empty():
+    """A readable roadmap ref with no step record in it: the step file for the brief is absent."""
+    gs_repo("dupstep-empty", {"README.md": "No step records here.\n"})
+
+
+def build_dup_noref():
+    """A step record in the checkout, with no origin/roadmap ref for the guard to read."""
+    gs_repo("dupstep-noref", dict([dup_step_file("dup-step-a", "coordinator, to route the step")]), ref=False)
+
+
+lazy_fixture([DUP_PRS_OPEN, DUP_PRS_NONE, DUP_PRS_BROKEN], build_dup_prs)
+lazy_fixture([DUP_STEP_ROUTE, DUP_STEP_OTHER], build_dup_steps)
+lazy_fixture([DUP_STEP_EMPTY], build_dup_empty)
+lazy_fixture([DUP_STEP_NOREF], build_dup_noref)
+
+
 # lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
@@ -11081,10 +11137,11 @@ def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=
         env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
-def step_allow(name, transcript, message, target=ROLE_OTHER):
-    """A send_message the guard lets through silently."""
-    add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message)
+def step_allow(name, transcript, message, target=ROLE_OTHER, cwd=NOGIT, env_path=None):
+    """A send_message the guard lets through silently. A marker brief is judged by lane-step-dup too, which reads the
+    step record and the pull requests, so those cases pass `cwd` and `env_path` (see the lane-step-dup section)."""
+    add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=cwd, silent=True, transcript=transcript,
+        env=ROLE_ENV, session_id=target, message=message, env_path=env_path)
 
 
 # Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step
@@ -11131,23 +11188,30 @@ step_allow("a marker on line two is not the first line, so the brief is not judg
            role_path("step-topic-lane"), "Status: PR #12 merged.\nLane brief: icon-a. Topic: colors.")
 # Passes: one lane, one topic, many steps. A new step on the lane's own topic is allowed.
 step_allow("a brief for a new step on the lane's own topic is allowed: one lane, one topic",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.")
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.",
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 step_allow("a brief for the lane's own step on its own topic is allowed",
-           role_path("step-topic-lane"), "Lane brief: icon-a. Topic: icons.")
+           role_path("step-topic-lane"), "Lane brief: icon-a. Topic: icons.",
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 # Passes: an older lane with two cs-step tags and no topic is judged by its steps: the second step is one of them.
 step_allow("an older lane with two cs-step tags: a brief naming its second step is allowed",
-           role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons.")
+           role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons.",
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 # Passes: a lane that create_session started on topic icons, with a new step on that topic, in both result shapes.
 step_allow("a brief for a new step on topic icons to a lane that create_session started (JSON result) is allowed",
-           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW,
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 step_allow("a brief for a new step on topic icons to a lane that create_session started (plain result) is allowed",
-           role_path("step-create-text"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-text"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW,
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 # Passes: a brief to a target that is no lane is not judged, whatever its topic line says.
 step_allow("a brief with topic colors to a target that is no lane (cs-build:triage) is allowed",
-           role_path("step-triage"), "Lane brief: icon-b. Topic: colors.")
+           role_path("step-triage"), "Lane brief: icon-b. Topic: colors.",
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 # Passes: the newest record decides. A lane read, then a newer triage read, makes the target no lane.
 step_allow("the newest record decides: a lane read, then a newer triage read, lets a brief through",
-           role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.")
+           role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.",
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 # Refused: the target's tags were set after its newest record, so the record is stale. The steer re-reads the record
 # with get_session. It never tells the sender to start a new lane, for a topic lane or a lane with no topic.
 step_refuse("a brief for topic icons, after set_session_tags on a topic lane, is refused: re-read the record with get_session",
@@ -11158,7 +11222,8 @@ step_refuse("a brief for topic icons, after set_session_tags on a lane with no t
             carries=("get_session",), lacks=("new lane",))
 # A create_session result shaped {"session_id": ...} is a record too: the brief is judged against the lane's topic.
 step_allow("a create_session result shaped session_id counts as the record: a brief for its own topic icons passes",
-           role_path("step-create-session-id"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-session-id"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW,
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 # The refusal must be the topic's, not the no-record one: a reader that misses the record refuses every brief here.
 step_refuse("a create_session result shaped session_id counts as the record: a brief for topic colors is refused",
             role_path("step-create-session-id"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW,
@@ -11195,12 +11260,13 @@ def dup_send(name, expected, transcript, message, target=DUP_NEW, carries=(), cw
         session_id=target, message=message, env_path=env_path)
 
 
-def dup_create(name, expected, transcript, tags, carries=()):
+def dup_create(name, expected, transcript, tags, carries=(), cwd=NOGIT, env_path=None):
     """A create_session judged by lane-step-dup, with `tags` as its input. A lane's start prompt is the effort command
-    alone (lane-effort-pin), so the call carries it, and only lane-step-dup decides the case. An allow must print nothing."""
+    alone (lane-effort-pin), so the call carries it, and only lane-step-dup decides the case. An allow must print nothing.
+    `cwd` and `env_path` are for the cases that read the step record or the pull requests (see below)."""
     add("lane-step-dup: " + name, expected, rule=None if expected == "allow" else DUP_RULE, tool=CREATE_SESSION,
-        cwd=NOGIT, transcript=transcript, env=ROLE_ENV, silent=expected == "allow", carries=carries,
-        title="a lane session", tags=list(tags), prompt="/effort medium")
+        cwd=cwd, transcript=transcript, env=ROLE_ENV, silent=expected == "allow", carries=carries,
+        title="a lane session", tags=list(tags), prompt="/effort medium", env_path=env_path)
 
 
 # Refused: a live carrier of dup-step-a is another session. The brief goes to a new lane, and the reason names the carrier.
@@ -11233,19 +11299,22 @@ dup_send("a malformed list_sessions result is asked, though the carrier's row is
          "ask", role_path("dup-list-cut"), BRIEF_DUP)
 # Allowed: each shape below changes one fact of a refused brief. These are the controls that keep the rule narrow.
 dup_send("a brief whose target is the live carrier itself is allowed: that is the remedy",
-         "allow", role_path("dup-list-carrier-self"), BRIEF_DUP, target=DUP_CARRIER)
+         "allow", role_path("dup-list-carrier-self"), BRIEF_DUP, target=DUP_CARRIER,
+         cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 dup_send("a carrier archived by status is not live: a brief to a new lane is allowed",
-         "allow", role_path("dup-list-archived"), BRIEF_DUP)
+         "allow", role_path("dup-list-archived"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 dup_send("a carrier archived by a later archive_session call is not live: a brief to a new lane is allowed",
-         "allow", role_path("dup-list-then-archive"), BRIEF_DUP)
+         "allow", role_path("dup-list-then-archive"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 dup_send("a list read that finds no live carrier allows a brief to a new lane",
-         "allow", role_path("dup-list-empty"), BRIEF_DUP)
+         "allow", role_path("dup-list-empty"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 dup_send("a brief for step dup-step-c, a step the carrier does not hold, is allowed",
-         "allow", role_path("dup-list-carrier"), "Lane brief: dup-step-c. Topic: dup-topic.\n\nDo the step.")
+         "allow", role_path("dup-list-carrier"), "Lane brief: dup-step-c. Topic: dup-topic.\n\nDo the step.",
+         cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 dup_send("a brief for step dup-step-a is allowed while the live carrier holds only dup-step-ab: a step id is exact",
-         "allow", role_path("dup-list-near"), BRIEF_DUP)
+         "allow", role_path("dup-list-near"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 dup_create("a create_session tagged cs-step:dup-step-c, a step the carrier does not hold, is allowed",
-           "allow", role_path("dup-list-carrier"), ["cs-build:lane", "cs-step:dup-step-c", "cs-repo:o/r"])
+           "allow", role_path("dup-list-carrier"), ["cs-build:lane", "cs-step:dup-step-c", "cs-repo:o/r"],
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 # The scanner trap: the marker is on line 2, so the message is no brief. Its step name is in the body, not a marker.
 dup_send("a marker and step name on message line 2, not the first line, is not a brief: allowed",
          "allow", role_path("dup-list-carrier"), "Status: the first half is merged.\n" + BRIEF_DUP)
@@ -11260,9 +11329,10 @@ dup_create("a create_session with no cs-step tag passes an unreadable transcript
 # create_session's own tags. A carrier in another repo is another lane, so it passes. A subject with no cs-repo tag
 # cannot be matched, so it is asked. A read whose has_more is set did not return every page: no carrier in it is asked.
 dup_send("a carrier in another repo does not count: a brief to a new lane for the same step is allowed",
-         "allow", role_path("dup-list-other-repo"), BRIEF_DUP)
+         "allow", role_path("dup-list-other-repo"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 dup_create("a create_session tagged cs-step:dup-step-a passes when the live carrier is in another repo",
-           "allow", role_path("dup-list-other-repo"), ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"])
+           "allow", role_path("dup-list-other-repo"), ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"],
+           cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 dup_send("a brief whose target record has no cs-repo tag is asked, though a live carrier holds the step",
          "ask", role_path("dup-list-no-repo-target"), BRIEF_DUP)
 # No cs-build:lane tag here: lane-repo-tag refuses a lane create that names no cs-repo before lane-step-dup is judged.
@@ -11275,44 +11345,6 @@ dup_create("a create_session tagged cs-step:dup-step-a, where the list read has 
 dup_send("a brief to a new lane is refused when the list read has more pages and a live carrier is in its page",
          "deny", role_path("dup-list-more-carrier"), BRIEF_DUP, carries=DUP_STEER)
 
-
-# The pull request and step-record reads. A whole list read with no carrier does not prove a step is free: an open pull
-# request in the cs-repo whose head is the step slug holds it (lane_head_refs), and the step record's lane names the
-# session that holds it. The stand-ins below answer for the pull request tool and for the record on origin/roadmap.
-DUP_PRS_OPEN = os.path.join(ROOT, "dup-prs-open")      # an open pull request in o/r whose head is the slug dup-step-a
-DUP_PRS_NONE = os.path.join(ROOT, "dup-prs-none")      # no open pull request on the slug
-DUP_PRS_BROKEN = os.path.join(ROOT, "dup-prs-broken")  # every call answers text that is not JSON
-DUP_STEP_ROUTE = os.path.join(ROOT, "grant", "dupstep-route")  # the step record's lane names no session
-DUP_STEP_OTHER = os.path.join(ROOT, "grant", "dupstep-other")  # the step record's lane names another session
-
-
-def dup_gh_path(folder):
-    """A PATH with the stand-in pull request tool in `folder` first, then the runner's own PATH, which holds git for the
-    step record's read. The stand-in answers before any real gh on the runner's PATH."""
-    return folder + os.pathsep + os.environ.get("PATH", "")
-
-
-def dup_step_file(lane):
-    """The step record for dup-step-a as the roadmap holds it, its lane field as given."""
-    body = {"id": "dup-step-a", "title": "Step dup-step-a", "status": "in_progress", "lane": lane, "grants": []}
-    return "roadmap/data/steps/dup-step-a.json", json.dumps(body, indent=2) + "\n"
-
-
-def build_dup_prs():
-    """The three pull request stand-ins. `need` pins each call to o/r, as the archive cases pin theirs."""
-    make_fake_gh(DUP_PRS_OPEN, "main", need=["o/r"], others=[{"number": 21, "head": "f" * 40, "ref": "dup-step-a"}])
-    make_fake_gh(DUP_PRS_NONE, "main", need=["o/r"])
-    make_fake_gh(DUP_PRS_BROKEN, "main", need=["o/r"], broken=True)
-
-
-def build_dup_steps():
-    """The two step repositories: each holds its record on origin/roadmap, the one ref the guard reads."""
-    gs_repo("dupstep-route", dict([dup_step_file("coordinator, to route the step")]))
-    gs_repo("dupstep-other", dict([dup_step_file("session_DUPOTHERLANE01")]))
-
-
-lazy_fixture([DUP_PRS_OPEN, DUP_PRS_NONE, DUP_PRS_BROKEN], build_dup_prs)
-lazy_fixture([DUP_STEP_ROUTE, DUP_STEP_OTHER], build_dup_steps)
 
 # (i) and (v) are asked: no carrier in the list, and the pull request read finds the slug, or fails.
 dup_send("a whole list read with no live carrier, and an open pull request in the cs-repo whose head is the slug, is asked",
@@ -11329,6 +11361,12 @@ dup_send("a step record whose lane names another session is asked, with no open 
 # (iv) is allowed: the record's lane field names no session id, so it holds no lane to refuse for.
 dup_send("a step record whose lane names no session id is allowed, with no open pull request on the slug",
          "allow", role_path("dup-pr-open"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+# (vi) is allowed: origin/roadmap reads, and holds no record for the brief's step, so there is no lane to refuse for.
+dup_send("a step record absent from a readable roadmap ref is no verdict: a brief to a new lane is allowed",
+         "allow", role_path("dup-pr-open"), BRIEF_DUP, cwd=DUP_STEP_EMPTY, env_path=dup_gh_path(DUP_PRS_NONE))
+# (vii) is asked: the step record sits in the checkout, but origin/roadmap cannot be read, so the lane it names is unknown.
+dup_send("a roadmap ref that cannot be read is asked, though the step record is in the checkout",
+         "ask", role_path("dup-pr-open"), BRIEF_DUP, cwd=DUP_STEP_NOREF, env_path=dup_gh_path(DUP_PRS_NONE))
 
 
 # =========================================================================== 5d. cite by id
