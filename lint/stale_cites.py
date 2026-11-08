@@ -67,7 +67,10 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
   STALE010  (decision record-cites-live-code; range mode only, a finding) a line the range ADDS to governed Markdown
             that cites a Python name in a STALE002
             form (`file.py` `name`, (file.py name)) or as a test node id, when the .py file is absent at head or does
-            not bind the name there (`names_in`; a node id is judged one segment at a time). Fenced lines count as
+            not bind the name there (`names_in`; a node id is judged one segment at a time). A cite whose first folder
+            is no tracked top folder at head (another repo, a library, a src-layout package) is no cite, the test STALE003
+            applies (`in_tracked_top`); the top folders come from a read of head's root tree through the one `cat-file`,
+            so it starts no process of its own. Fenced lines count as
             prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
             left, and not in --tree mode. A cite path outside the repo (`outside_repo`) is no path cite. It
             leaves a cite of a path the range removed or renamed to STALE001 and a name the range unbound to
@@ -221,8 +224,8 @@ class BlobReader:
     def __init__(self):
         self.proc = None
 
-    def get(self, spec):
-        """Bytes of the blob, or None when the object does not exist."""
+    def _ask(self, spec):
+        """(object type, raw bytes, hash length in bytes) of the object, or None when it does not exist."""
         if self.proc is None:
             self.proc = _nowindow.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -235,7 +238,30 @@ class BlobReader:
             return None
         data = self.proc.stdout.read(int(header[2]))
         self.proc.stdout.read(1)
-        return data if header[1] == b"blob" else b""
+        return header[1], data, len(header[0]) // 2
+
+    def get(self, spec):
+        """Bytes of the blob, or None when the object does not exist."""
+        found = self._ask(spec)
+        if found is None:
+            return None
+        return found[1] if found[0] == b"blob" else b""
+
+    def root_folders(self, rev):
+        """The names of the folders in the root tree of `rev`, read through this same process: no `ls-tree` start.
+        A submodule or a symlink is no folder, as `tracked_entries` leaves them out."""
+        found = self._ask("%s^{tree}" % rev)
+        if found is None:
+            return set()
+        _, data, width = found
+        folders, i = set(), 0
+        while i < len(data):
+            nul = data.index(b"\0", i)
+            mode, name = data[i:nul].split(b" ", 1)
+            if mode == b"40000":
+                folders.add(name.decode("utf-8", "replace"))
+            i = nul + 1 + width
+        return folders
 
     def close(self):
         if self.proc is not None:
@@ -536,6 +562,13 @@ def disabled(line):
     return codes
 
 
+def in_tracked_top(cite, tops):
+    """True when the first folder of a path cite is in `tops`, the tracked top folders. A cite into any other folder
+    (another repo, a library, a src-layout package) names nothing this tree holds. STALE003 (`scan_tree`) and
+    STALE010 (`dead_name_cites`) both apply this one test."""
+    return cite.split("/", 1)[0] in tops
+
+
 def cite_path(text):
     """A cited path in its tracked form: `./lint/x.py` is `lint/x.py`. The one home both STALE001 and STALE010 (and the
     STALE002 name match) read a cite's path through."""
@@ -570,6 +603,7 @@ class Range:
         self.unknowns = []
         self.bound_names = {}  # path -> names bound at head (`head_names`), read once
         self.removed_names = {}  # file (base and head path) -> names the range unbound there (NameReader.prepare)
+        self.tops = None  # the root folders at head (`BlobReader.root_folders`), read once by the first cite that needs them
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
@@ -1278,8 +1312,9 @@ def python_cites(text):
 def dead_name_cites(rng):
     """STALE010, a finding: {(path, line, code): [messages]} for each cite of a Python name on a line the range adds to
     governed Markdown, whose file is absent at head or does not bind the name there. A cite of a file the range removed
-    or renamed is STALE001's, and a name the range unbound is STALE002's. Fenced lines count as prose, as for STALE002.
-    The blobs come from the one `cat-file`, and only for a line that cites a .py file."""
+    or renamed is STALE001's, and a name the range unbound is STALE002's. A cite into an untracked top folder is no
+    cite. Fenced lines count as prose, as for STALE002. The blobs and the root tree come from the one `cat-file`,
+    and only for a line that cites a .py file."""
     found, excludes = {}, exclude_patterns(".")
     gone = set(rng.removed) | set(rng.renamed)
     for md in sorted(rng.added_lines):
@@ -1292,6 +1327,10 @@ def dead_name_cites(rng):
                 path = cite_path(path)
                 if not FILE_CITE.match(path):
                     continue  # no folder part, or a lead outside the repo: no path cite, the STALE003 test
+                if rng.tops is None:
+                    rng.tops = rng.batch.root_folders(rng.head)
+                if not in_tracked_top(path, rng.tops):
+                    continue  # a cite into an untracked top folder, as STALE003 reads it
                 names = None if path in gone else head_names(rng, path)
                 if names is None or name in names or name in rng.removed_names.get(path, ()):
                     continue
@@ -1649,7 +1688,7 @@ def scan_tree(rev):
                 off = disabled(line) if "ste-disable-line" in line else set()
                 for run in RUN_RE.finditer(line):
                     cite = run.group(0).rstrip(".-")
-                    if not FILE_CITE.match(cite) or cite.split("/", 1)[0] not in tops \
+                    if not FILE_CITE.match(cite) or not in_tracked_top(cite, tops) \
                             or placeholder_adjacent(line, run.start(), run.end()):
                         continue
                     home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite)))
