@@ -1105,7 +1105,10 @@ def _settings_place(path: str, cwd: str) -> bool:
     here = {os.path.normcase(os.path.realpath(guard_core.config_dir()))}
     if cwd:
         here.add(os.path.normcase(os.path.realpath(_expanded(cwd, ""))))
-    target = os.path.realpath(folder)
+    # `here` reads the cwd through `_expanded` on every OS. `where` is read that way on Windows only, so a
+    # Git-Bash `/c/` folder becomes `C:`. Elsewhere `where` stays raw, as `/c/` is a plain folder.
+    where = _expanded(folder, "") if os.name == "nt" else folder
+    target = os.path.realpath(where)
     # The target's own folder is a place too, from any cwd: a checkout root (`.git` marks it) or an install
     # source (`install.ps1`) holds a settings file that a local install links into ~/.claude. This also
     # covers the working folder's own checkout root, since that root is a checkout root.
