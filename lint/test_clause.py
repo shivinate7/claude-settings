@@ -362,13 +362,21 @@ class LexiconTests(unittest.TestCase):
         # CANNOT_FORMS, so a form added to one list does not reach the other.
         self.assertFalse(hasattr(report_guard, "_CANT"), "report_guard keeps its own _CANT, a copy of the can't forms")
 
-    def test_capability_re_is_built_from_the_shared_cannot_forms(self):
-        # Catches: CAPABILITY_RE built from its own list of the can't forms, so a form added to _clause.CANNOT_FORMS does not
+    def test_capability_re_is_built_from_the_shared_cant_forms(self):
+        # Catches: CAPABILITY_RE built from its own copy of the can't forms, so a form added to _clause.CANT_FORMS does not
         # read as a capability.
-        probe = self.fresh_report_guard("CANNOT_FORMS", ("zqxvform",))
-        self.assertEqual(probe._clause.CANNOT_FORMS, ("zqxvform",), "scope: the probe does not read the sentinel list")
+        self.assertTrue(hasattr(clause, "CANT_FORMS"), "_clause has no CANT_FORMS, so the can't forms have no home")
+        probe = self.fresh_report_guard("CANT_FORMS", ("zqxvform",))
+        self.assertEqual(probe._clause.CANT_FORMS, ("zqxvform",), "scope: the probe does not read the sentinel list")
         self.assertNotIn("zqxvform", report_guard.CAPABILITY_RE.pattern, "control: the shared report_guard reads the sentinel")
-        self.assertIn("zqxvform", probe.CAPABILITY_RE.pattern, "CAPABILITY_RE is not built from _clause.CANNOT_FORMS")
+        self.assertIn("zqxvform", probe.CAPABILITY_RE.pattern, "CAPABILITY_RE is not built from _clause.CANT_FORMS")
+
+    def test_cannot_forms_begins_with_the_cant_forms(self):
+        # Catches: CANNOT_FORMS built without the can't forms first, so the claim check and the hand-off cite read the start of
+        # the phrases from two lists.
+        self.assertTrue(hasattr(clause, "CANT_FORMS"), "_clause has no CANT_FORMS, so the can't forms have no home")
+        self.assertEqual(clause.CANNOT_FORMS[:len(clause.CANT_FORMS)], clause.CANT_FORMS,
+                         "CANNOT_FORMS does not begin with CANT_FORMS")
 
     def test_conditionals_are_the_words_that_make_a_clause_conditional(self):
         # Catches: a conditional word dropped from CONDITIONALS.
