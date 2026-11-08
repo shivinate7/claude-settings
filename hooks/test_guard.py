@@ -10041,9 +10041,9 @@ def mcp_post(name, body, expected, rule=None, carries=(), number=REVIEW_PR, comm
         env_path=GHRECORDREPO + os.pathsep + PY_PATH, carries=carries, **mcp_input(body, number, comment_id))
 
 
-def bash_post(name, command, expected, rule=None, carries=()):
+def bash_post(name, command, expected, rule=None, carries=(), lacks=()):
     """A case for one Bash command that posts a comment on pull request 12. Its live head is read from the cwd's repo."""
-    sh(name, command, expected, rule=rule, cwd=NOGIT, env_path=GHRECORD + os.pathsep + PY_PATH, carries=carries)
+    sh(name, command, expected, rule=rule, cwd=NOGIT, env_path=GHRECORD + os.pathsep + PY_PATH, carries=carries, lacks=lacks)
 
 
 def old_bash(name, command, expected, rule=None, carries=()):
@@ -10651,6 +10651,9 @@ VARIABLE_EDIT_ROUTES = (
     ("default expansion", "repos/y/x/issues/comments/${ID:-4417}"),
     ("variable repo", "repos/$REPO/issues/comments/77"),
     ("braced variable repo", "repos/${REPO}/issues/comments/77"),
+    ("command substitution as the repo", "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/comments/77"),
+    ("command substitution as the repo in double quotes",
+     "\"repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/comments/77\""),
 )
 VARIABLE_POST_ROUTES = (
     ("command substitution", "repos/y/x/issues/$(gh pr view --json number --jq .number)/comments"),
@@ -10659,6 +10662,9 @@ VARIABLE_POST_ROUTES = (
     ("default expansion", "repos/y/x/issues/${N:-12}/comments"),
     ("variable repo and number", "repos/$REPO/issues/$N/comments"),
     ("braced variable repo", "repos/${REPO}/issues/12/comments"),
+    ("command substitution as the repo", "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/12/comments"),
+    ("command substitution as the repo in double quotes",
+     "\"repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/12/comments\""),
 )
 VARIABLE_FORMS = (
     ("gh api -X PATCH, $ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
@@ -10696,6 +10702,33 @@ REVIEW_LOG_CHECKS.append(("review-record:an unmarked post on a literal issue num
 bash_post("review-record: an unmarked body in a variable comment id edit is refused as a read that could not run, gh api -X PATCH, $ID",
           "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % UNMARKED_BODY, "deny", rule=REVIEW_RULE,
           carries=("could not run",))
+
+# AN ENDPOINT THAT IS A SUBSTITUTION. The word the call goes to is the shell's own expansion, so the edit's target is a variable. The
+# inner call inside it names pull request 12's comments, a literal route that must not stand for the endpoint: a marked body is refused
+# with no read, and an unmarked body is refused as a read that could not run.
+VARIABLE_TARGET_ROUTES = (
+    ("command substitution", "$(gh api repos/o/r/issues/12/comments --jq '.[-1].url')"),
+    ("command substitution in double quotes", "\"$(gh api repos/o/r/issues/12/comments --jq '.[-1].url')\""),
+)
+for _label, _target in VARIABLE_TARGET_ROUTES:
+    bash_post("review-record: a marked edit whose endpoint is a substitution is refused, gh api -X PATCH, %s" % _label,
+              "gh api -X PATCH %s -f 'body=%s'" % (_target, review_record()), "deny", rule=REVIEW_RULE)
+    REVIEW_LOG_CHECKS.append(("review-record:a marked edit whose endpoint is a substitution is refused with no gh read, %s" % _label,
+                             review_reads("Bash", {"command": "gh api -X PATCH %s -f 'body=%s'" % (_target, review_record())}, "deny", 0)))
+    bash_post("review-record: an unmarked edit whose endpoint is a substitution is refused as a read that could not run, %s" % _label,
+              "gh api -X PATCH %s -f 'body=%s'" % (_target, UNMARKED_BODY), "deny", rule=REVIEW_RULE, carries=("could not run",))
+
+# THE REMEDY NAMES WHAT IS A VARIABLE. A post to a literal number in a variable repo is told to name the repo, not to write the PR number
+# literally, which is the remedy for a variable number. A variable number keeps its remedy: write the number literally.
+bash_post("review-record: a marked post to issues/$N/comments names the number literally in its remedy, gh api post",
+          "gh api repos/y/x/issues/$N/comments -f 'body=%s'" % review_record(), "deny", rule=REVIEW_RULE, carries=("literally",))
+bash_post("review-record: a marked post to repos/$REPO/issues/12/comments names the repo in its remedy, not the PR number, gh api post",
+          "gh api repos/$REPO/issues/12/comments -f 'body=%s'" % review_record(), "deny", rule=REVIEW_RULE,
+          carries=("repo",), lacks=("PR number literally",))
+
+# Allow control for the substitution repo: an unmarked post is not judged, as for a literal route.
+bash_post("review-record: an unmarked body in a substitution-repo post is allowed, gh api post, repos/$(..)/issues/12/comments",
+          "gh api repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/12/comments -f 'body=%s'" % UNMARKED_BODY, "allow")
 
 # `-e` is gh's --editor, not --edit-last. A post with -e is a post: judged on its pull request, with one head read, and allowed.
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh pr comment -e --body",
