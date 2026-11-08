@@ -19882,6 +19882,102 @@ for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
         tool=CREATE_SESSION_CALL, prompt="x", model=_model)
 add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
 
+# ---- Builder brief code check (rule builder-brief-code-check). A builder brief in a repo whose top level holds
+# .github/workflows/checks.yml must name a code check: `merge --lane-lint`, `ci-job checks --lint` or
+# `actions/code-check/code_check.py`. A brief whose only done check is a test lets the builder hand off a head that
+# the batch's lint never saw. Role match is case-blind. Not judged: a payload with no cwd, a cwd with no checks.yml,
+# and every other role. Selector: MUTATE_ONLY=builder-code-check: runs these cases alone. Each deny is red on
+# main, which lets the brief through. Each allow is a control the rule must leave alone.
+BUILDER_CODE_RULE = "builder-brief-code-check"
+CODE_CHECK = "merge --lane-lint"  # the remedy the refusal names
+WFGIT = os.path.join(ROOT, "wfgit")      # a git checkout whose top level holds .github/workflows/checks.yml
+BAREGIT = os.path.join(ROOT, "baregit")  # a git checkout with no workflow file at all
+BUILDER_TEST_ONLY = "Task: fix the typo in hooks/x.py.\nDone check: `verdict python3 hooks/test_x.py` passes."
+BUILDER_PR_2100 = ("Task: fix the failing lane test.\n"
+                   "Done check: `~/.claude/bin/verdict python3 merge/test_lane_lint.py` passes. Also run ruff "
+                   "(ruff.toml) on the changed .py files, and `bin/ste-changed origin/main` from your tree.")
+
+
+def _build_wfgit():
+    """WFGIT: one commit, and the CI checks workflow at the top level of the checkout."""
+    make_repo(WFGIT, {os.path.join(".github", "workflows", "checks.yml"): "name: checks\n"})
+
+
+def _build_baregit():
+    """BAREGIT: one commit, and no workflow file."""
+    make_repo(BAREGIT, {"README.md": "no workflow here\n"})
+
+
+lazy_fixture([WFGIT], _build_wfgit)
+lazy_fixture([BAREGIT], _build_baregit)
+
+add("builder-code-check: Agent builder brief whose only done check is a test, in a repo with checks.yml, is denied",
+    "deny", BUILDER_CODE_RULE, tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder",
+    model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: Task builder brief whose only done check is a test, in a repo with checks.yml, is denied",
+    "deny", BUILDER_CODE_RULE, tool="Task", prompt=BUILDER_TEST_ONLY, subagent_type="builder",
+    model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: Agent Builder brief whose only done check is a test, in a repo with checks.yml, is denied",
+    "deny", BUILDER_CODE_RULE, tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="Builder",
+    model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: Agent builder brief with PR 2100's done check, which names no code check, is denied",
+    "deny", BUILDER_CODE_RULE, tool="Agent", prompt=BUILDER_PR_2100, subagent_type="builder",
+    model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: Agent builder brief that names ~/.claude/bin/merge --lane-lint 2118 is allowed",
+    "allow", tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\nDone check: `~/.claude/bin/merge --lane-lint 2118` exits 0.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+add("builder-code-check: Agent builder brief that names merge --lane-lint HEAD is allowed",
+    "allow", tool="Agent", prompt="Task: fix the typo in hooks/x.py.\nDone check: `merge --lane-lint HEAD` exits 0.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+add("builder-code-check: Agent builder brief that names bin/ci-job checks --lint --base origin/main is allowed",
+    "allow", tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\nDone check: `bin/ci-job checks --lint --base origin/main` exits 0.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+add("builder-code-check: Agent builder brief that names actions/code-check/code_check.py is allowed",
+    "allow", tool="Agent",
+    prompt=("Task: fix the typo in hooks/x.py.\n"
+            "Done check: `python3 actions/code-check/code_check.py --base origin/main` exits 0."),
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+add("builder-code-check: Agent reviewer brief with no code check, in a repo with checks.yml, is allowed",
+    "allow", tool="Agent",
+    prompt="Task: review the diff in hooks/guard.py.\nDone check: each defect is named with its line.",
+    subagent_type="reviewer", cwd=WFGIT)
+add("builder-code-check: Agent test-author brief with no code check, in a repo with checks.yml, is allowed",
+    "allow", tool="Agent",
+    prompt="Task: write the red case for the typo in hooks/x.py.\nDone check: the new case fails on the old code.",
+    subagent_type="test-author", cwd=WFGIT)
+add("builder-code-check: Agent builder brief with no code check, in a cwd with no checks.yml, is allowed",
+    "allow", tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder", model="sonnet", cwd=BAREGIT)
+add("builder-code-check: Agent builder brief with no code check and no cwd is allowed",
+    "allow", tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder", model="sonnet")
+
+
+def lane_lint_flag_check():
+    """The brief rule names `merge --lane-lint`, so the flag must be the merge tool's own, or a rename goes unseen."""
+    with open(os.path.join(REPO, "merge", "merge.py"), encoding="utf-8") as handle:
+        text = handle.read()
+    if 'p.add_argument("--lane-lint"' in text:
+        return True, "merge/merge.py defines the --lane-lint argument"
+    return False, "merge/merge.py no longer defines p.add_argument(\"--lane-lint\"; the brief rule names that flag"
+
+
+def checks_workflow_code_check_tie():
+    """checks.yml still runs actions/code-check/code_check.py, the third name the brief rule accepts."""
+    with open(os.path.join(REPO, ".github", "workflows", "checks.yml"), encoding="utf-8") as handle:
+        text = handle.read()
+    if "actions/code-check/code_check.py" in text:
+        return True, "checks.yml names actions/code-check/code_check.py"
+    return False, "checks.yml no longer names actions/code-check/code_check.py; the brief rule accepts that path"
+
+
+FIXTURELESS_CHECKS.update((lane_lint_flag_check, checks_workflow_code_check_tie))
+LOG_CHECKS_EXTRA.append(("builder-code-check: merge.py defines the --lane-lint argument the brief rule names",
+                         lane_lint_flag_check))
+LOG_CHECKS_EXTRA.append(("builder-code-check: checks.yml still runs code_check.py, the third name the brief rule "
+                         "accepts", checks_workflow_code_check_tie))
+
+
 # ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
 # prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
 # command. So a create_session that tags a lane must carry that prompt alone. Calls without the
