@@ -13456,6 +13456,32 @@ add("test-author: a whole step running hooks/some_tool.py added to checks.yml is
 add("test-author: a mutate_guard shard step with continue-on-error added to checks.yml is refused", "deny", rule=TA,
     tool="Edit", file_path=WF, old_string=LINT, new_string=LINT + SHARD_GUARD_CONTINUE,
     carries=("builder", "Report"), **A)
+# The gating mutate step runs the whole mutation test. `--report` and `--changed` exit 0 whatever they find, so a run
+# with either is a report, not a gate, and `--only` checks a part only. A test author may not swap the gate for one of
+# them, nor delete it. Each swap is one whole step with no line in common with the gate, since a shared line splits
+# the diff into parts that no whole-step judge reads. A copy of the gate under a new name stays allowed.
+GATE_STEP = ("      - name: Guard mutation test\n"
+             "        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}\n"
+             "        run: python3 hooks/mutate_guard.py\n")
+GATE_COPY = ("      - name: Guard mutation test, copy\n"
+             "        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}\n"
+             "        run: python3 hooks/mutate_guard.py\n")
+GATE_REPORT_ONLY = "      - name: Guard report\n        run: python3 hooks/mutate_guard.py --report --only guard\n"
+GATE_REPORT = "      - name: Guard report\n        run: python3 hooks/mutate_guard.py --report\n"
+GATE_CHANGED = "      - name: Guard report\n        run: python3 hooks/mutate_guard.py --changed . --base origin/main\n"
+add("test-author: the gating mutate step swapped for a --report --only guard step is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=LINT + GATE_STEP, new_string=LINT + GATE_REPORT_ONLY,
+    carries=("builder", "Report"), **A)
+add("test-author: the gating mutate step swapped for a --changed step is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=LINT + GATE_STEP, new_string=LINT + GATE_CHANGED,
+    carries=("builder", "Report"), **A)
+add("test-author: the gating mutate step swapped for a --report step is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=LINT + GATE_STEP, new_string=LINT + GATE_REPORT,
+    carries=("builder", "Report"), **A)
+add("test-author: the gating mutate step deleted from checks.yml is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT + GATE_STEP, new_string=LINT, carries=("builder", "Report"), **A)
+add("test-author: a copy of the gating mutate step added to checks.yml is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + GATE_COPY, **A)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
