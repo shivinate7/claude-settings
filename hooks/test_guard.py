@@ -8050,6 +8050,65 @@ sh("env: interpreter heredoc: deny, a quoted python body with a comment line, th
 sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a list element",
    "python3 <<'PY'\n# note\n" + 'paths = [".gitignore", "' + ENV + '"]' + "\nPY", "deny", "env-file", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code": code that a runner takes with `-c`, `-e`, `-p` or
+# `--eval`, and the body of a quoted python or node heredoc, reads the file as the interpreter does, so
+# the guard judges it as it judges `cat` of the file. Names start "env: interpreter code", so
+# MUTATE_ONLY="env: interpreter code" runs this block alone. The denies are the gap recorded as debt
+# env-interpreter-code-reads, red on the base until the guard judges this code.
+sh("env: interpreter code: deny, python3 -c, an open of the file",
+   "python3 -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, python -c, a pathlib read of the file",
+   "python -c 'import pathlib; print(pathlib.Path(\"" + ENV + "\").read_text())'", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, a dotenv loader of the file",
+   "python3 -c \"from dotenv import dotenv_values; print(dotenv_values('" + ENV + "'))\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, an open of an envrc in a folder",
+   "python3 -c \"print(open('./config/" + ENVRC + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, node -e, a readFileSync of the file",
+   "node -e \"console.log(require('fs').readFileSync('" + ENV + "','utf8'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, node -p, a readFileSync of the double-quoted file",
+   "node -p \"require('fs').readFileSync(\\\"" + ENV + "\\\", 'utf8')\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, node --eval, a template literal holding the file",
+   "node --eval 'fs.readFileSync(`" + ENV + "`)'", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a quoted python heredoc that opens the file",
+   "python3 <<'PY'\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a quoted python heredoc with a comment line, then an open of the file",
+   "python3 <<'PY'\n# note\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a quoted node heredoc that reads the file in a template literal",
+   "node <<'EOF'\nconst fs = require('fs');\nconsole.log(fs.readFileSync(`" + ENV + "`, 'utf8'));\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a quoted node heredoc whose multi-line template literal holds the file",
+   "node <<'EOF'\nconst p = `\n" + ENV + "\n`.trim();\nconsole.log(require('fs').readFileSync(p, 'utf8'));\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, bash -c nesting a python -c open of the file",
+   'bash -c "python3 -c \\"print(open(\'' + ENV + '\').read())\\""', "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code: allow, python3 -c, a print of prose that names the file",
+   "python3 -c \"print('run cat " + ENV + " first')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, a quoted python heredoc that writes JSON quoting bash -c of cat",
+   "python3 <<'PY'\nimport json\njson.dump({\"why\": \"bash -c \\\"cat " + ENV + "\\\" leaks\"}, open(\"o.json\", \"w\"))\nPY",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an open of the example file",
+   "python3 -c \"print(open('" + ENV + ".example').read())\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, node -e, a comment opener inside a string",
+   "node -e \"const u = 'http://x/*'; console.log(u)\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a comment opener inside a string",
+   "python3 -c 'x = \"# not a comment\"; print(x)'", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a lone quote in printed text",
+   "python3 -c \"print(\\\"don't\\\")\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, a quoted python heredoc with the file named in a comment only",
+   "python3 <<'PY'\n# never open " + ENV + "\nprint(1)\nPY", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, a quoted node heredoc with the file named in a comment only",
+   "node <<'EOF'\n// read " + ENV + "? no\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an existence test of the file",
+   "python3 -c \"import os; print(os.path.exists('" + ENV + "'))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a pathlib existence test of the file",
+   "python3 -c \"from pathlib import Path; print(Path('" + ENV + "').exists())\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, node --env-file, a runner handed the file and a script",
+   "node --env-file=" + ENV + " app.js", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3, a runner of a script file",
+   "python3 app.py", "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
