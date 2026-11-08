@@ -1634,8 +1634,8 @@ function buildRuling(it) {
   return card;
 }
 // The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
-// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen or answered card's fold stays open and its control is locked.
-const foldLocked = (it) => !!eff(it) || withdrawing(it);
+// A draft, a stood pick or a pending withdraw locks the fold open. A saved item never locks.
+const foldLocked = (it) => !isSaved(it) && (!!eff(it) || withdrawing(it));
 // words ({ show, hide }) names the fold of a sunk answered card, which holds its note, last answer and reply instead of options, steps or commands.
 function unfoldBtn(it, open, locked, ncmd, words) {
   const dec = it.kind === "decision", tail = ncmd > 1 ? " and the " + ncmd + " commands" : ncmd ? " and the command" : "";
@@ -1670,7 +1670,7 @@ function replyMark(it) {
   return replyFirst(it) ? h("span", { class: "newmark" }, REPLY_WORDS[0], h("span", { class: "sr" }, REPLY_WORDS[1]))
     : h("span", { class: "newmark dot", title: full }, h("span", { class: "sr" }, full));
 }
-const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
+const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-label": ACT_NAME.park + " No. " + it.n, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
 function buildCard(it) {
   if (isRuling(it)) return buildRuling(it);
   const T = tierOf(it), byWait = isByWait(it), saved = isSaved(it) || byWait, d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
@@ -1718,7 +1718,7 @@ function buildCard(it) {
   if (thread) card.append(thread);
   const more = !!state.more[it.id], ctxText = it.context || "";
   card.append(h("p", { class: "ctx" + (more || ctxText.length <= 220 ? "" : " clamp"), id: "ctx-" + it.id }, ctxText));
-  if (ctxText.length > 220) card.append(h("button", { class: "morebtn", type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
+  if (ctxText.length > 220) card.append(h("button", { class: "morebtn", id: "b-more-" + it.id, type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
   // A sunk card changed on the page (a Change keeps it in the Answered section) folds every part the owner answers with, behind one control. An item the owner still owes never folds. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
@@ -1733,14 +1733,14 @@ function buildCard(it) {
     if (multi) put(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
     put(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
-        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"), parkBtn(it, d)));
+        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-label": "None of these on No. " + it.n, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"), parkBtn(it, d)));
   } else {
     const cmds = cmdBlocks(it); ncmd = cmds.length;
     put(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     put(...cmds);
     if (linksOf(it).length) put(h("div", { class: "links" }, linksOf(it).map(linkEl)));
     put(ready, h("div", { class: "alts" },
-      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done, act: null }); repaint(it); } }, "Mark done"), parkBtn(it, d)));
+      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-label": "Mark done on No. " + it.n, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done, act: null }); repaint(it); } }, "Mark done"), parkBtn(it, d)));
   }
   const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
   const ta = h("textarea", { id: "n-" + it.id, placeholder: need ? "Say what you want instead." : "Anything the session should know" });
@@ -2092,7 +2092,7 @@ function renderBar() {
   if (state.barNote) parts.push(state.barNote);
   else {
     if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [stood && stood + " where my pick stands", toPark && toPark + " to park", over && over + " overturn", pks && pks + " on " + (pks === 1 ? "a parked line" : "parked lines")].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
-    if (left) parts.push(h("b", {}, String(left)), " stay open.");
+    if (left) parts.push(h("b", {}, String(left)), left === 1 ? " stays open." : " stay open.");
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
   $("barStatus").replaceChildren(...parts);
@@ -2339,9 +2339,13 @@ const ASK_SEEN = readStamp("waiting.askSeen");
 const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
 const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
-const markAsksSeen = () => writeStamp("waiting.askSeen");
-document.addEventListener("visibilitychange", () => { if (document.hidden) markAsksSeen(); });
-window.addEventListener("pagehide", markAsksSeen);
+// The stamp moves only while the answer list (#askList, below the form) is on screen: an answer that lands on a hidden tab or below the fold has not been seen.
+// Hiding the tab stamps once, at the hide time. A visibilitychange or pagehide of a tab already hidden stamps nothing.
+const asksOnScreen = () => { const r = $("askList").getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+const markAsksSeen = () => { if (asksOnScreen()) writeStamp("waiting.askSeen"); };
+let tabWasHidden = document.hidden;
+document.addEventListener("visibilitychange", () => { const hiding = document.hidden && !tabWasHidden; tabWasHidden = document.hidden; if (hiding) markAsksSeen(); });
+window.addEventListener("pagehide", () => { if (!document.hidden) markAsksSeen(); });
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
 try { $("askText").value = localStorage.getItem("waiting.askDraft") || ""; } catch (e) {}
 // The stack is kept beside the draft, so a reload shows it again. An ask already written to the store is not kept. An edit left open keeps its words.
@@ -2928,10 +2932,11 @@ $("dFull").onclick = () => {
   try { window.open(URL.createObjectURL(new Blob([DESIGN_HTML[d.slug] || ""], { type: "text/html" })) + (stateOf(d) ? "#" + stateHash(stateOf(d)) : ""), "_blank", "noopener"); } catch (e) {}
 };
 // A card keeps its click closures while its content is unchanged, but the items are rebuilt as new objects, so match by id, never by object.
-// No exact match: open by slug and state. No match at all: open nothing, never a wrong design.
+// No exact match: open the design with the same slug and state only when exactly one has them. None, or several: open nothing, never a wrong design.
 function openShown(it, d) {
   const all = allDesigns(), same = (x) => x.it.id === it.id && x.slug === d.slug && stateOf(x) === stateOf(d);
-  let at = all.findIndex((x) => same(x) && x.label === d.label); if (at < 0) at = all.findIndex(same);
+  let at = all.findIndex((x) => same(x) && x.label === d.label);
+  if (at < 0) { const m = all.map((x, i) => same(x) ? i : -1).filter((i) => i >= 0); if (m.length === 1) at = m[0]; }
   if (at >= 0) openDesign(null, all, at);
 }
 function openDesign(slug, list, at) {
@@ -3189,6 +3194,8 @@ const stall = (() => {
   return { steps: rows, paused: ids(r.paused), bad, items: Array.isArray(r.items) ? r.items.filter((x) => x && x.n != null) : null, itemsWhy: typeof r.itemsWhy === "string" ? r.itemsWhy : "" };
 })();
 const stalledIds = new Set(stall.steps ? stall.steps.map((x) => x.id) : []), pausedIds = new Set(stall.paused || []);
+// A stalled or paused step keeps status active, so a count or a mark that reads the status alone calls it In progress.
+const shownState = (s) => (s.status !== "active" ? s.status : stalledIds.has(s.id) ? "stalled" : pausedIds.has(s.id) ? "paused" : s.status);
 
 /* ---------- read-at stamps and live work ---------- */
 function readAt() {
@@ -3258,7 +3265,7 @@ function stalledBand() {
 
 /* ---------- where you are ---------- */
 function renderNow() {
-  const cur = curPhase(), ss = byPhase(cur.k), done = ss.filter((s) => s.status === "done").length, act = ss.filter((s) => s.status === "active").length;
+  const cur = curPhase(), ss = byPhase(cur.k), done = ss.filter((s) => s.status === "done").length, act = ss.filter((s) => shownState(s) === "active").length;
   const tot = steps.length, tdone = steps.filter((s) => s.status === "done").length;
   const active = workOrder(steps.filter((s) => s.status === "active")), nu = nextUp(), off = offTrack();
   $("svNow").innerHTML = `
@@ -3278,7 +3285,7 @@ function renderNow() {
 function renderRail() {
   const cur = curPhase(), shown = shownPhase();
   $("svRail").innerHTML = PH.map((p) => {
-    const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+    const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => shownState(s) === "active").length, b = ss.filter((s) => s.status === "blocked").length;
     const u = ss.filter(stepNew).length;
     return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}${u ? ", " + u + " updated since your last visit" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="nmr">${u ? countMark(u) : ""}<span class="num" aria-hidden="true">${d}/${ss.length}</span></span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
   }).join("");
@@ -3367,7 +3374,7 @@ const defaultPage = (list) => { const ix = list.findIndex((s) => s.status !== "d
 function renderPhase() {
   stepWords = true;
   const k = shownPhase(), p = PH.find((x) => x.k === k), ss = byPhase(k);
-  const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+  const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => shownState(s) === "active").length, b = ss.filter((s) => s.status === "blocked").length;
   const nextIds = nextUp().map((s) => s.id), size = pageSize();
   const pages = Math.max(1, Math.ceil(open.length / size));
   if (ui.page[k] == null) ui.page[k] = defaultPage(open);
@@ -3433,7 +3440,7 @@ function feedCard(n = 8) {
   const recent = steps.filter((s) => when(s.updatedAt)).sort((a, b) => when(b.updatedAt) - when(a.updatedAt)).slice(0, n);
   if (!recent.length) return "";
   return `<section class="box"><header><h3>Latest changes</h3><span class="lbl">${esc(dayLabel(new Date()))}</span></header>
-    <ul class="feed">${recent.map((s) => `<li><span class="when">${esc(fresh(s.updatedAt) ? timeLabel(when(s.updatedAt)) : ago(s.updatedAt))}</span>${rgl(s.status)}<span><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join("")}</ul>
+    <ul class="feed">${recent.map((s) => `<li><span class="when">${esc(fresh(s.updatedAt) ? timeLabel(when(s.updatedAt)) : ago(s.updatedAt))}</span>${rgl(shownState(s))}<span><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join("")}</ul>
     <button type="button" class="morelink" data-view-go="log">All changes by day →</button></section>`;
 }
 function renderSide() {
@@ -3453,7 +3460,7 @@ function renderLog() {
     const all = ev.filter((e) => dayKey(e.d) === g.k), nd = all.filter((e) => e.s.status === "done").length, cont = gi === 0 && before === g.k;
     return `<div class="day"><h3><span>${esc(dayLabel(g.d))}${cont ? ' <span class="lbl">continued</span>' : ""}</span><span class="lbl">${perDay[g.k]} change${perDay[g.k] === 1 ? "" : "s"}${nd ? ` · <span style="color:var(--good)">${nd} done</span>` : ""}</span></h3>
     ${g.list.map((e) => { const s = e.s;
-      return `<div class="ev ${s.status}"><span class="when">${esc(timeLabel(e.d))}</span>${rgl(s.status)}<div><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
+      return `<div class="ev ${s.status}"><span class="when">${esc(timeLabel(e.d))}</span>${rgl(shownState(s))}<div><button type="button" class="lnk" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
         <div class="gist">${esc(firstSentence(s.note) || firstSentence(s.why))}</div></div></div>`; }).join("")}</div>`;
   }).join("")}${pager("log", pg, pages, ev.length, "changes")}</section>
   <p class="lead">Each step shows once, on the day it last changed.</p>`;
