@@ -1745,6 +1745,87 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(reply)])
         self.assert_blocked_for(out, NO_CHECK, line)
 
+    # ---- a later success cancels a failed try of the same call. A flagless gh pr call names no PR, so its own arguments
+    # are its identity: an identical call cancels its failure, and a differing one cancels nothing.
+
+    def test_cc_red_a_flagless_read_success_cancels_its_failure(self):
+        # Catches: a later success of a flagless gh pr read (view, status, checks, list) skipped as an unknown target, so the
+        # failure of the same read stood and the past claim named no check.
+        line = "I could not reach GitHub at first."
+        for verb in ("view", "status", "checks", "list"):
+            with self.subTest(verb=verb):
+                out = self.stop([trg.human("check the PR"), *failed_bash("gh pr " + verb, "tu_f"),
+                                 *ok_bash("gh pr " + verb, "tu_o"), landed_reply(line)])
+                self.assert_passes(out, "a failed, then ok, flagless gh pr %s" % verb)
+
+    def test_cc_green_a_flagless_read_failure_with_no_success_still_blocks(self):
+        # Control: the same failed flagless read with no later success. The past claim names no check, so it blocks.
+        line = "I could not reach GitHub at first."
+        out = self.stop([trg.human("check the PR"), *failed_bash("gh pr view", "tu_f"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_a_numbered_read_success_cancels_its_failure(self):
+        # Control: a numbered read has a known target, so its later success already cancels its failure. The line passes.
+        line = "I could not reach GitHub at first."
+        out = self.stop([trg.human("check the PR"), *failed_bash("gh pr view 12", "tu_f"),
+                         *ok_bash("gh pr view 12", "tu_o"), landed_reply(line)])
+        self.assert_passes(out, "a failed, then ok, numbered gh pr view")
+
+    def test_cc_red_an_identical_retry_of_a_flagless_create_cancels_its_failure(self):
+        # Catches: a flagless create keyed as an unknown target, so its identical retry, which succeeded, did not cancel the
+        # failed create. The retry names the same arguments, so it is the same call.
+        call = "gh pr create --draft --title T --body B"
+        for line in ("I could not open the PR on the first try, so I retried.",
+                     "I was unable to open the PR at first, then it worked."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open a PR"), *failed_bash(call, "tu_1"), *ok_bash(call, "tu_2"),
+                                 landed_reply(line)])
+                self.assert_passes(out, "an identical retry of a failed flagless create: %r" % line)
+
+    def test_cc_red_an_identical_retry_of_a_flagless_merge_cancels_its_failure(self):
+        # Catches: a flagless merge keyed as an unknown target, so its identical retry, which succeeded, did not cancel the
+        # failed merge and the past claim named no check.
+        call = "gh pr merge --squash"
+        line = "I could not merge the PR at first, then it worked."
+        out = self.stop([trg.human("merge the PR"), *failed_bash(call, "tu_1"), *ok_bash(call, "tu_2"),
+                         landed_reply(line)])
+        self.assert_passes(out, "an identical retry of a failed flagless merge")
+
+    def test_cc_green_a_differing_flagless_create_still_blocks(self):
+        # Control: a create with --draft failed, then a create with --base main succeeded. The calls differ, so the success
+        # cancels nothing and the past claim names no check.
+        line = "I could not open the PR on the first try, so I retried."
+        out = self.stop([trg.human("open a PR"), *failed_bash("gh pr create --draft", "tu_1"),
+                         *ok_bash("gh pr create --base main", "tu_2"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_a_differing_merge_of_another_repo_still_blocks(self):
+        # Control: a merge of PR 12 failed, then a merge of PR 12 in another repo succeeded. The two targets differ.
+        line = "I could not merge the PR at first, then it worked."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_1"),
+                         *ok_bash("gh pr merge --repo other/x 12", "tu_2"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_a_differing_flagless_merge_still_blocks(self):
+        # Control: a flagless merge with --squash failed, then one with --rebase succeeded. The calls differ, so no cancel.
+        line = "I could not merge the PR at first, then it worked."
+        out = self.stop([trg.human("merge the PR"), *failed_bash("gh pr merge --squash", "tu_1"),
+                         *ok_bash("gh pr merge --rebase", "tu_2"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_count_after_sent_back_names_no_check(self):
+        # Catches: "sent back" read as a status before any number, so "450 files" named the check of a refused merge. A count
+        # of units is no HTTP status, the same unit exclusion as CANNOT_CHECK_RE.
+        line = "I could not merge PR 12: it sent back 450 files."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_a_status_after_sent_back_still_names_the_check(self):
+        # Control: a real status after "sent back" still names the check of the refused merge.
+        line = "I could not merge PR 12: it sent back 403."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_passes(out, "a refused merge whose status 403 is sent back")
+
 
 if __name__ == "__main__":
     unittest.main()
