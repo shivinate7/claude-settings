@@ -974,12 +974,19 @@ class GuardRuleIdReadTests(unittest.TestCase):
         except ValueError as why:
             self.fail("the reader refused a def-local rule id: %s" % why)
 
-    def refused_at(self, call, line):
-        """`call()` raises the reader's ValueError at hooks/guard.py:`line`. A return that lists ids fails here, naming them."""
+    def refused_at(self, call, line, callee="refuse", or_lists=None, cause=""):
+        """`call()` raises the reader's ValueError at hooks/guard.py, on `line` (an int, or a tuple of the lines the
+        raise may sit on), naming `callee`. With `or_lists`, `call()` may instead return exactly those ids, and
+        any other return fails with `cause`. Without it, a return that lists ids fails, naming them."""
+        lines = (line,) if isinstance(line, int) else tuple(line)
         try:
             ids = call()
-        except ValueError as why:
-            self.assertRegex(str(why), r"hooks[\\/]guard\.py:%d: refuse\(\) takes a rule id the reader cannot resolve" % line)
+        except ValueError as raised:
+            self.assertRegex(str(raised), r"hooks[\\/]guard\.py:(?:%s): %s\(\) takes a rule id the reader cannot resolve"
+                             % ("|".join(str(n) for n in lines), callee))
+            return
+        if or_lists is not None:
+            self.assertEqual(ids, or_lists, cause)
             return
         self.fail("the reader listed %s for a loop it cannot read; it must raise, or a cull never sees the id" % sorted(ids))
 
@@ -1105,6 +1112,73 @@ class GuardRuleIdReadTests(unittest.TestCase):
                          "control: an unpacked loop over literal rows lists each id")
         self.assertEqual(self.listed(loop % '(LOCAL, "why a")'), {"local-rule", "lit-rule"},
                          "an unpacked loop row whose id is a def-local name drops that id")
+
+    def test_a_loop_over_a_dict_lists_its_keys_not_its_values(self):
+        # Scope first: a loop over a literal tuple of ids lists each; an empty dict lists none; a dict read by key
+        # gives its values as the rows of a table. A `for` over a dict walks its keys, so the keys are the ids.
+        loop = ('RULES = {"rule-a": "why a", "rule-b": "why b"}\ndef go(tool):\n    for rule in %s:\n'
+                '        refuse(tool, "deny", rule, RULES[rule], m)\n')
+        self.assertEqual(self.listed(loop % '("rule-a", "rule-b")'), {"rule-a", "rule-b"},
+                         "control: a loop over a literal tuple of ids lists each id")
+        self.assertEqual(self.listed('RULES = {}\ndef go(tool):\n    for rule in RULES:\n'
+                                     '        refuse(tool, "deny", rule, RULES[rule], m)\n'), set(),
+                         "control: a loop over an empty dict lists no id")
+        table = ('TABLE = {"k": ("row-rule", "why")}\ndef go(tool, key):\n    rule, why = TABLE[key]\n'
+                 '    refuse(tool, "deny", rule, why, m)\n')
+        self.assertEqual(self.listed(table), {"row-rule"},
+                         "control: a dict read by key gives its values as the rows of a table")
+        self.refused_at(lambda: rule_audit.guard_rule_names(loop % "RULES", "hooks/guard.py"), 4,
+                        or_lists={"rule-a", "rule-b"},
+                        cause="a `for` over a dict walks its keys, and the reader listed its values instead")
+
+    def test_a_star_args_refuse_wrapper_lists_the_id_its_call_passes(self):
+        # Scope first: a wrapper with a named rule parameter lists the id its call passes. A wrapper that takes
+        # `*args` and hands them on names no id at its call, so the reader lists the id by position or raises.
+        named = ('def refuse(p, t, rule, *rest):\n    guard_core.refuse(t, "deny", rule, *rest)\n'
+                 'def go(p, t):\n    refuse(p, t, "ctl-rule", "w", "m")\n')
+        self.assertEqual(self.listed(named), {"ctl-rule"},
+                         "control: a wrapper with a named rule parameter lists the id its call passes")
+        star = ('def refuse(*a, **k):\n    guard_core.refuse(*a, **k)\n'
+                'def go(p, t):\n    refuse(p, t, "wrapped-rule", "w", "m")\n')
+        self.refused_at(lambda: rule_audit.guard_rule_names(star, "hooks/guard.py"), (2, 4),
+                        or_lists={"wrapped-rule"},
+                        cause="a refuse() wrapper that takes *args names no id: its call's id is dropped")
+
+    def test_a_refuse_def_that_copies_its_id_parameter_to_a_local_lists_the_id_its_call_passes(self):
+        # Scope first: a def that forwards its id parameter by name lists the id its call passes. The same def
+        # that copies that parameter to a local name first drops the id at its call.
+        direct = ('def refuse(p, t, name, reason, m):\n    guard_core.refuse(t, "deny", name, reason, m)\n'
+                  'def go(p, t):\n    refuse(p, t, "ctl-name", "w", "m")\n')
+        self.assertEqual(self.listed(direct), {"ctl-name"},
+                         "control: a def that forwards its id parameter by name lists the id its call passes")
+        alias = ('def refuse(p, t, name, reason, m):\n    rule = name\n'
+                 '    guard_core.refuse(t, "deny", rule, reason, m)\n'
+                 'def go(p, t):\n    refuse(p, t, "renamed-local-rule", "w", "m")\n')
+        self.refused_at(lambda: rule_audit.guard_rule_names(alias, "hooks/guard.py"), (3, 5),
+                        or_lists={"renamed-local-rule"},
+                        cause="a refuse() def that copies its id parameter to a local drops the id its call passes")
+
+    def test_a_record_def_with_star_args_lists_the_id_its_call_passes(self):
+        # Scope first: a record() wrapper with named parameters lists the id its call passes; the `*args` form names none.
+        named = ('def record(tool, kind, rule, why):\n    guard_core.record(tool, kind, rule, why)\n'
+                 'def go(tool):\n    record(tool, "noted", "rec-ctl", "m")\n')
+        self.assertEqual(self.listed(named), {"rec-ctl"},
+                         "control: a record() wrapper with a named rule parameter lists the id its call passes")
+        star = ('def record(*a):\n    guard_core.record(*a)\n'
+                'def go(tool):\n    record(tool, "noted", "rec-rule", "m")\n')
+        self.refused_at(lambda: rule_audit.guard_rule_names(star, "hooks/guard.py"), (2, 4), callee="record",
+                        or_lists={"rec-rule"},
+                        cause="a record() wrapper that takes *args names no id: its call's id is dropped")
+
+    def test_a_refuse_def_with_no_rule_parameter_names_only_its_constant(self):
+        # The blind_brief shape: a def with no rule parameter takes its id from a constant in its own body. The call
+        # passes reason text where an id would sit, and that text names no id. A reader that lists the call's
+        # argument in that place would list "why" here.
+        src = ('RULE = "blind-const"\ndef refuse(payload, tool, reason, matched):\n'
+               '    guard_core.refuse(tool, "deny", RULE, reason, matched)\n'
+               'def go(payload, tool):\n    refuse(payload, tool, "why", "m")\n')
+        self.assertEqual(self.listed(src), {"blind-const"},
+                         "control: the constant in the def's body is the id; the reason text at the call is not")
 
 
 # ------------------------------------------------------------ parse cache
