@@ -19,7 +19,7 @@ commit trailers of the branch, and from the last paragraph of the PR body throug
 uses (one home). Commit trailers still count. CI (env `PR_BODY`) and the lane lint pass the body in;
 `--pr-body` covers a local run. A bare path excuses nothing, and no reason excuses nothing. Each use prints
 `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every reason. No switch turns the
-check off. Cost: one string read of the body per check run. No process starts, and no file is written.
+check off. Cost: one string read of the body per check run. No process starts.
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
 that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
@@ -37,7 +37,9 @@ an unflagged close gets no run read. It starts no long-lived process.
   line, in one paragraph or two. Read only the last paragraph left, with the trailer rules above.
 - **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
   line. A session in another repo that uses `bin/merge` asked for this. The CLI and CI read the body too,
-  which widens a shared tool (owner ruling, Cockpit item 411 a, 2026-11-08 06:11 CST).
+  which widens a shared tool (owner ruling, Cockpit item 411 a, 2026-11-08 06:11 CST). A body edit does not
+  rerun CI (`checks.yml` `pull_request.types` has no `edited`), so a body excuse added after a red run takes
+  effect at the next push.
 - **Verdict.** When the check finds a dropped line, `bin/merge preview` prints one `BLOCKED: <reason>`
   line and exits 1. An unreadable history is a plain refusal with no BLOCKED line.
 
