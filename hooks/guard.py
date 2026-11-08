@@ -94,10 +94,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-needs-review-record  deny. A `git push` (not a dry run) while the session's own transcript shows a PR and a reviewer or
                        design-reviewer report with no later posted review record holding that role, verdict and round, or a push to
                        the head branch of a PR whose posted record already holds a Fix check line.
-  push-owes-review-record  ask. A `git push` (not a dry run) in a merge-tool repo to a branch that a reviewer's stop left an entry
-                       for (state/owed-review-records), when its remote-tracking ref is still the reviewed head, the pushed source
-                       is another commit, and no posted review record that merge's parse_review accepts holds that head on its open
-                       pull request. An entry or a read that cannot be read asks, noting owed-record-unread. The stop writes the
+  push-owes-review-record  ask. A `git push` (not a dry run), or the MCP `update_pull_request_branch`, in a merge-tool repo to a
+                       branch that a reviewer's stop left an entry for (state/owed-review-records), when its remote-tracking ref is
+                       the reviewed head or a descendant, the pushed source is not that ref, and no posted review record that
+                       merge's parse_review accepts holds that head on the open pull request of that branch. An entry, a
+                       destination, a config or a read that cannot be read asks, noting owed-record-unread. The stop writes the
                        entry and never blocks. An override lifts the ask. (pr-review-record)
   env-file            deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
@@ -390,7 +391,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool, owed_record_hit, owed_record_write,
+            undrafted_pr_create, uses_merge_tool, OWED_BRANCH_TOOL, owed_record_hit, owed_record_pr_hit, owed_record_write,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -3530,7 +3531,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 record_hit, record_reason = review_record_hit(transcript, lambda: push_destinations(args, where, overrides))
                 if record_hit:
                     refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)
-                owed = owed_record_hit(args, where, overrides)
+                owed = owed_record_hit(args, where, overrides, cwd)
                 if owed:
                     ask_command("push-owes-review-record", owed[1], owed[0], "push past an unrecorded review")
                 kind = push_ask_hit(args, where, overrides)
@@ -4884,6 +4885,12 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+
+    # The MCP base merge moves a pull request's head branch like a push does (rule push-owes-review-record).
+    if tool == OWED_BRANCH_TOOL:
+        owed = owed_record_pr_hit(tool_input, cwd)
+        if owed:
+            refuse(tool, "ask", "push-owes-review-record", owed[1], owed[0])
 
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:

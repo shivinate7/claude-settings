@@ -218,6 +218,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `precompact-handoff` | Auto-compact drops detail. | [`docs/decisions/precompact-handoff.md`](../docs/decisions/precompact-handoff.md) |
 | `predicate-is-the-act` | Judge a guard by the act it must catch, never by the spelling of the act. | [`docs/decisions/predicate-is-the-act.md`](../docs/decisions/predicate-is-the-act.md) |
 | `premise-format` | A premise is a statement, not a fact. | [`docs/decisions/premise-format.md`](../docs/decisions/premise-format.md) |
+| `push-needs-review-record` | A shell `git push` is refused while a reviewer or design-reviewer report has no posted review record. | [`docs/decisions/push-needs-review-record.md`](../docs/decisions/push-needs-review-record.md) |
+| `push-owes-review-record` | Coordinator brief, 2026-11-08 09:45 CST. | [`docs/decisions/push-owes-review-record.md`](../docs/decisions/push-owes-review-record.md) |
 | `question-form` | Owner steer, 2026-10-30 12:50 CDT: a question to the owner has one form and one guard, for the chat question box (`AskUserQuestion`) and for a waiting-page item write. | [`docs/decisions/question-form.md`](../docs/decisions/question-form.md) |
 | `question-reviewer-agent-hook` | Owner rulings, 2026-10-22 10:18 CDT: | [`docs/decisions/question-reviewer-agent-hook.md`](../docs/decisions/question-reviewer-agent-hook.md) |
 | `questions-go-to-owner` | Owner, 2026-10-26: a session with a question brings it to the owner. | [`docs/decisions/questions-go-to-owner.md`](../docs/decisions/questions-go-to-owner.md) |

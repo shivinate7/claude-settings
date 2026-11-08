@@ -44,18 +44,21 @@ def _push_current_branch(cwd: str):
     return answer.stdout.strip().removeprefix("refs/heads/")
 
 
-def _push_bare_destination(cwd: str, overrides=None):
+def _push_bare_destination(cwd: str, overrides=None, matching=False):
     """Where a push with no refspec goes, read through push.default, else None (unknown).
 
     `simple` and `current` push the current branch to its own name. `upstream` pushes to the
     branch's upstream ref. `matching`, `nothing`, an unset upstream or an unreadable config is
-    unknown, and unknown is never safe.
+    unknown, and unknown is never safe. With `matching` set, a `matching` push reads as the
+    current branch, which it writes when the remote holds that name: the reader of a state
+    that follows one branch (rule push-owes-review-record) needs that name, and every other
+    reader keeps unknown.
     """
     current = _push_current_branch(cwd)
     mode = _push_config(cwd, "push.default", overrides)
     if current is None or mode is None:
         return None
-    if mode in ("", "simple", "current"):
+    if mode in ("", "simple", "current") or (matching and mode == "matching"):
         return current
     if mode in ("upstream", "tracking"):
         merge = _push_config(cwd, "branch." + current + ".merge", overrides)
@@ -179,13 +182,13 @@ def _push_parse(args):
     return force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain
 
 
-def _push_dest(spec: str, bare: bool, cwd: str, overrides=None):
+def _push_dest(spec: str, bare: bool, cwd: str, overrides=None, matching=False):
     """The branch one refspec writes: `HEAD` and a bare push read the checkout's current branch.
     None when that cannot be read."""
     source, colon, target = spec.lstrip("+").partition(":")
     target = target if colon else source
     if bare:
-        return _push_bare_destination(cwd, overrides)
+        return _push_bare_destination(cwd, overrides, matching)
     if target in ("HEAD", "@"):
         return _push_current_branch(cwd)
     return target
@@ -194,15 +197,16 @@ def _push_dest(spec: str, bare: bool, cwd: str, overrides=None):
 _DESTINATIONS = {}   # (args, cwd, overrides) -> destinations, for the life of one hook process
 
 
-def push_destinations(args, cwd: str, overrides=None):
+def push_destinations(args, cwd: str, overrides=None, matching=False):
     """The branch names a `git push` with these arguments writes, `refs/heads/` cut off, a deletion
     included. None stands for a destination it cannot resolve. One hook call is one process and reads
     each push's destinations once, so the record-branch check and the conflict-markers check share the
-    reads (`git symbolic-ref`, `git config`) a HEAD or bare push needs."""
-    key = (tuple(args), cwd, tuple(sorted((overrides or {}).items())))
+    reads (`git symbolic-ref`, `git config`) a HEAD or bare push needs. `matching` reads a bare
+    push under push.default=matching as the current branch (see `_push_bare_destination`)."""
+    key = (tuple(args), cwd, tuple(sorted((overrides or {}).items())), matching)
     if key not in _DESTINATIONS:
         plain = _push_parse(args)[-1]
-        found = [_push_dest(spec, not plain, cwd, overrides) for spec in plain or [""]]
+        found = [_push_dest(spec, not plain, cwd, overrides, matching) for spec in plain or [""]]
         _DESTINATIONS[key] = [t.removeprefix("refs/heads/") if t else t for t in found]
     return _DESTINATIONS[key]
 

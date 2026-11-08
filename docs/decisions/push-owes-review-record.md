@@ -4,13 +4,14 @@
 
 Coordinator brief, 2026-11-08 09:45 CST. Fix checks count, coordinator 09:54 CST. Process-only.
 
-- A reviewer's stop (a round or a fix check) writes an entry for the head it read: `state/owed-review-records/<sha>.json`. The entry holds the remote-tracking branches at that head. The stop never blocks.
-- A non-dry-run `git push` asks when all of these hold:
-  - the push's destination is a branch the entry names;
-  - that branch's remote-tracking ref still names the entry's head H;
-  - the pushed source is another commit, not H;
-  - an open pull request has head H, and its newest parseable review record does not hold Head H, or there is none.
-- A state read or a gh read that fails asks too, with the note `owed-record-unread`.
+- A reviewer's stop (a round or a fix check) writes an entry for the head it read: `state/owed-review-records/<sha>.json`. The entry holds the remote-tracking branches that contain that head, so a stop after the lane pushed past the head still writes one. The stop never blocks.
+- A non-dry-run `git push`, and the MCP `update_pull_request_branch` (GitHub's one-click base merge, the same act), asks when all of these hold:
+  - the destination is a branch the entry names (for the MCP call, the pull request's head branch);
+  - that branch's remote-tracking ref is the entry's head H or a descendant of H;
+  - the pushed source is not that ref (the MCP call's new commit always counts as new);
+  - the open pull request whose head branch is the destination has no posted review record with Head H, among those that merge's `parse_review` accepts. Any record counts, not the newest: a later round's record names a later head and never un-records H.
+- A state read or a gh read that fails asks too, with the note `owed-record-unread`. So does an entry that is this repo's (its head is a commit here) when the push's directory or destination cannot be read, or when `.github/stamp.json` exists and is not a JSON object. A missing `stamp.json` skips the check.
+- A bare push under `push.default=matching` reads as the current branch.
 - The ask names the rule and the remedy: render the record with `merge <pr> --review-record --head <H>`, post it, then push. It names no branch (rule `git-remedy-never-names-target`, a refusal names no target).
 - The owner's typed override lifts the ask.
 - Why: a push past an unrecorded head leaves the record unable to name that head. Fact: `merge <pr> --review-record --head <H>` stops with exit 1 when the live head is another sha (decision `pr-review-record`, the review record form).
@@ -56,30 +57,42 @@ The cases are in `hooks/test_guard.py`, section 5f-3 (family `push-owes-review-r
 | C10, dry run | `git push --dry-run` | allow |
 | C11, full folder | 40 entries for other heads, none for H | allow, no gh call |
 | R7c, fix-check record posted | A record with Head F and a Fix check line is posted before the push | allow |
+| F1a, stop after a push past H | The lane pushed past H, the reviewer then stopped at H in a detached tree, no record. The lane pushes again | ask |
+| F1b, a later round's record | A record at H, then a newer record at R. The lane pushes past R | allow |
+| F1c, PR head moved past H | The reviewer stopped at H. The lane pushed R past H, so the PR head is R. No record | ask |
+| F2, unreadable destination | An entry exists, and the push's destination cannot be read | ask, `owed-record-unread` |
+| F3, malformed stamp file | An entry exists, and `.github/stamp.json` is not valid JSON | ask |
+| F4, bare push, `push.default=matching` | An entry for the current branch, no record | ask |
+| F6, MCP base merge | `update_pull_request_branch` on the PR of a branch with an unrecorded entry | ask |
+| F6c, MCP base merge, recorded | The same call with the record at H posted | allow |
 
 ## The misses
 
 Found in the code:
 
-- A torn entry asks only when its head is a commit in the push's repo. Otherwise it passes.
+- A torn entry, an unreadable destination, directory or config asks only when an entry's head is a commit in the push's repo. Otherwise it passes.
+- A push that names no refspec range (`--all`, `--mirror`, a deletion, tags only) is not read.
 - Pruning runs at each reviewer stop. It removes any entry file older than 14 days by mtime, whether its PR is open or not. A push past that head then passes.
-- A reviewer stop on a head that no remote branch holds writes no entry. A later push past that head passes.
-- A reviewer that never checks out the branch writes no useful entry. The stop reads HEAD in its own directory.
-- Only the lowest-numbered open PR with head H is read. A second open PR with head H is not read.
-- Only open PRs are read. A closed or merged PR with head H does not ask.
-- Only shell `git push` is checked (`judge_shell`). MCP pushes (`push_files`, `update_pull_request_branch`) are not seen.
+- A reviewer stop on a head that no remote branch contains writes no entry. A later push past that head passes.
+- A reviewer that never checks out the head writes no useful entry. The stop reads HEAD in its own directory.
+- A stop whose git read fails writes no entry and logs `owed-record-unwritten`. A later push passes.
+- Only the lowest-numbered open PR whose head branch is the destination is read. A second open PR on that branch, or a fork's branch of the same name, is not told apart.
+- Only open PRs are read. A closed or merged PR on the branch does not ask.
+- Only the shell `git push` and `update_pull_request_branch` are checked. The MCP tools `push_files` and `create_or_update_file` are not seen.
+- An entry stays live for 14 days, so each push to its branch in that time reads gh again (one open-PR list and one comments read, even after the record is posted).
 - A design-reviewer or a workflow agent writes no entry. The stop reads only agent type `reviewer`.
 
 ## The cost
 
 - A push with no entry file: one listdir of `state/owed-review-records`. No git call, no gh call.
 - A push with entry files in a repo with a merge config: one merge-config read, one file read per entry, and the git reads of `push_destinations` (only for a bare or HEAD push). An entry for another branch costs its file read only. An entry for the push's branch costs one rev-parse of the tracking ref, and a second when that ref equals H. A torn entry costs one rev-parse.
-- A matching entry: the open PR list (one REST request per page, once per push), then the matched PR's issue comments (one REST request per page).
-- A reviewer stop: two git spawns (`rev-parse HEAD`, `branch -r --points-at HEAD`), one listdir, and one small file written (temp file, then replace).
+- A matching entry: the open PR list (one REST request per page, once per push), then the matched PR's issue comments (one REST request per page, once per PR per push). A tracking ref that is not H adds one `merge-base --is-ancestor` spawn.
+- An `update_pull_request_branch` call with entries present: one REST read of the pull request, then the same.
+- A reviewer stop: two git spawns (`rev-parse HEAD`, `branch -r --contains HEAD`), one listdir, and one small file written (temp file, then replace).
 - No long-lived process, no timer.
 - Not proved by a test: the git spawn counts. C1 and C11 prove the no-gh-call part.
 
-Dated by: the head compare in `owed_record_hit` and the 14-day constant `OWED_KEEP_SECONDS`, both in `hooks/guard_merge.py`. A change to either rewrites this record.
+Dated by: the head compare in `_records_hold` and the descent test in `_owed_scan` and the 14-day constant `OWED_KEEP_SECONDS`, all in `hooks/guard_merge.py`. A change to any of them rewrites this record.
 
 Risk: incident (PR #1869, PR #1914, PR #1985, PR #1699, PR #2015, PR #2025, PR #2026, PR #2068, PR #2088, lane `builder-report-in-head`).
 

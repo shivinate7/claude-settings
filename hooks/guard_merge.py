@@ -232,16 +232,24 @@ def merge_check_reason(verdict: str, detail: str) -> str:
 def _merge_config_at(root: str):
     """The `.github/stamp.json` object in the nearest folder at or above `root` that holds `.git`,
     when it is a JSON object with a `merge` key. Any other outcome is None."""
-    while not os.path.exists(os.path.join(root, ".git")):
-        if os.path.dirname(root) == root:
-            return None
-        root = os.path.dirname(root)
+    root = _repo_root_of(root)
+    if root is None:
+        return None
     try:
         with open(os.path.join(root, ".github", "stamp.json"), encoding="utf-8") as handle:
             config = json.load(handle)
     except (OSError, ValueError):
         return None
     return config if isinstance(config, dict) and "merge" in config else None
+
+
+def _repo_root_of(root: str):
+    """The nearest folder at or above `root` that holds `.git`, else None."""
+    while not os.path.exists(os.path.join(root, ".git")):
+        if os.path.dirname(root) == root:
+            return None
+        root = os.path.dirname(root)
+    return root
 
 
 def _merge_configs(where: str):
@@ -1132,13 +1140,15 @@ def brief_hit(tool: str, tool_input, transcript: str):
 
 # ---- push-owes-review-record: a reviewer's stop owes a posted record for the head it read
 #
-# A reviewer's SubagentStop writes one entry, `<config>/state/owed-review-records/<sha>.json`, for the head it read.
-# A push lists that folder. With no entry it makes no gh call and reads no repo. gh runs only for an entry whose branch
-# is the push's destination, whose remote-tracking ref still names the entry's head H, and when the push source is
-# another commit. Then two REST reads: the open pull request whose head is H, and its issue comments.
+# A reviewer's SubagentStop writes one entry, `<config>/state/owed-review-records/<sha>.json`, for the head it read:
+# the remote branches that contain it. A push (or the MCP base merge) lists that folder. With no entry it makes no gh
+# call and reads no repo. gh runs only for an entry whose branch is the destination, whose remote-tracking ref is
+# that head H or a descendant of it, and when the push source is not that ref. Then two REST reads: the open pull
+# request whose head BRANCH is the destination (its head sha moves, H does not), and its issue comments.
 OWED_DIR = ("state", "owed-review-records")
 OWED_KEEP_SECONDS = 14 * 86400
 _OWED_NAME = re.compile(r"[0-9a-f]{40}\.json")
+OWED_BRANCH_TOOL = "mcp__github__update_pull_request_branch"   # GitHub's one-click base merge: a push the shell never sees
 OWED_REASON = (
     "a reviewer stopped at head %s of pull request %d, and no posted review record holds that head. A push now moves "
     "past a review that was never recorded. Remedy: render the record with `merge %d --review-record --head %s` "
@@ -1158,12 +1168,13 @@ def _owed_folder():
 def owed_record_write(where, session, now):
     """Write the entry for the head a reviewer read in `where`; return '' or why none was written. `now` is a unix
     time, injected so a test fixes the clock. Entries older than OWED_KEEP_SECONDS go in the same pass. Never
-    blocks: the stop that calls it only logs a failure."""
+    blocks: the stop that calls it only logs a failure. The branches are those that CONTAIN the head, not only
+    those at it: a reviewer can stop after the lane pushed past the head it read."""
     done = _git(where, "rev-parse", "HEAD")
     sha = done.stdout.strip() if done is not None and done.returncode == 0 else ""
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         return "head unread"
-    done = _git(where, "branch", "-r", "--points-at", "HEAD")
+    done = _git(where, "branch", "-r", "--contains", "HEAD")
     if done is None or done.returncode:
         return "branches unread"
     branches = [line.split()[0] for line in done.stdout.splitlines() if line.strip() and "->" not in line]
@@ -1196,69 +1207,181 @@ def _owed_branches(path):
     return branches if isinstance(branches, list) and all(isinstance(b, str) for b in branches) else None
 
 
-def _newest_record(comments, merge_mod):
-    """The newest review record, parsed, among the issue comments `comments` (oldest first) that merge's own
-    parse_review accepts, else None."""
-    for comment in reversed(comments):
+def _owed_unread(why):
+    return "owed record unread", OWED_UNREAD_REASON % why
+
+
+def _owed_entries():
+    """The entry file names, sorted; [] when the folder is absent. Any other failure raises OSError."""
+    try:
+        return sorted(n for n in os.listdir(_owed_folder()) if _OWED_NAME.fullmatch(n))
+    except FileNotFoundError:
+        return []
+
+
+def _in_repo(base, names):
+    """True when an entry's head is a commit of the repo at `base`: the entry is this repo's."""
+    return bool(base) and any(_ref_sha(base, n[:-len(".json")]) for n in names)
+
+
+def _stamp_unreadable(where):
+    """True when the repo's stamp.json exists and is not a JSON object. A missing file is a repo without the tool."""
+    for root in dict.fromkeys((os.path.abspath(where), os.path.realpath(where))):
+        top = _repo_root_of(root)
+        if top is None:
+            continue
+        try:
+            with open(os.path.join(top, ".github", "stamp.json"), encoding="utf-8") as handle:
+                config = json.load(handle)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            return True
+        if not isinstance(config, dict):
+            return True
+    return False
+
+
+def _records_hold(comments, sha, merge_mod):
+    """True when any issue comment of `comments` is a review record that merge's parse_review accepts with Head
+    `sha`. Any record, not the newest: a later round's record names a later head and never un-records this one."""
+    for comment in comments:
         body = comment.get("body") if isinstance(comment, dict) else None
         record = merge_mod.parse_review(body) if isinstance(body, str) else None
-        if record:
-            return record
-    return None
+        if record and record["head"] == sha:
+            return True
+    return False
 
 
-def _owed_open(where, sha, merge_mod, memo):
-    """(number, comments) of the lowest open pull request whose head is `sha`, else None. The open list is read once
-    per push, in `memo`. A failed read raises."""
-    host = merge_mod.Host(cwd=where)
+def _owed_comments(host, number, memo, merge_mod):
+    """The issue comments of pull request `number`, read once per push in `memo`. A failed read raises."""
+    if number not in memo:
+        with merge_mod.shared_deadline(MERGE_READ_TIMEOUT):
+            memo[number] = host.pages("issues/%d/comments" % number)
+    return memo[number]
+
+
+def _owed_pr_of_branch(host, dest, memo, merge_mod):
+    """(number, comments) of the lowest open pull request whose head branch is `dest`, else None. The open list is
+    read once per push, in `memo`. A failed read raises."""
     with merge_mod.shared_deadline(MERGE_READ_TIMEOUT):
         if "pulls" not in memo:
             memo["pulls"] = host.pages("pulls", fields={"state": "open"})
-        numbers = sorted(int(row["number"]) for row in memo["pulls"] if row["head"]["sha"] == sha)
-        return (numbers[0], host.pages("issues/%d/comments" % numbers[0])) if numbers else None
+    numbers = sorted(int(row["number"]) for row in memo["pulls"] if row["head"]["ref"] == dest)
+    return (numbers[0], _owed_comments(host, numbers[0], memo, merge_mod)) if numbers else None
 
 
-def owed_record_hit(args, where, overrides=None):
-    """(matched, reason) when this `git push` moves a branch past a head a reviewer read and nobody recorded, else
-    None. The record is satisfied when the newest comment merge's parse_review accepts holds Head == the reviewed
-    head, as merge's fix-check head compare reads it. An entry that cannot be read as the entry form, or a read that
-    fails, asks with owed-record-unread: the guard-wide crash path fails open, so nothing here passes on an error."""
-    try:
-        names = [n for n in os.listdir(_owed_folder()) if _OWED_NAME.fullmatch(n)]
-    except FileNotFoundError:
-        return None
-    except OSError as e:
-        return "owed folder unread", OWED_UNREAD_REASON % e.__class__.__name__
-    named = push_refspecs(args)
-    if not names or named is None or not where or not os.path.isdir(where) or not uses_merge_tool(where):
-        return None
-    remote = named[0] or "origin"
-    pairs = [(_plain_source(spec.lstrip("+").partition(":")[0]), "refs/remotes/%s/%s" % (remote, dest), "%s/%s" % (remote, dest))
-             for spec, dest in zip(named[1] or [""], push_destinations(args, where, overrides)) if dest]
-    memo = {}
-    try:
-        for name in sorted(names):
-            sha = name[:-len(".json")]
-            branches = _owed_branches(os.path.join(_owed_folder(), name))
-            if branches is None:   # a torn entry counts only where its head is a commit of this repo
-                if _ref_sha(where, sha):
-                    return "unreadable owed entry", OWED_UNREAD_REASON % "an entry is torn"
-                continue
-            for source, tracking, label in pairs:
-                if label not in branches or _ref_sha(where, tracking) != sha or _ref_sha(where, source) == sha:
+def _owed_scan(where, names, pairs, find, repo=None, memo=None):
+    """(matched, reason) for the first entry that a push to one of `pairs` moves past, else None. A pair is
+    (source, dest, remote): the revision pushed (None when unknown, so it counts as new), the branch written, and
+    the remote named (None for any). An entry matches a pair when it names that branch, the branch's remote-tracking
+    ref is the entry's head H or a descendant of it, and the source is not that ref. `find(host, dest, memo,
+    merge_mod)` gives (number, comments) of the pull request for `dest`, else None."""
+    memo, merge_mod, host = {} if memo is None else memo, None, None
+    for name in names:
+        sha = name[:-len(".json")]
+        branches = _owed_branches(os.path.join(_owed_folder(), name))
+        if branches is None:   # a torn entry counts only where its head is a commit of this repo
+            if _ref_sha(where, sha):
+                return _owed_unread("an entry is torn")
+            continue
+        for source, dest, remote in pairs:
+            for branch in branches:
+                if (branch != remote + "/" + dest) if remote else (branch.partition("/")[2] != dest):
                     continue
-                merge_mod = merge_module()
+                tip = _ref_sha(where, "refs/remotes/" + branch)
+                if not tip:
+                    continue
+                if tip != sha:
+                    done = _git(where, "merge-base", "--is-ancestor", sha, tip)
+                    if done is None or done.returncode:
+                        continue
+                if source is not None and _ref_sha(where, source) == tip:
+                    continue
                 if merge_mod is None:
-                    raise RuntimeError("the merge tool could not be loaded")
-                found = _owed_open(where, sha, merge_mod, memo)
-                if found is None:
-                    continue
-                record = _newest_record(found[1], merge_mod)
-                if not record or record["head"] != sha:
+                    merge_mod = merge_module()
+                    if merge_mod is None:
+                        raise RuntimeError("the merge tool could not be loaded")
+                    host = merge_mod.Host(cwd=where, repo=repo)
+                found = find(host, dest, memo, merge_mod)
+                if found is not None and not _records_hold(found[1], sha, merge_mod):
                     return "push past unrecorded head " + sha[:12], OWED_REASON % (sha[:12], found[0], found[0], sha)
-    except (Exception, SystemExit) as e:
-        return "owed record unread", OWED_UNREAD_REASON % e.__class__.__name__
     return None
+
+
+def _owed_gate(where, names):
+    """None when the repo at `where` uses the merge tool, so the check goes on. Else the answer: an owed-record-unread
+    ask (a tuple) when the stamp.json is unreadable and an entry is this repo's, or False to skip the check."""
+    if uses_merge_tool(where):
+        return None
+    if _stamp_unreadable(where) and _in_repo(where, names):
+        return _owed_unread("the repo's stamp.json could not be read")
+    return False
+
+
+def owed_record_hit(args, where, overrides=None, cwd=""):
+    """(matched, reason) when this `git push` moves a branch past a head a reviewer read and nobody recorded, else
+    None. The record is satisfied when any comment merge's parse_review accepts holds Head == the reviewed head. An
+    entry, a destination, a directory or a config that cannot be read asks owed-record-unread when an entry is this
+    repo's, and so does a failed read: the guard-wide crash path fails open, so nothing here passes on an error. A
+    push that names no refspec range (`--all`, `--mirror`, a deletion, tags only) is not read."""
+    try:
+        names = _owed_entries()
+    except OSError as e:
+        return _owed_unread("the entry folder is unreadable: " + e.__class__.__name__)
+    named = push_refspecs(args) if names else None
+    if named is None:
+        return None
+    try:
+        if not where or not os.path.isdir(where):
+            return _owed_unread("the push's directory could not be read") if _in_repo(cwd, names) else None
+        gate = _owed_gate(where, names)
+        if gate is not None:
+            return gate or None
+        dests = push_destinations(args, where, overrides, True)
+        if None in dests:
+            return _owed_unread("the push's destination could not be read") if _in_repo(where, names) else None
+        remote = named[0] or "origin"
+        pairs = [(_plain_source(spec.lstrip("+").partition(":")[0]), dest, remote)
+                 for spec, dest in zip(named[1] or [""], dests)]
+        return _owed_scan(where, names, pairs, _owed_pr_of_branch)
+    except (Exception, SystemExit) as e:
+        return _owed_unread(e.__class__.__name__)
+
+
+def owed_record_pr_hit(tool_input, cwd):
+    """(matched, reason) when the MCP base merge of a pull request moves its head branch past a head a reviewer read
+    and nobody recorded, else None. The new commit is GitHub's, so the source is unknown and counts as new. The
+    same entry, gate, read and fail-closed rules as owed_record_hit; the branch is read from the pull request."""
+    try:
+        names = _owed_entries()
+    except OSError as e:
+        return _owed_unread("the entry folder is unreadable: " + e.__class__.__name__)
+    if not names:
+        return None
+    try:
+        if not cwd or not os.path.isdir(cwd):
+            return _owed_unread("the working directory could not be read") if _in_repo(cwd, names) else None
+        gate = _owed_gate(cwd, names)
+        if gate is not None:
+            return gate or None
+        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
+        if not (isinstance(number, int) and not isinstance(number, bool)):
+            return _owed_unread("the pull request number could not be read") if _in_repo(cwd, names) else None
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) and owner and name else None
+        merge_mod = merge_module()
+        if merge_mod is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        memo = {}   # the open list, read once; a pull request that is not open takes no base merge
+        with merge_mod.shared_deadline(MERGE_READ_TIMEOUT):
+            memo["pulls"] = merge_mod.Host(cwd=cwd, repo=repo).pages("pulls", fields={"state": "open"})
+        rows = [row for row in memo["pulls"] if row["number"] == number]
+        if not rows:
+            return None
+        return _owed_scan(cwd, names, [(None, str(rows[0]["head"]["ref"]), None)], lambda host, d, memo, mod:
+                          (number, _owed_comments(host, number, memo, mod)), repo, memo)
+    except (Exception, SystemExit) as e:
+        return _owed_unread(e.__class__.__name__)
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
