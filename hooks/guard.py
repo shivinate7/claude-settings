@@ -4836,8 +4836,9 @@ def git_push_after_check_hit(command: str) -> str:
     So is a lone command whose failure ends the shell under `set -e` (`_push_stops_under_errexit`). A group
     opener is walked into, so a check inside `{ }` or `( )` refuses. The walk ends and passes at a `|| exit`,
     at the tail of `|| { ...; exit N; }` or `if ! X; then exit N; fi` (`_push_exit_tails`), and at the
-    compound body that holds the push when its test is a check (`_push_body_head`); a `for` body, or an `if`
-    on a `[` test, is walked past. An `exit` inside a `( )` group leaves only that group, so it is no stop.
+    compound body that holds the push when its test is a check (`_push_body_head`); a `for` body, an `if`
+    on a `[` test and an `else` or `elif` body are walked past. An `exit` inside a `( )` group leaves only
+    that group, so neither it nor an exit tail inside one is a stop.
     Any other command refuses, a subshell included.
     A `||` or `|` before the start of the push's chain is no `;` join and passes. A dry run
     (`git_write_verb`) and an unreadable segment pass."""
@@ -4878,7 +4879,7 @@ def git_push_after_check_hit(command: str) -> str:
             if before is None or (before[:1] == ["exit"] and start > 1 and ends[start - 2] == "||"
                                   and not subshell_depth(segments, start - 1)):
                 break
-            if start - 1 in tails:
+            if start - 1 in tails and not subshell_depth(segments, start - 1):
                 break
             position, first = start - 1, False
     return ""
@@ -4915,13 +4916,24 @@ def _opens_push_body(segments, start: int, number: int) -> bool:
 
 
 def _push_body_head(segments, ends, start: int):
-    """For the `then` or `do` opener at `segments[start]`: the index of the head of its compound when the
-    walk must go on past the compound, else None. The body's own test guards the push when the head is an
-    `if`, `while` or `until` on a command, so None. A `for` head, or an `if`, `while` or `until` whose test
-    is no check (`[ -n "$X" ]`), guards nothing: the push runs whatever a check before the compound did.
-    An unreadable head, `else` and `elif` end the walk as before."""
+    """For the body opener at `segments[start]` (`then`, `do`, `else`, `elif`): the index of the head of its
+    compound when the walk must go on past the compound, else None. The body's own test guards the push when
+    the head is an `if`, `while` or `until` on a command, so None. A `for` head, or an `if`, `while` or
+    `until` whose test is no check (`[ -n "$X" ]`), guards nothing: the push runs whatever a check before the
+    compound did. An `else` or `elif` body is guarded by no test, since it runs when its test failed, so the
+    head of its `if` is always walked past. An unreadable head ends the walk."""
     opener = segment_tokens(segments[start])
-    if start == 0 or not opener or opener[0] not in ("then", "do"):
+    if start == 0 or not opener or opener[0] not in GIT_PUSH_BODY_WORDS:
+        return None
+    if opener[0] in ("else", "elif"):
+        open_depth = 0
+        for head in range(start - 1, -1, -1):
+            open_depth += _compound_delta(segments[head], wide=True)
+            if open_depth >= 1:
+                words = list(segment_tokens(segments[head]) or [])
+                while words and words[0] in GIT_PUSH_BODY_WORDS:
+                    words.pop(0)
+                return head if words[:1] == ["if"] else None
         return None
     head = start - 1
     while head > 0 and ends[head - 1] in ("&&", "||", "|"):
