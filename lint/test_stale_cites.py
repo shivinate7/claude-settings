@@ -2995,6 +2995,44 @@ class ValueCiteTests(StaleCase):
         self.assertEqual(parse(out), [], out)
         self.assertEqual(rc, 0, out)
 
+    def parent_parser_range(self, moved):
+        """The range on main to topic over one script, its shared parent parser and one page. The page keeps line 3, an
+        untouched cite of a value no JSON literal reads, and gains line 4, a cite of `Z = 2`. With `moved`, the range moves
+        the script's `--between` flag into the parent parser `window_parser()`, which the script takes as `parents=[...]`.
+        Without it, the script keeps its flag and only Z is added."""
+        base = {REPORT: parser_script(["--between"]), NOTES: cite_page(["%s: X = not json" % REPORT])}
+        head_page = cite_page(["%s: X = not json" % REPORT, "%s: Z = 2" % REPORT])
+        if moved:
+            head = {REPORT: parser_script([], parents=("window_parser",)) + "Z = 2\n",
+                    COMMON: shared_parser(["--between"]), NOTES: head_page}
+        else:
+            head = {REPORT: parser_script(["--between"]) + "Z = 2\n", NOTES: head_page}
+        return self.value_range(base, head)
+
+    def test_a_flag_read_through_a_parent_parser_does_not_make_an_untouched_cite_unknown(self):
+        base_src = parser_script(["--between"])
+        head_src = parser_script([], parents=("window_parser",))
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base REPORT declares --between itself
+        self.assertEqual(argument_flags(head_src), set())  # scope: head REPORT declares no flag of its own
+        self.assertIn("parents=[window_parser()]", head_src)  # scope: head REPORT takes its parser from COMMON
+        self.assertEqual(argument_flags(shared_parser(["--between"])), {"--between"})  # scope: COMMON declares --between at head
+        self.assertEqual(module_value(head_src + "Z = 2\n", "Z"), 2)  # scope: the added cite's Z = 2 holds at head
+        self.assertRaises(ValueError, json.loads, "not json")  # scope: the untouched cite's value is no JSON literal
+
+        control = self.parent_parser_range(moved=False)
+        rc, out = self.run_check(control)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(unknown_counts(out, (3,)), {3: 0},
+                         "control: a range that moves no flag must print no unknown line for line 3\n%s" % out)
+
+        rng = self.parent_parser_range(moved=True)
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(unknown_counts(out, (3,)), {3: 0},
+                         "a flag read through a parent parser must not make the untouched cite on line 3 unknown\n%s" % out)
+
     def test_an_untouched_js_value_cite_in_a_markdown_only_range_prints_no_unknown_line(self):
         base_page = cite_page(["hooks/lib.mjs: LIMIT = 4"])
         rng = self.value_range({"hooks/lib.mjs": MJS_BASE, CONFIG: LIMIT_BASE, NOTES: base_page},
