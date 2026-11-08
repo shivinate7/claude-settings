@@ -974,11 +974,12 @@ class LintMarkers(unittest.TestCase):
         proc.stderr.close()
 
     def test_with_no_marker_held_lints_running_counts_none(self):
-        """The empty state: no lint folder yet, so no marker is counted. The full state: every marker file exists and none is held,
-        so none is counted either."""
+        """The empty state: no lint folder yet, so no marker is counted, and the count writes no file. The full state: every marker
+        file exists and none is held, so none is counted either."""
         self.assertFalse(os.path.exists(self.folder), "the case starts with a lint folder already made")
         empty = merge.lints_running()
         self.assertEqual(empty, 0, "lints_running counted %d with no lint folder, want 0" % empty)
+        self.assertFalse(os.path.exists(self.folder), "lints_running made the lint folder: a count must write no file")
         markers = self.make_markers()
         self.assertEqual(len(markers), 2, "the full state did not get one marker file per slot: %r" % markers)
         held = merge.lints_running()
@@ -1000,6 +1001,17 @@ class LintMarkers(unittest.TestCase):
         self.release_child(holder)
         released = merge.lints_running()
         self.assertEqual(released, 0, "lints_running still counted %d after the other process exited, want 0" % released)
+
+    def test_a_marker_another_process_holds_and_a_lint_here_takes_the_next_one_and_both_count(self):
+        """Two markers held at once: run-0 by another process, then lint_running in this process takes the first free marker, run-1.
+        lints_running counts both. The marker check comes first, so the count is read with the lint's marker in place."""
+        self.hold_in_child(merge.run_marker_paths(create=True)[0])
+        with merge.lint_running():
+            run1 = os.path.join(self.folder, "run-1.lock")
+            self.assertTrue(os.path.exists(run1) and self.locked(run1),
+                            "lint_running did not take run-1 while run-0 was held by another process")
+            both = merge.lints_running()
+            self.assertEqual(both, 2, "lints_running counted %d with two markers held, one by another process and one by this lint, want 2" % both)
 
     def test_a_lint_that_holds_a_slot_and_no_run_marker_is_not_counted(self):
         """A waiting lint holds a slot (lint_slot) and no run marker. The slot lock is first shown held, then the count reads 0."""
