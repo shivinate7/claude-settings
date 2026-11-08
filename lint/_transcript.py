@@ -394,3 +394,31 @@ def page_writer_id(records):
                 if found:
                     writer = found
     return writer
+
+
+# A session id's token ends at any character outside this set, so `session_X2` is no `session_X`.
+_ID_CHARS = r"[\w.-]"
+_WRITER_ID_RE = re.compile(
+    r"(?<!%(c)s)(?:session_%(c)s+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?!%(c)s)"
+    % {"c": _ID_CHARS})
+_BARE_ID_RE = re.compile(r"%s+" % _ID_CHARS)
+
+
+def writer_names_id(writer, ident):
+    """True when the page writer string `writer` holds `ident` as a whole token: the writer is the bare id, or
+    a label such as "Triage (session_X)" names it. A token ends at any character outside [\\w.-], so
+    `session_X2` is no match for `session_X`. Cost: one regex scan of the string; no read, no process."""
+    if not writer or not ident:
+        return False
+    return re.search(r"(?<!%(c)s)%(i)s(?!%(c)s)" % {"c": _ID_CHARS, "i": re.escape(ident)}, writer) is not None
+
+
+def writer_ids(writer):
+    """The ids the page writer string names: each `session_...` token and each UUID in a label, else the
+    whole string when it is itself a bare id. A label with no id-shaped token names none (the writer is
+    unknown). Cost: one regex scan of the string; no read, no process."""
+    if not writer:
+        return set()
+    if _BARE_ID_RE.fullmatch(writer):
+        return {writer}
+    return set(_WRITER_ID_RE.findall(writer))

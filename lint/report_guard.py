@@ -132,7 +132,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses, writer_ids, writer_names_id)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -964,9 +964,10 @@ def question_problem(records, turn, text, hook):
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
-    acks = {writer: {writer}} if writer else {}
+    named = writer_ids(writer)
+    acks = {i: {i} for i in named}
     uses, sends = _turn_acts(records, turn, acks)
-    if writer and any(writer in t for t in sends):
+    if named and any(writer_names_id(writer, x) for t in sends for x in t):
         return "", ""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     from override import remote_session_id
@@ -976,7 +977,7 @@ def question_problem(records, turn, text, hook):
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
-        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
+        wanted = ({parent} if parent else set()) | named | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
