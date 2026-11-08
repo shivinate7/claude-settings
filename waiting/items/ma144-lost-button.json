@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-08T04:12:00Z",
+  "context": "Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (goal): the brief names Lost and Refunded, but no Lost stamp kind exists. A Lost kind is a new kind, so it needs your word.\nBased on (read): README, choice 5. The stamp kinds today: Claim filed, Refunded, Seller contacted, Reshipped, Partial refund, Other.\nDeparts from: the brief, which names a Lost button \u2014 the row shows Claim filed.",
+  "designs": [
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/5-claim-filed.png",
+      "label": "Claim filed",
+      "option": "a",
+      "slug": "ma144-5-claim-filed"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/5-lost.png",
+      "label": "Lost",
+      "option": "b",
+      "slug": "ma144-5-lost"
+    }
+  ],
+  "home": "mailaudit #144",
+  "id": "ma144-lost-button",
+  "kind": "decision",
+  "look": true,
+  "n": 391,
+  "options": [
+    {
+      "design": "ma144-5-claim-filed",
+      "gain": "No new stamp kind; the stamp rules hold as they are.",
+      "how": "Each past-transit row has Claim filed and Refunded.",
+      "key": "a",
+      "label": "Claim filed",
+      "lose": "\"Lost\" is the plainer word."
+    },
+    {
+      "design": "ma144-5-lost",
+      "gain": "The plainer word.",
+      "how": "Each past-transit row has Lost and Refunded, and the app adds a Lost kind.",
+      "key": "b",
+      "label": "Lost, as a new stamp kind",
+      "lose": "A new stamp kind, and its rules."
+    }
+  ],
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "pick": "a",
+  "ref": "mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices",
+  "short": "Lost or Claim filed",
+  "status": "open",
+  "title": "Past-transit row: \"Claim filed\" or a new \"Lost\" button?",
+  "why": "The design lane picks a: no new kind, and the stamp rules hold."
+}

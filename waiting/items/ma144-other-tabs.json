@@ -1,0 +1,66 @@
+{
+  "added": "2026-11-08T04:12:00Z",
+  "context": "Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen keeps Settings full width, and Ledger is MANIFEST's settings. Spreading Ledger departs from degen, so it needs your word.\nBased on (read): README, choice 4: a tab spreads when it has a list and a thing you open from it.\nDeparts from: degen's full-width Settings \u2014 MANIFEST spreads Ledger, with the list left and the opened thing right.",
+  "designs": [
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/4-spread-ledger.png",
+      "label": "Ledger spread",
+      "option": "a",
+      "slug": "ma144-4-spread-ledger"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/4-spread-tally.png",
+      "label": "Ledger spread: Tally",
+      "option": "a",
+      "slug": "ma144-4-spread-tally",
+      "width": "Tally"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/4-spread-orphaned.png",
+      "label": "Ledger spread: Orphaned",
+      "option": "a",
+      "slug": "ma144-4-spread-orphaned",
+      "width": "Orphaned"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/4-full-ledger.png",
+      "label": "Ledger full width",
+      "option": "b",
+      "slug": "ma144-4-full-ledger"
+    }
+  ],
+  "home": "mailaudit #144",
+  "id": "ma144-other-tabs",
+  "kind": "decision",
+  "look": true,
+  "n": 390,
+  "options": [
+    {
+      "design": "ma144-4-spread-ledger",
+      "gain": "One rule for every tab, and no text under the hinge.",
+      "how": "Tally, Orphaned and Ledger each put the list on the left page and the opened thing on the right.",
+      "key": "a",
+      "label": "All three spread",
+      "lose": "Ledger differs from degen's full-width Settings."
+    },
+    {
+      "design": "ma144-4-full-ledger",
+      "gain": "Ledger matches degen's Settings.",
+      "how": "Tally and Orphaned spread. Ledger spans both pages as one list.",
+      "key": "b",
+      "label": "Ledger full width",
+      "lose": "Every Ledger row crosses the fold."
+    }
+  ],
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "pick": "a",
+  "ref": "mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices",
+  "short": "Duo other tabs",
+  "status": "open",
+  "title": "Duo: do Tally, Orphaned and Ledger spread across both pages?",
+  "why": "The design lane picks a: one rule, and no row crosses the fold."
+}

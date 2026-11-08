@@ -1,0 +1,65 @@
+{
+  "added": "2026-11-08T04:12:00Z",
+  "context": "Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page \u2014 MANIFEST puts it under the right page.",
+  "designs": [
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/3-a.png",
+      "label": "Under the right page",
+      "option": "a",
+      "slug": "ma144-3-a"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/3-b.png",
+      "label": "Under the left page, on the keys",
+      "option": "b",
+      "slug": "ma144-3-b"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/3-c.png",
+      "label": "Under the left page, under the keys",
+      "option": "c",
+      "slug": "ma144-3-c"
+    }
+  ],
+  "home": "mailaudit #144",
+  "id": "ma144-tab-bar",
+  "kind": "decision",
+  "look": true,
+  "n": 389,
+  "options": [
+    {
+      "design": "ma144-3-a",
+      "gain": "It never moves, and it shows while you type.",
+      "how": "The tab bar stays under the right page in every pose.",
+      "key": "a",
+      "label": "Under the right page, always",
+      "lose": "Degen puts it on the left, so the two apps differ."
+    },
+    {
+      "design": "ma144-3-b",
+      "gain": "Same side as degen.",
+      "how": "The tab bar sits under the left page and rides on top of the keys.",
+      "key": "b",
+      "label": "Under the left page, on top of the keys",
+      "lose": "It jumps 256 pt each time the keys move."
+    },
+    {
+      "design": "ma144-3-c",
+      "gain": "Same as degen.",
+      "how": "The tab bar sits under the left page, below the keys.",
+      "key": "c",
+      "label": "Under the left page, under the keys, as degen does",
+      "lose": "You must drop the keys to change tabs."
+    }
+  ],
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "pick": "a",
+  "ref": "mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices",
+  "short": "Duo tab bar place",
+  "status": "open",
+  "title": "Duo tab bar: where does it sit?",
+  "why": "The design lane picks a: it never moves, and it shows while you type."
+}

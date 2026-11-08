@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-08T04:12:00Z",
+  "context": "Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts the left page on top when the pages stack. MANIFEST's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 8: the keys need the bottom page.\nDeparts from: degen's stack order, left page on top \u2014 MANIFEST puts the answer on top and the keys below.",
+  "designs": [
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/8-answer-top.png",
+      "label": "Answer on top",
+      "option": "a",
+      "slug": "ma144-8-answer-top"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/8-degen-order.png",
+      "label": "Degen's order",
+      "option": "b",
+      "slug": "ma144-8-degen-order"
+    }
+  ],
+  "home": "mailaudit #144",
+  "id": "ma144-stack-order",
+  "kind": "decision",
+  "look": true,
+  "n": 392,
+  "options": [
+    {
+      "design": "ma144-8-answer-top",
+      "gain": "The envelope stays in view while you type.",
+      "how": "The answer page goes on top and the keys on the bottom page.",
+      "key": "a",
+      "label": "Answer on top, keys below",
+      "lose": "Differs from degen."
+    },
+    {
+      "design": "ma144-8-degen-order",
+      "gain": "Same as degen.",
+      "how": "The left page goes on top, as in degen.",
+      "key": "b",
+      "label": "Degen's order",
+      "lose": "The keys cover all but one line of the envelope."
+    }
+  ],
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "pick": "a",
+  "ref": "mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices",
+  "short": "Duo stack order",
+  "status": "open",
+  "title": "Duo held tall: answer on top, or degen's order?",
+  "why": "The design lane picks a: degen's order hides the envelope behind the keys."
+}

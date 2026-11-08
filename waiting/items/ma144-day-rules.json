@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-08T04:12:00Z",
+  "context": "Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (goal): each rule adds a control or moves cards, so each needs your word. Tick each one you grant.\nBased on (read): README, choices 6 and 7.\nDeparts from: mailaudit main \u2014 adds a New envelope tap and moves day-end Suspense lines to Orphaned.",
+  "home": "mailaudit #144",
+  "id": "ma144-day-rules",
+  "kind": "decision",
+  "multi": true,
+  "n": 393,
+  "options": [
+    {
+      "gain": "The stray rule works.",
+      "how": "A stray is decided by the next card from the same envelope, so the app must know when an envelope ends. One tap per envelope ends it.",
+      "key": "a",
+      "label": "A New envelope tap ends each envelope",
+      "lose": "One more tap per envelope."
+    },
+    {
+      "gain": "No new place to look.",
+      "how": "A line still on Suspense at the end of the day becomes an envelope on the Orphaned tab.",
+      "key": "b",
+      "label": "Suspense at day end moves to Orphaned",
+      "lose": "The cards wait a day longer."
+    }
+  ],
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "pick": [
+    "a",
+    "b"
+  ],
+  "ref": "mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices",
+  "short": "Duo mail-day rules",
+  "status": "open",
+  "title": "Duo mail day: grant these two rules?",
+  "why": "The design lane picks both."
+}

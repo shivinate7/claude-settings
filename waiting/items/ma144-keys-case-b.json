@@ -1,0 +1,58 @@
+{
+  "added": "2026-11-08T04:12:00Z",
+  "context": "Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (goal): if the iPhone keyboard spans both pages (case B), it covers the right page. Case A, keys on one page, needs no fix.\nBased on (read): which case is real is unmeasured (README, choice 1).\nDeparts from: mailaudit main \u2014 adds a Duo keyboard layout.",
+  "designs": [
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/1-B1.png",
+      "label": "In-app keys on the left page",
+      "option": "a",
+      "slug": "ma144-1-b1"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/1-A.png",
+      "label": "In-app keys on the left page: Case A, for reference",
+      "option": "a",
+      "slug": "ma144-1-a",
+      "width": "Case A, for reference"
+    },
+    {
+      "drawn": 951,
+      "file": "docs/design/duo-card-in-hand/png/1-B2.png",
+      "label": "System keys span both pages",
+      "option": "b",
+      "slug": "ma144-1-b2"
+    }
+  ],
+  "home": "mailaudit #144",
+  "id": "ma144-keys-case-b",
+  "kind": "decision",
+  "look": true,
+  "n": 388,
+  "options": [
+    {
+      "design": "ma144-1-b1",
+      "gain": "The whole right page stays in view, and its top row offers open-order names.",
+      "how": "MANIFEST draws its own keys on the left page. A System keys key switches to the iPhone keys.",
+      "key": "a",
+      "label": "In-app keys on the left page, with a switch to system keys",
+      "lose": "No autocorrect, dictation or swipe typing. Each key needs a VoiceOver label. Keys are 42 pt wide, under the 44 pt floor."
+    },
+    {
+      "design": "ma144-1-b2",
+      "gain": "The usual iPhone keys, with autocorrect and dictation.",
+      "how": "The iPhone keys span the fold, and the query moves down onto them.",
+      "key": "b",
+      "label": "System keys span both pages",
+      "lose": "The right page keeps only 3 lines, and a key row sits on the crease."
+    }
+  ],
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "pick": "a",
+  "ref": "mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices",
+  "short": "Duo keys across the fold",
+  "status": "open",
+  "title": "Duo keyboard: if the system keys span the fold, which keys?",
+  "why": "The design lane picks a: build for case A, and if case B is real, take the in-app keys with the switch."
+}
