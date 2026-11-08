@@ -1288,14 +1288,14 @@ def quoted_empty_cd_word_reads_the_start_folder():
 
 @posix_case
 def quoted_semicolon_after_cd_leaks_no_nul_tag():
-    """27n. cd ";" is a quoted word, not an operator: its NUL tag never reaches a path, and cd fails, so the && list stops"""
+    """27n. cd ";" is a quoted word, not an operator: cd fails, so the && list stops, and the log is unresolved with no NUL tag in any path"""
     sw = load_module()
-    problems = read_rows_problems([("cd /x && cd y && make > log", ["/x/y/log"], [])])  # control: a plain word
+    problems = read_rows_problems([
+        ("cd /x && cd y && make > log", ["/x/y/log"], []),  # control: a plain word
+        ('cd /x && cd ";" && make > log', [], ["log"]),  # the documented read: the quoted word leaves the log unresolved
+    ])
     paths, unresolved = read_with(sw, 'cd /x && cd ";" && make > log')
-    names = paths + unresolved
-    if not names:  # scope: the read is empty, so no NUL check runs on it
-        problems.append('cd /x && cd ";" && make > log reads no path at all, so the NUL check has nothing to test')
-    for name in names:
+    for name in paths + unresolved:
         if "\0" in name:
             problems.append(f'cd /x && cd ";" && make > log reads {name!r}: the quoted ";" tag reached the cd target')
     for shell in ("/bin/sh", "/bin/bash"):  # the premise: cd ";" fails, the list stops, and no log is written
@@ -1405,6 +1405,56 @@ def word_that_is_one_backslash_is_not_a_continuation():
         got = log_folders_after(shell, 'cd x && echo "\\\\"\ncd b && echo ok > log', nested=("b",))
         if got != {"x/b"}:
             problems.append(f"{shell}: cd x && echo a quoted backslash, newline, cd b && echo ok > log left the log in {sorted(got)}, want ['x/b']")
+    return problems
+
+
+@posix_case
+def backslash_newline_glued_to_and_continues_the_list():
+    """27v. a backslash-newline right after && (no space before it) is whitespace too, so the cd after it is read and its log resolves in that cd's folder"""
+    problems = read_rows_problems([
+        ("cd /x &&\\\ncd b && make > log", ["/x/b/log"], []),
+        ("cd /x &&\ncd b && make > log", ["/x/b/log"], []),  # control: the same glued newline with no backslash starts the next list item
+        ("cd /x && echo \\\\\ncd b && make > log", ["/x/b/log"], []),  # control: an escaped backslash, then a newline, ends the command
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: the continuation joins the lines, so cd b runs in x
+        got = log_folders_after(shell, "cd x &&\\\ncd b && make > log", nested=("b",))
+        if got != {"x/b"}:
+            problems.append(f"{shell}: cd x &&\\ cd b && make > log left the log in {sorted(got)}, want ['x/b']")
+        got = log_folders_after(shell, "cd x && echo \\\\\ncd b && make > log", nested=("b",))
+        if got != {"x/b"}:
+            problems.append(f"{shell}: cd x && echo a backslash, newline, cd b && make > log left the log in {sorted(got)}, want ['x/b']")
+    return problems
+
+
+@posix_case
+def backslash_newline_glued_to_pipe_continues_the_pipeline():
+    """27w. a backslash-newline right after | (no space before it) is whitespace too, so the tee on the next line is read and its log stays in the start folder"""
+    problems = read_rows_problems([
+        ("make 2>&1 |\\\ntee log", ["log"], []),
+        ("make 2>&1 |\ntee log", ["log"], []),  # control: the same pipe with no backslash
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: the continuation joins the lines, so tee runs after the pipe
+        got = log_folders_after(shell, "echo hi 2>&1 |\\\ntee log")
+        if got != {"start"}:
+            problems.append(f"{shell}: echo hi 2>&1 |\\ tee log left the log in {sorted(got)}, want ['start']")
+    return problems
+
+
+@posix_case
+def backslash_newline_inside_a_word_joins_the_word():
+    """27x. a backslash-newline inside a word joins its two halves into one word: a cd or tee split that way is still the command the shell runs"""
+    problems = read_rows_problems([
+        ("c\\\nd /x && make > log", ["/x/log"], []),  # the shell runs cd /x, so the log is in /x
+        ("cd /x && t\\\nee log", ["/x/log"], []),  # the shell runs tee, so the log is in /x
+        ("ma\\\nke > log", ["log"], []),  # control: the word is make, and its log stays in the start folder
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: the joined words run as cd and tee
+        got = log_folders_after(shell, "c\\\nd x && make > log")
+        if got != {"x"}:
+            problems.append(f"{shell}: c\\ d x && make > log left the log in {sorted(got)}, want ['x']")
+        got = log_folders_after(shell, "cd x && t\\\nee log")
+        if got != {"x"}:
+            problems.append(f"{shell}: cd x && t\\ ee log left the log in {sorted(got)}, want ['x']")
     return problems
 
 
