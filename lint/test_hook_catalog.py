@@ -1560,6 +1560,17 @@ class Helpers(unittest.TestCase):
         self.assertEqual(cell("`` a ` `` <tag>"), "`` a ` `` `<tag>`",
                          "a lone backtick before a double span leaves the tag after the span bare")
 
+    def test_one_home_mask_history_code_span_does_not_cross_a_line_break(self):
+        # The overruled-text check masks each code span, then reads the line. A span that crosses a line break hides
+        # the line's "was:" from the check, so the check misses overruled text.
+        from hook_catalog import history_problems  # noqa: E402  the overruled-text check (lint/hook_catalog.py)
+        control = "The old rule says `alpha`\nwas: the rule `beta`\n"  # each span closes on its own line
+        found = history_problems("CLAUDE.md", control)
+        self.assertEqual(len(found), 1, "control: a was: line whose spans close on their own lines is one finding")
+        red = "The old rule says `alpha\nwas: the rule `beta\n"  # a lone backtick on each of two lines
+        self.assertEqual(history_problems("CLAUDE.md", red), found,
+                         "a code span crosses a line break and hides the was: line from the overruled-text check")
+
     def test_u5_records_rows_reads_each_section_and_unescapes_a_pipe(self):
         text = ("# Records\n\n## Debts\n\n| Slug | Gist | Link |\n|---|---|---|\n"
                 "| `a-b` | One \\| two. | [a-b](../debts/a-b.md) |\n\n"

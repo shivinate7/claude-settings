@@ -2263,6 +2263,23 @@ def load_module_under_test():
     return module
 
 
+class AnchorSentenceTests(unittest.TestCase):
+    """anchor_sentences: the prose before each rule anchor. An anchor inside a code span is a mention, not an anchor."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stale = load_module_under_test()
+
+    def test_one_home_mask_anchor_code_span_does_not_cross_a_line_break(self):
+        # A span that crosses a line break hides the anchor between its two backticks, so the anchor is never found.
+        control = "The gate reads `alpha`\n<!-- rule:cross-anchor --> holds the line `beta`\n"  # each span closes on its own line
+        self.assertEqual(self.stale.anchor_sentences(control), {"cross-anchor": "The gate reads `alpha`"},
+                         "control: an anchor whose spans close on their own lines is found")
+        red = "The gate reads `alpha\n<!-- rule:cross-anchor --> holds the line `beta\n"  # a lone backtick on each of two lines
+        self.assertEqual(self.stale.anchor_sentences(red), {"cross-anchor": "The gate reads `alpha"},
+                         "a code span crosses a line break and hides the anchor from anchor_sentences")
+
+
 class CitedExcerptTests(unittest.TestCase):
     """cited_excerpt: the numbered lines of a backing file that a cite points at. A prose judge sends them beside the line."""
     TEXT = "a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n"
