@@ -129,6 +129,9 @@ VERDICT_SUBJECT_WORDS = ("check", "checks", "guard", "guards", "hook", "hooks", 
 # What the verdict verb acts on: a send, a change, a PR, or a pronoun for one. "will catch OSError" acts on an error
 # class, so it is no forecast about a verdict. A passive verb ("will be refused") needs no object.
 VERDICT_OBJECTS = r"(?:it|this|that|them|the send|the change|(?:the |a )?PRs?)\b"
+# A forecast verb with no object ("The test will fail.") counts when it ends the sentence or its clause. It is no
+# claim before an object that is not listed ("will catch OSError"), so this tail never reads past a word.
+VERDICT_NO_OBJECT_END = r"(?=\s*(?:[.!?,;:]|\s[-–—]\s|$))"
 # The one adverb a forecast may carry before its verb ("will probably refuse it"); any word in -ly counts too.
 VERDICT_ADVERBS = ("probably", "still", "also", "never", "then", "definitely", "likely", "surely", "certainly", "just",
                    "now", "again", "always", "only", "really", "even", "already", "ever", "simply", "clearly")
@@ -138,7 +141,8 @@ ACTOR_PRONOUNS = ("i", "you", "we", "they", "he", "she", "it")
 VERDICT_ASK_WORDS = ("whether", "if", "verify", "confirm", "prove", "probe", "find out", "unknown")
 VERDICT_CLAIM_REMEDY = (
     "this message forecasts what a check will refuse, block, catch, flag, fail, allow or pass, and the turn did "
-    "not run it. Run the check first (a command that names the file the claim names), or add a backing cite at head: "
+    "not run it. Run the check first, and name the file in the sentence (outside any cite) so the run backs it, or add a "
+    "backing cite at head: "
     "`(test path::name)`, where the file defines that name, or `(read path:line)`, where the file is one the claim "
     "names (named in the sentence, outside the cite) or the file that defines the named rule. Or drop the forecast.")
 # THE TIME BUDGET. A judged item write makes two calls, in order, so the longest path is the dedicated past-ruling
@@ -522,8 +526,9 @@ _FORECAST = re.compile(_any_re(VERDICT_FORECAST_WORDS), re.I)
 # What follows a forecast word: up to two of `not` and an adverb, then an active verb and its object, `let OBJ
 # through`, or a passive verb. It is matched at the forecast word's end, so each forecast word of a sentence is read.
 _PREDICATE = re.compile(
-    r"(?:\s+(?:not|%s|[a-z]+ly)\b){0,2}\s+(?:(?:%s)\s+%s|let\s+%s\s+through\b|(?:be|get)\s+(?P<passive>%s)\b)" % (
+    r"(?:\s+(?:not|%s|[a-z]+ly)\b){0,2}\s+(?:(?:%s)\s+%s|(?:%s)%s|let\s+%s\s+through\b|(?:be|get)\s+(?P<passive>%s)\b)" % (
         "|".join(VERDICT_ADVERBS), "|".join(re.escape(w) for w in VERDICT_WORDS if " " not in w), VERDICT_OBJECTS,
+        "|".join(re.escape(w) for w in VERDICT_WORDS if " " not in w), VERDICT_NO_OBJECT_END,
         VERDICT_OBJECTS, "|".join(re.escape(w) for w in VERDICT_PASSIVE_WORDS)), re.I)
 _BY = re.compile(r"\s+by\s+", re.I)
 _CLAUSE_END = re.compile(r"[,;:](?=\s|$)|\s[-–—]\s")  # a clause ends at , ; : or a spaced dash
