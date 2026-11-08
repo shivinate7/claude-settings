@@ -310,7 +310,9 @@ def sh_dollar_end(src, i, spans, pending, in_dq=False):
     if nxt == "{":
         return sh_param_end(src, i + 2, spans, pending, in_dq)
     if src.startswith("$((", i):
-        return sh_arith_end(src, i + 3, spans, pending)
+        j = sh_try_arith(src, i + 3, spans, pending)
+        if j is not None:
+            return j
     if nxt == "(":
         return sh_code_end(src, i + 2, spans, pending, ")")
     if nxt == "'" and not in_dq:
@@ -388,6 +390,30 @@ def sh_arith_end(src, i, spans, pending):
     raise Unread("arithmetic expression never closes")
 
 
+def sh_try_arith(src, i, spans, pending):
+    """Index after the arithmetic expression whose body starts at i, or None when it is not one. Like bash, a `((`
+    or `$((` that does not close with `))` is a subshell or a command substitution that holds a subshell, as in
+    `((cd /tmp; ls) | wc -l)`; the caller then reads it as code."""
+    kept, saved = len(spans), list(pending)
+    try:
+        return sh_arith_end(src, i, spans, pending)
+    except Unread:
+        del spans[kept:]
+        pending[:] = saved
+        return None
+
+
+def sh_comment_end(src, i, in_backticks):
+    """Index of the end of the comment that opens at i: the line end, or inside backticks the first unescaped
+    backtick, since the shell cuts the command at that backtick before it parses it."""
+    n = len(src)
+    while i < n and src[i] != "\n":
+        if in_backticks and src[i] == "`":
+            return i
+        i += 2 if in_backticks and src[i] == "\\" and i + 1 < n and src[i + 1] != "\n" else 1
+    return i
+
+
 def sh_heredoc_word(src, i):
     """Read the delimiter after `<<` (i is just past it). Returns (index after the word, (delimiter, tab_strip)).
     The delimiter is the word with its quoting removed; a quoted word makes the body literal, which changes nothing
@@ -441,8 +467,11 @@ def sh_code_end(src, i, spans, pending, close=None):
     while i < len(src):
         c = src[i]
         if c == "\\":
-            i += 2
-            ws = False
+            if src.startswith("\n", i + 1):
+                i += 2  # a line break the shell removes: the next word starts where this one would have
+            else:
+                i += 2
+                ws = False
         elif c == "'":
             i = sh_quote_end(src, i + 1)
             ws = False
@@ -458,8 +487,7 @@ def sh_code_end(src, i, spans, pending, close=None):
             i = sh_dollar_end(src, i, spans, pending)
             ws = False
         elif c == "#" and ws:
-            end = src.find("\n", i)
-            end = len(src) if end < 0 else end
+            end = sh_comment_end(src, i, close == "`")
             spans.append((i, end))
             i = end
         elif c == "\n":
@@ -474,8 +502,8 @@ def sh_code_end(src, i, spans, pending, close=None):
             i, entry = sh_heredoc_word(src, i + 2)
             pending.append(entry)
             ws = False
-        elif ws and src.startswith("((", i):
-            i = sh_arith_end(src, i + 2, spans, pending)
+        elif ws and src.startswith("((", i) and (j := sh_try_arith(src, i + 2, spans, pending)) is not None:
+            i = j
             ws = False
         elif c == "(":
             depth += 1
