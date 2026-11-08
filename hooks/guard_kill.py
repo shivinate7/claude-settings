@@ -698,8 +698,7 @@ _PS_UNSET = ("$null", "")
 
 # A script block or a group that runs its body: `{`, `&{`, `.{`, `(`, `$(`, `@(`.
 _PS_BLOCK_OPEN = re.compile(r"[&.]?\{|[&.$@]?\(")
-_PS_GLUED_BRACE = re.compile(r"(?<!\$)\{")
-_PS_STATEMENT_START = "\0"   # `_open_script_blocks` puts it before text glued after a block's `}`
+_PS_STATEMENT_START = "\0"   # `_split_glued_braces` puts it after a block's `}`: a statement starts there
 _PS_COND_HEAD = re.compile(r"[A-Za-z]+\(")
 
 
@@ -718,7 +717,8 @@ def _open_script_blocks(tokens):
     its opener and its body, after any token: `if (...) {...}`, `ForEach-Object {...}`,
     `try {...}`. A token that starts inside quotes (`'{$env:X=1}'`, `tokens.quoted`) is text and
     stays whole. Known ceiling: an unquoted block passed as a plain argument (`Write-Host {...}`)
-    is read as code too, a false deny, the safe side."""
+    is read as code too, a false deny, the safe side. A `}` closes a block only when it is not
+    part of a braced name or a hash literal (`_split_glued_braces`)."""
     quoted = getattr(tokens, "quoted", ())
     out = []
     for i, tok in enumerate(tokens):
@@ -728,38 +728,67 @@ def _open_script_blocks(tokens):
         while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():
             out.append(opens.group(0)[-1])
             tok = tok[opens.end():].rstrip("})")
-        # A `{` glued to its word (`%{`, `){`, `try{`, `$sb={`) opens a block too. `${` is a
-        # braced variable name, so it stays whole.
-        head, *rest = _PS_GLUED_BRACE.split(tok) if len(tok) > 1 else [tok]
-        out.append(head)
-        for part in rest:
+        out += _split_glued_braces(tok)
+    return out
+
+
+def _split_glued_braces(tok):
+    """Split a token at each glued `{` and `}`: `%{` and `try{` open a block; the text after a
+    block's `}` is a new statement, marked with `_PS_STATEMENT_START` and judged like a statement
+    after `;`. A braced name `${env:X}` and a hash literal `@{a=1}` are text, so their `}` ends
+    no block. A `}` ends a token's block even with no `{` in the token (`1}$env:X=2`)."""
+    out, buf, kinds, mode, i = [], "", [], "head", 0
+
+    def flush():
+        nonlocal buf
+        text, buf = buf, ""
+        if mode == "body":
+            text = text.rstrip(")")
+        elif mode == "tail":
+            text = text.lstrip(")")
+            # `while(...)` or `until(...)` ends a `do{}` block: the text after its condition is
+            # a statement too.
+            head = _PS_COND_HEAD.match(text)
+            cond = _paren_end(text, head.end() - 1) if head else -1
+            if cond > 0:
+                out.extend([text[:cond + 1], _PS_STATEMENT_START])
+                text = text[cond + 1:]
+            while text.endswith(")") and text.count(")") > text.count("("):
+                text = text[:-1]
+        if text:
+            out.append(text)
+
+    while i < len(tok):
+        ch = tok[i]
+        if ch == "$" and tok[i + 1:i + 2] == "{" and "}" in tok[i:]:
+            end = tok.index("}", i) + 1
+            buf += tok[i:end]
+            i = end
+            continue
+        if ch == "{":
+            kinds.append("hash" if buf.endswith("@") else "block")
+            flush()
             out.append("{")
-            # Each `}` ends a block, so the text glued after it is a new statement, whatever
-            # block it closed (`if`, `else`, `try`, `catch`, `do`): it is marked with
-            # `_PS_STATEMENT_START` and judged like a statement after `;`.
-            body, *tails = part.split("}")
-            if body.rstrip(")"):   # a `{` that ends its token leaves no empty piece behind
-                out.append(body.rstrip(")"))
-            for tail in tails:
-                tail = tail.lstrip(")")
-                # `while(...)` or `until(...)` ends a `do{}` block: the text after its condition
-                # is a statement too.
-                head = _PS_COND_HEAD.match(tail)
-                cond = _paren_end(tail, head.end() - 1) if head else -1
-                if cond > 0:
-                    out += [_PS_STATEMENT_START, tail[:cond + 1]]
-                    tail = tail[cond + 1:]
-                while tail.endswith(")") and tail.count(")") > tail.count("("):
-                    tail = tail[:-1]
-                if tail:
-                    out += [_PS_STATEMENT_START, tail]
+            mode = "body"
+        elif ch == "}":
+            flush()
+            if (kinds.pop() if kinds else "block") == "block":
+                out.append(_PS_STATEMENT_START)
+                mode = "tail"
+            else:
+                mode = "head"
+        else:
+            buf += ch
+        i += 1
+    flush()
     return out
 
 
 def _ps_env_set(tokens, watch) -> str:
     """Return the matched text when a PowerShell statement sets a watched name in the process
     environment, else ''. Reads the statement's own tokens, so a name inside quoted text, which
-    is one token, never fires. A statement starts at the first token, or after `{`, `(` or `&`.
+    is one token, never fires. A statement starts at the first token, after a token that is or
+    ends in `{`, after `(`, `&`, or after a block's closing `}`.
     `$env:X = $null` and an empty value unset the name and pass."""
     alt = "|".join(map(re.escape, watch[0]))
     tokens = _open_script_blocks(tokens)
