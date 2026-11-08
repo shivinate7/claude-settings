@@ -1513,8 +1513,7 @@
 - check-tail-no-nested-read: no nested read, so `bash -c '... | tail'`, and `{ ...; } | tail` both pass (hooks/guard_stream.py). `python3 bin/ci-job ... | tail` is now refused in the background. Decision: background-check-through-verdict
 - check-tail-powershell-select: PowerShell `Select-Object -Last` and `-First` are not read as tail and head (hooks/guard_stream.py). Decision: background-check-through-verdict
 - verdict-pipe-if: `if verdict ... | tail` with `then` on the next line is not read by `verdict-pipe-exit`, and the `then` branch runs after a red check (hooks/guard_stream.py). Decision: background-check-through-verdict
-- verdict-pipe-newline: after `set -e` with no pipefail, a verdict pipe and then a commit on the next line passes; the same on one line with `;` is refused (hooks/guard_stream.py). Decision: background-check-through-verdict
-- verdict-pipe-semicolon-wolf: `verdict a | tail -3; verdict b | tail -3` is refused, though `;` gates nothing and each verdict prints its own line (hooks/guard_stream.py). Decision: background-check-through-verdict
+- verdict-pipe-newline: `set -e; verdict a | tail -3; git commit` passes, though `set -e` without pipefail does not stop at a red verdict (hooks/guard_stream.py). Decision: background-check-through-verdict. Fix: none — Claude does not chain set -e with verdict pipes on one line. Until: 2026-11-21
 - verdict-pipe-grep-q: `verdict a | grep -q PASS && git push` is refused, though grep's exit does gate the push (hooks/guard_stream.py). Decision: background-check-through-verdict
 - check-tail-uv-script: `uv run merge/merge.py --lane-lint 7 | tail` passes, because uv runs a `.py` operand as a script (hooks/guard_stream.py). Decision: background-check-through-verdict
 - verdict-pipe-substitution: `$(verdict ... | tail)` is not read by `verdict-pipe-exit` (hooks/guard_stream.py). Decision: background-check-through-verdict

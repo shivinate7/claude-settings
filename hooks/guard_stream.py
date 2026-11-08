@@ -288,29 +288,34 @@ CHECK_TAIL_REASON = (
 )
 
 
-# A VERDICT CALL PIPED ONWARD, then `&&`, `||` or `;` (decision background-check-through-verdict). A
+# A VERDICT CALL PIPED ONWARD, then `&&` or `||` (decision background-check-through-verdict). A
 # pipeline's exit status is its last stage's, so `verdict <cmd> | tail -1 && git commit` runs the commit
 # after a red check: verdict's own exit status is hidden. `set -o pipefail` earlier in the same command
-# keeps it. A pipeline that ends the command is safe, since nothing reads its status, and so is a bare
+# keeps it, unless a later `set +o pipefail` clears it. A `;` gates nothing, so it is not read. A pipeline that ends the command is safe, since nothing reads its status, and so is a bare
 # `verdict` call.
-CONTINUING_ENDS = ("&&", "||", ";")
-PIPEFAIL_FLAGS = re.compile(r"-[A-Za-z]*o$")
+CONTINUING_ENDS = ("&&", "||")
+PIPEFAIL_FLAGS = re.compile(r"[-+][A-Za-z]*o$")
 
 
-def _sets_pipefail(segment: str) -> bool:
-    """True when one segment is `set -o pipefail`, alone or in a cluster such as `set -euo pipefail`."""
+def _pipefail_change(segment: str):
+    """True when one segment turns pipefail on (`set -o pipefail`, or a cluster such as `set -euo
+    pipefail`), False when it turns it off (`set +o pipefail`), else None. The last change in a segment wins."""
     tokens = segment_tokens(segment)
     at = resolve_command(tokens) if tokens else None
     if at is None or basename(tokens[at]) != "set":
-        return False
+        return None
     rest = tokens[at + 1:]
-    return any(word == "pipefail" and PIPEFAIL_FLAGS.match(rest[i - 1])
-               for i, word in enumerate(rest) if i)
+    change = None
+    for i, word in enumerate(rest):
+        if i and word == "pipefail" and PIPEFAIL_FLAGS.match(rest[i - 1]):
+            change = rest[i - 1].startswith("-")
+    return change
 
 
 def verdict_pipe_exit_hit(stripped: str) -> str:
     """The matched text when a pipeline that starts with a `verdict` call has a later stage and is
-    followed by `&&`, `||` or `;` and more commands, with no `set -o pipefail` before it."""
+    followed by `&&` or `||` and more commands, with no `set -o pipefail` in force before it: the last
+    `set` that sets or clears pipefail decides."""
     ends = []
     segments = split_segments(stripped, ends)
     start = 0
@@ -323,7 +328,8 @@ def verdict_pipe_exit_hit(stripped: str) -> str:
         tokens = segment_tokens(stages[0])
         if not tokens or not _through_verdict(tokens):
             continue
-        if any(_sets_pipefail(earlier) for earlier in segments[:first]):
+        changes = [c for c in map(_pipefail_change, segments[:first]) if c is not None]
+        if changes and changes[-1]:
             continue
         return "verdict | " + (stages[1].split() or [""])[0] + " " + end
     return ""
