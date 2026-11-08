@@ -2846,6 +2846,34 @@ def brief_claim_hit(tool: str, tool_input) -> list:
     return brief_claim_gaps(tool_input.get("prompt"))
 
 
+# A done check that holds one of these runs the lint the checks job runs (rule builder-brief-code-check).
+BUILDER_CODE_CHECK_NAMES = ("merge --lane-lint", "ci-job checks --lint", "code_check.py")
+BUILDER_CODE_CHECK_REASON = (
+    "This builder brief names no code check, and the repo's checks job lints every head (Code check, comment "
+    "narration). Add `merge --lane-lint <head>` to the builder's done check: the lint steps must pass before a "
+    "builder reports done, or the batch finds them red after the hand-off. "
+    "(decision builder-brief-code-check, a builder's done check runs the checks job's lint)"
+)
+
+
+def builder_code_check_hit(tool: str, tool_input, cwd) -> bool:
+    """True for an Agent or Task builder brief, spawned in a repo whose top level holds the checks workflow, that names
+    no code check. A payload with no cwd, a cwd git cannot place, or a repo with no workflow passes: unknown is
+    never a hit. A Workflow agent() call is not read."""
+    if tool not in SPAWN_TOOLS or role_key(tool_input.get("subagent_type")) != BUILDER_ROLE:
+        return False
+    prompt = tool_input.get("prompt")
+    if not isinstance(prompt, str) or not isinstance(cwd, str) or not cwd:
+        return False
+    top = guard_core._git(cwd, "rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0 or not top.stdout.strip():
+        return False
+    if not os.path.isfile(os.path.join(top.stdout.strip(), ".github", "workflows", "checks.yml")):
+        return False
+    text = " ".join(prompt.split())
+    return not any(name in text for name in BUILDER_CODE_CHECK_NAMES)
+
+
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
@@ -5153,6 +5181,11 @@ def judge(payload) -> None:
     if claimed:
         named = ", ".join("`" + item[:120].replace("`", "'") + "`" for item in claimed)
         refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % named, named[:120])
+
+    # 9f. A builder's brief in a repo with the checks workflow names a code check (rule builder-brief-code-check).
+    # An override lifts it.
+    if builder_code_check_hit(tool, tool_input, payload.get("cwd")):
+        refuse(tool, "deny", "builder-brief-code-check", BUILDER_CODE_CHECK_REASON, "no code check in builder brief")
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
