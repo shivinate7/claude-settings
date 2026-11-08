@@ -1177,9 +1177,11 @@ MUTATIONS = [
     ("stale lock: a lock reason of another form counts as stale",
      "sweep",
      '    if not found:\n'
-     '        return False',
+     '        return False\n'
+     '    pid, start = int(found.group(1)), found.group(2)',
      '    if not found:\n'
-     '        return True',
+     '        return True\n'
+     '    pid, start = int(found.group(1)), found.group(2)',
      "test_other_lock_reason_keeps"),
     ("stale lock: the decision no longer asks for an unlock",
      "sweep",
@@ -1565,6 +1567,29 @@ def run_mutant(sources, work: str, index: int, entry):
         shutil.rmtree(scaffold, ignore_errors=True)
 
 
+def precheck_errors() -> list:
+    """Every pre-run error in MUTATIONS, one `ERROR ...` line each, or [] when the table is sound.
+
+    Each anchor must be found exactly once in its target's own file, through the one finder
+    (hooks/mutate_shared.find_anchor), so a doubled anchor is refused here as a stale one is: the
+    apply step replaces the first match, and a second copy would break the wrong spot unseen. Each
+    entry must also carry a required case name. `lint/check_mutant_anchors.py` calls this too, so
+    `merge --lane-lint` refuses a bad sweep anchor before review.
+    """
+    errors = []
+    for entry in MUTATIONS:
+        label, target, old, _new, required, _only_on = mutation_parts(entry)
+        try:
+            mutate_shared.find_anchor(REPO_ROOT, old, files=[os.path.relpath(SOURCES[target], REPO_ROOT)])
+        except mutate_shared.StaleMutant:
+            errors.append("ERROR stale mutation, anchor text not found in %s: %s" % (target, label))
+        except mutate_shared.AmbiguousMutant as error:
+            errors.append("ERROR ambiguous mutation, %s: %s" % (error, label))
+        if not required:
+            errors.append("ERROR mutation carries no required case name: %s" % label)
+    return errors
+
+
 def main() -> int:
     sources = {}
     for name, path in SOURCES.items():
@@ -1577,16 +1602,13 @@ def main() -> int:
     with open(SETTINGS_JSON, encoding="utf-8") as handle:
         sources["settings_json"] = handle.read()
 
-    # Every anchor is checked before any suite runs, so a stale mutation fails in the first
-    # second, not after the mutants ahead of it in the list have spent their minutes.
-    for entry in MUTATIONS:
-        label, target, old, _new, required, _only_on = mutation_parts(entry)
-        if old not in sources[target]:
-            print("ERROR stale mutation, anchor text not found in %s: %s" % (target, label))
-            return 1
-        if not required:
-            print("ERROR mutation carries no required case name: %s" % label)
-            return 1
+    # Every anchor is checked before any suite runs, so a stale or doubled mutation fails in the
+    # first second, not after the mutants ahead of it in the list have spent their minutes.
+    errors = precheck_errors()
+    for error in errors:
+        print(error)
+    if errors:
+        return 1
 
     # MUTATE_ONLY=<fragment>[,<fragment>...] runs only the mutants whose label holds a fragment.
     # Every anchor is still checked above. Unset, every mutant runs.
