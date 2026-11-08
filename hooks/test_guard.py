@@ -101,7 +101,7 @@ FAMILIES = {
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "review-record-after-round": "a lane's builder or test-author spawn, or its send_message, after a reviewer or design-reviewer spawn with no review record after it: the record marker from the merge tool, the transcript read, and its cost",
-    "resume-finished-reviewer": "a SendMessage from the main session to a reviewer or design-reviewer spawn that has finished (a background finish notice, or a foreground result): the target resolved by agentId or spawn name, the latest spawn with that name wins; a result of unknown shape asks; an agent's send, a send to main, a name no spawn holds and a missing transcript are allowed",
+    "resume-finished-reviewer": "a SendMessage from the main session to a spawn that has finished (a background finish notice, or a foreground result) and either ran in a worktree (isolation worktree, any role) or is a reviewer or design-reviewer: the target resolved by agentId or spawn name, the latest spawn with that name wins; a result of unknown shape asks; an agent's send, a send to main, a name no spawn holds, a missing transcript, and a finished spawn with no worktree that is not a reviewer are allowed",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10138,12 +10138,15 @@ def rr_session(*parts):
     return [RR_HUMAN] + role_call("g0", LANE_TAGS) + [line for part in parts for line in part]
 
 
-def rr_spawn(tool_id, subagent_type, tool="Agent", name=None, result=None):
+def rr_spawn(tool_id, subagent_type, tool="Agent", name=None, result=None, isolation=None):
     """A spawn of `subagent_type` and its result, as the transcript holds them. `name` adds the spawn's name to its
-    input, and `result` (a line the caller built) replaces the plain text result."""
+    input, `isolation` (for example "worktree") adds the Agent tool's isolation input, and `result` (a line the caller
+    built) replaces the plain text result."""
     tool_input = {"subagent_type": subagent_type, "prompt": "Review PR #12.", "model": "sonnet"}
     if name is not None:
         tool_input["name"] = name
+    if isolation is not None:
+        tool_input["isolation"] = isolation
     return [role_use(tool_id, tool, tool_input),
             role_result(tool_id, "Verdict: PASS.") if result is None else result]
 
@@ -10345,8 +10348,11 @@ RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher rout
 # =========================================================================== 5j. resume a finished reviewer
 #
 # Rule resume-finished-reviewer. A SendMessage from the main session (no agent_id in the payload) is refused when
-# `to` names a reviewer or design-reviewer spawn that has finished. `to` resolves to a spawn by its launch result's
-# toolUseResult.agentId, or by the spawn call's `name` input, and the latest spawn with that name wins. A background
+# `to` names a spawn that has finished and either ran in a worktree (the Agent input isolation worktree, any role: the
+# worktree is gone once it finishes, owner ruling 409 a, 2026-11-08 06:11 CST) or is a reviewer or design-reviewer,
+# whose refusal is kept with no worktree. A finished spawn with no worktree that is not a reviewer is allowed.
+# `to` resolves to a spawn by its launch result's toolUseResult.agentId, or by the spawn call's `name` input, and the
+# latest spawn with that name wins. A background
 # spawn is running while its launch result is async_launched and no later record holds a finish notice for its id.
 # Any other result, a foreground spawn's included, is finished. A result of unknown shape asks. An errored spawn never
 # ran, so it is skipped: the spawn before it governs, as review_record_hit skips it. The refusal says to
@@ -10372,6 +10378,13 @@ RF_RUNNING, RF_RUNNING_AGENT = "reviewer-pr20", "a3b8d0e6f4c17295"
 RF_ERR_FINISHED, RF_ERR_FINISHED_AGENT = "reviewer-pr21", "a5d8c3f1e7b20964"
 RF_ERR_RUNNING, RF_ERR_RUNNING_AGENT = "reviewer-pr22", "a6e9d4a2f8c31075"
 RF_MALFORMED = "reviewer-pr23"
+# Spawns that ran in a worktree (the Agent input's isolation worktree), each of another role, and a finished Explore
+# that ran with no worktree.
+RF_WT_BUILDER, RF_WT_BUILDER_AGENT = "builder-pr24", "b9c4e2f7a1d38605"
+RF_WT_RUNNING, RF_WT_RUNNING_AGENT = "builder-pr25", "b0e6d3a8f5c17924"
+RF_WT_TESTAUTHOR, RF_WT_TESTAUTHOR_AGENT = "test-author-pr26", "c8d1f5a2e9b07364"
+RF_WT_DESIGNER, RF_WT_DESIGNER_AGENT = "designer-pr27", "d6b3e9a1f4c28750"
+RF_EXPLORE, RF_EXPLORE_AGENT = "explore-pr28", "e4f1c8a3d7b29065"
 # A reviewer named `rev`. A `to` in the `name [ref]` form names it by that name and by the first eight hex of its id.
 RF_REV, RF_REV_AGENT = "rev", "a5eb5d25c7e90b41"
 # A record the reader cannot parse: a user record whose message is a string, not an object.
@@ -10390,9 +10403,9 @@ def rf_launch_result(tool_id, agent_id):
     return json.dumps(record)
 
 
-def rf_launch(tool_id, subagent_type, name, agent_id):
-    """A background spawn named `name`, and its launch result."""
-    return rr_spawn(tool_id, subagent_type, name=name, result=rf_launch_result(tool_id, agent_id))
+def rf_launch(tool_id, subagent_type, name, agent_id, isolation=None):
+    """A background spawn named `name`, and its launch result. `isolation` is the Agent input's isolation, if any."""
+    return rr_spawn(tool_id, subagent_type, name=name, result=rf_launch_result(tool_id, agent_id), isolation=isolation)
 
 
 def rf_launch_unknown(tool_id, subagent_type, name):
@@ -10507,6 +10520,19 @@ RF_TRANSCRIPTS = {
                                   rr_comment("c1", rr_record())),
     "bg-rev-running": rr_session(rf_launch("r1", "reviewer", RF_REV, RF_REV_AGENT),
                                  rr_comment("c1", rr_record())),
+    # A builder that ran in a worktree and finished, with no reviewer in the session.
+    "worktree-builder-finished": rr_session(
+        rf_launch("b1", "builder", RF_WT_BUILDER, RF_WT_BUILDER_AGENT, isolation="worktree"), rf_finish("b1")),
+    # A builder that ran in a worktree and still runs: its launch result, and no finish notice.
+    "worktree-builder-running": rr_session(
+        rf_launch("b1", "builder", RF_WT_RUNNING, RF_WT_RUNNING_AGENT, isolation="worktree")),
+    "worktree-test-author-finished": rr_session(
+        rf_launch("t1", "test-author", RF_WT_TESTAUTHOR, RF_WT_TESTAUTHOR_AGENT, isolation="worktree"),
+        rf_finish("t1")),
+    "worktree-designer-finished": rr_session(
+        rf_launch("d1", "designer", RF_WT_DESIGNER, RF_WT_DESIGNER_AGENT, isolation="worktree"), rf_finish("d1")),
+    # An Explore that finished and ran with no worktree.
+    "explore-finished": rr_session(rf_launch("e1", "Explore", RF_EXPLORE, RF_EXPLORE_AGENT), rf_finish("e1")),
     # No spawn at all: the empty state.
     "no-spawn": rr_session(),
 }
@@ -10520,10 +10546,11 @@ def write_rf_transcripts():
 lazy_fixture([rf_path(name) for name in RF_TRANSCRIPTS], write_rf_transcripts)
 
 
-def rf_refuse(name, tool_input, transcript, agent_id=None):
-    """A SendMessage the guard refuses for the rule: the reason names the rule, a fresh reviewer and the prior report."""
+def rf_refuse(name, tool_input, transcript, agent_id=None, carries=RF_CARRIES):
+    """A SendMessage the guard refuses for the rule: the reason names the rule and each fragment in `carries`
+    (by default a fresh reviewer and the prior report, the reviewer wording)."""
     add("resume-finished-reviewer: " + name, "deny", rule=RF_RULE, tool=RR_BUILTIN_SEND, cwd=NOGIT,
-        transcript=transcript, carries=RF_CARRIES, agent_id=agent_id, env=ROLE_ENV, **tool_input)
+        transcript=transcript, carries=carries, agent_id=agent_id, env=ROLE_ENV, **tool_input)
 
 
 def rf_allow(name, tool_input, transcript, agent_id=None):
@@ -10557,11 +10584,27 @@ rf_refuse("a reviewer that a TaskStop closed is refused",
           {"to": RF_STOPPED_AGENT, "message": RF_MSG}, rf_path("bg-reviewer-stopped"))
 rf_refuse("a foreground reviewer whose toolUseResult carries a terminal status is refused",
           {"to": RF_FOREGROUND, "message": RF_MSG}, rf_path("fg-reviewer-status-completed"))
-# Allowed: the target runs, is not a reviewer, is not in the transcript, or the send is not the main session's.
+# Owner ruling 409 a (2026-11-08 06:11 CST): a finished agent that ran in a worktree is refused a resume, for any
+# role, since its worktree is gone. A finished agent with no worktree still passes. Reviewer spawns in this repo always
+# run in a worktree, so the reviewer with no worktree below keeps its refusal.
+rf_refuse("a finished builder spawned with isolation worktree is refused, and the reason says fresh",
+          {"to": RF_WT_BUILDER, "message": RF_MSG}, rf_path("worktree-builder-finished"), carries=("fresh",))
+rf_refuse("a finished test-author spawned with isolation worktree is refused, and the reason says fresh",
+          {"to": RF_WT_TESTAUTHOR, "message": RF_MSG}, rf_path("worktree-test-author-finished"), carries=("fresh",))
+rf_refuse("a finished designer spawned with isolation worktree is refused, and the reason says fresh",
+          {"to": RF_WT_DESIGNER, "message": RF_MSG}, rf_path("worktree-designer-finished"), carries=("fresh",))
+rf_refuse("a finished reviewer spawned with no isolation is refused: the reviewer refusal is kept with no worktree",
+          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-finished"))
+# Allowed: the target runs, is a finished spawn with no worktree that is not a reviewer, is not in the transcript,
+# or the send is not the main session's.
 rf_allow("a running reviewer is allowed, though another spawn's finish notice is in the transcript",
          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-running"))
-rf_allow("a finished builder is allowed, though a reviewer in the same session finished",
+rf_allow("a finished builder spawned with no isolation passes, though a reviewer in the same session finished",
          {"to": RF_BUILDER, "message": RF_MSG}, rf_path("builder-finished"))
+rf_allow("a running builder spawned with isolation worktree passes",
+         {"to": RF_WT_RUNNING, "message": RF_MSG}, rf_path("worktree-builder-running"))
+rf_allow("a finished Explore spawned with no isolation passes",
+         {"to": RF_EXPLORE, "message": RF_MSG}, rf_path("explore-finished"))
 rf_allow("the latest spawn with the name wins: an older finished reviewer, then a newer running builder, is allowed",
          {"to": RF_SHARED, "message": RF_MSG}, rf_path("shared-name-finished-reviewer-then-running-builder"))
 rf_allow("a send to main is allowed", {"to": "main", "message": RF_MSG}, rf_path("bg-reviewer-finished"))
