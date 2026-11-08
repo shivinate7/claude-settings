@@ -10185,6 +10185,56 @@ pr_edit("pr-body-placeholder: gh pr edit --body \"Fixes $X\" is not judged", "al
 pr_edit("pr-body-placeholder: a set value with a lone quote, a hash and a semicolon is not denied", "allow",
         'BODY="Don\'t merge: see #12; the record"; gh pr edit 5 --body "$BODY"', live=GHMAIN)
 
+# Forms that set or read the body in the same command. Each call sends the value the command set, never a placeholder,
+# so the guard allows it. Each runs with the live body GHMAIN, so only the placeholder rule could refuse it. Removing
+# the branch that reads a form reads the body as empty, and the call is refused. The `$(...)` form is the one
+# exception: the guard reads its `$` as unexpanded text, so it is allowed with or without the expression check.
+pr_edit("pr-body-placeholder: PowerShell foreach ($body in $bodies), then gh pr edit --body $body is not denied",
+        "allow", '$bodies = @("%s")\nforeach ($body in $bodies) {\ngh pr edit 5 --body $body\n}' % PR_BODY_TEXT,
+        live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell [ref]$body in TryGetValue, then gh pr edit --body $body is not denied",
+        "allow", '$map = @{ body = "%s" }\n$map.TryGetValue("body", [ref]$body) | Out-Null\ngh pr edit 5 --body $body'
+        % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell Tee-Object -Variable body, then gh pr edit --body $body is not denied",
+        "allow", '"%s" | Tee-Object -Variable body | Out-Null\ngh pr edit 5 --body $body' % PR_BODY_TEXT,
+        live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell Write-Output -OutVariable body, then gh pr edit --body $body is not denied",
+        "allow", 'Write-Output "%s" -OutVariable body | Out-Null\ngh pr edit 5 --body $body' % PR_BODY_TEXT,
+        live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell $global:body assigned, then gh pr edit --body $body is not denied",
+        "allow", '$global:body = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT,
+        live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell $private:body assigned, then gh pr edit --body $body is not denied",
+        "allow", '$private:body = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT,
+        live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell $PSItem from a piped body, in ForEach-Object, is not denied",
+        "allow", '"%s" | ForEach-Object {\ngh pr edit 5 --body $PSItem\n}' % PR_BODY_TEXT,
+        live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell $args from a function called with the body, is not denied",
+        "allow", 'function upd {\ngh pr edit 5 --body $args\n}\nupd "%s"' % PR_BODY_TEXT,
+        live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell $input from a piped body, in a function, is not denied",
+        "allow", 'function upd {\ngh pr edit 5 --body $input\n}\n"%s" | upd' % PR_BODY_TEXT,
+        live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell --body @(Get-Content body.md -Raw) is not denied",
+        "allow", "gh pr edit 5 --body @(Get-Content body.md -Raw)", live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell --body=(Get-Content body.md -Raw) is not denied",
+        "allow", "gh pr edit 5 --body=(Get-Content body.md -Raw)", live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell --body $(Get-Content body.md -Raw) is not denied",
+        "allow", "gh pr edit 5 --body $(Get-Content body.md -Raw)", live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: read -r BODY from a file, then gh pr edit --body \"$BODY\" is not denied",
+        "allow", 'read -r BODY < body.txt; gh pr edit 5 --body "$BODY"', live=GHMAIN, env=BODY_UNSET)
+pr_edit("pr-body-placeholder: for BODY over a real body, then gh pr edit --body \"$BODY\" is not denied",
+        "allow", 'for BODY in "%s"; do gh pr edit 5 --body "$BODY"; done' % PR_BODY_TEXT, live=GHMAIN, env=BODY_UNSET)
+pr_edit("pr-body-placeholder: printf -v BODY, then gh pr edit --body \"$BODY\" is not denied",
+        "allow", 'printf -v BODY \'%%s\' "%s"; gh pr edit 5 --body "$BODY"' % PR_BODY_TEXT,
+        live=GHMAIN, env=BODY_UNSET)
+pr_edit("pr-body-placeholder: mapfile -t BODY from a file, then gh pr edit --body \"$BODY\" is not denied",
+        "allow", 'mapfile -t BODY < body.txt; gh pr edit 5 --body "$BODY"', live=GHMAIN, env=BODY_UNSET)
+pr_edit("pr-body-placeholder: a real default in \"${BODY:=...}\" on the line before, then gh pr edit --body \"$BODY\" "
+        "is not denied",
+        "allow", ': "${BODY:=%s}"; gh pr edit 5 --body "$BODY"' % PR_BODY_TEXT, live=GHMAIN, env=BODY_UNSET)
+
 # The shrink rule: at least 400 live characters, and a new body under one third of them. 566 is under a third of
 # 1700 and 567 is not, so each side of that line has a case.
 pr_update("pr-body-shrink: an MCP update of 120 characters over a live body of 1700 asks", "ask", PR_SHRINK,
