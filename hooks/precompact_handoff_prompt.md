@@ -34,9 +34,19 @@ Git and the transcript keep the history. Never make a dated copy.
 
 The handoff holds these sections, in this order:
 
-- Rulings with NO HOME YET, first: only a ruling whose record is being written now. Name
-  the branch that writes it. File every other ruling and task at once, in a decision record,
-  a rule, or the repo's todo or debt store. The handoff is never their home.
+- Rulings with NO HOME YET, first, under this fixed heading: only a ruling whose record is
+  being written now. One list line each, or `- none`:
+
+```
+## Rulings with NO HOME YET
+- <ruling>. Source: <owner message and date>. Home: NO HOME YET (branch <name>)
+```
+
+  Each such line, and each `[ruling]` premise below, ends with `Home: <ruling record path>`,
+  or with `Home: NO HOME YET (branch <name>)` naming the branch that writes it. The Stop
+  check refuses a line whose home is neither. File every other ruling and task at once, in a
+  decision record, a rule, or the repo's todo or debt store. The handoff is never their home.
+  A pick the owner did not rule is `[read]` or `[assumed]`, with its source.
 - Goal: one line, the owner's goal in the owner's words, with its source (the owner
   message and its date).
 - Working premises: the facts the next steps lean on, at most about 15, under the heading

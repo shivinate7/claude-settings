@@ -12,6 +12,7 @@ against HEAD. The markdown sweep (`md_sweep.py`) used the same predicate for a m
 through Bash. The sweep is deleted (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`).
 
 - The last human message carries an ISO timestamp in the transcript. That marks the start of the turn.
+- A session's handoff written this turn is a second act of this kind, read by `hooks/ruling_home.py`: a file tool names it, or its mtime is after the last human message. The Stop check stats it once and opens it only then.
 - The git check removes the large false positive: a `git pull` or a branch switch rewrites many
   mtimes, and those files stay clean against HEAD.
 

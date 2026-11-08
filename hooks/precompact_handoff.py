@@ -112,6 +112,10 @@ DEFAULT_WINDOW = 500_000
 PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
 _PREMISES_HEAD = re.compile(r"^##[ \t]+Working premises[ \t]*$", re.I | re.M)
 _PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
+# The handoff's first section, the fixed heading step 4 of the prompt file gives it.
+_NO_HOME_HEAD = re.compile(r"^##[ \t]+Rulings with NO HOME YET[ \t]*$", re.I | re.M)
+_LIST_LINE = re.compile(r"^[ \t]*[-*][ \t]+(\S.*)$")
+_NONE_LINE = re.compile(r"none\.?", re.I)
 
 
 def config_dir():
@@ -508,6 +512,16 @@ def inbox_note(session_id):
             " repo's todo or debt store." % ", ".join(ids))
 
 
+def _section_body(text, head):
+    """The text under the `head` heading up to the next `#` or `##` heading, or None when the heading is absent."""
+    found = head.search(text)
+    if not found:
+        return None
+    body = text[found.end():]
+    end = re.search(r"^#{1,2}[ \t]", body, re.M)
+    return body[:end.start()] if end else body
+
+
 def handoff_premises(path):
     """[(id, kind)] of the premise lines in the handoff's Working premises section, in order,
     one entry per id. [] when the file is unreadable or the section is missing or has no line.
@@ -517,15 +531,47 @@ def handoff_premises(path):
             text = f.read()
     except (OSError, ValueError):  # ValueError: a byte that is not UTF-8
         return []
-    head = _PREMISES_HEAD.search(text)
-    if not head:
+    body = _section_body(text, _PREMISES_HEAD)
+    if body is None:
         return []
-    body = text[head.end():]
-    end = re.search(r"^#{1,2}[ \t]", body, re.M)
     found = {}
-    for m in _PREMISE_LINE.finditer(body[:end.start()] if end else body):
+    for m in _PREMISE_LINE.finditer(body):
         found.setdefault(m.group(1), (m.group(2) or "").strip().lower())
     return list(found.items())
+
+
+def handoff_ruling_lines(text):
+    """[(label, line)] of each handoff line that claims a ruling, in order: every list line under
+    `## Rulings with NO HOME YET` bar `- none` (label its P-id, else `NO HOME YET line <n>`, n counting
+    that section's list lines from 1), then every `[ruling]` premise in Working premises (label its
+    P-id). A line in a code fence is prose. The caller checks each line's `Home:` token
+    (hooks/ruling_home.py)."""
+    from ruling_home import FENCE_MARKERS  # lazy: a sibling hook, imported only when the Stop check runs
+    out = []
+
+    def unfenced(body):
+        fenced = False
+        for line in (body or "").splitlines():
+            if line.startswith(FENCE_MARKERS):
+                fenced = not fenced
+            elif not fenced:
+                yield line
+
+    n = 0
+    for line in unfenced(_section_body(text, _NO_HOME_HEAD)):
+        item = _LIST_LINE.match(line)
+        if not item:
+            continue
+        n += 1
+        if _NONE_LINE.fullmatch(item.group(1).strip()):
+            continue
+        pid = re.match(r"P\d+\b", item.group(1))
+        out.append((pid.group(0) if pid else "NO HOME YET line %d" % n, line))
+    for line in unfenced(_section_body(text, _PREMISES_HEAD)):
+        m = _PREMISE_LINE.match(line)
+        if m and (m.group(2) or "").strip().lower() == "ruling":
+            out.append((m.group(1), line))
+    return out
 
 
 def premise_note(path, everyone):
