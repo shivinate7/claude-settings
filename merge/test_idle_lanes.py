@@ -7,7 +7,8 @@ WHAT IT PROVES. The command prints one line per lane to archive, then one summar
 the Backlog check reads). It takes its steps, marks and
 repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and no merge role in a cloud
 session. A missing --live file exits 1 and prints no summary, so an unread list never reads as an empty one. An unread archive
-list still prints the finished-lanes line, its count or its unknown form, after its unknown entry, and exits 1.
+list still prints the finished-lanes line, its count or its unknown form, after its unknown entry, and exits 1. With main
+unreadable, the finished-lanes line reads unknown, never a count: a draft pull's hold is tested against main.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
@@ -44,6 +45,16 @@ FINISHED_UNKNOWN = re.compile(r"^merge: %s unknown \(.+\)\.$" % re.escape(FINISH
 
 def finished_line(count):
     return "merge: %d %s." % (count, FINISHED_LANES_LINE)
+
+
+def last_line(out):
+    """The last line of a run's stdout, or "" when it printed none, so a missing line fails an assert and never raises."""
+    return out.rstrip("\n").split("\n")[-1]
+
+
+def draft_pull(head, branch="lane/c1", number=81):
+    """An open draft pull on a lane's head ref. Its head sha is the one the draft-head test reads against main."""
+    return {"number": number, "title": "lane " + branch, "branch": branch, "draft": True, "head": head}
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
 RUN_FOLDER = None
@@ -218,22 +229,43 @@ class IdleLanesCli(unittest.TestCase):
         self.assertRegex(out, FINISHED_UNKNOWN,
                          "the unknown count line is missing after an unread list: out: %r, err: %r" % (out, err))
 
-    def test_unreadable_main_exits_1_with_an_unknown_list_line_and_no_summary(self):
+    def make_main_unreadable(self):
+        """Rename main away, so no ref named main reads in this checkout."""
+        roadmap.git(self.repo, "branch", "-m", "main", "trunk")
+        self.assertIsNone(roadmap.build.main_ref(self.repo, "main"), "the fixture must make main unreadable")
+
+    def test_unreadable_main_exits_1_with_an_unknown_list_line_and_an_unknown_finished_line(self):
         # The control is the same lane with main read: it is listed, the summary says 1, and the command exits 0. With
         # main renamed away, no step can be read as landed, so the unknown list line carries the failure and the command
-        # exits 1 with no summary. The count does not read main, so its line still prints.
+        # exits 1 with no summary. The finished count reads main too (a draft pull's head is tested against it), so its
+        # line reads unknown, never a number.
         self.publish([lane("session_a", "c1")])
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual((code, out.splitlines()[-2:]), (0, [SUMMARY_ONE, finished_line(1)]), "out: %r, err: %r" % (out, err))
-        roadmap.git(self.repo, "branch", "-m", "main", "trunk")
-        self.assertIsNone(roadmap.build.main_ref(self.repo, "main"), "the fixture must make main unreadable")
+        self.make_main_unreadable()
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertTrue(any(line.startswith("unknown (") for line in out.splitlines()),
                         "an unreadable main prints no unknown line: out: %r, err: %r" % (out, err))
         self.assertEqual(code, 1, "an unreadable main exits %d, so a caller reads the list as read" % code)
         self.assertNotRegex(out, SUMMARY_LINE)
-        self.assertEqual(out.splitlines()[-1:], [finished_line(1)],
-                         "an unreadable main drops the count line: out: %r, err: %r" % (out, err))
+        self.assertRegex(last_line(out), FINISHED_UNKNOWN,
+                         "an unreadable main does not make the finished line unknown: out: %r, err: %r" % (out, err))
+        self.assertNotRegex(out, FINISHED, "an unreadable main prints a count on the finished line: out: %r, err: %r" % (out, err))
+
+    def test_unreadable_main_reads_the_finished_line_unknown_under_a_draft_pull(self):
+        # A review-ready lane under a draft pull is released only when the pull's head is on main, so the count reads main.
+        # With main unreadable the hold cannot be cleared, and the count would print 0 for the lane. The line must read
+        # unknown instead. The control is the same lane with main read: the draft's head is on main, so the lane is released
+        # and counted as 1.
+        head = roadmap.git(self.repo, "rev-parse", "main").strip()
+        self.publish([lane("session_a", "c1", bucket=roadmap.BUCKET_REVIEW_READY)], pulls=[draft_pull(head)])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual((code, out.splitlines()[-2:]), (0, [SUMMARY_ONE, finished_line(1)]), "out: %r, err: %r" % (out, err))
+        self.make_main_unreadable()
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertNotRegex(out, FINISHED, "an unreadable main gives the draft-held lane a number: out: %r, err: %r" % (out, err))
+        self.assertRegex(last_line(out), FINISHED_UNKNOWN,
+                         "an unreadable main does not make the finished line unknown under a draft pull: out: %r, err: %r" % (out, err))
 
     def test_idle_lanes_needs_no_merge_role_in_a_cloud_session(self):
         self.publish([lane("session_a", "c1")])
