@@ -1596,10 +1596,10 @@ def case_step_ruling_tail_stops_at_a_ruling_word():
 
 # ------------------------------------------------------------------ the step pool: label rows and recall rows
 # The step candidate pool takes a sentence that names ruling, owner or shiv, with no owner-marker gate and no label
-# exclusion. Each row names one sentence and what the pool does with it. MAIN_POOL_RE is the pool's rule as this test
+# exclusion. Each row names one sentence and what the pool does with it. POOL_RE is the pool's rule as this test
 # states it. LABEL_OPENER_RE finds a label at the clause start, after bullet or emphasis marks, an enumerator, or at most
 # two words (as in "Second incident"). A label mid-sentence is no opener.
-MAIN_POOL_RE = re.compile(r"ruling|owner|shiv", re.I)
+POOL_RE = re.compile(r"ruling|owner|shiv", re.I)
 LABEL_OPENER_RE = re.compile(r"\A[\s*_>#+-]*(?:\(\d+\)\s*)?(?:[\w'-]+\s+){0,2}(?:incident|gripe|deferred)s?\b", re.I)
 SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
 # Recall rows: sentences the pool keeps, none opening with a label. Each is verbatim from a step note (field note or
@@ -1655,8 +1655,8 @@ def case_step_pool_keeps_recall_rows():
     check("step pool recall: question_form._step_rulings exists", callable(fn), "missing function")
     if not callable(fn):
         return
-    outside = [step_id for step_id, s in STEP_POOL_RECALL if not MAIN_POOL_RE.search(s) or LABEL_OPENER_RE.search(s)]
-    check("step pool recall scope: every row is in origin/main's pool and opens with no label", not outside,
+    outside = [step_id for step_id, s in STEP_POOL_RECALL if not POOL_RE.search(s) or LABEL_OPENER_RE.search(s)]
+    check("step pool recall scope: every row is in the pool and opens with no label", not outside,
           "outside the scope: %r" % outside)
     for number, (step_id, sentence) in enumerate(STEP_POOL_RECALL, 1):
         lines = fn({step_id: (sentence, None)}, question_form._words(sentence))
@@ -1664,7 +1664,7 @@ def case_step_pool_keeps_recall_rows():
               "dropped; the pool gave %r" % (lines,))
 
 
-def case_step_pool_keeps_unlabeled_main_ruling_sentences():
+def case_step_pool_keeps_unlabeled_ruling_sentences():
     """Aggregate over the corpus: every sentence that names ruling, owner or shiv and opens with no label is kept by this
     pool. Label openers are kept too: case_step_pool_keeps_sentences_opening_with_a_label checks them.
     The step notes come from the production reader (question_form._read_steps) on this checkout's origin/roadmap.
@@ -1692,17 +1692,17 @@ def case_step_pool_keeps_unlabeled_main_ruling_sentences():
         for field in steps[step_id]:
             if isinstance(field, str):
                 for sentence in SENTENCE_BREAK.split(field.strip()):
-                    if (sentence and MAIN_POOL_RE.search(sentence) and not LABEL_OPENER_RE.search(sentence)
+                    if (sentence and POOL_RE.search(sentence) and not LABEL_OPENER_RE.search(sentence)
                             and question_form._words(sentence)):
                         required.append((step_id, sentence))
-    check("step pool corpus scope: origin/main's pool holds sentences to measure", len(required) > 0,
+    check("step pool corpus scope: the pool holds sentences to measure", len(required) > 0,
           "no sentence in the corpus names ruling, owner or shiv")
     missed = [(step_id, s) for step_id, s in required
               if not any(s in line for line in fn({step_id: (s, None)}, question_form._words(s)))]
     detail = ""
     if missed:
         detail = "%d of %d dropped; first %s: %s" % (len(missed), len(required), missed[0][0], missed[0][1][:100])
-    check("step pool corpus: every main pool sentence with no label opener is kept (%d sentences)" % len(required),
+    check("step pool corpus: every pool sentence with no label opener is kept (%d sentences)" % len(required),
           not missed, detail)
 
 
@@ -1714,7 +1714,7 @@ def case_step_pool_keeps_sentences_opening_with_a_label():
     check("step pool label: question_form._step_rulings exists", callable(fn), "missing function")
     if not callable(fn):
         return
-    outside = [s for s in STEP_POOL_LABEL_OPENERS if not (MAIN_POOL_RE.search(s) and LABEL_OPENER_RE.search(s))]
+    outside = [s for s in STEP_POOL_LABEL_OPENERS if not (POOL_RE.search(s) and LABEL_OPENER_RE.search(s))]
     check("step pool label scope: every row names ruling, owner or shiv and opens with a label", not outside,
           "outside the scope: %r" % outside[:2])
     for number, sentence in enumerate(STEP_POOL_LABEL_OPENERS, 1):
@@ -1899,8 +1899,8 @@ def test_step_pool_keeps_recall_rows():
     _judged(case_step_pool_keeps_recall_rows)
 
 
-def test_step_pool_keeps_unlabeled_main_ruling_sentences():
-    _judged(case_step_pool_keeps_unlabeled_main_ruling_sentences)
+def test_step_pool_keeps_unlabeled_ruling_sentences():
+    _judged(case_step_pool_keeps_unlabeled_ruling_sentences)
 
 
 def test_step_pool_keeps_sentences_opening_with_a_label():
@@ -1932,7 +1932,7 @@ def main():
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
                  case_task_str_replace_prose_label_passes, case_step_pool_keeps_each_ruling_word_sentence,
                  case_step_ruling_tail_stops_at_a_ruling_word, case_step_pool_keeps_recall_rows,
-                 case_step_pool_keeps_unlabeled_main_ruling_sentences,
+                 case_step_pool_keeps_unlabeled_ruling_sentences,
                  case_step_pool_keeps_sentences_opening_with_a_label):
         try:
             case()

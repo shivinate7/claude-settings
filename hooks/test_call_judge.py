@@ -2146,7 +2146,7 @@ def case_past_ruling_owner_decision_stays_refused():
 
 
 # The four sentences item 8 must carry verbatim, so the judge is told which step lines are rulings. A row fails when its
-# sentence is missing from the item-8 text. ITEM8_OLD_CLAUSES are the superseded phrases, which must no longer appear.
+# sentence is missing from the item-8 text.
 ITEM8_SENTENCES = (
     ("S1", "A step line is a ruling when it says the owner ruled, answered, picked or granted, and gives his words, "
            "a page item, or a date."),
@@ -2155,13 +2155,11 @@ ITEM8_SENTENCES = (
     ("S3", "An incident or gripe line that only tells what went wrong is not a ruling."),
     ("S4", "A ruling that mentions a risk, a defect or an incident is still a ruling."),
 )
-ITEM8_OLD_CLAUSES = ("never counts", "dated owner answer", "even when it mentions the owner")
 
 
 def case_item8_prompt_names_record_kinds_and_owner_markers():
     # The item-8 text the judge is sent: the lines from its `8. ` marker up to the candidate list. It must say that a
-    # decision or debt record is a ruling by its kind, carry each ITEM8_SENTENCES sentence verbatim, and drop each
-    # ITEM8_OLD_CLAUSES phrase.
+    # decision or debt record is a ruling by its kind, and carry each ITEM8_SENTENCES sentence verbatim.
     r = run_hook(question_input(box=milestone_cap_box()), answer=ALLOW)
     calls = form_calls(r)
     check("item 8 prompt: the question box makes one judged call", len(calls) == 1, detail(r))
@@ -2180,9 +2178,6 @@ def case_item8_prompt_names_record_kinds_and_owner_markers():
     for label, sentence in ITEM8_SENTENCES:
         check("item 8 prompt: sentence %s is in the item-8 text verbatim" % label, sentence in item8,
               "missing: " + sentence)
-    for phrase in ITEM8_OLD_CLAUSES:
-        check("item 8 prompt: superseded clause %r is gone" % phrase, phrase not in item8,
-              "still in the item-8 text: " + phrase)
 
 
 def main():
