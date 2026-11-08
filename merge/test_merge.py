@@ -11048,7 +11048,7 @@ class PullsHost(merge.Host):
     while pages follow, under count_gh. `closed` maps a number to a pull request that is not open (closed_pull), which `pulls/<n>` answers."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
                  base_compare_error=None, comments=(), comments_error=None, count_gh=False, now=None, events=None, events_error=None,
-                 main_runs=(), main_runs_error=None, jobs=None, closed=None, files=None):
+                 main_runs=(), main_runs_error=None, jobs=None, closed=None, files=None, pull_errors=None):
         clock = (lambda: now) if now is not None else time.time  # a case that gives `now` fixes every age it reads
         super().__init__(list(required), base="main", minute=60, now=clock, pause=lambda s: None, ignore=ignore)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
@@ -11056,6 +11056,7 @@ class PullsHost(merge.Host):
         self.main_runs, self.main_runs_error = list(main_runs), main_runs_error  # the base branch's runs, newest first; `actions/runs`
         self.jobs = jobs or {}  # run id -> its jobs; `actions/runs/<id>/jobs`
         self.files = files or {}  # pull request number -> its rows of `pulls/<n>/files`
+        self.pull_errors = pull_errors or {}  # number -> the output of a failed `GET pulls/<n>`: a network line, or any other failure
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
@@ -11085,12 +11086,7 @@ class PullsHost(merge.Host):
             return 0, self.answer(rel, args[1:])
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
-            found = [d for d in self.pulls if d["number"] == int(m.group(1))]
-            if not found and int(m.group(1)) in self.closed:
-                return 0, json.dumps(self.closed[int(m.group(1))])
-            if not found:
-                return 1, "gh: Not Found (HTTP 404)"
-            return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": ""})
+            return self.pull_reply(int(m.group(1)))
         m = re.search(r"/compare/([^/]+)\.\.\.([^/]+)$", route)
         if m:
             self.compare_reads.append(m.groups())
@@ -11102,7 +11098,9 @@ class PullsHost(merge.Host):
 
     def pull_reply(self, n):
         """-> (code, output) of `GET pulls/<n>`: an open pull request as the open list has it, or one in `closed` as it is. A number neither
-        holds is a 404, which Host.pr reads as a Stop."""
+        holds is a 404, which Host.pr reads as a Stop. A number in `pull_errors` answers its failure instead, which is not a 404."""
+        if n in self.pull_errors:
+            return 1, self.pull_errors[n]
         for d in self.pulls:
             if d["number"] == n:
                 return 0, json.dumps({**d, "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": ""})
@@ -13514,10 +13512,25 @@ class ReviewedLedger(ReviewEnv):
         host, out = self.follow_up("2, follow-up #7")
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
 
-    def test_findings_follow_up_to_a_pr_that_does_not_exist_is_open(self):
-        # no pull request 8: the read answers 404, which the rule reads as not existing, so the record reads open and the list still prints
+    def test_findings_follow_up_to_a_pr_that_does_not_exist_is_open_and_names_it(self):
+        # no pull request 8: the read answers 404, so the record is not done, and its line names the missing number. The list still prints.
         host, out = self.follow_up("2, follow-up #8")
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
+        self.assertIn("#8", line, "the line does not name the follow-up pull request that does not exist")
+
+    def test_findings_follow_up_whose_read_fails_is_unknown_and_holds(self):
+        # a read that cannot run is unknown, never clear (rule verification-report-unknown-reads). The record holds, and its line names the
+        # follow-up that could not be read. A failure that is not a 404 is no proof the pull request is missing, so the line is not `open`.
+        for failure in ("error connecting to api.github.com", "gh: Server Error (HTTP 502)"):
+            with self.subTest(failure=failure):
+                comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="2, follow-up #8"))]
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True,
+                                                  pull_errors={8: failure})
+                self.assertEqual(rc, 0, "a failed follow-up read stopped the whole list instead of holding its line:\n" + out + err)
+                line = list_line(self, out, 7)
+                self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} unknown: ", "a failed follow-up read did not read unknown")
+                self.assertIn("#8", line, "the unknown line does not name the follow-up pull request that could not be read")
 
     def test_findings_follow_up_needs_every_named_pr_to_pass(self):
         host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA), batch_pull(9, OTHER_SHA)])  # control: both open
