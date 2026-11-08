@@ -2166,11 +2166,16 @@ def _source_pathspecs(subcommand: str, rest):
 
 def _holds_add_only(word: str, where: str) -> bool:
     """True when `word` names a folder of its repository that holds a file of BUILDER_ADD_ONLY."""
+    try:
+        if os.path.exists(os.path.join(os.path.normpath(_expanded(word, where)), ".git")):
+            return True   # the repository top holds every file (`repo_rel` reads only its parents)
+    except Exception:
+        return False
     rel = repo_rel(word, where, outside=False)
     if rel is None:
         return False
     rel = norm(rel).strip("/").lower()
-    return rel in ("", ".") or any(name.startswith(rel + "/") for name in BUILDER_ADD_ONLY)
+    return any(name.startswith(rel + "/") for name in BUILDER_ADD_ONLY)
 
 
 def _index_only_paths(stripped: str):
