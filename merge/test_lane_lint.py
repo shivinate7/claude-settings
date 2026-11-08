@@ -304,6 +304,37 @@ class LaneLint(CiJobStub, tm.CloudSession):
                 self.assertEqual(rc, 1, out)
                 self.assertEqual(pass_lines(out), [], out)
 
+    def test_a_pass_writes_an_empty_lint_marker_named_by_the_head(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        path = tm.lane_lint_marker(self.cfg, head)
+        self.assertTrue(os.path.isfile(path), "a PASS wrote no lint marker for the head")
+        self.assertEqual(os.path.getsize(path), 0, "the lint marker is not empty")
+
+    def test_an_unknown_with_a_reason_writes_the_lint_marker(self):
+        self.use_ci_job(UNKNOWN, 2)
+        head = self.head("feat")
+        rc, out = self.lint_run("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(os.path.isfile(tm.lane_lint_marker(self.cfg, head)),
+                        "an unknown lint passed with a reason and wrote no lint marker")
+
+    def test_a_failed_lint_writes_no_lint_marker(self):  # the control: no marker for a head that fails
+        self.use_ci_job(FAILING, 1)
+        head = self.head("feat")
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(os.path.exists(tm.lane_lint_marker(self.cfg, head)), "a failed lint wrote a lint marker")
+
+    def test_an_unknown_without_a_reason_writes_no_lint_marker(self):  # the control: no marker for an unknown nobody excused
+        self.use_ci_job(UNKNOWN, 2)
+        head = self.head("feat")
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(os.path.exists(tm.lane_lint_marker(self.cfg, head)), "an unexcused unknown wrote a lint marker")
+
     def test_a_ref_target_lints_against_main_by_default(self):
         self.use_ci_job(PASSING, 0)
         sha = self.head("feat")
