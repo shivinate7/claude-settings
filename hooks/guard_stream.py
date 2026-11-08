@@ -77,9 +77,10 @@ LIVE_STREAM_REASON = (
 # a claim commit's checks and prints a line a minute. A pipe block-buffers that heartbeat and the
 # filter keeps one end of it, so a working wait reads as a hang. The roster is NAMED, one entry per
 # incident, because "does this command narrate for minutes" cannot be resolved from the system, and
-# refusing every `| tail` is the cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). `tee`
-# keeps every byte, so it is not refused. Only `--confirm` reaches the wait: a bare `merge <pr>` is a
-# preview that returns in seconds, so piping it is allowed.
+# refusing every `| tail` is the cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). A `tee`
+# with nothing after it keeps every byte and is not refused; a `tee` followed by `tail` or `head` is
+# refused, since the filter still cuts what the agent reads. Only `--confirm` reaches the wait: a bare
+# `merge <pr>` is a preview that returns in seconds, so piping it is allowed.
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
@@ -116,30 +117,18 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
 
 
 def narrated_tail_hit(stripped: str) -> str:
-    """Return the matched text when a narrating stage is piped straight into `tail`/`head`."""
-    ends = []
-    segments = split_segments(stripped, ends)
-    for index in range(len(segments) - 1):
-        if ends[index] != "|":
-            continue
-        stage = narrating_stage(segments[index])
-        if not stage:
-            continue
-        tokens = segment_tokens(segments[index + 1])
-        if not tokens:
-            continue
-        at = resolve_command(tokens)
-        if at is not None and basename(tokens[at]) in TRUNCATING_FILTERS:
-            return stage + " | " + basename(tokens[at])
-    return ""
+    """Return the matched text when a narrating stage reaches `tail`/`head`, directly or through a
+    `tee` or other filters. Same pipeline walk as `check_tail_hit`."""
+    return _walk_pipelines(stripped, lambda segment: narrating_stage(segment))
 
 
 NARRATED_TAIL_REASON = (
     "this command waits for minutes and prints a line as it goes, and a pipe into a filter "
     "that keeps one end of the stream hides that line until the end, so a working wait looks "
     "like a hang. "
-    "Remedy: run the command with nothing after it and read its output as it arrives, or "
-    "redirect to a file you read back afterwards, or use tee to keep a full copy."
+    "Remedy: run the command through `verdict <cmd>`, or with nothing after it, or through a "
+    "`tee` with nothing after it, and read its output as it arrives, or redirect to a file you "
+    "read back afterwards."
 )
 
 
@@ -171,12 +160,13 @@ def check_stage(segment: str, background: bool) -> str:
     return _roster_word(tokens, index, interpreter_only=True)
 
 
-def _pipeline_hit(stages, background: bool) -> str:
-    """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
-    between them does not end the reach, since the filter after it still cuts what the agent reads. A
-    `tee` with no `tail` or `head` after it is not a hit."""
+def _pipeline_hit(stages, find_stage) -> str:
+    """The matched text when a stage that `find_stage` names in one pipeline's stages reaches
+    `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
+    what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk for the
+    narrated rule and the check rule."""
     for first, segment in enumerate(stages):
-        stage = check_stage(segment, background)
+        stage = find_stage(segment)
         if not stage:
             continue
         for later in stages[first + 1:]:
@@ -190,20 +180,26 @@ def _pipeline_hit(stages, background: bool) -> str:
     return ""
 
 
-def check_tail_hit(stripped: str, background: bool) -> str:
-    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
-    filters. A pipeline ends at any separator other than `|`."""
+def _walk_pipelines(stripped: str, find_stage) -> str:
+    """Split a call into pipelines (a pipeline ends at any separator other than `|`) and return the
+    first `_pipeline_hit`."""
     ends = []
     segments = split_segments(stripped, ends)
     stages = []
     for segment, end in zip(segments, ends):
         stages.append(segment)
         if end != "|":
-            hit = _pipeline_hit(stages, background)
+            hit = _pipeline_hit(stages, find_stage)
             if hit:
                 return hit
             stages = []
-    return _pipeline_hit(stages, background)
+    return _pipeline_hit(stages, find_stage)
+
+
+def check_tail_hit(stripped: str, background: bool) -> str:
+    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
+    filters."""
+    return _walk_pipelines(stripped, lambda segment: check_stage(segment, background))
 
 
 CHECK_TAIL_REASON = (
