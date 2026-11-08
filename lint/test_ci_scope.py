@@ -378,6 +378,73 @@ class FileLoads(unittest.TestCase):
         self.assertEqual(closure("merge/merge.py", files, source.__getitem__), {"hooks/mid.py", "hooks/leaf.py"})
 
 
+class UnresolvedLoads(unittest.TestCase):
+    """A load the reader cannot resolve fails the closure loudly, and the failure names the file and the load. The reader must not
+    drop it: a dropped load leaves its file out of the closure, so a change to that file gets no merge flag. Each case puts the load
+    in hooks/mid.py, which merge/merge.py imports, so the failure comes through closure(), the walk the check runs."""
+
+    def closure_of(self, mid_src):
+        files = {"merge/merge.py", "hooks/mid.py", "hooks/deep.py"}
+        source = {"merge/merge.py": "import mid\n", "hooks/mid.py": mid_src, "hooks/deep.py": "X = 1\n"}
+        return closure("merge/merge.py", files, source.__getitem__)
+
+    def assert_fails_loud(self, mid_src, load):
+        """The closure raises, and its message names hooks/mid.py and the load's text."""
+        with self.assertRaises(Exception, msg=f"the closure drops the unresolvable load {load!r} without a failure") as cm:
+            self.closure_of(mid_src)
+        self.assertIn("hooks/mid.py", str(cm.exception), f"the failure for {load!r} does not name the file hooks/mid.py")
+        self.assertIn(load, str(cm.exception), f"the failure does not name the load {load!r}")
+
+    def test_a_package_qualified_from_import_fails_loud(self):
+        self.assert_fails_loud("from hooks import deep\n", "from hooks import deep")
+
+    def test_a_package_qualified_dotted_import_fails_loud(self):
+        self.assert_fails_loud("import hooks.deep\n", "import hooks.deep")
+
+    def test_an_importlib_load_of_a_package_qualified_name_fails_loud(self):
+        self.assert_fails_loud('import importlib\nimportlib.import_module("hooks.deep")\n', "hooks.deep")
+
+    def test_a_by_path_load_with_a_concatenated_path_fails_loud(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'SPEC = importlib.util.spec_from_file_location("deep", os.environ["X"] + ".py")\n',
+                               "spec_from_file_location")
+
+    def test_a_by_path_load_with_an_f_string_path_fails_loud(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'SPEC = importlib.util.spec_from_file_location("deep", f"hooks/{os.environ[\'X\']}.py")\n',
+                               "spec_from_file_location")
+
+    def test_a_by_path_load_with_a_format_path_fails_loud(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'SPEC = importlib.util.spec_from_file_location("deep", "hooks/{}.py".format(os.environ["X"]))\n',
+                               "spec_from_file_location")
+
+    # Green controls: the same call shapes with a path or a name the reader can read, and loads it must ignore.
+
+    def test_a_literal_by_path_load_still_resolves(self):
+        src = 'import importlib.util\nSPEC = importlib.util.spec_from_file_location("deep", "hooks/deep.py")\n'
+        self.assertEqual(self.closure_of(src), {"hooks/mid.py", "hooks/deep.py"}, "a literal by-path load stopped resolving")
+
+    def test_stdlib_loads_are_no_load(self):
+        src = "import os.path\nimport json\nfrom collections import abc\nimport importlib\nimportlib.import_module('json')\n"
+        self.assertEqual(self.closure_of(src), {"hooks/mid.py"}, "a stdlib load was read as a load of a closure file, or raised")
+
+    def test_a_load_text_in_a_comment_or_a_string_is_no_load(self):
+        src = ("# don't import hooks.deep\n"
+               'NOTE = "from hooks import deep"\n'
+               'DOC = """\n'
+               "import hooks.deep\n"
+               'importlib.import_module("hooks.deep")\n'
+               '"""\n')
+        self.assertEqual(self.closure_of(src), {"hooks/mid.py"}, "a load named in a comment or a string was read as a load")
+
+    def test_the_real_merge_closure_reads_without_an_unresolved_load(self):
+        # Green on base. It stays green only once each known computed load is resolved or allow-listed by the constant it names.
+        loads = closure("merge/merge.py", repo_load_files(), read_repo)
+        missing = [p for p in REACHED if p not in loads]
+        self.assertFalse(missing, f"the closure from merge.py misses {missing}")
+
+
 # The files the closure must reach, one per kind of load the reader sorts: a module-level import, a by-path load, a load through a
 # module-level path, a function-level import, a transitive load, guard.py, and bin/sim-lease, a script with no .py name that
 # guard.py loads by a path built from __file__'s folder. A reader that stops short fails the scope check first.
