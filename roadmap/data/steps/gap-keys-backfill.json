@@ -1,0 +1,10 @@
+{
+  "title": "Each open roadmap step gets a gap key",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.62,
+  "owner": "triage",
+  "why": "#1750 refuses a step whose gap key matches an open step's, but the open steps have no gap key yet, so the check has nothing to compare against (lane gap gap-keys-not-backfilled).",
+  "note": "Triage's own task, after #1750 lands. From lane step-names-its-gap via the coordinator, 20:53 CST Nov 7 (message stamped 20:55). Filed 20:54 CST Nov 7.",
+  "updatedAt": "2026-11-07T20:54:00-06:00"
+}

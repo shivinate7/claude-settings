@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T02:54:00Z",
+  "context": "Goal: every roadmap step names its gap, so a duplicate step is refused.\nProblem (rule): #1750 is reviewed (round 2 PASS), but no one holds a grant to merge it, so a grant needs your word.\nBased on (read): decision session-tiers lets only triage push the roadmap branch.\nBased on (read): decision standing-merge-grant covers merges into main only, so runner 8 cannot merge #1750.\nDeparts from: main, where no grant covers a PR into the roadmap branch \u2014 triage merges a reviewed, green PR into the roadmap branch.\nNot blocking: #1750 waits; nothing else depends on it.",
+  "home": "step-names-its-gap",
+  "id": "record-branch-merge",
+  "kind": "decision",
+  "n": 383,
+  "options": [
+    {
+      "gain": "Fixes to the roadmap build land with no wait on you.",
+      "how": "Triage merges a PR into the roadmap branch once its review record passes and its checks are green. Main keeps its own grant.",
+      "key": "a",
+      "label": "Triage merges reviewed, green PRs into the roadmap branch (recommended)",
+      "lose": "One more session can merge."
+    },
+    {
+      "gain": "You see each change to the roadmap build.",
+      "how": "Each PR into the roadmap branch waits for you to press merge.",
+      "key": "b",
+      "label": "You merge each one",
+      "lose": "Each one waits on you."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "PR #1750 (gap-key refusal in the roadmap build), base roadmap, head a2e93875e; decisions session-tiers and standing-merge-grant",
+  "short": "Merges into the roadmap branch",
+  "status": "open",
+  "title": "Who merges a reviewed, green PR into the roadmap branch?",
+  "why": "The coordinator recommends a: triage is already the only writer of the roadmap branch, and the PR still needs a passed review and green checks."
+}
