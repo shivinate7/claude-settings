@@ -946,14 +946,39 @@ def _folder_root(root: str, cwd: str) -> str:
     return text
 
 
+def _quoted_glob_escapes(word: str) -> str:
+    """`word` with each `\\*`, `\\?` and `\\[` inside a quote made a one-character class (`[*]`, `[?]`, `[[]`).
+    A quote hides the backslash from the shell, so the tool reads the escape and matches the character
+    itself; fnmatch has no escape, but a class of one character is the same match. An unquoted escape is
+    read by the shell, so the tool sees a bare glob character and the word is left as it is."""
+    out, quote, at = [], "", 0
+    while at < len(word):
+        char = word[at]
+        if char == quote:
+            quote = ""
+        elif not quote and char in "'\"":
+            quote = char
+        elif quote and char == "\\" and word[at + 1:at + 2] in ("*", "?", "["):
+            out.append("[%s]" % word[at + 1])
+            at += 2
+            continue
+        elif char == "\\" and word[at + 1:at + 2]:
+            out.append(word[at:at + 2])
+            at += 2
+            continue
+        out.append(char)
+        at += 1
+    return "".join(out)
+
+
 def _name_filters(words) -> tuple:
     """The file-name globs that limit what a `find` or `grep` segment reads: the values of `-name`, or of
     `--include`, so a walk of its folder roots counts only the files it reaches. () when there is none, and
     for a `find` that holds `-o`, `!`, `-not` or a group, which can widen or invert what `-name` picks, and
     for a value that holds `$` or a backtick, a brace sequence (`{a..b}`, which `_brace_split` reads as text),
     a backslash left after one unescape pass (`\\\\`), or a brace list of `_BRACE_LIMIT` words or more. A value's
-    brace list is several filters (`_brace_words`), and a backslash escape reads as its literal character, so a
-    walk counts a file that any of them matches. A `find` stops at its first `-exec`."""
+    brace list is several filters (`_brace_words`), and a backslash escape reads as its literal character (a quoted
+    `\\*`, `\\?` or `\\[` as a one-character class, `_quoted_glob_escapes`), so a walk counts a file that any of them matches. A `find` stops at its first `-exec`."""
     index = resolve_command(tuple(words))
     if index is None:
         return ()
@@ -975,7 +1000,7 @@ def _name_filters(words) -> tuple:
                 values.append(word.partition("=")[2])
             elif word == "--include" and at + 1 < len(args):
                 values.append(args[at + 1])
-    values = [_unquoted(value) for value in values]
+    values = [_unquoted(_quoted_glob_escapes(value)) for value in values]
     if any(re.search(r"[$`]", value) for value in values):
         return ()
     filters = []
