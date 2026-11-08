@@ -13398,17 +13398,15 @@ add("swift-test: Edit of non-test App/LoginTest.swift is allowed", "allow", tool
 add("swift-test: Edit of non-test native/abTests/x.swift is allowed", "allow", tool="Edit",
     file_path="native/abTests/x.swift", **B)
 
-# ---- an Xcode test plan is test config (Degen, 2026-10-11; decisions/builders-cannot-edit-tests.md,
-# "Test path"). `native/Degen.xctestplan` is test config. A builder change that ADDS a skip
-# (`skippedTests`) disables tests, so it is a test change. A new unrelated key (`codeCoverage`) stays
-# allowed. A test-author may edit the plan. The write tool judges the new text. The diff check
-# refuses the builder's skip at commit and push (the builder-refuse section), and logs the author's
-# plan edit (`xctestplan_logs_case`).
+# ---- an Xcode test plan is test config. A `.xctestplan` is whole-file test config (decision
+# builders-cannot-edit-tests, "Test paths and test config"): a builder's Edit of it is refused by path,
+# whatever the content. A test-author may edit the plan. The diff check refuses a builder's commit
+# that changes it (the builder-refuse section), and logs the author's plan edit (`xctestplan_logs_case`).
 XCTESTPLAN = "native/Degen.xctestplan"
 add("builder-test: Edit of .xctestplan that adds skippedTests is refused", "deny", rule=BT,
     tool="Edit", file_path=XCTESTPLAN, new_string='"skippedTests" : [ "LaunchTests" ]', **B)
-add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allow", tool="Edit",
-    file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
+add("builder-test: Edit of .xctestplan that adds codeCoverage is refused", "deny", rule=BT,
+    tool="Edit", file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
 # A whole-file test config is refused by its path, whatever the content: the runner's own config files.
 for _path, _text in (
