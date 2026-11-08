@@ -14229,6 +14229,56 @@ for _label, _check in (
         ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, reads no record",
          own_read_case("body-int", [None]))):
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+def _closed_fd():
+    """A descriptor number this process has closed. open() takes an int as a descriptor, so the int case
+    names a closed one: a probe then never reads or closes a live descriptor of the run."""
+    for fd in range(3, 1024):
+        try:
+            os.fstat(fd)
+        except OSError:
+            return fd
+    return None
+
+
+def own_ccr_unreadable_case():
+    """A check: own_session_ccr returns None, and does not raise, for each input it cannot read. The lane
+    fixture must hold the own record first, or the non-string id proves nothing."""
+    missing = os.path.join(ROLE_DIR, "no-such-transcript.jsonl")
+    folder = role_path("unreadable")
+    lane = role_path("archive-lane")
+    if os.path.exists(missing) or not os.path.isdir(folder) or not os.path.isfile(lane):
+        return False, "fixture: the missing path, the folder or the lane transcript is not as the case needs"
+    fd = _closed_fd()
+    if fd is None:
+        return False, "fixture: no closed descriptor number is free to name as the int path"
+    try:
+        module = _load_own_session()
+        if module.own_session_ccr(lane, ROLE_OTHER) is None:
+            return False, "fixture: the lane transcript holds no own record for a string id"
+    except Exception as error:
+        return False, "own_session_ccr raises %s on the readable lane transcript: %s" % (type(error).__name__, error)
+    inputs = (
+        ("the empty path", "", ROLE_OTHER),
+        ("a path that does not exist", missing, ROLE_OTHER),
+        ("a path that is a folder", folder, ROLE_OTHER),
+        ("a None path", None, ROLE_OTHER),
+        ("an int path", fd, ROLE_OTHER),
+        ("a target id that is not a string", lane, 3),
+    )
+    for label, transcript, own_id in inputs:
+        try:
+            got = module.own_session_ccr(transcript, own_id)
+        except Exception as error:
+            return False, "own_session_ccr raises %s for %s: %s" % (type(error).__name__, label, error)
+        if got is not None:
+            return False, "own_session_ccr returns a record for %s, want None" % label
+    return True, "own_session_ccr returns None, without a raise, for all %d unreadable inputs" % len(inputs)
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: own_session_ccr returns None, without a raise, for each input it cannot read",
+                         own_ccr_unreadable_case))
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
