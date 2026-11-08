@@ -1558,10 +1558,10 @@ class ModTestStepChecker(unittest.TestCase):
 # matches TEST_FILE. Tracked only, because a file git does not track, or a copy under node_modules, is
 # not a suite CI runs. A `_test_` name is a helper (lint/_test_git.py) and never matches. mutate_*.py is
 # not a suite (mutate_shared.py is plumbing). The mod and map-skill tests are not listed by name: COLLECTOR
-# prints them, and a file it prints counts as covered only when a run step names COLLECTOR, since that
+# prints them, and a file it prints counts as covered only when a run step is exactly MOD_CMD, since that
 # step is what runs them.
 REPO = os.path.normpath(os.path.join(HERE, ".."))
-COLLECTOR = ".github/scripts/mod-tests.sh"
+COLLECTOR = MOD_CMD.split()[-1]  # the path MOD_CMD runs, so the collector's path has one home
 TEST_FILE = re.compile(r"^(?:test_.*\.(?:py|sh|mjs)|.*\.test\.(?:mjs|js|ps1))$")
 
 
@@ -1630,6 +1630,11 @@ def find_test_files(root):
     return sorted(p for p in paths if TEST_FILE.match(p.split("/")[-1]))
 
 
+def runs_collector(commands):
+    """True when a run step is exactly the collector's command. `list`, `mods` and an echo of the command run something else."""
+    return any(command.strip() == MOD_CMD for command in commands)
+
+
 def collected_files(root):
     """The files the collector prints for `list` in `root`, one repo-relative path per line. A nonzero exit raises,
     so a collector that fails cannot read as an empty list."""
@@ -1644,11 +1649,15 @@ class CiCoverage(unittest.TestCase):
     def test_every_test_file_runs_in_a_ci_step(self):
         with open(CHECKS, encoding="utf-8") as handle:
             commands = run_commands(handle.read())
-        collected = set(collected_files(REPO)) if names_path(commands, COLLECTOR) else set()
+        collected = set(collected_files(REPO)) if runs_collector(commands) else set()
         missing = [p for p in find_test_files(REPO) if p not in collected and not names_path(commands, p)]
-        self.assertEqual(missing, [], "no run step in checks.yml covers: " + ", ".join(missing) + ". "
-                         "Add a run step in .github/workflows/checks.yml, or, for a helper that holds no tests, "
-                         "rename it to _test_<name>.")
+        # A rename to _test_<name> clears the gap only when the new name leaves the scope, so a .test.* file gets
+        # the run-step remedy alone.
+        renamable = [p for p in missing if TEST_FILE.match("_" + p.split("/")[-1]) is None]
+        advice = "Add a run step in .github/workflows/checks.yml"
+        if renamable:
+            advice += ", or, for a helper that holds no tests, rename it to _test_<name>"
+        self.assertEqual(missing, [], "no run step in checks.yml covers: " + ", ".join(missing) + ". " + advice + ".")
 
     def test_a_comment_line_is_not_a_run(self):
         # Rows: a comment line, a trailing comment, and a comment line inside a block. Named failure: a
