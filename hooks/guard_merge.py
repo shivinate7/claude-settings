@@ -1042,7 +1042,7 @@ def _stranded_branch(module, ccr, tag_repos) -> bool:
     """True when a branch in the record's external_metadata.current_branches is ahead of its repo's default
     branch (compare status ahead or diverged) and has a pull request in no state. A record with no branch
     field, or only null values, names none: no check. A 404 on the compare means the branch is not in that
-    repo, so that repo is skipped. Any other failed read raises, and archive_hit refuses on it."""
+    repo, so that branch is skipped in that repo. Any other failed read raises, and archive_hit refuses on it."""
     meta = ccr.get("external_metadata")
     named = meta.get("current_branches") if isinstance(meta, dict) else None
     branches = [b for b in named.values() if isinstance(b, str) and b] if isinstance(named, dict) else []
@@ -1105,8 +1105,8 @@ def archive_hit(tool: str, tool_input, transcript: str):
     if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     try:  # cost: one paginated gh REST read per cs-repo tag (one in practice), through the merge tool's page reader;
-        # then, for a record that names branches: one transcript read, one repo read per repo, one compare read per
-        # repo x branch, and one pulls read per branch that is ahead
+        # then one transcript read for each lane that clears the open list, and, for a record that names branches:
+        # one repo read per repo, one compare read per repo x branch, and one pulls read per branch that is ahead
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
