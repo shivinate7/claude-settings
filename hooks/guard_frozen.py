@@ -891,10 +891,25 @@ def _first_test_under(where: str, predicate, glob: str = "") -> str:
     return ""
 
 
+def _folder_root(root: str, cwd: str) -> str:
+    """The folder a root names when it is a plain relative path to a folder inside `cwd` that exists
+    on disk (`hooks`, `./hooks/`), else ''. A word with a quote, `$`, `~`, a glob character or a
+    backslash, a leading `-`, an absolute path and a path that leaves `cwd` are not read."""
+    text = _unquoted(root)
+    if (text in ("", ".", "./") or re.search(r"[$`~*?\[\\]", text)
+            or text.startswith(("-", "/", ":"))):
+        return ""
+    inside = os.path.normpath(text)
+    if inside == ".." or inside.startswith(".." + os.sep) or not os.path.isdir(os.path.join(cwd, inside)):
+        return ""
+    return text
+
+
 def _dot_roots(roots, cwd: str, predicate) -> list:
     """`roots` with each `.` or `./` put as the first test path under it, so a writer fed from the whole
     checkout is judged by a test it can reach. A `.` root that holds no test stays as it is, and so
-    does one when `cwd` or `predicate` is not given. A glob pathspec root (`_glob_root`) is put the
+    does one when `cwd` or `predicate` is not given. A folder root (`_folder_root`) is read the same
+    way, from disk, under that folder. A glob pathspec root (`_glob_root`) is put the
     same way, as the first test path under its folder that the glob matches. When none matches, or
     `cwd` or `predicate` is not given, it names nothing that is judged and is dropped."""
     reading = bool(cwd) and predicate is not None
@@ -908,9 +923,21 @@ def _dot_roots(roots, cwd: str, predicate) -> list:
         elif reading and root in (".", "./"):
             found = _first_test_under(cwd, predicate)
             out.append("./" + found if found else root)
+        elif reading and _folder_root(root, cwd) and not predicate(root, cwd):
+            # a folder that is itself a test path (`tests`) stays as it is: it is judged as it stands
+            folder = _folder_root(root, cwd)
+            found = _first_test_under(os.path.join(cwd, folder), predicate)
+            out.append(os.path.join(folder, found) if found else root)
         else:
             out.append(root)
     return out
+
+
+def _glob_item(item: str, where: str, predicate) -> list:
+    """The words a `for` list item stands for: each brace variant of it (`_brace_words`), a glob variant
+    put as the first test it matches on disk (`_shell_glob_test`), so the loop variable is judged by
+    a test the loop reaches. A glob that matches no test stays as it is."""
+    return [_shell_glob_test(variant, where, predicate) or variant for variant in _brace_words(item)]
 
 
 def _fed_segments(segments, ends, cwd: str = "", predicate=None):
@@ -927,7 +954,9 @@ def _fed_segments(segments, ends, cwd: str = "", predicate=None):
             lead += 1
         head = words[lead] if lead < len(words) else ""
         if head == "for" and words[lead + 2:lead + 3] == ["in"]:
-            loops.append((words[lead + 1], words[lead + 3:]))
+            where = (dir_before_segment(out + [segment], len(out), cwd, out_ends) or cwd) if cwd else ""
+            loops.append((words[lead + 1], [found for item in words[lead + 3:]
+                                            for found in _glob_item(item, where, predicate)]))
         elif head in ("while", "until", "select"):
             loops.append(("", []))
         elif head == "done" and loops:
@@ -1097,7 +1126,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 data = data | _data_words(kinds[number], raw)
         words, shown = [], []
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
-        editor = command_position and not closed and _segment_command(raw)[0] in ("sed", "perl")
+        editor = command_position and not closed and _segment_command(raw)[0] in ("sed", "perl", "tee", "cp")
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
@@ -1111,8 +1140,12 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 shown.append("dup")
             else:
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
-                if editor:   # a glob file word of `sed -i` or `perl -pi` is the test it matches on disk
-                    pieces = [_shell_glob_test(word, at, predicate) or word] if len(pieces) == 1 else pieces
+                if editor:   # a brace or glob file word of sed -i, perl -pi, tee or cp is the test it matches
+                    pieces = []
+                    for variant in _brace_words(word):
+                        found = _shell_glob_test(variant, at, predicate)
+                        pieces.extend([found] if found else
+                                      _words_of(variant) if "'" in variant or '"' in variant else [variant])
                 words.extend(pieces)
                 shown.extend(pieces)
         text = " ".join(shown)
@@ -1129,14 +1162,90 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
     return ""
 
 
+_BRACE_LIMIT = 256   # words one word's brace groups give before the expansion stops
+
+
+def _brace_split(word: str):
+    """(head, parts, tail) for the first unquoted `{a,b}` group of `word` that has a top-level comma,
+    else None. `${...}` is no group, a quoted or escaped brace is text, and a `{x}` with no comma is
+    text, as in bash."""
+    quote, depth, start, cuts, skip = "", 0, -1, [], False
+    for at, char in enumerate(word):
+        if skip:
+            skip = False
+        elif quote:
+            if char == quote:
+                quote = ""
+            elif char == "\\" and quote == '"':
+                skip = True
+        elif char == "\\":
+            skip = True
+        elif char in "'\"":
+            quote = char
+        elif char == "{" and word[at - 1:at] != "$":
+            if depth == 0:
+                start, cuts = at, []
+            depth += 1
+        elif char == "," and depth == 1:
+            cuts.append(at)
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0 and cuts:
+                bounds = [start] + cuts + [at]
+                return (word[:start], [word[bounds[i] + 1:bounds[i + 1]] for i in range(len(bounds) - 1)],
+                        word[at + 1:])
+    return None
+
+
+def _brace_words(word: str) -> list:
+    """The words a shell makes of `word` by brace expansion (`hooks/{a,b}.py` gives `hooks/a.py` and
+    `hooks/b.py`), else `[word]`. Stops at `_BRACE_LIMIT` words.
+    ponytail: a sequence (`{1..3}`) is not expanded, and a word past the limit is cut short."""
+    split = _brace_split(word)
+    if split is None:
+        return [word]
+    head, parts, tail = split
+    out = []
+    for part in parts:
+        for rest in _brace_words(part + tail):
+            out.append(head + rest)
+            if len(out) >= _BRACE_LIMIT:
+                return out
+    return out
+
+
+def _literal_word(word: str):
+    """`word` after quote removal when every quote wraps only literal text, else None. A quote that
+    holds a glob character, `$`, a backtick, a backslash or a space is not literal, and nor is an
+    unquoted `$`, backtick or backslash, so a glob character left in the result is one the shell expands."""
+    out, quote = [], ""
+    for char in word:
+        if quote:
+            if char == quote:
+                quote = ""
+            elif char in "$`\\*?[ \t":
+                return None
+            else:
+                out.append(char)
+        elif char in "'\"":
+            quote = char
+        elif char in "$`\\":
+            return None
+        else:
+            out.append(char)
+    return None if quote else "".join(out)
+
+
 def _shell_glob_test(word: str, where: str, predicate) -> str:
     """The first test path that a shell glob word expands to, read from disk in the folder `where`, else
     ''. The word is split at its first glob segment: the folder before it and the glob after it go to
-    the one glob reader (`_glob_root`, `_dot_roots`), so no second globber. Only a plain word is read:
-    a quote, `$`, backtick, backslash, or leading `-`, `~` or `:` leaves it as it is."""
-    if not re.search(r"[*?\[]", word) or re.search(r"""['"`$\\]""", word) or word[0] in "-~:":
+    the one glob reader (`_glob_root`, `_dot_roots`), so no second globber. A quote that wraps only
+    literal text is removed first (`"hooks"/*.py`); a quoted glob character is text. A word with `$`,
+    a backtick, a backslash or a leading `-`, `~` or `:` is left as it is."""
+    text = _literal_word(word)
+    if not text or not re.search(r"[*?\[]", text) or text[0] in "-~:":
         return ""
-    parts = word.split("/")
+    parts = text.split("/")
     first = next(at for at, part in enumerate(parts) if re.search(r"[*?\[]", part))
     folder = "/".join(parts[:first]) or ("/" if first else ".")
     found = _dot_roots([_glob_root(folder, "/".join(parts[first:]), shell=True)], where, predicate)
