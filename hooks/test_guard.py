@@ -641,6 +641,7 @@ PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
 PUSHNEWBR = os.path.join(ROOT, "pushnewbr")    # origin/lane/base at commit A; lane/fix one commit on it, at B
+PUSHBATCH = os.path.join(ROOT, "pushbatch")    # origin/main and origin/batch-01 at commit A; lane/join one commit on it, at B
 # The rule ids the two new asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -1969,6 +1970,21 @@ def _build_push():
             != run_vcs(PUSHNEWBR, "rev-parse", "origin/lane/base").stdout.strip()):
         sys.exit("fixture setup failed in build_fixtures: PUSHNEWBR needs HEAD~1 at origin/lane/base")
 
+    # The batch runner's shape: origin/main and the integration branch batch-01 both hold commit A, and a lane
+    # joins it. lane/join sits one commit on A, at B, and is never pushed. A new batch name at A is the batch
+    # runner's first push; a push of B into batch-01 is the join.
+    make_repo(PUSHBATCH, {"base.txt": "base\n"})
+    run_vcs(PUSHBATCH, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHBATCH, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHBATCH, "update-ref", "refs/remotes/origin/batch-01", "HEAD")
+    run_vcs(PUSHBATCH, "checkout", "-q", "-b", "lane/join")
+    write(os.path.join(PUSHBATCH, "join.txt"), "join\n")
+    run_vcs(PUSHBATCH, "add", "-A")
+    run_vcs(PUSHBATCH, *IDENT, "commit", "-q", "-m", "join")
+    if (run_vcs(PUSHBATCH, "rev-parse", "HEAD~1").stdout.strip()
+            != run_vcs(PUSHBATCH, "rev-parse", "origin/main").stdout.strip()):
+        sys.exit("fixture setup failed in build_fixtures: PUSHBATCH needs HEAD~1 at origin/main")
+
     make_repo(PUSHMAINUP, {"base.txt": "base\n"})
     run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -2292,7 +2308,7 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHNEWBR],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHNEWBR, PUSHBATCH],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -7563,6 +7579,42 @@ sh("push: a lease at another branch's tip, leased, allows",
    VCS + " push" + LEASE + " origin HEAD~1:refs/heads/skc-lease", "allow", cwd=PUSHNEWBR)
 push_case("a forced push at another branch's tip is refused by the force rule, not the new-branch rule",
           "--force origin HEAD~1:refs/heads/skc-ste", "deny", cwd=PUSHNEWBR)
+
+# PUSH-NEW-BRANCH JUDGEMENT, each refspec alone, and the reason's claim (coordinator pick A, 09:20 CST).
+# Filter: MUTATE_ONLY="push-new-branch:".
+# A delete beside a new-branch refspec hides it: the delete reaches the guard with no force verdict.
+sh("push-new-branch: a delete beside a new-branch refspec denies the new-branch refspec",
+   VCS + " push origin :lane/old HEAD~1:refs/heads/skc-del-ste", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
+sh("push-new-branch: a delete beside a refspec to an existing branch allows",
+   VCS + " push origin :lane/old HEAD~1:refs/heads/lane/base", "allow", cwd=PUSHNEWBR)
+# A main tip has no pull request branch, so the refusal must not send the agent to one. Its remedy names the
+# archive/ form, which the rule exempts. A stacked sha is not pinned here: the guard cannot tell it from a PR head.
+sh("push-new-branch: a main-tip refusal names the archive/ form",
+   VCS + " push origin origin/main:refs/heads/skc-main-tip", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHMAINUP,
+   carries="archive/")
+sh("push-new-branch: a main-tip refusal does not name a pull request",
+   VCS + " push origin origin/main:refs/heads/skc-main-tip", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHMAINUP,
+   lacks="pull request")
+# A HEAD or a local branch named as the source is judged like a sha. Its own name and an archive/ name are exempt.
+sh("push-new-branch: HEAD as the source is judged like a sha",
+   VCS + " push origin HEAD:refs/heads/skc-head-src", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSELF)
+sh("push-new-branch: a local branch named as the source is judged like a sha",
+   VCS + " push origin mylocal:refs/heads/skc-local-src", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHSTRAY)
+sh("push-new-branch: a local branch pushed to its own name is exempt",
+   VCS + " push origin mylocal:mylocal", "allow", cwd=PUSHSTRAY)
+sh("push-new-branch: HEAD pushed to an archive/ name is exempt",
+   VCS + " push origin HEAD:refs/heads/archive/skc-head-src", "allow", cwd=PUSHSELF)
+sh("push-new-branch: -u origin with a local branch name is exempt",
+   VCS + " push -u origin mylocal", "allow", cwd=PUSHSTRAY, silent=True)
+# THE BATCH RUNNER'S FLOW (skill ci-hygiene, step 8; merge/merge.py tests push origin/main:refs/heads/<name>).
+# The first push creates the integration branch at main's tip. Each lane then joins it with a push to the
+# existing name, which the rule never judges.
+sh("push-new-branch: the batch runner's integration branch at main's tip is allowed",
+   VCS + " push origin origin/main:refs/heads/batch-02", "allow", cwd=PUSHBATCH)
+sh("push-new-branch: a lane's HEAD joined into the existing integration branch is allowed",
+   VCS + " push origin HEAD:refs/heads/batch-01", "allow", cwd=PUSHBATCH)
+sh("push-new-branch: a lane's local branch joined into the existing integration branch is allowed",
+   VCS + " push origin lane/join:refs/heads/batch-01", "allow", cwd=PUSHBATCH)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
@@ -22809,6 +22861,36 @@ LOG_CHECKS = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd is allowed "
      "off Windows", worktree_home_cwd_builder_scratch_case),
 )
+
+
+def _judged_refspec_check(args, want):
+    """A direct check of push_new_branch_hit on `args` in PUSHNEWBR: it judges the refspec naming `want`,
+    or no refspec when `want` is ''. The guard reads its verdict from push_verdict first, so a forced
+    refspec never reaches this check through the guard. Only the function shows whether it is judged alone."""
+    def check():
+        materialize(PUSHNEWBR)
+        got = _load_guard_module().push_new_branch_hit(args, PUSHNEWBR)
+        if not want:
+            return got == "", "judged %r, want no refspec judged" % got
+        return want in got, "judged %r, want the refspec naming %s" % (got, want)
+    return check
+
+
+# Each refspec is judged alone. A forced or deleting refspec beside a new-branch refspec must not hide it. The
+# controls name an existing branch instead, and must stay silent.
+_NEW_BRANCH_SPEC_CHECKS = (
+    ("push-new-branch: a forced refspec beside a new-branch refspec judges the new one",
+     _judged_refspec_check(["origin", "+HEAD~1:refs/heads/lane/base", "HEAD~1:refs/heads/skc-plus-ste"],
+                           "skc-plus-ste")),
+    ("push-new-branch: a forced refspec beside an existing-branch refspec judges none",
+     _judged_refspec_check(["origin", "+HEAD~1:refs/heads/lane/base", "HEAD~1:refs/heads/lane/base"], "")),
+    ("push-new-branch: a deleting refspec beside a new-branch refspec judges the new one",
+     _judged_refspec_check(["origin", ":lane/old", "HEAD~1:refs/heads/skc-del-ste"], "skc-del-ste")),
+    ("push-new-branch: a deleting refspec beside an existing-branch refspec judges none",
+     _judged_refspec_check(["origin", ":lane/old", "HEAD~1:refs/heads/lane/base"], "")),
+)
+FIXTURELESS_CHECKS.update(check for _label, check in _NEW_BRANCH_SPEC_CHECKS)  # builds PUSHNEWBR itself
+LOG_CHECKS += _NEW_BRANCH_SPEC_CHECKS
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
 
