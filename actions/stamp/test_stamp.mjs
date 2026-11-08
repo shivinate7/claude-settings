@@ -13,7 +13,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { stamp, claim, check, loadConfig, currentBranch, onDefaultBranch } from "./stamp.mjs";
-import { CHILD, HANG, START, sweepAllowed, waitForGo, watchdog } from "./suite_watchdog.mjs";
+import { CHILD, HANG, START, leftoverExit, sweepAllowed, waitForGo, watchdog } from "./suite_watchdog.mjs";
 
 // Each fixture builds its own git repo. A CI run's GITHUB_REF and GITHUB_BASE_REF name the
 // runner's branch, not the fixture's. GITHUB_ACTIONS picks a hard refusal or an UNKNOWN line
@@ -1832,6 +1832,22 @@ test("watchdog: the Windows orphan sweep runs only in CI or with STAMP_SUITE_SWE
   assert.equal(sweepAllowed(false, {}), false);
   assert.equal(sweepAllowed(true, {}), true);
   assert.equal(sweepAllowed(false, { STAMP_SUITE_SWEEP: "1" }), true);
+});
+
+// The run's exit once its leftovers are known. Any leftover, named or not, fails the run. With none,
+// the suite's own code stands, and a run with no code at all still fails.
+test("watchdog: the leftover exit is 1 for any leftover, and the suite's own code otherwise", () => {
+  const cases = [
+    [0, {}, 0, "no leftover: the suite's exit 0 stands"],
+    [2, {}, 2, "no leftover: the suite's exit 2 stands"],
+    [null, {}, 1, "no leftover and no code: the run still fails"],
+    [0, { alive: ["7"] }, 1, "a pid still alive after the kill is a leftover, even with no line"],
+    [0, { lines: ["x"] }, 1, "a named leftover fails the run although the suite exited 0"],
+    [0, { unknown: ["y"] }, 1, "a sweep that could not read fails the run"],
+  ];
+  for (const [code, lists, want, why] of cases) {
+    assert.equal(leftoverExit(code, lists), want, why);
+  }
 });
 
 const hangLabels = {
