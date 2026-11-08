@@ -3657,7 +3657,7 @@ def case_repeat_repo_item_is_never_judged_as_a_repeat():
 
 
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
-    """A one-shot approval ("go ahead and merge PR 12") is a grant. A note homed to `once:<act>` passes it.
+    """A one-shot grant ("go ahead and merge PR 12") is a grant. A note homed to `once:<act>` passes it.
     The same words with no home still block."""
     mod = guard_module()
     homed = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT, items=(ONE_SHOT_HOME,))), "")
@@ -3696,7 +3696,7 @@ def case_step_path_is_derived_from_override_step_dir():
 
 
 def case_one_shot_home_does_not_pass_a_standing_grant():
-    """A message with a standing word ("always") is a standing grant, not a one-shot approval. A `once:<act>` note
+    """A message with a standing word ("always") is a standing grant, not a one-shot grant. A `once:<act>` note
     is no home for it: the message still has no home, as it has none on main."""
     mod = guard_module()
     line = "- fb-0958-1 [note] -> once:merge-green-prs"
@@ -3707,7 +3707,7 @@ def case_one_shot_home_does_not_pass_a_standing_grant():
 
 def case_closed_once_note_is_no_home_for_a_grant():
     """A closed `once:<act>` note is no home. A closed note needs a tracked file, a step, a page or not-a-grant, so the
-    one-shot approval still has no home."""
+    one-shot grant still has no home."""
     mod = guard_module()
     line = "- fb-0958-1 [note] -> once:merge-pr-12 [closed]"
     out = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT, items=(line,))), "")
@@ -3843,7 +3843,7 @@ UNCOVERED_STANDING_TEXTS = (  # standing grants, with no standing word from ACT'
 
 def case_once_home_does_not_pass_a_standing_grant_however_worded():
     """A standing grant gets no `once:<act>` home, whatever words state the standing scope. Each text still has no
-    home. The control, a one-shot approval with the same home, passes."""
+    home. The control, a one-shot grant with the same home, passes."""
     mod = guard_module()
     line = "- fb-0958-1 [note] -> once:merge-prs"
     for text in UNCOVERED_STANDING_TEXTS:
