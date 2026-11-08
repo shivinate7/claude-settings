@@ -1576,10 +1576,24 @@ def _bare_variable(segment: str, body: str) -> str:
     return names.pop() if len(names) == 1 else ""
 
 
-def _may_assign(earlier: str, name: str) -> bool:
+COMMAND_START = r"(?:^|[(){;&|]|\b(?:then|do|else|elif|if|while|until)\b)\s*"
+
+
+def _may_assign(earlier: str, name: str, powershell: bool = False) -> bool:
     """True when the segments ahead of the call might set this variable, so its value is unknown. Quoted
     text is no assignment (`echo 'BODY=x'`). The test leans to unknown: `name=` at a word start, a
-    declaration or read of the name, `${name:=`, and `eval` or `source` all count."""
+    declaration or read of the name, `${name:=`, and `eval`, `source` or a dot-source at command position
+    all count. In PowerShell the name ignores case and an assignment reads `$name =`."""
+    dot_source = re.compile(COMMAND_START + r"(?:eval|source|\.)\s", re.MULTILINE | re.IGNORECASE * powershell)
+    if powershell:
+        quoted = re.escape(name)
+        return bool(
+            re.search(r"(?<!['\"])\$" + quoted + r"\b\s*[-+*/%?]?=", earlier, re.IGNORECASE)
+            or re.search(r"\b(?:Set|New)-Variable\b[^\n;]*\b" + quoted + r"\b", earlier, re.IGNORECASE)
+            or re.search(r"\bforeach\s*\(\s*\$" + quoted + r"\b", earlier, re.IGNORECASE)
+            or re.search(r"\[ref\]\s*\$" + quoted + r"\b|-(?:Out)?Variable\s+" + quoted + r"\b",
+                         earlier, re.IGNORECASE)
+            or dot_source.search(earlier))
     word = r"(?<![\w'\"$])" + re.escape(name)
     return bool(
         re.search(word + r"[=+]?=", earlier)
@@ -1587,16 +1601,18 @@ def _may_assign(earlier: str, name: str) -> bool:
                      + word + r"\b", earlier)
         or re.search(r"\bprintf\s+-v\s+" + re.escape(name) + r"\b", earlier)
         or re.search(r"\$\{" + re.escape(name) + r":?=", earlier)
-        or re.search(r"(?:^|[\s;&|(])(?:eval|source|\.)\s", earlier))
+        or dot_source.search(earlier))
 
 
-def pr_edit_body(segment: str, raw: str, where: str, before: int, segments=(), number: int = 0):
+def pr_edit_body(segment: str, raw: str, where: str, before: int, segments=(), number: int = 0,
+                 tool: str = "Bash"):
     """Return (selector, repo, body) for a `gh pr edit` segment that sets a body this guard can read,
     else None. The last body text wins, as gh reads it. A body with a `$` or a backtick is judged only
     when the shell sends it as it stands: a message file (gh reads it as it is), a quoted heredoc, or a
     single-quoted value. A real expansion (`"$(cat f)"`, an unquoted heredoc, text mixed with a variable)
     is not the text the call will send. A body that is one bare variable is read from this process's
-    environment, or as empty when unset, because shell state does not carry over between Bash calls. Only
+    environment, or as empty when unset, because shell state does not carry over between Bash calls. A
+    PowerShell variable is a session variable, never an environment one, so it reads as empty. Only
     a placeholder value is a hit; a real value passes with no live read. A value the command may set in
     the segments ahead of this one (`segments[:number]`, joined only for a bare variable) stays unknown. A prefix
     `BODY=x gh pr edit ... "$BODY"` sets nothing the word sees, since bash expands the word first. An
@@ -1609,8 +1625,10 @@ def pr_edit_body(segment: str, raw: str, where: str, before: int, segments=(), n
     body = read[1][-1]
     if "$" in body or "`" in body:
         name = _bare_variable(segment, body) if not read[1][:-1] and "<<" not in segment else ""
-        if name and not _may_assign("\n".join(segments[:number]), name):
-            value = os.environ.get(name, "")
+        powershell = tool == "PowerShell"
+        if name and not _may_assign("\n".join(segments[:number]), name, powershell):
+            # A PowerShell variable lives in its session, and a fresh call holds none: it reads as empty.
+            value = "" if powershell else os.environ.get(name, "")
             # Only the placeholder test reads this value: a real one is passed unjudged, with no live read.
             return (call[0], call[1], value) if pr_body_is_placeholder(value) else None
         quotes = own_heredoc_quotes(segment, raw, before) if "<<" in segment else {}
@@ -3555,7 +3573,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
-        edited = pr_edit_body(segment, raw, cite_where, before, segments, number)
+        edited = pr_edit_body(segment, raw, cite_where, before, segments, number, tool)
         if edited:
             judge_pr_body(tool, edited[2], edited[0], edited[1], cite_where, True)
 
