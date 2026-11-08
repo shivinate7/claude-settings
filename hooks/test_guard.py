@@ -19882,7 +19882,7 @@ for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
         tool=CREATE_SESSION_CALL, prompt="x", model=_model)
 add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
 
-# ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
+# ---- Lane effort pin. A lane session runs Sonnet at medium effort. On a cloud session the only
 # prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
 # command. So a create_session that tags a lane must carry that prompt alone. Calls without the
 # lane tag are not judged by this rule.
