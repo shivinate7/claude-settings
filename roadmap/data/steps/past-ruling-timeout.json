@@ -1,0 +1,11 @@
+{
+  "title": "The past-ruling check logs its duration and prompt size, and its time limit is set from those measures",
+  "why": "Owner ask ask-mw8bz5rj1f, 15:14 CST Nov 8: the past-ruling check (lint/report_guard.py, call_judge.PAST_RULING_MODEL, PAST_RULING_TIMEOUT = 15 s) timed out on every Home coordinator question on 2026-11-08, so each went to the owner unchecked. Likely cause, unmeasured: one `claude -p` cold start plus a long candidate-rulings prompt under Mac load 11-16 does not fit in 15 s. Done when: the check logs its duration and prompt size per run, and its time limit (or the candidate list size) is set from those measures, so a normal question gets a verdict. Related: step judge-timeout-retries-once (ready) retries once, which does not help when every run overruns.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 824,
+  "updatedAt": "2026-11-08T15:15:00-06:00"
+}

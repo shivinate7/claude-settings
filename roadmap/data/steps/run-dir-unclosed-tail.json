@@ -1,0 +1,11 @@
+{
+  "title": "The guard reads the folder of a command that follows a heredoc, so a destructive git after it is judged in its own folder",
+  "why": "Lane draft-pr-guard-heredoc, 15:14 CST Nov 8, per the coordinator's 15:00 CST ruling. Hole on main: a heredoc to notes.md, then `cd <dirty> && git reset --hard HEAD`, run from a clean cwd, is allowed. _run_dir's second strip drops the tail, so rule shared-tree reads the clean cwd. Branch run-dir-unclosed-tail, from #1915's head, Merge after #1915.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKzzx35nAWSwPacHRXt",
+  "status": "doing",
+  "order": 823,
+  "updatedAt": "2026-11-08T15:15:00-06:00"
+}

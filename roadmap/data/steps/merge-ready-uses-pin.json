@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool's ready check runs a child repo's harness against the claude-settings commit that child pins",
+  "why": "Coordinator 15:13 CST Nov 8, from runner 9. Incident: the ready check ran q_max's harness against the local claude-settings checkout, not q_max's pinned commit. A skill bump on claude-settings main (map format 6) blocked every q_max batch before q_max's pin moved. Fix: run the ready check against the pinned commit, or name the pin-move PR as the remedy. Red case: a child pinned behind a main skill bump passes its ready check.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 822,
+  "updatedAt": "2026-11-08T15:15:00-06:00"
+}
