@@ -239,7 +239,8 @@ Check: record a lab trace of the changed route on a mobile profile. Pass when LC
 Blocking Time in the lab) and CLS meet web.dev's "good" lines. Where field data at the 75th percentile
 exists, it must also pass. Field data is in CrUX through PageSpeed Insights, or the repo's own field log.
 Source: [web.dev, Web Vitals](https://web.dev/articles/vitals) (the "good" lines, and the 75th
-percentile for field data); impeccable `optimize` gives the lines as advice with no check.
+percentile for field data) and [web.dev, Total Blocking Time](https://web.dev/articles/tbt) (the lab
+TBT line); impeccable `optimize` gives the lines as advice with no check.
 
 ## ux-feature-baseline-or-fallback
 
@@ -252,3 +253,13 @@ test, and the fallback was seen working. To see the fallback, invert the `@suppo
 feature test false, then use the page. A browser-name check fails.
 Source: [web.dev, Baseline](https://web.dev/baseline); impeccable `overdrive` asks for a working
 fallback, with no check.
+
+## ux-text-zooms
+
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
+Web text zooms to 200% and loses no content, and it grows with the browser's default font size. So a font
+size is never in px without a repo record.
+Check: zoom each changed route to 200% at its smallest width, and raise the browser's default font size.
+Pass when no content is clipped or lost, and the text grows.
+Source: [MDN, font-size](https://developer.mozilla.org/en-US/docs/Web/CSS/font-size) (a `px` size ignores
+the browser's default font size); WCAG 1.4.4 (resize text).

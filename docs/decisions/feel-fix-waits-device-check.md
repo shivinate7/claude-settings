@@ -71,11 +71,11 @@ Incident:
 Built against that incident. Landed 2026-11-01.
 
 Scope: the debt lint runs in each repo whose CI runs `lint/check_record_slugs.py`. The step row runs
-wherever the roadmap builder runs.
+wherever the roadmap build script runs.
 
 Cost:
 
-- Step fields: no new git process, file, timer or log. The fields ride in the step JSON that the builder
+- Step fields: no new git process, file, timer or log. The fields ride in the step JSON that the roadmap build script
   already loads.
 - Debt check: no new diff process, because the diff call it already makes switches to `--name-status`. The
   lint reads the origin/main text of each deleted, renamed or edited debt file: one `git show` each, usually
