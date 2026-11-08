@@ -521,5 +521,81 @@ def temp_dir_removal_failure_is_reported():
     return problems + expect(os.path.isdir(match.group(1)), "the path the note names is not left behind")
 
 
+SCRATCH_SESSION_ID = "probe-session-scratch-1"
+DELETE_ROOT = "rm -rf /"
+
+
+def probe_env(args, session_id):
+    """Run the probe with the outer session env as given, and only CLAUDE_CODE_SESSION_ID set when session_id is."""
+    env = {k: v for k, v in os.environ.items() if k not in SESSION_VARS}
+    if session_id:
+        env["CLAUDE_CODE_SESSION_ID"] = session_id
+    env["CLAUDE_CONFIG_DIR"] = new_dir()
+    result = subprocess.run([PY, PROBE] + list(args), capture_output=True, text=True, env=env,
+                            cwd=NOGIT, timeout=120)
+    return result.returncode, result.stdout, result.stderr
+
+
+@case
+def session_env_does_not_change_the_verdict():
+    """Probe: a session id in the outer env does not change the verdict for a call from a session's scratchpad."""
+    cwd = os.path.join(new_dir(), SCRATCH_SESSION_ID, "scratchpad")
+    os.makedirs(cwd)
+    args = ["--tool", "Bash", "--command", REFUSED, "--cwd", cwd]
+    # Control first: with no session id, the refusal stands.
+    rc, out, err = probe_env(args, None)
+    bad = scope(rc, out, err)
+    if bad:
+        return ["control, no session id: " + bad[0]]
+    if not out.startswith("deny %s: " % REFUSED_RULE):
+        return ["control, no session id: printed %r, want the refusal" % out[:60]]
+    rc2, out2, err2 = probe_env(args, SCRATCH_SESSION_ID)
+    bad = scope(rc2, out2, err2)
+    if bad:
+        return ["with a session id: " + bad[0]]
+    return expect(out2 == out, "with CLAUDE_CODE_SESSION_ID set the verdict is %r, want the unset run's %r"
+                  % (out2[:60], out[:60]))
+
+
+@case
+def tool_outside_shell_tools_is_refused():
+    """Probe: a --tool outside the guard's shell tools, with --command, exits nonzero with no verdict."""
+    # Scope first: the shell tools still get the guard's verdict for the same command.
+    for tool in ("Bash", "PowerShell"):
+        rc, out, err = probe(["--tool", tool, "--command", DELETE_ROOT, "--cwd", NOGIT])
+        bad = scope(rc, out, err)
+        if bad:
+            return ["control %s: %s" % (tool, bad[0])]
+        if not out.startswith("deny destructive-delete: "):
+            return ["control %s: printed %r, want the destructive-delete refusal" % (tool, out[:60])]
+    problems = []
+    for tool in ("bash", "Shell", "Write"):
+        rc, out, err = probe(["--tool", tool, "--command", DELETE_ROOT, "--cwd", NOGIT])
+        problems += ["%s: %s" % (tool, p) for p in bad_input_problems(rc, out, err)]
+    return problems
+
+
+@case
+def dropped_session_fields_are_noted():
+    """Probe: a stdin payload's session_id, agent_id and agent_type are dropped with a stderr note that names each."""
+    base = {"tool_name": "Bash", "tool_input": {"command": HARMLESS}, "cwd": NOGIT}
+    with_fields = dict(base, session_id="probe-session-2", agent_id="probe-agent-2", agent_type="Explore")
+    # Scope first: without those fields the run prints one verdict line, exits 0, and writes no note.
+    rc, out, err = probe([], stdin=json.dumps(base))
+    bad = scope(rc, out, err)
+    if bad:
+        return ["control, no session fields: " + bad[0]]
+    if err.strip():
+        return ["control, no session fields: stderr %r, want none" % err[:60]]
+    rc2, out2, err2 = probe([], stdin=json.dumps(with_fields))
+    bad = scope(rc2, out2, err2)
+    if bad:
+        return bad
+    problems = expect(out2 == out, "verdict %r, want the control's %r" % (out2[:60], out[:60]))
+    for field in ("session_id", "agent_id", "agent_type"):
+        problems += expect(field in err2, "stderr does not name the dropped %s" % field)
+    return problems
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))
