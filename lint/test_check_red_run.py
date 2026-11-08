@@ -46,12 +46,31 @@ VALID_LINE = "Red-run: python3 lint/test_widgets.py -> 1 failed on SHA"
 KEYWORD_TYPOS = ("Red-run: mutants: x -> 1 failed on SHA",
                  "Red-run: mutation: x -> 1 failed on SHA",
                  "Red-run: mutant x -> 1 failed on SHA",
-                 "Red-run: non: reason")
-# Real commands whose first word is an ordinary word. Each passes.
+                 "Red-run: non: reason",
+                 "Red-run: Mutant A (x) -> 1 failed on SHA",
+                 "Red-run: mutations x -> 1 failed on SHA",
+                 "Red-run: mutate x -> 1 failed on SHA",
+                 "Red-run: none x -> 1 failed on SHA",
+                 "Red-run: non x -> 1 failed on SHA")
+# The refused keywords that start `mutant` or `mutation`. Their FAIL line holds the hint that names the mutant form.
+MUTANT_TYPOS = tuple(line for line in KEYWORD_TYPOS if re.match(r"Red-run: mut(?:ant|ation)", line, re.IGNORECASE))
+# A mutant keyword with text glued on. The failed form would read it as a command, so each must flag its commit.
+PREFIX_BYPASSES = ("Red-run: mutant(A) (x) -> 1 failed on SHA",
+                   "Red-run: mutant-A (x) -> 1 failed on SHA",
+                   "Red-run: mutantA: x -> 1 failed on SHA",
+                   "Red-run: mutant=x -> 1 failed on SHA")
+# A key that is not `Red-run:` at line start. Beside a valid line, each is a malformed Red-run line.
+CASE_VARIANT_KEYS = ("Red-Run: none (x)", "red-run: none", "Red-run : x")
+VALID_NONE = "Red-run: none: ok"
+# Prose that mentions the key mid-line. It is not a Red-run line, so it passes.
+PROSE_LINE = "Prose: the Red-run: none form is for re-points."
+# Real commands whose first word is an ordinary word. Each passes. A path is not a keyword.
 REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: MUTATE_ONLY='x' python3 hooks/test_guard.py -> 1 failed on SHA",
                  "Red-run: make test -> 1 failed on SHA",
-                 "Red-run: ./bin/verdict python3 lint/test_x.py -> 1 failed on SHA")
+                 "Red-run: ./bin/verdict python3 lint/test_x.py -> 1 failed on SHA",
+                 "Red-run: mutmut run -> 1 failed on SHA",
+                 "Red-run: ./scripts/mutation_probe.sh -> 1 failed on SHA")
 BASE_REF = "origin/main"
 BASE_VERDICT = "has_trailer"  # origin/main's name for the message verdict, read from its checker
 VERDICT = "has_valid_trailer"  # this checker's name for the message verdict
@@ -374,6 +393,47 @@ class CheckCase(Fixture):
                                   red=filled([VALID_LINE, typo], self.base_sha))
                 self.assertFlagged(sha, "add widget tests", rel,
                                    why="a keyword typo beside a valid line must flag the commit: " + filled([typo], self.base_sha)[0])
+
+    def test_mutant_keyword_with_glued_text_is_flagged(self):
+        """The failed form would read a glued keyword as a command. Each of these must flag its commit."""
+        for line in PREFIX_BYPASSES:
+            with self.subTest(line=line):
+                self.base()
+                rel = self.new_test_path()
+                sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=filled([line], self.base_sha))
+                self.assertFlagged(sha, "add widget tests", rel,
+                                   why="a mutant keyword with glued text must flag the commit, not pass as a failed form: "
+                                       + filled([line], self.base_sha)[0])
+
+    def test_mutant_typo_fail_line_names_the_mutant_form(self):
+        """The FAIL line for a refused mutant-like line holds the hint. The remedy line names the form too, so this reads the FAIL line."""
+        for typo in MUTANT_TYPOS:
+            with self.subTest(typo=typo):
+                self.base()
+                rel = self.new_test_path()
+                sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=filled([typo], self.base_sha))
+                out = self.assertFlagged(sha, "add widget tests", rel,
+                                         why="a mutant typo must flag the commit: " + filled([typo], self.base_sha)[0])
+                fail = [line for line in out.splitlines() if line.startswith("check_red_run: FAIL:") and sha[:7] in line]
+                self.assertTrue(fail, "no FAIL line names the commit:\n" + out)
+                self.assertIn("Red-run: mutant:", fail[0],
+                              "the FAIL line for %s holds no hint naming the mutant form:\n%s" % (typo, out))
+
+    def test_case_variant_key_beside_a_valid_line_is_flagged(self):
+        """A Red-run key in another case, or with a space before its colon, is malformed. It flags the commit beside a valid line."""
+        for variant in CASE_VARIANT_KEYS:
+            with self.subTest(variant=variant):
+                self.base()
+                rel = self.new_test_path()
+                sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=[VALID_NONE, variant])
+                self.assertFlagged(sha, "add widget tests", rel,
+                                   why="a case-variant Red-run key beside a valid line must flag the commit: " + variant)
+
+    def test_red_run_mentioned_mid_line_passes(self):
+        """Prose that mentions the key mid-line is not a Red-run line. The control for the case-variant cases."""
+        self.base()
+        self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, red=[VALID_NONE, PROSE_LINE])
+        self.assertClean(why="prose that mentions red-run mid-line must not count as a Red-run line: " + PROSE_LINE)
 
     def test_real_commands_with_ordinary_first_words_pass(self):
         """Real commands pass as the failed form, including ones whose first word is an ordinary word. The controls for the typo cases."""
