@@ -25,7 +25,7 @@ Report when your checks have run. Never wait on a CI run or another agent. Befor
 
 Review against the brief you were given: the task, the files, the governing rulings, and
 the check that proves the task done. State each ruling in the fewest words. Hunt bypasses and
-false alarms: probe single cases from a scratch copy. In any guard or check, a bypass counts as a safety hole only if Claude could write it by mistake or from a misread task. A form only an attacker would write is out of scope, in every round and in the net-value lines (`guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker). Never replay a passing suite; CI runs the
+false alarms: probe single cases. To probe a guard, run `python3 hooks/probe.py --tool Bash --command '<text>'`. It prints the verdict in one line, `allow` or `<decision> <rule>: <reason>`, and it is read-only: it never runs the command and writes nothing outside its own temp dir. A probe that needs a file is a need to report, not a script to write. In any guard or check, a bypass counts as a safety hole only if Claude could write it by mistake or from a misread task. A form only an attacker would write is out of scope, in every round and in the net-value lines (`guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker). Never replay a passing suite; CI runs the
 full suites and the mutation tests. The test-author's recorded red run is enough. Re-run
 it only when that record is missing or in doubt. A green check proves only its platform and fixture.
 Verify a claim before you rely on it. Never guess an answer the code should give you.
