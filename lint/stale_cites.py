@@ -20,8 +20,9 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             named only in a docstring or comment of a .py was never declared. A span that cites no script (as in
             `git push --force`), or a script that never had the flag (a shim whose target holds the flags), never
             fires. A flag another touched .py declares (or another touched .sh holds) at head moved there, and
-            so is one a `parents=[name()]` parser of the script declares in a tracked module it imports with
-            `from module import name`. A leading `./` is dropped from the cited script, and a bare basename
+            so is one a `parents=[name()]` parser, or a helper called as `name(parser)`, declares in a tracked module
+            the script imports with `from module import name`, and one a loop over a module-level table passes to
+            `add_argument`. A removed flag head still names as a string constant in a form not read is unknown. A leading `./` is dropped from the cited script, and a bare basename
             names the one tracked file with it (never one that two tracked files share).
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
             touched that file. JavaScript and shell names are not read, so the line prints
@@ -424,24 +425,85 @@ SHELL_FLAG = re.compile(r"(?<![\w-])--[A-Za-z][\w-]*")
 SHELL_SCRIPT = re.compile(r"\.sh\Z")
 
 
-def declared_flags(root):
-    """The long flags the `add_argument` calls under an ast node pass as string literals."""
+def is_flag(node):
+    """True for a string constant that is a long flag."""
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and bool(LONG_FLAG.fullmatch(node.value))
+
+
+def flag_tables(tree):
+    """{name: [element]} for each module-level name bound once to a tuple or list of string constants (an element
+    is the string) or of tuples and lists of constants (an element is the tuple of their values, None for a
+    non-string). A name bound twice, or to anything else, is left out: it is a form this reader does not take."""
+    count, tables = {}, {}
+    for node in module_statements(tree.body):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            count[name] = count.get(name, 0) + 1
+            if not isinstance(node.value, (ast.Tuple, ast.List)):
+                continue
+            rows = []
+            for item in node.value.elts:
+                if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                    rows.append(item.value)
+                elif isinstance(item, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Constant) for e in item.elts):
+                    rows.append(tuple(e.value if isinstance(e.value, str) else None for e in item.elts))
+                else:
+                    rows = None
+                    break
+            if rows is not None:
+                tables[name] = rows
+    return {name: rows for name, rows in tables.items() if count[name] == 1}
+
+
+def looped_flags(loop, tables):
+    """The long flags a `for` loop over a `flag_tables` name declares: each add_argument in its body whose first
+    argument is the loop name, or the name at that place in a tuple target. `add_argument(*NAME)` is read too."""
+    rows = tables.get(loop.iter.id) if isinstance(loop.iter, ast.Name) else None
+    if rows is None:
+        return set()
+    if isinstance(loop.target, ast.Name):
+        places = {loop.target.id: None}
+    elif isinstance(loop.target, ast.Tuple):
+        places = {e.id: i for i, e in enumerate(loop.target.elts) if isinstance(e, ast.Name)}
+    else:
+        return set()
+    flags = set()
+    for call in (c for stmt in loop.body for c in ast.walk(stmt)):
+        if isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "add_argument" and call.args \
+                and isinstance(call.args[0], ast.Name) and call.args[0].id in places:
+            place = places[call.args[0].id]
+            for row in rows:
+                value = row if place is None else row[place] if isinstance(row, tuple) and place < len(row) else None
+                if isinstance(value, str) and LONG_FLAG.fullmatch(value):
+                    flags.add(value)
+    return flags
+
+
+def declared_flags(root, tables=None):
+    """The long flags the `add_argument` calls under an ast node pass as string literals, as `*NAME` of a module
+    table (`tables` from `flag_tables`), or as the loop name of a `for` over one."""
+    tables = tables or {}
     flags = set()
     for node in ast.walk(root):
         if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument":
-            flags.update(arg.value for arg in node.args
-                         if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and LONG_FLAG.fullmatch(arg.value))
+            flags.update(arg.value for arg in node.args if is_flag(arg))
+            for arg in node.args:
+                if isinstance(arg, ast.Starred) and isinstance(arg.value, ast.Name):
+                    flags.update(v for v in tables.get(arg.value.id, ()) if isinstance(v, str) and LONG_FLAG.fullmatch(v))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            flags |= looped_flags(node, tables)
     return flags
 
 
 def argument_flags(source):
-    """The long flags a Python source declares: the string literals passed to `add_argument`, read with `ast`.
-    A flag only named in a docstring or comment is not declared. None when the source does not parse."""
+    """The long flags a Python source declares: the string literals passed to `add_argument`, and those a loop over
+    a module-level table or `*NAME` of one passes, read with `ast`. A flag only named in a docstring or comment is
+    not declared. None when the source does not parse."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return None
-    return declared_flags(tree)
+    return declared_flags(tree, flag_tables(tree))
 
 
 def parent_parsers(source):
@@ -468,6 +530,45 @@ def parent_parsers(source):
     return found
 
 
+PARSER_MAKERS = {"ArgumentParser", "add_parser", "add_subparsers", "add_argument_group", "add_mutually_exclusive_group"}
+
+
+def helper_calls(source):
+    """[(module, name)] for each function a Python source calls with a parser as an argument, where `name` is
+    imported with `from module import name` and the argument is a plain name the source binds to a parser maker
+    (`ArgumentParser(...)`, `.add_parser(...)`, `.add_subparsers(...)` and the group makers). Not read: a helper
+    reached as `module.name(...)`, a parser passed through another name, or one a function takes as its own parameter."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    imported, parsers = {}, set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                imported[alias.asname or alias.name] = (node.module, alias.name)
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            made = node.value.func
+            if (made.attr if isinstance(made, ast.Attribute) else getattr(made, "id", None)) in PARSER_MAKERS:
+                parsers.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in imported:
+            passed = list(node.args) + [k.value for k in node.keywords]
+            if any(isinstance(a, ast.Name) and a.id in parsers for a in passed) and imported[node.func.id] not in found:
+                found.append(imported[node.func.id])
+    return found
+
+
+def named_flags(source):
+    """The long flags a Python source holds as a string constant anywhere, whether or not it passes one to
+    `add_argument`. Empty when it does not parse."""
+    try:
+        return {n.value for n in ast.walk(ast.parse(source)) if is_flag(n)}
+    except (SyntaxError, ValueError):
+        return set()
+
+
 def parser_flags(source, name):
     """The flags the def `name` declares in a Python source, or all the module's flags when it has no such def."""
     try:
@@ -476,8 +577,8 @@ def parser_flags(source, name):
         return set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return declared_flags(node)
-    return declared_flags(tree)
+            return declared_flags(node, flag_tables(tree))
+    return declared_flags(tree, flag_tables(tree))
 
 
 def shell_flags(source):
@@ -1114,8 +1215,12 @@ class FlagState:
     """What FlagReader.line reads: the flags removed per script at head, and the run, for the head tree that
     `find_stale` lists before it reads any line."""
 
-    def __init__(self, removed, rng):
-        self.removed, self.rng, self._names = removed, rng, None
+    def __init__(self, removed, rng, unread=None):
+        self.removed, self.rng, self.unread, self._names = removed, rng, unread or {}, None
+
+    def named(self, path):
+        """True when the range removed flags from `path`, or head still names a flag of it in a form not read."""
+        return path in self.removed or path in self.unread
 
     def script(self, token):
         """The script a cited token names, if it is one whose flags the range removed. A `~/.claude/<path>` cite is
@@ -1123,7 +1228,7 @@ class FlagState:
         that name; a basename two tracked files share names neither."""
         path = token[len(CLAUDE_HOME):] if token.startswith(CLAUDE_HOME) else token
         path = path[2:] if path.startswith("./") else path
-        if path in self.removed:
+        if self.named(path):
             return path
         if "/" in path or not self.rng.tree:
             return None
@@ -1132,7 +1237,7 @@ class FlagState:
             for tracked in file_paths(self.rng.tree):
                 self._names.setdefault(os.path.basename(tracked), []).append(tracked)
         homes = self._names.get(path, [])
-        return homes[0] if len(homes) == 1 and homes[0] in self.removed else None
+        return homes[0] if len(homes) == 1 and self.named(homes[0]) else None
 
 
 class FlagReader:
@@ -1177,17 +1282,20 @@ class FlagReader:
         return declared | (self.parent_flags(rng, script) if suffix == ".py" else set())
 
     def parent_flags(self, rng, script):
-        """The flags a `.py` script's `parents=[name()]` parsers declare at head, each read from the one tracked
-        module its `from module import name` names. One level only: a parent's own parents are not followed."""
+        """The flags a `.py` script takes from another module at head, each read from the one tracked module its
+        `from module import name` names, through `parent_parsers` (`parents=[name()]`) and `helper_calls` (`name(parser)`).
+        One level only: a parent's own parents, and the helpers a helper calls, are not followed."""
         src = rng.batch.get("%s:%s" % (rng.head, script))
-        parents = parent_parsers(src.decode("utf-8", "replace")) if src is not None else []
-        if not parents:
+        text = src.decode("utf-8", "replace") if src is not None else ""
+        pairs = parent_parsers(text)
+        pairs += [p for p in helper_calls(text) if p not in pairs]
+        if not pairs:
             return set()
         if rng.tree is None:
             rng.tree = tracked_entries(rng.head)
         tracked = [p for p in file_paths(rng.tree) if p.endswith(".py")]
         declared = set()
-        for module, name in parents:
+        for module, name in pairs:
             tail = module.replace(".", "/") + ".py"
             homes = [p for p in tracked if p == tail or p.endswith("/" + tail)]
             beside = [p for p in homes if os.path.dirname(p) == os.path.dirname(script)]
