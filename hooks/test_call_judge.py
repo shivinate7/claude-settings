@@ -2366,7 +2366,8 @@ def case_run_of_the_named_test_file_backs_its_forecast():
 
 
 # (claim file, command): each command runs the claimed file, so each clears the claim. The unittest, discover and shell
-# `-e` forms are the ones the run reader does not count yet.
+# `-e` forms count. So do a heredoc that bash reads, a `$( )`, a brace group, an `elif`, and a run after a quoted string
+# that holds `/*`, `#` or a lone quote.
 RUN_FORM_ROWS = (
     ("skills/waiting-page/test_page_grant.py", "python3 -m unittest skills/waiting-page/test_page_grant.py"),
     ("skills/waiting-page/test_page_grant.py",
@@ -2378,14 +2379,29 @@ RUN_FORM_ROWS = (
     ("hooks/guard.py", "! python3 hooks/guard.py"),
     ("hooks/x.sh", "bash -e hooks/x.sh"),
     ("hooks/x.sh", "sh -e hooks/x.sh"),
+    ("hooks/guard.py", "bash <<'EOF'\npython3 hooks/guard.py\nEOF"),
+    ("hooks/guard.py", 'out="$(python3 hooks/guard.py)"'),
+    ("hooks/guard.py", "if true; then :; elif python3 hooks/guard.py; then :; fi"),
+    ("hooks/guard.py", "{ python3 hooks/guard.py; }"),
+    ("hooks/guard.py", 'echo "a /* b" && python3 hooks/guard.py'),
+    ("hooks/guard.py", 'echo "# not a comment" && python3 hooks/guard.py'),
+    ("hooks/guard.py", 'echo "Don\'t" && python3 hooks/guard.py'),
 )
-# (claim file, command): each command checks the claimed file and runs nothing from it, so each leaves the claim refused.
-# The last row is a control, refused today: a `-e` string runs no file, and the file is only its argument.
+# (claim file, command): each command runs nothing from the claimed file, so each leaves the claim refused. A check, a
+# node code flag (`-e`, `-p`, `--eval`) whose string is code, a heredoc body that no shell reads, a quoted string, a
+# comment and a redirect target are all no run. The `-e` row is a control: a code string runs no file.
 CHECK_ONLY_ROWS = (
     ("hooks/x.js", "node --check hooks/x.js"),
     ("hooks/test_guard.py", "python3 -m pytest --collect-only hooks/test_guard.py"),
     ("hooks/test_guard.py", "python3 -m pytest --co hooks/test_guard.py"),
     ("hooks/x.js", 'node -e "console.log(1)" hooks/x.js'),
+    ("hooks/x.js", 'node -p "1" hooks/x.js'),
+    ("hooks/x.js", 'node --eval "1" hooks/x.js'),
+    ("hooks/guard.py", "git commit -F - <<'EOF'\npython3 hooks/guard.py\nEOF"),
+    ("hooks/guard.py", "echo 'python3 hooks/guard.py'"),
+    ("hooks/guard.py", 'git commit -m "first line\npython3 hooks/guard.py"'),
+    ("hooks/guard.py", "python3 gen.py > hooks/guard.py"),
+    ("hooks/guard.py", "echo '# x' # python3 hooks/guard.py"),
 )
 
 
