@@ -111,15 +111,18 @@ _COLOUR_WORD = r"(?:colou?rs?|accent|ink|background|surface|border|fill|brand|pa
 _ID_WORD = ("order", "lot", "bin", "invoice", "ticket", "id", "item", "box", "parcel", "package", "no.",
             "number", "ref")
 _NOT_ID = "".join(r"(?<!\b%s )" % w for w in _ID_WORD)  # "order #123456" is an id, not a colour
-# An id word spares only an all-digit hash, so "orders #123456" and "Order ID: #123456" are ids. A hash with a
-# hex letter keeps the plain guard above: "Item: #3d5af1" is a colour.
-_NOT_ID_DIGITS = "".join(r"(?<!\b%s%s%s )" % (re.escape(w), plural, colon)
-                         for w in _ID_WORD for plural in ("", "s", "es") for colon in ("", ":"))
+# An all-digit hash also passes after a listed plural ("Orders #123456", "Lots: #123456") or "<id word> ID:".
+# A label ("Item:", "Ref:") or an unlisted plural ("Items") does not spare it, and a colour word earlier in the
+# sentence refuses it ("Fill: Orders #123456"). A hash with a hex letter keeps the plain guard above.
+_ID_PLURAL = ("orders", "lots", "bins", "invoices", "tickets", "boxes", "parcels", "packages")
+_NOT_ID_DIGITS = (_NOT_ID + "".join(r"(?<!\b%s%s )" % (w, c) for w in _ID_PLURAL for c in ("", ":"))
+                  + "".join(r"(?<!\b%s id: )" % w for w in _ID_WORD if w.isalpha() and w != "id"))
 SPACING_EXEMPT = ("Device",)
 PATTERNS.update({
     "token-colour": [
         _NOT_ID + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
         _NOT_ID_DIGITS + r"#(?:\d{6}|\d{8})\b",
+        r"\b" + _COLOUR_WORD + r"\b[^.!?\n]*#(?:\d{6}|\d{8})\b",
         r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#[0-9a-f]{3,4}\b",
         r"\b(?:rgba?|hsla?|hwb|lch|oklab|oklch)\s?\(", r"\b(?:rgba?|hsla?)\s+\d+[ ,]+\d+[ ,]+\d+",
     ],
