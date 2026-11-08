@@ -1,11 +1,11 @@
 {
   "title": "A task-notification wake starts a spawn window only after a landed turn",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 655,
   "owner": "lane model-guard-reads-next",
   "lane": "session_013NEJL1SsG5NZULw1mG6qgB",
   "why": "Today a builder spawned in an unlanded turn before a task-notification wake escapes the Done model check (reports-done-names-models) and the Unstarted check; these wakes are 20 of 25 window starts on a real coordinator transcript (lane model-guard-reads-next, 07:32 CST Nov 8).",
-  "note": "Done check: new cases in lint/test_report_guard.py (an unlanded builder before a task-notification wake is refused for a missing model and a missing Unstarted line), red on 2e961cf70 and green on the fix; `python3 lint/test_report_guard.py` and `python3 lint/test_retired_names.py` pass. PR with Merge after: the peer-wake-starts-window PR. Doing in lane model-guard-reads-next (coordinator, 07:37 CST Nov 8).",
-  "updatedAt": "2026-11-08T07:32:00-06:00"
+  "note": "Done check: new cases in lint/test_report_guard.py (an unlanded builder before a task-notification wake is refused for a missing model and a missing Unstarted line), red on 2e961cf70 and green on the fix; `python3 lint/test_report_guard.py` and `python3 lint/test_retired_names.py` pass. PR with Merge after: the peer-wake-starts-window PR. Doing in lane model-guard-reads-next (coordinator, 07:37 CST Nov 8). Built as #2031, with runner 8 (lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), 08:18 CST Nov 8).",
+  "updatedAt": "2026-11-08T08:18:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "A peer hand-back that wakes an idle session starts a spawn window for the Done model check",
   "why": "A peer hand-back that wakes an idle session after a Stop starts no spawn window, so the Done model check makes the earlier turn's agents be named again (round 3 finding on PR #1946; lane model-guard-reads-next, 06:36 CST Nov 8).",
-  "note": "Fix PR stacks on #1946 with Merge after: #1946; red case first. Doing in lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), at the coordinator's ask (06:36 CST Nov 8). Round 2 PASS at 2e961cf70; round 3 next (lane, 07:31 CST Nov 8).",
+  "note": "Fix PR stacks on #1946 with Merge after: #1946; red case first. Doing in lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), at the coordinator's ask (06:36 CST Nov 8). Round 2 PASS at 2e961cf70; round 3 next (lane, 07:31 CST Nov 8). Built as #2010, with runner 8 (lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), 08:18 CST Nov 8).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 634,
   "owner": "triage",
   "lane": "session_013NEJL1SsG5NZULw1mG6qgB",
-  "updatedAt": "2026-11-08T07:31:00-06:00"
+  "updatedAt": "2026-11-08T08:18:00-06:00"
 }

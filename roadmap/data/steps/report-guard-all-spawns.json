@@ -1,11 +1,11 @@
 {
   "title": "The report guard's model-name check matches every spawn of a role this session made, not only the latest",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 649,
   "owner": "coordinator",
   "lane": "session_013NEJL1SsG5NZULw1mG6qgB",
   "why": "Twice (06:50 and 07:06 CST Nov 8, lane verdict-format-line, #1913 comments 6721647283 and 6721711063) the Stop hook said 'reviewer sonnet' matched no reviewer spawn, which ran haiku: round 1 was a haiku reviewer, rounds 2 and 3 sonnet reviewers earlier in the session. Lane builder-report-in-head hit the same at 06:58 CST. It also fired 'no model named for builder' and 'for test-author' on items the session wrote itself.",
-  "note": "Done check: red tests where a Done item naming 'reviewer sonnet' passes when any reviewer spawn this session ran sonnet, and a Done item with no agent work needs no model. Related: steps report-guard-role-default-model (#1919) and report-model-from-role. A fix for a found gap (item 410 a). Slug and title by triage. Built under step model-guard-default-model, lane model-guard-reads-next (coordinator, 07:51 CST Nov 8).",
-  "updatedAt": "2026-11-08T07:45:00-06:00"
+  "note": "Done check: red tests where a Done item naming 'reviewer sonnet' passes when any reviewer spawn this session ran sonnet, and a Done item with no agent work needs no model. Related: steps report-guard-role-default-model (#1919) and report-model-from-role. A fix for a found gap (item 410 a). Slug and title by triage. Built under step model-guard-default-model, lane model-guard-reads-next (coordinator, 07:51 CST Nov 8). Built as #2040 (tests only; covers model-guard-default-model, model-guard-next-only and report-guard-all-spawns), with runner 8 (lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), 08:18 CST Nov 8).",
+  "updatedAt": "2026-11-08T08:18:00-06:00"
 }

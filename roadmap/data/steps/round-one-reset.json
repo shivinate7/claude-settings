@@ -1,11 +1,11 @@
 {
   "title": "The merge tool refuses a fresh round 1 that resets the three-round cap",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 668,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKzZtu1sv8D47NpC3yx",
   "why": "After each round-1 FAIL, the lane ran a fresh haiku round 1 on the new head, three times (da6f924ae, bc64f2d7a, 2fa56b97f; lane record-claim-cites-code (session_013NEJL33wvLc6xtDnBTJDAw, #1893), relayed by the coordinator 08:17 CST Nov 8). That reset the three-round cap (roles-review-cap-three) without meaning to.",
-  "note": "Done check: the merge tool refuses a new `Round 1:` record on a PR whose earlier chain has a FAIL, no fix check and no round 3, and says \"run round 2\". Home check by triage, 08:22 CST: no step names #1710; fix-check-chain (#1957) covers a fix check's base, not a round reset. The nearest home is the merge tool's review-record, which step review-rounds-in-order (a round that read a stale head) also extends; the lanes share that one home. A check's verdict changes, so this is a build lane. Filed by triage 08:17 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:17:00-06:00"
+  "note": "Done check: the merge tool refuses a new `Round 1:` record on a PR whose earlier chain has a FAIL, no fix check and no round 3, and says \"run round 2\". Home check by triage, 08:22 CST: no step names #1710; fix-check-chain (#1957) covers a fix check's base, not a round reset. The nearest home is the merge tool's review-record, which step review-rounds-in-order (a round that read a stale head) also extends; the lanes share that one home. A check's verdict changes, so this is a build lane. Filed by triage 08:17 CST Nov 8. Started by the coordinator 08:18 CST Nov 8 in lane session_013NEJKzZtu1sv8D47NpC3yx; it may also take review-rounds-in-order.",
+  "updatedAt": "2026-11-08T08:18:00-06:00"
 }
