@@ -25,8 +25,8 @@ Deep links: `#s=mixed|dense`, `&o=hatch|tint`, `&c=on|off`, `&w=all|390|1280`, `
    progress), stripes (stalled), ring (paused), solid red (blocked), solid grey (to do). The roadmap
    bars are not aria-hidden, so the cell must not rely on colour alone. The ring echoes the pause
    mark's ring.
-   Loss: in a rail chip at 390 a cell is 2.25 px wide at 13 steps and 0 px at 30, and the stripes and
-   ring fade to a mid red and a mid grey there. At 1280 and 30 steps a phase head cell is 1.06 px at 1x,
+   Loss: in a rail chip at 390 a cell is 2.25 px wide at 13 steps and 0 px at 30. There the stripes and
+   ring fade to a mid red and a mid grey. At 1280 and 30 steps a phase head cell is 1.06 px at 1x,
    so the shapes show only at 3x.
    Pick: yes.
 
