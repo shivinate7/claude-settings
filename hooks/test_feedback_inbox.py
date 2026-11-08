@@ -3658,7 +3658,7 @@ def case_repeat_repo_item_is_never_judged_as_a_repeat():
 
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
     """A one-shot approval ("go ahead and merge PR 12") is a grant. A note homed to `once:<act>` passes it.
-    The same words with no home still block (debt one-shot-grant-label)."""
+    The same words with no home still block."""
     mod = guard_module()
     homed = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT, items=(ONE_SHOT_HOME,))), "")
     check("one-shot grant: a note homed to once:<act> passes", homed == [], homed)
@@ -3680,8 +3680,8 @@ def case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in():
 
 
 def case_step_path_is_derived_from_override_step_dir():
-    """feedback_guard takes the step file template from override.STEP_DIR, not a second spelling (debt
-    step-dir-spelled-twice). With the folder moved, a fresh load of the guard takes the new folder."""
+    """feedback_guard takes the step file template from override.STEP_DIR, not a second spelling.
+    With the folder moved, a fresh load of the guard takes the new folder."""
     override = importlib.import_module("override")
     saved = override.STEP_DIR
     try:
@@ -3763,6 +3763,7 @@ def case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo():
     control, the same unreadable sidecar with a home tracked in the Stop's repo, passes."""
     cwd = make_repo("unreadable-sidecar-stop", tracked=("decisions/a-ruling.md",))
     bad = unreadable_sidecar_repo()
+    expect_unreadable_sidecar(bad)
     text = "the rule is settled\nkeep it\nthanks"
     cfg, sid = new_cfg(), "r-unreadable-sidecar"
     write_file(sidecar_of(cfg, sid), bad)
