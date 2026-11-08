@@ -89,7 +89,8 @@ then takes its Home line) and the mechanisms file once. The decisions folder is 
 `candidates(root, "decisions")` that holds a file. A changed RULE_FILES file adds its base and head blobs and the
 mechanisms file to that read. Its list of changed files comes from the diff the run already read, with no git start.
 A range whose merge-base or diff failed adds starts to tell the cause apart, an upper bound: `a...b` four, `a..b`
-three, the root form `HEAD~1..HEAD` five (its three-dot form six); a passing run adds none.
+three; a base with a first-parent suffix adds a `rev-list`, so five and four; the root form `HEAD~1..HEAD` five (its
+three-dot form six); a passing run adds none.
 A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
 once, and each file a line anchor names once more, even when that file is a .md. It writes no file and prints no report.
 """
@@ -170,8 +171,9 @@ def cut_base(base, head):
     first-parent suffix (`~`, `^`, `~1`, `^1`, `~01`) and the stem names the head's own commit: `HEAD~1`, `@~1` and
     `<sha>^` count, `<another root>^1` does not. A rev-list or rev-parse that exits non-zero is no root: the range
     is unknown. Run only after a read failed.
-    The extra git starts are an upper bound: `a...b` four (head, base twice, shallow), `a..b` three, the root form
-    `HEAD~1..HEAD` five (those three plus `rev-list` and a `rev-parse` of the stem); its three-dot form six."""
+    The extra git starts are an upper bound: `a...b` four (head, base twice, shallow), `a..b` three. A base with a
+    first-parent suffix adds a `rev-list`: `a...b` five, `a..b` four. The root form `HEAD~1..HEAD` five (those three
+    plus `rev-list` and a `rev-parse` of the stem); its three-dot form six."""
     if resolves(base):
         return False
     shallow = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
