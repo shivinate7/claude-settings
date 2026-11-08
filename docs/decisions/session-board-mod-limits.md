@@ -55,7 +55,7 @@ Why: Oct 26, a UI session waited on a question box while its background agents f
 
 Risk kind: incident, per `building-guard-needs-incident`. Landed 2026-10-27.
 
-Cost, per `outcomes-mechanize-rules`: process starts, none on a box allowed after a good read, and none for a session start. Otherwise one python start per `guard.log` line, which is a refusal, or a box allowed because the list was unknown; `mods/session-board/session-board.test.mjs` pins one line per refusal. Files written: that one line. How often: once per AskUserQuestion call. No timer and no watcher; the agent list is read inside the check. `mods/session-board/session-board.test.mjs` (the "question box" cases) pins the zero starts on an allowed box and one line per refusal.
+Cost, per `outcomes-mechanize-rules`: process starts, none on a box allowed after a good read, and none for a session start. Otherwise one python start per `guard.log` line, which is a refusal, or a box allowed because the list was unknown; `mods/session-board/session-board.test.mjs` pins one line per refusal (unmeasured). Files written: that one line (unmeasured). How often: once per AskUserQuestion call (unmeasured). No timer and no watcher; the agent list is read inside the check. `mods/session-board/session-board.test.mjs` (the "question box" cases) pins the zero starts on an allowed box and one line per refusal (unmeasured).
 
 ## A missed notice
 

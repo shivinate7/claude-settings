@@ -28,7 +28,7 @@ Known limits:
 
 Risk kind: likely risk, per `building-guard-needs-incident`. Test-author work adds new tests in normal work, and 12 of 29 recorded changes carried no red run. Landed 2026-11-01.
 
-Cost: no long-lived process, no log, no timer. One python process per run, once per pull request run and once per test-author push. It starts these git children. One `rev-parse` and one `log` read the range, and one `ls-tree` reads HEAD. Each non-revert commit in the range then costs one `diff`. When HEAD holds the check, each also costs one `ls-tree` first, and the `diff` runs only when the parent tree holds the check.
+Cost: no long-lived process, no log, no timer. One python process per run, once per pull request run and once per test-author push (unmeasured). It starts these git children. One `rev-parse` and one `log` read the range, and one `ls-tree` reads HEAD (unmeasured). Each non-revert commit in the range then costs one `diff`. When HEAD holds the check, each also costs one `ls-tree` first, and the `diff` runs only when the parent tree holds the check.
 
 Kind: process
 Home: lint/check_red_run.py

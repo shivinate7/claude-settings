@@ -57,7 +57,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 ## Check and cost
 
 - Check: `skills/waiting-page/test_page_grant.py`, the checker's own test, its `Provenance` class for the fetch folder; `hooks/test_auto_mode_allow.py` for the entry.
-- Cost: two python processes per relayed act. `--new-fetch` makes one folder and one stamp file. The check reads the stamp and two files (`answers/<id>.json` and `items/<id>.json`) and renames the stamp once (`skills/waiting-page/test_page_grant.py`, case `test_checker_writes_only_its_stamp`). The two ArtifactData gets, not the checker, save those files.
+- Cost: two python processes per relayed act (unmeasured). `--new-fetch` makes one folder and one stamp file (unmeasured). The check reads the stamp and two files (`answers/<id>.json` and `items/<id>.json`) and renames the stamp once (`skills/waiting-page/test_page_grant.py`, case `test_checker_writes_only_its_stamp`). The two ArtifactData gets, not the checker, save those files.
 
 Kind: process
 Home: skills/waiting-page/SKILL.md

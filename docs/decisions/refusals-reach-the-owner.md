@@ -26,13 +26,13 @@ Incident, 2026-10-31 to 2026-11-01: the classifier refused the coordinator's `mc
 
 Rule outcomes-mechanize-rules (turn each rule into a check, and state what the check costs) asks this record to state the cost.
 
-- One process start per auto-mode refusal (the hook).
-- One file per session that had a refusal. It is gone after the reply names every tool in it.
+- One process start per auto-mode refusal (the hook) (unmeasured).
+- One file per session that had a refusal (unmeasured). It is gone after the reply names every tool in it.
 - Each Stop, inside the report guard that already runs, checks for the session's file, one stat. A session with no refusal reads no file and starts no process.
-- A Stop that finds a row with a `tool_use_id` also reads the transcript and every file in `<session>/subagents/`, once (debt `refusal-settle-reads`). The cost is unmeasured. A session with no refusal reads none of them.
+- A Stop that finds a row with a `tool_use_id` also reads the transcript and every file in `<session>/subagents/`, once (debt `refusal-settle-reads`) (unmeasured). The cost is unmeasured. A session with no refusal reads none of them.
 - No timer, no log and no long-lived process.
 
-Proof: `hooks/test_refusal_note.py` case `test_cost_one_refusal_creates_exactly_one_file` proves one file per refusal. `lint/test_report_guard.py` case `PendingRefusalTests.test_g_no_refusals_file_is_a_no_op` proves a Stop with no refusals file writes no file. No test counts the stat, so the one stat per Stop is unmeasured.
+Proof: `hooks/test_refusal_note.py` case `test_cost_one_refusal_creates_exactly_one_file` proves one file per refusal (unmeasured). `lint/test_report_guard.py` case `PendingRefusalTests.test_g_no_refusals_file_is_a_no_op` proves a Stop with no refusals file writes no file. No test counts the stat, so the one stat per Stop is unmeasured.
 
 Kind: process
 Home: hooks/refusal_note.py

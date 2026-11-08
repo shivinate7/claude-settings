@@ -27,15 +27,17 @@ holds the token's name as a whole name: its basename, or the folder before a `<p
 digit, `_`, `-` or `.`-and-name character beside it. A sentence that says "not pinned", "unpinned", "unmeasured" or
 "no test" pins nothing and flags nothing: the writer has said so.
 
-A count claim is a count word (one to six, once, twice, thrice, or digits) with at most three words between it and
-a cost noun (read, call, process, spawn, `ps`, write, file, run, start, times, line, command, request, lookup, query;
-plural too), or a cost noun followed within two words by once, twice or thrice. Code spans, dates (YYYY-MM-DD), times
-(HH:MM) and ids (`ruling`, `item`, `rule`, `step` or `decision` and a number; `#` and a number) are not read as part of
-a claim. A claim passes when its sentence holds a bound (at most, up to, no more than, fewer, at least), says "not
-pinned", "unpinned", "unmeasured" or "no test", or holds a test-name candidate that exists under the root and holds, as a
-whole name, the code span nearest the count word. A test-name span is never the nearest span. A sentence with no other
-code span passes on any existing test-name candidate. A sentence with a claim that passes none of these is one finding,
-on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`.
+A count claim is a count word (one to six, single, or digits) with at most three words between it and a cost noun
+(read, call, process, spawn, `ps`, write, file, run, start, times, line, command, request, lookup, query; plural too).
+Once, twice, thrice and Nx ("2x") count only after a verb of work (read, run, call, start, spawn, write, fetch, stat)
+within two words, never before a noun. Code spans, dates (YYYY-MM-DD), times (HH:MM), decimals, a number with a time
+unit (s, ms, sec, seconds, min, minutes), line references (`name.ext:123`), "Round N of M", "PR N" and ids (`ruling`,
+`item`, `rule`, `step` or `decision` and a number; `#` and a number) are not read as part of a claim, and "one" before
+"of" is no count. A claim passes when its sentence holds a bound (at most, up to, no more than, fewer, at least), says
+"not pinned", "unpinned", "unmeasured" or "no test", or holds a test-name candidate that exists under the root and
+holds, as a whole name, the code span nearest the count word. A test-name span is never the nearest span. A sentence
+with no other code span passes on no test: it needs a bound or a mark. A sentence with a claim that passes none of
+these is one finding, on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`.
 
 A debt note is one list item of the debt notes file (kind `debt-notes` in lint/layout.json), with its continuation
 lines. A note is read sentence by sentence, with the same sentence split and code-span blanking as a Cost paragraph.
@@ -85,13 +87,17 @@ UNBALANCED = "unbalanced backtick in a Cost paragraph"
 NO_READER = "count in a Cost sentence with no reader"
 NOTE_NO_READER = "count in a debt note with no reader"
 WORD = re.compile(r"\w+(?:['\u2019-]\w+)*")
-COUNT_WORD = re.compile(r"(?:one|two|three|four|five|six|once|twice|thrice|\d+)", re.IGNORECASE)
-TIMES_WORD = re.compile(r"(?:once|twice|thrice)", re.IGNORECASE)
+COUNT_WORD = re.compile(r"(?:one|two|three|four|five|six|single|once|twice|thrice|\d+x?)", re.IGNORECASE)
+WORK_VERB = re.compile(r"(?:reads?|runs?|calls?|called|starts?|spawns?|writes?|fetch(?:es)?|stats?)", re.IGNORECASE)
+TIMES_WORD = re.compile(r"(?:once|twice|thrice|\d+x)", re.IGNORECASE)
 COST_NOUN = re.compile(r"(?:reads?|calls?|process(?:es)?|spawns?|ps|writes?|files?|runs?|starts?|times|lines?|commands?"
                        r"|requests?|lookups?|quer(?:y|ies))", re.IGNORECASE)
 BOUND = re.compile(r"\b(?:at\s+most|up\s+to|no\s+more\s+than|fewer|at\s+least)\b", re.IGNORECASE)
-# A number beside a cost noun that counts nothing: a date, a time, an id.
-NOT_COUNTS = [re.compile(r"\b\d{4}-\d{2}-\d{2}\b"), re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"),
+# A number beside a cost noun that counts nothing: a line reference (`name.ext:123`), a date, a time, an id.
+NOT_COUNTS = [re.compile(r"[\w/.-]+\.[A-Za-z]+(?::\d+)+"), re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
+              re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"), re.compile(r"\b\d+\.\d+\b"),
+              re.compile(r"\b\d+\s*(?:ms|sec|seconds|min|minutes|s)\b", re.IGNORECASE),
+              re.compile(r"\bRound\s+\d+\s+of\s+\d+\b", re.IGNORECASE), re.compile(r"\bPR\s+#?\d+\b"),
               re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
 # A number, with thousands separators (`1,406`) or without.
 NUMBER = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
@@ -277,6 +283,12 @@ def pinned(token, candidates, root, texts):
     return False
 
 
+def trailing(words):
+    """True when a verb of work stands among `words`, the words before once, twice or thrice ("it reads the list
+    once"). A plain noun before the count is no claim ("a mutating command or `sed` once redirects")."""
+    return any(WORK_VERB.fullmatch(word.group()) for word in words)
+
+
 def counts(sentence):
     """(start, end) in the sentence text of each count word that makes a claim. A span, a date, a time and an id
     are blanked first, so none counts as a word of the claim; a span stays one word between count and noun."""
@@ -286,8 +298,11 @@ def counts(sentence):
     for i, word in enumerate(words):
         if not COUNT_WORD.fullmatch(word.group()):
             continue
-        after = any(COST_NOUN.fullmatch(w.group()) for w in words[i + 1:i + 5])
-        before = TIMES_WORD.fullmatch(word.group()) and any(COST_NOUN.fullmatch(w.group()) for w in words[max(0, i - 3):i])
+        # once, twice and thrice count only after a verb of work ("reads it once"); "one of" is a pronoun
+        leading = not TIMES_WORD.fullmatch(word.group()) and not (
+            word.group().lower() == "one" and words[i + 1:i + 2] and words[i + 1].group().lower() == "of")
+        after = leading and any(COST_NOUN.fullmatch(w.group()) for w in words[i + 1:i + 5])
+        before = TIMES_WORD.fullmatch(word.group()) and trailing(words[max(0, i - 3):i])
         if after or before:
             found.append((word.start(), word.end()))
     return found
@@ -300,7 +315,7 @@ def has_reader(sentence, start, end, candidates, root, texts):
     near = [(min(abs(a - end), abs(start - b)), k) for k, (a, b) in enumerate(sentence.holes)
             if not is_test_name(sentence.spans[k][0])]
     if not near:
-        return any(held(c, root, texts) is not None for c in candidates)
+        return False
     return pinned(sentence.spans[min(near)[1]][0], candidates, root, texts)
 
 

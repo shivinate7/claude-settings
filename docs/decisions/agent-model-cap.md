@@ -96,7 +96,7 @@ unless the file is a Haiku role. It also fails an `agents/*.md` body that states
 - With no pointer checkout the rule stands down and logs nothing. A table or agents folder in the pointer checkout that cannot be read passes the spawn and logs one `agent-role-model-unread` line, which `lint/guard_log_report.py` counts as a note for that rule.
 - The override lifts an above-row refusal (owner, 2026-11-01 17:25 CST, item 127, pick a; `never_lifted` in `hooks/guard.py` no longer reads it). No override lifts the no-model refusal (`owner-override`, the model guards).
 
-Cost: one read of this record per spawn. A spawn with no model adds one read of the agent files. No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
+Cost: one read of this record per spawn (unmeasured). A spawn with no model adds one read of the agent files (unmeasured). No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
 
 Incident one: briefs named sonnet for haiku-row roles until 13:59 CDT on 2026-10-30. Incident two: the round-2 builder of PR 872 named no model. The cloud CLI had no `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/builder.md` has no pin, so it inherited the lane's Opus (note `nao-builder-ran-opus`).
 
@@ -126,7 +126,7 @@ tag beside its target's. The rule runs after `lane-effort-pin`, so a call that b
 first. An owner override lifts it.
 The roadmap build shares this read (`github_slug` and `blob_url` in `skills/roadmap/build.py`). For an ssh origin with a port, a non-GitHub https origin or a POSIX local path, the build links its last two path segments on github.com.
 Cost, per lane `create_session` only: one extras file read, and one `git remote get-url origin` process start
-when the extras name no repo. A deny writes one guard.log line. No other file, and no timer.
+when the extras name no repo (unmeasured). A deny writes one guard.log line (unmeasured). No other file, and no timer.
 Known gaps: a Windows drive path with backslashes reads as no origin. A `cwd` below the repo root reads no
 extras file. Tags set by `set_session_tags` after the start are not judged.
 Kind of risk: incident. Landed 2026-11-01.

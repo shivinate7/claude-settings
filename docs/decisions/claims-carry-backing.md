@@ -80,10 +80,10 @@ A route row is read as unmeasured when its `measured` date is more than N days o
 No daemon and no timer.
 
 - The range scan starts one `git diff -M --raw -p -z -U0`. It carries the changed names and the added lines that STALE005 reads (read lint/stale_cites.py:1120; read lint/stale_cites.py:257-266).
-- Blob reads share one `git cat-file --batch` process. It starts on the first read and closes at the end of the run (read lint/stale_cites.py:150-175; read lint/stale_cites.py:1131).
+- Blob reads share one `git cat-file --batch` process (unmeasured). It starts on the first read and closes at the end of the run (read lint/stale_cites.py:150-175; read lint/stale_cites.py:1131).
 - The head blob of a file is read only when one of its added lines holds a verb or a route word (read lint/stale_cites.py:776-797).
-- A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:858-861; not pinned: no test counts these reads). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:882-900).
-- When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:855-880; read lint/stale_cites.py:913-916).
+- A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:858-861; unmeasured: no test counts these reads). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:882-900) (unmeasured).
+- When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:855-880; read lint/stale_cites.py:913-916) (unmeasured).
 - STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:823-853).
 - The merge takes the changed names from a `--name-only` diff (read merge/merge.py:2941). The merge judge runs its own `git diff -U0` (read merge/merge.py:2480) and up to 3 model starts per merge (read merge/merge.py:2454). Its model starts are unmeasured.
 
