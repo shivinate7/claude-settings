@@ -23349,6 +23349,10 @@ SPO_RUNNER_FORMS = (
     ("pytest", "pytest F", "probe2.py", PY_TEXT, "pytest %s"),
     ("pytest-m", "python3 -m pytest F", "probe2.py", PY_TEXT, "python3 -m pytest %s"),
     ("pytest-k", "pytest -k expr F", "probe2.py", PY_TEXT, "pytest -k expr %s"),
+    ("pytest-mark", "pytest -m slow F", "probe2.py", PY_TEXT, "pytest -m slow %s"),
+    ("pytest-c", "pytest -c cfg.ini F", "probe2.py", PY_TEXT, "pytest -c cfg.ini %s"),
+    ("py", "py F", "probe2.py", PY_TEXT, "py %s"),
+    ("py-3", "py -3 F", "probe2.py", PY_TEXT, "py -3 %s"),
     ("stdbuf", "stdbuf -oL python3 F", "probe2.py", PY_TEXT, "stdbuf -oL python3 %s"),
     # `setsid python3 F` is not here: detached-launch denies it for every agent, the writer's own run too, so this
     # rule is never reached and the case could not go red for it.
