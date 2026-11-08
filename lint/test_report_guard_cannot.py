@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -34,6 +35,21 @@ REFUSED_ROW_ID = "r-archive"
 ROW_REFUSED = hook_base.route_row(REFUSED_ROW_ID, "archive_session", "refused", surface="local")
 # Words a remedy must not name: the act a refusal is about (git-remedy-never-names-target).
 ACT_WORDS = re.compile(r"\bPR\b|pull request|\bopen\b|\bpush\b|\bmerge\b|\bgit\b|\bgh\b|mcp__", re.I)
+
+
+# Runs report_guard.py as the Stop hook runs it, and writes to stderr the paths its process opened (the audit event
+# "open"), so a case can count the reads the check makes.
+OPENS_CODE = (
+    "import json, runpy, sys\n"
+    "opened = []\n"
+    "sys.addaudithook(lambda event, args: opened.append(args[0])"
+    " if event == 'open' and args and isinstance(args[0], str) else None)\n"
+    "try:\n"
+    "    runpy.run_path(sys.argv[1], run_name='__main__')\n"
+    "except SystemExit:\n"
+    "    pass\n"
+    "sys.stderr.write('OPENED ' + json.dumps(opened) + '\\n')\n"
+)
 
 
 def setUpModule():
@@ -396,6 +412,190 @@ class CannotClaimTests(unittest.TestCase):
                          *failed_bash("grep -r pulls ci/", "tu_g"),
                          trg.assistant_text("Opening the PR from the MCP route next.")])
         self.assert_passes(out, "the incident turn with a reply that claims nothing")
+
+    # ---- review round 1: each probe line below is a bypass the review found, or a false alarm. A red fails on the
+    # unchanged guard. The green controls keep a line the check must still leave alone.
+
+    def test_cc_red_other_act_is_backed_only_by_a_try_sharing_a_word(self):
+        # Catches: an "other" claim backed by any failed call in the turn. The failed grep shares no word with the
+        # claim's object (GitHub), and the notice is no try, so the claim has no try.
+        line = "I can't reach GitHub from here; the MCP server failed to connect."
+        out = self.stop([trg.human("reach GitHub"), notice("github: failed to connect"),
+                         *failed_bash("grep -r pulls ci/", "tu_g"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_claim_in_a_code_span_is_no_try_for_an_unrelated_failure(self):
+        # Catches: code spans blanked before the act is read, so "use ... here" reads as an act of no words, and any
+        # failed call backs it. The failed grep shares no word with the tool the span names.
+        line = "I can't use `mcp__github__create_pull_request` here; grep returned 1."
+        out = self.stop([trg.human("open a PR"), *failed_bash("grep -r pulls ci/", "tu_g"),
+                         trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_claim_of_only_a_code_span_is_no_try(self):
+        # Catches: "I can't `gh pr create`." passing because the blanked span leaves no word after the phrase.
+        line = "I can't `gh pr create`."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_successful_call_with_refused_in_its_output_is_no_try(self):
+        # Catches: a successful call whose output holds the word refused counted as a failed try. A failure is an error
+        # flag, an exit code above zero, or an HTTP 4xx or 5xx status. A loose word in the output is none of these.
+        line = "I could not open the PR: `gh pr create` failed."
+        out = self.stop([trg.human("open a PR"), use("Bash", {"command": "gh pr create --title t"}, "tu_g"),
+                         done("tu_g", "3 refused connections in the log; nothing failed."), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_cannot_in_a_hyphenated_name_is_no_claim(self):
+        # Catches: "cannot" inside a branch name read as a claim. The phrase ends at a word boundary, not at a hyphen.
+        out = self.stop([trg.human("check the branch"),
+                         trg.assistant_text("Branch cannot-claim-needs-tries is ready.")])
+        self.assert_passes(out, "a branch name that holds cannot")
+
+    def test_cc_red_a_comma_does_not_end_a_would_clause(self):
+        # Catches: "would" read across a comma, so a claim after the comma passes as a conditional.
+        line = "I would open it, but I can't push."
+        out = self.stop([trg.human("push it"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_comma_does_not_end_an_if_clause(self):
+        # Catches: "If" read across a comma, so a claim after the comma passes as a condition.
+        line = "If the tool fails, I can't open the PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_comma_does_not_end_a_no_clause(self):
+        # Catches: "No," read across a comma, so a claim after it passes as a negated one.
+        line = "No, I can't open the PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_comma_does_not_end_a_not_clause(self):
+        # Catches: "did not" read across a comma, so a claim after it passes as a negated one.
+        line = "The MCP server did not connect, I could not open the PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_wasnt_able_to_is_a_claim(self):
+        # Catches: "wasn't able to" missing from the phrase list, so the line reads as no claim at all.
+        line = "I wasn't able to open the PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_wont_be_able_to_is_a_claim(self):
+        # Catches: "won't be able to" missing from the phrase list.
+        line = "I won't be able to push from here."
+        out = self.stop([trg.human("push it"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_no_way_i_can_is_a_claim(self):
+        # Catches: "no way I can" missing from the phrase list. Only "no way to" is in it.
+        line = "No way I can open the PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_be_merged_clause_is_a_claim(self):
+        # Catches: "be" skipped before any word, so "can't be merged" passes. The skip is for be undone, reverted,
+        # reversed, sure and certain only.
+        line = "That PR can't be merged from here."
+        out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_pass_a_be_sure_clause_is_no_claim(self):
+        # The comma-free pass the skip keeps: "be sure" and "be reverted" are a doubt and a reversal, not a claim.
+        for line in ("I can't be sure the push went through.", "The push can't be reverted."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("push it"), trg.assistant_text(line)])
+                self.assert_passes(out, "a doubt or a reversal, not a claim: %r" % line)
+
+    def test_cc_red_a_question_at_the_line_end_does_not_hide_a_claim(self):
+        # Catches: a whole line skipped for ending in "?", so a claim sentence before the question passes.
+        out = self.stop([trg.human("open a PR"), trg.assistant_text("I can't open the PR. Want me to try again?")])
+        self.assert_blocked_for(out, NO_TRY, "I can't open the PR.")
+
+    def test_cc_red_a_rule_clause_with_an_id_does_not_hide_a_claim(self):
+        # Catches: a whole line skipped for naming a hyphenated rule id, so a claim in another clause of it passes.
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(
+            "The rule git-main-only-by-pr says merges need CI; I can't open the PR.")])
+        self.assert_blocked_for(out, NO_TRY, "I can't open the PR.")
+
+    def test_cc_red_an_unvetted_mid_line_does_not_hide_a_claim(self):
+        # Catches: the text after a mid-line "Unvetted:" cut off, so a claim after it passes. Only a line that starts
+        # with the marker is the guard's own remedy line.
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(
+            "Ask the owner about this. Unvetted: none. I can't open the PR.")])
+        self.assert_blocked_for(out, NO_TRY, "I can't open the PR.")
+
+    def test_cc_pass_an_unvetted_line_start_is_the_guards_form(self):
+        # The guard's own Unvetted line, which starts with the marker, is left alone.
+        out = self.stop([trg.human("open a PR"),
+                         trg.assistant_text("Unvetted: the ruling is open; I cannot open the PR.")])
+        self.assert_passes(out, "the guard's own Unvetted line")
+
+    def test_cc_red_a_later_phrase_in_an_if_clause_is_judged(self):
+        # Catches: a later phrase read under an "if" that sits before the first phrase in the same clause, so the later
+        # claim, which its own words do not condition, passes.
+        line = "If the tool fails I can't push and I could not open the PR."
+        out = self.stop([trg.human("push and open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_later_success_cancels_an_earlier_failure(self):
+        # Catches: a failed create backing a claim made after a later create of the same route succeeded.
+        line = "I can't open the PR: `mcp__github__create_pull_request` returned 422."
+        out = self.stop([trg.human("open a PR"), *failed_pr_create("tu_1"),
+                         use(OPEN_PR, {"title": "t", "head": "b", "base": "main"}, "tu_2"),
+                         done("tu_2", "created #7"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_the_remedy_names_the_route_and_measured_cites(self):
+        # Catches: a remedy that names the try and the check but not the cite forms a line may carry, so a reader cannot
+        # tell that a route cite or a dated measurement clears the line.
+        line = "I could not open the PR; open it from your computer."
+        out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
+                         *failed_bash("grep -r pulls ci/", "tu_g"), trg.assistant_text(line)])
+        reason = self.assert_blocked_for(out, NO_TRY, line)
+        self.assertIn("Remedy:", reason)
+        self.assertIn("Lines:", reason)
+        remedy = reason[reason.index("Remedy:"):reason.index("Lines:")]
+        self.assertIn("(route", remedy, "the remedy names no route cite: %s" % remedy)
+        self.assertIn("(measured", remedy, "the remedy names no measured cite: %s" % remedy)
+
+    def opened_by_stop(self, reply):
+        """(stdout, paths the Stop process opened, the refusals path, the transcript path) for one reply, with a refusals
+        file and the route rows in place. The refusals file is written again for each run: a run that settles it removes
+        it."""
+        refusals = os.path.join(self.cfg, "state", "refusals", "cannot-sid-1.jsonl")
+        os.makedirs(os.path.dirname(refusals), exist_ok=True)
+        with open(refusals, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({"ts": "2026-11-06T10:00:00-06:00", "tool_name": OPEN_PR,
+                                     "reason": "refused"}) + "\n")
+        hook_base.write_route_rows(self.rows, [ROW_REFUSED])
+        transcript = trg.write_transcript([trg.human("open a PR"), trg.assistant_text(reply)], self.run_dir)
+        hook = {"hook_event_name": "Stop", "transcript_path": transcript, "stop_hook_active": False,
+                "cwd": self.run_dir, "session_id": "cannot-sid-1"}
+        env = hook_base.surface_env(dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home), "local")
+        env[hook_base.ROUTE_ROWS_ENV] = self.rows
+        run = subprocess.run([sys.executable, "-c", OPENS_CODE, trg.REPORT_GUARD], input=json.dumps(hook),
+                             capture_output=True, text=True, timeout=15, env=env)
+        self.assertEqual(run.returncode, 0, "the Stop hook exited non-zero: " + run.stderr[-300:])
+        self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
+        _, mark, tail = run.stderr.rpartition("OPENED ")
+        self.assertTrue(mark, "the probe did not finish: " + run.stderr[-300:])
+        return run.stdout.strip(), json.loads(tail), refusals, transcript
+
+    def test_cc_cost_a_claim_free_reply_adds_no_read_of_the_refusals_or_route_file(self):
+        # Catches: the check reading the refusals file or the route rows on a reply that claims nothing. Two readers that
+        # predate the check open the refusals file on every Stop (the route flags, and the settling of the file). So the
+        # proof is a difference: the same reply with one claim line adds exactly one read of the refusals file, and the
+        # claim-free reply reads the route rows not at all.
+        refuse = "`%s` refusal was right." % OPEN_PR
+        free_out, free_opened, refusals, transcript = self.opened_by_stop(refuse + " Opening the PR next.")
+        self.assertEqual(free_out, "", "a claim-free reply was judged: %s" % free_out)
+        self.assertNotIn(self.rows, free_opened, "the route rows were read on a claim-free reply")
+        self.assertIn(transcript, free_opened)
+        _, claimed_opened, _, _ = self.opened_by_stop(refuse + " I can't open the PR.")
+        extra = claimed_opened.count(refusals) - free_opened.count(refusals)
+        self.assertEqual(extra, 1, "the refusals file read %d more times on a claim line, expected one" % extra)
 
 
 if __name__ == "__main__":

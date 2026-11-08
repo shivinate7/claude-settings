@@ -73,7 +73,7 @@ WITH_ROUTE = WHY % (" (route %s)" % ROUTE_ID)
 DEAD_ROUTE = WHY % " (route r-missing)"
 ASKS_CITE = WHY % " (route r-asks)"
 # An Input Needed item with no Why yours label. Layer (a) does not judge it, even with a dead cite.
-UNLABELLED = "Push from your computer (route r-missing)."
+UNLABELLED = "The builder can't push from here (route r-missing)."
 # A prose line with a capability verb and no Why yours label. The hand-off guard leaves it alone. Its subject is the
 # trailer check, a third party, so the cannot-claim check does not read it as the session's own claim.
 NOT_HAND_OFF = "The trailer check can't run here, so it is open."
