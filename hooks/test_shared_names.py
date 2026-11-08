@@ -27,7 +27,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+sys.path.append(os.path.join(HERE, "..", "lint"))  # appended: a lint module never shadows a hook module
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 RUN = _test_temp.run_folder()  # removed when the suite ends
 HOOKS_UNDER_TEST = os.environ.get("HOOKS_UNDER_TEST") or HERE  # a fixture copy of hooks/ may be scanned instead
@@ -417,6 +417,26 @@ def case_config_dir_copies_sit_only_in_the_import_fallback():
     return not problems, "; ".join(problems) or "every copy sits in the import fallback"
 
 
+def case_guard_lane_tag_is_the_shared_object():
+    """hooks/guard.py holds LANE_TAG as shared_names.LANE_TAG, the one object. A literal copy of the same string
+    reads equal to it, so the case asks for identity."""
+    shared = _shared()
+    guard = importlib.import_module("guard")
+    got = getattr(guard, "LANE_TAG", None)
+    return got is shared.LANE_TAG, "guard.LANE_TAG=%r is shared_names.LANE_TAG: %s" % (
+        got, got is shared.LANE_TAG)
+
+
+def case_report_guard_lane_tag_is_the_shared_object():
+    """lint/report_guard.py holds LANE_TAG as shared_names.LANE_TAG, the one object. A literal copy of the same
+    string reads equal to it, so the case asks for identity."""
+    shared = _shared()
+    report_guard = importlib.import_module("report_guard")
+    got = getattr(report_guard, "LANE_TAG", None)
+    return got is shared.LANE_TAG, "report_guard.LANE_TAG=%r is shared_names.LANE_TAG: %s" % (
+        got, got is shared.LANE_TAG)
+
+
 def case_guard_merge_binds_tag_prefixes_to_shared_names():
     """hooks/guard_merge.py binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to the shared_names tags, by an imported name,
     not to a copied literal. TOPIC_TAG_PREFIX already reads TOPIC_TAG, so it is the green control beside ROLE_TAG_PREFIX."""
@@ -459,13 +479,16 @@ CASES = [
     ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
     ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
      case_one_home_for_lane_heads),
-    ("(l) every config dir copy in the four hook modules sits only in an ImportError fallback of shared_names",
-     case_config_dir_copies_sit_only_in_the_import_fallback),
-    ("(m) sim_boot_record exits 0 with shared_names.py absent", case_sim_boot_record_exits_zero_without_shared_names),
-    ("(n) precompact_handoff still writes its digest with shared_names.py absent",
-     case_precompact_builds_its_digest_without_shared_names),
-    ("(o) guard_merge binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to shared_names' tags, not literals",
+    ("(l) guard.py holds LANE_TAG as shared_names' own object", case_guard_lane_tag_is_the_shared_object),
+    ("(l2) lint/report_guard.py holds LANE_TAG as shared_names' own object",
+     case_report_guard_lane_tag_is_the_shared_object),
+    ("(l3) guard_merge binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to shared_names' tags, not literals",
      case_guard_merge_binds_tag_prefixes_to_shared_names),
+    ("(m) every config dir copy in the four hook modules sits only in an ImportError fallback of shared_names",
+     case_config_dir_copies_sit_only_in_the_import_fallback),
+    ("(n) sim_boot_record exits 0 with shared_names.py absent", case_sim_boot_record_exits_zero_without_shared_names),
+    ("(o) precompact_handoff still writes its digest with shared_names.py absent",
+     case_precompact_builds_its_digest_without_shared_names),
 ]
 
 
