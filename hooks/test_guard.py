@@ -8782,6 +8782,7 @@ ENVWALK_UNIGNORED = os.path.join(ROOT, "envwalk-unignored")  # a git repo whose 
 ENVWALK_NESTED = os.path.join(ROOT, "envwalk-nested")        # a top-level folder that holds an env file
 ENVWALK_LARGE = os.path.join(ROOT, "envwalk-large")          # one folder over the walk cap, no env file
 ENVWALK_BULK = os.path.join(ROOT, "envwalk-bulk")            # a clean repo whose .gitignore lists node_modules, which holds the bulk
+ENVWALK_MODULES_OPEN = os.path.join(ROOT, "envwalk-modules-open")  # the same bulk tree, with no .gitignore line
 
 
 def build_envwalk_folders():
@@ -8816,18 +8817,31 @@ lazy_fixture((ENVWALK_IGNORED, ENVWALK_UNIGNORED, ENVWALK_NESTED), build_envwalk
 lazy_fixture((ENVWALK_LARGE,), build_envwalk_large)
 
 
-def build_envwalk_bulk():
-    # A git repo whose .gitignore lists node_modules, as real repos do. rg and ag skip what it lists, so
-    # the bulk under it is never walked. Each folder holds more than the cap on its own.
+def build_envwalk_bulk_repo(where, ignore_modules):
+    # Each folder holds more than the cap on its own, so the bulk counts only if the walk enters it.
     import guard_env
-    make_repo(ENVWALK_BULK, {".gitignore": "node_modules/\n", "README.md": "bulk\n"})
-    for folder in (os.path.join(ENVWALK_BULK, "node_modules"), os.path.join(ENVWALK_BULK, ".git", "bulk")):
+    files = {"README.md": "bulk\n"}
+    if ignore_modules:
+        files[".gitignore"] = "node_modules/\n"
+    make_repo(where, files)
+    for folder in (os.path.join(where, "node_modules"), os.path.join(where, ".git", "bulk")):
         os.makedirs(folder, exist_ok=True)
         for number in range(guard_env.ENV_WALK_LIMIT + 1):
             open(os.path.join(folder, "f%06d" % number), "w").close()
 
 
+def build_envwalk_bulk():
+    # A git repo whose .gitignore lists node_modules, as real repos do. rg and ag skip what it lists.
+    build_envwalk_bulk_repo(ENVWALK_BULK, ignore_modules=True)
+
+
+def build_envwalk_modules_open():
+    # The same tree with no .gitignore line, so rg and ag walk node_modules and its bulk is over the cap.
+    build_envwalk_bulk_repo(ENVWALK_MODULES_OPEN, ignore_modules=False)
+
+
 lazy_fixture((ENVWALK_BULK,), build_envwalk_bulk)
+lazy_fixture((ENVWALK_MODULES_OPEN,), build_envwalk_modules_open)
 
 # Allowed. A folder named .env (a virtualenv), and text that names it, read no env file.
 for _tool, _cmd in (
@@ -8916,6 +8930,11 @@ sh("env: walk over the cap, folder too large to check, refused: rg --hidden foo"
 # says an env file is held.
 sh("env: walk, bulk under node_modules and .git, folder holds no env file, allowed: rg --hidden foo",
    "rg --hidden foo", "allow", cwd=ENVWALK_BULK, lacks="holds an environment file")
+# The same bulk tree with no .gitignore line: rg and ag walk node_modules, which holds more than the walk
+# cap, so the folder is too large to check. The reason says so, and never that an env file is held.
+sh("env: walk over the cap, node_modules not ignored, folder too large to check, refused: rg --hidden foo",
+   "rg --hidden foo", "deny", "env-file", cwd=ENVWALK_MODULES_OPEN,
+   carries=("too large", "cannot be shown clean"), lacks="holds an environment file")
 # A file regex that picks a dot-prefixed env name is refused. `[A-Z]*` may be empty, so `.env.md` is picked,
 # and `env\.prod$` picks `.env.prod`.
 for _cmd in (r"ag --hidden -G '\.env[A-Z]*\.md$' foo", r"ag --hidden -G 'env\.prod$' foo"):
