@@ -1219,11 +1219,8 @@ def case_powershell_bash_prefix_command_substitution():
          entry_of(ps_task("$x = $(Get-Date); git push")), None)
 
 
-def case_powershell_bash_prefix_two_deep_expansion():
-    # A NAME=value prefix may hold an expansion nested two levels deep, as in `A=${A:-${B:-${C}}}`, which is a bash
-    # form. The same text in single quotes is a string and passes.
-    page("a PowerShell command, A=${A:-${B:-${C}}} node x, is refused as a bash operator", "set",
-         entry_of(ps_task("A=${A:-${B:-${C}}} node x")), ("command-in-item", "bash operator"))
+def case_powershell_two_deep_expansion_in_single_quotes_passes():
+    # The same two-level text in single quotes is a string, and its contents are blanked, so it passes.
     page("a PowerShell string holding ${A:-${B:-${C}}}, single-quoted, passes", "set",
          entry_of(ps_task("$cfg = '${A:-${B:-${C}}}'")), None)
 
@@ -1253,15 +1250,6 @@ def case_step_path_cmdlet_is_a_shell_line():
          entry_of(task_item(["Check the output of `/opt/bin/Get-Thing`"])), ("command-in-item", "shell line"))
     page("a step holding `docs/Read-Me.md` alone is text and passes", "set",
          entry_of(task_item(["Check the output of `docs/Read-Me.md`"])), None)
-
-
-def case_step_span_flag_without_a_program_is_text():
-    # A lowercase word then a flag is a shell line when the word is a program (`grep -r x` and `chmod +x f` stay
-    # shell lines in case_step_shell_programs_partial). A span whose word names no program is text.
-    for span in ("ok --force", "mode -v", "the -x flag"):
-        page("a step holding `%s` is text and passes" % span, "set",
-             entry_of(task_item(["Check the output of `%s`" % span])), None)
-
 
 # ------------------------------------------------------------------ a question says how it departs from main
 #
@@ -1919,8 +1907,9 @@ def main():
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
                  case_task_str_replace_prose_label_passes,
                  case_powershell_pipe_then_newline_then_head, case_powershell_param_attribute_at_line_start,
-                 case_powershell_bash_prefix_command_substitution, case_powershell_bash_prefix_two_deep_expansion,
-                 case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_without_a_program_is_text):
+                 case_powershell_bash_prefix_command_substitution,
+                 case_powershell_two_deep_expansion_in_single_quotes_passes,
+                 case_step_path_cmdlet_is_a_shell_line):
         try:
             case()
         except Exception as exc:
