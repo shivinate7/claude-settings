@@ -16,9 +16,11 @@ import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subproc
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
+sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
+from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 RUN_FOLDER = _test_temp.run_folder()
@@ -27,9 +29,13 @@ atexit.register(shutil.rmtree, RUN_FOLDER, True)
 PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
 UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
+# The drift line bin/ste-changed prints under the pin note's variable: PIN_NOTE_MARKER, then this text.
+PIN_NOTE_DRIFT = ("CI pins ste-lint at abc1234 (2026-10-01, .github/workflows/checks.yml:5), older than this copy's lint. "
+                  "A line can pass here and fail CI. Move the pin to claude-settings main, in a lane of its own.")
 
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
+DETAILS = __DETAILS__  # step name -> the text after its verdict word; a step not named here reads `stub step`
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
@@ -42,7 +48,7 @@ if "--plan" in sys.argv:
 end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
 while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
-lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
+lines = ["%-15s %s: %s" % (state, name, DETAILS.get(name, "stub step")) for state, name in STEPS]
 print("\\n".join(lines))
 if RC == 1:
     with open(STEP_LOG, "w", encoding="utf-8") as f:
@@ -123,15 +129,17 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def write_stub(self, steps, rc, sleep=0):
-        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
+    def write_stub(self, steps, rc, sleep=0, details=None):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
+        `details` maps a step name to the text its line prints after the verdict word (default `stub step`)."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)))
+        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
+               .replace("__DETAILS__", repr(details or {})))
         return self.stub
 
-    def use_ci_job(self, steps, rc):
+    def use_ci_job(self, steps, rc, details=None):
         """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
-        self.write_stub(steps, rc)
+        self.write_stub(steps, rc, details=details)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -199,7 +207,7 @@ class LaneLint(LaneLintFixture):
         instead of passing on reads to the end only after the stub's bound."""
         go = os.path.join(self.t, "go")
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0))
+        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0)).replace("__DETAILS__", "{}")
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
         harness = os.path.join(self.t, "lane_lint_progress.py")
         tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
@@ -243,6 +251,20 @@ class LaneLint(LaneLintFixture):
         self.assertIn(self.head("feat")[:7], lines[0])
         self.assertIn("main", lines[0])
         self.assertIn("batch runner", lines[0])
+
+    def test_a_passing_lint_with_a_stale_pin_prints_the_whole_drift_line_on_its_pass_line(self):
+        self.use_ci_job(PASSING, 0, details={"ste lint": PIN_NOTE_MARKER + PIN_NOTE_DRIFT})
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertIn(PIN_NOTE_MARKER + PIN_NOTE_DRIFT, out, "the PASS line lacks the whole drift line: " + out)
+
+    def test_a_passing_lint_with_no_stale_pin_prints_no_pin_note(self):  # the control
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertNotIn(PIN_NOTE_MARKER, out, "a pass with no drift printed a pin note: " + out)
 
     def test_a_passing_lint_names_its_skipped_ci_steps_on_the_pass_line(self):
         self.use_ci_job(PASSING + [("skipped", "Push-only lint A"), ("skipped", "Push-only lint B")], 0)
