@@ -1988,8 +1988,8 @@ LOG_LOCK_OFFSET = 1 << 40  # a byte past any log data, so a reader never meets t
 
 def try_lock_fd(fd) -> bool:
     """Try once to take an exclusive lock on the open file `fd`, never waiting. -> True if held, False if another holder has it.
-    Any other OS error raises. The lock frees when the holder's fd closes or the process dies. The one home of this lock:
-    the log line lock and merge's lane-lint slots call it. msvcrt on Windows, fcntl elsewhere."""
+    Any other OS error raises. The lock frees when the holder's fd closes or the process dies. The log line lock and merge's
+    lane-lint slots call it (hooks/ci_wake.py and janitor/agent_end_reap.py still hold their own copies). msvcrt on Windows, fcntl elsewhere."""
     try:
         if os.name == "nt":
             import msvcrt
