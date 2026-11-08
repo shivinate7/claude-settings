@@ -22674,6 +22674,42 @@ _relesc_add("other-checkout: heredoc replay kept body unresolved word: a heredoc
             "home", rule="other-checkout")
 
 
+# A helper.sh that the outer command runs itself, not through a second body. Each run reaches it through a shell
+# variable, a shell variable passed to a shell, a copy or move that renames it, a pipe into a shell, or xargs. The
+# guard cannot see that nothing runs the body, so the body is kept. A dropped body would let the run write ../other/f.
+_OUTER_RUNS = (
+    "f=helper.sh; $f",
+    'f=helper.sh; "$SHELL" $f',
+    "cp helper.sh run2.sh && bash run2.sh",
+    "mv helper.sh run2.sh && bash run2.sh",
+    "f=helper.sh; cat $f | bash",
+    r"printf 'helper.sh\n' | xargs bash",
+)
+for _run in _OUTER_RUNS:
+    _relesc_add("other-checkout: heredoc replay kept body outer run: a heredoc helper.sh that echoes to ../other/f, "
+                "then %s, is refused" % _run,
+                "deny", _kept_heredocs([("helper.sh", "echo hi > ../other/f")], _run), "home", rule="other-checkout")
+# A helper in a folder one level down: from sub/, a single ../ stays inside the home, so the body reaches ../../other/f.
+_relesc_add("other-checkout: heredoc replay kept body outer run: a heredoc sub/helper.sh that echoes to ../../other/f, "
+            "then cd sub && bash helper.sh, is refused",
+            "deny", _kept_heredocs([("sub/helper.sh", "echo hi > ../../other/f")], "cd sub && bash helper.sh"),
+            "home", any_of=("other-checkout", "worktree-home"))
+# A judge that writes its argv to a file: the file may be run later, and the guard cannot see that nothing runs it.
+# Each judge is written in the command, so the guard reads its source.
+_relesc_add("other-checkout: heredoc replay kept body outer run: a heredoc judge.py that writes sys.argv[1] to cmd.sh, "
+            "then python3 judge.py \"echo x > ../other/f\", is refused",
+            "deny", _kept_heredocs([("judge.py", "import sys\nopen('cmd.sh','w').write(sys.argv[1])")],
+                                   'python3 judge.py "echo x > ../other/f"'), "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay kept body outer run: a heredoc judge.js that writes process.argv[2] to cmd.sh "
+            "with writeFileSync, then node judge.js \"echo x > ../other/f\", is refused",
+            "deny", _kept_heredocs([("judge.js", "require('fs').writeFileSync('cmd.sh', process.argv[2]);")],
+                                   'node judge.js "echo x > ../other/f"'), "home", rule="other-checkout")
+# Control: a helper that only echoes, run by bash from the outer command, writes nothing out of the tree.
+_relesc_add("other-checkout: heredoc replay kept body outer run control: a heredoc helper.sh that only echoes, then "
+            "bash helper.sh, is allowed",
+            "allow", _kept_heredocs([("helper.sh", "echo hi")], "bash helper.sh"), "home")
+
+
 # ---- Script rows. The fixture writes every on-disk script these rows run into RELESC_TREE_AGENT's home
 # (`_relesc_tree_files`). No command here writes one. The root's judge.py only prints, and sub/judge.py runs its
 # argument. The cd rows and the frozen row run from the root, and the mirror swaps the two. Each other folder holds
