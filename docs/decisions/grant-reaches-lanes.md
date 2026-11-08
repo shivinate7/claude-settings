@@ -16,7 +16,7 @@ Earlier sign-off: Cockpit item 152, pick a, 2026-11-03 18:21 CST.
   - the lane's own `get_session` result, read without a `session_id`, holds a `cs-step:<slug>` tag for the word's slug (a lane may hold several `cs-step` tags, and a word for any one of them counts);
   - a `get_event` result in the lane's transcript shows the owner's word for that slug, as a user event whose content is a plain string;
   - the word's act is `spawn`, and the call is still inside the word's length, counted from the event's server `created_at`.
-- The gate runs after every refusal that can reach an `Agent` or `Task` call. It reads the last 4 MiB of the transcript only (`GRANT_TAIL_BYTES` and `spawn_grant_hit` in `hooks/guard.py`).
+- The guard runs after every refusal that can reach an `Agent` or `Task` call. It reads the last 4 MiB of the transcript only (`GRANT_TAIL_BYTES` and `spawn_grant_hit` in `hooks/guard.py`).
 
 ## What never counts
 
@@ -35,7 +35,8 @@ Earlier sign-off: Cockpit item 152, pick a, 2026-11-03 18:21 CST.
 - The refused-act probe ran on a Bash write (see "The probe of a refused act") and on an Agent spawn (see "The Agent spawn, with a scratch allow hook"). No classifier refusal of a spawn was seen, so that refusal stays unmeasured. The classifier skip is measured for an allowed act only (plan `docs/plans/grant-reaches-lanes.md`, section 1).
 - The grant read must sit in the last 4 MiB of the transcript. An older grant is lost, and it grants nothing.
 - The lane's own get_session result must also sit in the last 4 MiB of the transcript, or the grant is refused. A long lane re-reads its tags with get_session.
-- A `grant off` reaches the gate only when the lane reads it with `get_event`. Until then the grant stays live to its end.
+- A `grant off` reaches the guard only when the lane reads it with `get_event`. Until then the grant stays live to its end.
+- The guard reads the lane's tags a second time. `own_session_read` in `hooks/own_session.py` reads the whole transcript file and takes the get_session result whose `ccr.id` is the session's own id. `spawn_grant_hit` reads the last 4 MiB only and takes the get_session call with no `session_id`, in the same pass that finds the get_event results. I found no reason for the copy beyond that one bounded pass; reuse of `own_session_read` was not tried.
 - The clock. A grant starts at the owner event's server `created_at`. Expiry is checked against the lane's own clock (`time.time()`). Clock skew between the two is unmeasured.
 - The length has no cap short of six digits for `n`. The ruling names `<n>m`. The word also takes `h`, which the ruling does not name.
 
@@ -59,7 +60,7 @@ act is a Bash write of an allow rule into `.claude/settings.local.json`, not an 
 
 So, in one run, a hook `allow` did not lift a classifier refusal of a settings-file write. Which
 of the four named conditions applied: unmeasured. Whether a lane's `Agent` spawn meets one of
-them: unmeasured. The mod `tool.check` gate is next (question 5).
+them: unmeasured. The mod `tool.check` hook is next (question 5).
 
 ### The Agent spawn, with a scratch allow hook
 
@@ -78,8 +79,8 @@ In run 1, the spawned agent's Write still met the classifier (2903 ms, allowed).
 
 ## Check and cost
 
-- Check: `hooks/test_grant_word.py` (the word's form), `hooks/test_grant_guard.py` (the gate; `test_grant_past_the_tail_read_grants_nothing` pins the 4 MiB bound with a grant 16 MiB back), and `hooks/test_local_time.py` (the context line).
-- Cost: one bounded transcript tail read, at most 4 MiB, per `Agent` or `Task` call from a lead session that reaches the check. Nothing on other tool calls. One `guard.log` line per allow (decision cell `spawn-grant`), and one per failed transcript read on an `Agent` or `Task` call (`spawn-grant-unread`), both under the rule `grant-reaches-lanes`. No new file: the coordinator's prompt hook already saves every prompt (`capture()` in `hooks/local_time.py`), and the grant line adds none.
+- Check: `hooks/test_grant_word.py` (the word's form), `hooks/test_grant_guard.py` (the guard; `test_grant_past_the_tail_read_grants_nothing` pins the 4 MiB bound with a grant 16 MiB back), and `hooks/test_local_time.py` (the context line).
+- Cost: one bounded transcript tail read, at most 4 MiB, per `Agent` or `Task` call from a lead session that reaches the check. On each other tool call that passes the guard's earlier checks, the hook process imports `grant_word` and compiles its regexes, and reads no file. That cost is unmeasured. One `guard.log` line per allow (decision cell `spawn-grant`), and one per failed transcript read on an `Agent` or `Task` call (`spawn-grant-unread`), both under the rule `grant-reaches-lanes`. No new file: the coordinator's prompt hook already saves every prompt (`capture()` in `hooks/local_time.py`), and the grant line adds none.
 
 Why: the owner had to type a grant again in each session (plan, section "The problem").
 
