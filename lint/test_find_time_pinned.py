@@ -1690,6 +1690,9 @@ class SwiftCalendarTest(FinderCase):
             "        let n_soon = Date(timeIntervalSinceNow: 60)",
             "        let n_fixed = Date(timeIntervalSince1970: 0)",
             "        let n_ref = Date(timeIntervalSinceReferenceDate: 0)",
+            "        let m_prefix = MyDate.now",
+            "        let m_suffix = Date.nowish",
+            "        let m_since = Date(timeIntervalSinceNowish: 1)",
             "        print(n_now, n_soon, n_fixed, n_ref)",
             "    }",
             "}",
@@ -1698,7 +1701,9 @@ class SwiftCalendarTest(FinderCase):
         calendar_judge(self, "Tests/StampReadTests.swift", text,
                        listed=["let n_now = Date.now", "let n_soon = Date(timeIntervalSinceNow: 60)"],
                        clean=["let n_fixed = Date(timeIntervalSince1970: 0)",
-                              "let n_ref = Date(timeIntervalSinceReferenceDate: 0)"])
+                              "let n_ref = Date(timeIntervalSinceReferenceDate: 0)",
+                              "let m_prefix = MyDate.now", "let m_suffix = Date.nowish",
+                              "let m_since = Date(timeIntervalSinceNowish: 1)"])
 
     def test_date_now_inside_an_elapsed_assert_is_that_assert_only(self):
         text = src(
@@ -1715,6 +1720,23 @@ class SwiftCalendarTest(FinderCase):
                              clean=["XCTAssertLessThan(Date.now.timeIntervalSince(s_begin), 1)"])
         self.assertIn(("Tests/StampSpanTests.swift", lineno(text, "XCTAssertLessThan(Date.now"), "elapsed-assert"),
                       self.rows(out), "the elapsed subtraction of Date.now is no longer elapsed-assert")
+
+    def test_since_now_inside_an_elapsed_assert_is_that_assert_only(self):
+        text = src(
+            "import XCTest",
+            "final class SinceNowSpanTests: XCTestCase {",
+            "    func testSpan() {",
+            "        let s_since = Date(timeIntervalSince1970: 0)",
+            "        XCTAssertLessThan(Date(timeIntervalSinceNow: 0).timeIntervalSince(s_since), 1)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/SinceNowSpanTests.swift", text)
+        out = calendar_judge(self, "Tests/SinceNowSpanTests.swift", text,
+                             clean=["XCTAssertLessThan(Date(timeIntervalSinceNow: 0).timeIntervalSince(s_since), 1)"])
+        proof = lineno(text, "XCTAssertLessThan(Date(timeIntervalSinceNow")
+        self.assertIn(("Tests/SinceNowSpanTests.swift", proof, "elapsed-assert"), self.rows(out),
+                      "the elapsed subtraction of Date(timeIntervalSinceNow:) is no longer elapsed-assert")
 
     def test_calendar_forms_after_comment_openers_quotes_and_multi_line_strings(self):
         text = src(
