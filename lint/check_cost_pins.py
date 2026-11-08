@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Fails when a decision record's Cost sentence names a file that no test pins, or states a count with no reader,
-or when a debt note states a count with no reader.
+"""Fails when a decision record's Cost sentence names a file that no test pins. It also fails on a count with no
+reader, in a Cost sentence or in a debt note.
 
     python3 lint/check_cost_pins.py [--root DIR]
 
@@ -40,18 +40,20 @@ on the line of its count word: `<record>:<line>: count in a Cost sentence with n
 A debt note is one list item of the debt notes file (kind `debt-notes` in lint/layout.json), with its continuation
 lines. A note is read sentence by sentence, with the same sentence split and code-span blanking as a Cost paragraph.
 A note's count claim is `among` and a count word (one to six, or digits), or digits, `of`, and a number of two or more
-digits (`406 of 8000`). The first number of an `N of M` claim is not read after the word `Round` or `Try`, or as the tail
-of a decimal (`20.2 of 28`). Words match in any case. A claim passes on the Cost rule's passes (a bound, an exempt word,
-a test-name candidate that holds the nearest code span), or when its sentence holds a date (YYYY-MM-DD) or `run` and
-digits: a count in a note is a dated past observation, not a standing fact. A sentence with a claim that passes none of
-these is one finding, on the line of its claim: `<notes path>:<line>: count in a debt note with no reader`. A note's
-cost-noun counts are not read, and a Cost sentence in a decision record keeps the Cost rule alone.
+digits (`406 of 8000`). A number may carry thousands separators (`1,406 of 8,000`). The first number of an `N of M`
+claim is not read after the word `Round` or `Try`, or as the tail of a decimal (`20.2 of 28`). Dates, times and ids are
+blanked first, as in a Cost sentence, so `item 3 of 40` and `step 2 of 12` make no claim. Words match in any case.
+A claim passes on the Cost rule's passes: a bound, an exempt word, or a test-name candidate that holds the nearest code
+span. It also passes when its sentence holds a date (YYYY-MM-DD) or `run` and digits. A count in a note is a dated past
+observation, not a standing fact. A sentence with a claim that passes none of these is one finding, on the line of its
+claim: `<notes path>:<line>: count in a debt note with no reader`. A note's cost-noun counts are not read. A Cost
+sentence in a decision record keeps the Cost rule alone.
 
 The report is one line per token and line: `<record>:<line>: <token> named in a Cost sentence with no pin`.
 Exit 1 when there is a finding, 0 when there is none. The decision records (kind `decisions` in lint/layout.json) and
 the debt notes file are read. A debt record's Cost line is not read. Each test file is read once per run.
-Cost: at most one more file read per run than before, the notes file, read once. The count rule scans the decision
-records, so an unbounded count there is a finding.
+Cost: per run, one read of the notes file, one read of lint/layout.json (through lint/layout.py), and one read of each
+test file a Cost sentence or a note names, cached. The number of test files read is not pinned.
 """
 import argparse
 import collections
@@ -91,10 +93,13 @@ BOUND = re.compile(r"\b(?:at\s+most|up\s+to|no\s+more\s+than|fewer|at\s+least)\b
 # A number beside a cost noun that counts nothing: a date, a time, an id.
 NOT_COUNTS = [re.compile(r"\b\d{4}-\d{2}-\d{2}\b"), re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"),
               re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
+# A number, with thousands separators (`1,406`) or without.
+NUMBER = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
 # A debt note's count claim: `among` and a count word, or `N of M` with M of two or more digits. The lookbehinds drop
 # a decimal tail (`20.2 of 28`) and a number after Round or Try.
-NOTE_CLAIM = re.compile(r"\bamong\s+(?:\d+|one|two|three|four|five|six)\b"
-                        r"|(?<![\d.])(?<!\bround )(?<!\btry )\b\d+\s+of\s+\d{2,}(?!\d)", re.IGNORECASE)
+NOTE_CLAIM = re.compile(r"\bamong\s+(?:" + NUMBER + r"|one|two|three|four|five|six)\b"
+                        r"|(?<![\d.])(?<!\bround )(?<!\btry )\b" + NUMBER + r"\s+of\s+(?:\d{1,3}(?:,\d{3})+|\d{2,})(?!\d)",
+                        re.IGNORECASE)
 NOTE_DATED = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\brun\s+\d+\b", re.IGNORECASE)
 # text, [(code span text, line)], line of the first character, text with code spans blanked, [(start, end)] of each span
 Sentence = collections.namedtuple("Sentence", "text spans line blanked holes")
@@ -275,9 +280,7 @@ def pinned(token, candidates, root, texts):
 def counts(sentence):
     """(start, end) in the sentence text of each count word that makes a claim. A span, a date, a time and an id
     are blanked first, so none counts as a word of the claim; a span stays one word between count and noun."""
-    blanked = sentence.blanked
-    for pattern in NOT_COUNTS:
-        blanked = pattern.sub(lambda m: "_" * len(m.group()), blanked)
+    blanked = blank_not_counts(sentence.blanked)
     words = list(WORD.finditer(blanked))
     found = []
     for i, word in enumerate(words):
@@ -301,15 +304,24 @@ def has_reader(sentence, start, end, candidates, root, texts):
     return pinned(sentence.spans[min(near)[1]][0], candidates, root, texts)
 
 
+def blank_not_counts(text):
+    """`text` with each date, time and id overwritten by underscores of the same length, so no offset moves."""
+    for pattern in NOT_COUNTS:
+        text = pattern.sub(lambda m: "_" * len(m.group()), text)
+    return text
+
+
 def note_paragraphs(lines):
-    """Each debt note of `lines` as a list of (line number, text): a list item and its continuation lines. A blank
-    line, a heading or a code fence ends a note; fenced code is not read."""
+    """Each debt note of `lines`, as a list of (line number, text) pairs. A note is a list item and its continuation
+    lines. A blank line, a heading or a code fence ends it. Fenced code is not read."""
+
     found, current, fenced = [], None, False
     for number, text in enumerate(lines, 1):
         if FENCE.match(text):
             fenced, current = not fenced, None
         elif fenced or HEADING.match(text) or not text.strip():
             current = None
+
         elif LIST_ITEM.match(text):
             current = [(number, text)]
             found.append(current)
@@ -319,11 +331,12 @@ def note_paragraphs(lines):
 
 
 def note_claim(sentence, candidates, root, texts):
-    """The offset in the sentence text of its first note count claim that has no reader, else None. A bound, an
-    exempt word, a date or run id in the sentence, or a test that holds the nearest span, passes it."""
+    """The offset in the sentence text of its first note count claim that has no reader, else None.
+    A bound, an exempt word, a date or run id in the sentence passes it. So does a test that holds the nearest span.
+    """
     if EXEMPT.search(sentence.text) or NOTE_DATED.search(sentence.blanked):
         return None
-    for m in NOTE_CLAIM.finditer(sentence.blanked):
+    for m in NOTE_CLAIM.finditer(blank_not_counts(sentence.blanked)):
         if not has_reader(sentence, m.start(), m.end(), candidates, root, texts):
             return m.start()
     return None
