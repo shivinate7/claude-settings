@@ -1872,8 +1872,10 @@ MUTATIONS = [
      "guard", 'narrate: the launcher script run through python'),
     # check-tail: a lint piped to tail or head before a commit or a push, and the script operand reader.
     ('check-tail lint: a uv run lint is not read through uv',
-     '    index = _skip_uv_run(tokens, index)\n    if LINT_SCRIPT.search(',
-     '    if LINT_SCRIPT.search(',
+     '    index = _skip_uv_run(tokens, index)\n    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word\n'
+     '        return ""\n    if LINT_SCRIPT.search(',
+     '    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word\n'
+     '        return ""\n    if LINT_SCRIPT.search(',
      "guard", 'check-tail: uv run lint script piped to tail, then ; git commit, is refused'),
     ('check-tail lint: a .py command word is no script',
      '    if not script and word.endswith(".py"):\n        script = tokens[index]\n    return script',
@@ -1937,8 +1939,8 @@ MUTATIONS = [
      '    texts = [_pipelines(stripped)]\n',
      "guard", 'a lint piped to tail inside $(...)'),
     ('check-tail lint: a commit beside a lint in a substitution is no follow-up',
-     '                after += [stages for text in others for stages in text]\n',
-     '                pass\n',
+     '            after = list(pipelines[at + 1:]) + [stages for text in others for stages in text]\n',
+     '            after = list(pipelines[at + 1:])\n',
      "guard", 'a lint piped to tail inside $(...)'),
     ('check-tail lint: a commit word anywhere in a segment counts as a commit',
      '    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))',

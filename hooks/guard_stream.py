@@ -275,6 +275,8 @@ def check_stage(segment: str, background: bool) -> str:
     if index is None:
         return ""
     index = _skip_uv_run(tokens, index)
+    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
+        return ""
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
     if _script_run(tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
@@ -296,6 +298,8 @@ def lint_stage(segment: str, background: bool) -> str:
     if index is None:
         return ""
     index = _skip_uv_run(tokens, index)
+    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
+        return ""
     if LINT_SCRIPT.search(_script_run(tokens, index).replace("\\", "/")):
         return "lint"
     return ""
@@ -353,7 +357,8 @@ def check_tail_hit(stripped: str, background: bool) -> str:
     command counts only when a later segment of the call runs a commit or a push: the pipeline's exit is
     the last stage's, so a red lint hides, and the commit or push runs on it (incident, lane
     windows-tests-for-touched-files). Order across texts is not tracked: a lint inside a substitution
-    counts when any other text of the call runs a commit or a push."""
+    counts when any other text of the call runs a commit or a push, and so does an outer lint when a
+    substitution after it runs one (`lint | tail -2 && out=$(git commit ...)`)."""
     texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
     if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
         texts = [(stripped, False)]
@@ -364,15 +369,12 @@ def check_tail_hit(stripped: str, background: bool) -> str:
             if hit:
                 return hit
     for number, pipelines in enumerate(texts):
-        outer = number == len(texts) - 1   # the last text is the command itself
         for at, stages in enumerate(pipelines):
             hit = _pipeline_hit(stages, background, lint_stage, any_later=True)
             if not hit:
                 continue
-            after = list(pipelines[at + 1:])
-            if not outer:
-                others = texts[:number] + texts[number + 1:]
-                after += [stages for text in others for stages in text]
+            others = texts[:number] + texts[number + 1:]
+            after = list(pipelines[at + 1:]) + [stages for text in others for stages in text]
             if any(_commits_or_pushes(segment) for later in after for segment in later):
                 return hit + " then a commit or push"
     return ""
