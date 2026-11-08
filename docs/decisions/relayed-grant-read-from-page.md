@@ -4,7 +4,7 @@
 
 Owner ask ask-mw3lqb8bwx, 2026-11-05 07:49 CST, verbatim: "i need sessions to be able to relay my word to other cloud sessions and it be trust worthy add in auto mode". Roadmap step owner-word-relay builds it.
 
-Owner ruling, 2026-11-08 ~11:50 CST, picking "Widen to settings" in lane session page-save-reaches-auto-mode: the entry may also cover a change to settings or permissions, when `page_grant.py` counted the owner's page answer naming that change. Overrides stay refused. He saw the risk first: a session that writes a fake answer row could then widen auto mode.
+Owner ruling, 2026-11-08 ~11:50 CST, typed in lane session page-save-reaches-auto-mode, picking `Widen to settings`: the entry may also cover a change to settings or permissions. It covers that change only when this session itself ran `page_grant.py` on the owner's page answer naming that change, and it printed `counted`. Overrides stay refused. The message route ("Owner Session Message") is unchanged. He saw the risk first: a session that writes a fake answer row could then widen auto mode.
 
 ## What counts
 
@@ -42,7 +42,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 
 - Item 254 (lane review-fix-check): the owner had to type "go" after picking item 231's choice a on the page.
 - Item 242, joyous ruleset: batch runner 9 was refused at 07:47 CST. Measured 2026-11-05 07:58 CST: `answers/joyous-ruleset-shared-form` is gone. The owning session deletes the answer when it routes ("Route and close"). So a reader alone would not have fixed item 242.
-- Item 149 b: a page answer to add an auto-mode allow line was refused as self-modification, 2026-11-01 23:06 CST. The 2026-11-08 ruling above answers it.
+- Item 149 b: the coordinator's `send_message` brief to a lane, which relayed the owner's Queue page save for an auto-mode allow line, was refused as self-modification, 2026-11-01 23:06 CST (time from roadmap step runner-merge-allow, `git show origin/roadmap:roadmap/data/steps/runner-merge-allow.json`). The 2026-11-08 ruling above covers a session that itself reads and counts the page answer. A relayed message still cannot carry it.
 - Source for both: the roadmap step owner-word-relay note (record branch commit dd574d33), and the live read of item 242 at 07:58 CST.
 
 ## Gaps
