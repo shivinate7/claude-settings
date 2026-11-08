@@ -1507,3 +1507,5 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
+- brief-id-markdown-backtrack: a lane brief id label followed by about 1000 `*` or `_` and no colon costs about 2 s to match; a run of 100 costs under 3 ms (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
+- brief-id-placeholder-digit: a placeholder id that holds a digit, such as `session_x1`, passes the lane brief id check (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
