@@ -270,7 +270,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   reading from the list. A lane row of this repo counts when it is not archived and its status is completed or failed.
   A review ready row counts when no open pull is on its steps' head refs (a draft whose head is on main does not hold). It reads no
   step, page item or age. A missing sessions list, a stale file, skipped rows, or a live lane row with no status
-  enum name reads unknown. It exits 1, with no summary line, when every entry is unknown;
+  enum name reads unknown. The command exits 1, with no summary and no finished line, when every list entry is unknown;
 - `Step:` trailers that name no step.
 
 ## Cost

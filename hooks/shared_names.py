@@ -6,7 +6,7 @@ guard or any sibling hook.
 
 import os
 import re
-from typing import Optional
+from typing import Optional, Union
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -59,7 +59,7 @@ def idle_lanes_summary(count: int) -> str:
     return f"merge: {count} {IDLE_LANES_LINE}."
 
 
-def finished_lanes_line(count: int | str) -> str:
+def finished_lanes_line(count: Union[int, str]) -> str:
     """The line `merge --idle-lanes` prints after its summary: the count, or `unknown (<why>)` for a count that could not be read."""
     if isinstance(count, int):
         return f"merge: {count} {FINISHED_LANES_LINE}."
