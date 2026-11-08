@@ -1278,6 +1278,22 @@ class SmallBaseMove(Env):
         self.assertIsNotNone(refusal)
         self.assertIn("does not hold main", refusal)
 
+    def test_a_batch_rename_of_a_path_main_changed_is_a_shared_path(self):
+        # --no-renames in small_base_move: the batch's rename names its old path too, so main's change to base.txt is shared.
+        # With rename detection the batch names moved.txt only, the shared check passes, and the green run stands.
+        repo, _ = self.batch_repo()
+        sh(repo, "git", "mv", "base.txt", "moved.txt"); sh(repo, "git", "commit", "-qm", "N renames base")
+        n_head = sh(repo, "git", "rev-parse", "HEAD")
+        base = sh(repo, "git", "merge-base", "main", n_head)
+        sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, "base.txt"), "main changed\n")
+        sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "main changes base")
+        scope = sh(repo, "git", "diff", "--name-status", "-M", base, n_head)
+        self.assertIn("R100\tbase.txt\tmoved.txt", scope, "the batch is not an exact rename, so the case proves nothing:\n" + scope)
+        with tempfiles_in_run_folder():
+            ok, why = merge.small_base_move(repo, "main", n_head)
+        self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
+        self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
+
     def scoped(self, workflow=CHECKS_YML, scope=True):
         """Main and feat both gain the CI files; feat then holds main's tip."""
         o = self.other
@@ -12695,9 +12711,11 @@ def posted_body(test, out):
     test.assertTrue(ends, "the printed record has no CI line:\n" + out)
     return "\n".join(lines[start:ends[0] + 1]) + "\n"
 
-def review_comment(cid, number, body, created="2026-10-02T00:00:00Z"):
-    """A comment on issue or pull request `number`, as the repo-wide comment list gives it."""
-    return {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
+def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=None):
+    """A comment on issue or pull request `number`, as the repo-wide comment list gives it. GitHub keeps created_at when a comment is
+    edited and sets updated_at to the edit's time; `updated` is that time, and without it the comment was never edited."""
+    return {"id": cid, "created_at": created, "updated_at": updated or created,
+            "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
@@ -14529,11 +14547,12 @@ def setUpModule():
 
 
 class ProseJudge(Env):
-    def setup_range(self, main_files, feat_files, links=None, later=None):
+    def setup_range(self, main_files, feat_files, links=None, later=None, renames=None):
         """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
         (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
         target. Feat then takes main's base, and `later` ({path: text}) is one more feat commit after that: the lines it adds to
-        a prose file are selected through the diff base, and a cited line through the backing file it cites."""
+        a prose file are selected through the diff base, and a cited line through the backing file it cites. `renames` ({old: new})
+        is one more feat commit after the base too: a git mv of each old path to its new one."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -14550,12 +14569,14 @@ class ProseJudge(Env):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: drop the pending record, change the backing")
         sh(o, "git", "push", "-q", "origin", "feat")
         head_takes_base(self)
-        if later:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
+        if later or renames:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
             sh(o, "git", "fetch", "-q", "origin")
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-            for path, text in later.items():
+            for old, new in (renames or {}).items():
+                sh(o, "git", "mv", old, new)  # the new path keeps the old text, so git reads a pure rename
+            for path, text in (later or {}).items():
                 put(os.path.join(o, path), text)
-            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: move the prose file" if renames and not later else "feat: add lines to the prose")
             sh(o, "git", "push", "-q", "origin", "feat")
 
     def run_capped(self, cap=PROSE_CAP):
@@ -14826,6 +14847,18 @@ class ProseJudge(Env):
             with self.assertRaises(ModelStarted):
                 decision_watch._nowindow.run(["claude", "-p"])
         self.assertEqual(started, [], "the refused claude start still reached the runner")
+
+    def test_a_renamed_prose_file_has_its_lines_judged_as_added(self):
+        # --no-renames in prose_judge_lines: the moved file's lines read as added, so each is judged. Under rename detection a pure
+        # rename adds no line, and its lines go unjudged. Scope first: the range is one pure rename of the prose file.
+        moved = "docs/notes/moved.md"
+        self.setup_range({PROSE: "# Cloud notes\n\nThe cloud runner is idle on weekends.\n"}, {}, renames={PROSE: moved})
+        base = sh(self.other, "git", "merge-base", "origin/main", "origin/feat")
+        scope = sh(self.other, "git", "diff", "--name-status", "-M", base, "origin/feat")
+        self.assertIn("R100\t%s\t%s" % (PROSE, moved), scope, "the range is not a pure rename of %s, so the case proves nothing:\n%s" % (PROSE, scope))
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the moved %s adds its line, so the line is judged\n%s" % (len(stub.prompts), moved, out))
+        self.assertIn("idle on weekends", stub.prompts[0], "the call does not carry the moved file's line")
 
     def test_no_backed_line_and_no_added_prose_makes_no_model_call(self):
         # The range changes code only, and the prose on main cites a file the range does not change.
@@ -15362,6 +15395,17 @@ class ReviewCutover(ReviewEnv):
             rc, out, err = self.run_args("--reviewed", host=host)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the unstamped record created before the cutover is not done")
+
+    def test_reviewed_reads_an_unstamped_record_edited_after_the_cutover_as_bad(self):
+        # The comment was created before the cutover and its body was edited after it, with no stamp. The cutover reads the
+        # comment's time, so the edit must be read by its updated time. It reads bad, not done.
+        comment = review_comment(1, 7, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        with cutover_at(REVIEW_CUTOVER):
+            host = PullsHost([batch_pull(7, REVIEW_HEAD)], {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}, comments=[comment])
+            rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ",
+                         "an unstamped body edited after the cutover reads done, not bad:\n" + out)
 
     def test_an_unstamped_record_created_after_the_cutover_reads_bad(self):
         rec = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=REVIEW_CUTOVER)
