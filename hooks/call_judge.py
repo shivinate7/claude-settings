@@ -173,7 +173,7 @@ PAGE_PROMPT = (
 NONE_DIRECTION_RULE = (
     "This call includes a re-ask: a write that gives an item new options and carries a `lastAnswer` note, so it asks "
     "the owner again after a \"none of these\" answer. A note that asks for other choices (cheaper, different, more) "
-    "is always allowed, even with other words. Otherwise, if the note already names an act a session can take with no "
+    "is always allowed by this rule, even with other words. Otherwise, if the note already names an act a session can take with no "
     "further pick from the owner, block it: the item should close and the note be filed as a step. "
     "The reason names no target."
 )
@@ -185,6 +185,24 @@ WIDENING_TEMPLATE = (
     "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
     "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. A marked "
     "option passes this rule. When unsure, allow."
+)
+
+
+# A question whose every option loses something large goes back to its writer for one more option (decision
+# question-form). Appended after NONE_DIRECTION_RULE and widening_rule(), once, only for a pick of one: a page decision
+# with 2+ options and no `multi` or `ranked`, or a box question with 2+ options and no multiSelect. It has no `%`.
+TRADEOFF_RULE = (
+    "This call sets options. Judge their tradeoff, and push back when every option loses something large, so the "
+    "owner gives up a large gain whichever he picks. Read each option's lose on its own text: on the page its `lose` "
+    "field, in a box the `Lose:` part of its description. A lose is large when it gives up the Goal or a large part "
+    "of it, removes a safety check or a guard, cannot be undone, or costs money the owner pays (a purchase, a paid "
+    "seat or service). Model calls, Opus or Sonnet use, session time, waiting, a delay, more work for a session, a "
+    "small limit, or a lose that only says another option's gain is missed are not large. Skip this rule for a task "
+    "item (kind task, or one that carries `steps`), and for options the owner may pick together (multi-select, a "
+    "`multi` or `ranked` item, or a pick that lists several keys). When every "
+    "option's lose is large, block, and in the reason ask the writer for one more option that keeps the gains of the "
+    "others, naming those gains. The option you ask for must never widen what a shared tool accepts (a second "
+    "accepted form, an allow-list entry, a per-repo exception). When unsure, allow."
 )
 
 
@@ -227,6 +245,17 @@ def sets_options(write):
     """True for a judged set or update whose data has non-empty `options`."""
     data = write.get("data") if write.get("op") in ("set", "update") else None
     return isinstance(data, dict) and bool(data.get("options"))
+
+
+def is_pick_of_one(write):
+    """True for a judged set or update whose data holds 2+ options the owner picks one of: no task (kind "task" or
+    `steps`) and no truthy `multi` or `ranked` (`ranked` implies `multi`)."""
+    if not sets_options(write):
+        return False
+    data = write["data"]
+    return (isinstance(data["options"], list) and len(data["options"]) >= 2
+            and data.get("kind") != "task" and not data.get("steps") and not data.get("multi")
+            and not data.get("ranked"))
 
 
 def is_reask(write):
@@ -361,7 +390,7 @@ def main():
             raise ValueError("tool_input is not an object")
         prompt, model, timeout, rule, fallback = JUDGES[tool]
         units = []  # (Unvetted marker text, words) of each question this call asks the owner
-        reask = widening = False
+        reask = widening = sets_choice = False
         if tool == "AskUserQuestion":
             import question_form
             code_rule, matched = question_form.chat_hit(args)
@@ -370,6 +399,10 @@ def main():
                 return refuse(payload, tool, args, code_rule, reason)
             shown = json.dumps(args, ensure_ascii=False)
             units = question_form.chat_units(args)
+            qs = args.get("questions")
+            sets_choice = isinstance(qs, list) and any(
+                isinstance(q, dict) and isinstance(q.get("options"), list) and len(q["options"]) >= 2
+                and q.get("multiSelect") is not True for q in qs)
         elif tool == DATA_TOOL:
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
@@ -382,6 +415,7 @@ def main():
             units = question_form.page_units(judged)
             reask = any(is_reask(w) for w in judged)
             widening = any(sets_options(w) for w in judged)
+            sets_choice = any(is_pick_of_one(w) for w in judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
@@ -394,6 +428,8 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
+        if sets_choice:
+            full += "\n" + TRADEOFF_RULE
         verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
