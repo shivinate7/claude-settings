@@ -5694,6 +5694,32 @@ sh("check-tail: uv run lint script piped to tail, then ; git commit, is refused"
 sh("check-tail: python3.11 lint script piped to tail, then && git push, is refused",
    "python3.11 lint/ste_lint.py docs/x.md 2>&1 | tail -2 && git push origin HEAD:b", "deny",
    "check-tail", cwd=NOGIT)
+# A pipeline's exit is its last stage's, so a lint piped into any later stage masks its exit before a commit,
+# not only into tail or head. tee keeps every byte and still returns its own exit. A redirect word, a
+# substitution in the script path, or a pipe inside `$(...)` hides the lint from the check the same way.
+sh("check-tail: lint piped to grep, then && git commit, is refused",
+   "python3 lint/ste_lint.py docs/x.md | grep -v OK && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: lint piped to tee, then && git commit, is refused",
+   "python3 lint/ste_lint.py docs/x.md | tee out.txt && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: lint piped to wc, then && git commit, is refused",
+   "python3 lint/ste_lint.py docs/x.md | wc -l && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+# Control: a lint piped to a filter with no commit after it is allowed, so the refusal stays on the commit.
+sh("check-tail: lint piped to grep with no commit after is allowed",
+   "python3 lint/ste_lint.py docs/x.md | grep -v OK", "allow", cwd=NOGIT)
+sh("check-tail: a 2>/dev/null redirect before the lint script, piped to tail, then && commit, is refused",
+   "2>/dev/null python3 lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a 2>/dev/null redirect after uv run, piped to tail, then && commit, is refused",
+   "uv run 2>/dev/null lint/x.py | tail -2 && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+# A substitution in the script path splits into several words, so the lint script is not the first word.
+sh("check-tail: a substitution in the lint script path, piped to tail, then && commit, is refused",
+   "$(echo a b)/lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+# A pipe inside `$(...)`: the inner pipeline's exit is tail's, and echo discards the substitution's exit.
+sh("check-tail: a pipe inside $(...) in the lint script path, piped to tail, then && commit, is refused",
+   "python3 $(pwd | head -1)/lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a lint piped to tail inside $(...), then && git commit, is refused",
+   "echo $(python3 lint/ste_lint.py x | tail -1) && git commit -m m", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: lint piped to tail, then ; echo done, is allowed",
    "python3 lint/ste_lint.py docs/x.md | tail -2; echo done", "allow", cwd=NOGIT)
 # Pins: a script outside lint/ is no lint stage, so a commit after its pipe is not refused. A commit before
