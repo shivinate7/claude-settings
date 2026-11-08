@@ -4759,6 +4759,45 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_allowed(line)
 
 
+    def test_pe_red_pre_existing_as_the_cause_is_refused(self):
+        rows = [
+            # Catches: "a pre-existing issue" named as the cause of a failure passes.
+            "The test fails due to a pre-existing issue.",
+            # Catches: "a pre-existing problem" named as the cause of a failure passes.
+            "CI fails from a pre-existing problem.",
+            # Catches: "a pre-existing bug" named as the cause of a red check passes.
+            "Lint is red because of a pre-existing bug.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_green_pre_existing_in_a_noun_or_negated_phrase_passes(self):
+        rows = [
+            # Catches: "pre-existing error handling" (a noun, no failure claim) is read as a claim.
+            "I kept the pre-existing error handling.",
+            # Catches: "pre-existing failure mode" (a noun for how a failure looks) is read as a claim.
+            "the pre-existing failure mode is unchanged",
+            # Catches: "pre-existing regression test" going red is read as a claim.
+            "The pre-existing regression test goes red on the old code.",
+            # Catches: "pre-existing tests" erroring out is read as a claim.
+            "The pre-existing tests error out on the old code.",
+            # Catches: "Pre-existing failures: none." is read as a claim.
+            "Pre-existing failures: none.",
+            # Catches: "Checked for pre-existing failures; none found." is read as a claim.
+            "Checked for pre-existing failures; none found.",
+            # Catches: a sentence that describes the guard is read as a claim.
+            "The guard refuses a line that calls a failure pre-existing.",
+            # Catches: "already failing on this branch" with "main job" is read as a claim on main.
+            "the main job is already failing on this branch",
+            # Catches: a run named as "main tip <sha>" is refused as no run on main.
+            "pre-existing: red on main tip 174b005c1",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
     Input Needed. The refusals file is written here by hand, so these cases do not depend on
