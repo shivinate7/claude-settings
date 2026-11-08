@@ -263,6 +263,13 @@ RED = [
     ("letters-only secret after a plain word and a semicolon",
      "password: required to log in; default is swordfish", "swordfish"),
     ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
+    # Each separator word or mark before a non-function word starts a second value, so the password value is refused.
+    ("letters-only secret after a plain word and `or`", "password: none or swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `but`", "password: none but swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `is`", "password: none is swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `are`", "password: none are swordfish", "swordfish"),
+    ("letters-only secret right after a plain word and a semicolon", "password: none; swordfish", "swordfish"),
+    ("letters-only secret after prose and a comma", "password: none for the guest, swordfish", "swordfish"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -360,6 +367,8 @@ GREEN = [
     # A placeholder word with prose after it on the same line, and a backticked shell path, name no secret.
     ("password word with optional and prose after it", "Set password: optional for the guest."),
     ("password word with none and prose after it", "password: none for the guest"),
+    # A function word after a comma is no second value: only a non-function word after a separator is one.
+    ("password word with none, prose, a comma and a function word", "password: none for the guest, and the"),
     ("backticked shell path after PWD", "`PWD=/Users/x`"),
     # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
     ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
