@@ -96,13 +96,18 @@ a{color:var(--accent-ink)}
 .notice p{margin:0;color:var(--ink-2)}
 
 html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
-.bar{height:6px;border-radius:3px;overflow:hidden;display:flex;gap:2px}
+.bar{height:6px;border-radius:3px;overflow:hidden;display:flex;gap:2px;position:relative}
 .bar i{display:block;flex:1;height:100%;background:var(--line);border-radius:1px}
 .bar i.done{background:var(--accent)}
 .bar i.act{background:var(--accent);opacity:.45}
 .bar i.blk{background:var(--bad)}
 .bar i.stl{background:repeating-linear-gradient(135deg,var(--bad) 0 2px,transparent 2px 4px)}
-.bar i.pzd{background:transparent;box-shadow:inset 0 0 0 1.5px var(--muted)}
+.bar i.pzd{background:linear-gradient(var(--muted),var(--muted)) left bottom/100% 50% no-repeat;box-shadow:none}
+/* Narrow rule: a bar draws one cell per step while each cell gets 3px or more beside 2px gaps (width >= --n x 5px - 2px). Under that the cells
+   clamp to 0px and the .runs layer draws one block per kind, each 4px or wider. The clamp(... * 1000) is a width switch with no script. */
+.bar>i{max-width:clamp(0px,calc((100% - var(--n)*5px + 2px)*1000),100%)}
+.bar>.runs{display:flex;position:absolute;top:0;bottom:0;left:0;gap:2px;overflow:hidden;width:clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000),100%)}
+.bar>.runs>i{flex:var(--c) 1 0px;min-width:4px;height:100%}
 
 /* phase selector */
 .rail{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
@@ -437,8 +442,13 @@ const PH = [
   {k:'cleanup',n:'Clean up'},{k:'organize',n:'Organize'},{k:'design',n:'Design'},{k:'rollout',n:'Roll out'},{k:'later',n:'Later'}
 ];
 const ORDER = ['todo','active','done','blocked'];
-// one cell per step, in this order: done, in progress, stalled, paused, blocked, to do
-const segs = (c,n) => { const m=c.done+c.act+c.stl+c.pzd+c.blk; return ['done','act','stl','pzd','blk'].map(k=>`<i class="${k}"></i>`.repeat(c[k])).join('') + '<i></i>'.repeat(Math.max(0,n-m)) + (n?'':'<i></i>'); };
+// Two layers, one draws (see the narrow rule in the CSS). Cells: one per step, in this order: done, in progress, stalled, paused, blocked, to do.
+// Runs: one block per kind present, in the same order, each as wide as its count.
+const segs = (c,n) => { const m=c.done+c.act+c.stl+c.pzd+c.blk, todo=Math.max(0,n-m), K=['done','act','stl','pzd','blk'];
+  return K.map(k=>`<i class="${k}"></i>`.repeat(c[k])).join('') + '<i></i>'.repeat(todo) + (n?'':'<i></i>')
+    + '<b class="runs">' + K.filter(k=>c[k]>0).map(k=>`<i class="${k}" style="--c:${c[k]}"></i>`).join('') + (todo>0?`<i style="--c:${todo}"></i>`:'') + '</b>'; };
+// The step count a bar's narrow rule reads, at least 1.
+const barN = n => Math.max(1,n);
 // The bar's cell counts for a phase's steps, one per cell kind. shownState decides in progress, stalled and paused; the tallies read status for done and blocked.
 const tally = ss => ({ done:ss.filter(s=>s.status==='done').length, act:ss.filter(s=>shownState(s)==='active').length, stl:ss.filter(s=>shownState(s)==='stalled').length, pzd:ss.filter(s=>shownState(s)==='paused').length, blk:ss.filter(s=>s.status==='blocked').length });
 // The bar's words, such as "4 done, 1 in progress, 1 stalled, 1 paused, 5 to do"; a kind with no steps is left out.
@@ -572,7 +582,7 @@ function renderNow(){
   <div><h2>Phase <span class="num">${PH.indexOf(cur)+1}/${PH.length}</span></h2>
     <div class="big">${esc(cur.n)}</div>
     <div class="sub">${[`<span class="num">${done}</span> of <span class="num">${ss.length}</span> done`,...[[act,'in progress'],[c.stl,'stalled'],[c.pzd,'paused'],[c.blk,'blocked']].filter(x=>x[0]).map(x=>`<span class="num">${x[0]}</span> ${x[1]}`)].map(g=>`<span class="grp">${g}</span>`).join('&nbsp;· ')}</div>
-    <div class="bar" style="margin-top:7px"${barAttrs(c,ss.length)}>${segs(c,ss.length)}</div>
+    <div class="bar" style="margin-top:7px;--n:${barN(ss.length)}"${barAttrs(c,ss.length)}>${segs(c,ss.length)}</div>
     <div class="sub" style="margin-top:6px;color:var(--muted)">Whole plan <span class="num">${tdone}/${tot}</span> done</div>
   </div>
   <div><h2>Doing now</h2><ul>${active.map(s=>`<li>${glyph('active')}<span class="id">${esc(s.id)}</span><button class="tx" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join('')||'<li class="sub">Nothing in progress. Pick the first step up next.</li>'}</ul>
@@ -588,7 +598,7 @@ function renderRail(){
     const ss=byPhase(p.k), c=tally(ss), d=c.done;
     const w=n=>ss.length?n/ss.length*100:0;
     return `<button data-phase="${p.k}" aria-pressed="${p.k===shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${c.stl?', '+c.stl+' stalled':''}${c.pzd?', '+c.pzd+' paused':''}${c.blk?', '+c.blk+' blocked':''}${p===cur?', current phase':''}"><div class="nm"><span>${esc(p.n)}${p===cur?'<span class="here" title="Current phase: the first with work left"></span>':''}</span><span class="num">${d}/${ss.length}</span></div>
-      <div class="bar">${segs(c,ss.length)}</div></button>`;
+      <div class="bar" style="--n:${barN(ss.length)}">${segs(c,ss.length)}</div></button>`;
   }).join('');
 }
 const shownPhase = () => ui.phase && PH.some(p=>p.k===ui.phase) ? ui.phase : curPhase().k;
@@ -692,7 +702,7 @@ function renderPhase(){
   }
   $('#phases').innerHTML = `<section class="card phase" id="p-${k}">
     <div class="ph-head"><span class="lbl">Phase ${PH.indexOf(p)+1}</span><h2>${esc(p.n)}</h2>
-      <div class="prog"><span class="num">${d}/${ss.length}</span><div class="bar"${barAttrs(c,ss.length)}>${segs(c,ss.length)}</div><span>done</span></div></div>
+      <div class="prog"><span class="num">${d}/${ss.length}</span><div class="bar" style="--n:${barN(ss.length)}"${barAttrs(c,ss.length)}>${segs(c,ss.length)}</div><span>done</span></div></div>
     ${asof?`<div class="asof">${asof}</div>`:''}
     ${k==='cleanup'&&ui.how&&cull&&cull.note?`<div class="howbody">${esc(cull.note)}</div>`:''}
     <div class="tiles">${tiles}</div>
