@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -19,7 +20,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_refspecs, push_target, push_text,
+    push_destinations, push_refspecs, push_remote, push_target, push_text,
 )
 
 
@@ -227,6 +228,66 @@ def merge_check_reason(verdict: str, detail: str) -> str:
     if verdict == "batch":
         return MERGE_BATCH_REASON % cap_safe(detail, 160)
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+
+
+REVIEWED_HEAD_PUSH_REASON = (
+    "Rule (Git, reviewed-head-push): this push lands on the head of an open pull request whose newest review record is "
+    "done and already carries its one fix check, so the merge tool can write no record for the new head (decision pr-review-record). "
+    "Remedy: stack the change on a new branch, and open its own pull request."
+)
+
+
+def _sends_nothing(specs, where: str, sha: str) -> bool:
+    """True when every source this push sends (HEAD for a bare push) is the commit `sha`, the pull request's live head."""
+    for source in [s.lstrip("+").partition(":")[0] or "HEAD" for s in specs] or ["HEAD"]:
+        found = _git(where, "rev-parse", "--verify", "-q", source + "^{commit}") if where else None
+        if found is None or found.returncode != 0 or found.stdout.strip() != sha:
+            return False
+    return True
+
+
+def reviewed_head_push_hit(args, where: str, overrides=None) -> bool:
+    """True when this push writes the head branch of an open pull request whose newest review record is done
+    and already holds its fix check (rule reviewed-head-push). Fails open, the opposite of merge_check: a tool that
+    cannot load, a failed or unreadable read, or any other error is False, with exactly one stderr line naming the rule.
+    The record is read and judged by the merge tool's own `review_comments`, `parse_review` and `review_state`, so no
+    parse or state rule is copied here. Only the current branch's destinations are read: a push of `--all`, `--mirror`,
+    a tag alone, a deletion, a glob refspec, or a push whose remote (named, or implied by `push_remote`) is not origin is never
+    judged. A push whose sources all equal a pull request's live head sha sends nothing, and that pull request is not judged.
+    Reads: none from gh when the push is out of that scope; else one open pull request list, and, when a pull request
+    has the destination as its head, one paged repo-wide issue comment read."""
+    scope = push_refspecs(args)
+    if scope is None:
+        return False
+    try:
+        if push_remote(args, where, overrides) != "origin":
+            return False
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        branches = {b for b in push_destinations(args, where, overrides) if b and "*" not in b}
+        if not branches:
+            return False
+        host = module.Host(repo=None, cwd=where or None)
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            rows = [d for d in host.pages("pulls", fields={"state": "open"})
+                    if d["head"]["ref"] in branches and not _sends_nothing(scope[1], where, d["head"]["sha"])]
+            if not rows:
+                return False
+            since = min(str(d.get("created_at") or "1970-01-01T00:00:00Z") for d in rows)
+            found = host.review_comments(since)
+        for row in rows:
+            n, sha = row["number"], row["head"]["sha"]
+            records = found.get(n, [])
+            rec = module.parse_review(records[-1]) if records else None
+            if (rec and rec["n"] == n and rec["head"] == sha and rec["fix"] is not None
+                    and module.review_state(rec, sha)[0] == "done"):
+                return True
+        return False
+    except (Exception, SystemExit) as e:
+        print("guard: reviewed-head-push could not read the pull request, so the push goes through: "
+              + cap_safe(" ".join(str(e).split()), 160), file=sys.stderr)
+        return False
 
 
 def _merge_config_at(root: str):

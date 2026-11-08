@@ -221,6 +221,26 @@ def push_refspecs(args):
     return remote, plain
 
 
+def push_remote(args, cwd: str, overrides=None):
+    """The remote a `git push` writes: the one the arguments name, else the one git implies for a bare
+    push (branch.<cur>.pushRemote, then remote.pushDefault, then branch.<cur>.remote, else origin).
+    None when git cannot answer."""
+    remote = _push_parse(args)[-2]
+    if remote:
+        return remote
+    current = _push_current_branch(cwd)
+    keys = ["remote.pushDefault"]
+    if current:
+        keys = ["branch.%s.pushRemote" % current] + keys + ["branch.%s.remote" % current]
+    for key in keys:
+        value = _push_config(cwd, key, overrides)
+        if value is None:
+            return None
+        if value:
+            return value
+    return "origin"
+
+
 def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 
