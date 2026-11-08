@@ -65,10 +65,11 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
   STALE010  (range mode only, a finding) a line the range ADDS to governed Markdown that cites a Python name in a STALE002
             form (`file.py` `name`, (file.py name)) or as a test node id, when the .py file is absent at head or does
             not bind the name there (`names_in`; a node id is judged one segment at a time). Fenced lines count as
-            prose, as for STALE002. It fires on a line the range adds, never on a line it only moved or left, and not
-            in --tree mode. It leaves a cite of a path the range removed or renamed to STALE001 and a name the range
-            unbound to STALE002, so a line never gets two codes for one cite. A cite of a .mjs, .js, .cjs, .ts or .sh
-            file keeps the unknown line. A cited .py that does not parse at head is one unknown line, no finding.
+            prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
+            left, and not in --tree mode. A cite path led by `/`, `..` or `~` (`cite_path`) is no path cite. It
+            leaves a cite of a path the range removed or renamed to STALE001 and a name the range unbound to
+            STALE002, so a line never gets two codes for one cite. A cite of a .mjs, .js, .cjs, .ts or .sh file keeps
+            the unknown line. A cited .py that does not parse at head is one unknown line, no finding.
             A line marked `<!-- ste-disable-line STALE010 -->` is left out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
@@ -173,7 +174,9 @@ FOREIGN_PAIR_RES = pair_res(FOREIGN_EXT)
 FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
-FILE_CITE = re.compile(r"^[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$")  # a folder part and an extension
+# A path cite: a folder part and an extension, inside the repo. A `/`, `..` or `~` lead names a path outside it, which
+# no blob at a rev holds (a `..` lead even ends `git cat-file`), so it is no path cite.
+FILE_CITE = re.compile(r"^(?!\.\./|~)[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$")
 ANCHOR = re.compile(r":(\d+)(?:-(\d+))?(?!\w)")
 
 
@@ -1260,7 +1263,7 @@ def dead_name_cites(rng):
             for path, name in python_cites(line):
                 path = cite_path(path)
                 if not FILE_CITE.match(path):
-                    continue  # no folder part: no path cite, the STALE003 test
+                    continue  # no folder part, or a lead outside the repo: no path cite, the STALE003 test
                 names = None if path in gone else head_names(rng, path)
                 if names is None or name in names or name in rng.removed_names.get(path, ()):
                     continue
