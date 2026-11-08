@@ -132,7 +132,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses, writer_ids, writer_names_id)
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses, writer_ids)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -967,7 +967,7 @@ def question_problem(records, turn, text, hook):
     named = writer_ids(writer)
     acks = {i: {i} for i in named}
     uses, sends = _turn_acts(records, turn, acks)
-    if named and any(writer_names_id(writer, x) for t in sends for x in t):
+    if any(x in named for t in sends for x in t):
         return "", ""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     from override import remote_session_id

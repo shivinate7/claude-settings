@@ -10,6 +10,7 @@ transcript and its `content` blocks. last_reply returns the text of the last ass
 import json
 import os
 import re
+import sys
 
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
@@ -396,29 +397,36 @@ def page_writer_id(records):
     return writer
 
 
-# A session id's token ends at any character outside this set, so `session_X2` is no `session_X`.
-_ID_CHARS = r"[\w.-]"
-_WRITER_ID_RE = re.compile(
-    r"(?<!%(c)s)(?:session_%(c)s+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?!%(c)s)"
-    % {"c": _ID_CHARS})
-_BARE_ID_RE = re.compile(r"%s+" % _ID_CHARS)
+# One token: id characters, where `.` and `-` count only between two of them. A trailing period or comma ends it,
+# and `session_X2` is a different token from `session_X`.
+_TOKEN_RE = re.compile(r"\w+(?:[.-]\w+)*")
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
-def writer_names_id(writer, ident):
-    """True when the page writer string `writer` holds `ident` as a whole token: the writer is the bare id, or
-    a label such as "Triage (session_X)" names it. A token ends at any character outside [\\w.-], so
-    `session_X2` is no match for `session_X`. Cost: one regex scan of the string; no read, no process."""
-    if not writer or not ident:
-        return False
-    return re.search(r"(?<!%(c)s)%(i)s(?!%(c)s)" % {"c": _ID_CHARS, "i": re.escape(ident)}, writer) is not None
+def _writer_tokens(writer):
+    return _TOKEN_RE.findall(writer) if isinstance(writer, str) else []
 
 
 def writer_ids(writer):
-    """The ids the page writer string names: each `session_...` token and each UUID in a label, else the
-    whole string when it is itself a bare id. A label with no id-shaped token names none (the writer is
-    unknown). Cost: one regex scan of the string; no read, no process."""
-    if not writer:
-        return set()
-    if _BARE_ID_RE.fullmatch(writer):
-        return {writer}
-    return set(_WRITER_ID_RE.findall(writer))
+    """The session ids the page writer string names: each whole token of it that is `session_...` or a UUID,
+    and each `cse_<x>` token as `session_<x>` (the mapping of override.record_id). A word with no id shape,
+    such as `Triage`, is no id, so a writer that names none is unknown. Cost: a string scan, and the one-time
+    import of override; no read of the repo, no process."""
+    ids = set()
+    for tok in _writer_tokens(writer):
+        if tok.startswith("session_") or _UUID_RE.fullmatch(tok):
+            ids.add(tok)
+        elif tok.startswith("cse_"):
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+            from override import record_id
+            mapped = record_id(tok)
+            if mapped:
+                ids.add(mapped)
+    return ids
+
+
+def writer_names_id(writer, ident):
+    """True when `ident` is a whole token of the page writer string, or one of its writer_ids. The writer is
+    the bare id, or a label such as "Triage (session_X)" or "Triage (cse_X)" names it. `session_X2` is no match
+    for `session_X`. Cost: the string scan of writer_ids; no read, no process."""
+    return bool(ident) and (ident in _writer_tokens(writer) or ident in writer_ids(writer))

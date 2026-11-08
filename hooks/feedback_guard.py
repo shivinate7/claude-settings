@@ -105,8 +105,9 @@ a turn end in these cases:
     shell run (Bash or PowerShell) of export_page.py ended with the line `same`, or with `<page id>: same`
     under --all. No commit on the folder at all counts as older. This session is the writer when the newest
     meta/page get names the hook's session id or the id the remote env names (override.remote_session_id), as a
-    whole token of a label such as `Triage (session_X)`. A writer that names an id decides alone. Only when
-    none is named (no `session_...` id, no UUID, not a bare id) does an interpreter run of export_page.py
+    whole token of a label such as `Triage (session_X)` (a `cse_X` token counts as `session_X`). A writer that
+    names an id decides alone. Only when it names neither (no `session_...`, `cse_...` or UUID token, and not
+    equal to either id; a word such as `Triage` is no id) does an interpreter run of export_page.py
     (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
     writer cannot be told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
     the roadmap went stale from 06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost
@@ -1171,9 +1172,10 @@ def export_check(cwd, transcript_path, session_id):
     branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (verdict
     `same`, or `<page id>: same` under --all). This session is the writer when the newest meta/page get names
     `session_id` or the id the remote env names (override.remote_session_id), as a whole token of a label such
-    as `Triage (session_X)`. A writer that names an id decides alone. Only when none is named (no
-    `session_...` id, no UUID, not a bare id) does an interpreter run of export_page.py (EXPORT_RUN) before
-    the write make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
+    as `Triage (session_X)` (a `cse_X` token counts as `session_X`). A writer that names an id decides alone.
+    Only when it names neither (no `session_...`, `cse_...` or UUID token, and not equal to either id; a word
+    such as `Triage` is no id) does an interpreter run of export_page.py (EXPORT_RUN) before the write make
+    this session the writer. A session that is not the writer, or whose writer cannot be told, passes
     with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
     or the layout failed: that is never a block. A transcript that cannot be read gives neither. The whole
     transcript is read and timestamps decide, so a write in an earlier turn still counts."""
@@ -1187,8 +1189,10 @@ def export_check(cwd, transcript_path, session_id):
     if not writes:
         return None, None  # nothing is read from the repo before a write is found
     writer = _transcript.page_writer_id(records)
-    if _transcript.writer_ids(writer):
-        is_writer = any(_transcript.writer_names_id(writer, i) for i in (session_id, override.remote_session_id()))
+    if any(_transcript.writer_names_id(writer, i) for i in (session_id, override.remote_session_id())):
+        is_writer = True
+    elif _transcript.writer_ids(writer):
+        is_writer = False  # the writer names another session
     else:
         is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
     if not is_writer:
