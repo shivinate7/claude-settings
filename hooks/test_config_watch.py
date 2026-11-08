@@ -320,6 +320,10 @@ bypass("a path held in a shell variable",
                  % to_bash_path(os.path.join(FIXTURE_TMP, "lift_case4.json")))
 bypass("a script file that never names the path in the command",
        lambda p: "sh write.sh")
+# A grep that names a mutating word and the settings file is a read, so it explains no lift. Beside the cap
+# value it must not make the watch keep the lift that the script writes (config_watch.explained_path).
+bypass("a grep naming mkdir in the settings file, beside a cap value, does not explain a script's lift",
+       lambda p: "grep -rn mkdir .claude/settings.local.json; echo '\"" + KEY + "\": \"opus\"'; sh write.sh")
 
 
 

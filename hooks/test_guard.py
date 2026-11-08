@@ -11656,6 +11656,95 @@ sh("frozen word: php -r mkdir of a frozen folder is refused",
    "php -r \"mkdir('" + FROZEN_DIR_X + "');\"", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen word: awk system() mkdir of a frozen folder is refused",
    "awk 'BEGIN{system(\"mkdir " + FROZEN_DIR_X + "\")}'", "deny", "frozen-path", cwd=NOGIT)
+# A reader that names a frozen path and pipes on to a program that runs what it reads (`xargs rm`, a
+# here-string piped to `sh`), or a program that takes a write target as its argument (`pip install
+# --target`, `install.py`, `node cli.js rm`, `perl s.pl mv`), writes that path. Each DENIES: its command
+# word is no reader, so the whole segment is read.
+sh("frozen word: rg -l copy of a frozen file piped to xargs rm is refused",
+   "rg -l copy " + CFG_HOOK + " | xargs rm", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: ag -l install of a frozen file piped to xargs rm is refused",
+   "ag -l install " + CFG_HOOK + " | xargs rm", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: rg -l copy of a frozen file piped to xargs -I mv onto /tmp is refused",
+   "rg -l copy " + CFG_HOOK + " | xargs -I{} mv {} /tmp", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: a here-string rm of a frozen file piped to sh is refused",
+   "sort <<< 'rm " + CFG_HOOK + "' | sh", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: python3 -m pip install --target a frozen folder is refused",
+   "python3 -m pip install --target " + FROZEN_DIR_X + " x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: python3 install.py into a frozen folder is refused",
+   "python3 install.py " + FROZEN_DIR_X, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: node cli.js rm of a frozen file is refused",
+   "node cli.js rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: perl s.pl mv onto a frozen file is refused",
+   "perl s.pl mv x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: sed with an e command that names a frozen file is refused",
+   "sed '1e rm " + CFG_HOOK + "' notes.txt", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: a printer piped to xargs rm of a frozen file is refused",
+   "printf 'x\\n' | xargs rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# CONTROL, ALLOWED. An interpreter run on a file with no inline program reads its path words, so a
+# frozen path after `-k copy` is an argument, as the builder's own test run is.
+sh("frozen word: python3 -m pytest -k copy naming a frozen file is allowed",
+   "python3 -m pytest -k copy " + CFG_HOOK, "allow", cwd=NOGIT)
+# CONTROLS, REFUSED. A mutating word after a `;` is read whole, and a program that runs its piped text is a
+# write. Each pins one filter or nested-command rule against a wider list.
+sh("frozen word: a grep naming a frozen file, then a mkdir into a frozen folder after a semicolon, is refused",
+   "grep x " + CFG_HOOK + " ; mkdir " + FROZEN_DIR_X + "/d", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: a grep naming a frozen file, then a mkdir after an ampersand, is refused as a detached launch",
+   "grep x " + CFG_HOOK + " & mkdir " + FROZEN_DIR_X + "/d", "deny", "detached-launch", cwd=NOGIT)
+sh("frozen word: echo of a mkdir piped to awk, which runs its text, is refused",
+   "echo 'mkdir " + FROZEN_DIR_X + "' | awk '{system($0)}'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: echo of an rm piped to python3 -c, which runs its text, is refused",
+   "echo 'rm " + CFG_HOOK + "' | python3 -c 'import os,sys; os.system(sys.stdin.read())'",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: echo of an rm piped to sed with the e flag, which runs its text, is refused",
+   "echo 'rm " + CFG_HOOK + "' | sed 's/^/ /e'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: a grep of a frozen file piped to xargs, which runs its input, is refused",
+   "grep -rn mkdir " + CFG_HOOK + " | xargs cat", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: a mkdir in a command substitution of echo is refused",
+   "echo $(mkdir " + FROZEN_DIR_X + "/q)", "deny", "frozen-path", cwd=NOGIT)
+# A group mark in the segment reads the whole segment, so a reader's segment that holds a group and a mkdir
+# into a frozen folder is refused. No `$(` here, so the substitution rule does not catch it first.
+sh("frozen word: an echo whose segment holds a group and a mkdir into a frozen folder is refused",
+   "echo hi (mkdir " + FROZEN_DIR_X + "/q)", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: grep -rn mkdir naming a hook piped to tee onto a frozen settings file is refused",
+   "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | tee " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# READS, ALLOWED. `git grep` and PowerShell `Select-String` read the files they name, so a mutating word
+# after them is an argument, as it is after `grep`.
+sh("frozen word: git grep naming mkdir and a hook in the live pin is allowed",
+   VCS + " grep mkdir " + LIVE_HOOKS + "/guard.py", "allow", cwd=NOGIT)
+sh("frozen word: PowerShell Select-String naming mkdir and a hook in the live pin is allowed",
+   "Select-String mkdir " + LIVE_HOOKS + "/guard.py", "allow", tool="PowerShell", cwd=NOGIT)
+
+
+def config_edit_read_case():
+    """Decision 7 (frozen-path's project-config reader): a grep whose pattern is a mutating word, naming a
+    project hook, is a read. It prints nothing and adds no `noted`/`config-edit` line to the log."""
+    folder = os.path.join(ROOT, "cfgread")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "guard.log")
+    if os.path.exists(path):
+        os.remove(path)
+    env = dict(os.environ)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    payload = {"tool_name": "Bash", "tool_input": {"command": "grep -rn mkdir " + PROJ_HOOK}, "cwd": NOGIT}
+    result = subprocess.run(
+        [sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+        env=env, timeout=60,
+    )
+    if result.returncode != 0:
+        return False, "guard exited %d" % result.returncode
+    if result.stdout.strip():
+        return False, "expected a silent allow, got %r" % result.stdout.strip()[:120]
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as handle:
+            lines = [line for line in handle.read().splitlines() if line.strip()]
+        if lines:
+            return False, "a read of a project hook logged %d line(s): %r" % (len(lines), lines[0][:120])
+    return True, "a silent allow, and no line for the read"
+
+
+# Appended with the log checks below, because LOG_CHECKS_EXTRA is defined there; its family is set by hand.
+FROZEN_READ_LOG_LABEL = "frozen: a grep naming mkdir and a project hook is a silent read with no config-edit line"
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
@@ -12384,6 +12473,10 @@ sh("cap: a grep for the variable in a settings file is not a write",
    "grep -n " + CAP_KEY + " " + PROJ_SETTINGS, "allow", cwd=NOGIT)
 sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
+# A grep that names a mutating word and a settings file is a read, so the cap ask does not fire on the
+# cap value beside it. The ask reads a settings write in command position only (judge_shell).
+sh("cap: a grep for mkdir in a settings file, beside an opus model value, is not a write",
+   "grep -rn mkdir " + PROJ_SETTINGS + " && echo '\"" + CAP_KEY + "\": \"" + OPUS + "\"'", "allow", cwd=NOGIT)
 
 # THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
 # a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view. So is text
@@ -13397,6 +13490,9 @@ sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allow
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
    "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+# CONTROL. A bare `pytest` is an interpreter's runner too, so it reads its path words like `python3 -m pytest`.
+sh("builder-test: shell bare pytest -k with a mutating word is allowed",
+   "pytest -k copy tests/test_guard.py", "allow", **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
@@ -13776,6 +13872,8 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+LOG_CHECKS_EXTRA.append((FROZEN_READ_LOG_LABEL, config_edit_read_case))
+LOG_FAMILY[FROZEN_READ_LOG_LABEL] = "frozen"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -21727,6 +21825,9 @@ add("other-checkout: a Read of a separate clone is allowed",
     "allow", tool="Read", cwd=XCL_PRIMARY, file_path=os.path.join(XCL_SEP, "src", "app.py"))
 sh("other-checkout: a shell read of a separate clone is allowed",
    "cat " + slash(os.path.join(XCL_SEP, "src", "app.py")), "allow", cwd=XCL_PRIMARY)
+# A grep whose pattern is a mutating word reads the separate clone's file: the word is an argument.
+sh("other-checkout: a grep naming mkdir and a file in a separate clone is allowed",
+   "grep -rn mkdir " + slash(os.path.join(XCL_SEP, "src", "app.py")), "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a git read run with -C into a separate clone is allowed",
    VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
 add("other-checkout: a Grep into a separate clone is allowed",
@@ -22613,6 +22714,30 @@ LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -
                          "naming session-home and EnterWorktree", session_home_clean_refuses_case))
 LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -n and git status in the primary "
                          "pass", session_home_clean_reads_case))
+
+
+def session_home_grep_read_case():
+    """Rule session-home: while the record is lost, a grep whose pattern is a mutating word, naming a file
+    in the primary checkout, is a read and passes. The rule reads a mutating word in command position only."""
+    primary = sh_new_primary("grepread")
+    lane, branch = sh_add_lane(primary, "lane-grepread")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    src = slash(os.path.join(primary, "src", "app.py"))
+    got, reason = _decide_full("Bash", primary, session=session, command="grep -rn mkdir " + src)
+    if got != "allow":
+        problems.append("grep -rn mkdir in the primary: want allow, got %s (%s)" % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a grep naming mkdir and a primary file passes while the record is lost"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a grep naming mkdir and a primary file passes",
+                         session_home_grep_read_case))
 
 
 def session_home_agent_tree_inspect_case():
@@ -24200,6 +24325,34 @@ LOG_CHECKS_EXTRA.append((
     ov_vetoed_check("frozen", lambda config, session: ov_call(
         "Write", {"file_path": slash(os.path.join(config, "settings.json")), "content": "{}"}, NOGIT,
         config, session, 0))))
+
+
+def ov_read_veto_check():
+    """A read that names a mutating word beside a settings file and a cap value is no write, so it does not
+    veto the owner override: the kill of a foreign pid still ends with the `override 15m` line, which the
+    override lifts. The kill carries no `$(`: a substitution anywhere in a call reads every segment whole."""
+    def check():
+        config, session = ov_config("veto-read"), "ov-veto-read"
+        command = ("grep -rn mkdir " + PROJ_SETTINGS + " && echo '\"" + CAP_KEY + "\": \"" + OPUS + "\"' && "
+                   + "kill %d" % FOREIGN)
+        got, reason = ov_call("Bash", {"command": command}, NOGIT, config, session, 0)
+        if got != "deny":
+            return False, "got %s (%s), want deny" % (got, reason[:70])
+        expected = ov_home("offer")
+        expected = expected("machine-wide-kill", agent_id=None) if expected else None
+        if not expected:
+            return False, "override.offer is missing, so the line cannot be read from its home"
+        if "override 15m" not in reason:
+            return False, "the refusal does not offer an override, so the read vetoed it: %s" % reason[-120:]
+        if not reason.rstrip().endswith(expected.strip()):
+            return False, "the override line is not last: %s" % reason[-120:]
+        return True, "the refusal still ends with the override line"
+    return check
+
+
+LOG_CHECKS_EXTRA.append((
+    "override: a grep naming mkdir in a settings file beside a cap value still offers the override",
+    ov_read_veto_check()))
 
 
 def ov_fail_closed_says_no_override():
