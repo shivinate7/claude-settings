@@ -53,7 +53,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             (MAP9 reads none) or whose path no tracked file has is a finding. A cite of a name that holds no literal at
             head, or of a file that does not parse, is unknown. An untouched line prints each of these as unknown too,
             only when the whole tree is read. A cite of a path the range removed is STALE001's.
-  STALE009  (range mode only, report only) a SENTENCE of an added line of a decision record (`docs/decisions/*.md`) that
+  STALE009  (decision record-cites-live-code; range mode only, report only) a SENTENCE of an added line of a decision
+            record (`docs/decisions/*.md`) that
             states what code does or does not do: a code subject (a noun such as tool, ledger, script, hook, guard,
             check, or one source file) and a behaviour verb (reads, writes, prints, calls, refuses, counts, runs,
             checks; also after never, only, or does not). It passes when it cites `file.py` `name`, (file.py name) or
@@ -63,7 +64,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             with no cite. Paragraphs, sentences and the mark come from STALE005. It prints as
             `stale-cites: report, path:line: STALE009 ...` and never changes the exit code (decision
             source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE009 -->` is left out.
-  STALE010  (range mode only, a finding) a line the range ADDS to governed Markdown that cites a Python name in a STALE002
+  STALE010  (decision record-cites-live-code; range mode only, a finding) a line the range ADDS to governed Markdown
+            that cites a Python name in a STALE002
             form (`file.py` `name`, (file.py name)) or as a test node id, when the .py file is absent at head or does
             not bind the name there (`names_in`; a node id is judged one segment at a time). Fenced lines count as
             prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
@@ -76,7 +78,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             A line marked `<!-- ste-disable-line STALE010 -->` is left out.
 A cite path led by `..`, `~` or `/` (`outside_repo`) names a path outside the repo, which no read asks git for: it is
 no path cite for STALE010, and one unknown line for a STALE005 backing or a STALE008 value cite.
-A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
+A line left in place, for a name the range did not remove, never fires. A moved or reworded line is an added
+line, which STALE010 judges. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE008, STALE010). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
@@ -113,8 +116,9 @@ a code-only range pays only for the patch text. An added governed line that hold
 file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
 the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
 for a range with no such line. So a range that adds a `docs/decisions` line holding a code verb (CODE_VERB_WORD,
-STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file), and a Markdown range with no such line starts 3
-(CostTests pins both). A range that changes the rows file reads it at base and head through the same `cat-file`;
+STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file). A Markdown range starts 3 with no decision-record
+code claim and no folder .py name cite, and 4 with either (CostTests pins the 3 and the 4 for a code claim,
+NameCiteTests the 4 for a name cite). A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
