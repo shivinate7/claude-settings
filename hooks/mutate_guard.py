@@ -2292,6 +2292,11 @@ MUTATIONS = [
      '        if reread_check.ph is None:',
      '        if False:',
      "guard", "a guard copy without precompact_handoff.py refuses as guard-crash"),
+    ("install-hooks-whole: a failed import of proc_env falls back to a foreign-pid read again",
+     'from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)\n',
+     'try:\n    from proc_env import holds_session_tag\nexcept ImportError:\n'
+     '    def holds_session_tag(pid, session_id):\n        return False\n',
+     "guard", "a copy missing proc_env (guard_kill's session-tag read) refuses a Bash call as guard-crash"),
     ("handoff-unread: an agent's call is judged like the main session's",
      '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):',
      '        if ph is None or not isinstance(payload, dict):',
