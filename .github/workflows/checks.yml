@@ -264,6 +264,9 @@ jobs:
       - name: Route judge measure fixture suite
         run: python3 lint/test_prove_route_judge.py
 
+      - name: Word-run fence fixture suite
+        run: python3 lint/test_word_runs.py
+
       - name: Guard log report fixture suite
         run: python3 lint/test_guard_log_report.py
 

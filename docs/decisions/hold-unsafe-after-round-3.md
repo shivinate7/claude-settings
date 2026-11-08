@@ -15,8 +15,8 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
 - Owner, 2026-10-15 13:40 CDT: a held change that is red in CI gets no red-CI split. A change that is not held keeps the split (red CI is split, not a safety hole).
 - Owner, 2026-10-17 11:56 and 12:53 CDT: a change that only deletes and adds nothing gets one review round. It skips rounds 2 and 3 and the net-value test. A delete-only change opens no safety hole unless it removes a guard or check, which round 1 must judge. The owner gave no other reason. If round 1 finds a safety hole Claude could hit in normal work, the normal path applies. A change that adds anything takes the normal path.
 - Owner, 2026-10-25 14:25 CDT, PR 571 (ios-ship, one shared tool to ship iOS apps): the net-value test is not owed when the guard edits only add coverage for a new tool and loosen nothing.
-- Owner, 2026-10-29 16:33 CDT, option a: a change with zero or positive net value merges on green. Only a change with negative net value is held. The owner's words: `i thought its zero and greater not just positive that r permitted`.
-- Owner, 2026-11-03 22:24 CST, Cockpit item 203 a, in every repo: a small fix to a round's finding gets one short read, a fix check, and then merges. Incident: degen page item 83, where five PRs were held about 2 hours (degen D10, a record in that repo, not read here). The definition:
+- Rule `roles-review-cap-three`. Owner, 2026-10-29 16:33 CDT, option a: a change with zero or positive net value merges on green. Only a change with negative net value is held. The owner's words: `i thought its zero and greater not just positive that r permitted`.
+- Rule `roles-review-cap-three`. Owner, 2026-11-03 22:24 CST, Cockpit item 203 a, in every repo: a small fix to a round's finding gets one short read, a fix check, and then merges. Incident: degen page item 83, where five PRs were held about 2 hours (degen D10, a record in that repo, not read here). The definition:
   - A fix check is a fresh reviewer that reads only the diff from the reviewed head to the new head (`git diff <reviewed-head>..<head>`). It confirms the diff fixes the named finding and adds nothing else.
   - PASS: the head merges on green, with no further round.
   - FAIL, or a diff wider than the finding: the fix starts a new lane at round 1.
@@ -28,7 +28,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
   - A guard: any hook that can refuse or ask, with its wiring and prompt-type guards in `settings.json`. Also any `allow`, `deny` or `ask` entry under `permissions` in `settings.json`, and any `tools` or `disallowedTools` line in `agents/*.md` frontmatter. Examples: `hooks/guard*.py`, `hooks/rm_prompt_answer.py`, `githooks/`.
   - A check: any check that can fail CI or the merge. Examples: `.github/workflows/`, `actions/*`, `lint/` checks, `merge/` checks, `hooks/mutate_*.py`.
 
-Why: the owner does not want worse changes on main, and does want partial progress merged. A change that takes main from 6 safety holes to 3 merges. A change that changes no guard or check scores zero by construction, so it skips the test. Holes that main already has do not count against a change. Only the safety holes a change opens count against it, and the safety holes it closes count for it. Protected outcome: no merge leaves main worse on net, and no open finding that Claude is likely to hit stays out of sight.
+Why (rule `roles-review-cap-three`): the owner does not want worse changes on main, and does want partial progress merged. A change that takes main from 6 safety holes to 3 merges. A change that changes no guard or check scores zero by construction, so it skips the test. Holes that main already has do not count against a change. Only the safety holes a change opens count against it, and the safety holes it closes count for it. Protected outcome: no merge leaves main worse on net, and no open finding that Claude is likely to hit stays out of sight.
 
 Kind: process
 Home: rule:roles-review-cap-three

@@ -2706,5 +2706,14 @@ class RefusalCiteRatchetTests(unittest.TestCase):
         self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
 
 
+class FencedAnchorTests(unittest.TestCase):
+    def test_an_anchor_inside_a_top_level_indented_tilde_block_is_no_anchor(self):
+        # Red: at the top level the four-space tilde fence is indented code, and main masks it, so the anchor in it is a
+        # mention of the form, not an anchor. A tilde block, not a backtick one: a backtick pair is a code span already.
+        text = "Paragraph.\n\n    ~~~\n    <!-- rule:example-only -->\n    ~~~\n\nAfter the block <!-- rule:real-one -->\n"
+        slugs = [slug for slug, _ in rule_audit.anchor_spans(text)]
+        self.assertEqual(slugs, ["real-one"], "an anchor inside a top-level indented fence block is no anchor")
+
+
 if __name__ == "__main__":
     unittest.main()

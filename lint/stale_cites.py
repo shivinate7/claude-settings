@@ -19,6 +19,12 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
             removes a path or a Python name, since only then is Markdown read. A range that touches only such
             files prints nothing and passes.
+  STALE006  (range mode only) a tracked Markdown line at head holds a run of REWORD_FLOOR (5) words of a rule sentence
+            that the range removed or changed in a RULE_FILES file (the rule sentences of lint/rule_audit.py
+            `rule_sentences_of`; a reflow or a change of emphasis changes none). The whole tree at head is read, not
+            the diff, and only when such a run exists. A line is left out when its paragraph, list item, table row,
+            blockquote or fenced block (`word_runs.units`) names the rule id, or the file is one of
+            lint/copy_exclusions.py. It lists the file and line and names the rule id; it never prints the old text.
   STALE005  (range mode only, report only) a SENTENCE of governed prose, in a paragraph the range adds a line to,
             states a capability by route with no backing. A paragraph is a run of prose rows; a blank row, a heading,
             a quote row, a fence and a list item end one. A sentence ends at . ! or ? before a space, so a claim
@@ -39,7 +45,7 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             (decision source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE005 -->` is left out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE006). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
 --tree [REV] reads every tracked Markdown file at REV (default HEAD) instead of a range, so it fires on lines no
 change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base, so a shallow clone is fine.
@@ -104,9 +110,10 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds (hooks/precompact_handoff.py)
 import route_match  # noqa: E402  the one home of the route rows file's path (hooks/route_match.py)
-from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
+from rule_audit import RULE_FILES, anchor_sentences, rule_sentences_of  # noqa: E402  the one home of the rule files and their sentences
+from copy_exclusions import EXCLUDED_FILES, RECORDS_PAGE  # noqa: E402  the one home of the files a prose copy check skips
+import word_runs  # noqa: E402  the one home of word-run matching (lint/word_runs.py)
 
-RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
 NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
@@ -495,19 +502,16 @@ class ForeignReader:
 # The rows file as a repo path, for a read at head. Derived from the one home of its path, never copied.
 ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                                        "..")).replace(os.sep, "/")
-HTML_COMMENT = re.compile(r"<!--.*?-->")
+HTML_COMMENT = word_runs.COMMENT
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
 BARE_PATH = r"(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+"  # a file path with a folder part and an extension
 MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|' + BARE_PATH)
 PATH_SPAN = re.compile(BARE_PATH + r"\Z")
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
-FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
 TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
 LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
-# A sentence ends at . ! or ? before a space or the end. "e.g.", "i.e.", "vs." and "cf." end none, so a paren group
-# such as "(e.g. read hooks/x.py:2)" stays in one sentence.
-SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bcf)[.!?](?=\s|\Z)")
+SENTENCE_END = word_runs.SENTENCE_END  # "e.g.", "i.e.", "vs." and "cf." end no sentence
 # A capability verb. `is refused` and `are refused` are present; a bare `refused` is an incident and never matches.
 VERB = re.compile(r"\b(?:cannot|can\s+not|can['’]t|won['’]t|will\s+not|refuses|denies|blocks"
                   r"|(?:is|are)\s+(?:not\s+)?(?:refused|blocked|denied)"
@@ -527,21 +531,8 @@ BACKING_KINDS = tuple(kind for kind in PREMISE_KINDS if kind not in WEAK_KINDS)
 
 
 def fenced_lines(rows):
-    """The numbers (from 1) of the rows inside a fenced block, the fence rows included. A backtick fence takes no
-    backtick in its info string, so a span such as `` ``` `` that starts a line opens none."""
-    inside, opener = set(), None
-    for number, row in enumerate(rows, 1):
-        fence = FENCE.match(row)
-        if opener is None:
-            if fence and not (fence.group(1)[0] == "`" and "`" in fence.group(2)):
-                opener = fence.group(1)
-                inside.add(number)
-        else:
-            inside.add(number)
-            if fence and fence.group(1)[0] == opener[0] and len(fence.group(1)) >= len(opener) \
-                    and not fence.group(2).strip():
-                opener = None
-    return inside
+    """The numbers (from 1) of the rows inside a code block, a fence's own rows included (word_runs.code_mask)."""
+    return {number for number, code in enumerate(word_runs.code_mask(rows), 1) if code}
 
 
 def paren_cites(row):
@@ -965,6 +956,84 @@ def find_stale(rng):
     return found
 
 
+REWORD_FLOOR = 5  # words in a row of a removed rule sentence that a tracked line must hold to be listed (owner item 340)
+
+
+def rule_file_texts(rng, rev):
+    """{rule file path: text at rev, or "" when the file is absent there}, each read through the run's one cat-file."""
+    texts = {}
+    for path in (p.replace(os.sep, "/") for p in RULE_FILES):
+        blob = rng.batch.get("%s:%s" % (rev, path))
+        texts[path] = blob.decode("utf-8", "replace") if blob is not None else ""
+    return texts
+
+
+NEGATORS = frozenset(("not", "never", "no", "nor", "cannot", "unless", "except", "t"))  # "t" is what n't leaves in the word form
+
+
+def only_grown(old, new):
+    """True when `new` holds every word of `old` in order and its added words hold no negator: a rule that gained "not"
+    or "n't" changed its meaning, so it is a reword and not growth."""
+    added = word_runs.added_words(old, new)
+    return added is not None and not NEGATORS & set(added)
+
+
+def removed_rule_runs(rng):
+    """{run of REWORD_FLOOR words: [rule id, ...]}: the runs a rule sentence held at base and no rule sentence holds at
+    head. Empty when no RULE_FILES file changed, or the change only reflowed or re-emphasised its sentences, or only added
+    words to them (a head sentence of the same rule holds every word of the old one, in order, and the added words hold
+    no negator). A run is
+    read in the copy form of lint/word_runs.py, so a quoted old sentence (its anchor in a code span) is no source."""
+    rule_files = {p.replace(os.sep, "/") for p in RULE_FILES}
+    if not rng.changed & rule_files:
+        return {}
+    kept = set()
+    for text in rule_file_texts(rng, rng.head).values():
+        for sentences in rule_sentences_of(text).values():
+            for sentence in sentences:
+                kept.update(word_runs.windows(word_runs.words(sentence, keep=True), REWORD_FLOOR))
+    head_lists = {}  # {rule id: [word list of each sentence of that rule at head]}: a rule is compared with its own
+    for text in rule_file_texts(rng, rng.head).values():
+        for slug, sentences in rule_sentences_of(text).items():
+            head_lists.setdefault(slug, []).extend(word_runs.words(sentence, keep=True) for sentence in sentences)
+    removed = {}
+    for text in rule_file_texts(rng, rng.base).values():
+        for slug, sentences in rule_sentences_of(text).items():
+            for sentence in sentences:
+                old = word_runs.words(sentence, keep=True)
+                lost = [run for run in word_runs.windows(old, REWORD_FLOOR) if run not in kept]
+                if lost and not any(only_grown(old, new) for new in head_lists.get(slug, ())):  # words only added
+                    for run in lost:
+                        if slug not in removed.setdefault(run, []):
+                            removed[run].append(slug)
+    return removed
+
+
+def find_rewords(rng):
+    """STALE006, {(path, line, code): [messages]}: each tracked Markdown line at head that holds a REWORD_FLOOR-word run
+    of a rule sentence this range removed or changed, unless its paragraph, table row, blockquote or fenced block names
+    the rule id. The whole tree is read, not the diff, and only when such a run exists."""
+    removed = removed_rule_runs(rng)
+    if not removed:
+        return {}
+    found = {}
+    rng.tree = tracked_entries(rng.head)
+    for md in markdown_files(rng.tree, exclude_patterns(".")):
+        if md in EXCLUDED_FILES:
+            continue
+        text = read_markdown(rng.batch, rng.head, md)
+        rows = text.split("\n")
+        for first, unit in word_runs.units(text):
+            for slug, offset in word_runs.first_lines(unit, removed, REWORD_FLOOR).items():
+                number = first + offset
+                if word_runs.names(unit, slug) or "STALE006" in disabled(rows[number - 1]):
+                    continue
+                found.setdefault((md, number, "STALE006"), []).append(
+                    "holds a %d-word run of the old text of rule %s, which this range removed or changed; "
+                    "reword the line, or name the rule id beside it" % (REWORD_FLOOR, slug))
+    return found
+
+
 # The report (decision stale-cites-at-merge). Its lines are no finding and never set the exit code.
 REPORT = "stale-cites: report, "
 MECHANISMS = "lint/rule_mechanisms.json"
@@ -972,22 +1041,7 @@ MECHANISMS = "lint/rule_mechanisms.json"
 # top dirs a source path may start with, a different set), so it lives here.
 RULE_DIRS = ("hooks/", "lint/", "bin/", "actions/", ".github/")
 HOME_LINE = re.compile(r"^Home:[ \t]*`?([^\s`]+)`?[ \t]*$", re.M)
-CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
-
-
-def anchor_sentences(text):
-    """{slug: the prose since the previous anchor, or the paragraph start, spaces collapsed}. An anchor inside a
-    code span is a mention of the form, not an anchor."""
-    found = {}
-    for block in re.split(r"\n[ \t]*\n", text.replace("\r\n", "\n")):
-        spans = [m.span() for m in CODE_SPAN.finditer(block)]
-        start = 0
-        for match in ANCHOR_RE.finditer(block):
-            if any(a <= match.start() < b for a, b in spans):
-                continue
-            found[match.group(1)] = " ".join(block[start:match.start()].split())
-            start = match.end()
-    return found
+CODE_SPAN = word_runs.CODE_SPAN
 
 
 def decision_folders():
@@ -1123,6 +1177,8 @@ def scan(range_text):
     lines = []
     try:
         found = find_stale(rng)
+        for key, texts in find_rewords(rng).items():
+            found.setdefault(key, []).extend(texts)
         try:
             lines = claim_lines(rng) + report(rng)
         except (Unknown, OSError, ValueError, layout.LayoutError) as exc:  # LayoutError: a layout or extras file that does not read

@@ -63,7 +63,7 @@ CODE = {
     "lint/x.py": "def check():\n    return 3\n",
 }
 Range = collections.namedtuple("Range", "case repo base head")
-FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-4]) (?P<text>.*)$")
+FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-46]) (?P<text>.*)$")
 
 
 def base_files(notes="# Notes\n", extra=None):
@@ -1716,6 +1716,32 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
+    def test_route_claim_in_a_fence_four_spaces_deep_under_a_list_item_is_silent(self):
+        # The fence sits under a list item, so the claim inside it is no claim. The claim after the fence is read: the scope
+        # control.
+        rows = [
+            ("- Run the step:", False),
+            ("    ```", False),
+            ("    The cloud cannot push to main.", False),  # inside a fence four spaces deep
+            ("    ```", False),
+            ("- The cloud cannot push to main.", True),  # the scope control: the same claim outside the fence
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_in_a_tilde_fence_four_spaces_deep_under_a_list_item_is_silent(self):
+        # CODE_SPAN pairs backtick rows across lines and blanks the claim between them, so a backtick fence pins nothing
+        # about the fence reader. A tilde fence has no such pairing: only the fence reader keeps its claim out of the scan.
+        rows = [
+            ("- Run the step:", False),
+            ("    ~~~", False),
+            ("    The cloud cannot push to main.", False),  # inside a tilde fence four spaces deep
+            ("    ~~~", False),
+            ("- The cloud cannot push to main.", True),  # the scope control: the same claim outside the fence
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
     def test_route_claim_fires_on_a_code_span_used_as_the_subject_and_skips_only_a_span_holding_the_whole_claim(self):
         rows = [
             ("- `gh` cannot close a pull request.", True),  # the span is the subject; the claim is outside the span
@@ -2246,6 +2272,261 @@ class CitedExcerptTests(unittest.TestCase):
     def test_a_cite_that_names_no_backing_path_gives_none(self):
         shown = self.stale.cited_excerpt("read the top of the file", self.TEXT)
         self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
+
+
+# Reword check (plan part b, owner item 340). A rule sentence removed or changed in a RULE_FILES file leaves a finding
+# on each tracked Markdown line at head that holds a 5-word run of it, unless that line's paragraph names the rule id.
+# The retired phrase is split in source, so this file never holds it whole (lint/test_retired_names.py).
+REWORD = "STALE006"  # the reword code; STALE001-005 are taken
+OLD_STE = "Write in Simplified " + "Technical English"
+OLD_RULE = ("**Output.** " + OLD_STE + " by default, to me and between agents,\n"
+            "unless told otherwise.<!-- rule:output-write-in-ste -->\n")
+NEW_RULE = "**Output.** Write plainly: short sentences, one term per meaning, no filler.<!-- rule:output-write-in-ste -->\n"
+# The eight agent lines and the debt line, verbatim from origin/main 5a5f081e (grep "Technical English"), one line per
+# file. Each is at line 1 here, where it sat at lines 18 to 510 there. The old phrase is the %s.
+NINE = {
+    "agents/builder.md": "that does not apply. %s. Start with the point. No preamble.\n",
+    "agents/claude-code-guide.md": "Report once. Start with the point. %s. Report in under 25\n",
+    "agents/designer.md": "Input Needed, list each `Owner grant: yes` item. %s. Report in\n",
+    "agents/explore.md": "Report once. Start with the point. %s. Report in under 25\n",
+    "agents/plan.md": "Report once. Start with the point. %s. Report in under 25\n",
+    "agents/record-writer.md": "now). %s.\n",
+    "agents/reviewer.md": "label that does not apply. %s. Start with the point. No\n",
+    "agents/test-author.md": "that does not apply. %s. Start with the point. No preamble.\n",
+    NOTES: "- ste-into-agent-briefs: move the STE writing standard from CLAUDE.md into agent briefs; agents/*.md still "
+           "say \"%s\". Owner's grant, or 30 days after the plain-prose lint merges to main, counted by date (agents/*.md). "
+           "Decision: plain-prose-lint\n",
+}
+NINE_PATHS = sorted(NINE)
+PLAN = "agents/plan.md"
+
+
+class RewordCase(StaleCase):
+    def reworded(self, head_rule=NEW_RULE, base_rule=OLD_RULE, copies=True, extra=None):
+        """A range whose CLAUDE.md changes from base_rule to head_rule. With copies, the nine lines are at base too."""
+        notes, files = "# Notes\n", {"CLAUDE.md": base_rule}
+        if copies:
+            notes = NINE[NOTES] % OLD_STE
+            files.update({path: text % OLD_STE for path, text in NINE.items() if path != NOTES})
+        files.update(extra or {})
+
+        def change(repo):
+            write(repo, "CLAUDE.md", head_rule)
+            commit(repo)
+        return self.make_range(base_files(notes, extra=files), change)
+
+    def fix(self, rng, files):
+        """A new commit on the topic branch of rng that writes `files`. Returns the range to the new head."""
+        for path, text in files.items():
+            write(rng.repo, path, text)
+        commit(rng.repo)
+        return Range(rng.case, rng.repo, rng.base, git(rng.repo, "rev-parse", "HEAD"))
+
+    @staticmethod
+    def listed(out):
+        return sorted((path, number) for path, number, code, _ in parse(out) if code == REWORD)
+
+
+class RewordTests(RewordCase):
+    def test_the_nine_copies_are_listed_when_the_rule_is_reworded(self):
+        rng = self.reworded()
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [(path, 1) for path in NINE_PATHS], out)
+        self.assertEqual(rc, 1, out)
+        for path, number, code, text in parse(out):
+            if code == REWORD:
+                self.assertIn("output-write-in-ste", text, out)
+
+    def test_the_nine_copies_pass_once_each_is_fixed(self):
+        rng = self.reworded()
+        fixed = {path: text % "Write plainly." for path, text in NINE.items() if path != PLAN}
+        # The plan line names the rule id in its paragraph, so the rule id exempts the copy.
+        fixed[PLAN] = "Per rule output-write-in-ste: report once. Start with the point. %s. Report in under 25\n" % OLD_STE
+        fixed["agents/four.md"] = "in Simplified Technical English\n"  # a 4-word run is under the floor
+        rc, out = self.run_check(self.fix(rng, fixed))
+        self.assertEqual(self.listed(out), [], out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+
+    def test_fixing_eight_leaves_only_the_ninth_listed(self):
+        rng = self.reworded()
+        fixed = {path: text % "Write plainly." for path, text in NINE.items() if path != PLAN}
+        rc, out = self.run_check(self.fix(rng, fixed))
+        self.assertEqual(self.listed(out), [(PLAN, 1)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_an_untracked_copy_is_not_read(self):
+        def change(repo):
+            write(repo, "CLAUDE.md", NEW_RULE)
+            commit(repo)
+            write(repo, "agents/builder.md", "that does not apply. %s. Start with the point.\n" % OLD_STE)
+        rng = self.make_range(base_files(extra={"CLAUDE.md": OLD_RULE}), change)
+        self.assert_passes(rng)
+
+    def test_a_removed_sentence_with_no_copy_passes(self):
+        self.assert_passes(self.reworded(copies=False))
+
+    def test_a_reflowed_or_re_emphasised_rule_is_no_change(self):
+        head = "*Output.* Write plainly: short sentences,\none term per meaning, no filler.<!-- rule:output-write-in-ste -->\n"
+        self.assert_passes(self.reworded(head_rule=head, base_rule=NEW_RULE))
+
+    def test_a_quoted_old_sentence_is_not_a_rule_sentence(self):
+        base = "Quote it as `**Output.** " + OLD_STE + " by default, to me and between agents, unless told otherwise." \
+               "<!-- rule:output-write-in-ste -->` only.\n"
+        head = "Quote it as `**Output.** Write plainly: short sentences, one term per meaning, no filler." \
+               "<!-- rule:output-write-in-ste -->` only.\n"
+        self.assert_passes(self.reworded(head_rule=head, base_rule=base))
+
+    def test_a_comment_opener_in_a_code_span_does_not_hide_the_rule_sentence(self):
+        base = "**Output.** Write the `<!--` opener as text. " + OLD_STE + " by default, to me and between agents,\n" \
+               "unless told otherwise.<!-- rule:output-write-in-ste -->\n"
+        head = "**Output.** Write the `<!--` opener as text. Write plainly: short sentences, one term per meaning, " \
+               "no filler.<!-- rule:output-write-in-ste -->\n"
+        rng = self.reworded(head_rule=head, base_rule=base)
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [(path, 1) for path in NINE_PATHS], out)
+
+    def test_a_removed_run_quoted_in_a_four_space_fence_under_a_list_item_is_listed_without_the_rule_id(self):
+        # The fence sits in a list item. With no rule id in it the removed run is listed at its own line, and the same
+        # fence with the id is exempt. This pins the verdict as it stands.
+        bare = "- Run the step:\n    ```text\n    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE
+        named = ("- Run the step:\n    ```text\n    that does not apply. %s. <!-- rule:output-write-in-ste -->\n"
+                 "    ```\n" % OLD_STE)
+        rng = self.reworded(copies=False, extra={"agents/bare.md": bare, "agents/named.md": named})
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [("agents/bare.md", 3)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_a_removed_run_in_a_four_space_fence_under_a_list_item_with_the_rule_id_is_not_listed(self):
+        # The id sits on the item's line, and the fence four spaces under it holds the removed run. The item is one unit,
+        # so the id exempts the run. The same shape with no id is the control: listed at its own line.
+        item = ("- Run the step: <!-- rule:output-write-in-ste -->\n    ```text\n"
+                "    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE)
+        bare = "- Run the step:\n    ```text\n    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE
+        rng = self.reworded(copies=False, extra={"agents/item-line.md": item, "agents/item-bare.md": bare})
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [("agents/item-bare.md", 3)], out)
+
+    def test_a_removed_run_in_indented_lines_that_continue_a_prose_line_with_the_rule_id_is_not_listed(self):
+        # The id sits on a prose line, and the four-space fence line after it has no blank line between: CommonMark reads
+        # it as paragraph text, so the id and the run share one paragraph. The same shape with no id is the control.
+        prose = ("Run the step: <!-- rule:output-write-in-ste -->\n    ```text\n"
+                 "    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE)
+        bare = "Run the step:\n    ```text\n    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE
+        rng = self.reworded(copies=False, extra={"agents/prose-line.md": prose, "agents/prose-bare.md": bare})
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [("agents/prose-bare.md", 3)], out)
+
+    def test_a_change_to_a_file_outside_the_rule_files_is_no_trigger(self):
+        rng = self.make_range(base_files(NINE[NOTES] % OLD_STE, extra={"CLAUDE.md": NEW_RULE}), lambda repo: (
+            write(repo, NOTES, "# Notes\n\n- the debt is closed\n"), commit(repo)))
+        self.assert_passes(rng)
+
+
+class RewordCostTests(RewordCase):
+    """The reword check reads the tree only when a rule sentence changed. A rule change lists the tree once and reads
+    the blobs in one cat-file batch, and a reflow reads no tree. No run writes a file."""
+
+    def run_traced(self, rng):
+        rc, out, commands = self.run_traced_commands(rng)
+        return rc, out, [command.split()[0] for command in commands]
+
+    def test_a_rule_sentence_change_starts_one_tree_listing_and_one_blob_batch(self):
+        rc, out, subs = self.run_traced(self.reworded())
+        self.assertIn(rc, (0, 1), out)  # the verdict is not the subject here; the starts are
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "ls-tree", "merge-base", "rev-parse"], subs)
+
+    def test_a_reflow_only_rule_change_lists_no_tree(self):
+        head = "*Output.* Write plainly: short sentences,\none term per meaning, no filler.<!-- rule:output-write-in-ste -->\n"
+        rc, out, subs = self.run_traced(self.reworded(head_rule=head, base_rule=NEW_RULE, copies=False))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("ls-tree", subs, subs)
+
+    def test_a_rule_sentence_change_writes_no_file(self):
+        rng = self.reworded()
+        rc, out, before, after = self.run_copy_of_script(rng, ["--range", "%s...%s" % (rng.base, rng.head)])
+        self.assertEqual(before, after, out)
+
+
+# Review round 2, F5: a head sentence that only gained words used to skip the reword check. The skip was checked against
+# every rule's head sentences, and it ignored a negator in the added words. Now a negator ends the skip, and a rule is
+# compared with its own head sentences only.
+MERGE_BASE = "**Merge.** Main may merge only by pull request.<!-- rule:merge-by-pr -->\n"
+MERGE_MOVED = "**Merge.** Main moves only by pull request.<!-- rule:merge-by-pr -->\n"
+MERGE_NEGATED = "**Merge.** Main may not merge only by pull request.<!-- rule:merge-by-pr -->\n"
+CAN_BASE = "**Merge.** Main can merge only by pull request.<!-- rule:merge-by-pr -->\n"
+CAN_CONTRACTED = "**Merge.** Main can't merge only by pull request.<!-- rule:merge-by-pr -->\n"
+MERGE_LINE = "Main may merge only by pull request. Start with the point.\n"
+CAN_LINE = "Main can merge only by pull request. Start with the point.\n"
+BRIEF_BASE = "**Brief.** Write the brief to the task and the files only.<!-- rule:brief-scope -->\n"
+BRIEF_GROWN = "**Brief.** Write the brief, for each lane, to the task and the files only.<!-- rule:brief-scope -->\n"
+BRIEF_LINE = "Write the brief to the task and the files only. Start with the point.\n"
+BATCH_BASE = "**Batch.** Main may merge only by a pull request.<!-- rule:batch-merge -->\n"
+BATCH_GROWN = "**Batch.** Main, when the checks pass, may merge only by a pull request.<!-- rule:batch-merge -->\n"
+# Growth that adds "unless" or "except" changes what the rule allows, so it is a reword. Each word is its own case.
+# "without" is no negator (owner ruling 15:00 CST), so its growth is the case after the listing test.
+BRIEF_UNLESS = "**Brief.** Write the brief, unless the owner asks, to the task and the files only.<!-- rule:brief-scope -->\n"
+BRIEF_EXCEPT = "**Brief.** Write the brief, except when the owner asks, to the task and the files only.<!-- rule:brief-scope -->\n"
+BRIEF_WITHOUT = ("**Brief.** Write the brief, without a note from the owner, to the task and the files only."
+                 "<!-- rule:brief-scope -->\n")
+
+
+class RewordSkipTests(RewordCase):
+    def reword(self, base, head, line):
+        """A range whose CLAUDE.md changes from base to head, with `line` in agents/notes.md at both ends."""
+        def change(repo):
+            write(repo, "CLAUDE.md", head)
+            commit(repo)
+        return self.make_range(base_files(extra={"CLAUDE.md": base, "agents/notes.md": line}), change)
+
+    def test_a_rule_reworded_with_no_growth_lists_its_copy(self):
+        # The control: with no growth to skip, the same copy line is listed.
+        rc, out = self.run_check(self.reword(MERGE_BASE, MERGE_MOVED, MERGE_LINE))
+        self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_a_negator_added_to_a_rule_sentence_is_listed(self):
+        rc, out = self.run_check(self.reword(MERGE_BASE, MERGE_NEGATED, MERGE_LINE))
+        self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_a_contraction_added_to_a_rule_sentence_is_listed(self):
+        rc, out = self.run_check(self.reword(CAN_BASE, CAN_CONTRACTED, CAN_LINE))
+        self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_growth_with_no_negator_still_skips(self):
+        self.assert_passes(self.reword(BRIEF_BASE, BRIEF_GROWN, BRIEF_LINE))
+
+    def test_growth_in_another_rule_does_not_hide_a_removed_sentence(self):
+        rng = self.reword(MERGE_BASE + "\n" + BATCH_BASE, MERGE_MOVED + "\n" + BATCH_GROWN, MERGE_LINE)
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_a_rule_grown_by_an_exception_word_is_listed(self):
+        # The exception is in the middle of the sentence, so the old runs across it are lost, as a reword's are.
+        for word, head in (("unless", BRIEF_UNLESS), ("except", BRIEF_EXCEPT)):
+            with self.subTest(word=word):
+                rc, out = self.run_check(self.reword(BRIEF_BASE, head, BRIEF_LINE))
+                self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+                self.assertEqual(rc, 1, out)
+
+    def test_a_rule_grown_by_without_is_not_a_reword(self):
+        # Owner ruling 15:00 CST: "without" is no negator, so growth by it skips the reword check like other growth.
+        self.assert_passes(self.reword(BRIEF_BASE, BRIEF_WITHOUT, BRIEF_LINE))
+
+
+class FencedLinesTests(unittest.TestCase):
+    def test_a_top_level_indented_fence_block_is_the_fenced_rows_of_the_removed_run_scan(self):
+        # Red: at the top level the four-space fence is indented code, a block of its own, so its rows are the rows inside
+        # it. The row after the block is prose, which the control pins.
+        spec = importlib.util.spec_from_file_location("stale_cites_fenced_lines", MODULE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        rows = ["Paragraph.", "", "    ```", "    x", "    ```", "After."]
+        self.assertEqual(sorted(module.fenced_lines(rows)), [3, 4, 5],
+                         "the rows of a top-level four-space fence block are the rows inside the block")
 
 
 if __name__ == "__main__":

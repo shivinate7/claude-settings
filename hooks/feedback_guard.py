@@ -151,6 +151,8 @@ import local_time  # noqa: E402  the one home of the inbox paths
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
+import word_runs  # noqa: E402  the one home of a code line (lint/word_runs.py code_mask)
+
 from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
@@ -762,18 +764,9 @@ def answer_problem(b, text, k, homes, pages):
 
 
 def unfenced(text):
-    """`text` without the lines of its own code fences, an unclosed fence running to the end."""
-    kept, fence = [], None
-    for ln in text.split("\n"):
-        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
-        if fence is None:
-            if mark:
-                fence = mark.group(1)
-            else:
-                kept.append(ln)
-        elif mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence):
-            fence = None
-    return "\n".join(kept)
+    """`text` without the lines of its own code blocks, an unclosed fence running to the end (word_runs.code_mask)."""
+    lines = text.split("\n")
+    return "\n".join(line for line, code in zip(lines, word_runs.code_mask(lines)) if not code)
 
 
 def is_grant(text):

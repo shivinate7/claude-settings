@@ -75,7 +75,9 @@ import re
 import subprocess
 import sys
 from typing import List
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+import word_runs  # the one home of fence reading (lint/word_runs.py)
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
@@ -103,7 +105,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
 RULE_FLOOR = 98
-UNMECHANIZED_EXPECTED = 59
+UNMECHANIZED_EXPECTED = 58
 JUDGMENT_EXPECTED = 24
 REASON_MIN_WORDS = 8
 
@@ -358,6 +360,66 @@ def claude_md_anchors(text: str) -> List[str]:
 def rule_text(root: str = ROOT) -> str:
     """The text of every RULE_FILES entry under `root`, joined. One list of anchors."""
     return "\n".join(read(os.path.join(root, p)) for p in RULE_FILES)
+
+
+CODE_SPAN = word_runs.CODE_SPAN  # the one home of the span, comment and sentence-end forms (lint/word_runs.py)
+LEAD_IN = re.compile(r"^\*\*[^*]+\*\*\s*")  # the bold label that starts a rule paragraph, such as **Output.**
+SENTENCE_END = word_runs.SENTENCE_END
+
+
+def anchor_spans(text: str):
+    """[(slug, the prose since the previous anchor or the paragraph start, spaces collapsed)] in file order. An anchor
+    inside a code span or a fenced block is a mention of the form, not an anchor."""
+    found = []
+    for block in re.split(r"\n[ \t]*\n", word_runs.mask_fences(text)):
+        spans = [m.span() for m in CODE_SPAN.finditer(block)]
+        start = 0
+        for match in ANCHOR_RE.finditer(block):
+            if any(a <= match.start() < b for a, b in spans):
+                continue
+            found.append((match.group(1), " ".join(block[start:match.start()].split())))
+            start = match.end()
+    return found
+
+
+def anchor_sentences(text: str):
+    """{slug: the span of its anchor}, the last span when a slug repeats."""
+    return dict(anchor_spans(text))
+
+
+def sentences_of(span: str) -> List[str]:
+    """The sentences of a rule span, its bold lead-in dropped. A sentence ends at `.`, `!` or `?` followed by a space,
+    and never inside a code span."""
+    span = LEAD_IN.sub("", span)
+    masked = CODE_SPAN.sub(lambda m: "x" * len(m.group(0)), span)  # a stop inside a code span splits nothing
+    out, start = [], 0
+    for stop in SENTENCE_END.finditer(masked):
+        out.append(span[start:stop.end()].strip())
+        start = stop.end()
+    out.append(span[start:].strip())
+    return [sentence for sentence in out if sentence]
+
+
+def rule_sentences_of(text: str):
+    """{slug: [sentence, ...]} of one rule file's text. A slug that repeats gathers every span's sentences."""
+    found = {}
+    for slug, span in anchor_spans(text):
+        found.setdefault(slug, []).extend(sentences_of(span))
+    return found
+
+
+def rule_sentences(root: str = ROOT):
+    """{slug: [sentence, ...]} of every RULE_FILES entry under `root`. An absent file holds no rule; a file that exists
+    and cannot be read raises OSError, and a root with no rule file at all gives {}."""
+    found = {}
+    for path in RULE_FILES:
+        try:
+            text = read(os.path.join(root, path))
+        except FileNotFoundError:
+            continue
+        for slug, sentences in rule_sentences_of(text).items():
+            found.setdefault(slug, []).extend(sentences)
+    return found
 
 
 def _string_constants(node) -> set:

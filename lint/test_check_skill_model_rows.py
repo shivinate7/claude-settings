@@ -44,7 +44,7 @@ FIXTURE_STEP = "Skill model rows fixture suite"
 
 sys.path.insert(0, HERE)
 from test_windows_split import all_jobs  # noqa: E402  one home for the checks.yml step parser
-from check_skill_model_rows import skill_names  # noqa: E402
+from check_skill_model_rows import live_lines, skill_names  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
@@ -271,6 +271,31 @@ class Fences(unittest.TestCase):
                 files[RECORD] = record([], extra=pattern % (row("alpha"), row("alpha")))
                 code, out = run(files)
                 self.assertEqual(code, 0, out)
+
+    def test_a_four_space_or_tab_fence_under_a_list_item_hides_the_rows_inside_it(self):
+        # Pin: in a list item the indented fence is a fence, so the row inside it is hidden and the row after it counts.
+        for opener in ("    ```", "\t```"):
+            with self.subTest(opener=opener):
+                lines = list(live_lines("- item\n%s\nhidden-row\n%s\nafter-row\n" % (opener, opener)))
+                self.assertEqual(lines, ["- item", "after-row"], "a row inside a list-item fence indented as %r must not count" % opener)
+
+    def test_a_top_level_four_space_or_tab_fence_hides_the_rows_inside_it(self):
+        # Red: at the top level a block indented four spaces, or led by a tab, is code (CommonMark), and main hid the rows
+        # inside such a block. So a row inside it after a blank line is no row, and the row after the block is read.
+        for opener, row in (("    ```", "    hidden-row"), ("\t```", "\thidden-row")):
+            with self.subTest(opener=opener):
+                lines = [line.strip() for line in live_lines("Paragraph.\n\n%s\n%s\n%s\n\nafter-row\n" % (opener, row, opener))]
+                self.assertNotIn("hidden-row", lines,
+                                 "a row inside a top-level block indented as %r is code, not a row" % opener)
+                self.assertIn("after-row", lines, "the row after a top-level %r block is read" % opener)
+
+    def test_rows_after_a_top_level_indented_opener_at_the_start_still_count(self):
+        # Pin: the opener at the start of the file is code, and a row at column 0 after it is read, as is the row after.
+        for opener in ("    ```", "\t```"):
+            with self.subTest(opener=opener):
+                lines = list(live_lines("%s\nhidden-row\n%s\nafter-row\n" % (opener, opener)))
+                self.assertIn("hidden-row", lines, "a column-0 row after a top-level %r opener is read" % opener)
+                self.assertIn("after-row", lines, "the row after a top-level %r opener is read" % opener)
 
     def test_mid_line_comment_opener_hides_the_rows_it_wraps(self):
         # Red: "intro <!--" opens a multi-line comment on a prose line. The row inside must not count.

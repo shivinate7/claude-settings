@@ -32,13 +32,13 @@ except ImportError:  # actions/ruling-kind runs this file in a tree without hook
     _nowindow = subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+import word_runs  # noqa: E402  the one home of a code line (code_mask)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIR = None  # the records folder: the layout's decisions folder under ROOT; --dir replaces it
 RULE_FILES = ("CLAUDE.md", "output-styles/shiv-stylisms.md")
 ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 HEADING_RE = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
-FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 PLAN_RE = re.compile(r"^(\S+)#(\S+) \(([^()\s][^()]*)\)$")
 
@@ -56,24 +56,17 @@ def read(rel):
 
 
 def unfenced(text):
-    """Yield the lines outside fenced text and HTML comments (CommonMark fence rules)."""
-    fence, comment = None, False
-    for line in text.split("\n"):
+    """Yield the lines outside code blocks and HTML comments (CommonMark rules)."""
+    comment = False
+    lines = text.split("\n")
+    for line, code in zip(lines, word_runs.code_mask(lines)):
         if comment:
             end = line.find("-->")
             if end < 0:
                 continue
             line, comment = line[end + 3:], False
-        elif fence:
-            m = FENCE_RE.match(line)
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
-                fence = None
+        elif code:
             continue
-        else:
-            m = FENCE_RE.match(line)
-            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
-                fence = m.group(1)
-                continue
         # Comment openers inside an inline code span are prose, so scan a masked copy.
         masked = re.sub(r"`[^`]*`", lambda m: "x" * len(m.group()), line)
         kept, pos = [], 0
@@ -109,7 +102,7 @@ RULES_FILES = []  # --rules-file paths; when set, they replace the RULE_FILES un
 
 def rule_ids():
     texts = [read_path(p) for p in RULES_FILES] if RULES_FILES else [read(rel) for rel in RULE_FILES]
-    return {i for t in texts for i in ANCHOR_RE.findall(t or "")}
+    return {i for t in texts for i in ANCHOR_RE.findall(word_runs.mask_fences(t or ""))}  # an anchor in a fenced example is no rule
 
 
 def field(lines, name):

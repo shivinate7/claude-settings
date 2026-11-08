@@ -14,8 +14,7 @@ grant. Decision child-cites-not-copies (a child names the cs record and never co
 - **DUPLICATE:** cs already holds the guard. The child copy goes. The row names the cs guard.
 - **STAYS:** the guard is a fact of that repo. It does not move.
 - **DELETE:** no caller, or no mistake or incident backs it. Rule building-guard-needs-incident
-  (in CLAUDE.md: a guard needs a mistake or incident behind it) and decision
-  guard-guards-mistakes-only (guards stop Claude's mistakes, not an attacker's) decide it.
+  (in CLAUDE.md: a guard needs a mistake or incident behind it) and rule `roles-review-cap-three` (the mistake test; decision `guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker's) decide it.
 - **CONSUMER:** a child calls a cs action or uses a cs setting. The child keeps it.
 - **?:** the reader could not confirm the verdict.
 

@@ -64,6 +64,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+import word_runs  # noqa: E402  the one home of a code line (code_mask)
 
 ROOT = os.path.abspath(os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
 PAGE = "docs/catalog.md"
@@ -223,12 +224,11 @@ def unquote(text):
 
 def under_first_heading(text):
     """The text under the first heading, up to the next heading, with list markers dropped.
-    A line inside a fenced block is never a heading."""
-    out, seen, fence = [], False, False
-    for line in text.split("\n"):
-        if line.lstrip().startswith(("```", "~~~")):
-            fence = not fence
-        elif not fence and re.match(r"#{1,6}\s", line):
+    A line inside a code block is never a heading."""
+    out, seen = [], False
+    lines = text.split("\n")
+    for line, code in zip(lines, word_runs.code_mask(lines)):
+        if not code and re.match(r"#{1,6}\s", line):
             if seen:
                 break
             seen = True
@@ -490,7 +490,6 @@ def render():
 RECORDS_PAGE = layout.layout()["kinds"]["records-index"]["path"]
 SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Plans")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 KIND = re.compile(r"^Kind:\s*(process|build)\s*$")
@@ -513,20 +512,11 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 
 
 def lines_outside_fences(text):
-    """(line number from 1, line) for each line. A line inside a fenced block, the fences too, has line None.
-    A fence closes on the same character, at least as long, with no text after it (CommonMark)."""
-    fence = None
-    for n, line in enumerate(text.split("\n"), 1):
-        found = FENCE.match(line)
-        if fence:
-            if found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence) and not found.group(2).strip():
-                fence = None
-            yield n, None
-        elif found and not (found.group(1)[0] == "`" and "`" in found.group(2)):
-            fence = found.group(1)
-            yield n, None
-        else:
-            yield n, line
+    """(line number from 1, line) for each line. A line inside a code block, a fence's own rows too, has line None
+    (word_runs.code_mask)."""
+    lines = text.split("\n")
+    for n, (line, code) in enumerate(zip(lines, word_runs.code_mask(lines)), 1):
+        yield n, None if code else line
 
 
 def mask_code(text):

@@ -1540,6 +1540,17 @@ class Supersede(unittest.TestCase):
         self.assertEqual((code, head(out)), (1, "supersede: out - 1 line(s) to read in 1 file(s)"), out)
         self.assertEqual(out.splitlines()[1:], ["  departs, no exemption: CLAUDE.md:%d: The designation is never inherited." % first[3]], out)
 
+    def test_a_departure_in_a_fence_four_spaces_deep_under_a_list_item_is_not_read(self):
+        # The fence sits under a list item, so the departure inside it is no unit. The departure after it is read, at its
+        # own line.
+        paragraphs = ("- Run the step:\n    ```text\n    The designation is never inherited.\n    ```",
+                      "The designation is never inherited.")
+        first = self.starts(*paragraphs)
+        code, out = self.child(*paragraphs).run("supersede")
+        self.assertEqual((code, head(out)), (1, "supersede: out - 1 line(s) to read in 1 file(s)"), out)
+        self.assertEqual(out.splitlines()[1:],
+                         ["  departs, no exemption: CLAUDE.md:%d: The designation is never inherited." % first[1]], out)
+
     def test_a_child_lint_exemption_is_not_ours(self):
         # "known exemption" with no rule id is flagged only beside departure wording: a child's own lint exemption is not ours.
         code, out = self.child("`legacy/` is a known exemption from the no-print check.").run("supersede")
@@ -2064,6 +2075,12 @@ class Restates(unittest.TestCase):
     def test_a_copied_record_line_is_refused(self):
         self.assert_refused(self.child("- " + grant_line()), "CLAUDE.md:1")
 
+    def test_a_copied_record_line_inside_a_two_line_comment_passes(self):
+        # Review round 2, F3: a comment is no prose in either form, and a comment over two lines is one comment, so the
+        # record line on its middle line is comment text and passes.
+        unit = "<!-- a note about the grant\n%s\nand its check -->" % grant_line()
+        self.assert_passes(self.child(unit))
+
     def test_a_named_record_with_its_ruling_time_passes(self):
         # A citation: it names the record and its ruling time, and copies no run of the record's words.
         unit = "- Merge grant (owner, %s): see claude-settings %s. Batch runner details here." % (grant_time(), GRANT)
@@ -2232,6 +2249,19 @@ class RestatesFixtures(unittest.TestCase):
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+
+
+class FencedParagraphTests(unittest.TestCase):
+    def test_the_text_inside_a_top_level_indented_fence_block_is_no_paragraph(self):
+        # Red: at the top level the four-space fence is indented code, a block of its own, so the text inside it is no
+        # paragraph of the record. Main reads it so. The paragraph after the block is read (the control).
+        import compliance_probes
+        found = compliance_probes.paragraphs(
+            "Paragraph.\n\n    ```\n    The designation is never inherited.\n    ```\n\nAfter the block.\n", "x.md")
+        texts = [text for _, text in found]
+        self.assertEqual([t for t in texts if "designation" in t], [],
+                         "the text inside a top-level indented fence block is read as a paragraph")
+        self.assertIn("After the block.", texts, "the paragraph after the block is read")
 
 
 if __name__ == "__main__":
