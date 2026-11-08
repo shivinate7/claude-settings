@@ -2230,6 +2230,35 @@ class RestatesFixtures(unittest.TestCase):
         self.assertNotIn(other_time(), record(GRANT))
 
 
+class XcodebuildRuns(unittest.TestCase):
+    """The argument list of each xcodebuild run, read by xcodebuild_runs. A command substitution or a backtick in an
+    argument ends the run group there, so the action that follows it is lost from the run."""
+
+    @staticmethod
+    def runs(text):
+        import compliance_probes
+        return compliance_probes.xcodebuild_runs(text)
+
+    def test_a_plain_run_keeps_its_action(self):  # green control: no substitution, so the action is kept
+        runs = self.runs("xcodebuild -scheme App -derivedDataPath /tmp/derived test")
+        self.assertEqual(len(runs), 1, runs)
+        self.assertIn("test", runs[0], runs)
+
+    def test_an_action_after_a_substitution_or_backticks_in_an_argument_stays_in_the_run(self):
+        for line in ('xcodebuild -scheme App -derivedDataPath "$(mktemp -d)" test',
+                     "xcodebuild -scheme App -derivedDataPath $(mktemp -d) test",
+                     'xcodebuild -scheme App -derivedDataPath "`mktemp -d`" test'):
+            with self.subTest(line=line):
+                runs = self.runs(line)
+                self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
+                self.assertIn("test", runs[0], runs)  # then its action: the run keeps `test` after the substitution
+
+    def test_a_lone_double_quote_in_an_argument_keeps_the_action_in_the_run(self):  # green control: passes on the old code too
+        runs = self.runs('xcodebuild -scheme App -derivedDataPath "x test')
+        self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
+        self.assertIn("test", runs[0], runs)  # then its action: an unclosed quote is text, and `test` stays in the run
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
