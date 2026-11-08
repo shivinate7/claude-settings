@@ -1428,6 +1428,8 @@ READ_LOCAL = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = local'
 ABSENT_SHA = "deadbeef" * 5  # forty hex digits that neither the fixture clone nor its origin holds
 CODE_CHECK_STUB = "import pathlib\npathlib.Path('pinned-code-check.txt').write_text('pinned\\n')\n"
 STE_CHANGED_STUB = "#!/bin/sh\necho pinned > ste-pinned.txt\n"
+STE_CHANGED_A = "#!/bin/sh\necho A > ste-A.txt\n"  # pin A's bin/ste-changed: writes a file named for its own commit
+STE_CHANGED_B = "#!/bin/sh\necho B > ste-B.txt\n"  # pin B's bin/ste-changed, over the copy B inherits from A
 # The step before a pin: a `run: |` block, then the blank line that ends it. The pin is the first line of the next step.
 BUILD_LITERAL = "      - name: build\n        run: |\n          make\n\n"
 BUILD_ONE_LINE = "      - name: build\n        run: make\n\n"
@@ -2077,6 +2079,76 @@ class PinnedSettings(Job):
             pinned = self.pinned_listed(path)
             self.assertEqual(len(pinned), 1, "one pin made %d pinned trees while %s ran, not one:\n%s"
                              % (len(pinned), name, out))
+
+    def test_lint_runs_a_remote_ste_lint_and_code_check_each_from_its_own_pins_tree(self):
+        self.settings(extra={"bin/ste-changed": STE_CHANGED_A}, executable=("bin/ste-changed",),
+                      local_extra={"bin/ste-changed": STE_CHANGED_B, "actions/code-check/code_check.py": CODE_CHECK_B})
+        self.assertNotEqual(fixture_rc(self.clone, "cat-file", "-e", self.sha_a + ":actions/code-check/code_check.py"), 0,
+                            "precondition: pin A holds a code_check.py, so the code check could run from A")
+        self.assertIn("ste-B.txt", fixture_git(self.clone, "show", self.sha_b + ":bin/ste-changed"),
+                      "precondition: pin B's bin/ste-changed is not its own stub")
+        rc, lines, out = self.run_pinned(
+            step("ste lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % self.sha_a),
+            step("code check", uses=PIN_USES % self.sha_b),
+            args=("--lint", "--base", "origin/main"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "ste-A.txt")),
+                        "the ste lint did not run pin A's bin/ste-changed:\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ste-B.txt")),
+                         "the ste lint ran pin B's bin/ste-changed, not its own pin A's:\n" + out)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-B.txt")),
+                        "the code check did not run pin B's code_check.py:\n" + out)
+        self.assertEqual((rc, by_step(lines)), (0, {"ste lint": "PASS", "code check": "PASS"}),
+                         "both lint steps pass under their own pins, so --lint must exit 0:\n" + out)
+
+    def test_lint_with_a_blocked_pin_beside_a_good_pin_runs_the_good_step_and_exits_two(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        self.assertNotEqual(fixture_rc(self.clone, "cat-file", "-e", ABSENT_SHA + "^{commit}"), 0,
+                            "precondition: the clone holds the blocked sha, so its pin is not blocked")
+        self.assertNotEqual(fixture_rc(os.path.join(self.fixture, "origin"), "cat-file", "-e", ABSENT_SHA + "^{commit}"), 0,
+                            "precondition: origin holds the blocked sha, so its pin is not blocked")
+        rc, lines, out = self.run_pinned(
+            step("good pin", uses=PIN_USES % self.sha_a),
+            step("blocked pin", uses=PIN_USES % ABSENT_SHA),
+            args=("--lint", "--base", "origin/main"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "the good pin's code_check.py did not run:\n" + out)
+        self.assertEqual(by_step(lines), {"good pin": "PASS", "blocked pin": "unknown"},
+                         "a blocked pin must read unknown and must not stop the good pin's lint step:\n" + out)
+        self.assertIn(ABSENT_SHA[:9], line_of(lines, "blocked pin") or "",
+                      "the unknown line must name the blocked sha: " + str(line_of(lines, "blocked pin")))
+        self.assertEqual(rc, 2, "one lint step is unknown and none failed, so --lint must exit 2:\n" + out)
+
+    def test_lint_does_not_run_an_install_before_a_lint_step_whose_pin_is_blocked(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        self.assertNotEqual(fixture_rc(self.clone, "cat-file", "-e", ABSENT_SHA + "^{commit}"), 0,
+                            "precondition: the clone holds the blocked sha, so its pin is not blocked")
+        env = InstallSteps.stub_path(self, npm=InstallSteps.NPM_OK)  # the npm stub: InstallSteps's one home
+        rc, lines, out = self.run_pinned(
+            step("good pin", uses=PIN_USES % self.sha_a),  # keeps the all-blocked gate from ending the run before the install
+            step("install", "npm ci"),
+            step("blocked pin", uses=PIN_USES % ABSENT_SHA),
+            args=("--lint", "--base", "origin/main"), env=env)
+        self.assertEqual(InstallSteps.npm_calls(self), "(no npm call)",
+                         "the install ran before a lint step whose pin is blocked:\n" + out)
+        self.assertEqual((rc, by_step(lines)), (2, {"good pin": "PASS", "install": "not run", "blocked pin": "unknown"}),
+                         "the install has no lint step after it that will run, so it is not run:\n" + out)
+
+    def test_lint_under_two_pins_a_plain_lint_step_reading_the_settings_dir_is_unknown_beside_pinned_actions(self):
+        self.two_pin_settings()
+        rc, lines, out = self.run_pinned(
+            *self.two_pin_steps(self.lint_step("read settings", "read_marker", MARKER_SCRIPT, "local")),
+            args=("--lint", "--base", "origin/main"), env=pipx_stub_env())
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "precondition: the code check under pin A did not run:\n" + out)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "zizmor-B.txt")),
+                        "precondition: the zizmor step under pin B did not run:\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "seen.txt")),
+                         "the plain lint step ran under two pins and read the caller's settings dir:\n" + out)
+        line = line_of(lines, "read settings") or ""
+        self.assertEqual((rc, by_step(lines).get("read settings")), (2, "unknown"),
+                         "a plain lint step under two pins must be unknown, exit 2:\n" + out)
+        self.assertTrue(self.sha_a[:9] in line and self.sha_b[:9] in line,
+                        "the unknown line must name both pins, the ambiguity: " + line)
 
 
 if __name__ == "__main__":
