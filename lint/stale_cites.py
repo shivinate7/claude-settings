@@ -574,15 +574,17 @@ def backing_path(kind, rest):
     return None
 
 
-def defined_line(text, name):
+def defined_line(text, name, end=False):
     """The first line where `name` is a def or class in the Python `text`, found through the AST so a comment, a docstring or a string
-    that names it is never the answer. 0 when the text parses and defines no such name; None when it is not Python."""
+    that names it is never the answer. With `end`, the last line of that def's body instead. 0 when the text parses and defines no
+    such name; None when it is not Python."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return None
     kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    return min((n.lineno for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name), default=0)
+    found = sorted((n.lineno, n.end_lineno) for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name)
+    return found[0][1 if end else 0] if found else 0
 
 
 def cited_excerpt(cite, text, limit=40, row_chars=None):
@@ -657,11 +659,13 @@ def named_too_large(text):
 
 
 def named_excerpt(names, text, around=3, limit=40):
-    """The numbered lines of a file's `text` within `around` lines of each line that holds one of `names` as a whole word, at most
-    `limit` lines, a "..." row between two windows that do not touch. Each row is cut to NAMED_ROW_CHARS characters with a marker.
-    When the `limit` drops later lines, the excerpt ends with a marker line that says so; it has none otherwise. None when no line holds
-    a name, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line that names the file in
-    backticks, so the model reads the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS characters."""
+    """The numbered lines of a file's `text`, at most `limit`, a "..." row between two windows that do not touch. A name, or the last
+    segment of a dotted name, that Python `text` defines as a def or class (defined_line) shows from its def row through its body;
+    those rows take the cap first. Each line that holds one of `names` as a whole word also shows the `around` lines about it, in
+    the cap that is left. Each row is cut to NAMED_ROW_CHARS characters with a marker. When the `limit` drops later lines, the
+    excerpt ends with a marker line that says so; it has none otherwise. None when no line holds a name, or when `text` is over
+    NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line that names the file in backticks, so the model reads
+    the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS characters; two ast.parse calls of `text` per name."""
     if named_too_large(text):
         return None
     rows = text.replace("\r\n", "\n").split("\n")
@@ -670,8 +674,17 @@ def named_excerpt(names, text, around=3, limit=40):
     for n, row in enumerate(rows, 1):
         if any(h.search(row) for h in hits):
             keep.update(range(max(n - around, 1), min(n + around, len(rows)) + 1))
-    ordered = sorted(keep)
-    shown = ordered[:limit]
+    first = []
+    for name in names:
+        short = name.rsplit(".", 1)[-1]
+        start = defined_line(text, short)
+        if start:
+            first.extend(range(start, min(defined_line(text, short, end=True), len(rows)) + 1))
+    first = list(dict.fromkeys(first))
+    total = len(set(first) | keep)
+    first = first[:limit]
+    rest = sorted(keep - set(first))
+    shown = sorted(set(first) | set(rest[:limit - len(first)]))
     if not shown:
         return None
     out, last = [], None
@@ -680,7 +693,7 @@ def named_excerpt(names, text, around=3, limit=40):
             out.append("...")
         out.append("%d: %s" % (n, cut_row(rows[n - 1])))
         last = n
-    if len(ordered) > limit:
+    if total > limit:
         out.append("[more lines left out at the %d-row cap]" % limit)
     return "\n".join(out)
 

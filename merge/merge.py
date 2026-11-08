@@ -2645,7 +2645,7 @@ def prose_judge_prompt(wt, path, by_line, read=None):
     """The prompt for one prose file: each selected line labelled `<path>:<N>`, with each cite as written and the text it points at.
     `read(wt, backing)` fetches a backing file's text, read_backing by default; lint/prove_route_judge.py passes a reader that goes through git at a rev.
     A line also gets an excerpt of each backticked path it names but does not cite: the lines within 3 of each line that holds another backticked
-    name or number of that line. Each path is read once per prompt build. prose_judge_pack builds the prompt of many files the same way."""
+    name or number of that line, and the body of a name that the Python file defines. Each path is read once per prompt build. prose_judge_pack builds the prompt of many files the same way."""
     rows = [(path, number, text, tuple(cites)) for number, (text, cites) in sorted(by_line.items())]
     return prose_judge_prompt_of(rows, prose_judge_body(wt, read), {})
 
