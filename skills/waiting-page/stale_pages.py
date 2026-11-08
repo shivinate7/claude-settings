@@ -556,21 +556,36 @@ def has_text(value):
 def open_ask_lines(asks, complete=True):
     """One open-ask line per ask with no session reply, oldest first: id, time, text. A dismissed root is the owner's own
     close and is not listed. An ask the owner wrote as a reply under an answer (`re`) waits like any other. With `complete` False
-    (that folder may be cut short) one unknown line, never a clear."""
+    (that folder may be cut short), or an entry that is not an object, one unknown line, never a clear."""
     if not complete:
         return ["open-ask: unknown (the asks folder has no .complete marker, so its list may be cut short)"]
     waiting = []
+    unreadable = False
     for doc_id, data in asks:
-        if not isinstance(data, dict) or has_text(data.get("reply")) or data.get("dismissed"):
+        if not isinstance(data, dict):
+            unreadable = True
+            continue
+        if has_text(data.get("reply")) or data.get("dismissed"):
             continue
         waiting.append((str(data.get("at") or ""), doc_id if doc_id is not None else data.get("id"), data.get("text")))
-    return ["open-ask: %s at %s: %s" % (ask_id, at or "unknown", " ".join(str(text or "").split()) or "(no text)")
-            for at, ask_id, text in sorted(waiting, key=lambda row: row[0])]
+    lines = ["open-ask: %s at %s: %s" % (ask_id, at or "unknown", " ".join(str(text or "").split()) or "(no text)")
+             for at, ask_id, text in sorted(waiting, key=lambda row: row[0])]
+    if unreadable:
+        lines.append("open-ask: unknown (an entry in the asks list is not an object, so it may hide an ask)")
+    return lines
+
+
+def answered_after(answer_at, marked_at):
+    """True only when both times read and the kept answer is strictly later than the writer's marker (lastAnswer.at or replied)."""
+    answered, marked = parse_utc(answer_at), parse_utc(marked_at)
+    return answered is not None and marked is not None and answered > marked
 
 
 def open_item_lines(items, answers, complete=True, answers_complete=True):
     """One open-item line per open item whose kept answers/<id> has no `reply`, `lane` or `waits` beside it: the owner spoke and the writer has
     not routed, replied or closed (SKILL.md, "Route and close"). `lastAnswer` is not the signal: it outlives a consumed answer.
+    A `lane` or a `reply` still counts as handled unless the kept answer is strictly later than `lastAnswer.at` or `replied`: the owner answered
+    again. A missing or unreadable time keeps the marker. An item with both stays out while either marker holds.
     A park answer, an arbiter item and an answer with no item are never named. A cut-short list gives one unknown line."""
     if not (complete and answers_complete):
         return ["open-item: unknown (the %s folder has no .complete marker, so its list may be cut short)" % ("items" if not complete else "answers")]
@@ -586,8 +601,13 @@ def open_item_lines(items, answers, complete=True, answers_complete=True):
         if not isinstance(item, dict):
             continue
         item_id = doc_id if doc_id is not None else item.get("id")
-        if (item.get("status") != "closed" and item_id in kept and not item.get("arbiter") and not has_text(item.get("reply"))
-                and not has_text(item.get("lane")) and not item.get("waits")):
+        if item.get("status") == "closed" or item_id not in kept or item.get("arbiter") or item.get("waits"):
+            continue
+        answer_at = kept[item_id].get("at")
+        last = item.get("lastAnswer")
+        lane_holds = has_text(item.get("lane")) and not answered_after(answer_at, last.get("at") if isinstance(last, dict) else None)
+        reply_holds = has_text(item.get("reply")) and not answered_after(answer_at, item.get("replied"))
+        if not (lane_holds or reply_holds):
             lines.append("open-item: item %s (%s): the owner answered at %s and the item has no reply"
                          % (item.get("n", item_id), item_id, kept[item_id].get("at") or "unknown"))
     return lines
@@ -634,7 +654,10 @@ def single_page(argv):
     if args.asks is not None:
         if args.items is not None and args.answers is None:
             item_problem = "--asks with --items needs --answers"
-        return open_asks_mode(args, (items, answers, complete, answers_complete) if args.items is not None else None, item_problem, code)
+        if args.items is None and args.answers is not None:
+            item_problem = "--answers needs --items"
+        state = (items, answers, complete, answers_complete) if args.items is not None or args.answers is not None else None
+        return open_asks_mode(args, state, item_problem, code)
     return code
 
 
@@ -645,7 +668,7 @@ def open_asks_mode(args, state, item_problem, code):
     try:
         asks, complete = load_docs(args.asks, "asks", keyed=True)
         lines = open_ask_lines(asks, complete)
-        unknown = not complete
+        unknown = any(line.startswith("open-ask: unknown") for line in lines)
     except ValueError as err:
         lines, unknown = ["open-ask: unknown (%s)" % err], True
     if state is not None:
@@ -738,9 +761,11 @@ PARK_ANSWER_MAX_AGE = 600  # seconds: a park answer the writer has not closed in
 
 def parse_utc(text):
     """An ISO time with a Z (as the store writes it) as epoch seconds, or None when it cannot be read."""
+    if not isinstance(text, str):
+        return None
     try:
-        return datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
-    except ValueError:
+        return datetime.datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except (ValueError, OverflowError, OSError):
         return None
 
 

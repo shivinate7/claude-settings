@@ -267,8 +267,13 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    (never an open item, an item with `waits`, an arbiter ruling or a park answer). With `--asks`, last, one `open-ask: <id> at <time>: <text>` line per
    ask with no `reply`. A dismissed root is not listed. With `--items` and `--answers` too, one `open-item:` line per open item
    that still holds a kept `answers/<id>` and has no `reply`, `lane` or `waits`. An unreadable or cut-short list is `open-item: unknown`.
+   `--answers` without `--items` is `open-item: unknown` too.
+   An item with a `lane` or a `reply` is still listed when the owner answered again. The kept answer's `at` must be later than `lastAnswer.at` for a `lane`.
+   For a `reply` it must be later than `replied`. An equal, earlier, missing or unreadable time keeps the item out. With both, either one still holding keeps it out.
+   The `open-item:` lines never name the closed arbiter ruling's overturn answer. That answer is meant to stay ("Route and close").
+   An entry in the asks list that is not an object, and an asks list that cannot be read or is cut short, print `open-ask: unknown`.
    Then one `FAIL:` line the writer cannot skip: answer each on the page ("Route an ask") before the wake ends.
-   A waiting ask makes a `current` page exit 1. An asks list that cannot be read or is cut short prints `open-ask: unknown` and exits 2.
+   A waiting ask makes a `current` page exit 1. On a `current` page, any unknown line makes it exit 2.
    Without `--asks` the exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
