@@ -885,12 +885,13 @@ class PinTests(unittest.TestCase):
 
 class CostTests(StaleCase):
     """The check's cost is a contract. A range that removes or renames no path, and changes only Markdown outside
-    the rule files, starts three git processes and reads no blob. It starts one more, a cat-file, when an added line
-    holds a verb or route word a reader judges: STALE005's list on any governed page, and STALE009's looser list
-    (CODE_VERB_WORD, where `check`, `run` and `read` count) on an added decision record. A removed or renamed path
-    makes the check read the tracked Markdown files. So does a name that a touched .py no longer defines. A changed
-    file that is not Markdown also reads the repo's decision records for its Home line, even when nothing was removed.
-    No run writes a file."""
+    the rule files, starts three git processes and reads no blob, unless an added line needs a read. One such line
+    starts one more, a cat-file: a line holding a verb or route word a reader judges (STALE005's list on any governed
+    page, and STALE009's looser list, CODE_VERB_WORD, where `check`, `run` and `read` count, on an added decision
+    record), a folder .py name cite (STALE010, which NameCiteTests pins at four starts), or a value cite of a code
+    file (STALE008). A removed or renamed path makes the check read the tracked Markdown files. So does a name that a
+    touched .py no longer defines. A changed file that is not Markdown also reads the repo's decision records for its
+    Home line, even when nothing was removed. No run writes a file."""
 
     def run_traced(self, rng):
         rc, out, commands = self.run_traced_commands(rng)
@@ -1145,7 +1146,8 @@ class ForeignFileTests(StaleCase):
 
     def test_an_added_notes_line_citing_an_absent_or_untouched_js_file_prints_no_unknown_line_and_no_finding(self):
         """ForeignReader names a cite only for a file the range touched, so these two lines print nothing. STALE010's
-        docstring says a .mjs cite keeps the unknown line: this pins the code as it is, and the gap is for a builder."""
+        docstring says a .mjs cite on another added line prints its unknown line only for a file the range touched,
+        so an untouched file prints none."""
         rng, _ = self.route_range([("- see `hooks/gone.mjs` `run`", False), ("- see `hooks/lib.mjs` `refusals`", False)])
         self.assertNotIn("hooks/gone.mjs", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope: absent
         self.assertEqual(touched(rng), {NOTES})  # scope: the cited .mjs file is not in the range
@@ -2031,8 +2033,9 @@ class RouteClaimTests(StaleCase):
 
     def test_route_claim_read_or_test_backing_naming_a_file_absent_at_head_is_a_dead_backing(self):
         """Class (d), a test re-pointed by a ruling. Coordinator ruling, 2026-11-08 04:03 CST (item 386): "a cite to a code
-        name missing there is red". Lane pick, 04:16 CST: a dead cite has one home, STALE010. The node id is that dead
-        cite, so the exit is 1. The read backing names no code name, so it keeps only its STALE005 report."""
+        name missing there is red". Lane pick, 04:16 CST: a dead cite has one home, STALE010. Their home is decision
+        `record-cites-live-code` (claims about code cite live code names). The node id is that dead cite, so the exit
+        is 1. The read backing names no code name, so it keeps only its STALE005 report."""
         rows = [
             ("- The cloud cannot push to main (read hooks/guard.py:12).", False),  # the file exists at head: backed
             ("- The cloud cannot push to main (read hooks/gone.py:12).", True),  # no such file: a dead backing
@@ -3022,7 +3025,8 @@ class CodeClaimTests(StaleCase):
     def test_a_cite_to_a_name_unbound_in_its_file_at_head_is_stale010_and_no_stale009_report(self):
         """Class (d), a test re-pointed by a ruling: a dead cite moves from a STALE009 report to the STALE010 finding.
         Coordinator ruling, 2026-11-08 04:03 CST (item 386): "a cite to a code name missing there is red". Lane pick,
-        04:16 CST: a dead cite has one home, STALE010, and STALE009 keeps only "a code claim with no cite"."""
+        04:16 CST: a dead cite has one home, STALE010, and STALE009 keeps only "a code claim with no cite".
+        Their home is decision `record-cites-live-code` (claims about code cite live code names)."""
         cited = [(DEAD_PAREN, "no_such_name"), (DEAD_TICK, "no_such_name"), (GONE_FILE, "lane_lint")]
         rng, _ = self.rows_range([("- " + text, False) for text, _ in cited] + [("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
@@ -3085,7 +3089,8 @@ class CodeClaimTests(StaleCase):
     def test_report_lines_leave_the_exit_code_at_zero_and_the_verdict_at_pass(self):
         """Class (d), a test re-pointed by a ruling. Lane pick, 04:16 CST: STALE009 keeps only "a code claim with no
         cite", so both lines here stay report lines. A dead cite is STALE010, never a report line (coordinator ruling,
-        2026-11-08 04:03 CST, item 386)."""
+        2026-11-08 04:03 CST, item 386). Their home is decision `record-cites-live-code` (claims about code cite live
+        code names)."""
         rng, flagged = self.rows_range([("- " + INCIDENT, True), ("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
         rc, out = self.run_check(rng)
