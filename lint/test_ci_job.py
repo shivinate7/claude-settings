@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import MISSING_INSTALL_LINE, run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -392,6 +392,22 @@ class StepSelect(Job):
     def test_a_run_with_no_step_runs_every_step(self):  # the control
         rc, lines, out = self.run_job(step("one", "true"), step("two", "true"))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+
+    def test_control_a_node_path_folder_left_to_a_playwright_setup_step_reads_one_unknown_and_runs_no_npm(self):
+        """Today's read, pinned: the job's playwright-setup step is not run here, so the suite's NODE_PATH folder is absent and the
+        step reads one unknown line that names it. MISSING_INSTALL_LINE is the one reader of that text (merge's lane lint reads it too).
+        No npm runs: a change that runs the install must say so in its own commit."""
+        install = step("Install the pinned Playwright", uses="./actions/playwright-setup", **{"with": {"package-dir": ".github/shoot"}})
+        suite = step("Guard suite", "python3 hooks/test_guard.py",
+                     env={"NODE_PATH": "${{ github.workspace }}/.github/shoot/node_modules"})
+        rc, lines, out = self.run_job(install, suite, args=("--step", "Guard suite"), env=self.stub_path(npm=self.NPM_OK))
+        self.assertEqual(rc, 2, out)
+        unknown = [ln for ln in lines if ln.startswith("unknown")]
+        self.assertEqual(len(unknown), 1, out)
+        found = MISSING_INSTALL_LINE.search(unknown[0])
+        self.assertIsNotNone(found, "the unknown line is not the missing NODE_PATH install: " + out)
+        self.assertTrue(found.group(1).endswith("/.github/shoot/node_modules"), "the line names another folder: " + out)
+        self.assertEqual(self.npm_calls(), "(no npm call)", "ci-job ran npm for the playwright-setup step: " + out)
 
 
 class SteAction(Job):
