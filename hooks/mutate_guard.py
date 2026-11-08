@@ -3512,7 +3512,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     imports or loads, however deep: from each tracked `.py` the suite names, it follows the stems that file imports (`import`,
     `from`, a literal `import_module`) and the basenames it names in a path expression, to tracked `.py` files, each file
     once, so a cycle ends. A deleted `.py` path is no longer tracked, so its stem is matched against the stems those files
-    import. A stem or basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
+    import, and its basename against the basenames they name in a path expression. A stem or basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
     whatever the number of paths or suites."""
     import re
     listed = dict(REPORT_TARGETS)
@@ -3538,6 +3538,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     suites = [item for item in suites if profile_of(item) is not None]
     reached = {}  # a suite -> the tracked .py files its loads lead to
     reached_stems = {}  # a suite -> the stems those files import, so a deleted module (no longer tracked) still matches
+    reached_bases = {}  # a suite -> the basenames those files name in a path expression, for the same deleted-path match
     if chain:
         by_stem = {}
         for item in tracked:
@@ -3555,6 +3556,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
             todo = loads_of(profile_of(suite))
             seen = set()
             followed = set()
+            named = set()
             while todo:
                 file = todo.pop()
                 if file in seen:
@@ -3563,9 +3565,11 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
                 profile = profile_of(file)
                 if profile is not None:
                     followed.update(profile[0])
+                    named.update(profile[1])
                     todo.extend(loads_of(profile))
             reached[suite] = seen
             reached_stems[suite] = followed
+            reached_bases[suite] = named
     for path in scan:
         folder, name = os.path.split(path)
         stem, extension = os.path.splitext(name)
@@ -3574,7 +3578,8 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
             stems, bases = profiles[item]
             if (os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))) \
                     or name in bases or (extension == ".py" and stem in stems) or path in reached.get(item, ()) \
-                    or (extension == ".py" and stem in reached_stems.get(item, ())):
+                    or (extension == ".py" and stem in reached_stems.get(item, ())) \
+                    or name in reached_bases.get(item, ()):
                 names.add(item)
     return names
 
