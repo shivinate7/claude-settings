@@ -4,6 +4,7 @@ tree its branch moved under (stale-tree-commit).
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import fnmatch
 import os
 import shlex
 
@@ -133,9 +134,10 @@ COMMIT_VALUE_LETTERS = "mFCct"   # a short cluster ends where one of these start
 
 
 def commit_scope(args):
-    """(all, include, paths) of a `git commit` call's arguments. `all` is `-a`/`--all`; `include`
-    is `-i`/`--include`; `paths` are the named pathspecs, which commit the work-tree copies."""
-    every = include = False
+    """(all, include, paths, only) of a `git commit` call's arguments. `all` is `-a`/`--all`;
+    `include` is `-i`/`--include`; `only` is `-o`/`--only`; `paths` are the named pathspecs, which
+    commit the work-tree copies."""
+    every = include = only = False
     paths = []
     ended = False
     skip = False
@@ -153,6 +155,8 @@ def commit_scope(args):
                 every = True
             elif name == "--include":
                 include = True
+            elif name == "--only":
+                only = True
             elif name in COMMIT_VALUE_FLAGS and "=" not in arg:
                 skip = True
         else:
@@ -161,12 +165,14 @@ def commit_scope(args):
                     every = True
                 elif letter == "i":
                     include = True
+                elif letter == "o":
+                    only = True
                 elif letter in COMMIT_VALUE_LETTERS:
                     skip = at == len(arg) - 1
                     break
                 elif letter in "Su":   # optional value, always glued
                     break
-    return every, include, paths
+    return every, include, paths, only
 
 
 def _raw_pairs(where, args):
@@ -190,9 +196,10 @@ def _raw_pairs(where, args):
     return pairs
 
 
-def _newest_entry(gitdir):
-    """The newest HEAD reflog entry of a git directory as (old, new, message), or None for no
-    log, an empty log or an unreadable line. Reads the tail of the file only."""
+def _newest_entries(gitdir):
+    """The newest two HEAD reflog entries of a git directory, oldest first, each (old, new,
+    message). One entry when the log holds one or the earlier line is unreadable; [] for no log,
+    an empty log or an unreadable newest line. Reads the tail of the file only."""
     try:
         with open(os.path.join(gitdir, "logs", "HEAD"), "rb") as handle:
             handle.seek(0, os.SEEK_END)
@@ -200,15 +207,31 @@ def _newest_entry(gitdir):
             handle.seek(max(0, size - 8192))
             tail = handle.read().decode("utf-8", "replace")
     except OSError:
-        return None
-    lines = [line for line in tail.split("\n") if line.strip()]
-    if not lines:
-        return None
-    head, _, message = lines[-1].partition("\t")
-    fields = head.split()
-    if len(fields) < 2:
-        return None
-    return fields[0], fields[1], message.strip()
+        return []
+    entries = []
+    for line in [line for line in tail.split("\n") if line.strip()][-2:]:
+        head, _, message = line.partition("\t")
+        fields = head.split()
+        entries.append((fields[0], fields[1], message.strip()) if len(fields) >= 2 else None)
+    if not entries or entries[-1] is None:
+        return []
+    return entries if entries[0] is not None else entries[-1:]
+
+
+def _moved_from(entries, head):
+    """X, the commit this checkout's index may still be cut from, or "" for none (decision
+    stale-tree-commit, step 1). Judged from the newest two HEAD log entries."""
+    if not entries:
+        return ""
+    old, new, message = entries[-1]
+    before = entries[-2] if len(entries) > 1 else None
+    if new != head:
+        return new                        # the branch moved under this checkout
+    if before and old != before[1]:
+        return before[1]                  # a gap: it moved before the newest entry
+    if before and (message == "" or message.startswith("reset:")):
+        return before[1]                  # a move that leaves the index alone
+    return ""
 
 
 def _is_detached(gitdir):
@@ -232,50 +255,64 @@ def stale_tree_hit(where, args) -> str:
     gitdir, top, head = lines[:3]
     if _is_detached(gitdir):
         return ""
-    last = _newest_entry(gitdir)
-    if last is None:
-        return ""
-    old, new, message = last
-    if new != head:
-        moved = new                       # the branch moved under this checkout
-    elif message == "" or message.startswith("reset:"):
-        moved = old                       # a move that leaves the index alone
-    else:
-        return ""                         # commit, pull, merge, rebase, checkout: the index synced
+    moved = _moved_from(_newest_entries(gitdir), head)
     if not moved.strip("0") or moved == head:
         return ""
     ancestor = _git(where, "merge-base", "--is-ancestor", moved, head)
     if ancestor is None or ancestor.returncode != 0:
         return ""                         # a squash or a reset back: not a move forward
-    every, include, paths = commit_scope(args)
-    # Named paths commit only those paths' work-tree copies, so the move is read for them alone.
-    spec = ["--", *paths] if paths else []
+    every, include, paths, only = commit_scope(args)
+    include = include and not only
+    # The copy the commit records per path: the index's, except that `-a` takes the work tree's
+    # for each path the index tracks, and named paths take the work tree's. `-i` with paths takes
+    # the index for every path and the work tree for the named ones.
+    from_index = not paths or include
+    # Without `-i`, only the named paths are recorded, so the move is read for them alone. With
+    # `-i` the index decides every path, so the move is read whole and the names matched here.
+    spec = ["--", *paths] if paths and not include else []
     changed = _raw_pairs(where, ["diff-tree", "-r", "-z", "--no-abbrev", moved, head, *spec])
     if not changed:
         return ""
-    if include or every or not paths:
+    staged = {}
+    if from_index:
         staged = _raw_pairs(top, ["diff-index", "--cached", "-r", "-z", "--no-abbrev", head])
         if staged is None:
             return ""
-        for name, (_, index_sha) in staged.items():
-            if name in changed and index_sha == changed[name][0]:
-                return name
-    if every or paths:
-        # `-a` takes the work-tree copy of every path HEAD still tracks; a path the move added
-        # is judged by the index read above.
-        names = [name for name, (before, after) in changed.items() if after and (before or paths)]
-        files = [name for name in names if os.path.isfile(os.path.join(top, name))]
-        shas = []
-        if files:
-            hashed = _git(top, "hash-object", "--", *files)
-            if hashed is None or hashed.returncode != 0:
-                return ""
-            shas = hashed.stdout.split()
-        present = dict(zip(files, shas))
-        for name in names:
-            if present.get(name, "") == changed[name][0]:
-                return name
+    reads = []                            # the paths whose recorded copy is the work tree's
+    for name, (_, after) in changed.items():
+        if paths:
+            reads_it = not include or _named_by(name, paths, where, top)
+        elif every:
+            reads_it = staged[name][1] != "" if name in staged else after != ""
+        else:
+            reads_it = False
+        if reads_it:
+            reads.append(name)
+    files = [name for name in reads if os.path.isfile(os.path.join(top, name))]
+    shas = {}
+    if files:
+        hashed = _git(top, "hash-object", "--", *files)
+        if hashed is None or hashed.returncode != 0:
+            return ""
+        shas = dict(zip(files, hashed.stdout.split()))
+    for name, (_, after) in changed.items():
+        if name in reads:
+            copy = shas.get(name, "")     # a file the work tree lacks records as deleted
+        else:
+            copy = staged[name][1] if name in staged else after   # diff-index lists only differences
+        if copy != after:
+            return name
     return ""
+
+
+def _named_by(name, paths, where, top):
+    """True when a literal or glob pathspec in PATHS (relative to WHERE) covers the top-relative
+    NAME. Used only for `-i` with paths."""
+    for path in paths:
+        full = os.path.relpath(os.path.join(where, path), top).replace(os.sep, "/")
+        if name == full or name.startswith(full.rstrip("/") + "/") or fnmatch.fnmatchcase(name, full):
+            return True
+    return False
 
 
 def stale_tree_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
