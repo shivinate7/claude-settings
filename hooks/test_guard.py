@@ -16557,6 +16557,31 @@ def pd_seam_case():
 LOG_CHECKS_EXTRA.append(("page-item-design: the checker runs only for a write with designs", pd_seam_case))
 
 
+def pd_key_case():
+    """The checker is handed the item under its doc key. A data `id` field that names another item is ignored, so a
+    picture that misses under the key is denied. The seam stands in for the checker: it misses only under the key."""
+    seen = []
+
+    def seam(page_file, item):
+        seen.append(item.get("id"))
+        if item.get("id") == PD_DOC:
+            return 1, "The picture of option A shows nothing the focus names."
+        return 0, ""
+    repo = pd_repo("dockey", PD_PAGE)
+    calls, out, _ = pd_judged(pd_body(repo, pd_item(id="other-id")), "dockey", seam=seam)
+    if calls != 1:
+        return False, "the checker was called %d times for a write with a picture, want 1" % calls
+    if seen != [PD_DOC]:
+        return False, "checker got item id %r, want the doc key %r: the data id field must not name the item" % (seen[0], PD_DOC)
+    decision, _reason = read_decision(out)
+    if decision != "deny":
+        return False, "a miss under the doc key was %s, want deny" % decision
+    return True, "the checker gets the doc key, and a miss under it is denied"
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: the item's id is its doc key, not its data id field", pd_key_case))
+
+
 def pd_partial_options():
     """Two options with gain and lose, one with a picture. A partial update's options must pass the form rule too."""
     return with_stake({"options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
