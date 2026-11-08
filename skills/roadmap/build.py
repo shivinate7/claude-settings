@@ -82,8 +82,8 @@ The upkeep list also names each open step whose note, why or ask holds an owner-
 answers do not match (step pick-claims-match-page). A claim is `[the] owner picked [option] [<n>] <letter> [on [page]
 item <n>]` or `item <n> [option] <letter>` (`item #<n>` too), any case, the letter one whole word, with markup or
 punctuation allowed around it (`**b**`, `(b)`, `: b`, `_a_`, backticks, quotes). An `item` claim whose letter is `a` or
-`i` ends at the end of the text, a line break, or before a backtick or one of the marks . , ; ) ] ? * ( : after whitespace,
-so "item 9 a decision" is not one; another letter needs only a non-letter after it. "Owner picked none of these" and
+`i` ends, right after the letter, at the end of the text, a line break, or before a backtick or one of the marks
+. , ; ) ] ? * ( : _ so "item 9 a decision" is not one; another letter needs only a non-letter after it. "Owner picked none of these" and
 "items 9 and 10 a" are not claims either. A claim names item n by `item <n>`, by a number before the letter, or by
 `on [page] item <n>` after it; it matches the live file's "answers" row {"n", "choice"?, "at"?} with that n, or that
 item's `lastAnswer` {"choice"?, "note"?, "at"?} on its "items" row, when its choice (a letter, or a list of letters)
@@ -1455,9 +1455,9 @@ def unfiled(steps, work):
 # An owner-pick claim: `[the] owner picked [option] [<n>] <letter> [on [page] item <n>]` or `item [#]<n> [option] <letter>`,
 # any case. The letter may sit behind markup or punctuation (`**b**`, `(b)`, `: b`, `_a_`, backticks, quotes). No letter or
 # digit may touch either end, so "homeowner picked a", "subitem 9 a", "items 9 a" and "item 9 ab" are not claims. An item
-# claim whose letter is `a` or `i` must also end (ITEM_END): at the end of the text, a line break, or before
-# a backtick or one of `. , ; ) ] ? * ( :` after optional whitespace, so the article in "item 9 a decision" and the word in "item 9 I
-# decide" are no pick. Any other letter needs only a non-letter after it.
+# claim whose letter is `a` or `i` must also end (ITEM_END), counted from the letter and not from the markup after it:
+# at the end of the text, a line break, or before a backtick or one of `. , ; ) ] ? * ( : _` after optional whitespace,
+# so the article in "item 9 a decision" and the word in "item 9 I decide" are no pick. Any other letter needs only a non-letter after it.
 _SEP = r"[\s:*_`\"(\[]+"
 _CLOSE = r"[*_`\")\]]*"
 _OPTION = r"(?:(?i:option)" + _SEP + r")?"
@@ -1465,7 +1465,7 @@ PICK_CLAIM = re.compile(
     r"(?<![^\W_]|-)(?:(?i:(?:the\s+)?owner\s+picked)" + _SEP + _OPTION + r"(?:#?(?P<on>\d+)" + _SEP + r")?(?P<pick>[A-Za-z])" +
     _CLOSE + r"(?:\s+(?i:on)\s+(?:(?i:page)\s+)?(?i:item)\s+#?(?P<on2>\d+))?(?![^\W_])"
     r"|(?i:item)\s+#?(?P<n>\d+)" + _SEP + _OPTION + r"(?P<letter>[A-Za-z])" + _CLOSE + r"(?![^\W_]))")
-ITEM_END = re.compile(r"\s*(?:\Z|[.,;)\]?*`(:]|[\r\n])")
+ITEM_END = re.compile(r"\s*(?:\Z|[.,;)\]?*`(:_]|[\r\n])")
 
 
 def pick_claims(open_, work):
@@ -1486,7 +1486,7 @@ def pick_claims(open_, work):
             text = d.get(key)
             text = text if isinstance(text, str) else ""
             for m in PICK_CLAIM.finditer(text):
-                if m.group("letter") is not None and m.group("letter") in "aAiI" and not ITEM_END.match(text, m.end()):
+                if m.group("letter") is not None and m.group("letter") in "aAiI" and not ITEM_END.match(text, m.end("letter")):
                     continue
                 n = m.group("n") or m.group("on") or m.group("on2")
                 letter = m.group("letter") or m.group("pick")
