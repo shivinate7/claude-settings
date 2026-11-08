@@ -5720,6 +5720,24 @@ sh("narrate: a semicolon ends the pipeline, so a tail after it reads no live str
 sh("check-tail: merge --lane-lint piped to tail, then a background &, is refused",
    "merge --lane-lint 7 | tail & echo $!", "deny", "check-tail", cwd=NOGIT)
 
+# A trailing `&` backgrounds a named check as run_in_background does, so a ci-job with one is refused.
+# The until note keeps background-end out of these cases, as it does for the backgrounded rows above.
+add("check-tail: ci-job checks --lint piped to grep, then a trailing background &, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint | grep FAIL & echo $!")
+add("check-tail: ci-job checks --lint piped to tail, then a trailing background &, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint | tail -3 &")
+sh("check-tail: ci-job checks --lint piped to tail in the foreground, with no &, is allowed",
+   "~/.claude/bin/ci-job checks --lint | tail -3", "allow", cwd=NOGIT)
+
+# A merge script run by its path, with no interpreter word, is the same verdict call as
+# `python merge/merge.py`, so check-tail refuses it too.
+sh("check-tail: ./merge/merge.py --lane-lint piped to tail is refused",
+   "./merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge/merge.py --review-record piped to grep is refused",
+   "merge/merge.py --review-record 7 | grep Head", "deny", "check-tail", cwd=NOGIT)
+
 # =========================================================================== 2c. waiter loops
 #
 # Rule 9, approved by the owner. A pause between polls turns waiting into a loop of turns that
