@@ -2681,6 +2681,12 @@ sh("checkout: a start point survives a merged-output redirect",
    VCS + " checkout origin/claude/pass3-seam 2>&1", "allow", cwd=NOGIT)
 sh("checkout: a start point survives a discarded-error redirect",
    VCS + " checkout main 2>/dev/null", "allow", cwd=NOGIT)
+# A noclobber override and a named descriptor are redirects, so the word after them is no start point's path.
+sh("checkout: a start point survives a noclobber redirect",
+   VCS + " checkout origin/main >| log", "allow", cwd=NOGIT)
+sh("checkout: a start point survives a named-descriptor redirect",
+   VCS + " checkout origin/main {fd}>log", "allow", cwd=NOGIT)
+sh("checkout: a start point with no redirect is allowed", VCS + " checkout origin/main", "allow", cwd=NOGIT)
 sh("checkout: a new branch survives a log redirect and merged output",
    VCS + " checkout -b feat/x origin/feat/x >log.txt 2>&1", "allow", cwd=NOGIT)
 sh("checkout: a status piped onward is not a checkout at all",
@@ -7145,6 +7151,9 @@ push_case("main, a second refspec that reaches main asks", "origin HEAD:push-gua
           rule=PUSH_MAIN_RULE)
 push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, --branches reaches main and asks", "--branches origin", "ask", rule=PUSH_MAIN_RULE)
+# A redirect's fd is no destination: the verdict of `origin main 10>out` is the bare push's.
+push_case("main, a push of main with an fd-10 redirect asks like the bare one", "origin main 10>out", "ask",
+          rule=PUSH_MAIN_RULE)
 # A -u push of the local name writes main when the checkout is main, and -u does not hide a second refspec to main.
 push_case("main, -u HEAD on main asks", "-u origin HEAD", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
 push_case("stacked lane, -u HEAD with a second refspec to main asks", "-u origin HEAD main", "ask",
@@ -9862,6 +9871,9 @@ def record_push_cost_case():
         ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "diff": 1}),
         ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "diff": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
+        # The redirect's digits are no destination: `10>out` reads as `origin main`, with no extra git read.
+        ("a literal destination, origin main with an fd-10 redirect", "push origin main 10>out",
+         {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
     ):
@@ -10872,6 +10884,15 @@ records_refusal("stage then commit: add of the page and commit with an edited pa
 
 records_refusal("stage then commit: add . with a redirect glued to its path, and commit with an edited page",
              VCS + " add .>out.txt && " + VCS + " commit -m x", "unstaged")
+# A glued redirect is no part of a pathspec, so `commit .>out.txt` commits what `commit .` commits, and
+# `commit docs/records.md>log` commits the page as `commit docs/records.md` does.
+records_refusal("a commit of . with the page edited and unstaged", VCS + " commit .", "unstaged")
+records_refusal("a commit of the page by path, with the page edited and unstaged", VCS + " commit docs/records.md",
+                "unstaged")
+records_refusal("a commit of . with a glued redirect, with the page edited and unstaged",
+                VCS + " commit .>out.txt", "unstaged")
+records_refusal("a commit of the page by path with a glued redirect, with the page edited and unstaged",
+                VCS + " commit docs/records.md>log", "unstaged")
 
 # 2. No staged change to the page: allowed, though the base's page moved after the lane was cut.
 records_allow("a commit that stages no page change, with the base's page moved on", VCS + " commit -m x",
@@ -11016,6 +11037,15 @@ records_refusal("a chain that runs the generator with --print glued to a redirec
              GEN + " --print>docs/records.md && " + ADD_A + " && " + COMMIT_X, "product")
 records_allow("a chain that runs the generator with --print into another file, then add -A and commit",
               GEN + " --print > out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+# `>&file` writes the file as `&>file` does, and a pipe into `tee` writes what it is given.
+records_refusal("a chain that runs the generator with --print into the page by >&, then add -A and commit",
+                GEN + " --print >&docs/records.md && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("a chain that runs the generator with --print and a >&2 duplicate, then add -A and commit",
+              GEN + " --print >&2 && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_refusal("a chain that pipes the generator's --print into tee of the page, then add -A and commit",
+                GEN + " --print | tee docs/records.md && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("a chain that pipes the generator's --print into tee of another file, then add -A and commit",
+              GEN + " --print | tee out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 
 # argparse reads a flag by any unambiguous prefix, and -h or --help exits before any write. So -h, --help,
 # --che (a prefix of --check) and --pri (a prefix of --print) read the generator and write no page. A --root
@@ -11036,6 +11066,13 @@ records_allow("a chain that runs the generator with --root at another repo, then
               GEN + " --root " + OTHER_REPO + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 records_allow("a chain that runs the generator with --root=another repo, then add -A and commit",
               GEN + " --root=" + OTHER_REPO + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+# A --root that names another repo does not stop a redirect into this repo's page: the shell still writes it.
+records_refusal("a chain that runs the generator with --root at another repo and a redirect into the page,"
+                " then add -A and commit",
+                GEN + " --root " + OTHER_REPO + " > docs/records.md && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("a chain that runs the generator with --root at another repo and a redirect to another file,"
+              " then add -A and commit",
+              GEN + " --root " + OTHER_REPO + " > out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 records_refusal("a chain that runs the generator with --root at this repo, then add -A and commit",
              GEN + " --root " + REC_LANES["product"] + " && " + ADD_A + " && " + COMMIT_X, "product")
 records_refusal("a chain that runs the generator with --root . in this repo, then add -A and commit",

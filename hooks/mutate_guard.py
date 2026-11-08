@@ -2399,6 +2399,16 @@ MUTATIONS = [
      "    tokens = _split_glued_redirects(tokens)\n    out, index = [], 0\n",
      "    out, index = [], 0\n",
      "guard", "add . with a redirect glued to its path"),
+    # REDIRECTION (hooks/guard_core.py) cuts a redirect from the words a git call's arguments are read from. Each
+    # operator form below is one branch of its alternation, and a dropped branch leaves the redirect's word there.
+    ("redirect cut: the noclobber override `>|` is no longer cut from the arguments",
+     r'(?:\d|\{[A-Za-z_]\w*\})?>>?\|?)"',
+     r'(?:\d|\{[A-Za-z_]\w*\})?>>?)"',
+     "guard", "checkout: a start point survives a noclobber redirect"),
+    ("redirect cut: the named descriptor `{fd}>` is no longer cut from the arguments",
+     r'(?:\d|\{[A-Za-z_]\w*\})?>>?\|?)"',
+     r'(?:\d)?>>?\|?)"',
+     "guard", "checkout: a start point survives a named-descriptor redirect"),
 ]
 
 
