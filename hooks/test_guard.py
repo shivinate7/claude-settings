@@ -3896,6 +3896,71 @@ sh("two-worktrees: worktree add -f -d, a forced detached add that takes no branc
 sh("two-worktrees: worktree add -f --detach, a forced detached add that takes no branch, is allowed",
    VCS + " worktree add -f --detach ../n2 x", "allow", cwd=TWACT)
 
+# THE REF MOVES. `git update-ref` writes a branch ref straight through, and git 2.43 checks no worktree
+# for it. Run from a tree that does not hold the branch, a move or a delete leaves the holder's index at
+# the old commit, the same stale state the forms above cause. Reproduced in a scratch clone: a move from
+# the actor's tree left the holder with a staged diff that reverts the actor's commit. Git refuses none
+# of these, so the rule must.
+sh("two-worktrees: update-ref moves a branch another worktree holds, and is refused",
+   VCS + " update-ref refs/heads/x HEAD", "deny", TWO_RULE, cwd=TWACT)
+# The -m flag takes a value. The branch the call moves is still the held one, after the value.
+sh("two-worktrees: update-ref -m takes a value, and the branch it moves is still the held one, so it is refused",
+   VCS + " update-ref -m sync refs/heads/x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: update-ref -d deletes a branch another worktree holds, and is refused",
+   VCS + " update-ref -d refs/heads/x", "deny", TWO_RULE, cwd=TWACT)
+# THE TREE OF A -C. The primary checkout holds main, not x, so the move runs from a tree that does not hold x.
+sh("two-worktrees: git -C <primary> update-ref of x, held by another worktree, is refused",
+   VCS + " -C " + slash(TWBASE) + " update-ref refs/heads/x HEAD", "deny", TWO_RULE, cwd=TWACT)
+# A READ THAT FAILS REFUSES, as for the forms above. `y` is held by no worktree, so the refusal can only
+# come from the failed read.
+stand_in_sh("two-worktrees: a failed worktree list read refuses update-ref, even of a branch no worktree holds",
+            VCS + " update-ref refs/heads/y HEAD", "deny", TWO_RULE, cwd=TWACT,
+            env_path=TWFAILSHIM + os.pathsep + GIT_PATH)
+
+# THE SYMBOLIC REF. `symbolic-ref HEAD refs/heads/<b>` points the running tree's HEAD at a branch, so the tree
+# holds it. Run onto a branch another worktree holds, git 2.43 refuses nothing: two trees hold one branch, and
+# a commit in either moves it under the other. Git refuses the plain checkout and the new-branch forms of a
+# held name, so this form is the one git lets through and the rule must cover.
+sh("two-worktrees: symbolic-ref HEAD onto a branch another worktree holds is refused",
+   VCS + " symbolic-ref HEAD refs/heads/x", "deny", TWO_RULE, cwd=TWACT)
+# A READ. Without a target, symbolic-ref only names the branch HEAD is on, so it passes.
+sh("two-worktrees: symbolic-ref HEAD with no target reads the branch and is allowed",
+   VCS + " symbolic-ref HEAD", "allow", cwd=TWACT)
+
+# THE REF MOVE CONTROLS. A ref no worktree holds, a remote-tracking ref, and a branch the running tree holds
+# itself all pass. Each names HEAD as the value, so no held ref moves to a commit its tree does not have.
+sh("two-worktrees: update-ref of a branch no worktree holds is allowed",
+   VCS + " update-ref refs/heads/y HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: update-ref -d of a branch no worktree holds is allowed",
+   VCS + " update-ref -d refs/heads/y", "allow", cwd=TWACT)
+sh("two-worktrees: update-ref of a remote-tracking ref is allowed, since no worktree checks one out",
+   VCS + " update-ref refs/remotes/origin/x HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: update-ref of the branch the running tree holds itself is allowed",
+   VCS + " update-ref refs/heads/actor-lane HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: update-ref of x in the worktree that already holds x is allowed",
+   VCS + " update-ref refs/heads/x HEAD", "allow", cwd=TWHOLD)
+
+# THE PUSH. A plain push writes the named ref in the remote, and origin here is a different repository, so
+# the holder's local ref does not move. The incident named a push. Pinned allowed: a rule that refused this
+# would turn away the lane's own remedy, which pushes HEAD to the held name.
+sh("two-worktrees: a plain push to origin of a name another worktree holds is allowed, since origin's ref moves alone",
+   VCS + " push origin HEAD:refs/heads/x", "allow", cwd=TWACT)
+sh("two-worktrees: a plain push to origin of a name no worktree holds is allowed",
+   VCS + " push origin HEAD:refs/heads/y", "allow", cwd=TWACT)
+
+# THE REMEDY. The refusal prints these forms, so they must pass from the own worktree.
+sh("two-worktrees: the remedy's detached checkout of origin's branch is allowed",
+   VCS + " checkout --detach origin/x", "allow", cwd=TWACT)
+sh("two-worktrees: the remedy's push from its own worktree, named with -C, is allowed",
+   VCS + " -C " + slash(TWACT) + " push origin HEAD:x", "allow", cwd=TWACT)
+
+# GIT'S OWN REFUSALS. Git refuses a fetch into a checked-out branch and a forced branch move of one, so the
+# rule has nothing to add and these pass, as the plain checkout does above.
+sh("two-worktrees: a fetch into a branch another worktree holds is git's own refusal, not this rule's",
+   VCS + " fetch origin x:x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -f of a branch another worktree holds is git's own refusal, not this rule's",
+   VCS + " branch -f x HEAD", "allow", cwd=TWACT)
+
 
 def _two_worktrees_calls(command, cwd):
     """Run `command` through the guard with the logging stand-in on PATH. Returns (decision, reason, the
