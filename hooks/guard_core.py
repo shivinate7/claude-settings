@@ -841,10 +841,11 @@ _LEADING_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", 
 # Wrappers that run the command after them, and the commands that only read a file named after them.
 _WRAPPERS = {"sudo", "env", "timeout", "nohup", "nice", "command", "time", "xargs"}
 _READERS = {"cat", "wc", "head", "tail", "less", "grep", "jq", "diff"}
-# An interpreter flag that takes a value which is no script, and a flag whose value is code, not a file
-# (`node -p` and `--print` print what the code gives, `node --eval` and `perl -E` run it).
+# An interpreter flag that takes a value which is no script, and a flag whose value is code, not a file, with
+# the interpreter it gives code to ("" for each). `node -p` and `--print` print what the code gives, `node --eval`
+# and `perl -E` run it; `python3 -E` and `perl -p` take no code.
 _VALUE_FLAGS = {"-W", "-X", "-r", "--require", "-o", "-O"}
-_CODE_FLAGS = {"-c", "-e", "-p", "--print", "--eval", "-E"}
+_CODE_FLAGS = {"-c": "", "-e": "", "-p": "node", "--print": "node", "--eval": "node", "-E": "perl"}
 # A file named for a shell (`run.sh`, `run.ksh`, a file named `sh`), which a later call may run.
 _SHELL_SCRIPT = re.compile(r"(?:^|[./])(?:" + _SHELLS + r")$").search
 _STDIN_FILE = re.compile(r"(?<![<\d&])<(?![<(])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
@@ -893,12 +894,13 @@ def _stage_runs(words):
     or `-`. The word after a wrapper's flag may be the flag's value (`sudo -u root python3`), and so may the word
     after an interpreter's value flag (`python3 -W ignore -`), but never the `-` itself. The chain may start past
     a launcher no runner names (`uv run python -`, `stdbuf -oL python3 -`), unless the stage is a pure reader
-    (`grep python`). The caller passes no line that holds a shell word."""
+    (`grep python`), and a `-` ends that launcher (`gh pr create --body-file - --title "Bump node"`). The caller passes no line that holds a shell word."""
     start = _command_start(words)
     ran = words[start:start + 1]
     stdin = False
+    launcher = words[start:words.index("-", start) if "-" in words[start:] else len(words)]   # a `-` ends it
     at = start if _reads_only(words) else next(
-        (i for i in range(start, len(words)) if _RUNNER(_basename_word(words[i]))), len(words))
+        (start + i for i, word in enumerate(launcher) if _RUNNER(_basename_word(word))), len(words))
     while at < len(words):
         name = _basename_word(words[at])
         if not _RUNNER(name):
@@ -1000,8 +1002,9 @@ def _data_positions(words) -> set:
             continue
         step = at + 1
         code = False
+        family = re.match(r"[a-z]*", _basename_word(word))[0]
         while step < len(words) and _is_flag(words[step]):
-            code = code or words[step] in _CODE_FLAGS
+            code = code or _CODE_FLAGS.get(words[step]) in ("", family)
             step += 2 if words[step] in _VALUE_FLAGS else 1
         if not code:
             data.update(range(step + 1, len(words)))   # `step` is the script
@@ -1009,23 +1012,35 @@ def _data_positions(words) -> set:
 
 
 def _list_pieces(line: str):
-    """The pieces of LINE between `;`, `&&`, `||` and `&` that sit outside every `$(`, `(` and backtick. A mark
-    inside one stays in its piece, so `python3 -c "$(cd d && cat f)"` is one piece. An unclosed `(` keeps the
-    rest of the line in one piece: a reader of it can only run more files, never fewer."""
+    """The pieces of LINE between `;`, `&&`, `||` and `&` that sit outside every quote, `$(`, `(` and backtick. A
+    mark inside one stays in its piece, so `python3 -c "import os; $(cat f)"` and `python3 -c "$(cd d && cat f)"`
+    are one piece each. A quote or paren left open keeps the rest of the line in one piece: a reader of it can
+    only run more files, never fewer."""
     pieces = []
-    depth = 0
-    tick = False
+    stack = ""
     begin = 0
     index = 0
     while index < len(line):
         char = line[index]
-        if char == "`":
-            tick = not tick
-        elif char == "(":
-            depth += 1
-        elif char == ")" and depth:
-            depth -= 1
-        elif not depth and not tick and char in ";&|":
+        top = stack[-1:]
+        if top == "'":
+            stack = stack[:-1] if char == "'" else stack
+        elif char == "\\":
+            index += 2
+            continue
+        elif top == '"':
+            if line.startswith("$(", index):
+                stack += "("
+                index += 1
+            elif char in '"`':
+                stack = stack[:-1] if char == '"' else stack + char
+        elif char in "'\"(":
+            stack += char
+        elif char == ")" and top == "(" or char == "`" and top == "`":
+            stack = stack[:-1]
+        elif char == "`":
+            stack += char
+        elif not stack and char in ";&|":
             mark = line[index:index + 2] if line[index:index + 2] in ("&&", "||") else char
             redirect = mark == "&" and (line[index - 1:index] in ("<", ">") or line[index + 1:index + 2] == ">")
             if mark != "|" and not redirect:   # a pipe joins its stages, a `2>&1` or `&>` redirects

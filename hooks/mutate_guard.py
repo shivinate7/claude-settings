@@ -326,8 +326,8 @@ MUTATIONS = [
      'heredoc-keep: a kept body and a data body, then a bash run and a background npm start, denies'),
     # _CODE_FLAGS: a flag whose value is code, so the interpreter's operands are no data.
     ("heredoc: no flag gives code, node -p require of a file runs nothing",
-     '_CODE_FLAGS = {"-c", "-e", "-p", "--print", "--eval", "-E"}',
-     '_CODE_FLAGS = set()', "guard",
+     '_CODE_FLAGS = {"-c": "", "-e": "", "-p": "node", "--print": "node", "--eval": "node", "-E": "perl"}',
+     '_CODE_FLAGS = {}', "guard",
      'heredoc-keep: reader, a body in f.js run by node -p require of ./f.js, denies'),
     # _data_positions: the value of -W or -X is no script, so the script is the word after it.
     ("heredoc: a value flag takes no value, python3 -W ignore f reads f as data",
