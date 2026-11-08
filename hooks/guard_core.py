@@ -1466,47 +1466,59 @@ LOG_LOCK_WAIT = 2.0  # seconds; then the line is written unlocked, never dropped
 LOG_LOCK_OFFSET = 1 << 40  # a byte past any log data, so a reader never meets the lock
 
 
+def try_lock_fd(fd) -> bool:
+    """Try once to take an exclusive lock on the open file `fd`, never waiting. -> True if held, False if another holder has it.
+    Any other OS error raises. The lock frees when the holder's fd closes or the process dies. The one home of this lock:
+    the log line lock and merge's lane-lint slots call it. msvcrt on Windows, fcntl elsewhere."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(fd, LOG_LOCK_OFFSET, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError as exc:
+        # Only contention is a refusal: msvcrt gives EACCES or EDEADLK, flock gives BlockingIOError (EAGAIN) or EACCES.
+        if isinstance(exc, BlockingIOError) or exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+            return False
+        raise
+
+
+def unlock_fd(fd) -> None:
+    """Free the lock that try_lock_fd took on `fd`."""
+    if os.name == "nt":
+        import msvcrt
+        os.lseek(fd, LOG_LOCK_OFFSET, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
 def _log_lock(handle) -> bool:
     """Take a short exclusive lock on the open log. False if it cannot: the caller writes anyway.
 
     Two processes appending to one file can lose lines on Windows, where an append seeks and then
-    writes. The lock makes each line land whole. Stdlib only: msvcrt on Windows, fcntl elsewhere.
+    writes. The lock makes each line land whole.
     """
     try:
         fd = handle.fileno()
         deadline = time.monotonic() + LOG_LOCK_WAIT
         while True:
-            try:
-                if os.name == "nt":
-                    import msvcrt
-                    os.lseek(fd, LOG_LOCK_OFFSET, os.SEEK_SET)
-                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if try_lock_fd(fd):
                 return True
-            except OSError as exc:
-                # Only contention is worth a retry: msvcrt gives EACCES or EDEADLK, flock gives
-                # BlockingIOError (EAGAIN) or EACCES. Any other error returns at once.
-                busy = isinstance(exc, BlockingIOError) or exc.errno in (
-                    errno.EACCES, errno.EAGAIN, errno.EDEADLK)
-                if not busy or time.monotonic() >= deadline:
-                    return False
-                time.sleep(0.001)
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.001)
     except Exception:
         return False
 
 
 def _log_unlock(handle) -> None:
     try:
-        fd = handle.fileno()
-        if os.name == "nt":
-            import msvcrt
-            os.lseek(fd, LOG_LOCK_OFFSET, os.SEEK_SET)
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        unlock_fd(handle.fileno())
     except Exception:
         pass
 
