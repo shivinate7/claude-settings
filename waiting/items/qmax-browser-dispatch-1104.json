@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-08T04:58:00Z",
+  "checked_with": "runner 9 (q_max batch runner, 22:54 CST) and GitHub: no browser.yml run on q_max main since 17:50 CST Nov 7",
+  "context": "Goal: learn whether q_max main is green again after #1104 (merged 22:12 CST Nov 7). The last run, 42427075186 at 17:50 CST, failed 1 of 8 browser shards.\nWhy you: q_max's CLAUDE.md keeps the full browser suite on main for your dispatch of browser.yml only (owner, 2026-10-02 and 2026-10-14; D-748). On item 40 (Oct 28) you let a lane start it once; that grant named that one run.\nSteps: open the link below, press Run workflow, keep branch main, and press Run workflow again. Then press Done here. Or say in chat that a lane may start it, and the coordinator does.",
+  "home": "qmax-browser-main-red",
+  "id": "qmax-browser-dispatch-1104",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Open q_max browser.yml",
+      "url": "https://github.com/shivinate7/q_max/actions/workflows/browser.yml"
+    }
+  ],
+  "n": 397,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "step qmax-browser-main-red; q_max #1104; item 40 qmax-browser-dispatch",
+  "repo": "q_max",
+  "short": "Run q_max's browser checks on main",
+  "status": "open",
+  "title": "Start q_max's browser checks on main, after #1104"
+}
