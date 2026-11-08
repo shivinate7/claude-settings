@@ -1502,6 +1502,16 @@ OWNER_RULING_MUST_MATCH = (
     "Ruling Oct 17: no measuring step",
     "Rulings Nov 2: both stay",
     "Not a pin: shiv ruled out that stopgap",
+    "Owner ruling, item 330 b (keep the root): x",
+    "Owner ruling in chat, Nov 2 10:41 CST (no undo): x",
+    "Owner, Queue item 161 b, Nov 2: x",
+    "Owner chat Nov 3: keep it",
+    "shiv, Oct 30 14:47 CDT (item 78 note): one command per OS",
+    "Rulings: a stays, b goes",
+    "the owner's go on it, Nov 4",
+    "The owner keeps (a)",
+    "Lane notes-fix-large-1: owner ruling 13:20: keep",
+    "see docs/debts/notes.md; Ruling (owner, 2026-11-07): keep",
 )
 OWNER_RULING_MUST_NOT = (
     "Incident (shiv, Nov 9 10:12): a lane hand-merged X",
@@ -1518,6 +1528,12 @@ OWNER_RULING_MUST_NOT = (
     "There is no owner ruling on this",
     "**Incident** (shiv, Nov 1): x",
     "- Incident (shiv, Nov 1): x",
+    "Waits on the owner, item 248.",
+    "(owner grant needed before merge)",
+    "The owner asks whether we keep it",
+    "Note: owner ruled X",
+    "Incident (shiv, Nov 9 10:12): x",
+    "Second incident (shiv, Nov 3): x",
 )
 
 
