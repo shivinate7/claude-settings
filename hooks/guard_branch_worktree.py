@@ -399,12 +399,13 @@ def _name_list(where, *args):
     return [line for line in answer.stdout.split("\n") if line]
 
 
-def unstaged_edit_hit(where, args, added=()) -> str:
+def unstaged_edit_hit(where, args, added=(), later=()) -> str:
     """The left-out paths, comma-joined, when a plain `git commit` with these arguments, run in `where`,
     leaves a tracked edit out beside a staged path in the same folder, else ''. A commit that picks its
     files (`-a`, `-o`, `-i`, named paths) is not read. ADDED are tree-top-relative paths that an earlier
     `git add` or `git rm` of the same command puts in the commit: they join the staged set and leave the
-    left-out set."""
+    left-out set. LATER are paths that a later `git add` of the same command stages for a commit after it:
+    a deliberate split, so they leave the left-out set and do not join the staged set."""
     every, include, paths, only, _dry = commit_scope(args)
     if every or include or only or paths:
         return ""
@@ -417,7 +418,7 @@ def unstaged_edit_hit(where, args, added=()) -> str:
     left = _name_list(where, "diff", "--name-only")
     if not left:
         return ""
-    left = [name for name in left if name not in added]
+    left = [name for name in left if name not in added and name not in later]
     folders = {os.path.dirname(name) for name in staged}
     beside = [name for name in left if os.path.dirname(name) in folders]
     if not beside:
@@ -475,6 +476,27 @@ def _tree_top(where):
         where = parent
 
 
+def _call_paths(site, top, subcommand, args):
+    """The tree-top-relative paths one `git add` or `git rm` call of SITE names, [] when it runs in
+    another tree than TOP, or None when they cannot be read: a scope-changing flag, a glob, `.`, a
+    variable, a folder, or a site with no tree top."""
+    names = _named_paths(subcommand, args)
+    if names is None or not site or not top:
+        return None
+    there = _tree_top(site[1])
+    if there is None:
+        return None
+    if there != top:
+        return []
+    paths = []
+    for name in names:
+        full = shell_abs(name, site[1])
+        if not full or os.path.isdir(full):
+            return None
+        paths.append(os.path.relpath(full, top).replace(os.sep, "/"))
+    return paths
+
+
 def _added_by_chain(segments, number: int, cwd: str, ends, tree):
     """The tree-top-relative paths that earlier `git add` and `git rm` calls of this command put in the
     commit run in TREE, or None when an earlier call makes the state unreadable: any other index-changing
@@ -487,32 +509,43 @@ def _added_by_chain(segments, number: int, cwd: str, ends, tree):
         for subcommand, args in (site[0] if site else git_calls(segments[earlier])):
             if subcommand not in INDEX_CHANGING_SUBCOMMANDS:
                 continue
-            names = _named_paths(subcommand, args)
-            if names is None or not site or not top:
+            paths = _call_paths(site, top, subcommand, args)
+            if paths is None:
                 return None
-            there = _tree_top(site[1])
-            if there is None:
-                return None
-            if there != top:
-                continue
-            for name in names:
-                full = shell_abs(name, site[1])
-                if not full or os.path.isdir(full):
-                    return None
-                added.append(os.path.relpath(full, top).replace(os.sep, "/"))
+            added += paths
     return added
+
+
+def _staged_for_later_commit(segments, number: int, cwd: str, ends, tree):
+    """The tree-top-relative paths that a later `git add <paths>` of this command stages in TREE with a
+    `git commit` after it: the earlier commit left them out on purpose. An add whose paths cannot be read,
+    an add with no commit after it, and a call in another tree count for nothing."""
+    top = _tree_top(tree)
+    staged, pending = [], []
+    for later in range(number + 1, len(segments)):
+        site = _git_site(segments, later, cwd, ends)
+        for subcommand, args in (site[0] if site else []):
+            if subcommand == "add":
+                pending += _call_paths(site, top, subcommand, args) or []
+            elif subcommand == "commit" and _tree_top(site[1]) == top:
+                staged, pending = staged + pending, []
+    return staged
 
 
 def unstaged_edit_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
     """The left-out paths when `segments[number]` is a plain `git commit` that leaves a tracked edit
     unstaged beside a staged path in the same folder, else ''. The guard reads the index before the
     command runs, so earlier `git add <paths>` and `git rm <paths>` calls of the same command count as
-    in the commit; any other earlier index-changing git call makes the commit pass."""
+    in the commit; any other earlier index-changing git call makes the commit pass. A path that a later
+    `git add <paths>` stages for a later commit is a split, not a path left behind."""
     site = _commit_site(segments, number, cwd, ends)
     if not site:
         return ""
     added = _added_by_chain(segments, number, cwd, ends, site[1])
-    return "" if added is None else unstaged_edit_hit(site[1], site[0], added)
+    if added is None:
+        return ""
+    later = _staged_for_later_commit(segments, number, cwd, ends, site[1])
+    return unstaged_edit_hit(site[1], site[0], added, later)
 
 
 UNSTAGED_EDIT_REASON = (
