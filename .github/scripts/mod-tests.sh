@@ -13,8 +13,9 @@ rc=0
 
 phase_mods() {
   local list f n=0 fail=0
+  # check.mjs files are checks, not tests by name, and a red one must fail the phase too.
   # A pipe would hide find's exit code, so find runs alone and the loop reads its output.
-  list=$(find mods -name node_modules -prune -o \( -name '*.test.mjs' -o -name '*.test.js' \) -print) || { echo "find failed"; return 1; }
+  list=$(find mods -name node_modules -prune -o \( -name '*.test.mjs' -o -name '*.test.js' -o -name check.mjs \) -print) || { echo "find failed"; return 1; }
   [ -n "$list" ] || { echo "no mod test file found"; return 1; }
   while IFS= read -r f; do n=$((n + 1)); done <<< "$list"
   echo "mod tests: $n files"
