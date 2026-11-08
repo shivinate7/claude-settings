@@ -39,10 +39,10 @@ class RetiredRepos(unittest.TestCase):
             self.assertIn(self.retired[old], reg["repos"], "the repo that took %s has no colour" % old)
 
     def test_matcher(self):
-        for text in ("home-app's docs/design/", "shivinate7/home-app", "Home-App", "(home-app)"):
-            self.assertTrue(names(text, "home-app"), text)
-        for text in ("home's `records/home-app.md`", "ios/HomeApp/Views.swift", "home-apps", "my-home-app"):
-            self.assertFalse(names(text, "home-app"), text)
+        for text in ("portal's docs/design/", "shivinate7/portal", "Portal", "(portal)"):
+            self.assertTrue(names(text, "portal"), text)
+        for text in ("home's `records/portal.md`", "ios/PortalApp/Views.swift", "portals", "my-portal"):
+            self.assertFalse(names(text, "portal"), text)
 
     def test_no_tracked_file_names_a_retired_repo(self):
         files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True,

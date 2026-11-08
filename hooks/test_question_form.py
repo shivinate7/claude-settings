@@ -1628,7 +1628,7 @@ STEP_POOL_RECALL = (
     ("stall-watch-quiet-lint", "Owner question filed as page item 405 (stall-log-kept): keep a stalled job's log for 7 "
                                "days, recorded line in decision stall-watch has no owner ruling behind it."),
     ("c164", "Note: a non-writer owner that rewrites an item may republish a design, which only the writer should do."),
-    ("waiting-data-in-repo", "Owner hold: its draft PR merges only on the owner's word."),
+    ("waiting-data-in-repo", "Owner hold: its draft PR merges only on the owner's grant."),
 )
 # Label rows: sentences that OPEN with an Incident, Gripe or Deferred label. The pool keeps each one; the item-8 prompt,
 # not the pool, tells a label line from a ruling. A label may carry a qualifier, a bullet or an enumerator.
@@ -1639,7 +1639,7 @@ STEP_POOL_LABEL_OPENERS = (
     "(2) Your gripe, same day: the shiv ruling on the page was read as a yes.",
     "Deferred (shiv, Nov 5): the owner's ruling waits behind all work that needs none.",
     "Second incident (shiv, Nov 3): a lane merged the owner's ruling by hand.",
-    "Deferred (shiv, Oct 27 04:22 CDT): the live waiting pages (home-app, degen, mailaudit) belong to a third account; "
+    "Deferred (shiv, Oct 27 04:22 CDT): the live waiting pages (portal, degen, mailaudit) belong to a third account; "
     "both the cloud and the Mac get 404.",
     "Gripe, Oct 28 (shiv, in triage 11's session): on a task item (no option picker) the page offers only Mark done "
     "and a note.",
@@ -1669,7 +1669,7 @@ def case_step_pool_keeps_unlabeled_ruling_sentences():
     pool. Label openers are kept too: case_step_pool_keeps_sentences_opening_with_a_label checks them.
     The step notes come from the production reader (question_form._read_steps) on this checkout's origin/roadmap.
     A read that fails fails the row by name; an absent ref prints an unknown line. A sentence whose words are all
-    stopwords (an owner ask that names only an id and a time) shares no word with any question, so it is not measured."""
+    stopwords (a step note that names only an id and a time) shares no word with any question, so it is not measured."""
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "_step_rulings", None)
     read = getattr(question_form, "_read_steps", None)

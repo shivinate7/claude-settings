@@ -2154,8 +2154,8 @@ ITEM8_SENTENCES = (
     ("S3", "An incident or gripe line that only tells what went wrong is not a ruling."),
     ("S4", "A ruling that mentions a risk, a defect or an incident is still a ruling."),
 )
-# Phrases item 8 must not carry. The evidence clause made a step line with no words, page item or date stop counting as
-# a ruling, so the judge refused undated owner rulings.
+# Phrases item 8 must not carry: an evidence clause on S1 would stop a step line with no words, page item or date
+# from counting as a ruling.
 ITEM8_ABSENT = (
     ("S1 evidence clause", "and gives his words, a page item, or a date"),
 )
