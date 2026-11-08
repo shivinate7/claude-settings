@@ -7519,6 +7519,33 @@ sh("push: nested quote, bash -c printf prints a forced push, allows",
    r'bash -c "printf \"%s\" \"' + VCS + r' push -f\""', "allow", cwd=PUSHFEAT)
 sh("push: nested quote, node -e console.log prints a forced push, allows",
    r'node -e "console.log(\"' + VCS + r' push -f\")"', "allow", cwd=PUSHFEAT)
+# NAME PINS. Each case goes red on a scratch guard with the name it pins removed, except System.out.print*,
+# which print\w* also matches. ruby and perl are read only by INTERPRETER_RUNNER, and `system` also matches
+# CALL_RUNNER, so their pins use `spawn` and `readpipe`. `deno eval` is read by SCRIPT_RUNNER's `eval`, not
+# by the deno entry of INTERPRETER_RUNNER, which needs a dash flag.
+sh("push: nested quote runner pin, ruby -e spawns a forced push, denies",
+   r'ruby -e "spawn(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote runner pin, perl -e readpipe runs a forced push, denies",
+   r'perl -e "readpipe(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote runner pin, deno eval spawns a forced push, denies",
+   r'deno eval "spawn(\"' + VCS + r' push -f origin x\")"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote printer pin, ruby -e puts prints a forced push, allows",
+   r'ruby -e "puts(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, perl -e say prints a forced push, allows",
+   r'perl -e "say(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, python -c logger.info prints a forced push, allows",
+   r'python3 -c "import logging; logger = logging.getLogger(); logger.info(\"' + VCS + r' push -f origin x\")"',
+   "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c System.out.println prints a forced push, allows",
+   r'bash -c "System.out.println(\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c Write-Host prints a forced push, allows",
+   r'bash -c "Write-Host (\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c Write-Output prints a forced push, allows",
+   r'bash -c "Write-Output (\"' + VCS + r' push -f origin x\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c sudo echo prints a forced push, allows",
+   r'bash -c "sudo echo \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
+sh("push: nested quote printer pin, bash -c command printf prints a forced push, allows",
+   r'bash -c "command printf \"%s\" \"' + VCS + r' push -f origin x\""', "allow", cwd=PUSHFEAT)
 # The push text reader's scanner shapes. A comment opener or a multi-line string inside quotes is text, so
 # each is an allow control, green today. A lone quote in text opens no string that hides a push: nothing
 # after an unterminated quote runs, so the push-looking text after `it's #` is not a live push.
