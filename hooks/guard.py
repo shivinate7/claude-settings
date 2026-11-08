@@ -216,7 +216,8 @@ Other tools, in `judge` order:
                        (`a verdict: PASS or FAIL`).
                        Each step hides only its own span or sentence, so a later label in the same
                        line is read afresh (`... PASS or FAIL. Prior verdict: FAIL.` is refused).
-                       Shapes at sentence start only, so a brief that quotes the rule's words passes. A
+                       A report shape counts at line start only. A verdict label counts anywhere in its
+                       sentence before the colon, so a sentence that quotes `Verdict: PASS` is refused. A
                        findings list passes. A Workflow call is judged with or without a model; one
                        whose agentType the scan cannot read passes. A reviewer call whose prompt the
                        scan cannot read is refused with BRIEF_UNREAD_REASON.
@@ -2626,8 +2627,8 @@ def step_up_reason(prompt: str, role, model) -> str:
 
 # THE REVIEWER BRIEF CHECK (rule reviewer-brief-blind, decision reviewer-brief-blind). A reviewer that reads the builder's
 # report or a prior round's verdict anchors on it and confirms it. A spawn whose role is a reviewer is refused when its brief
-# holds a report-shaped block or a verdict line. Each shape is read at line start, never as a word, so a brief that quotes the
-# rule passes. A later round's findings list (file, line, claim) and a fix check's one finding hold neither shape. An argument
+# holds a report-shaped block or a verdict line. A report shape is read at line start. A verdict label is read anywhere in its
+# sentence before the colon. A later round's findings list (file, line, claim) and a fix check's one finding hold neither shape. An argument
 # pasted as plain prose is not caught. Cost: no process start and no file written; one pass over the brief's text.
 BRIEF_BLIND_ROLES = ("reviewer", guard_core.REFUTER_ROLE)
 REVIEWER_VERDICT_WORDS = ("PASS", "FAIL", "PARTIAL", "CHANGES")
