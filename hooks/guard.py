@@ -1574,15 +1574,19 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         if piped:
             files.append(piped)
             judged_stdin = True
+    unread = ""
     for name in files:
         try:
             with open(os.path.normpath(_absolute(name, where)), encoding="utf-8", errors="replace") as handle:
                 texts.append(handle.read(MESSAGE_FILE_MAX))
         except Exception:
+            unread = unread or name
             review_note("the body file " + name + " could not be read")
+    unseen = (stdin and not judged_stdin) or "--input" in rest   # an edit's new body the guard cannot see
     if stdin and not judged_stdin:
         review_note("the body comes from stdin and cannot be read")
-    return review_record_hit(texts, repo, selector, where, edit, variable=rest[:1] == ["api"] and not selector.isdigit())
+    return review_record_hit(texts, repo, selector, where, edit, variable=rest[:1] == ["api"] and not selector.isdigit(),
+                             unseen=bool(unseen), unread=unread)
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
