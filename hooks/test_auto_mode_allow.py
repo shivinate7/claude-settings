@@ -25,7 +25,8 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
-  relayed-grant-read-from-page).
+  relayed-grant-read-from-page). Its Covers text names settings or permissions, and its Never
+  covers names neither: one entry cannot cover and refuse the same act.
 - One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
   one `--confirm` merge rule. Its Covers text names the coordinator that relays (cs-build:coordinator),
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
@@ -94,8 +95,11 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("task answer", "any task answer"), ("time with no zone", "time has no zone"),
                    ("older than added", "an answer older than the item's added"),
                    ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
-                   ("permissions", "permissions"), ("settings", "settings"), ("overrides", "overrides"),
+                   ("overrides", "overrides"),
                    ("no counted line", "no `counted` line in this session"))
+# The scope the Relayed Grant entry's Covers text must name, and the words its Never covers must not name.
+RELAYED_SETTINGS_SCOPE = (("settings or permissions", "settings or permissions"),)
+SETTINGS_SCOPE_WORDS = (("settings", r"\bsettings\b"), ("permissions", r"\bpermissions\b"))
 # Each act the Relayed Merge Yes entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
                          ("not tagged cs-build:coordinator", "not tagged `cs-build:coordinator`"),
@@ -229,6 +233,19 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
         missing = unnamed_terms(clause, RELAYED_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_covers_names_settings_or_permissions(self):
+        entry = allow_entry(RELAYED)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % RELAYED)
+        missing = unnamed_terms(bounds_text(entry), RELAYED_SETTINGS_SCOPE)
+        self.assertFalse(missing, "Covers text does not name settings or permissions: %r" % missing)
+
+    def test_never_covers_names_neither_settings_nor_permissions(self):
+        clause = never_covers(allow_entry(RELAYED))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
+        named = [word for word, pattern in SETTINGS_SCOPE_WORDS if re.search(pattern, clause, re.I)]
+        self.assertFalse(named, "Never covers still names %r: the entry may not both cover and refuse them"
+                         % named)
 
 
 class RelayedMergeYesIsAllowed(unittest.TestCase):
