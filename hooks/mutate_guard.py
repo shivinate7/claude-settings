@@ -1873,9 +1873,9 @@ MUTATIONS = [
     # check-tail: a lint piped to tail or head before a commit or a push, and the script operand reader.
     ('check-tail lint: a uv run lint is not read through uv',
      '    index = _skip_uv_run(tokens, index)\n    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word\n'
-     '        return ""\n    if LINT_SCRIPT.search(',
+     '        return ""\n    script = _script_run(tokens, index)',
      '    if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word\n'
-     '        return ""\n    if LINT_SCRIPT.search(',
+     '        return ""\n    script = _script_run(tokens, index)',
      "guard", 'check-tail: uv run lint script piped to tail, then ; git commit, is refused'),
     ('check-tail lint: a .py command word is no script',
      '    if not script and word.endswith(".py"):\n        script = tokens[index]\n    return script',
@@ -1886,7 +1886,8 @@ MUTATIONS = [
      '    redirect = None\n    if not redirect:',
      "guard", 'check-tail: python3 -u with a 2>&1 redirect before the script, piped to tail, is refused'),
     ('check-tail lint: the lint pass reads the check roster, not lint scripts',
-     '            hit = _pipeline_hit(stages, background, lint_stage, any_later=True)\n',
+     '            hit = _pipeline_hit(stages, background,\n'
+     '                                lambda segment, bg: lint_stage(segment, bg, in_lint, folder), any_later=True)\n',
      '            hit = _pipeline_hit(stages, background)\n',
      "guard", 'check-tail: lint piped to tail, then && git commit is refused'),
     ('check-tail lint: a lint piped to tail is refused with no commit or push after it',
@@ -1942,6 +1943,11 @@ MUTATIONS = [
      '            after = list(pipelines[at + 1:]) + [stages for text in others for stages in text]\n',
      '            after = list(pipelines[at + 1:])\n',
      "guard", 'a lint piped to tail inside $(...)'),
+    # A lint script is looked up in the folder the call runs in: a copy install's lint/ and another repo's lint/.
+    ("check-tail lint: a lint file is read from the guard's own lint/, not the call's folder",
+     '    return os.path.isfile(os.path.join(folder or LINT_DIR, name))',
+     '    return os.path.isfile(os.path.join(LINT_DIR, name))',
+     "guard", "check-tail: a copy install, cd lint, then ./ste_lint.py piped to tail, then && commit, is refused"),
     ('check-tail lint: a commit word anywhere in a segment counts as a commit',
      '    return any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
      '    return "commit" in segment or any(verb in ("commit", "push") for verb, _args in git_calls(segment))',
@@ -3215,6 +3221,15 @@ def main() -> int:
                 return 1
             seen_paths[key] = (index, label)
 
+    # MUTATE_ONLY=<label> runs that one mutation. It filters after the anchor loop above, which checks every entry.
+    chosen = MUTATIONS
+    only = os.environ.get("MUTATE_ONLY")
+    if only:
+        chosen = [entry for entry in MUTATIONS if mutation_parts(entry)[0] == only]
+        if not chosen:
+            print("ERROR no mutation named: %s" % only)
+            return 1
+
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
     # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
@@ -3234,7 +3249,7 @@ def main() -> int:
 
     try:
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry))
+            chosen, lambda entry: run_mutant(sources, work, entry))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
