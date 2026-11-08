@@ -1320,6 +1320,120 @@ class Stale(unittest.TestCase):
         self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
         self.assert_page_word(r, "current", 0)
 
+    # A closed item with `waits` and a kept answer: a page answer is kept during a wait, a chat answer then closes the item, and no
+    # wait line ever ends it (wait lines cover open items only, SKILL.md "Route and close"). It gets one line, which says to delete
+    # answers/<id> only when its wait has ended.
+
+    def assert_waits_kept_line(self, r, n, item_id):
+        """Exactly one kept-answer line names closed item `n` (id `item_id`) with waits, it starts with the waits line, and a line
+        that says to delete answers/<id> also says when its wait has ended."""
+        named = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: item %d (%s)" % (n, item_id))]
+        self.assertEqual(len(named), 1, "want one kept-answer line for closed item %d (%s) with waits, got %d:\n%s"
+                         % (n, item_id, len(named), r.stdout + r.stderr))
+        line = named[0]
+        self.assertTrue(line.startswith(waits_kept_line(n, item_id)), "the kept-answer line for closed item %d with waits differs:\n%s" % (n, line))
+        if "delete" in line:
+            self.assertIn("when its wait", line, "the line says to delete answers/%s before its wait has ended:\n%s" % (item_id, line))
+
+    def test_a_closed_item_with_waits_and_a_kept_answer_gets_one_waits_line_in_both_shapes(self):
+        current, _ = self.current_and_behind()
+        for label, waits in (("a run", {"repo": REPO, "run": RUN}), ("a PR", {"repo": REPO, "pr": PR}), ("a malformed value", "soon")):
+            for as_folder in (False, True):
+                with self.subTest(label, folder=as_folder):
+                    waited = decision_item(364, "waits-kept", waits=waits)
+                    answer = ("waits-kept", answer_for("waits-kept", 364))
+                    items, answers = self.shaped([INCIDENT, waited], [(INCIDENT_ID, INCIDENT_ANSWER), answer], as_folder)
+                    r = self.items_run(current, items, {}, answers=answers)
+                    self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)  # the scope: the run read the answers before the subject is checked
+                    self.assert_waits_kept_line(r, 364, "waits-kept")
+                    self.assert_page_word(r, "current", 0)
+
+    def test_full_size_closed_waits_items_get_one_line_each_only_when_their_answer_is_kept(self):
+        current, _ = self.current_and_behind()
+        items, answers, want = [], [], []
+        for i in range(40):  # closed with waits, answer kept: one line each, in item order
+            item_id, n = "waits-kept-%03d" % i, 1400 + i
+            items.append(decision_item(n, item_id, waits={"repo": REPO, "run": RUN} if i % 2 else {"repo": REPO, "pr": PR}))
+            answers.append((item_id, answer_for(item_id, n)))
+            want.append(waits_kept_line(n, item_id))
+        for i in range(40):  # closed with waits, no answer: no line
+            items.append(decision_item(1500 + i, "waits-quiet-%03d" % i, waits={"repo": REPO, "run": RUN}))
+        self.assertEqual(len(items), 80)
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                env, folder = self.gh_env({})
+                items_arg, answers_arg = self.shaped(items, answers, as_folder)
+                r = self.items_run(current, items_arg, env, answers=answers_arg)
+                got = kept_lines(r.stdout)
+                self.assertEqual(len(got), 40, "want 40 kept-answer lines, one per closed item with waits and a kept answer, got %d:\n%s"
+                                 % (len(got), r.stdout + r.stderr))
+                for line, prefix in zip(got, want):
+                    self.assertTrue(line.startswith(prefix), "a kept-answer line is not the waits line for its item, in item order:\n" + line)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed item")
+
+    def test_a_list_of_id_and_data_entries_names_the_incident_in_both_lists(self):
+        # The shape parked_mode reads and the store's list returns: one {"id", "data"} entry per doc, for the items and the answers.
+        current, _ = self.current_and_behind()
+        items = self.list_file([{"id": INCIDENT_ID, "data": INCIDENT}], "items")
+        answers = self.list_file([{"id": INCIDENT_ID, "data": INCIDENT_ANSWER}], "answers")
+        r = self.items_run(current, items, {}, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        self.assert_page_word(r, "current", 0)
+
+    def test_pin_a_list_of_bare_data_objects_still_names_the_incident_in_both_lists(self):
+        # Pin: a list of bare data objects, each holding its own `item` for an answer, keeps working beside the {"id", "data"} shape.
+        current, _ = self.current_and_behind()
+        items, answers = self.shaped([INCIDENT], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder=False)
+        r = self.items_run(current, items, {}, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        self.assert_page_word(r, "current", 0)
+
+    def test_pin_an_items_folder_with_no_complete_marker_names_the_items_folder(self):
+        # Pin: the unknown line names the folder that has no marker, so the reader knows which list may be cut short.
+        current, _ = self.current_and_behind()
+        items = self.docs_folder({INCIDENT_ID: INCIDENT}, "items")
+        os.remove(os.path.join(items, ".complete"))
+        r = self.items_run(current, items, {}, answers=self.list_file([INCIDENT_ANSWER], "answers"))
+        kept = kept_lines(r.stdout)
+        self.assertEqual(len(kept), 1, "want exactly one kept-answer line for an items folder with no marker, got %d:\n%s"
+                         % (len(kept), r.stdout + r.stderr))
+        self.assertTrue(kept[0].startswith("kept-answer: unknown"), "the one kept-answer line is not the unknown line:\n" + kept[0])
+        self.assertIn("the items folder", kept[0], "the unknown line does not name the items folder:\n" + kept[0])
+        self.assert_page_word(r, "current", 0)
+
+    def test_pin_an_answers_folder_with_no_complete_marker_names_the_answers_folder(self):
+        # Pin: the unknown line names the answers folder when that is the folder with no marker, not the items folder.
+        current, _ = self.current_and_behind()
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        os.remove(os.path.join(answers, ".complete"))
+        r = self.items_run(current, self.items_file([INCIDENT]), {}, answers=answers)
+        kept = kept_lines(r.stdout)
+        self.assertEqual(len(kept), 1, "want exactly one kept-answer line for an answers folder with no marker, got %d:\n%s"
+                         % (len(kept), r.stdout + r.stderr))
+        self.assertTrue(kept[0].startswith("kept-answer: unknown"), "the one kept-answer line is not the unknown line:\n" + kept[0])
+        self.assertIn("the answers folder", kept[0], "the unknown line does not name the answers folder:\n" + kept[0])
+        self.assert_page_word(r, "current", 0)
+
+    def test_items_with_answers_starts_no_more_gh_processes_than_items_alone(self):
+        # Cost: --answers reads files only, so its run starts no gh process beyond the ones --items alone starts for the same items.
+        current, _ = self.current_and_behind()
+        items = [wait_item(154, {"repo": REPO, "run": RUN}), wait_item(155, {"repo": REPO, "pr": PR}),
+                 decision_item(INCIDENT_N, INCIDENT_ID), decision_item(365, "waits-kept", waits={"repo": REPO, "run": RUN})]
+        answers = [(INCIDENT_ID, INCIDENT_ANSWER), ("waits-kept", answer_for("waits-kept", 365))]
+        gh_answers = {RUN_ARGV: RUN_DONE, PR_ARGV: PR_OPEN}
+        env, alone_folder = self.gh_env(gh_answers)
+        r_alone = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r_alone, "current", 0)
+        env, both_folder = self.gh_env(gh_answers)
+        items_arg, answers_arg = self.shaped(items, answers, as_folder=False)
+        r_both = self.items_run(current, items_arg, env, answers=answers_arg)
+        self.assert_kept_line(r_both, INCIDENT_N, INCIDENT_ID)  # the scope: the answers were read in the run that is counted
+        self.assert_page_word(r_both, "current", 0)
+        alone, both = self.gh_calls(alone_folder), self.gh_calls(both_folder)
+        self.assertGreaterEqual(len(alone), 2, "the items-alone run did not start the gh processes its open waits need: %s" % alone)
+        self.assertLessEqual(len(both), len(alone), "--answers started more gh processes than --items alone:\n%s" % both)
+
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
@@ -1406,6 +1520,11 @@ def answer_for(item_id, n, **extra):
 def kept_line(n, item_id):
     """The line the flag prints for a kept answer on closed item `n` (id `item_id`). A remedy may follow it."""
     return "kept-answer: item %d (%s) is closed and answers/%s is kept" % (n, item_id, item_id)
+
+
+def waits_kept_line(n, item_id):
+    """The line the flag prints for a kept answer on closed item `n` (id `item_id`) that still has `waits`. A remedy may follow it."""
+    return "kept-answer: item %d (%s) is closed with waits and answers/%s is kept" % (n, item_id, item_id)
 
 
 def kept_lines(out):
