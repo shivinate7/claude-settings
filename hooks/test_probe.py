@@ -600,7 +600,8 @@ def dropped_session_fields_are_noted():
 @case
 def relative_cwd_is_judged_as_the_absolute_folder():
     """Probe: a relative --cwd gives the guard the same folder as the absolute path, so the verdict is the same."""
-    folder = new_dir()
+    # realpath: the probe reports the folder the OS resolves, so a symlinked TMPDIR must not split the two runs.
+    folder = os.path.realpath(new_dir())
     sub = os.path.join(folder, "sub")
     os.makedirs(sub)
     probe_copy = os.path.join(folder, "probe.py")
