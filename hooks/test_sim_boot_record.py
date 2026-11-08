@@ -16,7 +16,8 @@ The contract pinned here (hooks/sim_boot_record.py must match it):
     boot check failed (see below).
   - boot check (decision sim-boot-is-verified): after a Bash `simctl boot` or an MCP `launch`, each device that went
     shut-down -> booted is checked: `xcrun simctl bootstatus <UDID>` exits 0 AND `xcrun simctl io
-    <UDID> screenshot <file>` exits 0. A fail runs `simctl shutdown <UDID>` then `simctl boot
+    <UDID> screenshot <file>` exits 0, AND `frame_uniform(<file>)` is not True (a frame of one colour,
+    black or blank, fails the check). A fail runs `simctl shutdown <UDID>` then `simctl boot
     <UDID>` once, then checks again. A healthy boot writes nothing to stdout. A retry that passes
     writes {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": ...}}
     (booted again, launch the app again). A retry that fails writes {"decision": "block",
@@ -24,6 +25,9 @@ The contract pinned here (hooks/sim_boot_record.py must match it):
     line is written in both cases, and carries the launchd_sim pid read AFTER the retry. An
     `xcodebuild -destination` boot is not checked. The hung-bootstatus timeout (90 s) is not
     pinned: it needs an environment seam, and the suite must not wait.
+  - frame_uniform(path) (decision sim-boot-is-verified): True when every pixel of the PNG is one colour, False when
+    not, None when the file cannot be judged (not a PNG, 16-bit, palette, interlaced, truncated, empty, missing).
+    `sim_ok` fails only on True. The frame cases build their PNGs with the encoder below, under all five filters.
   - a record line is {"udid", "name", "deviceTypeIdentifier", "runtime", "at", "launchd_pid",
     "launchd_start"}. `at` is ISO-8601 UTC. launchd_pid and launchd_start are the pid and the start
     time of the device's launchd_sim, as `ps` prints them, read when the device is booted.
@@ -44,18 +48,26 @@ PATH and answers `simctl list devices` from a file the case rewrites between the
 No environment seam reaches the hook except CLAUDE_CONFIG_DIR and PATH, which Claude Code sets too.
 """
 
+import importlib.util
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+import zlib
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "sim_boot_record.py")
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+
+RUN_FOLDER = _test_temp.run_folder()  # every temp path of this run lives under here
+unittest.addModuleCleanup(shutil.rmtree, RUN_FOLDER, True)
 
 MCP = "mcp__Claude_Code_iOS_Simulator__control"
 RT = "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
@@ -82,6 +94,119 @@ def devices_json(rows):
             "udid": udid, "name": name, "state": state, "deviceTypeIdentifier": dtype,
             "isAvailable": True})
     return json.dumps({"devices": grouped})
+
+
+# ------------------------------------------------------------------ PNG fixtures (stdlib only)
+# A small PNG encoder for the frame cases. It writes 8-bit RGB (colour type 2) and RGBA (6),
+# non-interlaced, with a chosen filter per row, so every unfilter path runs. The undecodable cases
+# reuse it with a 16-bit depth, a palette (3), the interlace flag, or a cut stream.
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+BLACK_RGBA = b"\x00\x00\x00\xff"
+WHITE_RGB = b"\xff\xff\xff"
+COLOUR_RGB = bytes([200, 100, 50])
+# The fake xcrun runs this to copy a fixture to the screenshot path, then to log the fixture's name.
+# It sits in shell double quotes, so it holds no $ and no backtick.
+FRAME_COPY = ("import shutil,sys; shutil.copyfile(sys.argv[1],sys.argv[2]); "
+              "open(sys.argv[3],'a').write(sys.argv[4]+'\\n')")
+
+
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+
+def paeth(a, b, c):
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    if pa <= pb and pa <= pc:
+        return a
+    return b if pb <= pc else c
+
+
+def filter_row(kind, raw, prev, bpp):
+    """One scanline with its filter type byte. PREV is the unfiltered row above (zeros for the first)."""
+    left = bytes(bpp) + raw[:-bpp]
+    upleft = bytes(bpp) + prev[:-bpp]
+    if kind == 0:
+        pred = bytes(len(raw))
+    elif kind == 1:
+        pred = left
+    elif kind == 2:
+        pred = prev
+    elif kind == 3:
+        pred = bytes((a + b) >> 1 for a, b in zip(left, prev))
+    elif kind == 4:
+        pred = bytes(paeth(a, b, c) for a, b, c in zip(left, prev, upleft))
+    else:
+        raise ValueError("filter type %r is not 0-4" % kind)
+    return bytes([kind]) + bytes((x - p) & 0xFF for x, p in zip(raw, pred))
+
+
+def make_png(rows, width, colour_type=6, depth=8, filters=0, idat_size=None, interlace=0, palette=None):
+    """A PNG of ROWS, each one scanline of raw sample bytes. FILTERS is one filter for every row, or a list
+    cycled over the rows. IDAT_SIZE splits the zlib stream into IDAT chunks of that many bytes."""
+    kinds = [filters] if isinstance(filters, int) else list(filters)
+    bpp = max(1, CHANNELS[colour_type] * depth // 8)
+    filtered, prev = bytearray(), bytes(len(rows[0]))
+    for y, raw in enumerate(rows):
+        filtered += filter_row(kinds[y % len(kinds)], raw, prev, bpp)
+        prev = raw
+    stream = zlib.compress(bytes(filtered))
+    size = idat_size or len(stream)
+    pieces = [stream[i:i + size] for i in range(0, len(stream), size)]
+    header = struct.pack(">IIBBBBB", width, len(rows), depth, colour_type, 0, 0, interlace)
+    out = PNG_SIGNATURE + chunk(b"IHDR", header)
+    if palette is not None:
+        out += chunk(b"PLTE", palette)
+    out += b"".join(chunk(b"IDAT", piece) for piece in pieces)
+    return out + chunk(b"IEND", b"")
+
+
+def rows_of(width, height, pixel):
+    """Every row one colour. PIXEL is the bytes of one pixel."""
+    return [pixel * width] * height
+
+
+def live_rows(width, height, channels):
+    """Varied pixels: the frame is not one colour."""
+    return [bytes((x * 7 + y * 13 + c * 31) % 256 for x in range(width) for c in range(channels))
+            for y in range(height)]
+
+
+def sub_ramp_rows(width, height, step, channels):
+    """Pixel x holds (x + 1) * step on every channel. Sub filtering turns each row into bytes of STEP alone."""
+    row = b"".join(bytes([(x + 1) * step] * channels) for x in range(width))
+    return [row] * height
+
+
+def up_ramp_rows(width, height, step, channels):
+    """Row y holds (y + 1) * step. Up filtering turns every row into bytes of STEP alone."""
+    return [bytes([(y + 1) * step] * (width * channels)) for y in range(height)]
+
+
+def with_byte(rows, y, index, value):
+    """ROWS with byte INDEX of row Y set to VALUE."""
+    changed = list(rows)
+    row = bytearray(changed[y])
+    row[index] = value
+    changed[y] = bytes(row)
+    return changed
+
+
+def cut_inside_idat(data):
+    """DATA cut three bytes into the first IDAT chunk's data: no IEND, and the chunk is short."""
+    return data[:data.index(b"IDAT") + 4 + 3]
+
+
+def integration_frames():
+    """The fixtures the fake xcrun copies to a screenshot path, by name."""
+    return {
+        "live": make_png(live_rows(32, 64, 4), 32, colour_type=6, filters=[0, 1, 2, 3, 4]),
+        "black": make_png(rows_of(32, 64, BLACK_RGBA), 32, colour_type=6, filters=[0, 1, 2, 3, 4]),
+        "blank": make_png(rows_of(32, 64, WHITE_RGB), 32, colour_type=2, filters=[0, 1, 2, 3, 4]),
+        "undecodable": make_png(rows_of(32, 64, b"\x00" * 6), 32, colour_type=2, depth=16),
+    }
 
 
 def fake_ps_script(rows, log, flag=None, rows_after=None):
@@ -111,7 +236,7 @@ def fake_ps_script(rows, log, flag=None, rows_after=None):
 class SimBootRecordTests(unittest.TestCase):
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="sim_boot_record_")
+        self.root = tempfile.mkdtemp(prefix="sim_boot_record_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.root, True)
         self.cfg = os.path.join(self.root, "cfg")
         self.state = os.path.join(self.cfg, "state")
@@ -126,7 +251,14 @@ class SimBootRecordTests(unittest.TestCase):
         self.calls = os.path.join(self.root, "boot-check-calls.log")  # one "name UDID" per call
         self.plans = os.path.join(self.root, "plans")                 # <name>: one exit code per call
         self.booted_flag = os.path.join(self.root, "fake-boot-ran")
+        self.frame_dir = os.path.join(self.root, "frames")              # the scripted screenshot fixtures
+        self.frame_plan_path = os.path.join(self.root, "frame-plan")    # one fixture name per screenshot call
+        self.frame_log = os.path.join(self.root, "frames-written.log")  # one name per frame the fake wrote
         os.makedirs(self.plans)
+        os.makedirs(self.frame_dir)
+        for name, data in integration_frames().items():
+            with open(os.path.join(self.frame_dir, name + ".png"), "wb") as handle:
+                handle.write(data)
         # A default `ps` with a launchd_sim row for each UDID, so a boot's record can name one.
         self.write_ps([(str(LAUNCHD_PIDS[u]), "1", "0", LAUNCHD_CMD + " " + u)
                        for u in (U1, U2, U3)])
@@ -166,6 +298,7 @@ class SimBootRecordTests(unittest.TestCase):
         # `simctl list` answers BODY. bootstatus, io screenshot, shutdown and boot log "name UDID"
         # and exit with line N of plans/<name> for their Nth call (0 when the plan has no line N).
         # Shell builtins only: the hook's PATH holds no grep or sed. A boot also makes the flag file the fake `ps` reads.
+        # A screenshot copies its scripted frame fixture to its file, with FRAME_COPY, and logs the fixture's name.
         script = (
             "#!/bin/sh\n"
             "case \"$*\" in\n"
@@ -177,6 +310,10 @@ class SimBootRecordTests(unittest.TestCase):
             "    [ \"$name\" = boot ] && : > '" + self.booted_flag + "'\n"
             "    i=0; rc=0; [ -f '" + self.plans + "'/\"$name\" ] && while read -r v; do"
             " i=$((i+1)); [ $i -eq $n ] && rc=$v; done < '" + self.plans + "'/\"$name\"\n"
+            "    if [ \"$name\" = screenshot ]; then f=live; i=0; [ -f '" + self.frame_plan_path + "' ] && while read -r v; do"
+            " i=$((i+1)); [ $i -eq $n ] && f=$v; done < '" + self.frame_plan_path + "'\n"
+            "      '" + sys.executable + "' -I -c \"" + FRAME_COPY + "\" '" + self.frame_dir + "'/\"$f\".png \"$5\""
+            " '" + self.frame_log + "' \"$f\"; fi\n"
             "    exit \"${rc:-0}\" ;;\n"
             "esac\n")
         with open(self.fake, "w", encoding="utf-8") as handle:
@@ -188,6 +325,22 @@ class SimBootRecordTests(unittest.TestCase):
         boot), one per call in order. A call past the list exits 0."""
         with open(os.path.join(self.plans, name), "w", encoding="utf-8") as handle:
             handle.write("".join("%d\n" % rc for rc in rcs))
+
+    def script_frames(self, *names):
+        """Script the fixture the fake xcrun copies to the path of each screenshot call, in order. A call past
+        the list gets a live frame."""
+        for name in names:
+            self.assertTrue(os.path.exists(os.path.join(self.frame_dir, name + ".png")),
+                            "no fixture named %s" % name)
+        with open(self.frame_plan_path, "w", encoding="utf-8") as handle:
+            handle.write("".join(name + "\n" for name in names))
+
+    def frames_written(self):
+        """The fixture names the fake xcrun copied to a screenshot path, in order."""
+        if not os.path.exists(self.frame_log):
+            return []
+        with open(self.frame_log, encoding="utf-8") as handle:
+            return handle.read().splitlines()
 
     def check_calls(self):
         """The "name UDID" lines the fake xcrun logged for the check and the retry, in order."""
@@ -634,6 +787,61 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertIn("again", json.loads(result.stdout)["hookSpecificOutput"]
                       ["additionalContext"].lower())
 
+    # ------------------------------------------------------------------ frame judge in the check (sim-boot-is-verified)
+    # A screenshot that exits 0 still fails the check when its frame is one colour. The fake xcrun copies
+    # the fixture named by the frame plan (line N for the Nth screenshot call, live after the list) to the
+    # screenshot's file, and logs its name.
+
+    def test_a_black_frame_with_exit_0_is_retried_once(self):
+        self.ps_with_retry_pid()
+        self.script_frames("black", "live")
+        self.boot_and_check()
+        self.assertEqual(self.frames_written()[:1], ["black"], "the black frame did not reach the screenshot path")
+        names = [c.split()[0] for c in self.check_calls()]
+        self.assertEqual(names, ["bootstatus", "screenshot", "shutdown", "boot", "bootstatus", "screenshot"],
+                         "a uniform black frame that exited 0 was not retried once")
+
+    def test_a_live_frame_on_the_retry_gives_the_pass_note(self):
+        self.ps_with_retry_pid()
+        self.script_frames("black", "live")
+        result = self.boot_and_check()
+        self.assertTrue(result.stdout, "the black frame was not followed by a pass note")
+        out = json.loads(result.stdout)
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+        self.assertIn("again", out["hookSpecificOutput"]["additionalContext"].lower(),
+                      "the pass note does not say the device was booted again")
+        self.assertNotIn("decision", out, "a retry with a live frame was blocked")
+
+    def test_a_blank_white_frame_with_exit_0_is_retried_once(self):
+        self.ps_with_retry_pid()
+        self.script_frames("blank", "live")
+        self.boot_and_check()
+        self.assertEqual(self.frames_written()[:1], ["blank"], "the white frame did not reach the screenshot path")
+        names = [c.split()[0] for c in self.check_calls()]
+        self.assertEqual(names, ["bootstatus", "screenshot", "shutdown", "boot", "bootstatus", "screenshot"],
+                         "a uniform white frame that exited 0 was not retried once")
+
+    def test_a_black_frame_on_the_retry_too_blocks_the_device(self):
+        self.ps_with_retry_pid()
+        self.script_frames("black", "black")
+        result = self.boot_and_check()
+        self.assertTrue(result.stdout, "two black frames wrote no block decision")
+        out = json.loads(result.stdout)
+        self.assertEqual(out.get("decision"), "block", "two black frames did not block the device")
+        self.assertIn(U1, out["reason"], "the block reason does not name the UDID")
+        self.assertIn("broken", out["reason"].lower(), "the block reason does not call the device broken")
+        names = [c.split()[0] for c in self.check_calls()]
+        self.assertEqual(names.count("shutdown"), 1, "the retry did not shut the device down exactly once")
+
+    def test_an_undecodable_frame_is_a_pass_and_is_not_retried(self):
+        self.script_frames("undecodable")
+        result = self.boot_and_check()
+        self.assertEqual(self.frames_written()[:1], ["undecodable"],
+                         "the undecodable frame did not reach the screenshot path")
+        self.assertEqual(result.stdout, "", "an undecodable frame wrote to stdout")
+        self.assertEqual(self.check_calls(), ["bootstatus " + U1, "screenshot " + U1],
+                         "an undecodable frame was retried")
+
     # ------------------------------------------------------------------ record mode (`--record <UDID>`)
     # bin/sim-test calls the hook as `sim_boot_record.py --record <UDID>` after its own boot. The mode
     # appends one record line for that device, read with the same devices() and launchd() as the hook
@@ -698,12 +906,129 @@ class SimBootRecordTests(unittest.TestCase):
 
     def tearDown_state(self):
         """Reset the fake's logs, plans, flag and records between sub-cases of one test."""
-        for path in (self.calls, self.booted_flag, self.records):
+        for path in (self.calls, self.booted_flag, self.records, self.frame_plan_path, self.frame_log):
             if os.path.exists(path):
                 os.remove(path)
         for name in os.listdir(self.plans):
             os.remove(os.path.join(self.plans, name))
         shutil.rmtree(self.state, ignore_errors=True)
+
+
+def load_hook():
+    """The hook module, loaded by path and per call, so a missing name fails one case rather than the file."""
+    spec = importlib.util.spec_from_file_location("sim_boot_record_under_test", HOOK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class FrameUniformTests(unittest.TestCase):
+    """frame_uniform(path) in hooks/sim_boot_record.py (decision sim-boot-is-verified): True when every pixel is
+    one colour, False when not, None when the file cannot be judged. Each case writes its own PNG."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.folder, True)
+
+    def judge(self, data):
+        """frame_uniform on a file that holds DATA. DATA None: no file at the path."""
+        path = os.path.join(self.folder, "frame.png")
+        if data is not None:
+            with open(path, "wb") as handle:
+                handle.write(data)
+        judge = getattr(load_hook(), "frame_uniform", None)
+        self.assertIsNotNone(judge, "sim_boot_record has no frame_uniform: the frame judge is not built")
+        return judge(path)
+
+    def test_uniform_black_rgba_is_uniform(self):
+        data = make_png(rows_of(16, 8, BLACK_RGBA), 16, colour_type=6)
+        self.assertIs(self.judge(data), True, "a uniform black RGBA frame was not judged uniform")
+
+    def test_uniform_white_rgb_is_uniform(self):
+        data = make_png(rows_of(16, 8, WHITE_RGB), 16, colour_type=2)
+        self.assertIs(self.judge(data), True, "a uniform white RGB frame was not judged uniform")
+
+    def test_uniform_black_is_uniform_under_each_filter(self):
+        for kind in range(5):
+            with self.subTest(filter=kind):
+                data = make_png(rows_of(16, 8, BLACK_RGBA), 16, colour_type=6, filters=kind)
+                self.assertIs(self.judge(data), True, "a uniform black frame was not judged uniform")
+
+    def test_uniform_colour_is_uniform_under_each_filter(self):
+        for kind in range(5):
+            with self.subTest(filter=kind):
+                data = make_png(rows_of(16, 8, COLOUR_RGB), 16, colour_type=2, filters=kind)
+                self.assertIs(self.judge(data), True, "a uniform colour frame was not judged uniform")
+
+    def test_uniform_frame_whose_rows_mix_filters_is_uniform(self):
+        for pixel, colour_type in ((BLACK_RGBA, 6), (COLOUR_RGB, 2)):
+            with self.subTest(colour_type=colour_type):
+                data = make_png(rows_of(16, 10, pixel), 16, colour_type=colour_type, filters=[0, 1, 2, 3, 4])
+                self.assertIs(self.judge(data), True, "a uniform frame whose rows mix filters was not judged uniform")
+
+    def test_live_frame_is_not_uniform_under_each_filter(self):
+        for kind in range(5):
+            with self.subTest(filter=kind):
+                data = make_png(live_rows(16, 8, 4), 16, colour_type=6, filters=kind)
+                self.assertIs(self.judge(data), False, "a live frame with varied pixels was judged uniform")
+
+    def test_a_sub_ramp_with_flat_filtered_bytes_is_not_uniform(self):
+        data = make_png(sub_ramp_rows(40, 40, 3, 3), 40, colour_type=2, filters=1)
+        self.assertIs(self.judge(data), False,
+                      "a Sub-filtered ramp, flat in its filtered bytes but varied in pixels, was judged uniform")
+
+    def test_an_up_ramp_with_flat_filtered_bytes_is_not_uniform(self):
+        data = make_png(up_ramp_rows(40, 40, 3, 3), 40, colour_type=2, filters=2)
+        self.assertIs(self.judge(data), False,
+                      "an Up-filtered ramp, flat in its filtered bytes but varied in pixels, was judged uniform")
+
+    def test_one_pixel_off_by_one_in_the_last_row_is_not_uniform(self):
+        rows = with_byte(rows_of(16, 8, WHITE_RGB), 7, 47, 254)  # last row, last byte: 254 among 255s
+        data = make_png(rows, 16, colour_type=2, filters=[0, 1, 2, 3, 4])
+        self.assertIs(self.judge(data), False, "one pixel off by 1 in the last row was judged uniform")
+
+    def test_one_pixel_off_by_one_in_the_first_row_is_not_uniform(self):
+        rows = with_byte(rows_of(16, 8, WHITE_RGB), 0, 0, 254)  # first row, first byte: 254 among 255s
+        data = make_png(rows, 16, colour_type=2, filters=[0, 1, 2, 3, 4])
+        self.assertIs(self.judge(data), False, "one pixel off by 1 in the first row was judged uniform")
+
+    def test_several_idat_chunks_of_a_uniform_frame_are_joined_and_judged_uniform(self):
+        data = make_png(rows_of(16, 8, BLACK_RGBA), 16, colour_type=6, filters=[0, 1, 2, 3, 4], idat_size=3)
+        self.assertIs(self.judge(data), True, "a uniform frame split into several IDAT chunks was not judged uniform")
+
+    def test_several_idat_chunks_of_a_live_frame_are_judged_not_uniform(self):
+        data = make_png(live_rows(16, 8, 4), 16, colour_type=6, filters=[0, 1, 2, 3, 4], idat_size=3)
+        self.assertIs(self.judge(data), False, "a live frame split into several IDAT chunks was judged uniform")
+
+    def test_a_full_size_uniform_frame_is_uniform(self):
+        data = make_png(rows_of(390, 844, WHITE_RGB), 390, colour_type=2, filters=[0, 1, 2, 3, 4])
+        self.assertIs(self.judge(data), True, "a full-size uniform frame was not judged uniform")
+
+    def test_a_16_bit_frame_is_none(self):
+        data = make_png(rows_of(16, 8, b"\x00" * 6), 16, colour_type=2, depth=16)
+        self.assertIsNone(self.judge(data), "a 16-bit frame was not left undecided (None)")
+
+    def test_a_palette_frame_is_none(self):
+        data = make_png(rows_of(16, 8, b"\x00"), 16, colour_type=3, palette=b"\x00\x00\x00")
+        self.assertIsNone(self.judge(data), "a palette frame was not left undecided (None)")
+
+    def test_an_interlaced_frame_is_none(self):
+        data = make_png(rows_of(16, 8, BLACK_RGBA), 16, colour_type=6, interlace=1)
+        self.assertIsNone(self.judge(data), "an interlaced frame was not left undecided (None)")
+
+    def test_a_truncated_frame_is_none(self):
+        data = cut_inside_idat(make_png(rows_of(16, 8, BLACK_RGBA), 16, colour_type=6))
+        self.assertIsNone(self.judge(data), "a truncated frame was not left undecided (None)")
+
+    def test_a_file_that_is_not_a_png_is_none(self):
+        self.assertIsNone(self.judge(b"this is a text file, not a PNG\n"),
+                          "a file that is not a PNG was not left undecided (None)")
+
+    def test_an_empty_file_is_none(self):
+        self.assertIsNone(self.judge(b""), "an empty file was not left undecided (None)")
+
+    def test_a_missing_file_is_none(self):
+        self.assertIsNone(self.judge(None), "a missing file was not left undecided (None)")
 
 
 if __name__ == "__main__":
