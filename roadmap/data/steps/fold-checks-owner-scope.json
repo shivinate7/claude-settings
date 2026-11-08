@@ -1,0 +1,11 @@
+{
+  "title": "Triage folds a sighting into a step only after its lane confirms scope",
+  "phase": "process",
+  "status": "todo",
+  "order": 672,
+  "owner": "triage",
+  "lane": "",
+  "why": "At 08:25 CST Nov 8 triage folded note-rewrite-keeps-claims into notes-trailer-per-slug by title. That lane had already built its step (#1973) and judged whole notes by slug, not sentences, so the fold was undone at 08:27 CST. A wrong fold drops a gap from the queue until the owner lane notices.",
+  "note": "Fix: the roadmap skill's upkeep list tells triage to file a sighting as its own step when the owner step is past todo, unless that lane has said the scope fits. Done check: the skill text names the rule, and a roadmap build lists a fold into a step whose lane has not confirmed. Filed by triage 08:23 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:23:00-06:00"
+}
