@@ -103,7 +103,6 @@ jobs:
 OTHER_JOB, MACOS_JOB = "checks-merge-install", "checks-macos"
 MERGE_SUITE, MACOS_SUITE = "Merge tool git-half fixture suite", "Idle-lanes reader fixture suite"  # python3 merge/test_merge.py, python3 merge/test_idle_lanes.py
 NODE_JOB, NODE_STEP, NODE_SUITE = "checks-guard", "Guard hook suite", "hooks/test_guard.py"  # the Linux job whose suite step sets NODE_PATH
-NODE_PATH_DIR = "tools/guard-node-modules"  # the folder that step's NODE_PATH names: not in the checkout, as the uses: step that installs it never runs here
 OTHER_JOBS_WORKFLOW = """name: t
 on: push
 jobs:
@@ -125,6 +124,10 @@ jobs:
   checks-guard:
     runs-on: ubuntu-latest
     steps:
+      - name: Install the pinned Playwright and Chromium
+        uses: $/actions/playwright-setup
+        with:
+          package-dir: .github/shoot
       - name: Guard hook suite
         env:
           NODE_PATH: tools/guard-node-modules
@@ -148,10 +151,6 @@ def unknown_line(step, detail):
     return "%-15s %s: %s" % ("unknown", step, detail)
 
 
-def node_path_detail(path):
-    """The detail bin/ci-job's plan() gives a step whose env NODE_PATH names a folder that is not in the checkout (its NODE_PATH check)."""
-    return ("env NODE_PATH names %s, which is not installed here: the step that installs it (a uses: action) is not run locally, "
-            "so the suite cannot run" % path)
 
 
 class QuietClock:
@@ -931,17 +930,17 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
 
-    def test_a_picked_suite_whose_env_node_path_is_not_installed_here_is_one_not_run_line_naming_the_path_and_the_lane_lint_passes(self):
-        head = self.other_jobs_head()
+    def test_a_picked_suite_whose_node_path_its_own_playwright_setup_step_installs_reads_its_verdict_never_not_run(self):
+        head = self.other_jobs_head()  # checks-guard holds its own playwright-setup step before the suite, as CI runs it
         verbatim = [not_run_line(NODE_JOB, [NODE_SUITE])]
-        self.use_ci_job(PASSING, 0, jobs={NODE_JOB: ([], 2, [unknown_line(NODE_STEP, node_path_detail(NODE_PATH_DIR))])}, verbatim=verbatim)
+        self.use_ci_job(PASSING, 0, jobs={NODE_JOB: ([("PASS", NODE_STEP)], 0)}, verbatim=verbatim)
         rc, out = self.lint_run("--lane-lint", head, head=head, other_runs=1)  # the guard job's run is asserted first: scope before subject
-        self.assertEqual(rc, 0, "a picked suite whose env NODE_PATH names a folder not installed here read as unknown and refused the lane lint: " + out)
+        self.assertEqual(rc, 0, "a picked suite whose install is its own job's step refused the lane lint: " + out)
         notes = [line for line in out.splitlines() if line.startswith("not run") and NODE_JOB in line]
-        self.assertEqual(len(notes), 1, "the picked suite of %s is not one `not run` line: %s" % (NODE_JOB, out))
-        self.assertTrue(NODE_SUITE in notes[0] or NODE_STEP in notes[0], "the `not run` line does not name the suite: " + out)
-        self.assertIn(NODE_PATH_DIR, notes[0], "the `not run` line does not name the missing NODE_PATH folder: " + out)
-        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertEqual(notes, [], "the picked suite of %s reads as a `not run` line: %s" % (NODE_JOB, out))
+        passed = pass_lines(out)
+        self.assertEqual(len(passed), 1, out)
+        self.assertIn(NODE_JOB, passed[0], "the PASS line does not name the suite run in %s: %s" % (NODE_JOB, out))
 
     def test_control_a_picked_suite_of_a_node_path_job_whose_unknown_is_other_text_still_refuses(self):
         head = self.other_jobs_head()
