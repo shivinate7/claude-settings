@@ -211,6 +211,11 @@ class Case(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("Traceback", out)
 
+    def scan(self, files):
+        self.base({"keep.py": "x = 1\n"})
+        self.change(files)
+        return self.lint()
+
 
 class FlagsAddedLines(Case):
     def test_each_pattern_flags_an_added_comment(self):
@@ -900,11 +905,6 @@ class SwiftScan(Case):
 class ShellScan(Case):
     """Shell comments: a `#` inside quotes, after an escape, in an expansion, in arithmetic or in a heredoc body is text."""
 
-    def scan(self, files):
-        self.base({"keep.py": "x = 1\n"})
-        self.change(files)
-        return self.lint()
-
     def test_full_line_comment_is_flagged(self):
         rc, out = self.scan({"x.sh": "# fixed in round 2\necho hi\n"})
         self.assertHit(out, "x.sh", 1)
@@ -1124,6 +1124,71 @@ class ShellScan(Case):
     def test_reader_gap_backticks_with_a_comment_inside_do_not_hide_the_later_comment(self):
         rc, out = self.scan({"x.sh": "x=`echo a # note`\n# fixed in round 2\n"})
         self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_pin_arithmetic_base_with_a_trailing_comment_then_a_later_comment(self):
+        rc, out = self.scan({"x.sh": "(( x = 16#ff )) # c\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_pin_shift_assignment_in_arithmetic_then_a_later_comment(self):
+        rc, out = self.scan({"x.sh": "(( n <<= 1 ))\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_pin_hash_joined_to_a_continued_word_is_text(self):
+        rc, out = self.scan({"x.sh": "echo a\\\n#x fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 3)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_pin_arithmetic_that_falls_back_to_a_subshell_then_a_later_comment(self):
+        rc, out = self.scan({"x.sh": "(( 1 ) ; echo a)\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_regex_group_hash_is_text_not_a_comment(self):
+        rc, out = self.scan({"x.sh": "[[ $x =~ ^(a)(#b.round2)$ ]]\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_extglob_hash_is_text_not_a_comment(self):
+        rc, out = self.scan({"x.sh": "case $x in +(a|b)#round2) echo;; esac\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_subscript_shift_is_not_a_heredoc(self):
+        rc, out = self.scan({"x.sh": "a[1<<2]=x\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_control_comment_after_a_closing_paren_still_hits(self):
+        rc, out = self.scan({"x.sh": "(cmd) # fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round2_gap_control_real_heredoc_after_a_subscript_shift_still_skips_its_body(self):
+        rc, out = self.scan({"x.sh": "a[1<<2]=x\ncat <<EOF\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 5)
+        self.assertNoHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+
+class RuleQuotes(Case):
+    def test_round_cited_with_a_matching_id_is_clean(self):
+        rc, out = self.scan({"x.py": "# keeps the net value round 3 gave (decision hold-unsafe-after-round-3, net-value hold after round 3)\nx = 1\n"})
+        self.assertEqual(rc, 0, out)
+
+    def test_round_without_a_cited_id_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# fixed in round 2\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_citing_an_id_with_another_number_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# fixed in round 2 (decision hold-unsafe-after-round-3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
         self.assertEqual(rc, 1, out)
 
 
