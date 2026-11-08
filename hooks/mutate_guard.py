@@ -405,6 +405,9 @@ MUTATIONS = [
      '                if newest is None or written > newest:\n                    newest, heads = written, [sha]\n'
      '                elif written == newest:\n                    heads.append(sha)\n                break',
      '                heads.append(sha)\n                break', "guard", 'G2 an entry at H0 never got a record'),
+    ("push-owes-review-record: the moved flag is ignored, so a chained push reads its source as HEAD",
+     '(None if moved else _plain_source(',
+     '(_plain_source(', "guard", 'H1 a commit then a push in one command'),
     ("force-push: quoted text is read as a push",
      'return PUSH_QUOTED.sub(" ", segment)', 'return segment', "guard",
      'false alarm: --force quoted in a commit message'),
