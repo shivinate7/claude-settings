@@ -1,11 +1,11 @@
 {
   "title": "Measure where this operation's tokens go: models per role, context size, and waste",
   "why": "Owner ask ask-mw83yebd18 (11:30 CST Nov 8): \"what is causing so much token spend in general in this operation given that so much should be running on sonnet? is there a lot of context waste? token waste? more opus than anticipated? we've spent thousands more than i'd expect for this kind of work\". Unmeasured today. Done when a report gives, for one day, spend by model and by role (coordinator, triage, runners, lanes, agents), the share of Opus against the agent-model-cap table, and the largest context sources (long sessions, re-read files, transcripts), each with its source.",
-  "note": "",
+  "note": "Coordinator 12:09 CST: lane session_013NEJL2ffE4xixcyVkMbpuV, an owner ask under item 387 a. Not answered in chat before.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "status": "todo",
+  "lane": "session_013NEJL2ffE4xixcyVkMbpuV",
+  "status": "doing",
   "order": 775,
-  "updatedAt": "2026-11-08T12:07:00-06:00"
+  "updatedAt": "2026-11-08T12:09:00-06:00"
 }

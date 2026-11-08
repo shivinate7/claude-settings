@@ -1,11 +1,11 @@
 {
   "title": "A builder cannot edit test config",
   "phase": "guards",
-  "status": "doing",
+  "status": "ready",
   "order": 664,
   "owner": "coordinator",
   "lane": "session_013NEJL4ErXeDSsWmZzHBqG7",
   "why": "A builder edited test config in a lane (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8, review notes guard idea). Test config belongs to the test-author, so a builder edit can weaken a test unseen.",
-  "note": "Extends guard builder-test-edit (steps builder-test-edit-heredoc and builder-checkout-test-path) to the test config paths, one home. Done check: a red test where a builder's write to a test config file is refused. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL4ErXeDSsWmZzHBqG7.",
-  "updatedAt": "2026-11-08T08:16:00-06:00"
+  "note": "Extends guard builder-test-edit (steps builder-test-edit-heredoc and builder-checkout-test-path) to the test config paths, one home. Done check: a red test where a builder's write to a test config file is refused. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL4ErXeDSsWmZzHBqG7. Coordinator 12:09 CST Nov 8: #2103 handed to runner 8 (merge after #1732, #1987, #1904, #1636). Owner item 437 (builder-test-edit-scope) is open on the same rule; its pick a keeps \"builders never write test content\".",
+  "updatedAt": "2026-11-08T12:09:00-06:00"
 }
