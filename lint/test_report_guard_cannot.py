@@ -2199,12 +2199,20 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_red_a_prior_sentence_writer_try_names_no_check(self):
         # Catches: the writer test missing from the prior-sentence check. "I tried; I cannot push." names no check in its own
-        # sentence, so "I tried. I cannot push." names none either: the same try, in a prior sentence.
-        for line in ("I tried. I cannot push.", "We tried. We cannot push."):
+        # sentence, so "I tried. I cannot push." names none either: the same try, in a prior sentence. The refusal lists the
+        # claim sentence only, so the listing holds "I cannot push." and not the whole two-sentence line.
+        for line, claim in (("I tried. I cannot push.", "I cannot push."), ("We tried. We cannot push.", "We cannot push.")):
             with self.subTest(line=line):
                 out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"),
                                  landed_reply(line)])
-                self.assert_blocked_for(out, NO_CHECK, line)
+                self.assertIsNotNone(out, "no block came for %r" % line)
+                self.assertEqual(out.get("decision"), "block", "not a block: %s" % out)
+                reason = out.get("reason", "")
+                self.assertIn(HEAD, reason, "the block is not the cannot-claim guard: %s" % reason)
+                self.assertIn(NO_CHECK, reason, "the wrong variant for %r: %s" % (line, reason))
+                self.assertNotIn(NO_TRY, reason, "two variants in one reason: %s" % reason)
+                self.assertIn("- " + claim, reason, "the claim sentence is not listed: %s" % reason)
+                self.assertNotIn("- " + line, reason, "the listing names the whole two-sentence line: %s" % reason)
 
     def test_cc_pass_a_prior_sentence_that_says_the_push_failed_passes(self):
         # Control: a prior sentence that says the push failed names the check, so the line passes.
