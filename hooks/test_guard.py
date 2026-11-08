@@ -28866,9 +28866,9 @@ def register_simulator_lease_cases():
 #     - `xcrun simctl <verb> UDID|booted` for a verb in DRIVE_SIMCTL, shutdown and erase included. The read set is
 #       `io ... screenshot`, list, get_app_container, and `ui UDID <setting>` with no value (appearance,
 #       content_size, increase_contrast). A boot is left to the boot rules.
-#     - inside `sim-test --hold [--for S] -- CMD`, a drive of a named UDID or name is refused unless this session holds
-#       its own live lease for it, booted or shut down (ruling 12). A drive of `$SIM_TEST_UDID` must reach the hold's
-#       shell unexpanded: only inside a single-quoted `sh -c '...'`. A bare or
+#     - inside `sim-test --hold [--for S] -- CMD`, a drive is allowed only when it names a booted phone this session
+#       holds a live lease for (ruling 12). Any other target is refused unless it is `$SIM_TEST_UDID` inside a
+#       single-quoted `sh -c '...'`, the one form that reaches the hold's shell unexpanded. A bare or
 #       double-quoted `$SIM_TEST_UDID` (or `${SIM_TEST_UDID}`) expands to empty in the caller's shell before the hold
 #       exports it (decision sim-test-is-the-one-boot-path, ruling 12: every session leases the shared phone before it
 #       uses it; an empty -d may act on the booted phone). The refusal names `$SIM_TEST_UDID` and the `sh -c '...'`
