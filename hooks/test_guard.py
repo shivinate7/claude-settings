@@ -5661,8 +5661,8 @@ sh("waiter: a foreground until-loop with sleep 5 is refused", "until test -e d; 
 # judges a Monitor call today, so this passes; it pins that the waiter rule never refuses one.
 add("waiter: a Monitor call with an until-loop that sleeps 2 is allowed", "allow", tool="Monitor",
     cwd=NOGIT, command="until test -e /tmp/x; do sleep 2; done; echo done", description="wait for a directory")
-# The harness sends a Monitor call to the guard as a Bash payload that carries timeout_ms, not timeout
-# (coordinator, 2026-11-08). The record allows that wait, so the loop under timeout_ms is allowed. The
+# The harness sends a Monitor call to the guard as a Bash payload that carries timeout_ms, not timeout.
+# The record allows that wait, so the loop under timeout_ms is allowed. The
 # same loop under timeout is a plain Bash call and stays refused.
 add("waiter: a Monitor call sent as Bash with timeout_ms and an until-loop is allowed", "allow", tool="Bash",
     cwd=NOGIT, command="until test -e d; do sleep 2; done; echo repro-done", description="x", timeout_ms=60000)
@@ -5717,9 +5717,8 @@ sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
 
 # An interpreter heredoc's body is the program's text, and the loop it quotes is data. The body is kept
-# in view, because the interpreter may run shell, so the scanner must read each quote in it. MEASURED on
-# origin/main 422cbbdfe: an escaped apostrophe in a Python single-quoted string ends the shell's quote
-# early, and the loop after it is read as a call.
+# in view, because the interpreter may run shell, so the scanner must read each quote in it. An escaped
+# apostrophe in a Python single-quoted string must not end the quote, or the loop after it reads as a call.
 sh("waiter: a python heredoc string with an escaped apostrophe holds a loop as text, allowed",
    "python3 - <<'EOF'\ns = 'it\\'s: until test -e d; do sleep 2; done'\nEOF", "allow", cwd=NOGIT)
 # The scanner pins for the same body: a comment opener, a multi-line string, a lone apostrophe in a
