@@ -52,7 +52,7 @@ else
   # Each diff runs in an assignment, not a process substitution: set -e does not see the exit of a
   # process substitution, so a failing range (no merge base, a bad ref) would read as "no markdown changed".
   diff_failed() {
-    echo "ste-lint: UNKNOWN, git diff $RANGE failed (a shallow clone has no base history); check out with fetch-depth 0" >&2
+    echo "ste-lint: UNKNOWN, git diff $RANGE failed (no base history: a shallow clone, or the repo's first commit); check out with fetch-depth 0" >&2
     exit 1
   }
   RAW_LIST="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")" || diff_failed
