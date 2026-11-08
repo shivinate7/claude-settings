@@ -679,17 +679,15 @@ MUTATIONS = [
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)', "guard", 'frozen: Write of a config hook'),
     # Added: rules guard.py grew after the prior mutation run.
     ("live-stream: never refuse a live stream",
-     '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
-     '        if matched:\n'
+     '        if matched and stream_family:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)',
-     '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
      '        if False:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)', "guard", 'stream: tail -f never ends'),
     ("waiter: never refuse a waiter loop (Rule 9)",
      '    matched = waiter_verdict(split_segments(stripped), background)\n'
-     '    if matched:\n'
+     '    if matched and stream_family:\n'
      '        if poller:',
      '    matched = waiter_verdict(split_segments(stripped), background)\n'
      '    if False:\n'
@@ -2400,8 +2398,8 @@ MUTATIONS = [
      '                if e.get("slot") in lease.SLOT_UDID}', "guard",
      "lease: another session's live slot 1 lease on Duo 1 does not allow this session", "posix"),
     ("simulator-boot-lease: an empty session may match an empty lease session",
-     '    if not session:\n        return set()',
-     '    if False:\n        return set()', "guard",
+     '    lease = _sim_lease_module() if session else None',
+     '    lease = _sim_lease_module()', "guard",
      "lease: a lease with an empty session does not match a payload with no session", "posix"),
     ("simulator-boot-lease: every slot maps to Duo 1",
      'return {lease.SLOT_UDID[e["slot"]].casefold()',
@@ -2417,9 +2415,9 @@ MUTATIONS = [
      "lease: a shared name, this session's slot 1 lease alone is refused", "posix"),
     # An unreadable lease reads as every device held: the set claims every UDID, so the lease test passes.
     ("simulator-boot-lease: a lease that cannot be read allows",
-     '    except Exception:\n        return set()\n    finally:\n        sys.dont_write_bytecode = keep',
+     '    except Exception:\n        return set()\n\n\ndef sim_lease_holds',
      '    except Exception:\n        return type("AnyUdid", (set,), {"__contains__": lambda self, u: True})()\n'
-     '    finally:\n        sys.dont_write_bytecode = keep', "guard",
+     '\n\ndef sim_lease_holds', "guard",
      "lease: a lease file that is not JSON keeps the refusal", "posix"),
     ("sim-lease: a pid that is alive counts as live whatever its start time",
      '    return bool(entry.get("start")) and isinstance(pid, int) and start_time(pid) == entry["start"]',
