@@ -78,7 +78,7 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
-from test_mac_artifact_shapes import mac_of_cloud, mac_tool  # noqa: E402  the Mac input shapes of owner item 440
+from mac_artifact_shapes_test import mac_of_cloud, mac_tool  # noqa: E402  the Mac input shapes of owner item 440
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
 RUNS = [0]
@@ -1554,7 +1554,7 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 
 
 # ------------------------------------------------------------------ Mac-shaped waiting-page calls (owner item 440)
-# A Mac call is a twin of a cloud call: the same data, in the Mac shape that test_mac_artifact_shapes builds from the
+# A Mac call is a twin of a cloud call: the same data, in the Mac shape that mac_artifact_shapes_test builds from the
 # cloud input. The item writes and the str_replace must reach the judge as the cloud ones do. The reads and the
 # negatives exit before the judge, as the cloud ones do. On main no Mac name reaches this hook, so those exit
 # early there too: they are green controls, and they guard a build that maps too much.

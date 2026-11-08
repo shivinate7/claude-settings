@@ -70,7 +70,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
-from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
+from mac_artifact_shapes_test import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"

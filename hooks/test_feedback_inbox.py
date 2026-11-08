@@ -215,7 +215,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
+from mac_artifact_shapes_test import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 LT_PATH =os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(

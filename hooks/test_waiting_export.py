@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, HERE)
-from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
+from mac_artifact_shapes_test import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 
 ROOT = _test_temp.run_folder()
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")

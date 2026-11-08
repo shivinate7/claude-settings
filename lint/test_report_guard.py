@@ -34,7 +34,7 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
-from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
+from mac_artifact_shapes_test import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 # The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
