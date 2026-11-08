@@ -8386,8 +8386,8 @@ sh("env: interpreter code follow-ups: deny, node -e, a readdirSync loop, the fil
    "node -e \"const {execSync}=require('child_process'); for (const f of require('fs').readdirSync('.')) "
    "if (f.startsWith('" + ENV + "')) execSync('cat ' + f)\"", "deny", "env-file", cwd=NOGIT)
 sh("env: interpreter code follow-ups: deny, node -e, a readdirSync loop, the file's name in an execSync template literal",
-   "node -e \"const {execSync}=require('child_process'); for (const f of require('fs').readdirSync('.')) "
-   "if (f.startsWith('" + ENV + "')) execSync(`cat ${f}`)\"", "deny", "env-file", cwd=NOGIT)
+   "node -e 'const {execSync}=require(\"child_process\"); for (const f of require(\"fs\").readdirSync(\".\")) "
+   "if (f.startsWith(\"" + ENV + "\")) execSync(`cat ${f}`)'", "deny", "env-file", cwd=NOGIT)
 sh("env: interpreter code follow-ups: deny, node -e, a readdirSync loop, the file's name in spawnSync argv",
    "node -e \"const {spawnSync}=require('child_process'); for (const f of require('fs').readdirSync('.')) "
    "if (f.startsWith('" + ENV + "')) spawnSync('cat', [f])\"", "deny", "env-file", cwd=NOGIT)
