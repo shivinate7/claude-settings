@@ -17,7 +17,8 @@ report only: the exit code does not change (RouteClaimTests).
 STALE009 (range mode only) reports an added decision line that states what code does or does not do (a code subject
 and a behaviour verb) with no cite. It is report only too (CodeClaimTests).
 STALE010 (range mode) is a finding: an added line that cites a Python name the head does not bind, or a file absent
-at head, in a STALE002 form or a node id. A dead cite is STALE010 and never STALE009 (NameCiteTests).
+at head in a tracked top folder, in a STALE002 form or a node id. A cite into an untracked top folder is no cite here,
+as for STALE003 (NameCiteTests). A dead cite is STALE010 and never STALE009 (NameCiteTests).
 
 
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
@@ -1274,6 +1275,11 @@ def decisions(*pairs, folder="docs/decisions"):
 def touched(rng):
     """The paths the range changed. A case asserts this first, so the scope it probes is the one it claims."""
     return set(git(rng.repo, "diff", "--name-only", rng.base, rng.head).split())
+
+
+def top_folders(rng):
+    """The first folder of each tracked path at head: the folders a cite's first segment is tested against (STALE003)."""
+    return {p.split("/", 1)[0] for p in git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split() if "/" in p}
 
 
 NONE = re.compile(r"\bnone\b")
@@ -3172,7 +3178,8 @@ INCIDENT_LINE = (  # the line the incident added to docs/debts/notes.md, verbati
 
 class NameCiteTests(StaleCase):
     """STALE010, range mode, a finding. An ADDED line that cites a Python name in a STALE002 form, or a node id, is
-    flagged when its file is absent at head or the name is not bound there at head (names_in). A cite of a JavaScript
+    flagged when its file is absent at head in a tracked top folder, or the name is not bound there at head (names_in).
+    A cite into an untracked top folder is no cite, as STALE003 reads it. A cite of a JavaScript
     or shell file keeps the unknown form, and a cite of a .py file that does not parse at head is one unknown line with
     no finding. A fenced cite counts as prose, as STALE002 reads fences (its docstring). STALE010 judges only the
     lines the PR adds, so the check stays never red on work the PR did not do."""
@@ -3421,6 +3428,49 @@ class NameCiteTests(StaleCase):
         # No ls-tree of the tree and no second cat-file. Passes already: a cost pin, not a red case.
         self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
         self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_a_cite_into_an_untracked_top_folder_is_no_stale010_and_starts_no_git_process_past_the_four(self):
+        """`mypkg` is no tracked top folder: its package lives under `src/`. `django` is no folder of the repo. Both
+        cited files are absent at head, and STALE003 reads such a cite as no path cite."""
+        foo_src = "def foo():\n    return 1\n"
+        rows = [("- (mypkg/x.py foo)", False), ("- (django/db/models.py Model)", False)]
+        rng, _ = self.route_range(rows, extra={"src/mypkg/x.py": foo_src})
+        self.assertEqual(binding_kind(foo_src, "foo"), "def")  # scope: the file under src binds the cited name
+        self.assertIn("src", top_folders(rng))  # scope: src is a tracked top folder
+        self.assertNotIn("mypkg", top_folders(rng))  # scope: mypkg is no tracked top folder
+        self.assertNotIn("django", top_folders(rng))  # scope: django is no tracked top folder
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(parse(out), [], out)
+        subs = [command.split()[0] for command in commands]
+        # The four starts of a Markdown range, and no fifth: the cited folder is read through the one cat-file batch
+        # the check already holds (a tree reads as no blob, a missing path as None), so no ls-tree is started.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_a_cite_into_a_tracked_top_folder_with_a_missing_name_is_still_stale010_beside_the_untracked_ones(self):
+        """The twin of the case above, in the same range: the two untracked cites are silent, and `lint` is a tracked
+        top folder, so its cite of a name the file does not bind is still a finding, with exit 1."""
+        rows = [
+            ("- (mypkg/x.py foo)", False),
+            ("- (django/db/models.py Model)", False),
+            ("- (lint/x.py missing)", True),
+        ]
+        rng, flagged = self.route_range(rows, extra={"src/mypkg/x.py": "def foo():\n    return 1\n"})
+        self.assertIn("lint", top_folders(rng))  # scope: lint is a tracked top folder
+        self.assertIsNone(binding_kind(CODE["lint/x.py"], "missing"))  # scope: lint/x.py binds no such name
+        self.assert_flags(rng, [(NOTES, n, "STALE010") for n in flagged])
+
+    def test_a_tree_with_no_tracked_top_folder_gives_no_stale010_for_a_folder_cite(self):
+        """Every tracked path sits at the root, so no folder is a top folder, and a folder cite names an untracked one."""
+        def change(repo):
+            write(repo, "notes.md", "# Notes\n\n- (lint/x.py missing)\n")
+            commit(repo)
+        rng = self.make_range({"notes.md": "# Notes\n"}, change)
+        self.assertEqual(top_folders(rng), set())  # scope: no tracked path has a folder
+        self.assertIn("notes.md", touched(rng))  # scope: the range adds the cite on a Markdown file at the root
+        self.assert_passes(rng)
 
 
 if __name__ == "__main__":
