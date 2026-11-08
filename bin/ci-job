@@ -40,7 +40,8 @@
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.token }} is empty.
 # ${{ github.event.pull_request.body }} is the text of the UTF-8 file that $CI_JOB_PR_BODY_FILE names, read as written (no newline
-# translation); merge --lane-lint writes the lane PR's body there. The body reaches a step as literal text, never through a shell.
+# translation); merge --lane-lint and the merge's own lint write the PR's body there. The body reaches a step as literal text through
+# its env: only, never through a shell, so a run: line that holds the body expression reads unknown.
 # With no such variable it is empty, as for a ref target with no PR, so an excuse that lives only in the PR body (Drops-lines,
 # Retire-run) reads FAIL, as it does on main, which passes no body. A named file that cannot be read is one unknown line, exit 2.
 # Any other expression makes the step unknown.
