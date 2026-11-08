@@ -28,6 +28,8 @@
 - cap-until-field-taught-late: the _agentCapUntil field is taught only in the revoke message after a bad cap write (hooks/config_watch.py, hooks/guard.py)
 - cap-write-by-python-unseen: a cap write made by a Python script, or text piped or written to a script and run later, is not asked (hooks/guard_frozen.py)
 - cap-write-glued-ampersand: `(W)&` and `W&` (a cap write backgrounded with a glued `&`) allow, while the spaced form denies as a detached launch (hooks/guard_frozen.py _shell_write_hit)
+- frozen-trim-quoted-backtick: _shell_write_hit trims a trailing backtick inside a quote too, so a write to a file literally named with a trailing ` reads as the bare name (hooks/guard_frozen.py)
+- push-calls-substitution-mutant: no mutant removes only the substitution read in _push_calls; the three wrapper-substitution deny cases would catch it (hooks/mutate_guard.py)
 - catalog-mode-detect-flags: hook catalog finds modes only from a "$g" --flag argument; a script registered twice with a positional arg or -x looks like one mode (lint/hook_catalog.py)
 - cite-by-id-skips-merge-subject: the cite-by-id rule does not read a gh pr merge subject; the lane-by-slug rule does (hooks/guard.py)
 - cites-lack-gloss-unchecked: some cites of record ids in decisions and debts carry no gloss and no check requires one (decisions, debts)
