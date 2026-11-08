@@ -8966,6 +8966,19 @@ sh("git env set: PowerShell, a braced GIT_DIR set with no space before =, after 
    r"% {${env:GIT_DIR}='x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a braced GIT_DIR set with no space before =, held in a variable, denies",
    r"$sb = {${env:GIT_DIR}='x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a braced GIT_DIR set with a space before =, in a block, denies",
+   r"{${env:GIT_DIR} = 'x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a braced GIT_DIR set with a space before =, after a leading %, denies",
+   r"% {${env:GIT_DIR} = 'x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a braced GIT_DIR set with a space before =, held in a variable, denies",
+   r"$sb = {${env:GIT_DIR} = 'x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# A `${` that never closes inside a string must not crash the reader. The set after it still denies.
+sh("git env set: PowerShell, an unclosed ${ in a string, then GIT_DIR set, denies",
+   "('${' + $x); $env:GIT_DIR='x'", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, an unclosed ${ in a string, then GIT_DIR set in a block, denies",
+   "('${'); & {$env:GIT_DIR='x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, an unclosed ${ in a string, a newline, then GIT_DIR set, denies",
+   "('${' + $x)\n$env:GIT_DIR='x'", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # The statement marker after a block's `}` ends a cmdlet's arguments. So `$null` after the block is not
 # the value of the set before it, and that set denies. A scrub whose value is `$null` inside the block
 # stays allowed. Both pins read the marker cut at guard_kill.py, rest = rest[:rest.index(...)].
@@ -8986,6 +8999,10 @@ sh("git env set: PowerShell, a hash literal then a read of GIT_DIR, allowed",
    r'$h = @{a=1}; Write-Output $env:GIT_DIR', "allow", tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a braced read of GIT_DIR, allowed",
    r'Write-Output ${env:GIT_DIR}', "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a braced read of HOME in a block, allowed",
+   r'if($x){ "${env:HOME}" }', "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, an unclosed ${ in a string with no set, allowed",
+   "('${' + $x)", "allow", tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a call operator on a block that sets, denies",
    "& { $env:GIT_DIR=1 }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # Each form below runs the block it prints, through `.Invoke()`, a `%` pipe into `& $_`, or Invoke-Expression,
