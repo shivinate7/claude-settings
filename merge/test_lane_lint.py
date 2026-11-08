@@ -1052,7 +1052,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
 
     def test_control_a_named_target_fetch_that_fails_for_another_reason_is_not_retried_and_the_lint_ends_as_today(self):
         """Today's read, pinned: the fetch of a bare branch name ignores its exit code, and the lint runs at origin/feat as this clone
-        holds it. Only a ref-lock collision is retried; any other failure is one fetch and that outcome."""
+        holds it. Only a ref-lock collision is retried; any other failure is one fetch and that outcome.
+        Re-point when step lane-lint-fetch-fail-unknown lands: a failed fetch then reads unknown."""
         self.use_ci_job(PASSING, 0)
         self.assertFalse(self.has_local_branch("feat"), "the case needs no local feat, so the lane lint fetches the named target")
         head = self.head("feat")
