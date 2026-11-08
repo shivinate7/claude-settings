@@ -2440,6 +2440,8 @@ class RetireCite(unittest.TestCase):
     def test_the_run_is_read_against_the_head_the_flag_gives(self):
         head, body = self.cited_close()
         below = self.r.sh("rev-parse", "origin/main")  # the parent of the head: a green run there excuses nothing
+        self.r.sh("checkout", "-q", "--detach", below)  # the checkout is not the head, so a reader keyed to HEAD reads this run
+        self.assertNotEqual(self.r.sh("rev-parse", "HEAD"), head, "premise: the checkout must not sit at the head")
         runs = Runs(("success", below))
         code, out = self.cli(head, runs, env={CASE_BODY: body})
         self.assertIn(RUN_URL, runs.urls, "the run reader was not asked for the cited run, so the case proves nothing")
@@ -2476,14 +2478,14 @@ class RetireCite(unittest.TestCase):
     def test_the_same_drops_lines_line_without_the_flag_excuses_nothing(self):  # control
         head, _ = self.cited_close()
         drops = "Drops-lines: %s -- the owner retired this debt by hand\n" % self.DEBT
-        code, out = self.cli(head, Runs(("success", head)), flag=False, env={CASE_BODY: drops})
+        code, out = self.cli(head, Runs(("success", head)), flag=False, env={CASE_BODY: drops, PR_BODY: drops})  # PR_BODY too: no default may read it
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL: %s:" % self.DEBT, out, "the body excused the delete with no flag:\n" + out)
 
     def test_without_the_flag_the_body_and_the_run_are_not_read(self):  # control
         head, body = self.cited_close()
         runs = Runs(("success", head))
-        code, out = self.cli(head, runs, flag=False, env={CASE_BODY: body})
+        code, out = self.cli(head, runs, flag=False, env={CASE_BODY: body, PR_BODY: body})  # PR_BODY too: no default may read it
         self.assertEqual(runs.urls, [], "the run reader was asked with no flag: the CLI must read no run")
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL: %s:" % self.DEBT, out, "the cited delete was excused with no flag:\n" + out)
