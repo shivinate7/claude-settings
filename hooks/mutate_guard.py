@@ -2214,6 +2214,10 @@ MUTATIONS = [
      '        if not any(verb == "push" and git_write_verb(verb, args) for verb, args in calls):',
      '        if not any(verb == "push" for verb, args in calls):',
      "guard", "git-after-cd: a check, then ; a git push --dry-run, a read, passes"),
+    ("git-after-cd: a || or | before the push's chain is a ; join",
+     '                if first:\n                    break\n                return "push"',
+     '                return "push"',
+     "guard", "git-after-cd: a check joined to a push by ||, then a git push -u, passes"),
     # ---- conflict-markers after a segment the cd walk cannot read (an echo with an ANSI-C quote).
     ("conflict-markers: a segment the walk cannot read hides the cd before it",
      '        where = walk.where or command_root(stripped, cwd)',
