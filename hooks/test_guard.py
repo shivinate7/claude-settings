@@ -8777,6 +8777,10 @@ FIXTURELESS_CHECKS.add(incident_write_strip_case)  # it loads the module and bui
 ENVWALK_HELD = os.path.join(ROOT, "envwalk-held")    # an env file and an ordinary file
 ENVWALK_CLEAN = os.path.join(ROOT, "envwalk-clean")  # ordinary files and no env file
 ENVWALK_EMPTY = os.path.join(ROOT, "envwalk-empty")  # no files at all
+ENVWALK_IGNORED = os.path.join(ROOT, "envwalk-ignored")      # a git repo whose .gitignore lists the env file
+ENVWALK_UNIGNORED = os.path.join(ROOT, "envwalk-unignored")  # a git repo whose .gitignore does not
+ENVWALK_NESTED = os.path.join(ROOT, "envwalk-nested")        # a top-level folder that holds an env file
+ENVWALK_LARGE = os.path.join(ROOT, "envwalk-large")          # one folder over the walk cap, no env file
 
 
 def build_envwalk_folders():
@@ -8788,6 +8792,27 @@ def build_envwalk_folders():
 
 
 lazy_fixture((ENVWALK_HELD, ENVWALK_CLEAN, ENVWALK_EMPTY), build_envwalk_folders)
+
+
+def build_envwalk_repos():
+    # Two git repos, so rg reads .gitignore. The env file is on disk in both; only the ignore rule differs.
+    make_repo(ENVWALK_IGNORED, {".gitignore": ENV + "\n", ENV: "FIXTURE=1\n", "README.md": "ignored\n"})
+    make_repo(ENVWALK_UNIGNORED, {".gitignore": "*.log\n", ENV: "FIXTURE=1\n", "README.md": "kept\n"})
+    write(os.path.join(ENVWALK_NESTED, "sub", ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVWALK_NESTED, "README.md"), "nested\n")
+
+
+def build_envwalk_large():
+    # The walk cap is the guard's ENV_WALK_LIMIT entries (guard_env.py). The folder holds one more, so it
+    # is over the cap whatever the cap is set to. No file in it is an env file.
+    import guard_env
+    os.makedirs(ENVWALK_LARGE, exist_ok=True)
+    for number in range(guard_env.ENV_WALK_LIMIT + 1):
+        open(os.path.join(ENVWALK_LARGE, "f%06d" % number), "w").close()
+
+
+lazy_fixture((ENVWALK_IGNORED, ENVWALK_UNIGNORED, ENVWALK_NESTED), build_envwalk_repos)
+lazy_fixture((ENVWALK_LARGE,), build_envwalk_large)
 
 # Allowed. A folder named .env (a virtualenv), and text that names it, read no env file.
 for _tool, _cmd in (
@@ -8842,6 +8867,41 @@ sh("env: grep walk control, path holds no env file, allowed: grep -r X src", "gr
    cwd=ENVWALK_HELD)
 sh("env: grep walk control, folder has no env file, allowed: grep -r X .", "grep -r X .", "allow",
    cwd=ENVWALK_CLEAN)
+
+# rg reads a dotfile only with a hidden flag, and in a git repo it skips what .gitignore lists. A listed
+# env file is not read, so a hidden search of its folder is allowed. An unlisted one is refused, and so
+# is a search that turns the ignore rules off.
+for _cmd in ("rg --hidden foo", "rg --hidden foo ."):
+    sh("env: rg hidden, env file listed in .gitignore, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_IGNORED)
+    sh("env: rg hidden, env file not listed in .gitignore, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_UNIGNORED)
+for _cmd in ("rg --hidden --no-ignore foo .", "rg -uu foo ."):
+    sh("env: rg hidden, env file listed in .gitignore, ignore rules off, refused: " + _cmd, _cmd, "deny",
+       "env-file", cwd=ENVWALK_IGNORED)
+# rg -u turns the ignore rules off and reads no dotfile. Only a hidden flag (-uu, --hidden) reaches one.
+sh("env: rg -u reads no dotfile, folder holds an env file, allowed: rg -u foo .", "rg -u foo .", "allow",
+   cwd=ENVWALK_HELD)
+sh("env: rg -uu reads dotfiles, folder holds an env file, refused: rg -uu foo .", "rg -uu foo .", "deny",
+   "env-file", cwd=ENVWALK_HELD)
+# A glob in the path names the folders it expands to. A hidden search of one that holds an env file reads it.
+sh("env: walk hole, glob names a folder that holds an env file, refused: rg --hidden foo *",
+   "rg --hidden foo *", "deny", "env-file", cwd=ENVWALK_NESTED)
+sh("env: walk control, glob names no folder with an env file, allowed: rg --hidden foo *",
+   "rg --hidden foo *", "allow", cwd=ENVWALK_CLEAN)
+sh("env: walk control, glob names a folder with no env file, allowed: rg --hidden foo src*",
+   "rg --hidden foo src*", "allow", cwd=ENVWALK_HELD)
+# A folder over the walk cap, with no env file in it: the search is allowed, and no reason says one is held.
+sh("env: walk over the cap, folder holds no env file, allowed: rg --hidden foo", "rg --hidden foo", "allow",
+   cwd=ENVWALK_LARGE, lacks="holds an environment file")
+# A file regex that picks a dot-prefixed env name is refused. `[A-Z]*` may be empty, so `.env.md` is picked,
+# and `env\.prod$` picks `.env.prod`.
+for _cmd in (r"ag --hidden -G '\.env[A-Z]*\.md$' foo", r"ag --hidden -G 'env\.prod$' foo"):
+    sh("env: ag hidden regex hole, refused: " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+# A regex that names no env prefix of its own is judged on the sample env names alone (the accepted limit
+# in guard_env.py). These two pick none of them, whatever their size or their POSIX class, so they are allowed.
+for _cmd in (r"ag --hidden -G '.*a.*b.*c.*d.*e.*f' foo", r"ag --hidden -G '[[:^alpha:]]x' foo"):
+    sh("env: ag hidden regex, no sample env name it picks, allowed: " + _cmd, _cmd, "allow", cwd=NOGIT)
 
 
 # Select-String -NotMatch is a switch, so the next word is the pattern. A word after the pattern is a
