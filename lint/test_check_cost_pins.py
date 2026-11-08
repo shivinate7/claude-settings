@@ -7,7 +7,10 @@ A decision record's Cost sentence may name a file only when a test pins it. The 
 docs/decisions/*.md under --root and prints one line per unpinned file token:
 `<record path>:<line>: <file token> named in a Cost sentence with no pin`.
 A count claim in a Cost sentence prints `<record path>:<line>: count in a Cost sentence with no reader`.
-The file cases compare file rows only; a count case passes counts=True to compare count rows too.
+A count claim in a debt note (each list item of docs/debts/notes.md is one note) prints
+`<notes path>:<line>: count in a debt note with no reader`.
+The file cases compare file rows only; a count case passes counts=True to compare count rows too, and so
+does a note case.
 
 Each case builds a temp tree holding the records and test files it reads, then runs the real script
 with --root on that tree. The corpus case runs it on this repo with no --root. COST_PINS_UNDER_TEST
@@ -32,6 +35,10 @@ NAMED = " named in a Cost sentence with no pin"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
 # The count rule's row. The file cases leave it out, so a count the rule flags fails only the count cases.
 COUNT = "count in a Cost sentence with no reader"
+# A count claim in a debt note: its row, and the notes file the note cases build. That file is the layout's
+# debt-notes path. An unrolled tree also tries the legacy path first, which these cases leave absent.
+NOTES = "docs/debts/notes.md"
+NOTE_COUNT = "count in a debt note with no reader"
 # A plain count beside a cost noun, which the rule flags. Each count case prints it, so a case whose other
 # sentences pass still shows that the rule ran on its record.
 CONTROL = "- **Cost:** two `simctl list` reads per call.\n"
@@ -67,7 +74,7 @@ def findings(out, counts=False):
             what = m.group("what")
             if what.endswith(NAMED):
                 what = what[:-len(NAMED)]
-            if what == COUNT and not counts:
+            if what in (COUNT, NOTE_COUNT) and not counts:
                 continue
             rows.append((record_of(m.group("path")), int(m.group("line")), what))
     return rows
@@ -89,6 +96,11 @@ def row(name, text, needle, token):
 def count_row(name, text, needle):
     """The count finding that record `name`, with `text`, must print on the line holding `needle`."""
     return row(name, text, needle, COUNT)
+
+
+def note_row(text, needle):
+    """The count finding that the debt notes file, with `text`, must print on the line holding `needle`."""
+    return (NOTES, lineno(text, needle), NOTE_COUNT)
 
 
 class CostPinTests(unittest.TestCase):
@@ -135,6 +147,18 @@ class CostPinTests(unittest.TestCase):
         self.assertEqual(rc, 1, "exit 1 expected with findings %r; got exit %d:\n%s" % (expected, rc, out))
         for wanted in expected:
             self.assertIn(wanted, findings(out, counts), out)
+
+    def note(self, body):
+        """Write the debt notes file: `body` is its list items, one note each. Returns the body."""
+        self.put(NOTES, body)
+        return body
+
+    def note_control(self, body):
+        """The notes file reads clean beside a decision whose count the rule already flags. That decision row shows
+        the run read this tree, so a clean note is not an empty run."""
+        text = self.decide("control.md", CONTROL)
+        self.note(body)
+        self.assert_found([count_row("control.md", text, CONTROL_NEEDLE)], counts=True)
 
     def test_founding_incident_is_flagged(self):
         # The Proof sentence names a test that holds layout.json. It is another sentence, so it pins nothing here.
@@ -588,6 +612,101 @@ class CostPinTests(unittest.TestCase):
         # `at most` inside a code span is code, not a bound, so the count has no reader and is flagged.
         text = self.decide("span-bound.md", "- **Cost:** one `at most` read per call.\n")
         self.assert_found([count_row("span-bound.md", text, "- **Cost:**")], counts=True)
+
+    # Debt notes: each list item is one note. A count claim in a note needs a reader: a bound, an exemption word,
+    # a date or run id in its sentence, or a test that holds the nearest code span. The red cases fail on the old
+    # code. The note_control cases read clean beside a decision row that prints, so a clean note shows the run read.
+
+    def test_note_founding_incident_line_is_flagged(self):
+        text = self.note("- record-claim-cites-code: 0 doc-relative cites among 266 folder .py file cites in "
+                         "this repo.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_n_of_m_with_a_two_digit_total_is_flagged(self):
+        text = self.note("- materialize-all-builds-every-fixture: 253 of 543 log checks read ROOT; "
+                         "a per-check audit could skip builds.\n")
+        self.assert_found([note_row(text, "253 of 543")], counts=True)
+
+    def test_note_count_on_a_wrapped_second_line_is_flagged_on_that_line(self):
+        text = self.note("- record-wrap: the first line says nothing,\n"
+                         "  and the second line is among 266 folder cites in this repo.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_span_markers_and_a_lone_apostrophe_keep_one_finding(self):
+        # The comment openers sit in code spans and the apostrophe is plain text. None may end the sentence
+        # or hide the claim, so the one claim prints one finding on its line.
+        text = self.note("- record-scan: Don't rerun `/*` or `//` or `#` here: the list is among 266 folder cites.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_full_size_file_flags_only_its_claim(self):
+        items = ["- note-%03d: a plain note with no count in it.\n" % n for n in range(300)]
+        items[150] = "- note-150: the list is among 266 folder cites in this repo.\n"
+        text = self.note("".join(items))
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_among_a_word_number_is_a_claim(self):
+        text = self.note("- record-six: each run is among six checks that read the list.\n")
+        self.assert_found([note_row(text, "among six")], counts=True)
+
+    def test_note_exempt_word_in_the_next_sentence_does_not_pass(self):
+        # The exemption sits in the second sentence. A sentence is read alone, so the first sentence's claim is flagged.
+        text = self.note("- record-scope: the list is among 266 folder cites. Unmeasured for now.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_test_name_that_does_not_hold_the_span_does_not_pass(self):
+        self.put("lint/test_x.py", "# x cases\n\nother text\n")
+        self.assert_exists("lint/test_x.py")
+        text = self.note("- record-pin: reads `state/x.json` among 266 files, pinned by `lint/test_x.py`.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_dated_rewrite_of_the_founding_line_reads_clean(self):
+        self.note_control("- record-claim-cites-code: This repo had 0 doc-relative cites on 2026-11-08.\n")
+
+    def test_note_exempt_words_pass_an_among_claim(self):
+        self.note_control("- The list is among 266 folder cites; unmeasured.\n"
+                          "- The list is among 266 folder cites (not pinned).\n"
+                          "- The list is among 266 folder cites, unpinned.\n"
+                          "- The list is among 266 folder cites, no test counts them.\n")
+
+    def test_note_bound_words_pass_an_among_claim(self):
+        self.note_control("- The list is among 266 folder cites; the run reads it at most once.\n"
+                          "- The list is among 266 folder cites; the run reads it up to twice.\n"
+                          "- The list is among 266 folder cites; the run reads it no more than twice.\n"
+                          "- The list is among 266 folder cites; the run reads it fewer than 9 times.\n"
+                          "- The list is among 266 folder cites; the run reads it at least once.\n")
+
+    def test_note_test_name_holding_the_nearest_span_passes(self):
+        self.put("lint/test_x.py", "# x cases\n\nx.json is read\n")
+        self.note_control("- record-pin: reads `state/x.json` among 266 files, pinned by `lint/test_x.py`.\n")
+
+    def test_note_round_and_try_phrases_are_not_claims(self):
+        self.note_control("- record-round: Round 3 of 3 passed and Try 2 of 3 ran.\n"
+                          "- record-round-wide: Round 3 of 12 passed and Try 2 of 10 ran.\n")
+
+    def test_note_decimal_tail_is_not_a_claim(self):
+        self.note_control("- windows-rest: the slowest green run was 20.2 of 28 min.\n")
+
+    def test_note_a_count_with_no_claim_shape_is_not_read(self):
+        self.note_control("- record-id: the id is 9 characters long.\n")
+
+    def test_note_count_inside_a_code_span_is_not_read(self):
+        self.note_control("- record-quote: the old line said `among 266 folder cites` and was fixed.\n")
+
+    def test_note_a_date_or_run_id_in_the_sentence_passes_a_claim(self):
+        self.note_control("- record-dated: the list was among 266 folder cites on 2026-11-08.\n"
+                          "- record-run: the list was among 266 folder cites in run 4411.\n")
+
+    def test_note_shape_in_a_decision_outside_a_cost_sentence_is_not_flagged(self):
+        self.decide("note-shape.md", "The list is among 266 folder cites in this repo.\n")
+        text = self.decide("control.md", CONTROL)
+        self.assert_found([count_row("control.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_note_cost_noun_count_is_not_read(self):
+        # The cost-noun rule reads Cost sentences only. Two files once a call is no claim in a note.
+        self.note_control("- record-reads: the check reads 2 files once per call.\n")
+
+    def test_note_empty_file_reads_clean(self):
+        self.note_control("")
 
 
 class CorpusTests(unittest.TestCase):
