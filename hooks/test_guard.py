@@ -5316,6 +5316,24 @@ sh("git-after-cd: a check, then ; an if whose else body holds a git push, is ref
    carries=("&&",))
 sh("git-after-cd: an if whose else body holds a git push, with no check before it, passes",
    'if [ -n "$X" ]; then :; else %s push -u origin b; fi' % VCS, "allow", cwd=NOGIT)
+# A COMPOUND'S TEST OR AN EXIT TAIL CLEARS ONLY ITS OWN COMMANDS. An elif body, an until body, a `|| exit` after a
+# git fetch, and an if whose test is a git fetch each cover only their own command. The walk keeps going back past
+# them, so a check joined by `;` further back still guards the push, and each push here is refused. A `|| exit` after
+# the fetch protects the fetch alone, so the fetch with no check before it passes.
+sh("git-after-cd: a check, then ; an if with an elif whose body holds a git push, is refused",
+   'pytest -q; if [ -n "$X" ]; then :; elif [ -n "$Y" ]; then %s push -u origin b; fi' % VCS,
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; an until loop with a git push in its body, is refused",
+   "pytest -q; until false; do %s push -u origin b; break; done" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; a git fetch protected by || exit 1, then a git push -u, is refused",
+   "pytest -q; %s fetch origin || exit 1; %s push -u origin b" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; an if on a git fetch with a git push in its then body, is refused",
+   "pytest -q; if %s fetch; then %s push -u origin b; fi" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a git fetch protected by || exit 1, then ; a git push -u, passes",
+   "%s fetch origin || exit 1; %s push -u origin b" % (VCS, VCS), "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
