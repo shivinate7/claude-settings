@@ -1462,40 +1462,71 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
 # ---- a review record posted as a comment (rule pr-review-record; the judge is guard_merge.review_record_hit)
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 # The one home of the comment routes. The guard sees the word before the shell fills it, so a repo, an issue number or a comment id
-# may be a variable (`$N`, `${N}`, `${N:-12}`), an arithmetic (`$((N+1))`) or a command substitution (`$(...)`, closed or cut
-# at its first space by the tokenizer). Group 1 is the repo, group 2 the number; group 3 holds a substitution cut before its close.
-_ROUTE_REPO = r"([^/\s]+/[^/\s]+|\$\w+|\$\{[^}\s]*\})"
+# may be a variable (`$N`, `${N}`, `${N:-12}`), an arithmetic (`$((N+1))`) or a command substitution (`$(...)`). Group 1 is the
+# repo, group 2 the number. `_joined_substitutions` first joins a substitution the tokenizer split at its spaces into one word.
+_ROUTE_REPO = r"([^/\s]+/[^/\s]+|\$\w+|\$\{[^}\s]*\}|\$\(.*\))"
 _ROUTE_NUMBER = r"(\d+|\$\w+|\$\{[^}\s]*\}|\$\(.*)"
 
 
 def _issue_route(middle: str, after: str):
-    """The pattern of `repos/<repo>/issues/<middle><number><after>`, number last or before `/comments`."""
-    return re.compile(r"/?repos/" + _ROUTE_REPO + "/issues/" + middle + "(?:" + _ROUTE_NUMBER + after + r"|(\$\(\S*))")
+    """The pattern of `repos/<repo>/issues/<middle><number><after>`."""
+    return re.compile(r"/?repos/" + _ROUTE_REPO + "/issues/" + middle + _ROUTE_NUMBER + after)
 
 
 _COMMENTS_ROUTE = _issue_route("", "/comments/?")
 _COMMENT_EDIT_ROUTE = _issue_route("comments/", "/?")   # a comment edited in place, by comment id
+ENDPOINT_NUMBER = "<endpoint>"   # the number of a route whose whole endpoint is a substitution
+_API_VALUE_FLAGS = {"-X", "--method", "-H", "--header", "-q", "--jq", "-t", "--template", "--input", "--hostname", "--cache",
+                    "-p", "--preview"} | set(GH_API_FIELD_FLAGS)
 
 
-def _route_parts(routes, route: str):
-    """Return (repo, number) of a word that fully matches `routes`; a variable number or repo keeps its shell text."""
-    found = routes.fullmatch(route)
-    return found.group(1), found.group(2) or found.group(3)
-
-
-def _first_comment_route(args):
-    """Return the comment route (post or edit) that the first route-shaped word of a `gh api` call fits, else None. The
-    first word decides: the inner call of a command substitution names a literal route that must not stand for the post."""
+def _joined_substitutions(args):
+    """Return `args` with each route-shaped word that opens a `$(` the tokenizer split at a space joined with the words up to its
+    close, so the inner call of a substitution is no word of its own. Only a word that starts a route or an endpoint (`repos/`,
+    `/repos/`, `$(`) is joined: a body field that holds `$(` as text is left alone."""
+    out, depth = [], 0
     for arg in args:
+        if depth > 0:
+            out[-1] += " " + arg
+        else:
+            out.append(arg)
+            if "$(" not in arg or not re.match(r"(/?repos/|\$\()", arg):
+                continue
+        depth = max(0, out[-1].count("(") - out[-1].count(")"))
+    return out
+
+
+def _api_endpoint(args):
+    """Return the endpoint word of a `gh api` call (its first word that is no flag and no flag's value), else ''."""
+    index = 1
+    while index < len(args):
+        arg = args[index]
+        index += 2 if arg in _API_VALUE_FLAGS else 1
+        if not arg.startswith("-"):
+            return arg
+    return ""
+
+
+def _comment_route(args):
+    """Return (routes, repo, number) for the comment route of a `gh api` call, else None. `routes` is the post or the edit
+    pattern. A first route-shaped word wins, and an endpoint that is itself a substitution is a variable target
+    (ENDPOINT_NUMBER, repo ''), an edit when the call names the method PATCH or PUT, else a post."""
+    for arg in args[1:]:
         for routes in (_COMMENTS_ROUTE, _COMMENT_EDIT_ROUTE):
-            if routes.fullmatch(arg):
-                return routes
+            found = routes.fullmatch(arg)
+            if found:
+                return routes, found.group(1), found.group(2)
+    if _api_endpoint(args).startswith("$("):
+        method = next((args[i + 1].upper() for i, a in enumerate(args[:-1]) if a in ("-X", "--method")), "")
+        return (_COMMENT_EDIT_ROUTE if method in ("PATCH", "PUT") else _COMMENTS_ROUTE), "", ENDPOINT_NUMBER
     return None
 
 
-def _literal_route(repo: str, number) -> bool:
-    """True when the repo and the number are text the guard can read, not shell expansions."""
-    return str(number).isdigit() and "$" not in repo
+def _variable_parts(repo: str, number) -> tuple:
+    """Return which parts of a route are shell expansions the guard cannot read: "endpoint", else "number" and "repo" as they apply."""
+    if number == ENDPOINT_NUMBER:
+        return ("endpoint",)
+    return tuple(name for name, bad in (("number", not str(number).isdigit()), ("repo", "$" in repo)) if bad)
 
 
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
@@ -1528,14 +1559,9 @@ def _piped_cat_file(previous) -> str:
     return words[1] if len(words) == 2 and words[0] == "cat" and not words[1].startswith("-") else ""
 
 
-def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
-    """Return (repo, number, texts, files, stdin) for a `gh api repos/O/R/issues/<n>/comments` call, else None; `routes`
-    names another route to read (the edit route returns the comment id as `number`). A `body` field
+def _api_bodies(args):
+    """Return (texts, files, stdin) for the `body` fields of a `gh api` call. A `body` field
     is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
-    route = next((a for a in args if routes.fullmatch(a)), None)
-    if route is None or args[:1] != ["api"]:
-        return None
-    repo, number = _route_parts(routes, route)
     texts, files, stdin, index = [], [], False, 1
     while index < len(args):
         arg = args[index]
@@ -1562,7 +1588,7 @@ def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
                 files.append(text[1:])
         else:
             texts.append(text)
-    return repo, number, texts, files, stdin
+    return texts, files, stdin
 
 
 def review_post_hit(segment: str, raw: str, where: str, before: int, previous: str = ""):
@@ -1574,7 +1600,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
-    edit, variable = None, False
+    edit, variable = None, ()
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
         selector, repo = _comment_target(args)
@@ -1582,17 +1608,18 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             edit = ("last", selector)
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
-        routes = _first_comment_route(rest)
-        posted = _api_post_bodies(rest, routes) if routes else None
-        if posted is None:
+        rest = _joined_substitutions(rest)
+        route = _comment_route(rest)
+        if route is None:
             return None
-        repo, selector, texts, files, stdin = posted
-        variable = not _literal_route(repo, selector)
+        routes, repo, number = route
+        texts, files, stdin = _api_bodies(rest)
+        variable = _variable_parts(repo, number)
         if routes is _COMMENT_EDIT_ROUTE:   # an edit names a comment, not a pull request
-            edit = ("comment", selector if not variable else "")
+            edit = ("comment", "" if variable else number)
             selector = ""
         else:
-            selector = str(selector)
+            selector = str(number)
     else:
         return None
     texts, files = list(texts), list(files)

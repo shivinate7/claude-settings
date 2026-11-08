@@ -492,15 +492,24 @@ def _old_body_hit(edit, repo: str, where: str):
     return None
 
 
-def _variable_reason(module):
-    """Return (matched, reason) for a record posted to an issue number or repo held in a shell expansion (a variable, an arithmetic,
-    a command substitution): its pull request cannot be checked. The refusal sits one call below its caller, so the rule audit reads its reason within its depth limit."""
+VARIABLE_REMEDIES = {
+    "number": "write the PR number literally in the route (`issues/12/comments`)",
+    "repo": "write the repo, OWNER/NAME, in the route instead of a shell expansion (`repos/OWNER/NAME/issues/12/comments`)",
+    "endpoint": "write the route out in the call (`repos/OWNER/NAME/issues/12/comments`) instead of a substitution",
+}
+
+
+def _variable_reason(module, variable):
+    """Return (matched, reason) for a record posted to an issue number, repo or endpoint held in a shell expansion (a variable, an
+    arithmetic, a command substitution): its pull request cannot be checked. `variable` names the parts that are expansions
+    ("number", "repo", "endpoint"), and each gets its own remedy. The refusal sits one call below its caller, so the rule audit
+    reads its reason within its depth limit."""
     return "review record posted to a variable issue number", REVIEW_REASON % (
-        "this record goes to an issue number or repo the guard cannot read, held in a shell expansion; write the PR number literally "
-        "in the route (`issues/12/comments`)", _review_render(module, "<pr>", "<live head>"))
+        "this record goes to a route the guard cannot read, held in a shell expansion; "
+        + "; ".join(VARIABLE_REMEDIES[name] for name in variable), _review_render(module, "<pr>", "<live head>"))
 
 
-def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variable: bool = False):
+def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variable=()):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
@@ -509,7 +518,7 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variab
     tool) it names the comment, ("comment", id) or ("last", selector). A marked new body is refused after the form check and
     before any read, because an edited record was rendered by no run. An unmarked new body makes one read of the old body
     (`_old_body`) and is refused when that holds a record, or when the read could not run. No new body known: None, no read.
-    `variable` is true when the number or repo is a shell expansion: a marked post is refused with no read, as its pull request cannot be checked."""
+    `variable` names the route parts that are shell expansions (`_variable_reason`), empty for a literal route: a marked post is refused with no read, as its pull request cannot be checked."""
     found = _marked_bodies(bodies)
     if edit and not found:
         if not any(isinstance(b, str) for b in bodies):
@@ -523,7 +532,7 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variab
     if edit:
         return _edit_reason(module)
     if variable:
-        return _variable_reason(module)
+        return _variable_reason(module, variable)
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)
