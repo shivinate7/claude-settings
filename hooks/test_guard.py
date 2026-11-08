@@ -15031,8 +15031,12 @@ FINDCP = os.path.join(ROOT, "findcp")
 
 
 def _build_find_cp():
+    # hooks/test_x.py is a test-named file in hooks/, like hooks/test_guard.py. docs/ is the folder the copies
+    # below write into, and assets/ holds files with no test name.
     make_repo(FINDCP, {"src/app.py": "x\n", "src/a.py": "x\n", "src/b.txt": "x\n", "src/test_a.py": "x\n",
-                       "pkg/keep.py": "x\n", "hooks/keep.py": "x\n"})
+                       "pkg/keep.py": "x\n", "hooks/keep.py": "x\n", "hooks/test_x.py": "x\n",
+                       "hooks/guard.py": "x\n", "hooks/notes.txt": "x\n", "docs/keep.txt": "x\n",
+                       "assets/logo.css": "x\n"})
 
 
 lazy_fixture([FINDCP], _build_find_cp)
@@ -15059,6 +15063,30 @@ sh("builder-find: find src *.txt piped to xargs, cp of each into hooks/, writes 
    "find src -name '*.txt' | xargs -I{} cp {} hooks/", "allow", **dict(BR, cwd=FINDCP))
 sh("builder-find: for loop of cp of a and b into src/, writes no test, is allowed",
    "for f in a b; do cp $f src/; done", "allow", **dict(BR, cwd=FINDCP))
+# ---- round 2 of PR #2305: a cp judged on the path it writes. hooks/test_x.py is the test-named source.
+# A destination that is a file name writes that name, so no test is written and the copy is allowed.
+sh("builder-find: cp of hooks/test_x.py to docs/y.bak, a file name, writes docs/y.bak, no test, is allowed",
+   "cp hooks/test_x.py docs/y.bak", "allow", **dict(BR, cwd=FINDCP))
+# A glob, a brace or a loop feeds the test-named source into docs/, so each writes docs/test_x.py.
+sh("builder-find: cp of hooks/*.py into docs/ writes docs/test_x.py, is refused",
+   "cp hooks/*.py docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cp of hooks/* into docs/ writes docs/test_x.py, is refused",
+   "cp hooks/* docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cp of hooks/{guard,test_x}.py into docs/ writes docs/test_x.py, is refused",
+   "cp hooks/{guard,test_x}.py docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: for loop of cp of hooks/*.py into docs/ writes docs/test_x.py, is refused",
+   "for f in hooks/*.py; do cp $f docs/; done", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+# A copy of a folder keeps the folder's name under docs/, so the test inside it lands at docs/hooks/test_x.py.
+sh("builder-find: cp -r hooks into docs/ writes docs/hooks/test_x.py, is refused",
+   "cp -r hooks docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+# A subshell whose paren is glued to cp still copies the test-named source into docs/.
+sh("builder-find: (cp hooks/test_x.py docs/) with the paren glued writes docs/test_x.py, is refused",
+   "(cp hooks/test_x.py docs/)", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+# The pins: each copy below writes no test name, so each is allowed.
+sh("builder-find: cp of hooks/*.txt into docs/ writes docs/notes.txt, no test, is allowed",
+   "cp hooks/*.txt docs/", "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: cp -r assets into docs/ writes docs/assets/logo.css, no test, is allowed",
+   "cp -r assets docs/", "allow", **dict(BR, cwd=FINDCP))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
