@@ -28324,8 +28324,8 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a bold **Verdict
 # round-1 pin uses an en dash (U+2013), written as an escape so the dash is visible in the source.
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 2 of 3 — FAIL line, em dash, pinned on sonnet",
            "Check the floor fix.\nRound 2 of 3 — FAIL\nFiles: hooks/guard.py.", model="sonnet")
-rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 – FAIL line, en dash, pinned",
-           "Check the floor fix.\nRound 1 – FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 \u2013 FAIL line, en dash, pinned",
+           "Check the floor fix.\nRound 1 \u2013 FAIL\nFiles: hooks/guard.py.")
 
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
