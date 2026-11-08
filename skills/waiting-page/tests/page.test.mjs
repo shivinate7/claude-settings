@@ -7915,6 +7915,9 @@ for (const scheme of ["light", "dark"]) {
 // dashed edge is the control, then presses it. The ink colour comes from a probe that reads --ink, never from a copy of its value.
 const inkColor = (page) => page.evaluate(() => { const p = document.createElement("i"); p.style.color = "var(--ink)"; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; });
 const edgeOf = (loc) => loc.evaluate((el) => ({ style: getComputedStyle(el).borderTopStyle, color: getComputedStyle(el).borderTopColor }));
+const overPress = (page, it) => page.locator(`#b-over-${it.id}`);
+const nonePress = (page, it) => page.locator(`#b-none-${it.id}`);
+const donePress = (page, it) => page.locator(`#b-done-${it.id}`);
 for (const scheme of ["light", "dark"]) {
   test(`a pressed Park on an open decision card draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
     const page = await open(t, { items: [DECISION], scheme }); if (!page) return;
@@ -7940,6 +7943,42 @@ for (const scheme of ["light", "dark"]) {
     const on = await edgeOf(parkBtn(page, PARK_A, "drop"));
     assert.equal(on.style, "solid", "a pressed Drop does not draw a solid edge: " + on.style);
     assert.equal(on.color, await inkColor(page), "a pressed Drop's edge is not the ink colour: " + on.color);
+  });
+  test(`a pressed Overturn on a closed arbiter card draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [DECISION, ARBITER], scheme }); if (!page) return;
+    await need(card(page, ARBITER), `No. ${ARBITER.n} is not on the page`);
+    await need(overPress(page, ARBITER), "the arbiter card has no Overturn button");
+    const off = await edgeOf(overPress(page, ARBITER));
+    assert.equal(off.style, "dashed", "an unpressed Overturn does not draw a dashed edge: " + off.style);
+    await overPress(page, ARBITER).click();
+    assert.equal(await pressedOf(overPress(page, ARBITER)), "true", "an Overturn press did not press Overturn");
+    const on = await edgeOf(overPress(page, ARBITER));
+    assert.equal(on.style, "solid", "a pressed Overturn does not draw a solid edge: " + on.style);
+    assert.equal(on.color, await inkColor(page), "a pressed Overturn's edge is not the ink colour: " + on.color);
+  });
+  test(`a pressed None of these on a decision draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [DECISION], scheme }); if (!page) return;
+    await need(card(page, DECISION), `No. ${DECISION.n} is not on the page`);
+    await need(nonePress(page, DECISION), "the decision card has no None of these button");
+    const off = await edgeOf(nonePress(page, DECISION));
+    assert.equal(off.style, "dashed", "an unpressed None of these does not draw a dashed edge: " + off.style);
+    await nonePress(page, DECISION).click();
+    assert.equal(await pressedOf(nonePress(page, DECISION)), "true", "a None of these press did not press None of these");
+    const on = await edgeOf(nonePress(page, DECISION));
+    assert.equal(on.style, "solid", "a pressed None of these does not draw a solid edge: " + on.style);
+    assert.equal(on.color, await inkColor(page), "a pressed None of these edge is not the ink colour: " + on.color);
+  });
+  test(`a pressed Mark done on a task draws a solid ink edge, and an unpressed one a dashed edge, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [TASK], scheme }); if (!page) return;
+    await need(card(page, TASK), `No. ${TASK.n} is not on the page`);
+    await need(donePress(page, TASK), "the task card has no Mark done button");
+    const off = await edgeOf(donePress(page, TASK));
+    assert.equal(off.style, "dashed", "an unpressed Mark done does not draw a dashed edge: " + off.style);
+    await donePress(page, TASK).click();
+    assert.equal(await pressedOf(donePress(page, TASK)), "true", "a Mark done press did not press Mark done");
+    const on = await edgeOf(donePress(page, TASK));
+    assert.equal(on.style, "solid", "a pressed Mark done does not draw a solid edge: " + on.style);
+    assert.equal(on.color, await inkColor(page), "a pressed Mark done edge is not the ink colour: " + on.color);
   });
 }
 
