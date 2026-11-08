@@ -73,9 +73,12 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   its kind's paths is reported as not a tracked home of that kind, with the homes listed. It blocks
   nothing on `stop_hook_active`, so it cannot loop, but it still counts that turn's messages and
   judges repeats (the Repeats bullet). A relative home is judged in the repo the inbox sidecar binds
-  and in the Stop's cwd repo, and passes if either holds it. A repo whose git or layout cannot be read
-  is skipped, and the block reason names it. Homes pass unchecked, with a systemMessage line, only when
-  no repo reads: neither folder is in a git repo, or every repo is unreadable.
+  and in the Stop's cwd repo, and passes if either holds it. File homes (`Homes.problem`, `_judge`) skip
+  a repo whose git or layout read fails, and a block reason names it. Step and closed-note homes
+  (`Homes._held`) skip a repo whose git read fails only, and a block reason names it. A repo whose
+  `rev-parse` exits non-zero is dropped with no skip and no name (`Homes._root`). A `rev-parse` that cannot
+  run stands the whole check down. Homes pass unchecked, with a systemMessage line, only when no repo
+  reads: neither folder is in a git repo (a failed `rev-parse` counts as none), or every repo is unreadable.
 - **Pages.** `page` (the owner's ruling answers waiting-page item n): the home is `page:<n>`. The guard
   checks each open one, in every block that holds one, burst or not. A `[closed]` one is never checked.
   It blocks until the transcript shows a send after the owner's message. The send is a send_message or
