@@ -796,6 +796,20 @@ class Hook(unittest.TestCase):
         self.assertEqual(count_lines(prompt), ["Blind designers: 2"], "scope: the pin holds only the fenced plain line")
         self.assertEqual(self.spawn(prompt), "", "a fenced plain count line must pass, as on main")
 
+    def test_unclosed_fence_does_not_hide_a_second_marked_count_line(self):
+        # An unclosed ``` line hides nothing after it. Read whole, the text holds two marked count lines and no plain
+        # one, so neither counts and the brief is refused.
+        self.assertCountRefused("Designer kind: informed\n- Blind designers: 2\n\n```\n- Blind designers: 0\n\n" + DUO_BRIEF,
+                                ["- Blind designers: 2", "- Blind designers: 0"],
+                                "a bulleted count line, then a second one under an unclosed fence")
+
+    def test_unclosed_fence_does_not_hide_a_lone_marked_count_line(self):
+        # An unclosed ``` line above the only count line hides nothing: read whole, that one marked line is the count.
+        prompt = "Designer kind: informed\n\n```\n- Blind designers: 2\n\n" + DUO_BRIEF
+        self.assertEqual(count_lines(prompt), ["- Blind designers: 2"], "scope: the probe brief must hold only the bulleted line, under an unclosed fence")
+        self.assertEqual(load().kind_of(prompt), "informed", "scope: the probe brief must read as informed")
+        self.assertEqual(self.spawn(prompt), "", "an unclosed fence must not hide a lone marked count line, so the brief must pass")
+
     def test_informed_spawn_with_owner_none_passes(self):
         self.assertEqual(self.spawn('Designer kind: informed\nBlind designers: none, owner: "informed only"\n\nDraw it.'), "")
 
