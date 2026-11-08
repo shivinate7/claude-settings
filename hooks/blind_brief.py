@@ -236,34 +236,51 @@ def _words(text):
 
 def duo_faults(device, poses):
     """Faults of a Device section in a repo that draws both Duo poses: `duo-unfolded` when it never names the
-    unfolded pose, `duo-order` when it names the unfolded pose before the folded one. Order is read from the
+    unfolded pose, `duo-order` when it draws the unfolded pose before the folded one. Order is read from the
     pose words, the words in one device name and not in the other ("folded", "unfolded"), and only when both
     appear. So "Duo unfolded, then folded" is an order fault."""
     folded, unfolded = poses
     if not names_device(device, unfolded):
         return [("duo-unfolded", "Device", unfolded)]
-    at_folded, at_unfolded = _pose_rank(device, folded, unfolded), _pose_rank(device, unfolded, folded)
-    if at_folded is not None and at_unfolded is not None and at_unfolded < at_folded:
+    words = _words(device)
+    at_folded, at_unfolded = _pose_index(words, folded, unfolded), _pose_index(words, unfolded, folded)
+    if at_folded is None or at_unfolded is None:
+        return []
+    first = at_folded < at_unfolded  # text order: the folded pose is named first
+    if _order_word_between(words, at_folded, at_unfolded):
+        first = not first
+    if not first:
         return [("duo-order", "Device", "%s before %s" % (unfolded, folded))]
     return []
 
 
-ORDER_WORDS = {"after": -1, "before": 1}  # "drawn after the folded pose": folded goes first
+def _pose_index(words, name, other):
+    """The index in `words` of the first pose word of device `name`, or None. A pose word is a word of
+    `name` that is not in device `other`."""
+    pose = set(_words(name)) - set(_words(other))
+    return next((i for i, word in enumerate(words) if word in pose), None)
 
 
-def _pose_rank(text, name, other):
-    """The draw rank of the first pose word of device `name` in `text`, or None. A pose word is a word of
-    `name` that is not in device `other`. The rank is the word index. A pose word with "after" or "before" in
-    the two words before it ranks first or last, so "unfolded, drawn after the folded pose" puts folded
-    first."""
-    words, pose = _words(text), set(_words(name)) - set(_words(other))
-    for index, word in enumerate(words):
-        if word in pose:
-            for near in words[max(0, index - 2):index]:
-                if near in ORDER_WORDS:
-                    return ORDER_WORDS[near] * len(words)
-            return index
-    return None
+ORDER_FILLER = frozenset({"the", "a", "an", "duo", "iphone"})
+
+
+def _order_word_between(words, one, two):
+    """True when an order word ties the two poses directly, so the pose named first is drawn last. Either
+    "before" plus only filler sits directly ahead of the first pose word ("Before the folded Duo, draw the
+    unfolded Duo"), or every word from the last "after" between the poses up to the second pose word is
+    filler ("after the Duo unfolded"). Anything else ("after the header, before the folded Duo", "after
+    that, draw the Duo folded"), or "after" in front of both poses, leaves the text order."""
+    low, high = min(one, two), max(one, two)
+    ahead = low - 1
+    while ahead >= 0 and words[ahead] in ORDER_FILLER:
+        ahead -= 1
+    flip = ahead >= 0 and words[ahead] == "before"
+    between = words[low + 1:high]
+    if "after" in between:
+        last = len(between) - 1 - between[::-1].index("after")
+        if all(word in ORDER_FILLER for word in between[last + 1:]):
+            flip = not flip
+    return flip
 
 
 def ios_skill_faults(text, devices):
