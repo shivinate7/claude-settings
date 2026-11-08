@@ -14,7 +14,7 @@ Code spans, 2026-11-06 12:28 CST, process-only: a code span used as a claim's su
 
 Part (v), the owner hand-off check. Coordinator agreed 2026-11-06 12:00 and 12:21 CST, process-only.
 
-- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow (read lint/report_guard.py:1487-1496).
+- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow (read lint/report_guard.py:1581-1591).
 - (b) `hooks/reply_judge.py` (the reply judge) judges the hand-off's cite against the cited route row and the act's alternates. When the cited id has no row on this surface, it reads the act from the other surface's row and carries neither that row nor its alternates (read hooks/reply_judge.py:146-152; read hooks/reply_judge.py:174-176).
 
 Lane ruling, 2026-11-06 12:34 CST, process-only: layer (a) checks only "Why yours" lines. A route cite passes only when the row's outcome is refused or asks. A row whose outcome is works refuses the cite. An unknown outcome reads UNKNOWN.
@@ -48,6 +48,8 @@ Lane ruling, 2026-11-07 23:22 CST, process-only (review round 1, item 7): it, ch
 Lane ruling, 2026-11-07 23:22 CST, process-only (review round 1, item 11): the rule skip reads the words rule, ruling, decision and grant.
 
 Lane ruling, 2026-11-07 23:50 CST, lane session, process-only: only a table act is a claim. Measured on 400 recent main commit messages: a check of other acts flagged 12 of 12 phrase hits, and none was a hand-off claim (decision `guard-that-cries-wolf-is-spent`).
+
+Coordinator, 2026-11-07 14:36 CST, process-only: the waiting page judges a task's "Why yours" line by guard rule `task-why-cited`. It accepts a route-row cite and a dated measured cite only, and reads no refusals file, so a backtick tool-name cite does not pass there.
 
 ## Incident
 
@@ -118,9 +120,10 @@ No daemon and no timer.
 Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
-- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1351-1369).
-- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:2193-2223; read lint/report_guard.py:2711-2721).
-- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1487-1496; read lint/report_guard.py:2659).
+- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1416-1434).
+- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:2280-2310; read lint/report_guard.py:2899-2909).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1581-1606; read lint/report_guard.py:2842).
+- Part (v) on the waiting page: guard rule `task-why-cited` refuses a task's Why yours line that gives a capability reason with no route-row or dated measured cite (`why_cited_hit` in hooks/question_form.py; the verdict is `why_yours_verdict` in lint/report_guard.py).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:759-764).
 - The merge's model judge, report-only (see Model judge at merge).
