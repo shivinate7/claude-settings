@@ -2728,6 +2728,14 @@ class DoubleBacktickMaskTests(unittest.TestCase):
         self.assertNotIn("STE001", self.codes("Run ``status then `" + words + "` now.\n"),
                          "an unclosed double-backtick run makes a later code span read as prose")
 
+    def test_lone_backtick_before_a_double_span_does_not_hide_the_words_before_it(self):
+        # The lone backtick is an unclosed run, so it is literal and opens no span. The `` span after
+        # it is masked, and the 31 words before it stay prose.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Use " + words + " ``x`` now.\n"), "fixture sentence is not over budget")
+        self.assertIn("STE001", self.codes("Use ` then " + words + " ``x`` now.\n"),
+                      "a lone backtick before a double-backtick span hides the words before it")
+
     def test_single_backtick_span_content_is_not_linted(self):
         words = " ".join(["word"] * 31)
         self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
