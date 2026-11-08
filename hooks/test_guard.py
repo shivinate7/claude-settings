@@ -20411,9 +20411,10 @@ def worktree_home_cross_checkout_case():
 def worktree_home_cross_checkout_copy_case():
     """Rule 0, `other-checkout`, the false alarms on a copy and on a heredoc, beside
     `worktree_home_cross_checkout_case`. A copy reads its SOURCE, so a source in another checkout
-    is a read; only the target is a write. A quoted heredoc hands its body to an interpreter as
-    text, so a path quoted inside it is not a command. A substitution in an unquoted heredoc, a
-    bash body, and an interpreter that writes a file still judge their writes. Why:
+    is a read; only the target is a write. A quoted heredoc's body is text to the shell, so a path
+    quoted inside it is not a command. An interpreter runs its body as code: a write it makes through
+    os.system, subprocess, a copy call, or open() is judged. A substitution in an unquoted heredoc and
+    a bash body are judged too. Why:
     docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
     """
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocp")
@@ -20445,6 +20446,9 @@ def worktree_home_cross_checkout_copy_case():
           "Bash", lane_a,
           command="python3 - <<'PY'\nimport json\n"
                   "open('roadmap.json','w').write(json.dumps({'n': 'cp a %s/x $f'}))\nPY" % other)
+    # A string the interpreter only prints is text, even when it quotes a copy into another checkout.
+    check("python body that only prints a copy command string", "allow", "Bash", lane_a,
+          command="python3 - <<'PY'\nprint(\"os.system('cp a %s/x')\")\nPY" % other)
 
     # Controls: each write into another checkout stays refused.
     check("control: copy into another checkout's file, quoted target", "deny", "Bash", lane_a,
@@ -20465,6 +20469,15 @@ def worktree_home_cross_checkout_copy_case():
     # New deny: a quoted heredoc whose interpreter writes a file in another checkout.
     check("quoted heredoc whose interpreter opens a file in another checkout", "deny", "Bash",
           lane_a, command="python3 - <<'PY'\nopen('%s/x','w').write('1')\nPY" % other)
+    # Interpreter bodies that run a write through another call. Main refuses each one.
+    check("python os.system runs a copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('cp a %s/x')\nPY" % other)
+    check("python os.system runs an echo redirect into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('echo 1 > %s/x')\nPY" % other)
+    check("python subprocess.run lists a copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport subprocess; subprocess.run(['cp','a','%s/x'])\nPY" % other)
+    check("python from-import copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nfrom shutil import copy; copy('a','%s/x')\nPY" % other)
 
     if problems:
         return False, "; ".join(problems)
@@ -20631,7 +20644,8 @@ def worktree_home_cross_checkout_cost_case():
     checkout; none for a Read, a Grep, a shell call that writes no file (a `2>&1` or `/dev/null`
     redirect included), a git verb that stays in its own checkout (`commit`, `checkout -b`, `stash list`),
     a `cd` within its own checkout, or a write from a cwd with no `.git` at or above it. A `git -C` into a
-    separate clone spends its one list. A stand-in git on PATH logs each spawn."""
+    separate clone spends its one list. A python heredoc that prints spends none; one that opens a
+    file in another checkout spends one. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
@@ -20676,6 +20690,10 @@ def worktree_home_cross_checkout_cost_case():
          {"command": VCS + " status"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
         ("shell git -C a separate clone commit", "Bash", lane_a,
          {"command": VCS + " -C " + slash(XCL_SEP) + " commit -m x"}, None, 1, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell python heredoc that prints, from its own checkout", "Bash", lane_a,
+         {"command": "python3 - <<'PY'\nprint(1)\nPY"}, None, 0),
+        ("shell python heredoc that opens a file in another checkout", "Bash", lane_a,
+         {"command": "python3 - <<'PY'\nopen('" + slash(lane_b) + "/x','w')\nPY"}, None, 1),
     ):
         if os.path.exists(log):
             os.remove(log)
