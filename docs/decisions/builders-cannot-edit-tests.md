@@ -33,7 +33,7 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 
 The payload must carry an `agent_id`. The main session, reviewers, Explore, and a session started with `--agent builder` (no `agent_id`) stay allowed.
 
-- `builder`: refused at commit, push and stop when the diff holds a test path. The write tool and the shell check refuse it too. A test conflict mid-merge is refused. The route is `git merge --abort`, then report to the orchestrator.
+- `builder`: refused at commit, push and stop when the diff holds a test path, whole-file test config, or an owned part of partly-owned test config (`owned_config_changed`). The write tool refuses the same. The shell check refuses a test path or whole-file test config. A test conflict mid-merge is refused. The route is `git merge --abort`, then report to the orchestrator.
 - `test-author`: the inverse. Logged when the diff holds anything but a test path, test config, a dev dependency list or a whole workflow test step (`author-diff`). Never refused at commit, push or stop.
 - `record-writer`: may change only `*.md` files: records, README, CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or config. The write tool refuses any other path (`record-writer-scope`). At commit, push and stop, a diff that holds one is logged only (`writer-diff`).
   - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`).
@@ -44,15 +44,23 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 
 **Test paths and test config.** The guard's own suites (`hooks/test_guard.py`, `lint/test_*.py`) are test paths. A test-author changes them.
 
-- A builder change to a test-runner config file that ADDS a line disabling tests counts as a test change.
-- A test-author owns test config files and `requirements-dev.txt`. Two files are partly owned: `package.json` (only `devDependencies`, `jest` and the test scripts) and `pyproject.toml` (only the `[tool.pytest*]` sections).
-- A builder may add a dependency or a dev dependency.
+- Whole-file test config is a test path for a builder, whatever it says. The files: `pytest.ini`; `jest`, `vitest`, `playwright` and `karma` configs (`.config.*` or `.conf.*`); `vitest.workspace.*`; `.mocharc*`; `*.xctestplan`. Constant `WHOLE_FILE_TEST_CONFIG`, predicate `builder_test_rel`.
+- Partly-owned files also hold product settings. A builder may not change their owned parts:
+  - `package.json`: the `jest` key, and scripts whose name starts with `test`, `pretest` or `posttest`.
+  - `pyproject.toml`: the `[tool.pytest*]` sections.
+  - `setup.cfg` and `tox.ini`: `[pytest]`, `[tool:pytest]`, and a `[testenv]` or `[testenv:*]` section whose body names a test runner. `[tox]` and a lint env are not owned.
+- A change to an owned part is refused at the write tool and at commit, push and stop (`owned_config_changed`). The shell check does not read these files, since their content is unknown there. The diff check catches the change.
+- A partly-owned file still refuses an added line that disables tests (`disables_tests`).
+- The rest of a partly-owned file is not owned. See `False alarms pinned`.
+- A test-author owns test config and `requirements-dev.txt`. Its change to `package.json` may touch only `devDependencies`, `jest` and the test scripts. Its change to `pyproject.toml` may touch only the `[tool.pytest*]` sections.
 - A test-author owns a CI step that only runs a test suite. In `.github/workflows/*.yml` or `*.yaml`, it may add or remove a whole test-run step. The step holds only the keys `name`, `if`, `run`, `shell`, `working-directory` and `timeout-minutes`. Its one `run:` is a single line: an optional interpreter (`python`, `python3`, `node`, `bash`, `sh` or `pwsh`), a test path, and arguments that disable no test. No shell operators, `$(` or backtick. The write tool refuses any other workflow change by a test-author (`test-author-scope`), and commit, push and stop log it (`author-diff`). `workflow_test_steps_only` in `hooks/guard.py` judges it, reading `workflow_changed_lines`.
 - A builder keeps every other workflow edit, and may add a test step or move one. Its change counts as a test change (`builder-test-edit`) when it does one of three things. It adds a test-disabling flag or name on a line that names a test runner or runs a test path. It adds `continue-on-error: true` or `if: false` under a test-run step. It drops a test path that the workflow ran before. `workflow_builder_refused` in `hooks/guard.py` judges it, through `workflow_disables_tests`, `workflow_disables_step` and `workflow_drops_tests`; the first reads `workflow_changed_lines`. The builder is not refused for the whole file, because CI work (lint and build steps) is a builder's.
+- Cost: no new process, file or timer. A partly-owned Edit reads its file once, from disk, inside the guard hook that already runs. Commit, push and stop read each changed file's old and new text from git.
+- Basis: named incident, 2026-11-08 08:12 CST. In lane `notes-fix-page`, a builder edited test config. Step `builder-test-config-check`, triage 08:14 CST. Rulings, orchestrator, 08:34 and 08:39 CST: an `.xctestplan` is whole-file, so a builder's `codeCoverage` line is refused.
 
 **False alarms pinned** (`guard-that-cries-wolf-is-spent`). A builder may still do these:
 
-- Rename or delete product files, and add a dependency or a script to a manifest.
+- Rename or delete product files. Add a dependency, a dev dependency or a non-test script to a manifest. Edit a part no test owns, such as `[project]`, `[flake8]`, `[tox]` or a lint env.
 - Read tests, and keep test changes that the branch inherited or that main brought in a merge. Keeping them needs no edit. A merge conflict in a test file is not the builder's to resolve: resolving it chooses what the test checks, so a test-author resolves it. The refusal names the test-author route in one sentence, and the next says a merge conflict in a test file takes the same route.
 - Use a name that only looks like a test, such as `src/contest.py`.
 - Write a file in no repository, such as a probe in the session scratchpad, from a call that runs in a repository. A path with no enclosing checkout is no test of the repo. A test path in any repository stays refused, also one in a different repository. A call that runs in no repository still judges the path by its shape.
@@ -60,9 +68,9 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 
 ## The shell check
 
-The shell check does not replace the act. The act stays a test path in the builder's change. The shell check flags common mistake forms first. The diff log at commit, push and stop catches every other form. Recovery stays allowed: `git checkout -- <test>` and `git restore` are not read as writes.
+The shell check does not replace the act. The act stays a builder test change in the builder's diff: a test path, whole-file test config, or an owned part of partly-owned config. The shell check flags common mistake forms first. The diff check at commit, push and stop catches every other form. Recovery stays allowed: `git checkout -- <test>` and `git restore` are not read as writes.
 
-- Reads: a redirect, `tee`, `sed -i` or `cp` onto a test path (`_shell_write_hit`, with `command_position`). It also reads a python or node heredoc body, or a `-c` or `-e` script, that opens a test path for write (`interpreter_write_hit`). Both use the Edit path's predicate (`builder_test_path`).
+- Reads: a redirect, `tee`, `sed -i` or `cp` onto a test path or whole-file test config (`_shell_write_hit`, with `command_position`). It also reads a python or node heredoc body, or a `-c` or `-e` script, that opens one for write (`interpreter_write_hit`). Both use the Edit path's predicate (`builder_test_path`). Partly-owned files are not read.
 - Basis: named incident, 2026-11-01. In lane `refusal-cite-reach`, a builder changed `lint/test_rule_audit.py` through a python heredoc. It then restored the file with `git show HEAD:... > file`.
 - Landed: 2026-11-02.
 - Cost: no process, no file, no timer. The scan runs inside the guard hook that already runs for a builder's shell call. `ast` is imported only when a python body is read. A refusal writes its one guard.log line, as every refusal does. A scan error in the python or node reader is no hit. Any other scan error ends the judge: the guard logs `guard-crash` and allows the call.
