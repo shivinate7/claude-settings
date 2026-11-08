@@ -3271,8 +3271,8 @@ def _reviewed_lines(h, root):
     waits on is red. When the base's latest run is red, each batch line adds `held by main red <age>`; an unreadable run is a Stop. The last line
     gives the longest wait since a done record and the count with no next act. `red` is True when any line is RED.
     Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
-    request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base, plus the jobs and workflow files of
-    runs that may clear a run that did not succeed (host.base_state holds the count). No GraphQL, no head or check read, no timer, file or log."""
+    request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base, plus, for a run that did not succeed, its jobs
+    and the jobs and workflow files of runs that may clear it (host.base_state holds the count). No GraphQL, no head or check read, no timer, file or log."""
     pulls = h.pages("pulls", fields={"state": "open"})
     summary = lambda wait, none: f"longest wait since a done record: {wait}h; no next act: {none}"
     if not pulls:
