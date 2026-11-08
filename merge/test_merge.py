@@ -13213,7 +13213,9 @@ class ReviewedList(ReviewEnv):
         return host, rc, out, err
 
     def test_the_newest_record_decides_the_line(self):
-        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
+        # the newer record reaches round 2, so it clears the earlier round 1 FAIL, and the newest record decides the line
+        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))),
+                    review_comment(2, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
@@ -13317,9 +13319,10 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
 
     def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
-        # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
+        # The older record is open, so the newer one must be the record the list reads. The newer one reaches round 2, which clears the failed round 1.
+        # Its footer is trailing text: the line is done, not bad.
         older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
-        newest = record_text(rounds=REVIEW_PASS).rstrip("\n") + REVIEW_FOOTER
+        newest = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")).rstrip("\n") + REVIEW_FOOTER
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
@@ -13354,13 +13357,11 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: round 2 is not passed; CI "), out)
 
-    def test_a_wide_or_pass_fix_check_on_a_round_one_record_floors_nothing_above_round_one(self):
-        # control: a WIDE or PASS fix check floors a later record only at the round it reached, so a round-1 record floors nothing above round 1
-        for verdict in ("WIDE", "PASS"):
-            with self.subTest(verdict=verdict):
-                host, rc, out, err = self.floor_listing(verdict, ("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS)
-                self.assertEqual(rc, 0, out + err)
-                self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: round 1 passed; CI "), out)
+    def test_a_pass_fix_check_on_a_round_one_record_floors_nothing_above_round_one(self):
+        # control: a PASS fix check clears the round-1 FAIL, so a later round-1 PASS reads done. A WIDE leaves round 1 uncleared, which the G1 cases cover
+        host, rc, out, err = self.floor_listing("PASS", ("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS)
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: round 1 passed; CI "), out)
 
     def test_the_fix_floor_read_costs_the_same_five_gh_calls(self):
         # control: the floor reads the comment list the listing already holds, so two records on a pull request cost the calls one costs
