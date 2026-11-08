@@ -4,7 +4,12 @@
   "home": "lane lint-before-record-push (session_013NEJKzXyKNARtJsbz3Q1R2)",
   "id": "ste-lint-at-push",
   "kind": "decision",
-  "lane": "lint-before-record-push",
+  "lane": "session_013NEJKzXyKNARtJsbz3Q1R2",
+  "lastAnswer": {
+    "at": "2026-11-08T01:03:53Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 377,
   "options": [
     {
@@ -23,6 +28,7 @@
   "owner": "lane lint-before-record-push (session_013NEJKzXyKNARtJsbz3Q1R2)",
   "rank": 2,
   "ref": "record ste-guard-fixes-not-nags; step lint-before-record-push; PR #1653",
+  "reply": "19:12 CST: a (allow the push-time lint) went to lane lint-before-record-push, roadmap step lint-before-record-push. The item closes on the lane's report.",
   "short": "Plain-English lint at push time, or CI only",
   "status": "open",
   "title": "May a push that breaks the plain-English lint be refused before it leaves?",

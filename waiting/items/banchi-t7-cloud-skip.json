@@ -4,7 +4,12 @@
   "home": "lane banchi-t7-root-ipv6-skip (session_013NEJL46E7t1ZeTe57HjYPW)",
   "id": "banchi-t7-cloud-skip",
   "kind": "decision",
-  "lane": "banchi-t7-root-ipv6-skip",
+  "lane": "session_013NEJL46E7t1ZeTe57HjYPW",
+  "lastAnswer": {
+    "at": "2026-11-08T01:03:53Z",
+    "choice": "a",
+    "note": "i wonder if t7 is accurately needed"
+  },
   "n": 375,
   "options": [
     {
@@ -29,6 +34,7 @@
   "owner": "lane banchi-t7-root-ipv6-skip (session_013NEJL46E7t1ZeTe57HjYPW)",
   "rank": 2,
   "ref": "ask ask-mw6vybwdb8; step banchi-t7-root-ipv6-skip",
+  "reply": "19:12 CST: a (named SKIP in the cloud) and your note went to lane banchi-t7-root-ipv6-skip. The lane builds the skip and answers whether the T7 checks earn their place. The item closes on the lane's report.",
   "short": "banchi T7 in the cloud: named SKIP, or keep proving",
   "status": "open",
   "title": "How should banchi's T7 checks act in a cloud session, where they cannot pass?",

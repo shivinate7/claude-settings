@@ -5,9 +5,9 @@
   "id": "button-merge-stale-page",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-07T21:01:51.965Z",
-    "choice": "none",
-    "note": "idk how to pick between these"
+    "at": "2026-11-08T01:03:53Z",
+    "choice": "a",
+    "note": ""
   },
   "n": 369,
   "options": [
@@ -28,9 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "decision no-merge-during-batch-ci",
-  "reply": "15:02 CST: rewritten as one question about how you work. The lane's 14:48 CST weighing is in the Based on lines.",
+  "reply": "19:12 CST: a (you rarely press the button: a hook refuses auto-merge for Claude, and the button stays yours). Home: roadmap step auto-merge-refused-for-claude, routed to the coordinator; decision no-merge-during-batch-ci records it when the lane lands.",
   "short": "Do you press GitHub's merge button often?",
-  "status": "open",
+  "status": "closed",
   "title": "Do you often merge pull requests with GitHub's merge button yourself?",
   "why": "Lane notes-keep-reverify, from kept note merge-by-button-stale-page."
 }
