@@ -275,7 +275,7 @@ MUTATIONS = [
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
      '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, [header for _, _, header in bodies]):\n'
+     '            text, [header for _, _, header in bodies], shells_only):\n'
      '        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("frozen-path: freeze nothing",
@@ -2435,6 +2435,15 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # shell_run_texts (hooks/guard.py) is the one home of the texts a shell reads: check 6b and impeccable use it.
+    ("draft-pr: a quoted interpreter body holding a backtick is not read, so a span in it goes unseen",
+     '            elif "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):',
+     '            elif False and "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):',
+     "guard", "draft-pr: a node file with a stray backtick in a single-quoted string, then an execSync gh pr create span, is refused"),
+    ("draft-pr: check 6b reads the stripped text, not the shell-run texts, so a written file's bare line is refused",
+     '    for run_text in shell_run_texts(raw):\n        for text, _in_message in _substitutions(run_text)[0]:\n            if any(undrafted_pr_create',
+     '    for run_text in [stripped]:\n        for text, _in_message in _substitutions(run_text)[0]:\n            if any(undrafted_pr_create',
+     "guard", "draft-pr: a python file from a quoted heredoc, with a bare gh pr create line, is allowed"),
 ]
 
 
