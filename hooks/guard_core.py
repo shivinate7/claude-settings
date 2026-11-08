@@ -1909,7 +1909,8 @@ PY_WRITE_CALLS = frozenset({"remove", "unlink", "rmdir", "rmtree", "mkdir", "mak
 PY_COPY_CALLS = frozenset({"copy", "copy2", "copyfile", "copytree", "copymode", "copystat"})
 PY_MOVE_CALLS = frozenset({"rename", "replace", "move"})
 # A call whose argument is only printed, written as content, or compared: the string is text, as an
-# `echo` argument is in the shell. `write(x)` takes x as the CONTENT, never the path.
+# `echo` argument is in the shell. `write(x)` takes x as the CONTENT, never the path. A prefix test's
+# literal is text here and judged again by `_python_prefix_paths`.
 PY_TEXT_CALLS = frozenset({"print", "pprint", "write", "writelines", "write_text", "write_bytes",
                            "dumps", "dump", "startswith", "endswith"})
 PY_TEXT_COMPARES = (ast.In, ast.NotIn, ast.Eq, ast.NotEq)
@@ -1932,6 +1933,7 @@ JS_CONTENT_CALLS = frozenset({"writeFileSync", "writeFile", "appendFileSync", "a
 JS_EXISTS_CALLS = frozenset({"exists", "existsSync", "access", "accessSync", "stat", "statSync", "lstat",
                              "lstatSync"})
 JS_JOIN_CALLS = frozenset({"join", "resolve", "normalize"})
+# A prefix test's literal is text here and judged again at the end of `_js_scan`.
 JS_TEXT_CALLS = frozenset({"write", "writeln", "stringify", "includes", "indexOf", "startsWith", "endsWith"})
 JS_CONSOLE_CALLS = frozenset({"log", "error", "warn", "info", "debug"})
 JS_CALLEE = re.compile(r"([\w$.?]+)\s*$")
@@ -2230,7 +2232,7 @@ def _js_mode(frames, code: str, start: int, end: int, whole: bool) -> str:
 def _js_frames_mode(frames, whole: bool) -> str:
     """The mode the calls around a string or a name give it (see `_js_mode`)."""
     direct = whole
-    for kind, callee, index in reversed(frames):
+    for kind, callee, index, *_ in reversed(frames):
         if kind != "(":
             direct = False
             continue
@@ -2269,8 +2271,8 @@ def _js_scan(code: str):
     # of the test text), and `uses` each whole argument that is a bare name, as (name, the mode its call
     # gives it, its position). A prefix test (`f.startsWith('.env')`) is judged apart: `prefixes` holds
     # each one the same way, with "" for a receiver that is no bare name, and `opened` each name that a
-    # file call takes in its argument, or that another call takes whole, with a read, write or unknown
-    # mode, as (name, position, whole). The name is read by its spelling (no scope).
+    # call takes in its argument (not inside an arrow function, except within a file call), with a read,
+    # write or unknown mode, as (name, position, whole). The name is read by its spelling (no scope).
     tests, prefixes, uses, opened = [], [], [], []
 
     def note_compared(text: str, start: int, end: int):
@@ -2322,7 +2324,7 @@ def _js_scan(code: str):
                 prev, i = "a", j + 1
             elif j < n:
                 stack.append("${")
-                frames.append(["{", "", 0])
+                frames.append(["{", "${", 0])
                 prev, i = "{", j + 2
             else:
                 i = n
@@ -2389,10 +2391,13 @@ def _js_scan(code: str):
             mode = _js_frames_mode(frames, whole_arg(i, j)) if frames else ""
             if whole:
                 uses.append((code[i:j], mode, i))
-            if mode in ("read", "write", "unknown") and (whole or _js_file_frame(frames)):
+            if mode in ("read", "write", "unknown") and (whole or _js_file_frame(frames) or (
+                    _js_argument_frame(frames) and not code[j:].lstrip().startswith("=>"))):
                 opened.append((code[i:j], i, whole))
             prev, i = ("kw" if code[i:j] in JS_REGEX_WORDS else "a"), j
         else:
+            if code.startswith("=>", i) and frames and frames[-1][0] == "(" and len(frames[-1]) == 3:
+                frames[-1].append("=>")   # the argument is an arrow function, not a value
             if not char.isspace():
                 prev = char
             i += 1
@@ -2415,12 +2420,23 @@ def _js_scan(code: str):
 
 def _js_file_frame(frames) -> bool:
     """True when the nearest call around a token, past any join, is a file call (`readFileSync(...)`)."""
-    for kind, callee, _ in reversed(frames):
+    for kind, callee, *_ in reversed(frames):
         if kind != "(":
             continue
         base = callee.rsplit(".", 1)[-1]
         if base not in JS_JOIN_CALLS:
             return base in JS_FILE_CALLS
+    return False
+
+
+def _js_argument_frame(frames) -> bool:
+    """True when a token sits in a call's argument, past array brackets and template `${...}` parts,
+    and that argument is no arrow function: `execSync('cat ' + f)`, `spawnSync('cat', [f])`. A frame
+    is `[kind, callee, argument index]`, with "=>" after it once an arrow is seen at its own level."""
+    for frame in reversed(frames):
+        if frame[0] == "[" or frame[1] == "${":
+            continue
+        return frame[0] == "(" and frame[1] not in JS_NOT_CALLS and len(frame) == 3
     return False
 
 
