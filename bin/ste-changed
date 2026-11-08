@@ -11,8 +11,8 @@
 # (PINNED below). A pin this clone does not hold is reported as unknown and changes no exit code. A pin the
 # clone holds but whose history a shallow clone cut is unknown too, in its own line with the remedy
 # `git fetch --unshallow`; unlike the line above, it still exits 3, because the files differ, and that is a fact.
-# Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/, so it uses the clone the
-# global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
+# Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/ste-lint, so it uses the
+# clone the global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
 import os, re, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
