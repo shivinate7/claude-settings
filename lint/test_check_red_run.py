@@ -19,6 +19,7 @@ change commits on top. The check runs as the copy at lint/check_red_run.py in th
 --root cases run the module by its path, from another directory. CHECK_RED_RUN_UNDER_TEST overrides the
 module path, which a stub run uses.
 """
+import importlib.util
 import os
 import re
 import subprocess
@@ -39,6 +40,22 @@ PRODUCT_REL = "src/widgets.py"
 PRODUCT_TEXT = "def widget():\n    return 1\n"
 TEST_TEXT = "def test_widget():\n    assert widget() == 1\n"
 GOOD = "Red-run: python3 lint/test_widgets.py -> 2 failed on abc1234"
+# Lines carry the placeholder SHA, filled with a real fixture sha by each case (see filled).
+VALID_LINE = "Red-run: python3 lint/test_widgets.py -> 1 failed on SHA"
+# Keyword typos. Each must flag its commit, and none may pass as a failed-form command.
+KEYWORD_TYPOS = ("Red-run: mutants: x -> 1 failed on SHA",
+                 "Red-run: mutation: x -> 1 failed on SHA",
+                 "Red-run: mutant x -> 1 failed on SHA",
+                 "Red-run: non: reason")
+# Real commands whose first word is an ordinary word. Each passes.
+REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
+                 "Red-run: MUTATE_ONLY='x' python3 hooks/test_guard.py -> 1 failed on SHA",
+                 "Red-run: make test -> 1 failed on SHA",
+                 "Red-run: ./bin/verdict python3 lint/test_x.py -> 1 failed on SHA")
+BASE_REF = "origin/main"
+BASE_VERDICT = "has_trailer"  # origin/main's name for the message verdict, read from its checker
+VERDICT = "has_valid_trailer"  # this checker's name for the message verdict
+FIELD = "\x1f"
 # Every commit carries this block, as real commits do. A check that wants Red-run as the last
 # trailer fails here, not on the first real commit.
 ATTRIBUTION = ["Co-Authored-By: Claude <noreply@anthropic.com>",
@@ -64,6 +81,72 @@ def tearDownModule():
 def read_module():
     with open(MODULE, encoding="utf-8", newline="") as f:
         return f.read()
+
+
+def filled(lines, sha):
+    """Each line with the placeholder SHA replaced by a real sha."""
+    return [line.replace("SHA", sha) for line in lines]
+
+
+def with_why(why, out):
+    """An assert message: the one cause the case names, then the check's output."""
+    return out if why is None else why + "\n" + out
+
+
+class Unknown(Exception):
+    """A git read of origin/main failed, so the history pin cannot say."""
+
+
+def git_text(*args):
+    done = subprocess.run(["git", *args], cwd=HERE, capture_output=True, encoding="utf-8", errors="replace", env=GIT_ENV)
+    if done.returncode:
+        raise Unknown("unknown: git %s failed: %s" % (args[0], done.stderr.strip()))
+    return done.stdout
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def verdict(module, name, message):
+    return getattr(module, name)(message)
+
+
+def main_messages():
+    """(sha, subject, message) for each non-merge commit on origin/main."""
+    out = git_text("log", "--no-merges", "-z", "--format=%H" + FIELD + "%s" + FIELD + "%B", BASE_REF)
+    records = []
+    for chunk in out.split("\0"):
+        if chunk.strip():
+            sha, subject, message = chunk.lstrip("\n").split(FIELD, 2)
+            records.append((sha, subject, message))
+    return records
+
+
+def load_baseline(folder):
+    """origin/main's checker, loaded from its git blob. Its hooks are this checkout's: the message verdict imports none."""
+    base = tempfile.mkdtemp(dir=folder, prefix="base_")  # test-temp-standard: the run folder holds it
+    os.makedirs(os.path.join(base, "lint"))
+    done = subprocess.run(["git", "show", BASE_REF + ":" + CHECK_REL], cwd=HERE, capture_output=True, env=GIT_ENV)
+    if done.returncode:
+        raise Unknown("unknown: origin/main has no %s: %s" % (CHECK_REL, done.stderr.decode("utf-8", "replace").strip()))
+    path = os.path.join(base, "lint", "check_red_run.py")
+    with open(path, "wb") as f:
+        f.write(done.stdout)
+    tracked_tree.copy_tracked(base, "hooks")
+    return load_module("check_red_run_on_main", path)
+
+
+def lost_trailers(baseline, current, records):
+    """One line per message that origin/main's checker accepts and `current` refuses, named by short sha and subject."""
+    lost = []
+    for sha, subject, message in records:
+        if verdict(baseline, BASE_VERDICT, message) and not verdict(current, VERDICT, message):
+            lost.append("%s %s" % (sha[:7], subject))
+    return lost
 
 
 class Fixture(unittest.TestCase):
@@ -106,7 +189,7 @@ class Fixture(unittest.TestCase):
         return "lint/test_widgets_%d.py" % self.serial
 
     def commit(self, subject, files, red=None):
-        """Write files (a None value deletes one), commit them, return the full sha. `red` is the Red-run line."""
+        """Write files (a None value deletes one), commit them, return the full sha. `red` is a Red-run line, or a list."""
         for rel, text in files.items():
             path = os.path.join(self.tree, *rel.split("/"))
             if text is None:
@@ -117,7 +200,8 @@ class Fixture(unittest.TestCase):
                 f.write(text)
         if files:
             self.git("add", "--", *files)  # only the named paths join the commit
-        body = ([red] if red else []) + ATTRIBUTION
+        reds = [red] if isinstance(red, str) else list(red or [])
+        body = reds + ATTRIBUTION
         self.git("commit", "-q", "--allow-empty", "--cleanup=verbatim", "-F", "-",
                  input=subject + "\n\n" + "\n".join(body) + "\n")
         return self.git("rev-parse", "HEAD")
@@ -152,9 +236,9 @@ class CheckCase(Fixture):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_red_run.py")
         super().setUp()
 
-    def assertClean(self, args=None, env=None, script=None, cwd=None):
+    def assertClean(self, args=None, env=None, script=None, cwd=None, why=None):
         rc, out = self.lint(args, env, script, cwd)
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 0, with_why(why, out))
         self.assertNotIn("Traceback", out, out)
 
     def assertGap(self, out, sha, subject, rel):
@@ -166,9 +250,9 @@ class CheckCase(Fixture):
         self.assertTrue(any(short in line and rel in line for line in out.splitlines()),
                         "no line names %s with %s:\n%s" % (short, rel, out))
 
-    def assertFlagged(self, sha, subject, rel, script=None, cwd=None):
+    def assertFlagged(self, sha, subject, rel, script=None, cwd=None, why=None):
         rc, out = self.lint(script=script, cwd=cwd)
-        self.assertEqual(rc, 1, out)
+        self.assertEqual(rc, 1, with_why(why, out))
         self.assertGap(out, sha, subject, rel)
         return out
 
@@ -245,6 +329,59 @@ class CheckCase(Fixture):
                 rel = self.new_test_path()
                 sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=red)
                 self.assertFlagged(sha, "add widget tests", rel)
+
+    def test_malformed_line_beside_a_valid_line_is_flagged(self):
+        """One malformed Red-run line flags the commit, whichever line comes first. Each pair is a valid line and a bad one."""
+        pairs = (("Red-run: none: re-points fixtures", "Red-run: mutant:  -> 1 failed on SHA"),
+                 (VALID_LINE, "Red-run: none"))
+        for valid, bad in pairs:
+            for order in ((valid, bad), (bad, valid)):
+                with self.subTest(order=order):
+                    self.base()
+                    rel = self.new_test_path()
+                    sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=filled(order, self.base_sha))
+                    self.assertFlagged(sha, "add widget tests", rel, why="a malformed Red-run line must flag the commit: "
+                                       + filled([bad], self.base_sha)[0])
+
+    def test_two_valid_lines_pass(self):
+        """Two valid Red-run lines in one message pass. The controls for the malformed-line case."""
+        pairs = (("Red-run: none: re-points fixtures", VALID_LINE),
+                 (VALID_LINE, "Red-run: mutant: drop the guard -> 1 failed on SHA"),
+                 (VALID_LINE, "Red-run: python3 lint/test_gadgets.py -> 2 failed on SHA"))
+        for pair in pairs:
+            with self.subTest(pair=pair):
+                self.base()
+                self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, red=filled(pair, self.base_sha))
+                self.assertClean(why="two valid Red-run lines must pass: " + " | ".join(filled(pair, self.base_sha)))
+
+    def test_keyword_typo_line_is_flagged_alone(self):
+        """A keyword typo is refused, not read as the failed form, even as the only Red-run line."""
+        for typo in KEYWORD_TYPOS:
+            with self.subTest(typo=typo):
+                self.base()
+                rel = self.new_test_path()
+                sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=filled([typo], self.base_sha))
+                self.assertFlagged(sha, "add widget tests", rel,
+                                   why="a keyword typo must flag the commit, not pass as a failed form: " + filled([typo], self.base_sha)[0])
+
+    def test_keyword_typo_beside_a_valid_line_is_flagged(self):
+        """A keyword typo beside a valid line flags the commit. The valid line must not carry the typo through."""
+        for typo in KEYWORD_TYPOS:
+            with self.subTest(typo=typo):
+                self.base()
+                rel = self.new_test_path()
+                sha = self.commit("add widget tests", {rel: TEST_TEXT},
+                                  red=filled([VALID_LINE, typo], self.base_sha))
+                self.assertFlagged(sha, "add widget tests", rel,
+                                   why="a keyword typo beside a valid line must flag the commit: " + filled([typo], self.base_sha)[0])
+
+    def test_real_commands_with_ordinary_first_words_pass(self):
+        """Real commands pass as the failed form, including ones whose first word is an ordinary word. The controls for the typo cases."""
+        for command in REAL_COMMANDS:
+            with self.subTest(command=command):
+                self.base()
+                self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, red=filled([command], self.base_sha))
+                self.assertClean(why="a real command must pass as the failed form: " + filled([command], self.base_sha)[0])
 
     def test_zero_failures_is_flagged(self):
         for form in ("Red-run: python3 lint/test_widgets.py -> 0 failed on %s",
@@ -481,6 +618,42 @@ class CheckCase(Fixture):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertGap(out, sha, "add widget tests", normal)
+
+
+class MainHistory(unittest.TestCase):
+    """The history pin: a message origin/main's checker accepts must still pass this checker.
+
+    It reads origin/main's whole history, which CI fetches (fetch-depth 0). A ref it cannot read is unknown, and fails.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.records = main_messages()
+        cls.baseline = load_baseline(RUN_FOLDER)
+        cls.current = load_module("check_red_run_under_test", MODULE)
+        if not hasattr(cls.baseline, BASE_VERDICT):
+            raise AssertionError("origin/main's checker has no %s: re-point the pin" % BASE_VERDICT)
+        if not hasattr(cls.current, VERDICT):
+            raise AssertionError("this checker has no %s: re-point the pin" % VERDICT)
+
+    def test_pin_reads_every_non_merge_message_on_main(self):
+        counted = int(git_text("rev-list", "--no-merges", "--count", BASE_REF))
+        self.assertEqual(len(self.records), counted, "the pin must read every non-merge message on origin/main")
+
+    def test_no_valid_trailer_on_main_turns_invalid(self):
+        accepted = [record for record in self.records if verdict(self.baseline, BASE_VERDICT, record[2])]
+        self.assertGreater(len(accepted), 0, "scope: origin/main holds no valid trailer, so the pin checks nothing")
+        lost = lost_trailers(self.baseline, self.current, self.records)
+        self.assertEqual(lost, [], "a valid trailer on origin/main turns invalid under this checker:\n" + "\n".join(lost))
+
+    def test_pin_flags_a_message_the_checker_refuses(self):
+        """A checker that refuses every message trips the pin, so a green pin means the comparison ran."""
+        class RefusesAll:
+            def has_valid_trailer(self, message):
+                return False
+
+        lost = lost_trailers(self.baseline, RefusesAll(), self.records)
+        self.assertGreater(len(lost), 0, "a checker that refuses every message must trip the pin")
 
 
 if __name__ == "__main__":
