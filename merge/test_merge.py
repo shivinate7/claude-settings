@@ -9587,6 +9587,17 @@ class ReadFailsInWait(FakeReadsWaitHost):
     def api(self, rel, *a, **k):
         return 1, "gh: connection reset by peer"
 
+class ClockedReadsWaitHost(FakeReadsWaitHost):
+    """FakeReadsWaitHost on a fake clock: each pause moves it on, so a wait that holds ends at its deadline and never sleeps."""
+    def __init__(self, fake, required, rows):
+        super().__init__(fake, required, rows)
+        self.clock = [0.0]
+        self.now, self.pause = (lambda: self.clock[0]), self.advance
+
+    def advance(self, s):
+        self.clock[0] += s
+        assert self.clock[0] < 3600, "the wait never reached its deadline"  # a wait that never ends fails here, not hangs
+
 class ConfirmWaitCites(RecordsEnv):
     """The same cites through confirm: its first wait wraps a refusal as a red head. A head that moves during that wait is refused with
     its own cite and no failing-CI cite; a read that fails in that wait carries the read cite (decision no-merge-during-batch-ci).
@@ -9607,6 +9618,36 @@ class ConfirmWaitCites(RecordsEnv):
         self.assertEqual(rc, 1, out)
         self.assertIn("reading the pull request failed", out)  # control: the read is the one that fails
         self.assertIn("no-merge-during-batch-ci", out, f"a failed read in the first wait carries no read cite: {out}")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_a_pending_deadline_in_the_first_wait_cites_the_wait_rule_once(self):
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, with a stale page: the first wait runs before any push
+        host = ClockedReadsWaitHost(self.host, ["checks"], {"checks": [("pending", "")]})  # still pending when the 5-minute deadline passes
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("Still pending: checks", out)  # control: the pending deadline is the refusal reached
+        cites = out.count("ci-wait-reads-run-status")
+        self.assertEqual(cites, 1, f"the pending deadline in the first wait prints its wait cite {cites} times: {out}")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_a_red_head_in_the_first_wait_cites_the_failing_ci_rule_and_not_the_wait_rule(self):
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, with a stale page: the first wait runs before any push
+        host = FakeReadsWaitHost(self.host, ["checks"], {"checks": [("fail", "")]})
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a check is red", out)  # control: the red head is the refusal reached
+        cites = out.count("git-never-merge-failing-ci")
+        self.assertEqual(cites, 1, f"a red head in the first wait prints the failing-CI cite {cites} times: {out}")
+        self.assertNotIn("ci-wait-reads-run-status", out, f"a red head in the first wait prints the wait cite: {out}")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_a_failed_read_in_the_wait_with_no_claim_cites_the_read_rule_once(self):
+        self.kinds_off()  # no stamp kinds: nothing is claimed and the page is current, so the first wait is never reached
+        rc, out = self.run_merge("7", "--confirm", host=ReadFailsInWait(self.host))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("a read in the checks wait failed", out)  # control: the failed read in the checks wait is the refusal reached
+        cites = out.count("no-merge-during-batch-ci")
+        self.assertEqual(cites, 1, f"a failed read in the checks wait prints the read cite {cites} times: {out}")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
 class PagesReadCite(unittest.TestCase):
