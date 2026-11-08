@@ -564,6 +564,7 @@ await test('R2-5 makeLimiter timeoutMs: a hung call holds its slot to the 20 ms 
     const hung = L.run('a', () => new Promise(() => {}))
     assert.equal(await L.run('b', async () => 'B'), null) // still busy at once
     mock.timers.tick(19)
+    await new Promise(r => setImmediate(r)) // a bound that fired at 10 ms frees its slot in microtasks: flush them so the probe sees it
     assert.equal(await L.run('c', async () => 'C'), null, 'the slot was freed before its 20 ms bound')
     mock.timers.tick(1)
     // A macrotask boundary ends the wait: the hung run settles in microtasks once its bound fires, so a slot still held fails here.
