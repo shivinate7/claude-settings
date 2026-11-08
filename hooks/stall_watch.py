@@ -81,6 +81,7 @@ Stop: stall_watch.py --stop
 See docs/decisions/stall-watch.md.
 """
 import calendar
+import io
 import json
 import os
 import re
@@ -158,6 +159,18 @@ def _cd_target(args, cwd):
     return target if os.path.isabs(target) else os.path.join(cwd, target) if cwd else target
 
 
+class _KeepNewline(io.StringIO):
+    """A command as a stream for shlex. readline stops before the newline: shlex skips a comment with
+    readline, and the newline that ends the comment must stay a token that ends the command."""
+
+    def readline(self, size=-1):
+        line = super().readline()
+        if line.endswith("\n"):
+            self.seek(self.tell() - 1)
+            line = line[:-1]
+        return line
+
+
 def _background_amp(tok, k):
     """True when tok[k], an `&` in a punctuation token, ends a list. `&&`, `&>`, `>&` and `|&` do not."""
     prev, nxt = tok[k - 1] if k else "", tok[k + 1] if k + 1 < len(tok) else ""
@@ -187,20 +200,19 @@ def read_named_logs(command):
     A `(` saves the directory and a `)` restores it. A list that ends in a lone `&` runs in a
     background subshell. Its logs resolve against its own directory, and after the `&` the directory
     is the one where that list started. A compound command (`{ }`, `if`, `while`, `for`, `case`) has
-    lists of its own. Newlines are tokens, and a comment that ends a line shows in the line count."""
+    lists of its own. Newlines are tokens. A comment stops before its newline, so that newline is a
+    token too."""
     try:
-        lex = shlex.shlex(strip_heredoc_bodies(command, shells_only=True), posix=True,
+        lex = shlex.shlex(_KeepNewline(strip_heredoc_bodies(command, shells_only=True)), posix=True,
                           punctuation_chars="();<>|&\n")
         lex.whitespace_split = True
         lex.whitespace = " \t\r"
-        tokens, fresh = [], []
+        tokens = []
         while True:
-            before = lex.lineno
             tok = lex.get_token()
             if tok is None:
                 break
             tokens.append(tok)
-            fresh.append(lex.lineno - before - tok.count("\n") > 0)  # a comment line was skipped first
     except Exception:
         return [], []
     punct = set(lex.punctuation_chars)
@@ -209,9 +221,7 @@ def read_named_logs(command):
     while i < len(tokens):
         tok, nxt = tokens[i], tokens[i + 1] if i + 1 < len(tokens) else None
         before = tokens[i - 1] if i else None
-        start = i == 0 or fresh[i] or set(before) <= punct or before in COMMAND_STARTERS
-        if fresh[i]:
-            list_dir = cwd  # a comment line ended the list before it
+        start = i == 0 or set(before) <= punct or before in COMMAND_STARTERS
         if set(tok) <= punct:
             for k, ch in enumerate(tok):
                 if ch == "(":
@@ -237,7 +247,7 @@ def read_named_logs(command):
             i += 1
             continue
         if start:
-            if i == 0 or fresh[i] or (set(before) <= punct and (set(";\n(") & set(before))):
+            if i == 0 or (set(before) <= punct and (set(";\n(") & set(before))):
                 only_cds = True  # the first command of a list item
             elif before != "&&":
                 only_cds = False  # after `||`, `&`, `|`, `)`, or a reserved word: it may not run

@@ -68,6 +68,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   cds joined by `&&`. A cd behind `||`, `&`, `|` or `then`, or inside `{ }`, leaves it unknown.
   A list that ends in `&` runs in a background subshell, so after the `&` the directory is the list's start.
   Limit: `builtin cd`, `command cd` and `eval "cd ..."` are not read as a cd.
+  Limit: a cd inside a shell heredoc body (`bash <<EOF`) is read as moving the main shell.
   The hook never refuses for this (coordinator ruling, 2026-11-08). It leaves that log out of `--also`,
   passes it as `--unwatched`, and the STALL report names it. A refusal on `cd "$REPO" && make > log`
   costs more than a missed log.
