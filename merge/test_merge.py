@@ -154,6 +154,9 @@ class FakeHost:
     def required_names(self):
         return ["checks"]
 
+    def issue_comments(self, since):  # the repo's comments: none here; a case that needs some uses CommentHost
+        return []
+
     def batch_running(self, n, base, head=None):  # the other ready pull requests on base with a pending required check; a case sets batch
         self.batch_calls.append((n, base))
         if self.batch_error:
@@ -3005,7 +3008,7 @@ class GhLockTest(unittest.TestCase):
 #   - GraphQL (`gh pr ...`, `gh repo view`, `gh api graphql`, any other gh command) answers the HTTP 403 a Claude Code cloud session gives.
 #   - the cloud agent proxy refuses a numeric-ID path: when a case sets `proxy_refuses_paged`, a `--paginate` read of more than one page
 #     answers HTTP 403 on `repositories/<id>/...`, the path gh follows from the Link header. Off unless a case sets it.
-#   - `issues/comments` answers a case's `issue_comments` (oldest first) once the case sets them; with none set it stays a 404.
+#   - `issues/comments` answers a case's `issue_comments` (oldest first), or `[]` when the case sets none. A case's `comments_fail` (the error text) answers every read of it.
 #   - a case's `fail_page` ({"page", "text"}) answers every read of that page with the error text (rest_err), so a later page of a list read fails.
 #   - a list read under `-i` prints the header block gh prints, with a `Link` header (rel="next" and rel="last", on the numeric route) while pages
 #     follow, and none on the last page. A `--paginate` read prints no Link header: gh follows it itself.
@@ -3381,8 +3384,10 @@ try:
             answer_list(cur["check_runs"], "check_runs", {"total_count": len(cur["check_runs"])})
         answer_list(cur["statuses"], "statuses", {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])})
 
-    elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
-        answer_list(S["issue_comments"], None)
+    elif method == "GET" and rel == "issues/comments":  # the repo's issue comments: a case's `issue_comments`, else none; `comments_fail` fails the read
+        if S.get("comments_fail"):
+            raise Refused(S["comments_fail"])
+        answer_list(S.get("issue_comments", []), None)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
         finish(one({"status": "diverged"}, jq), 0, include)
@@ -3590,6 +3595,20 @@ class GhHalf(Env):
         self.assertIn("checks: fail", out)
         self.assertIn("GET actions/runs branch=main per_page=50", self.calls())
         self.assertNotIn("PUT pulls/7/merge", self.calls())
+
+    def test_a_comment_read_that_fails_refuses_the_merge(self):
+        # the batch-red check reads the repo's comments through gh: a read that fails is unknown, and unknown is red (no reason flag lifts it).
+        # A 404 is a failed read too, not "no comments"
+        self.set(comments_fail=rest_err(404, "Not Found"))
+        rc, out = self.go()
+        self.assertNotEqual(rc, 0, "a failed comment read did not refuse the merge:\n" + out)
+        self.assertIn("could not read the comments", out)
+        self.assertNotIn(MERGE_CALL, self.calls(), "the head was merged after its comment read failed")
+
+    def test_control_an_empty_comment_read_merges(self):
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(MERGE_CALL, self.calls())
 
     def red_main_then_merge(self, *flags, unreadable=False):
         """Main's latest run is red, the flags go on the --confirm, and the merge call is the fake gh's. -> (rc, out, fields of each merge call)."""
@@ -15011,6 +15030,129 @@ class LaneLintRedLimits(ReviewEnv):
 
     def test_the_lane_lint_red_act_has_no_age_limit_key_of_its_own(self):
         self.assertNotIn("lane lint red", merge.PR_STATE_AGE_HOURS, "the lane lint red act keeps a limit of its own; it must take the lane round limit")
+
+
+# ------------------------------------------------------------------ merge --build-batch --drop-red PR, and --on BRANCH
+# `--drop-red PR` reads the newest CI run of the integration pull request PR. Its red jobs, less the aggregate `all-jobs-passed`, are the jobs
+# that failed. A lane whose changed files hit the red job's suite (hit_suites; BuildEnv's stub reads a change to BUILD_LINT_FILE as a hit) is
+# dropped with its dependents: a pull request stacked on it, or one with a `Merge after #n` line. Each dropped pull request gets one
+# `Batch: red <head> <job>` comment, and the batch is rebuilt from the base without them, pushed only to a new --push branch. `--on BRANCH`
+# builds on the head of batch BRANCH: that batch's own lanes are not candidates, and a pull request based on main joins. Each case asserts
+# the effect its flag owes, after a control: the same build without the flag.
+
+RED_JOB = "checks-merge-3"  # the red job of the integration run: a CI job, not the aggregate
+HIT = {BUILD_LINT_FILE: "lint step\n"}  # the files of a lane whose change the stubbed hit_suites reads as hitting the red job's suite
+INT_PR, RUN_ID = 20, 555  # the integration pull request --drop-red names, and the id of its one run
+
+
+class BatchDropRed(BuildEnv):
+    """--drop-red names the integration pull request whose newest run ran red. Each lane's changed files are matched to the red job's suite: a lane
+    that hits it is dropped with its dependents, and each dropped pull request gets one `Batch: red` line. The rebuilt batch holds none of them."""
+
+    def integration(self, name, lanes):
+        """Branch `name` on origin: origin/main with each lane's head merged in order, as an integration branch holds them. -> its head sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", name, "origin/main")
+        for lane in lanes:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge {lane}", f"origin/{lane}")
+        sh(o, "git", "push", "-q", "-f", "origin", name)
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def red_host(self, pulls, done, int_sha, jobs):
+        """A PullsHost over `pulls`, each of `done` ((number, head) pairs) with its done record. The integration head `int_sha` has one completed
+        run, `checks`, whose jobs are `jobs` ((name, conclusion) pairs), as `gh run list --commit` and the jobs read give them."""
+        runs = {int_sha: [{"name": "checks", "status": "completed", "conclusion": "failure", "workflowDatabaseId": 1, "databaseId": RUN_ID}]}
+        records = [c for n, sha in done for c in self.done(n, sha)]
+        return PullsHost(pulls, {}, comments=records, workflow_runs=runs, jobs={RUN_ID: [main_job(name, conclusion) for name, conclusion in jobs]})
+
+    def red_jobs(self):
+        """The jobs of a red run: the red job, the aggregate that fails with it, and a job that passed."""
+        return [(RED_JOB, "failure"), ("all-jobs-passed", "failure"), ("scope", "success")]
+
+    def assert_dropped(self, host, expected, heads, out, err):
+        """Each pull request in `expected` got exactly one comment, whose first line is `Batch: red <its head> <RED_JOB>`. `heads`: number -> head."""
+        self.assertEqual(sorted(n for n, _ in host.posts), sorted(expected), "the drop did not write one Batch: red line on each dropped pull request:\n" + out + err)
+        for n in expected:
+            (text,) = [t for num, t in host.posts if num == n]
+            self.assertEqual(text.splitlines()[0], f"Batch: red {heads[n]} {RED_JOB}", f"#{n}'s Batch: red line does not name its head and the red job:\n" + out + err)
+
+    def test_a_red_job_that_hits_a_lane_drops_it_and_its_dependents_and_rebuilds_the_rest(self):
+        h7 = self.lane(7, files=HIT)
+        h8 = self.lane(8, base=h7)  # stacked on #7
+        h9 = self.lane(9)  # hits nothing
+        h10 = self.lane(10)  # merges after #7
+        hi = self.integration("int-red", ["feat7", "feat8", "feat9", "feat10"])
+        heads = {7: h7, 8: h8, 9: h9, 10: h10}
+        pulls = [batch_pull(7, h7), batch_pull(8, h8, base="feat7"), batch_pull(9, h9), body_pull(10, h10, "Merge after #7\n"),
+                 batch_pull(INT_PR, hi, head_ref="int-red", labels=(BATCH_LABEL,))]
+        host = self.red_host(pulls, list(heads.items()), hi, self.red_jobs())
+        rc, out, err = self.build(host)  # control: no drop, all four join
+        self.assert_ran(rc, out, err, 4)
+        main, before = self.head("main"), self.refs()
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        self.assert_dropped(host, [7, 8, 10], heads, out, err)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #9 feat9 {h9[:9]}"], "the rebuild did not keep feat9 alone:\n" + out + err)
+        self.assertEqual(self.head("int-red"), hi, "the integration branch moved: the rebuild goes to the new branch only")
+        moved = {line.split("\t")[1] for line in set(self.refs().splitlines()) - set(before.splitlines())}
+        self.assertEqual(moved, {"refs/heads/red-int"}, "the rebuild moved a ref other than the new branch")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        pushed = self.head("red-int")
+        parents = sh(self.co, "git", "rev-list", "--parents", "-n1", pushed).split()[1:]
+        self.assertEqual(parents, [main, h9], "the rebuilt batch is not origin/main with feat9 merged once")
+        files = sh(self.co, "git", "ls-tree", "-r", "--name-only", pushed).split()
+        self.assertFalse({"feat7.txt", "feat8.txt", "feat10.txt", BUILD_LINT_FILE} & set(files), "the rebuilt batch holds a dropped lane's files:\n" + "\n".join(files))
+        self.assertNotIn("This reverts commit", sh(self.co, "git", "log", "--format=%B", pushed), "the rebuilt batch holds a revert commit")
+
+    def test_a_red_job_that_hits_no_lane_drops_nothing_exits_non_zero_and_names_the_job(self):
+        h7, h9 = self.lane(7), self.lane(9)  # neither lane's files hit the red job's suite
+        hi = self.integration("int-red", ["feat7", "feat9"])
+        pulls = [batch_pull(7, h7), batch_pull(9, h9), batch_pull(INT_PR, hi, head_ref="int-red", labels=(BATCH_LABEL,))]
+        host = self.red_host(pulls, [(7, h7), (9, h9)], hi, self.red_jobs())
+        rc, out, err = self.build(host)  # control: no drop, both join
+        self.assert_ran(rc, out, err, 2)
+        before = self.refs()
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        self.assertIn(RED_JOB, out + err, "a red job that hits no lane is not named:\n" + out + err)
+        self.assertNotEqual(rc, 0, "a red job that hits no lane exits 0:\n" + out + err)
+        self.assertEqual(host.posts, [], "a red job that hits no lane wrote a Batch: red line")
+        self.assertEqual(self.refs(), before, "a red job that hits no lane moved a ref on origin")
+
+    def test_a_red_job_that_hits_two_lanes_drops_both_and_names_both(self):
+        h7, h9, h11 = self.lane(7, files=HIT), self.lane(9, files=HIT), self.lane(11)
+        hi = self.integration("int-red", ["feat7", "feat9", "feat11"])
+        heads = {7: h7, 9: h9, 11: h11}
+        pulls = [batch_pull(7, h7), batch_pull(9, h9), batch_pull(11, h11), batch_pull(INT_PR, hi, head_ref="int-red", labels=(BATCH_LABEL,))]
+        host = self.red_host(pulls, list(heads.items()), hi, self.red_jobs())
+        rc, out, err = self.build(host)  # control: no drop, all three join
+        self.assert_ran(rc, out, err, 3)
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        self.assert_dropped(host, [7, 9], heads, out, err)
+        for n in (7, 9):
+            self.assertIn(f"#{n}", out + err, f"the output does not name #{n}, which the red job hit:\n" + out + err)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #11 feat11 {h11[:9]}"], "the rebuild did not keep feat11 alone:\n" + out + err)
+
+    def test_on_builds_on_the_batch_head_without_its_own_lanes_and_takes_pull_requests_on_main(self):
+        h7, h8, h9 = self.lane(7), self.lane(8), self.lane(9)
+        n_head = self.integration("int-n", ["feat7"])  # batch N: origin/main with #7 merged, its pull request open
+        pulls = [batch_pull(7, h7), batch_pull(8, h8), batch_pull(9, h9), batch_pull(INT_PR, n_head, head_ref="int-n", labels=(BATCH_LABEL,))]
+        host = PullsHost(pulls, {}, comments=self.done(7, h7) + self.done(8, h8) + self.done(9, h9))
+        rc, out, err = self.build(host)  # control: no --on, all three join on main
+        self.assert_ran(rc, out, err, 3)
+        rc, out, err = self.build(host, "--on", "int-n", "--push", "on-int")
+        self.assertEqual(joins_of(out), [f"joins: #8 feat8 {h8[:9]}", f"joins: #9 feat9 {h9[:9]}"],
+                         "--on int-n did not join #8 and #9 onto batch N's head, or joined N's own lane #7 again:\n" + out + err)
+        self.assertEqual(left_of(out), [], "a pull request based on main was left out on --on:\n" + out + err)
+        self.assert_ran(rc, out, err, 2)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        pushed = self.head("on-int")
+        self.assertTrue(pushed, "origin has no on-int after --push:\n" + out + err)
+        last = sh(self.co, "git", "rev-list", "--parents", "-n1", pushed).split()[1:]
+        self.assertEqual(last[1:], [h9], "the last merge is not feat9's head")
+        first = sh(self.co, "git", "rev-list", "--parents", "-n1", last[0]).split()[1:]
+        self.assertEqual(first, [n_head, h8], "the batch did not start at batch N's head: #8 is not merged onto it")
 
 
 if __name__ == "__main__":
