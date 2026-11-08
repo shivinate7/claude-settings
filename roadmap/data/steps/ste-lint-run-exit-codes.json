@@ -1,0 +1,11 @@
+{
+  "title": "The ste-lint action's run.sh keeps its exit codes: set -e is checked, and fail: false no longer mutes UNKNOWN",
+  "why": "Coordinator 12:37 CST Nov 8, from lane unknown-read-one-rule round 3. It named a follow-up step that checks run.sh's `set -e`; triage found none on the roadmap, so this step holds it. Two more gaps: actions/ste-lint/run.sh:140 sets STALE_EXIT=0 when FAIL is not true, which also mutes stale_cites' UNKNOWN; actions/ste-lint/action.yml:14 still says \"'false' never fails\".",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 791,
+  "updatedAt": "2026-11-08T12:39:00-06:00"
+}

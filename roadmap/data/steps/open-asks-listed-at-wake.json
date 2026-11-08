@@ -1,11 +1,11 @@
 {
   "title": "The page writer's wake lists every owner ask with no reply, so a routed ask is also closed on the page",
   "why": "Triage 12:36 CST Nov 8, its own mistake: ask ask-mw8321blnx (11:05 CST) was routed to step stray-push-ask-source but never closed on the page, so the owner saw no answer for 90 minutes. The feedback-inbox Stop hook surfaced it. Fix: the waiting-page skill's wake query lists asks with no status or reply, and the Stop check refuses while one is older than the last wake.",
-  "note": "",
+  "note": "Coordinator 12:37 CST Nov 8: a lane starts now.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "status": "todo",
+  "status": "doing",
   "order": 788,
-  "updatedAt": "2026-11-08T12:36:00-06:00"
+  "updatedAt": "2026-11-08T12:39:00-06:00"
 }
