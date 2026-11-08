@@ -14,7 +14,10 @@ import signal
 import subprocess
 import sys
 
-import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
+    _nowindow = subprocess
 
 LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
 LINT_INPUTS = ("paths", "exclude", "changed_paths", "decisions-dir")
@@ -182,3 +185,7 @@ def error_findings(out, limit=3):
         if len(rows) == limit:
             break
     return rows
+
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"
