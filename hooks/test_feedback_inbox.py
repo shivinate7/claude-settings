@@ -3881,6 +3881,10 @@ def case_standing_grant_reason_names_the_once_bar():
           "standing" in reason.lower() and "once:" in reason, reason)
     check("standing once bar: the reason names the standing homes",
           mod.STANDING_HOMES in reason, reason)
+    check("standing once bar: the reason names the [ruling] home",
+          "[ruling]" in reason, reason)
+    check("standing once bar: the reason names the [page] home",
+          "[page]" in reason, reason)
     check("standing once bar: the reason does not offer the once: home itself",
           bool(reason) and "-> once:" not in reason, reason)
 
