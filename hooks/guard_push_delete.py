@@ -19,6 +19,11 @@ from guard_core import (
 # `-o` is read in the short-flag loop, where its value may be glued on.
 PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "--push-option"}
 DEFAULT_BRANCH_FALLBACK = ("main", "master")
+# Rule push-agent-branch. A test-author lane pushed its agent-worktree branch (`claude/agent-<hex>`, no
+# upstream) to origin on 2026-11-08, and push-stray-branch is silent with no upstream. The three shapes the
+# tools name a worktree branch by, with 8 or more lowercase hex characters after the prefix. Cost: a string
+# match, no new read.
+AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")
 
 
 def _push_config(cwd: str, key: str, overrides=None):
@@ -280,7 +285,12 @@ def _push_branch_config(cwd: str, current: str, with_default: bool, overrides=No
 
 
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
-    """'main', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+    """'main', 'agent', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+
+    'agent' (rule push-agent-branch): a push whose destination name is an agent-worktree branch name
+    (`AGENT_BRANCH`), with or without `-u`, checked before 'stray'. An implied destination is the current
+    branch; an explicit one is the part after `:`, `refs/heads/` stripped; a colon-less refspec is its own
+    name. An explicit destination adds no read.
 
     'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`, `--all`
     included. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
@@ -329,18 +339,26 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
             dest = None
         if dest in DEFAULT_BRANCH_FALLBACK:
             return "main"
+        agent = bool(dest and AGENT_BRANCH.fullmatch(dest))
     else:
+        agent = False
         for spec in plain:
             source, colon, target = spec.partition(":")
             if colon:
                 if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
                     return "main"
+                agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
             elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
                 return "main"
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
                 implied = True
+                agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))
+            else:
+                agent = agent or bool(AGENT_BRANCH.fullmatch(source.removeprefix("refs/heads/")))
         if implied and current() in DEFAULT_BRANCH_FALLBACK:
             return "main"
+    if agent:
+        return "agent"
     if not implied or current() is None:
         return ""
     remote_cfg, merge, _mode = config()
@@ -822,6 +840,12 @@ PUSH_MAIN_REASON = (
 PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
     "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
+    "Approving the prompt lets this one push through; it is not a grant."
+)
+PUSH_AGENT_REASON = (
+    "Rule (Git): this push writes a branch named like an agent worktree (agent-<hex>, claude/agent-<hex> or "
+    "worktree-agent-<hex>), not a lane branch (decision plain-push-asks). Push the lane branch by name: "
+    "`git push origin HEAD:<lane-branch>`. "
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ASK_REASON = (

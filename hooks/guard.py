@@ -91,6 +91,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
+  push-agent-branch    ask. A non-forced push whose destination branch name is an agent-worktree name
+                       (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
+                       -u. No upstream is needed. A delete, a mirror and a dry run pass.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -373,7 +376,7 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
+            PUSH_AGENT_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
             parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
@@ -3520,6 +3523,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
                                 "push to the default branch")
+                elif kind == "agent":
+                    ask_command("push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args),
+                                "push to an agent-worktree branch")
                 elif kind == "stray":
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")
