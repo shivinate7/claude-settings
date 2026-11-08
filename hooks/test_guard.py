@@ -12738,13 +12738,13 @@ sh("frozen-scan-crash: pin, python -c that reads a frozen hook through a ten-ter
 
 # --------------------------------------------------------------------------- frozen-scan-crash: the depth cap and the crash text
 #
-# The composed-path reader raises once an expression nests past its depth cap, and the frozen caller then reads
-# the whole script as plain text. Three claims: a write to a frozen folder is still denied when an unrelated
-# chain of four links, earlier in the script, pushes the reader past its cap; a project's own .claude/hooks and a
-# print of frozen parts stay allowed after that cap; and the plain text the fallback reads is the code, so a
-# comment, a multi-line string and an escaped quote read as the text they are. The controls are the same shapes
-# at three links, which the reader still composes. Each name carries frozen-scan-crash:, so
-# MUTATE_ONLY=frozen-scan-crash: runs them.
+# The composed-path reader raises past its depth cap, and the frozen caller then reads the whole script as plain
+# text. The cap is 100 levels (`_COMPOSE_DEPTH` in guard_core.py), and a link `v = v / "x"` nests two of them, so
+# a chain of 50 links reaches it. The four-link rows never reach the cap; they check the composed path. Their
+# claims: a write to a frozen folder is still denied, a project's own .claude/hooks and a print of frozen parts
+# stay allowed, and the plain text the fallback reads is the code, so a comment, a multi-line string and an
+# escaped quote read as the text they are. The 50-link rows further down check the cap itself. Each name carries
+# frozen-scan-crash:, so MUTATE_ONLY=frozen-scan-crash: runs them.
 
 
 def depth_chain_command(links, tail):
@@ -12822,6 +12822,73 @@ add("frozen-scan-crash: control, python -c that writes a .claude/hooks folder un
 add("frozen-scan-crash: residual, python -c that writes a .claude/hooks folder under home, not the config folder, after the reader crashes on the whole script is allowed",
     "allow", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
     command="python3 -c 'import os\nh = os.path.expanduser(\"~\")\nopen(os.path.join(h, \"ab\", \".claude\", \"hooks\", \"x.py\"), \"w\")'")
+
+# --------------------------------------------------------------------------- frozen-scan-crash: the cap, the budget, the cycle
+#
+# A chain past 50 links reaches the depth cap, so its frozen write is read as plain text, and the reason carries
+# the crash note. The two-link controls stay under the cap: the same write there is judged by its composed path,
+# with no note. A value doubled 40 times is cut by the read budget (`_COMPOSE_BUDGET`); the row's time limit is
+# what fails when that budget is gone. A loop that appends to a name bound nowhere holds itself (`_PY_EXPANDING`),
+# and the read after it stays allowed. Each name carries frozen-scan-crash:, so MUTATE_ONLY=frozen-scan-crash: runs them.
+
+CLIMB_LINKS = ["notes", ".."] * 30   # 60 links, each out to ~/notes and back, so the chain ends at home
+SHORT_LINKS = ["notes", ".."]        # the same shape, two links, under the cap
+
+
+def frozen_at_end(links, mode):
+    """A tail that opens `.claude/hooks/x.py` under the chain's last value: read ("r") or written ("w")."""
+    return 'open(os.path.join(str(v%d), ".claude", "hooks", "x.py")%s)' % (
+        len(links), ', "w"' if mode == "w" else "")
+
+
+def json_then_increments(count):
+    """A python -c script that reads the frozen settings file, then `count` `n += 1` lines and a print."""
+    return ("python3 -c 'import json\njson.load(open(\"~/.claude/settings.json\"))\n"
+            + "n += 1\n" * count + "print(n)'")
+
+
+def doubling_command(times):
+    """A python -c script that doubles a value `times` times, then writes a frozen hook."""
+    body = "import os\nfrom pathlib import Path\nu0 = Path(os.path.expanduser(\"~\")) / \"notes\"\n"
+    body += "".join("u%d = u%d / u%d\n" % (i + 1, i, i) for i in range(times))
+    return ("python3 -c '" + body
+            + 'open(os.path.join(os.path.expanduser("~"), ".claude", "hooks", "x.py"), "w")' + "'")
+
+
+add("frozen-scan-crash: cap, python -c that writes a frozen hook through a 60-link chain that climbs back to home is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, carries="frozen reader crashed",
+    command=depth_chain_command(CLIMB_LINKS, frozen_at_end(CLIMB_LINKS, "w")))
+add("frozen-scan-crash: control, python -c that writes a frozen hook through a two-link chain that climbs back to home is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, lacks="frozen reader crashed",
+    command=depth_chain_command(SHORT_LINKS, frozen_at_end(SHORT_LINKS, "w")))
+add("frozen-scan-crash: cap, python -c that reads a frozen hook through a 60-link chain that climbs back to home is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV,
+    command=depth_chain_command(CLIMB_LINKS, frozen_at_end(CLIMB_LINKS, "r")))
+add("frozen-scan-crash: control, python -c that reads a frozen hook through a two-link chain that climbs back to home is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV,
+    command=depth_chain_command(SHORT_LINKS, frozen_at_end(SHORT_LINKS, "r")))
+add("frozen-scan-crash: cap, python -c that writes a project's own .claude/hooks after a 60-link chain that climbs back to home is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(CLIMB_LINKS, DEPTH_OTHER_WRITE))
+add("frozen-scan-crash: residual, python -c that prints a frozen hook's parts after an unused chain of 52 `/` links is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(["notes"] * 52, DEPTH_PRINT))
+add("frozen-scan-crash: control, python -c that prints a frozen hook's parts after an unused chain of 10 `/` links is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(["notes"] * 10, DEPTH_PRINT))
+add("frozen-scan-crash: residual, python -c that reads a frozen settings file, then 52 `n += 1` lines and a print, is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=json_then_increments(52))
+add("frozen-scan-crash: control, python -c that reads a frozen settings file, then 10 `n += 1` lines and a print, is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=json_then_increments(10))
+add("frozen-scan-crash: cycle, python -c that reads a frozen settings file after a loop that appends to a name bound nowhere is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV,
+    command="python3 -c 'import os\nfor i in range(3):\n    p += \"/x\"\n"
+            "print(open(os.path.join(os.path.expanduser(\"~\"), \".claude\", \"settings.json\")).read())'")
+add("frozen-scan-crash: control, python -c that reads a frozen settings file after a loop that appends to a name bound before it is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV,
+    command="python3 -c 'import os\nq = \"/x\"\nfor i in range(3):\n    q += \"/x\"\n"
+            "print(open(os.path.join(os.path.expanduser(\"~\"), \".claude\", \"settings.json\")).read())'")
+add("frozen-scan-crash: budget, python -c that doubles a value 40 times, then writes a frozen hook, is denied in under 10 s",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, max_seconds=10, command=doubling_command(40))
+add("frozen-scan-crash: control, python -c that doubles a value 8 times, then writes a frozen hook, is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, command=doubling_command(8))
 
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
@@ -24261,7 +24328,9 @@ print(json.dumps({"cpu": time.process_time() - started, "out": printed.getvalue(
 '''
 
 
-def _apostrophe_speed_case(command):
+def _apostrophe_speed_case(command, bound=1.0, want=None):
+    """A check that judges `command` in a child and bounds its CPU time at `bound` seconds. `want` names the
+    decision it must reach ("allow" or "deny"), or None for the timing alone."""
     def check():
         materialize(NOGIT)
         payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT}
@@ -24272,14 +24341,16 @@ def _apostrophe_speed_case(command):
                 env=dict(os.environ, CLAUDE_CONFIG_DIR=CFG),
             )
         except subprocess.TimeoutExpired:
-            return False, "not judged within 30 s, killed; the bound is 1 s of CPU"
+            return False, "not judged within 30 s, killed; the bound is %g s of CPU" % bound
         reply = json.loads(done.stdout.strip())
         took = reply["cpu"]
-        if took >= 1.0:
-            return False, "judged in %.2f s CPU, not under 1 s" % took
+        if took >= bound:
+            return False, "judged in %.2f s CPU, not under %g s" % (took, bound)
         got = "allow" if not reply["out"].strip() else \
             json.loads(reply["out"])["hookSpecificOutput"]["permissionDecision"]
-        return True, "judged %s in %.2f s CPU, under 1 s" % (got, took)
+        if want is not None and got != want:
+            return False, "judged %s, not %s" % (got, want)
+        return True, "judged %s in %.2f s CPU, under %g s" % (got, took, bound)
     return check
 
 
@@ -24289,6 +24360,15 @@ for _name, _command in (
 ):
     LOG_CHECKS_EXTRA.append(("guard-command-position: speed, %s, judged in under 1 s CPU" % _name,
                              _apostrophe_speed_case(_command)))
+
+
+# A python -c script of 2000 `n += 1` lines with no frozen text. Linear work takes about 1.1 s of CPU here; a rescan
+# of the plain text per capped entry takes about 13 s. The 4 s bound sits between the two.
+SPEED_LINES_CMD = "python3 -c 'import os\nn = 0\n" + "n += 1\n" * 2000 + "'"
+_SPEED_LINES_LABEL = "frozen-scan-crash: speed, 2000 `n += 1` lines with no frozen text are judged in under 4 s CPU"
+LOG_CHECKS_EXTRA.append((_SPEED_LINES_LABEL,
+                         lambda: _apostrophe_speed_case(SPEED_LINES_CMD, bound=4, want="allow")()))
+LOG_FAMILY[_SPEED_LINES_LABEL] = "frozen"   # this block sits after the frozen section, so its family is set here
 
 
 # Ruling item 4: _split_segments_cached is keyed on the command alone, but split_segments reads
