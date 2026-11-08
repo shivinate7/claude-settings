@@ -286,6 +286,19 @@ class BriefFaults(unittest.TestCase):
                 found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
                 self.assertIn(("token-font", "Job"), found)
 
+    def test_font_name_after_a_no_break_space_is_refused(self):
+        # A no-break space (U+00A0) separates words as a space does, so a font name after it still names a font.
+        for line in ("Font\xa0Lora for the body.", "Use the font\xa0Lora here."):
+            with self.subTest(line=line):
+                found = codes(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn("token-font", found, msg="a no-break space before a font name must be refused")
+
+    def test_no_break_space_before_a_lower_case_word_after_font_still_passes(self):
+        # The same separator before a lower-case word names no font, so these neighbours stay green.
+        for line in ("The font\xa0on the envelope is hard to read.", "Font\xa0size is set by the grid."):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
+
     def test_colour_word_before_a_part_number_hash_is_refused(self):
         # "ink" is a colour word, and "cartridge" is not an id word. Main refuses the 4-digit hash after them as a colour.
         found = pairs(self.m.brief_faults(brief(job=JOB + "\nReplace ink cartridge #1234.")))
