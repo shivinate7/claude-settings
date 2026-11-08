@@ -880,38 +880,150 @@ def _bound_names(target):
     return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
 
 
-def _locals(fdef):
-    """name -> [(value, slot)] for each binding in a function. A value of None is a binding made at
+def _branch_chain(node, mod):
+    """The `if` arms that hold `node`, outermost first: (id of the `if`, "body" or "orelse") for each `if` whose
+    body or else holds it. An `if`'s test runs before either arm, so the test adds none."""
+    chain, cur = [], node
+    parent = mod.parents.get(id(cur))
+    while parent is not None:
+        if isinstance(parent, ast.If) and cur in parent.body:
+            chain.append((id(parent), "body"))
+        elif isinstance(parent, ast.If) and cur in parent.orelse:
+            chain.append((id(parent), "orelse"))
+        cur, parent = parent, mod.parents.get(id(parent))
+    return tuple(reversed(chain))
+
+
+def _sibling(binding, read):
+    """True when two arm chains first split at one `if`, one in its body and the other in its else (an elif is one)."""
+    for (b_if, b_arm), (r_if, r_arm) in zip(binding, read):
+        if b_if != r_if:
+            return False  # two `if` statements in a row: the earlier one runs first
+        if b_arm != r_arm:
+            return True
+    return False
+
+
+def _effect(at):
+    """Where a binding takes effect in source order: an assignment at its end, since its value runs first, else at its
+    start. None is an argument, which binds on entry."""
+    if at is None:
+        return (0, 0)
+    if isinstance(at, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        return (at.end_lineno, at.end_col_offset)
+    return (at.lineno, at.col_offset)
+
+
+def _loops_holding(node, mod):
+    """The loops that run `node` again: a for body, and a while test or body, within its own def."""
+    loops, cur = [], node
+    parent = mod.parents.get(id(cur))
+    while parent is not None and not isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(parent, (ast.For, ast.AsyncFor, ast.While)) and (
+                any(cur is s for s in parent.body) or cur is getattr(parent, "test", None)):
+            loops.append(parent)
+        cur, parent = parent, mod.parents.get(id(parent))
+    return loops
+
+
+def _statement(node, mod):
+    """The statement `node` sits in: the node itself when it is one, else the nearest statement above it."""
+    cur = node
+    while cur is not None and not isinstance(cur, ast.stmt):
+        cur = mod.parents.get(id(cur))
+    return cur
+
+
+def _deferred(node, mod):
+    """True when a lambda or a generator expression within `node`'s own def holds it. Each runs later than its
+    statement, when it is called or pulled, so it may read a binding made after its statement."""
+    cur = mod.parents.get(id(node))
+    while cur is not None and not isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(cur, (ast.Lambda, ast.GeneratorExp)):
+            return True
+        cur = mod.parents.get(id(cur))
+    return False
+
+
+def _enclosing_defs(node, mod):
+    """The defs around `node`, nearest first. A class body is no scope for a def inside it, so it is skipped."""
+    out, cur = [], mod.parents.get(id(node))
+    while cur is not None:
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out.append(cur)
+        cur = mod.parents.get(id(cur))
+    return out
+
+
+def _reaching(entries, read, mod):
+    """The bindings a read sees. Where a read runs in a lambda or a generator expression, all of them: it may run after any of them. Else
+    one reaches the read when it sits in the read's own statement, or when it takes effect before the read and is not
+    in an arm of an `if` the read is not in. A binding after the read, or in a sibling arm, never ran before it. A loop
+    body that holds both pools them all, since the loop may run the binding again before the read. A run-time binding
+    that reaches the read still leaves it unresolved. When unsure, a binding stays in."""
+    if _deferred(read, mod):
+        return list(entries)
+    loops = {id(loop) for loop in _loops_holding(read, mod)}
+    chain = _branch_chain(read, mod)
+    before = (read.lineno, read.col_offset)
+    statement = _statement(read, mod)
+    found = []
+    for entry in entries:
+        at = entry[2]
+        if at is None:
+            found.append(entry)
+        elif _statement(at, mod) is statement:
+            found.append(entry)  # one statement runs its parts in an order the source does not show
+        elif loops & {id(loop) for loop in _loops_holding(at, mod)}:
+            found.append(entry)
+        elif _effect(at) < before and not _sibling(_branch_chain(at, mod), chain):
+            found.append(entry)
+    return found
+
+
+def _locals(fdef, mod):
+    """name -> [(value, slot, at)] for each binding in a function. A value of None is a binding made at
     run time (an argument, a loop target), so the name has no static text. A slot is the position
-    in a tuple value that the name unpacks."""
+    in a tuple value that the name unpacks. `at` is the node the binding takes effect at (see _effect),
+    and None for an argument, which binds on entry."""
     locs = {}
+
+    def bind(name, value, slot, at):
+        locs.setdefault(name, []).append((value, slot, at))
+
     args = fdef.args
     for arg in args.posonlyargs + args.args + args.kwonlyargs + [a for a in (args.vararg, args.kwarg) if a]:
-        locs.setdefault(arg.arg, []).append((None, None))
+        locs.setdefault(arg.arg, []).append((None, None, None))
     for node in _own(fdef):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    locs.setdefault(target.id, []).append((node.value, None))
+                    bind(target.id, node.value, None, node)
                 elif isinstance(target, ast.Tuple) and all(isinstance(e, ast.Name) for e in target.elts):
                     for i, e in enumerate(target.elts):
-                        locs.setdefault(e.id, []).append((node.value, i))
+                        bind(e.id, node.value, i, node)
                 else:
                     for name in _bound_names(target):
-                        locs.setdefault(name, []).append((None, None))
-        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension, ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
+                        bind(name, None, None, node)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
             for name in _bound_names(node.target):
-                locs.setdefault(name, []).append((None, None))
+                bind(name, None, None, node.target)  # the target binds as the body starts
+        elif isinstance(node, ast.comprehension):
+            for name in _bound_names(node.target):
+                bind(name, None, None, mod.parents.get(id(node)))  # the comprehension binds before its element is read
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
+            for name in _bound_names(node.target):
+                bind(name, None, None, node)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 for name in _bound_names(item.optional_vars) if item.optional_vars else []:
-                    locs.setdefault(name, []).append((None, None))
+                    bind(name, None, None, item.optional_vars)
         elif isinstance(node, ast.Lambda):
             # A lambda's parameters bind at run time. Its body is read in this scope, so they read as unknown.
             for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs + [a for a in (node.args.vararg, node.args.kwarg) if a]:
-                locs.setdefault(arg.arg, []).append((None, None))
+                bind(arg.arg, None, None, arg)
         elif isinstance(node, ast.ExceptHandler) and node.name:
-            locs.setdefault(node.name, []).append((None, None))  # the caught exception is bound at run time
+            bind(node.name, None, None, node)  # the caught exception is bound at run time
     return locs
 
 
@@ -1023,7 +1135,7 @@ class _Reasons:
 
     def locals_of(self, fdef, mod):
         if id(fdef) not in self._locals:
-            self._locals[id(fdef)] = _locals(fdef)
+            self._locals[id(fdef)] = _locals(fdef, mod)
         return self._locals[id(fdef)]
 
     def alts(self, expr, mod, locs, depth=0):
@@ -1070,7 +1182,7 @@ class _Reasons:
         if isinstance(expr, ast.IfExp):
             return _union([self.alts(expr.body, mod, locs, d), self.alts(expr.orelse, mod, locs, d)])
         if isinstance(expr, ast.Name):
-            return self._name(expr.id, mod, locs, d, None)
+            return self._name(expr, mod, locs, d, None)
         if isinstance(expr, ast.Subscript):
             if isinstance(expr.slice, ast.Constant) and isinstance(expr.slice.value, int) and expr.slice.value >= 0:
                 return self._elt(expr.value, expr.slice.value, mod, locs, d)  # `reason[0]` of a tuple-valued name
@@ -1109,7 +1221,7 @@ class _Reasons:
         """The static text of a local name's branches, skipping the run-time ones. `x = x or "text"` adds
         "text": its `x` is the run-time branch that another binding holds."""
         found = []
-        for value, slot in locs.get(name, []):
+        for value, slot, _ in locs.get(name, []):
             if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or) \
                     and isinstance(value.values[0], ast.Name) and value.values[0].id == name:
                 parts = [self.alts(v, mod, locs, depth) for v in value.values[1:]]
@@ -1162,13 +1274,22 @@ class _Reasons:
                 return self._call(expr, mod, locs, d, i)
             return None
         if isinstance(expr, ast.Name):
-            return self._name(expr.id, mod, locs, d, i)
+            return self._name(expr, mod, locs, d, i)
         return None
 
-    def _name(self, name, mod, locs, depth, index):
+    def _name(self, read, mod, locs, depth, index):
+        name = read.id
         if name in locs:
+            seen = _reaching(locs[name], read, mod)
+            if not seen:  # bound in this def, but no binding reaches this read: its text is unknown
+                return None
             return _union([self._value(v, slot, index, mod, locs, depth) if v is not None else None
-                           for v, slot in locs[name]])
+                           for v, slot, _ in seen])
+        for outer in _enclosing_defs(read, mod):  # a nested def reads the enclosing def's bindings, all of them
+            outer_locs = self.locals_of(outer, mod)
+            if name in outer_locs:
+                return _union([self._value(v, slot, index, mod, outer_locs, depth) if v is not None else None
+                               for v, slot, _ in outer_locs[name]])
         home = self._home(mod, name)
         if home is None:
             return None
@@ -1205,7 +1326,7 @@ class _Reasons:
         if not any(isinstance(a, ast.Starred) for a in call.args) and not any(k.arg is None for k in call.keywords):
             for name, arg in _call_args(call, fdef):
                 if name in flocs:
-                    flocs[name] = [(_Fixed(self.alts(arg, mod, locs, depth + 1)), None)]
+                    flocs[name] = [(_Fixed(self.alts(arg, mod, locs, depth + 1)), None, None)]
         returns = [n.value for n in _own(fdef) if isinstance(n, ast.Return) and n.value is not None]
         return _union([self._value(v, None, index, fmod, flocs, depth + 1) for v in returns])
 
@@ -1305,9 +1426,9 @@ def _refusals_of(call, locs, where, unattributed, mod, reasons):
     if name == "refuse" and isinstance(rule, ast.Name):
         bound = locs.get(rule.id, [])
         if any(isinstance(v, ast.Subscript) and isinstance(v.value, ast.Name) and v.value.id == PENDING_ASK
-               for v, _ in bound):
+               for v, _, _ in bound):
             return []  # the ask_command() call sites carry these ids
-        for value, slot in bound:
+        for value, slot, _ in bound:
             options = _tuple_options(value) if slot == 0 else None
             if options and all(len(t.elts) == 2 and isinstance(t.elts[0], ast.Constant) for t in options):
                 return [(t.elts[0].value, t.elts[1]) for t in options]
@@ -1522,7 +1643,7 @@ def _params_reaching(expr, params, locs, seen=frozenset()):
         if name in params:
             found.add(name)
         elif name in locs and name not in seen:
-            for value, _ in locs[name]:
+            for value, _, _ in locs[name]:
                 if value is not None:
                     found |= _params_reaching(value, params, locs, seen | {name})
     return found
@@ -1694,7 +1815,7 @@ class _Helpers:
             flocs, unknown = dict(hlocs), []
             for name, arg in pairs:
                 texts = self.reasons.alts(arg, self.mod, locs)
-                flocs[name] = [(_Fixed(texts), None)]
+                flocs[name] = [(_Fixed(texts), None, None)]
                 if texts is None and name in reach:
                     unknown.append(arg)
             fallback = ", ".join(_unparse(a) for a in unknown) or _unparse(msg)
@@ -1997,6 +2118,18 @@ def merge_src(raise_line, defs="", body=None):
             + defs + 'def go(b):\n' + lines)
 
 
+BRANCH_HELPER = ('def helper(seg):\n'
+                 '    if seg:\n'
+                 '        return seg, "see decision alpha"\n'
+                 '    return "", ""\n')
+BRANCH_PICK = 'def pick(seg):\n    return seg\n'  # its reason is a parameter, so the text is known only at run time
+
+
+def branch_src(judge_body):
+    """A guard module with a cited helper, a run-time helper, and `judge(seg, tool)` made of the lines of `judge_body`."""
+    return BRANCH_HELPER + BRANCH_PICK + 'def judge(seg, tool):\n' + judge_body
+
+
 class RefusalCiteFixtureTests(unittest.TestCase):
     """The cite pattern and the scanner, on in-memory source."""
 
@@ -2113,6 +2246,148 @@ class RefusalCiteFixtureTests(unittest.TestCase):
         self.assertEqual(status_of(src, "tuple-id"), ["cited"])
         uncited = src.replace("see decision alpha", "no cite here")
         self.assertEqual(status_of(uncited, "tuple-id"), ["no cite"])
+
+    def test_a_run_time_walrus_in_another_branch_does_not_unresolve_a_cited_branch(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        if hit[0]:\n'
+                         '            refuse(tool, "deny", "walrus-id", hit[1], hit[0])\n'
+                         '    elif seg == "b" and (hit := pick(seg)):\n'
+                         '        return hit\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "walrus-id"), ["cited"],
+                         "a run-time walrus of hit in another branch hides the cited hit this branch binds")
+
+    def test_an_unbound_read_in_a_branch_stays_not_resolved(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        refuse(tool, "deny", "unbound-id", hit[1], hit[0])\n'
+                         '    elif seg == "b":\n'
+                         '        hit = pick(seg)\n'
+                         '        return hit\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "unbound-id"), ["not resolved"],
+                         "no binding of hit reaches this refusal, so its reason must not resolve")
+
+    def test_a_cited_binding_in_a_sibling_branch_does_not_reach_a_refusal(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        return hit\n'
+                         '    elif seg == "b":\n'
+                         '        refuse(tool, "deny", "sibling-id", hit[1], hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "sibling-id"), ["not resolved"],
+                         "the cited hit is bound in a sibling branch, which does not reach this refusal")
+
+    def test_a_branch_whose_only_reaching_binding_is_run_time_stays_not_resolved(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        return hit\n'
+                         '    elif seg == "b":\n'
+                         '        hit = pick(seg)\n'
+                         '        if hit[0]:\n'
+                         '            refuse(tool, "deny", "runtime-id", hit[1], hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "runtime-id"), ["not resolved"],
+                         "the only binding reaching this refusal is run-time; a cited binding elsewhere must not resolve it")
+
+    def test_a_single_binding_read_in_its_branch_stays_cited(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        if hit[0]:\n'
+                         '            refuse(tool, "deny", "single-id", hit[1], hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "single-id"), ["cited"])
+
+    def test_a_later_run_time_walrus_does_not_unresolve_an_earlier_cited_read(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        if hit:\n'
+                         '            refuse(tool, "deny", "later-walrus-id", hit[1], hit[0])\n'
+                         '    if seg == "b" and (hit := pick(seg)):\n'
+                         '        return hit\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "later-walrus-id"), ["cited"],
+                         "a walrus in a later if runs after the read, so it must not pool into the read")
+
+    def test_a_run_time_binding_before_the_read_stays_not_resolved(self):
+        src = branch_src('    hit = pick(seg)\n'
+                         '    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '    if hit[0]:\n'
+                         '        refuse(tool, "deny", "before-id", hit[1], hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "before-id"), ["not resolved"],
+                         "the run-time binding before the read reaches it when seg is not a, so it stays unresolved")
+
+    def test_a_loop_rebinding_after_the_read_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    for x in seg:\n'
+                         '        if x:\n'
+                         '            refuse(tool, "deny", "loop-id", hit[1], hit[0])\n'
+                         '        hit = pick(x)\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "loop-id"), ["not resolved"],
+                         "the run-time rebinding after the read reaches it when the loop re-enters")
+
+    def test_a_run_time_walrus_in_a_conditional_test_reaches_the_read_before_it(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    refuse(tool, "deny", "cond-id", hit[1] if (hit := pick(seg)) else "", hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "cond-id"), ["not resolved"],
+                         "a conditional runs its test before its body, so the walrus in the test reaches hit[1]")
+
+    def test_a_run_time_walrus_in_a_comprehension_if_reaches_its_element(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    return [refuse(tool, "deny", "comp-id", hit[1], hit[0])\n'
+                         '            for x in seg if (hit := pick(x))]\n')
+        self.assertEqual(status_of(src, "comp-id"), ["not resolved"],
+                         "a comprehension's if runs before its element, so the walrus in the if reaches the element")
+
+    def test_a_while_test_reads_a_run_time_rebind_in_the_body(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    while refuse(tool, "deny", "while-id", hit[1], hit[0]) or pick(seg):\n'
+                         '        hit = pick(seg)\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "while-id"), ["not resolved"],
+                         "the body rebinds hit before the test runs again, so the test's read is not resolved")
+
+    def test_a_lambda_called_after_a_run_time_rebind_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    later = lambda: refuse(tool, "deny", "lambda-id", hit[1], hit[0])\n'
+                         '    hit = pick(seg)\n'
+                         '    return later()\n')
+        self.assertEqual(status_of(src, "lambda-id"), ["not resolved"],
+                         "the lambda runs after the rebind, so the read it makes is of the run-time hit")
+
+    def test_a_lambda_defined_after_a_run_time_rebind_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    hit = pick(seg)\n'
+                         '    later = lambda: refuse(tool, "deny", "lambda-guard", hit[1], hit[0])\n'
+                         '    return later()\n')
+        self.assertEqual(status_of(src, "lambda-guard"), ["not resolved"],
+                         "the run-time rebind comes before the lambda, so the read is of the run-time hit")
+
+    def test_a_generator_read_after_a_run_time_rebind_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    g = (refuse(tool, "deny", "p-id", hit[1], hit[0]) for x in seg)\n'
+                         '    hit = pick(seg)\n'
+                         '    return next(g)\n')
+        self.assertEqual(status_of(src, "p-id"), ["not resolved"],
+                         "a generator expression runs when next() pulls it, after the rebind, so its read is run-time")
+
+    def test_a_generator_read_after_a_rebind_in_an_if_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    g = (refuse(tool, "deny", "p-id2", hit[1], hit[0]) for x in seg)\n'
+                         '    if seg:\n'
+                         '        hit = pick(seg)\n'
+                         '    return list(g)\n')
+        self.assertEqual(status_of(src, "p-id2"), ["not resolved"],
+                         "the if may rebind hit before list() pulls the generator, so its read is run-time")
+
+    def test_an_eager_generator_read_with_no_rebind_stays_cited(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    return any(refuse(tool, "deny", "eager-id", hit[1], hit[0]) for x in seg)\n')
+        self.assertEqual(status_of(src, "eager-id"), ["cited"])
 
     def test_an_empty_reason_is_not_resolved(self):
         self.assertEqual(status_of('refuse(t, "deny", "empty-id", "", m)\n', "empty-id"), ["not resolved"])
