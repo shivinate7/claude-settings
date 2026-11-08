@@ -5924,6 +5924,18 @@ sh("check-tail: uv run pytest.py piped to tail, then && commit, is allowed",
    "uv run pytest.py | tail -3 && git commit -m x", "allow", cwd=NOGIT)
 sh("check-tail: python3 -Im pytest piped to tail, then && commit, is allowed",
    "python3 -Im pytest | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+# Under `cd lint`, `-m pytest` and `-m unittest` name no script under lint/, so each is allowed.
+# A lint script run in a substitution, in a subshell, or by a path inside a subshell is still a lint run.
+sh("check-tail: cd lint, then python3 -m pytest piped to tail, then && commit, is allowed",
+   "cd lint && python3 -m pytest | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: cd lint, then python3 -m unittest piped to tail, then && commit, is allowed",
+   "cd lint && python3 -m unittest test_x | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: cd lint, then a lint script in a substitution piped to tail, then && commit, is refused",
+   "cd lint && out=$(./ste_lint.py x.md | tail -3) && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: cd lint, then a lint script in a subshell piped to tail, then && commit, is refused",
+   "cd lint && (./ste_lint.py x.md | tail -3) && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a lint script path in a subshell piped to tail, then && commit, is refused",
+   "(python3 lint/ste_lint.py x.md | tail -3) && git commit -m x", "deny", "check-tail", cwd=NOGIT)
 # A comment opener in quotes, a lone apostrophe and a multi-line quote do not hide a lint pipe before a commit.
 sh("check-tail: a quoted # does not hide a lint pipe before a commit, is refused",
    'echo "# ok"; python3 lint/ste_lint.py docs/x.md | tail -3 && git commit -m x', "deny", "check-tail",
