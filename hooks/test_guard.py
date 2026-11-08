@@ -10053,8 +10053,8 @@ pr_update("pr-body-placeholder: an MCP update whose body is only whitespace is d
 pr_update("pr-body-placeholder: an MCP update whose body is x is denied", "deny", PR_PLACEHOLDER, body="x")
 pr_update("pr-body-placeholder: an MCP update whose body is one 40-character token is denied", "deny",
           PR_PLACEHOLDER, body="A" * 40)
-# The boundary and the scope of the placeholder rule, green today. With no live body on PATH the shrink rule has
-# nothing to compare, so only the placeholder rule can decide.
+# The boundary and the scope of the placeholder rule. With no live body on PATH the shrink rule has nothing to
+# compare, so only the placeholder rule can decide.
 pr_update("pr-body-placeholder: an MCP update whose body is one 41-character token is allowed", "allow",
           body="A" * 41, live=GHMAIN)
 pr_update("pr-body-placeholder: an MCP update whose body is two words is allowed", "allow",
@@ -10079,8 +10079,7 @@ pr_update("pr-body-placeholder: an MCP update whose body is PLACEHOLDER is denie
           PR_PLACEHOLDER, body="PLACEHOLDER", live=PRBODY_BROKEN)
 
 # A bare variable is the body the shell sends. Each call runs in a fresh shell, so a value an earlier call set is gone:
-# an unset BODY expands to nothing, the body reads as empty, and the placeholder rule denies it. The guard passes each
-# of these forms unjudged today, so each is red.
+# an unset BODY expands to nothing, the body reads as empty, and the placeholder rule denies it.
 PR_BODY_TEXT = "The lane lands the body check."   # a real body, set by a command or by the guard's environment
 BODY_UNSET = {"BODY": None}                      # decide() pops a None value: the guard's environment has no BODY
 pr_edit("pr-body-placeholder: gh pr edit --body \"$BODY\" with BODY unset in the env is denied", "deny",
@@ -10105,36 +10104,68 @@ pr_edit("pr-body-placeholder: gh pr edit --body \"PLACEHOLDER\\$\" is denied, th
         'gh pr edit 5 --body "PLACEHOLDER\\$"', PR_PLACEHOLDER)
 
 # A PowerShell variable is assigned by the same call, and PowerShell names ignore case. A `$body` the call assigns is
-# the body it sends, so it is no placeholder. Each allow is red today: the guard refuses it as a placeholder.
+# the body it sends, so it is no placeholder.
 PS_UNSET = {"BODY": None, "body": None}   # the guard's environment holds no body, under either case of the name
 pr_edit("pr-body-placeholder: PowerShell $body assigned, then gh pr edit --body $body is not denied", "allow",
         '$body = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET, tool="PowerShell")
 pr_edit("pr-body-placeholder: PowerShell $Body assigned, then gh pr edit --body $body is not denied, case-blind",
         "allow", '$Body = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET, tool="PowerShell")
 # A PowerShell `$body` is a session variable, not an environment one, and a fresh call has none, so the body is empty.
-# Control, green today: the guard denies it as a placeholder.
+# Control: the placeholder rule denies that empty body.
 pr_edit("pr-body-placeholder: PowerShell gh pr edit --body $body with no assignment is denied", "deny",
         "gh pr edit 5 --body $body", PR_PLACEHOLDER, env=PS_UNSET, tool="PowerShell")
-# Scope, green today: `$env:BODY` names an environment variable of the call's shell, which this rule does not read, so
-# the call passes unjudged.
+# Scope: `$env:BODY` names an environment variable of the call's shell, which this rule does not read, so the call
+# passes unjudged.
 pr_edit("pr-body-placeholder: PowerShell gh pr edit --body $env:BODY is not denied, "
         "an environment variable is out of scope",
         "allow", "gh pr edit 5 --body $env:BODY", live=GHMAIN, env=PS_UNSET, tool="PowerShell")
-# Control, green today. The literal placeholder is denied in PowerShell too, so the allows above are not green only
-# because PowerShell is out of the rule.
+# Control: the literal placeholder is denied in PowerShell too, so the allows above do not pass only because
+# PowerShell is out of the rule.
 pr_edit("pr-body-placeholder: PowerShell gh pr edit --body PLACEHOLDER is denied", "deny",
         "gh pr edit 5 --body PLACEHOLDER", PR_PLACEHOLDER, env=PS_UNSET, tool="PowerShell")
 # A lone `.` is an argument to ls, not a dot-source, so BODY stays unset for the call and the body reads as empty. The
-# guard reads that `.` as a dot-source that may assign BODY, so it passes the call unjudged today: red.
+# placeholder rule denies the call.
 pr_edit("pr-body-placeholder: ls . && gh pr edit --body \"$BODY\" with BODY unset is denied, "
         "a lone dot is no dot-source",
         "deny", 'ls . && gh pr edit 5 --body "$BODY"', PR_PLACEHOLDER, env=BODY_UNSET)
-# Control, green today: a dot-source at command position may assign BODY, so the call is not judged.
+# Control: a dot-source at command position may assign BODY, so the call is not judged.
 pr_edit("pr-body-placeholder: . ./env.sh && gh pr edit --body \"$BODY\" is not denied, a dot-source may assign",
         "allow", '. ./env.sh && gh pr edit 5 --body "$BODY"', live=GHMAIN, env=BODY_UNSET)
+# The pin: a PowerShell variable is never read from the environment. The guard's environment holds a body under both
+# names, yet `$body` is unset in the call, so the call sends an empty body and the placeholder rule denies it.
+pr_edit("pr-body-placeholder: PowerShell gh pr edit --body $body with body and BODY set in the env is denied, "
+        "a PowerShell variable never reads the env",
+        "deny", "gh pr edit 5 --body $body", PR_PLACEHOLDER, env={"body": PR_BODY_TEXT, "BODY": PR_BODY_TEXT},
+        tool="PowerShell")
+# Forms the guard must not read as an empty body: a scope-qualified or braced assignment, a pipeline variable, a
+# function's `$1`, and a parenthesised expression. Each runs with the live body GHMAIN, so only the placeholder rule
+# could refuse the call, and each must be allowed.
+pr_edit("pr-body-placeholder: PowerShell $script:body assigned on the line before gh pr edit --body $body is not denied",
+        "allow", '$script:body = "%s"\ngh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET,
+        tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell ${body} assigned, then gh pr edit --body $body is not denied",
+        "allow", '${body} = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET,
+        tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell gh pr edit --body $_ in a ForEach-Object block is not denied",
+        "allow", "$bodies | ForEach-Object {\ngh pr edit 5 --body $_\n}", live=GHMAIN, env=PS_UNSET,
+        tool="PowerShell")
+pr_edit("pr-body-placeholder: Bash gh pr edit --body \"$1\" in a function body is not denied",
+        "allow", 'upd() {\ngh pr edit 5 --body "$1"\n}', live=GHMAIN)
+pr_edit("pr-body-placeholder: PowerShell gh pr edit --body (Get-Content body.md -Raw) is not denied",
+        "allow", "gh pr edit 5 --body (Get-Content body.md -Raw)", live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+# Controls: a value a cmdlet sets before the call is the body the call sends, and quoted text is no assignment.
+pr_edit("pr-body-placeholder: PowerShell Set-Variable body, then gh pr edit --body $body is not denied",
+        "allow", 'Set-Variable -Name body -Value "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN,
+        env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell New-Variable body, then gh pr edit --body $body is not denied",
+        "allow", 'New-Variable body "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN,
+        env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell echo '$body = x', then gh pr edit --body $body is denied, "
+        "quoted text is no assignment",
+        "deny", "echo '$body = x'; gh pr edit 5 --body $body", PR_PLACEHOLDER, env=PS_UNSET, tool="PowerShell")
 
-# Controls, green today. A value the command sets before the call is the body the shell sends, so the guard may read
-# it. The value is real words, so no reading of it is a placeholder, and the live body is GHMAIN, so no shrink ask.
+# Controls. A value the command sets before the call is the body the shell sends, so the guard may read it. The value
+# is real words, so no reading of it is a placeholder, and the live body is GHMAIN, so no shrink ask.
 PR_SET_BEFORE = (
     'BODY="%s"; ' % PR_BODY_TEXT,
     "BODY=$(cat f) && ",
