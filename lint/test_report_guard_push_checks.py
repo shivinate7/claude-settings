@@ -753,24 +753,25 @@ class PushCheckTests(unittest.TestCase):
         self.assertIsNone(decision, "the first push of %s on a single-branch clone read its head unknown, not from the "
                           "local commit %s: %s" % (FEAT, head[:7], reason))
 
-    def test_bare_name_with_a_tag_and_a_local_branch_reads_the_branch_unknown(self):
-        # The tag and the local branch share a name, and the branch has no remote-tracking ref, so its head is unnamed.
-        # The name reads unknown: the branch is checked, and the tag does not drop the push.
+    def test_bare_name_with_a_tag_and_a_local_branch_reads_the_local_branch_head(self):
+        # The tag and the local branch share a name, and the branch has no remote-tracking ref. The push sends the
+        # branch, so its local head is read: not the tag's commit, and not unknown.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
-        git_commit(folder, remote_branch=None, on_branch=FEAT)
+        head = git_commit(folder, remote_branch=None, on_branch=FEAT)
         steps = push("", command="git push origin %s" % FEAT)
-        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                           runs=[run_entry(None, sha=head, status="in_progress")])
         decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
         self.assertEqual(decision, "block", "a report-less bare-name push was not blocked (scope check)")
         decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
         self.assertEqual(decision, "block", "a bare-name push of a tag and a local branch of one name passed with no "
-                         "CI line: the branch was dropped for the tag")
-        self.assertIn("CI unknown on " + FEAT, reason,
-                      "the bare-name push is not named unknown on %s: %s" % (FEAT, reason))
-        decision, _, _ = self.stop(turn("> **Done** BUILT abc123\n> **Next** CI unknown on %s" % FEAT, steps),
+                         "CI line: the branch's local head was not read")
+        self.assertIn("CI running on " + head[:7], reason,
+                      "the bare-name push's local branch head is not named running on %s: %s" % (head[:7], reason))
+        decision, _, _ = self.stop(turn("> **Done** BUILT abc123\n> **Next** CI running on %s" % head[:7], steps),
                                    fixture_, folder=folder)
-        self.assertIsNone(decision, "a report that holds the unknown line on %s was blocked" % FEAT)
+        self.assertIsNone(decision, "a report that holds the running line on %s was blocked" % head[:7])
 
     def test_bare_name_with_a_tag_and_a_branch_with_its_remote_ref_names_the_branch_head(self):
         # The tag sits on an older commit than the branch's head, so the head named must be the branch's own. The
