@@ -249,7 +249,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
     releases the lane. A ready pull always holds it. A failed git read reads as not landed;
   - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
     its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
-    The page writes `open` and `closed` only, so only `closed` releases a lane.
+    The page writes `open` and `closed` only, so only `closed` releases a lane;
+  - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main). Such a lane reads a hold line instead.
 
   An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three.
   `no cs-step tag`: the archive guard refuses such a lane. A step id that is off the record branch with no
