@@ -2290,16 +2290,19 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
                 named.append((num, pr))
     def new_to_batch(h):  # the own head's history first: once it holds `h`, the clone holds `h`, so an exit 128 on the base read is a bad base and refuses
         return head_in_history(root, h, info["head"]) and not head_in_history(root, h, base_ref)
-    try:
-        found += [(kind, f"#{num} {'' if kind == 'newhead' else 'changes a guard or check and '}{why}.") for num in sorted(records)
-                  for kind, why in [stale_guard_round(num, records[num], heads, new_to_batch, own=num == n) or (None, None)] if kind]
-    except Exception as e:
-        if not unknown_ok.strip():
-            raise Liftable(f"the round-3 check could not read the history of a stale record's head ({type(e).__name__}: {e}).\n"
-                           f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {READ_CITE}")
-        say(f"merge: round-3 check UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
-        lifted = unknown_ok.strip()
-    if found:  # a lane found owing still refuses when the stale-record read was lifted
+    for num in sorted(records):  # one record per read: the reason flag lifts an unreadable record's read alone, never another record's finding
+        try:
+            kind, why = stale_guard_round(num, records[num], heads, new_to_batch, own=num == n) or (None, None)
+        except Exception as e:
+            if not unknown_ok.strip():
+                raise Liftable(f"the round-3 check could not read the history of a stale record's head ({type(e).__name__}: {e}).\n"
+                               f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {READ_CITE}")
+            say(f"merge: round-3 check UNKNOWN on the record of #{num} ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
+            lifted = unknown_ok.strip()
+            continue
+        if kind:
+            found.append((kind, f"#{num} {'' if kind == 'newhead' else 'changes a guard or check and '}{why}."))
+    if found:  # a lane found owing still refuses when a stale-record read was lifted
         kinds = [k for k in ROUND_REMEDY if any(k == f[0] for f in found)]
         raise RoundOwed(" ".join(f[1] for f in found) + "\n" + " ".join(ROUND_REMEDY[k].format(named=", ".join(f"#{posted} names #{pr}" for posted, pr in sorted(named))) for k in kinds) + f" {ROUND3_CITE}")
     return lifted
