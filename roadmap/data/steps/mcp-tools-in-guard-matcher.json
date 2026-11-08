@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL1BcjeYCubrQhUmWKz",
   "why": "Lane review-record-from-render found that no mcp__github__* tool is in the guard's PreToolUse matcher, so the guard code for MCP merges and draft PRs never ran (coordinator, 17:15 CST Nov 7). A merge through the MCP tool skips the merge guard.",
-  "note": "Done check: a check that fails when a guard handles a tool name the matcher misses, red on main.",
-  "updatedAt": "2026-11-07T17:15:00-06:00"
+  "note": "Done check: a check that fails when a guard handles a tool name the matcher misses, red on main. Sighting (#2284 review, coordinator 14:51 CST Nov 8): mcp__github__merge_pull_request is also missing from the guard matcher, so no merge check runs for the MCP merge tool. This step owns it; the lane confirms its stack (#1601-#1694) adds that tool name, or adds it.",
+  "updatedAt": "2026-11-08T14:53:00-06:00"
 }
