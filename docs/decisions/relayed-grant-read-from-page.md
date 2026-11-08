@@ -43,7 +43,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 - Item 254 (lane review-fix-check): the owner had to type "go" after picking item 231's choice a on the page.
 - Item 242, joyous ruleset: batch runner 9 was refused at 07:47 CST. Measured 2026-11-05 07:58 CST: `answers/joyous-ruleset-shared-form` is gone. The owning session deletes the answer when it routes ("Route and close"). So a reader alone would not have fixed item 242.
 - Item 149 b: the coordinator's `send_message` brief to a lane, which relayed the owner's Queue page save for an auto-mode allow line, was refused as self-modification, 2026-11-01 23:06 CST (time from roadmap step runner-merge-allow, `git show origin/roadmap:roadmap/data/steps/runner-merge-allow.json`). The 2026-11-08 ruling above covers a session that itself reads and counts the page answer. A relayed message still cannot carry it.
-- Source for both: the roadmap step owner-word-relay note (record branch commit dd574d33), and the live read of item 242 at 07:58 CST.
+- Source for the first two bullets: the roadmap step owner-word-relay note (record branch commit dd574d33), and the live read of item 242 at 07:58 CST.
 
 ## Gaps
 
