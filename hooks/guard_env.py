@@ -378,8 +378,12 @@ def _plain_escaped_quotes(cmd: str) -> str:
 # or node heredoc run opens a file as the interpreter does, so it is judged by its STRING LITERALS
 # (guard_core `code_paths` reads them), each read as one path with `env_reference`. Prose that holds
 # the name among other words, an example file and a comment all stay out. A literal that only asks
-# whether the file exists stays out too, as `test -f` does in the shell form. Every other mode,
-# "unknown" too, is refused.
+# whether the file exists stays out too, as `test -f` does in the shell form, and so does a literal
+# that is only text: printed, written as content, dumped as JSON or compared, as `echo` is in the
+# shell form. Every other mode, "unknown" too, is refused.
+
+
+CODE_WORDS = re.compile(r"py|node|bun|deno").search
 
 
 def _literal_refusal(code: str, language: str):
@@ -389,13 +393,15 @@ def _literal_refusal(code: str, language: str):
         return ENV_DEPTH_REASON, "%s code nested past %d levels" % (language, JS_DEPTH)
     for literal, mode in paths:
         named = env_reference(literal.strip())  # a template literal may carry its line breaks
-        if named and mode != "exists":
+        if named and mode not in ("exists", "text"):
             return ENV_CODE_REASON, "%s code holds the path '%s' in a string" % (language, named)
     return "", ""
 
 
 def _code_refusal(text: str):
     """(reason, log) for the `-c` or `-e` code of one text that names an environment file."""
+    if not CODE_WORDS(text):
+        return "", ""   # no interpreter word: nothing to tokenize
     for piece in split_segments(text):
         for segment in _env_parts(piece):
             tokens = segment_tokens(segment)
