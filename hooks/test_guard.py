@@ -103,7 +103,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
-    "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
+    "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
@@ -562,6 +562,49 @@ ARCHREADY_BEHIND = os.path.join(ROOT, "archready-behind")      # an open ready (
 ARCHDRAFT_READFAIL = os.path.join(ROOT, "archdraft-readfail")  # an open draft whose containment read fails
 ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft based on integration/b1, not the default branch
 ARCHDRAFT_LANE_BEHIND = os.path.join(ROOT, "archdraft-lane-behind")  # an open draft on the lane/<slug> head, head behind main
+# The branch read (lane-closes-after-records). The incident: a lane tagged for claude-settings and q_max, its branch pushed
+# to q_max alone. Its fakes name both repos (make_fake_gh's `repos`), and each repo answers for itself.
+ARCH_REPO_SETTINGS = "shivinate7/claude-settings"
+ARCH_REPO_QMAX = "shivinate7/q_max"
+ARCH_BRANCH = "claude/qmax-hosted-db-gate-notes"  # ahead of main in q_max, on no pull request
+ARCH_BRANCH_OTHER = "claude/other-y1"             # another branch of q_max, on an open pull request
+ARCHINC_NOPR = os.path.join(ROOT, "archinc-nopr")              # the branch is ahead in q_max, on no pull request
+ARCHINC_OTHERPR = os.path.join(ROOT, "archinc-otherpr")        # q_max's open pull request is on another branch
+ARCHINC_MERGED = os.path.join(ROOT, "archinc-merged")          # the branch's pull request was merged (a squash: still ahead)
+ARCHINC_CLOSED = os.path.join(ROOT, "archinc-closed")          # the branch's pull request was closed as replaced
+ARCHINC_OPEN = os.path.join(ROOT, "archinc-open")              # the branch's pull request is open
+ARCHINC_BEHIND = os.path.join(ROOT, "archinc-behind")          # the branch is behind main in q_max
+ARCHINC_IDENT = os.path.join(ROOT, "archinc-identical")        # the branch is identical to main in q_max
+ARCHINC_DEFAULT = os.path.join(ROOT, "archinc-default")        # the branch is main, the default of both repos
+ARCHINC_ARCHIVE = os.path.join(ROOT, "archinc-archive")        # the branch is archive/..., ahead in both repos
+ARCHINC_404ALL = os.path.join(ROOT, "archinc-404-all")         # the branch is in neither repo: a 404 in each
+ARCHINC_COMPARE500 = os.path.join(ROOT, "archinc-compare-500") # the compare of the branch in q_max is a server error
+ARCHINC_NETWORK = os.path.join(ROOT, "archinc-network")        # the compare of the branch in q_max is a refused connection
+ARCHINC_PULLS500 = os.path.join(ROOT, "archinc-pulls-500")     # the pull request list of the branch in q_max is a server error
+ARCHINC_PULLSJUNK = os.path.join(ROOT, "archinc-pulls-junk")   # the pull request list of the branch in q_max is not JSON
+ARCHINC_REPO500 = os.path.join(ROOT, "archinc-repo-500")       # q_max's own read, its default branch, is a server error
+ARCHINC_TRUNK = os.path.join(ROOT, "archinc-trunk")            # q_max's default branch is trunk: the branch is ahead of trunk
+ARCHINC_DIVERGED = os.path.join(ROOT, "archinc-diverged")      # the branch diverged from main in q_max, on no pull request
+ARCHINC_REPO404 = os.path.join(ROOT, "archinc-repo-404")       # q_max is named only by a source; its own read answers 404
+ARCHINC_SLOW = os.path.join(ROOT, "archinc-slow")              # two branches of q_max, behind main; each compare of q_max sleeps
+ARCH_SLOW_A = "claude/slow-behind-a"                           # the first slow branch: behind main in q_max
+ARCH_SLOW_B = "claude/slow-behind-b"                           # the second slow branch: behind main in q_max
+
+
+def arch_pair(qmax=None, settings=None):
+    """The incident's two repos, as make_fake_gh's `repos` takes them. claude-settings does not hold the branch (its compare is a
+    404); q_max holds it, ahead of main. A scope given here replaces the default keys of its repo."""
+    return {
+        ARCH_REPO_SETTINGS: dict({"compares": {"main..." + ARCH_BRANCH: "missing"}}, **(settings or {})),
+        ARCH_REPO_QMAX: dict({"compares": {"main..." + ARCH_BRANCH: "ahead"}}, **(qmax or {})),
+    }
+
+
+def arch_row(ref, number, state="open", merged=False):
+    """A pull request row for an arch fixture: its head ref, its number and its state. Its head sha is the number, padded to forty."""
+    return {"number": number, "head": "%040d" % number, "ref": ref, "state": state, "merged": merged}
+
+
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -1054,6 +1097,15 @@ if path:
     for word in state["need"]:
         if ("/" in word and "repos/" + word + "/" not in path) or ("/" not in word and "/pulls/" in path and "/pulls/" + word not in path):
             state["broken"] = True
+    if state.get("repos") is not None:  # per-repo answers: a call to a repo the fixture does not name is a broken tool
+        named = re.match(r"^repos/([^/{}]+/[^/{}]+)(?:/|$)", path)
+        scope = state["repos"].get(named.group(1)) if named else None
+        if scope is None:
+            state["broken"] = True
+        else:
+            state.update(repo_mode=True, others=scope.get("others", []), compares=scope.get("compares", {}),
+                         default_branch=scope.get("default_branch", "main"), repo_error=scope.get("repo_error"),
+                         pulls_error=scope.get("pulls_error"), compare_delay_s=scope.get("compare_delay_s", 0))
 while "-R" in args:
     i = args.index("-R")
     del args[i:i + 2]
@@ -1075,15 +1127,29 @@ else:
     head = state["pr"]["head"]["sha"]
     rows_of = {head: (state["checks"], state["statuses"])}  # the head's own rows; each other open pull request's head has its own
     rows_of.update({o["head"]: (o.get("checks", []), o.get("statuses", [])) for o in state["others"]})
-    if re.fullmatch(r"pulls/\d+", rel):
+    if state.get("repo_mode") and re.fullmatch(r"repos/[^/{}]+/[^/{}]+", path):  # the repo's own read: its default branch
+        if state["repo_error"] == "server":
+            api_error(500, "repo read broke")
+        if state["repo_error"] == "missing":  # the repo is not on GitHub: its own read answers 404
+            api_error(404, "Not Found")
+        print(json.dumps({"full_name": path[len("repos/"):], "default_branch": state["default_branch"]}))
+    elif re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
+        if state.get("pulls_error") and fields.get("state") == state["pulls_error"][0]:  # a list read of that state fails
+            if state["pulls_error"][1] == "server":
+                api_error(500, "pulls read broke")
+            print("<html>a page that is not JSON</html>")
+            sys.exit(0)
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
                        base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main")}},
                        state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
-        rows = [dict(state["pr"], number=state["number"])] + others
+        rows = ([] if state.get("repo_mode") else [dict(state["pr"], number=state["number"])]) + others  # a repo scope holds its own rows only
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
+        if "head" in fields:  # GitHub filters a list read by `head=<owner>:<branch>`: the owner is the repo's, so a bare branch matches none
+            owner, _, branch = fields["head"].partition(":")
+            rows = [row for row in rows if owner == path.split("/")[1] and row["head"]["ref"] == branch]
         print(listing(rows, None, fields, flags, rel=rel))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
@@ -1108,9 +1174,16 @@ else:
             sys.exit(1)
         print(json.dumps(state["required"]))  # the `--jq .contexts` of the protection read: a JSON array of the required names
     elif re.fullmatch(r"compare/.+", rel):  # the containment read of "<base>...<head sha>" (a base may hold a slash): a pair not listed is diverged
+        if state.get("compare_delay_s"):  # a repo's compare reads each sleep first: one budget shared across them runs out
+            time.sleep(state["compare_delay_s"])
         status = state.get("compares", {}).get(rel[len("compare/"):], "diverged")
         if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
             api_error(500, "compare read broke")
+        if status == "missing":  # the branch is not in this repo: GitHub answers 404
+            api_error(404, "Not Found")
+        if status == "network":  # no HTTP status at all: a refused connection
+            print('Get "https://api.github.com/' + rel + '": dial tcp 140.82.112.6:443: connect: connection refused')
+            sys.exit(1)
         print(json.dumps({"status": status}))
     else:
         api_error(404, "Not Found")
@@ -1119,11 +1192,19 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, repos=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `repos`, when given, maps each repo name ("owner/name") to that repo's own answers, for a case whose
+    lane spans repos: `compares` (its containment reads; "missing" is a 404, "network" a refused
+    connection), `others` (its pull requests, rows as `others` takes them), `default_branch` (what its
+    own read names; main when unset), `repo_error` ("server": its own read fails with 500; "missing": with 404), `compare_delay_s` (seconds each of its
+    compare reads sleeps before it answers) and `pulls_error`
+    ([state, "server" or "junk"]: a list read of that state fails). A repo's answers replace the
+    top-level ones for the calls that name it. A call to a repo the map does not name is a broken tool.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -1186,6 +1267,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
+        "repos": None if repos is None else dict(repos),  # None: one repo, the top-level answers; a map: see the docstring
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -1427,6 +1509,33 @@ def build_fixtures():
     # An open draft on the `lane/<slug>` head form, its head behind main: released as the bare-slug draft is.
     make_fake_gh(ARCHDRAFT_LANE_BEHIND, "main", need=["o/r"],
                  others=[dict(slug_head, draft=True, ref="lane/" + ARCHIVE_SLUG)], compares={draft_pair: "behind"})
+    # The branch read: each fake names both repos of the incident (`repos`), so no call may name another.
+    make_fake_gh(ARCHINC_NOPR, "main", repos=arch_pair())
+    make_fake_gh(ARCHINC_OTHERPR, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH_OTHER, 21)]}))
+    make_fake_gh(ARCHINC_MERGED, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 22, state="closed", merged=True)]}))
+    make_fake_gh(ARCHINC_CLOSED, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 23, state="closed")]}))
+    make_fake_gh(ARCHINC_OPEN, "main", repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}))
+    make_fake_gh(ARCHINC_BEHIND, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "behind"}}))
+    make_fake_gh(ARCHINC_IDENT, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "identical"}}))
+    # The default branch is judged by no compare: an unlisted pair is diverged (ahead), so a guard that judged it would refuse.
+    make_fake_gh(ARCHINC_DEFAULT, "main", repos=arch_pair(qmax={"compares": {}}, settings={"compares": {}}))
+    make_fake_gh(ARCHINC_ARCHIVE, "main", repos=arch_pair(qmax={"compares": {"main...archive/claude/x": "ahead"}}))
+    make_fake_gh(ARCHINC_404ALL, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "missing"}}))
+    make_fake_gh(ARCHINC_COMPARE500, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "server"}}))
+    make_fake_gh(ARCHINC_NETWORK, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "network"}}))
+    make_fake_gh(ARCHINC_PULLS500, "main", repos=arch_pair(qmax={"pulls_error": ["all", "server"]}))
+    make_fake_gh(ARCHINC_PULLSJUNK, "main", repos=arch_pair(qmax={"pulls_error": ["all", "junk"]}))
+    make_fake_gh(ARCHINC_REPO500, "main", repos=arch_pair(qmax={"repo_error": "server"}))
+    make_fake_gh(ARCHINC_TRUNK, "main", repos=arch_pair(qmax={"default_branch": "trunk",
+                                                             "compares": {"main..." + ARCH_BRANCH: "behind",
+                                                                          "trunk..." + ARCH_BRANCH: "ahead"}}))
+    make_fake_gh(ARCHINC_DIVERGED, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "diverged"}}))
+    # q_max's own read answers 404: the repo is named only through a source, and it is not on GitHub.
+    make_fake_gh(ARCHINC_REPO404, "main", repos=arch_pair(qmax={"repo_error": "missing"}))
+    # Each compare of q_max sleeps 13s, under MERGE_READ_TIMEOUT (25s) alone. The two branches are behind main, so a
+    # read that runs both sums past one budget. A delay on every call would stretch the run past a minute.
+    make_fake_gh(ARCHINC_SLOW, "main", repos=arch_pair(qmax={
+        "compares": {"main..." + ARCH_SLOW_A: "behind", "main..." + ARCH_SLOW_B: "behind"}, "compare_delay_s": 13}))
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -10042,6 +10151,23 @@ ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
 # A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
 ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
+# The branch read: a lane tagged for both repos of the incident, and the sources its session started on.
+ARCH_INC_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS, "cs-repo:" + ARCH_REPO_QMAX]
+ARCH_QMAX_SOURCE = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX}}
+ARCH_QMAX_SOURCE_GIT = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX + ".git"}}
+
+
+def arch_record(tags, branches=None, sources=None, session=ROLE_OTHER, title="a lane session"):
+    """The target's get_session record, with the fields the branch read takes. `branches` is external_metadata.current_branches
+    (None: the record has no external_metadata at all), and `sources` is session_context.sources (None: no session_context)."""
+    ccr = {"id": session, "title": title, "tags": list(tags), "parent_session_id": "session_PARENT01"}
+    if branches is not None:
+        ccr["external_metadata"] = {"current_branches": branches}
+    if sources is not None:
+        ccr["session_context"] = {"sources": sources}
+    return json.dumps({"ccr": ccr})
+
+
 # A runner record cut short: not JSON, yet it still names the tier, so a substring read would allow it.
 ROLE_CUT = role_result("g1", role_record(RUNNER_TAGS))[:-30]
 # The lane's own record, and the forged text a session's title or data could carry: a closing tag with the real nonce,
@@ -10150,6 +10276,38 @@ ROLE_LINES = {
     "body-int-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
                                                           role_result_block("g1", content=7)]
                           + role_target_call("g2", ARCH_LANE_TAGS),
+    # The branch read. Each target record arrives wrapped, as another session's text does. Its branches are the
+    # values of current_branches; `None` is no branch, and no metadata at all is the record with no branch field.
+    "archive-inc": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-two": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": ARCH_BRANCH_OTHER, "extra": ARCH_BRANCH}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-archive": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": "archive/claude/x"}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-default": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": "main"}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-null": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {"": None}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-empty": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, {}, [ARCH_QMAX_SOURCE]))),
+    "archive-inc-nometa": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, None, [ARCH_QMAX_SOURCE]))),
+    # The branch lives only in q_max, which the record names through its sources: no cs-repo tag names q_max.
+    "archive-inc-source-only": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE]))),
+    # The same lane, its source URL ending in .git: the repo it names is q_max, as the URL without the suffix.
+    "archive-inc-source-git": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE_GIT]))),
+    # Shape drift: current_branches is a list, then a string, where the read takes a map of branch names.
+    "archive-inc-list": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, [ARCH_BRANCH], [ARCH_QMAX_SOURCE]))),
+    "archive-inc-str": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ARCH_INC_TAGS, ARCH_BRANCH, [ARCH_QMAX_SOURCE]))),
+    # One lane on q_max alone, two branches of it, both behind main: the reads are slow, not the answers.
+    "archive-inc-slow": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_QMAX], {"": ARCH_SLOW_A, "extra": ARCH_SLOW_B}))),
 }
 
 
@@ -10573,9 +10731,12 @@ FAMILY = "lane-closes-after-records"
 # the target's newest get_session record in this session's own transcript, as merge-role-proof and
 # trust-card-in-build read theirs:
 #   - the record has no cs-build:lane tag: allow, the target is not a lane;
-#   - a lane, with no record of the target in the transcript: deny, and the remedy steers to get_session;
+#   - a lane, with no record of the target in the transcript: refuse, and the remedy steers to get_session;
 #   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
-#     cs-step slug denies. None allows. A read that cannot run denies: guards fail closed.
+#     cs-step slug refuses. None allows. A read that cannot run refuses: guards fail closed.
+#   - a lane whose record names branches (external_metadata.current_branches): each branch ahead of its repo's
+#     default branch, on no pull request in any state, refuses. A 404 on the branch's compare means the branch is not
+#     in that repo. Any other failed read refuses. A branch equal to the default, or behind it, or archive/..., is skipped.
 # The allows are as load-bearing as the refusals: a false alarm on a finished lane blocks the batch runner.
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_RULE = "lane-closes-after-records"
@@ -10633,7 +10794,7 @@ archive_refuse("no record of the target in the transcript is refused, and the re
 # The calling session's own lane record is not the target's: a lane-tagged own record does not stand for it.
 archive_refuse("an own lane record with no record of the target is refused, and the remedy steers to get_session",
                role_path("archive-own-lane"), fake_gh_path(ARCHCLOSED), carries=ARCHIVE_STEER)
-# A read that cannot run denies: a broken gh, and a missing gh.
+# A read that cannot run refuses: a broken gh, and a missing gh.
 archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
                fake_gh_path(GHBROKEN))
 archive_refuse("a lane with no gh on the path is refused", role_path("archive-lane"), GHNONE_PATH)
@@ -10704,6 +10865,77 @@ archive_refuse("a get_session result whose content is a dict before the lane's r
                role_path("body-dict-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
 archive_refuse("a get_session result whose content is an int before the lane's record: the lane's open pull request refuses",
                role_path("body-int-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+
+# The branch read. The record's current_branches names each branch of the lane. A branch that is ahead of its repo's
+# default branch, on no pull request in any state, refuses the archive. The refusal names that shape, never a branch.
+# Each repo answers for itself: a 404 on a compare means the branch is not in that repo, and any other failed read refuses.
+ARCHIVE_NOPR_PIN = ("has no pull request",)
+ARCHIVE_NO_BRANCH = (ARCH_BRANCH, ARCH_BRANCH_OTHER, "could not be read")  # a no-pull-request refusal names neither branch
+ARCHIVE_READ_LACKS = (ARCHIVE_NOPR_PIN[0], ARCH_BRANCH)  # a read-failure refusal is not the no-pull-request one
+archive_refuse("an incident lane: its branch is ahead of main in q_max, on no pull request, and claude-settings has no such branch: refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+archive_refuse("a lane whose branch has no pull request, while another branch of its repo has an open one: refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OTHERPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+archive_refuse("a lane with two branches, the first on an open pull request and the second on none: refused for the second",
+               role_path("archive-inc-two"), fake_gh_path(ARCHINC_OTHERPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+archive_refuse("a lane whose branch compare in q_max is a server error: refused, and the reason says the branch read failed, not the open list",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE500), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_READ_LACKS + ("open pull requests",))
+archive_refuse("a lane whose branch compare in q_max is a refused connection, not a 404: refused, and the reason says the read failed",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NETWORK), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a lane whose pull request list for its branch in q_max is a server error: refused, and the reason says the read failed",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS500), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a lane whose pull request list for its branch in q_max is not JSON: refused, and the reason says the read failed",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLSJUNK), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a lane whose q_max default branch cannot be read: refused, and the reason says the read failed",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_REPO500), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a lane whose q_max default branch is trunk: its branch is judged against trunk, not main, and refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_TRUNK), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# Allowed: a branch with a pull request in any state, a branch the rule skips, and a record that names no branch.
+archive_allow("an incident lane whose branch has a merged pull request is allowed: a squash leaves the branch ahead",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_MERGED))
+archive_allow("an incident lane whose branch has a closed, unmerged pull request is allowed: it was closed as replaced",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_CLOSED))
+archive_allow("an incident lane whose branch has an open pull request is allowed",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_OPEN))
+archive_allow("a branch named archive/... is skipped, though it is ahead with no pull request",
+              role_path("archive-inc-archive"), fake_gh_path(ARCHINC_ARCHIVE))
+archive_allow("a branch behind main with no pull request is allowed",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_BEHIND))
+archive_allow("a branch identical to main with no pull request is allowed",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_IDENT))
+archive_allow("a branch equal to its repo's default branch is skipped, though the compare would read it diverged",
+              role_path("archive-inc-default"), fake_gh_path(ARCHINC_DEFAULT))
+archive_allow("a branch the compare reads as a 404 in every repo is in none of them: allowed",
+              role_path("archive-inc"), fake_gh_path(ARCHINC_404ALL))
+archive_allow("a null branch value is no branch: allowed, though a read of the null as a branch would find one ahead",
+              role_path("archive-inc-null"), fake_gh_path(ARCHINC_NOPR))
+archive_allow("an empty current_branches names no branch: allowed, and reading it does not fail the archive",
+              role_path("archive-inc-empty"), fake_gh_path(ARCHINC_NOPR))
+archive_allow("a record with no external_metadata is judged as before the branch read: allowed",
+              role_path("archive-inc-nometa"), fake_gh_path(ARCHINC_NOPR))
+# A repo the record names only through session_context.sources is read too: a branch ahead there, on no pull request, refuses.
+archive_refuse("a lane whose branch lives only in a repo its record names through sources, not a cs-repo tag: refused",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A compare that reads diverged is a branch off main that is not in it: ahead of main for the rule, so no pull request refuses.
+archive_refuse("a branch whose compare in q_max is diverged, on no pull request: refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_DIVERGED), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A source URL ending in .git names the same repo: its branch, ahead there on no pull request, refuses as it does without it.
+archive_refuse("a source URL ending in .git names its repo: a branch ahead there on no pull request is refused",
+               role_path("archive-inc-source-git"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A repo named only by a source whose own read answers 404 is unreadable, not skipped: the archive refuses as unreadable.
+archive_refuse("a sources-only repo whose own read answers 404 is refused, and the reason says the read failed",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_READ_LACKS)
+# Shape drift fails closed: a current_branches that is not a map is a shape the read does not know, so it refuses as unreadable.
+archive_refuse("a current_branches that is a list, not a map, is refused, and the reason says the read failed",
+               role_path("archive-inc-list"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+archive_refuse("a current_branches that is a string, not a map, is refused, and the reason says the read failed",
+               role_path("archive-inc-str"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
+# One read budget covers the branch reads (MERGE_READ_TIMEOUT, 25s). Each q_max compare sleeps 13s, under the budget alone;
+# the second outlasts what the first left, so the archive refuses as unreadable. A budget per call would let both through.
+archive_refuse("a lane whose two branch compares outlast one read budget, each under it alone, is refused as unreadable",
+               role_path("archive-inc-slow"), fake_gh_path(ARCHINC_SLOW), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
 
 
 # =========================================================================== 5h. one lane, one topic
