@@ -13544,6 +13544,15 @@ sendto_refuse("a test path read in one clause and fixed in the next, to a builde
 sendto_refuse("a path read in one sentence is carried to Replace it in the next, to a builder, naming test-author",
               SENDTO_BUILDER, "Read tests/x.py. Replace it with the fix.", T_SENDTO_BUILDER, "test-author",
               lacks=("tests/x.py",))
+# Review round 3. A `make sure` is no edit, a run verb's path is not carried to a later fix, and a product path
+# is not cleared by a green word that follows `to`.
+sendto_allow("a make-sure request for a test to pass is no edit, for a builder",
+             SENDTO_BUILDER, "Make sure tests/x.py passes.", T_SENDTO_BUILDER)
+sendto_allow("a run of a test, then a fix of guard.py, is allowed to a builder",
+             SENDTO_BUILDER, "Run tests/x.py. Fix the failure in guard.py.", T_SENDTO_BUILDER)
+sendto_refuse("a product fix whose goal is a test passing, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "Fix guard.py to pass tests/test_guard.py.", T_SENDTO_AUTHOR, "builder",
+              lacks=("guard.py",))
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
