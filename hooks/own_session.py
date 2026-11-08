@@ -97,3 +97,19 @@ def own_session_read(transcript, own_id, created=False):
                     except (ValueError, KeyError, TypeError):
                         continue
     return newest, tagged_after, parent
+
+
+def started_a_session(transcript):
+    """True when the transcript holds a create_session call: a session that started another session is a coordinator.
+    The call counts whatever its result, so the read fails closed. Cost: one transcript read."""
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = json.loads(line)["message"]["content"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if isinstance(content, list) and any(
+                    isinstance(block, dict) and block.get("type") == "tool_use"
+                    and str(block.get("name", "")).endswith("create_session") for block in content):
+                return True
+    return False

@@ -812,8 +812,11 @@ def merge_roles():
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
     "If this session is the batch runner: run get_session (no argument) alone in its own "
-    "turn, then retry. Any other session, the coordinator too: post the review record on the PR for your branch; the batch runner finds it "
-    "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner)."
+    "turn, then retry. If it is owner-started (no parent session, no cs-build tag, and it has started no session): run "
+    "get_session (no argument) alone in its own turn, then record the solo-owner role in a turn of its own. Any other "
+    "session, the coordinator too: post the review record on the PR for your branch; the batch runner finds it "
+    "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner). "
+    "(decision session-tiers, Who started a session decides its merge path)"
 )
 
 
@@ -871,10 +874,14 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript and tier in merge_roles():
-                if tier == SOLO_ROLE:  # owner-started: the own record has no parent and no cs-build tag (ruling tier-boundaries-enforced)
+                # Owner-started: the own record has no parent and no cs-build tag, and the session started no session, since a
+                # session that starts others is a coordinator (ruling "Who started a session decides its merge path", owner
+                # 2026-11-02 15:38 CST, decision session-tiers).
+                if tier == SOLO_ROLE:
                     tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
                     if tags is not None and not tagged_after and parent is None \
-                            and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
+                            and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags) \
+                            and not own_session.started_a_session(transcript):
                         continue
                 else:
                     tags = _own_get_session_tags(transcript, own_id)
@@ -889,26 +896,29 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
 # ---- a raw merge outside the merge tool: the same role check the tool applies before a confirm (rule merge-role-raw)
 RAW_ROLE_REASON = (
     "merge-role-raw: this session's own record does not prove a tier that may merge. In a cloud session only the "
-    "batch runner merges, and the merge tool refuses every other tier before a confirm; a raw `gh pr merge` or the "
-    "host's merge tool gets the same refusal. To gain the merge role, the batch runner starts with `merge --role "
-    "batch-runner`. A lane, coordinator or triage session hands its PR to the batch runner instead: post the review "
-    "record on the PR for your branch; the batch runner finds it (list_sessions, tag cs-build:batch-runner, same "
-    "cs-repo, names the runner). "
+    "batch runner and an owner-started session merge, and the merge tool refuses every other tier before a confirm; a "
+    "raw `gh pr merge` or the host's merge tool gets the same refusal. To gain the merge role, the batch runner starts "
+    "with `merge --role batch-runner`. An owner-started session (no parent session, no cs-build tag) runs get_session "
+    "(no argument) alone in its own turn, then `merge --role solo-owner` in a turn of its own. A lane, coordinator or "
+    "triage session hands its PR to the batch runner instead: post the review record on the PR for your branch; the "
+    "batch runner finds it (list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner). "
     "(decision session-tiers, the coordinator never merges; decision merge-practices)"
 )
 
 
-# The merge role is the one home merge/merge.py read_merge_role: coordinator ruling 2026-11-07 16:32 CST, tier-boundaries-enforced; no get_session tag fallback.
-def raw_role_hit(transcript: str) -> bool:
+# The merge role is the one home merge/merge.py read_merge_role, with no get_session tag fallback (ruling "Who started a
+# session decides its merge path", owner 2026-11-02 15:38 CST, decision session-tiers).
+def raw_role_hit(session_id: str = "") -> bool:
     """True when a raw merge in a cloud session comes from a session the merge tool would refuse. Local sessions are never
     refused here: the tool's role check runs in the cloud only. The role the tool records for this session (read_merge_role)
-    allows; with none, or any load or read failure, the merge is refused.
+    allows; with none, or any load or read failure, the merge is refused. `session_id` is the hook payload's: the hook's env
+    may lack CLAUDE_CODE_SESSION_ID, and in a cloud shell that variable equals it.
     Cost: one module read and one small file read, only on a cloud merge."""
     if not is_cloud():
         return False
     try:
         module = merge_module()
-        if module is not None and module.read_merge_role():
+        if module is not None and module.read_merge_role(session_id if isinstance(session_id, str) else None):
             return False
     except Exception:
         pass

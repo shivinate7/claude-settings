@@ -95,7 +95,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
-                       record (read from the transcript) does not show in its cs-build tags.
+                       record (read from the transcript) does not show in its cs-build tags. The solo-owner
+                       tier needs a record with no parent and no cs-build tag, and no create_session call.
+  merge-role-raw       deny. In a cloud session, a green `gh pr merge` or the host's merge tool from a
+                       session with no merge role the merge tool reads (merge/merge.py read_merge_role),
+                       judged by the payload's session id.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
@@ -3542,7 +3546,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
         # A green head from a cloud session the merge tool would refuse by role (rule merge-role-raw); before the ask.
-        if raw_role_hit(transcript):
+        if raw_role_hit(session_id):
             refuse(tool, "deny", "merge-role-raw", RAW_ROLE_REASON, "gh pr merge " + merging[0])
         # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
         if cite_where and uses_merge_tool(cite_where):
@@ -4870,8 +4874,7 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
-        merge_transcript = payload.get("transcript_path")
-        if raw_role_hit(merge_transcript if isinstance(merge_transcript, str) else ""):  # rule merge-role-raw
+        if raw_role_hit(session_id_of(payload)):  # rule merge-role-raw
             refuse(tool, "deny", "merge-role-raw", RAW_ROLE_REASON, "merge tool")
 
     # The MCP create tool carries its own `draft` field.

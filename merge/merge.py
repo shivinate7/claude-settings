@@ -106,6 +106,7 @@ ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may me
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
+SOLO_CITE = "(decision standing-merge-grant, a session with no coordinator holds the grant only in the repos its record names)"
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
@@ -3199,15 +3200,20 @@ def fix_check_arg(text):
 
 # Each tier that may run `merge <pr> --confirm` in a cloud session, with the env var that holds the id its role file names. The coordinator never merges.
 # batch-runner: the remote session id. solo-owner: the owner-started session's own id; the guard refuses `--role solo-owner` from a lane or a child.
-ROLE_ID_ENV = {"batch-runner": "CLAUDE_CODE_REMOTE_SESSION_ID", "solo-owner": "CLAUDE_CODE_SESSION_ID"}
+SOLO_ROLE = "solo-owner"
+ROLE_ID_ENV = {"batch-runner": "CLAUDE_CODE_REMOTE_SESSION_ID", SOLO_ROLE: "CLAUDE_CODE_SESSION_ID"}
 MERGE_ROLES = set(ROLE_ID_ENV)
+# The repos whose record grants a solo session its merge (decision standing-merge-grant, the bullet "A session with no coordinator").
+# The one source of the solo grant's scope in code: the confirm reads it, and merge/test_merge.py SoloMergeScope holds it to the record.
+SOLO_MERGE_REPOS = frozenset({"shivinate7/claude-settings"})
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
 
-def read_merge_role():
-    """This session's recorded merge role, or None: no file, unreadable or malformed, a tier outside MERGE_ROLES, no id in the env for that tier, or another session's id.
-    Every failure is None, so the check fails closed. An absent id never equals an absent record."""
+def read_merge_role(own_id=None):
+    """This session's recorded merge role, or None: no file, unreadable or malformed, a tier outside MERGE_ROLES, no id for that tier, or another session's id.
+    `own_id` is a hook payload's session_id. It stands for CLAUDE_CODE_SESSION_ID, which a hook's env may lack, so it names the session for a
+    tier keyed on that variable and wins over the env. Every failure is None, so the check fails closed. An absent id never equals an absent record."""
     try:
         data = json.loads(role_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
@@ -3217,8 +3223,17 @@ def read_merge_role():
     role = data.get("role")
     if not isinstance(role, str) or role not in MERGE_ROLES:  # a list is unhashable: test the type first
         return None
-    sid = os.environ.get(ROLE_ID_ENV[role])
+    payload = own_id if isinstance(own_id, str) and own_id and ROLE_ID_ENV[role] == "CLAUDE_CODE_SESSION_ID" else None
+    sid = payload or os.environ.get(ROLE_ID_ENV[role])
     return role if sid and data.get("session") == sid else None
+
+def refuse_solo_outside_scope(root, host):
+    """Stop a solo-owner confirm in a repo SOLO_MERGE_REPOS does not name. The repo is the host's (a PR URL names it), else the checkout's
+    origin (hooks/git_reads.github_repo). A repo that cannot be read is outside the scope, so the check fails closed. Cost: one git start."""
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    repo = getattr(host, "repo", None) or git_reads.github_repo(root) or ""
+    if repo.lower() not in {r.lower() for r in SOLO_MERGE_REPOS}:
+        raise Stop(f"the owner's solo merge grant does not name {repo or 'this repo'}, so ask the owner to merge this PR. " + SOLO_CITE)
 
 def write_merge_role(tier):
     """Record `tier` as this cloud session's merge role, under the id its tier names (ROLE_ID_ENV). Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
@@ -3393,6 +3408,8 @@ def main(argv, host=None, lock=None):
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
             raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR. " + OFF_CITE)
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and read_merge_role() == SOLO_ROLE:
+            refuse_solo_outside_scope(root, h)
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
