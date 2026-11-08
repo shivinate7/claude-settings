@@ -60,7 +60,7 @@ for each doc over 500 words.
 **Overlap.**
 
 - Rule `output-write-in-ste` (write plainly) and decision `plain-prose-lint` (the STE lint is a
-  plain-prose lint). Home: `lint/ste_lint.py`, `lint/ste_gate.py`.
+  plain-prose lint). Home: `lint/ste_lint.py`.
 - Skill `fresh-prose` (prose that stays true).
 - Output style `shiv-stylisms` (short and plain replies).
 - Hook `prose_judge.py` (judges prose edits in decision records).
