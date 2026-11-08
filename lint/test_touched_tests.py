@@ -230,7 +230,8 @@ class Selector(unittest.TestCase):
         return windows, macos, stdout
 
     def include_entries(self, matrix_text):
-        """The matrix's include entries, each as {os, files}: files a sorted list of path strings."""
+        """The matrix's include entries, each as {os, files}. The workflow reads files as text, so files must be a
+        string that decodes to a sorted JSON list of path strings. -> the decoded lists."""
         matrix = self.json_value(matrix_text, "matrix")
         self.assertIsInstance(matrix, dict, f"matrix= is not a JSON object: {matrix_text!r}")
         include = matrix.get("include")
@@ -239,10 +240,13 @@ class Selector(unittest.TestCase):
         for entry in include:
             self.assertIsInstance(entry, dict, f"a matrix entry is not an object: {entry!r}")
             files = entry.get("files")
-            self.assertIsInstance(files, list, f"a matrix entry's files is not a JSON list: {entry!r}")
-            for item in files:
+            self.assertIsInstance(files, str, f"a matrix entry's files is not text, as the workflow reads it: {entry!r}")
+            decoded = self.json_value(files, "matrix files")
+            self.assertIsInstance(decoded, list, f"a matrix entry's files does not decode to a JSON list: {entry!r}")
+            for item in decoded:
                 self.assertIsInstance(item, str, f"a matrix file is not a path string: {item!r}")
-            entries.append({"os": entry.get("os"), "files": sorted(files)})
+            self.assertEqual(decoded, sorted(decoded), f"a matrix entry's files is not sorted: {entry!r}")
+            entries.append({"os": entry.get("os"), "files": decoded})
         return sorted(entries, key=lambda e: str(e["os"]))
 
     def commands_of(self, outputs):
