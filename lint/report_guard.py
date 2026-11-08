@@ -1560,7 +1560,7 @@ _BLOCKER_TAIL = (
 # Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
 # merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
 _BLOCKER_STATES = (
-    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!health )(?<!health-)(?<!connectivity )(?<!tool )(?<!server )(?<!connector )(?<!MCP )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)"
+    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!health )(?<!health-)(?<!connectivity )(?<!connection )(?<!network )(?<!tool )(?<!server )(?<!connector )(?<!MCP )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)"
      % _BLOCKER_TAIL),
     (("pr-merge",), r"(?<![\w.])review\s+is\s+pending"),
     (("pr-merge",), r"(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"),
@@ -1774,8 +1774,10 @@ def _names_rule_id(clause):
     folder (layout.path). Both are read in this file's checkout and in the checkout the global CLAUDE.md points at
     (guard.pointer_checkout): an installed copy holds only the pointer and no decisions. Cost: on the first such slug of
     a hook run, the guard import (cannot_problem needs it next anyway), one read of the pointer, of each rule file and
-    of the layout per checkout; per slug, one file stat per checkout. A guard that does not load prints UNKNOWN and reads this checkout alone. When no checkout's
-    rule files can be read, the slug skips with no note: a guard that cannot read cannot accuse."""
+    of the layout per checkout; per slug, one file stat per checkout. A guard that does not load prints UNKNOWN and
+    reads this checkout alone. A checkout whose layout path does not read uses the layout's default; when that does not
+    read either, the hook prints UNKNOWN and the slug skips. When no checkout's rule files can be read, the slug skips
+    with no note: a guard that cannot read cannot accuse."""
     slugs = [m.group(1).lower() for m in CANNOT_RULE_ID_RE.finditer(clause)]
     if not slugs:
         return False
@@ -1795,16 +1797,23 @@ def _names_rule_id(clause):
                 read = True
             except (OSError, UnicodeDecodeError):
                 continue
-        folders = []  # each checkout's decisions folder, from the layout; a checkout whose layout does not read adds none
+        folders = []  # each checkout's decisions folder: its layout path, else the layout's default path, else unknown
         for root in roots:
-            try:
-                folders.append(os.path.join(root, *layout.path(root, "decisions").split("/")))
-            except (layout.LayoutError, OSError):
-                continue
+            folder = None
+            for read_folder in (lambda: layout.path(root, "decisions"), lambda: layout.kinds()["decisions"]["path"]):
+                try:
+                    folder = os.path.join(root, *read_folder().strip("/").split("/"))
+                    break
+                except (layout.LayoutError, OSError, KeyError):
+                    continue
+            folders.append(folder)
+        if None in folders:
+            print("cannot-claim guard: UNKNOWN, the layout did not read, so a slug in parentheses was not checked "
+                  "against the decisions.", file=sys.stderr)
         _RULE_IDS.append((folders, ids if read else None))
     folders, ids = _RULE_IDS[0]
-    return ids is None or any(slug in ids or any(os.path.isfile(os.path.join(folder, slug + ".md")) for folder in folders)
-                              for slug in slugs)
+    return ids is None or None in folders or any(
+        slug in ids or any(os.path.isfile(os.path.join(folder, slug + ".md")) for folder in folders) for slug in slugs)
 
 
 def _report_label_end(body):
