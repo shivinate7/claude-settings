@@ -72,8 +72,9 @@ whose clause asks for the verdict (VERDICT_ASK_WORDS: whether, if, verify, confi
 label "Unknown:"; VERDICT_WH_WORDS: which or what before the actor, as in "Which check will fail?") is a question, not
 a claim. A send that also fails the owner-question check is refused once, naming both rules, and both checks run
 before that refusal. A send with no forecast word and verdict word exits before any import, transcript read or model
-call. The refusal goes through refuse(), so the owner override lifts it. A source that cannot be read allows, with one
-stderr line.
+call. The refusal goes through refuse(), so the owner override lifts it. A cite whose file cannot be read at head (no
+repo, no such file) backs nothing, so its claim is refused unless a run backs it. A transcript that cannot be read
+allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
@@ -83,8 +84,8 @@ call. A judged item write: one git process, the dedicated Sonnet call, and then 
 Sonnet call than before. A chat box: one git process and one Opus call, as before. Nothing is written but the
 guard.log line of a refusal. test_call_judge.py counts the processes and the calls.
 Cost of the verdict claim rule: a send without both a forecast word and a verdict word costs two regex passes, with no
-import, no process and no model call. A send with both imports lint/stale_cites.py and, for a claim with no cite, reads
-the transcript's turn (one file read); each cite to a file costs one `git show` process. It makes no model call of its
+import, no process and no model call. A send with both imports lint/stale_cites.py and, for a claim that no cite backs
+and that names a file, reads the transcript's turn (one file read per send); each cite to a file costs one `git show` process. It makes no model call of its
 own and writes nothing but a refusal's guard.log line. An owner question that also holds a claim makes its one
 past-ruling call before the refusal, as before.
 
@@ -132,8 +133,8 @@ VERDICT_SUBJECT_WORDS = ("check", "checks", "guard", "guards", "hook", "hooks", 
 VERDICT_OBJECTS = r"(?:it|this|that|them|the send|the change|(?:the |a )?PRs?)\b"
 # A forecast verb with no object ("The test will fail.") counts when it ends the sentence or its clause, or when an
 # open paren ("will fail (see ...)") or closing emphasis ("**The guard will refuse**") follows it. It is no claim
-# before an object that is not listed ("will catch OSError"), so this tail never reads past a word. Named limit: a
-# tail that opens with a preposition or a conjunction ("will fail on the old code", "will fail because ...") is no end.
+# before an object that is not listed ("will catch OSError"), so this tail never reads past a word. Named limit: any
+# word after the bare verb ("will fail on the old code", "will fail because ...", "will fail twice") is no end.
 VERDICT_NO_OBJECT_END = r"(?=\s*(?:[.!?,;:(]|[*_]+(?!\w)|\s[-–—]\s|$))"
 # The one adverb a forecast may carry before its verb ("will probably refuse it"); any word in -ly counts too.
 VERDICT_ADVERBS = ("probably", "still", "also", "never", "then", "definitely", "likely", "surely", "certainly", "just",
@@ -145,6 +146,11 @@ VERDICT_ASK_WORDS = ("whether", "if", "verify", "confirm", "prove", "probe", "fi
 # A wh-word asks only in a sentence that ends in "?" and comes before the actor: "Which check will fail?" asks, while
 # in a statement such as "The check which fails will refuse it." the wh-word is a relative and the claim stands.
 VERDICT_WH_WORDS = ("which", "what")
+# A sentence that opens with one of these and ends in "?" is a yes/no question: "Do you think the guard will refuse it?"
+# asks, whatever sits between the opener and the forecast word.
+VERDICT_QUESTION_OPENERS = ("do", "does", "did", "would", "could", "will", "can", "is", "are", "should")
+# The articles that open the actor phrase: an ask word after one is a modifier of the subject ("The verify hook").
+VERDICT_ACTOR_ARTICLES = ("the", "a", "an")
 SHORT_QUESTION_WORDS = 6  # a question this short or shorter, after a wh-clause, finishes that clause's question
 VERDICT_CLAIM_REMEDY = (
     "this message forecasts what a check will refuse, block, catch, flag, fail, allow or pass, and the turn did "
@@ -544,7 +550,10 @@ _BULLET = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|>)")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _SUBJECT_WORDS = {w.lower() for w in VERDICT_SUBJECT_WORDS if w != "CI"}  # CI counts only in capitals
 # A forecast in a clause that asks for the verdict is a question, not a claim: "Find out if CI will fail it".
-_ASK_WORDS = re.compile(r"\b(?:%s)\b" % "|".join(w.replace(" ", r"\s+") for w in VERDICT_ASK_WORDS), re.I)
+# A word joined by a hyphen is part of a compound noun ("The unknown-reads check"), so it is no ask word.
+_ASK_WORDS = re.compile(r"(?<![\w-])(?:%s)(?![\w-])" % "|".join(w.replace(" ", r"\s+") for w in VERDICT_ASK_WORDS), re.I)
+_ACTOR_ARTICLE = re.compile(_any_re(VERDICT_ACTOR_ARTICLES), re.I)
+_QUESTION_OPENER = re.compile(_any_re(VERDICT_QUESTION_OPENERS), re.I)
 _WH_WORDS = re.compile(_any_re(VERDICT_WH_WORDS), re.I)
 _UNKNOWN_LABEL = re.compile(r"\bunknown\s*$", re.I)  # "Unknown: the check will refuse it" reports a read that did not run
 
@@ -586,12 +595,19 @@ def split_clause(prefix):
 
 
 def is_ask(prefix, question=False):
-    """True when the forecast that ends `prefix` is asked, not claimed: its clause holds an ask word ("Verify the check
-    will pass it", "whether the check will refuse it"), `question` (a "?" ends the sentence's question) and a wh-word sits before
-    the actor ("Which check will fail?"), or a label "Unknown:" opens it."""
+    """True when the forecast that ends `prefix` is asked, not claimed: its clause holds an ask word outside the actor
+    phrase ("Verify the check will pass it", "whether the check will refuse it"; not "The verify hook will refuse
+    it"), a label "Unknown:" opens it, or `question` (a "?" ends the sentence's question) and the sentence opens with
+    an auxiliary or modal ("Do you think the guard will refuse it?") or a wh-word sits before the actor ("Which check
+    will fail?"). This is the one home for the ask test."""
     head, clause = split_clause(prefix)
-    return _ASK_WORDS.search(clause) is not None or _UNKNOWN_LABEL.search(head) is not None \
-        or (question and any(has_subject(clause[wh.end():].split()) for wh in _WH_WORDS.finditer(clause)))
+    articles = list(_ACTOR_ARTICLE.finditer(clause))
+    # The actor phrase starts at the last article of the clause; an ask word before it asks, one inside it names the actor.
+    outside = clause[:articles[-1].start()] if articles else clause
+    opener = _QUESTION_OPENER.match(prefix.lstrip())
+    return _ASK_WORDS.search(outside) is not None or _UNKNOWN_LABEL.search(head) is not None \
+        or (question and (opener is not None
+                          or any(has_subject(clause[wh.end():].split()) for wh in _WH_WORDS.finditer(clause))))
 
 
 def actor_before(prefix):
