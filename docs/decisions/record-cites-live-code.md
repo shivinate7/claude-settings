@@ -15,11 +15,11 @@ Coordinator readings:
 - 2026-11-08 04:03 CST, coordinator reading, process-only (item 386; #1539 is the PR that adds CODE_CLAIM): "Your lane owns stale_cites (CODE_CLAIM), so the guard rides with you (item 386), as a follow-up from #1539's head with `Merge after: #1539`: lane lint runs stale_cites on the PR's own tree (base plus PR), so a cite to a code name missing there is red."
 - 2026-11-08 07:43 CST, coordinator reading, process-only: "go ahead with record-cites-live-code."
 
-Lane pick, 2026-11-08 04:16 CST, under the 04:03 reading: a dead cite has one home, STALE010 (a cite to a Python name missing at head). STALE009 (a report that never fails) covers only a code claim with no cite. A name the range removed stays STALE002 (a cite to a name the range removed from its file). A deleted or renamed path stays STALE001 (a line naming a path the range deleted or renamed).
+Lane pick, 2026-11-08 04:16 CST, process-only, under the 04:03 reading: a dead cite has one home, STALE010 (a cite to a Python name missing at head). STALE009 (a report that never fails) covers only a code claim with no cite. A name the range removed stays STALE002 (a cite to a name the range removed from its file). A deleted or renamed path stays STALE001 (a line naming a path the range deleted or renamed).
 
 ## The mistakes and the harm
 
-- Decision `pr-ledger` (#1419, commit 7156e9a3) said the ledger reads no CI state, but the merge tool reads main's latest CI run (merge/merge.py run_state). A reader who trusts the record misjudges what the tool does.
+- Pull request #1419 at commit 7156e9a3 said the ledger reads no CI state, but the merge tool reads main's latest CI run (merge/merge.py run_state). A reader who trusts the record misjudges what the tool does.
 - #1553 merged a note citing lint/stale_cites.py `CODE_CLAIM` before #1539 added it. CI was green. A dead cite sends the reader to a name that is not there.
 
 Claude writes both in normal work: it states what code does from memory, and it cites names from a branch that has not landed.
@@ -34,8 +34,8 @@ Claude writes both in normal work: it states what code does from memory, and it 
 
 ## Open
 
-- Recall of STALE009 is unmeasured; its known misses are in debt `stale010-class-level-names` and the notes.
-- Dated by: a change to the cite forms the check reads, or STALE009 moving from a report to a finding.
+- Recall of STALE009 is unmeasured; its known misses are in the debt notes (`docs/debts/notes.md`).
+- Dated by: a change to the cite forms under How it works, or STALE009 moving from a report to a finding.
 
 Kind: build
 Plan: docs/decisions/record-cites-live-code.md#how-it-works (all)
