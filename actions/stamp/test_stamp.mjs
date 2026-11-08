@@ -1807,13 +1807,14 @@ const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold", "orphan" or "escape", as h
 // node -e code, by kind. "hold": the child holds the pipe and the command sleeps too. "orphan": the
 // command exits, so the child holds the pipe and its parent pid names a dead process. "escape": the
 // child is detached with no pipe, and the command exits 0, so nothing waits on the child. "grace": as
-// escape, but the child exits 2 s later, inside the watchdog's 3 s grace. "clean": no child at all. Both
+// escape, but the child exits 1 s after its boot, so it is alive at close. That leaves about 2 s of the
+// watchdog's 3 s grace for a slow boot. "clean": no child at all. Both
 // pids go to pidFile first; a clean run writes its own pid twice. Both command lines carry pidFile raw,
 // in a comment, so a check can tell them from a reused pid. JSON.stringify doubles a Windows backslash,
 // so a quoted copy alone would not match.
 function hangCommand(pidFile, kind) {
   const escape = kind === "escape" || kind === "grace";
-  const sleeper = kind === "grace" ? `setTimeout(() => {}, 2000); // ${pidFile}` : `setInterval(() => {}, 1e9); // ${pidFile}`;
+  const sleeper = kind === "grace" ? `setTimeout(() => {}, 1000); // ${pidFile}` : `setInterval(() => {}, 1e9); // ${pidFile}`;
   const spawnOpts = escape ? `{ detached: true, stdio: "ignore" }` : `{ stdio: "inherit" }`;
   const start = kind === "clean" ? "const c = { pid: process.pid };\n"
     : `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], ${spawnOpts});\n${escape ? "c.unref();\n" : ""}`;
