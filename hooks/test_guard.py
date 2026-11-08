@@ -7158,6 +7158,22 @@ sh("push: a new branch at another branch's tip denies, the stray-branch incident
    VCS + " push origin HEAD~1:refs/heads/skc-ste", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
 sh("push: a new branch on top of another branch, a stacked lane, allows",
    VCS + " push origin HEAD:refs/heads/skc-stacked", "allow", cwd=PUSHNEWBR)
+# ALLOW, the exceptions to the new-branch refusal. Each one is judged by its own arm: an existing target,
+# an archive/ name, a source that is a local branch, a source that is not HEAD, and a lease. A source that
+# is HEAD is never judged, so the stacked case above cannot pin the tip test: HEAD~0 can. A plain forced
+# push is refused by the force rule instead, so its case names that rule and not this one.
+sh("push: a push to an existing branch at its own tip, allows",
+   VCS + " push origin HEAD~1:refs/heads/lane/base", "allow", cwd=PUSHNEWBR)
+sh("push: a new archive/ branch at another branch's tip, allows",
+   VCS + " push origin HEAD~1:refs/heads/archive/skc-ste", "allow", cwd=PUSHNEWBR)
+sh("push: a local branch at another branch's tip, named as the source, allows",
+   VCS + " push origin main:refs/heads/skc-localsrc", "allow", cwd=PUSHNEWBR)
+sh("push: a stacked commit named by a sha, not HEAD, allows",
+   VCS + " push origin HEAD~0:refs/heads/skc-stacked-sha", "allow", cwd=PUSHNEWBR)
+sh("push: a lease at another branch's tip, leased, allows",
+   VCS + " push" + LEASE + " origin HEAD~1:refs/heads/skc-lease", "allow", cwd=PUSHNEWBR)
+push_case("a forced push at another branch's tip is refused by the force rule, not the new-branch rule",
+          "--force origin HEAD~1:refs/heads/skc-ste", "deny", cwd=PUSHNEWBR)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
