@@ -7,7 +7,7 @@
 import "../../lint/_test_git.mjs";  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from "node:assert/strict";
 import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, realpathSync, openSync, closeSync } from "node:fs";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -2131,9 +2131,9 @@ test("watchdog, Windows: a go file that cannot be written fails the run before a
 // platform. The env names are spelled here, not imported: a new export would fail the import before
 // any case ran. goChild starts the child the way watchdog() does, with no watchdog above it. HANG
 // scopes the child to the clean fixture, so the child never starts this file again.
-function goChild(dir, goFile) {
+function goChild(dir, goFile, waitMs = "500") {
   const env = { ...process.env, [CHILD]: "1", STAMP_SUITE_RUN: randomUUID(), STAMP_SUITE_GO: goFile,
-    STAMP_SUITE_GO_WAIT_MS: "500", [HANG]: join(dir, "pids"), [HANG_KIND]: "clean" };
+    STAMP_SUITE_GO_WAIT_MS: waitMs, [HANG]: join(dir, "pids"), [HANG_KIND]: "clean" };
   return shSync(process.execPath, [SELF], { env, encoding: "utf8" });
 }
 
@@ -2151,7 +2151,7 @@ test("watchdog, child: a go file that never appears runs no test and fails by na
     const out = `${r.stdout}${r.stderr}`;
     assert.equal(r.signal, null, `the child ended on signal ${r.signal}, not on its own\n${out}`);
     assert.notEqual(r.status, 0, `the child exited 0 with no go file: it ran its tests\n${out}`);
-    assert.match(out, /^FAIL - no go file/m, `the child printed no line starting "FAIL - no go file"\n${out}`);
+    assert.match(out, /^FAIL - no go file at .* after 500 ms,/m, `the child printed no "FAIL - no go file at <path> after 500 ms," line, so the wait knob was not honoured\n${out}`);
     assert.doesNotMatch(out, /^ok - /m, `the child ran a test with no go file\n${out}`);
     assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
   }));
@@ -2174,6 +2174,30 @@ test("watchdog, child: a go file that exists lets the child run its tests and ex
     assert.equal(found.pids.length, 2, `the clean fixture wrote no pid file, so no test ran\n${out}`);
     assert.match(out, /ok - hang fixture \(clean\)/, out);
     assert.equal(r.status, 0, out);
+    assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
+  }));
+
+// A go file written part way through the wait releases the child: the wait ends when the file appears,
+// not at its timeout. A helper process writes the file about 1 s in, under a 3 s wait. The helper is its
+// own process because spawnSync holds this test until the child exits.
+test("watchdog, child: a go file written mid-wait releases the child, which runs its tests and exits 0", () =>
+  withTempDir((dir) => {
+    const goFile = join(dir, "go-mid-wait");
+    assert.equal(existsSync(goFile), false, "scope: the go file must be absent when the child starts, so the child waits");
+    spawn(process.execPath, ["-e", `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(goFile)}, "go"), 1000)`],
+      { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    const pidFile = join(dir, "pids");
+    let r, found;
+    try {
+      r = goChild(dir, goFile, "3000");
+    } finally {
+      found = leftovers(pidFile);
+    }
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(r.signal, null, `the child ended on signal ${r.signal}, not on its own\n${out}`);
+    assert.equal(r.status, 0, `the child exited ${r.status} although the go file was written during its wait\n${out}`);
+    assert.equal(found.pids.length, 2, `the clean fixture wrote no pid file, so no test ran\n${out}`);
+    assert.match(out, /ok - hang fixture \(clean\)/, out);
     assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
   }));
 
