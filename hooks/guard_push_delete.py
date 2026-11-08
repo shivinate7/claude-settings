@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import json
 import os
 import re
 import stat
@@ -374,6 +375,76 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         return ""
     # A -u push of the local name sets that name as the new upstream on purpose (a lane stacked on a lane).
     return "stray" if merge != current() and not upstream else ""
+
+
+# ------------------------------------------------------------------ a push the agent's brief never named
+#
+# MEASURED 2026-11-08 (cloud linux, and macOS per decision a-kill-by-pid-needs-an-owned-pid): an agent's
+# payload `transcript_path` is the main session's `<session>.jsonl`. The agent's spawn brief is the FIRST
+# line of `<that path minus .jsonl>/subagents/agent-<agent_id>.jsonl`, a `type: user` record whose
+# `message.content` is a string or a list of `{type: text, text}` blocks. A later line is never the brief.
+BRIEFED_ROLES = ("builder", "test-author")   # the agent types whose push the brief must name
+BRIEF_LINE_CAP = 1 << 20                     # bytes of the first line this reads; a longer line is unreadable
+_NAME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-")
+_NAME_TAIL = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")
+
+
+def _agent_brief(transcript: str, agent_id: str):
+    """The text of the agent's spawn brief, or None when it cannot be read. One bounded read of the first
+    line of the agent's own transcript file."""
+    if not transcript.endswith(".jsonl") or not agent_id:
+        return None
+    path = os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-" + agent_id + ".jsonl")
+    try:
+        with open(path, "rb") as handle:
+            line = handle.readline(BRIEF_LINE_CAP)
+        if not line.endswith(b"\n") and len(line) >= BRIEF_LINE_CAP:
+            return None
+        record = json.loads(line.decode("utf-8"))
+        content = record["message"]["content"] if record.get("type") == "user" else None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b["text"] for b in content
+                         if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
+    return None
+
+
+def _brief_names(brief: str, name: str) -> bool:
+    """True when `name` stands in `brief` as a whole branch name: the char before it is no name character,
+    and the char after it is the end, no name character, or a `.` or `/` that ends a sentence (the end, or
+    a char that cannot continue a name)."""
+    start = brief.find(name)
+    while start != -1:
+        end = start + len(name)
+        if not (start and brief[start - 1] in _NAME_CHARS):
+            after = brief[end:end + 2]
+            if not after or after[0] not in _NAME_CHARS:
+                return True
+            if after[0] in "./" and (len(after) == 1 or after[1] not in _NAME_TAIL):
+                return True
+        start = brief.find(name, start + 1)
+    return False
+
+
+def push_unbriefed_hit(args, cwd: str, overrides, transcript: str, agent_id: str, agent_type: str) -> bool:
+    """True for a push by a builder or test-author whose brief does not name every branch the push writes
+    (rule push-unbriefed-branch). A forced, deleting, mirror or tags-only push, a push by another agent
+    type or by the orchestrator, a brief or agent id that cannot be read, and a destination that cannot be
+    resolved are all False; the caller sends a forced or dry-run push elsewhere. Cost: one bounded read of
+    the agent's transcript head, only for a builder or test-author push; none otherwise."""
+    role = agent_type.rpartition(":")[2].strip().lower() if isinstance(agent_type, str) else ""
+    if role not in BRIEFED_ROLES or not transcript or not agent_id or push_refspecs(args) is None:
+        return False
+    brief = _agent_brief(transcript, agent_id)
+    if brief is None:
+        return False
+    destinations = push_destinations(args, cwd, overrides)
+    if any(not dest for dest in destinations):
+        return False
+    return any(not _brief_names(brief, dest) for dest in destinations)
 
 
 # ------------------------------------------------------------------ a rewrite and a wide delete
@@ -853,6 +924,11 @@ PUSH_AGENT_REASON = (
     "Rule (Git): this push writes a branch named like an agent worktree (agent-<hex>, claude/agent-<hex> or "
     "worktree-agent-<hex>), not a lane branch (decision plain-push-asks). Push the lane branch by name: "
     "`git push origin HEAD:<lane-branch>`. "
+    "Approving the prompt lets this one push through; it is not a grant."
+)
+PUSH_UNBRIEFED_REASON = (
+    "Rule (Git): the brief this agent was spawned with names no branch this push writes. "
+    "The orchestrator pushes the lane's branch, or re-brief this agent with the branch it may push. "
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ASK_REASON = (

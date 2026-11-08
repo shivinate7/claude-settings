@@ -94,6 +94,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-agent-branch    ask. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. A delete, a mirror and a dry run pass.
+  push-unbriefed-branch ask. A non-forced push by a builder or test-author whose spawn brief does not
+                       name every branch the push writes. Cost: one bounded read of the agent's
+                       transcript head, only on such a push; none otherwise. A brief that cannot be
+                       read passes.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -376,8 +380,9 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_AGENT_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            PUSH_AGENT_REASON, PUSH_REASON, PUSH_STRAY_REASON, PUSH_UNBRIEFED_REASON, cmd_exe_delete_hit,
+            delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_target, push_text,
+            push_unbriefed_hit, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -3248,7 +3253,8 @@ def settle_ask(tool: str, raw: str) -> None:
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
-                background: bool = False, description: str = "") -> None:
+                background: bool = False, description: str = "", agent_id: str = "",
+                agent_type: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -3530,6 +3536,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 elif kind == "stray":
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")
+                # Owner ruling 206 a: a builder or test-author pushes only a branch its brief names. One
+                # push asks once, so a push that already asked above is not judged again.
+                if not kind and push_unbriefed_hit(args, where, overrides, transcript, agent_id, agent_type):
+                    ask_command("push-unbriefed-branch", PUSH_UNBRIEFED_REASON, "git push " + " ".join(args),
+                                "push with no branch in the brief")
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
@@ -4953,7 +4964,10 @@ def judge(payload) -> None:
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
-                        tool_input.get("description") or "")
+                        tool_input.get("description") or "",
+                        agent_id if isinstance(agent_id := payload.get("agent_id"), str)
+                        and AGENT_ID.match(agent_id) else "",
+                        payload.get("agent_type") if isinstance(payload.get("agent_type"), str) else "")
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:
