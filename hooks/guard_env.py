@@ -59,6 +59,7 @@ def names_env_file(name: str) -> bool:
 # A head holds no space, except in a quote that sits inside the word (`C:\"My Dir"\.env`) or in a
 # quoted word that is a rooted path from its first character (`"C:\My Dir\.env"`). Prose before the
 # backslash (`"see C:\MyDir\.env"`) and a regex (`"\d+ \.env"`) have no root, so they stay text.
+# The argument of a PowerShell path command (ENV_PATH_COMMANDS) is no text: none of this applies.
 #
 # The residue, stated rather than hidden: a RELATIVE Windows path whose every segment after the
 # first begins with a dot, such as `foo\.config\.env`, is no longer read as a path. Text alone
@@ -66,6 +67,12 @@ def names_env_file(name: str) -> bool:
 ENV_PATH_PREFIX = re.compile(r"^(\.{1,2}|~|[A-Za-z]:|\S*(/|\\(?![.\\]))\S*)$")
 ENV_QUOTED_ROOT = re.compile(r"^([A-Za-z]:[\\/]|\\\\|~[\\/]|\.{1,2}[\\/]|/)")
 ENV_QUOTED_SPAN = re.compile(r"\"[^\"]*\"|'[^']*'")
+
+# PowerShell commands whose arguments are paths, with their aliases, in lower case. Their backslash
+# is a path separator, never a regex escape.
+ENV_PATH_COMMANDS = frozenset((
+    "get-content", "gc", "cat", "type", "get-item", "gi", "copy-item", "cpi", "copy", "cp",
+    "move-item", "mi", "move", "mv"))
 
 # Runners that read the file into their own environment and echo nothing. `npm` and `npx` reach the
 # flag through node, so `node --env-file=.env <npm-cli.js> run x` is the npm form.
@@ -314,19 +321,24 @@ def _glob_could_name_env(word: str) -> bool:
     return False
 
 
-def _joined_spaces(word: str) -> str:
+def _joined_spaces(word: str, path_arg: bool = False) -> str:
     """Write each space that belongs to a quoted path as NUL, so the head test, which reads `\\S*`,
     keeps the path in one word. Those are the spaces inside a quote within the word, and every space
-    of a quoted word that is a rooted path from its first character. A quoted word with prose or a
-    regex before the backslash keeps its spaces, and the head test then reads it as text."""
+    of a quoted word that is a rooted path from its first character, or any quoted word that is a
+    path argument. A quoted word with prose or a regex before the backslash keeps its spaces, and
+    the head test then reads it as text."""
     if len(word) > 1 and word[0] in "\"'" and word[-1] == word[0] and word.count(word[0]) == 2:
         inner = word[1:-1]
-        return inner.replace(" ", "\0") if ENV_QUOTED_ROOT.match(inner) else inner
+        return inner.replace(" ", "\0") if path_arg or ENV_QUOTED_ROOT.match(inner) else inner
     return ENV_QUOTED_SPAN.sub(lambda m: m.group(0).replace(" ", "\0"), word)
 
 
-def env_reference(word: str) -> str:
+def env_reference(word: str, path_arg: bool = False) -> str:
     """Return the environment file that one shell word names as a path, else ''.
+
+    `path_arg` is set for an argument of a PowerShell command that takes a path (ENV_PATH_COMMANDS).
+    There a backslash is always a separator and a quoted word is one path, so `sub\\.env` and
+    `"My Dir\\.env"` name the file. In any other argument a backslash may be a regex escape.
 
     A reference is the WHOLE BASENAME of the word and never a substring of it. That one property
     keeps `process.env`, `import.meta.env` and `dotenv` out, because in none of them does `.env`
@@ -336,12 +348,12 @@ def env_reference(word: str) -> str:
     `'.e'nv` are `.env`, and so does a backslash that is not an escaped dot, so `.e\\nv` is. A
     glob that starts with a dot and could match a name, such as `.en?` or `.env*`, is the name.
     """
-    word = re.sub(r"[\"'`]", "", _joined_spaces(word)).strip("()")
+    word = re.sub(r"[\"'`]", "", _joined_spaces(word, path_arg)).strip("()")
     for separator in ("/", "\\"):
         head, found, tail = word.rpartition(separator)
         if not found:
             continue
-        if separator == "\\" and not ENV_PATH_PREFIX.match(head):
+        if separator == "\\" and not path_arg and not ENV_PATH_PREFIX.match(head):
             break  # `process\.env` is an escaped dot, not a Windows separator
         word = tail
         break
@@ -524,7 +536,7 @@ def _quoted_words(segment: str):
 
     while i < n:
         char = segment[i]
-        if char == "\\" and i + 1 < n and not (segment[i + 1] in SMART_QUOTES and is_powershell(segment)):
+        if char == "\\" and i + 1 < n and not is_powershell(segment):   # PowerShell: a path character
             plain.append(segment[i:i + 2])
             i += 2
             continue
@@ -664,6 +676,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
+            path_arg = command.lower() in ENV_PATH_COMMANDS and is_powershell(segment)
             patterns, glued = (_pattern_words(words, position, command)
                                if command in ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
                                else (set(), {}))
@@ -679,7 +692,8 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     continue
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
-                named = env_reference(glued[index] if index in glued else rest if assigned else word)
+                named = env_reference(glued[index] if index in glued else rest if assigned else word,
+                                      path_arg)
                 if not named:
                     continue
                 previous = words[index - 1] if index else ""
