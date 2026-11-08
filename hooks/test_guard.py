@@ -3964,6 +3964,16 @@ hm_allow("an agent sets a variable to its own red-run folder, as the red run doe
 hm_allow("a repo under the guard's temp folder runs a variable target no command sets, and the throwaway rule passes it",
          HMADD + '"$S/lane"', cwd=HMTMPREPO)
 
+# A VARIABLE IN -C. The shell expands `$R` in `-C "$R"` before git runs, so a -C target that holds a
+# variable is judged as unknown, and a worktree add that reaches the primary is refused. The assignment
+# may end its segment with `&&` or a newline: both pin the variable target resolved from the same command.
+hm_deny("a -C variable set in the same command, from a folder with no repo, reaches the primary and is refused",
+        "R=" + HMIN + "; " + VCS + ' -C "$R" worktree add ' + HMSCRATCH, cwd=NOGIT)
+hm_deny("a scratch path set with && in the same command, added from the non-temp primary as $S, is refused",
+        "S=" + HMSCRATCH + " && " + HMADD + '"$S"')
+hm_deny("a scratch path set on its own line in the same command, added from the non-temp primary as $S, is refused",
+        "S=" + HMSCRATCH + "\n" + HMADD + '"$S"')
+
 TEMP_DIR = None   # back to the system temp for the sections below
 
 # THE REFUSAL TEXT and THE POINTER REMEDY, judged on the printed reason (see the two checks below).
