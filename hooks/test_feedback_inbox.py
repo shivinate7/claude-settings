@@ -1706,13 +1706,13 @@ SELF = "page-close-writer"  # the session under test; the writer cases name it a
 OTHER_WRITER = "page-close-other-writer"  # a page writer that is not the session under test
 
 
-def writer_names(writer):
-    """The page's writer as page_writer_id reads it: one get of meta/page whose result names `writer`. None gives a
-    meta/page that names no writer."""
+def writer_names(writer, url=None, tool_id="meta1"):
+    """The page's writer as page_writer_id reads it: one get of meta/page at `url`, the waiting page when None, whose
+    result names `writer`. None gives a meta/page that names no writer. Two gets in one transcript need two tool_ids."""
     data = {"writer": writer} if writer is not None else {"title": "Waiting page"}
-    return [used_rec("ArtifactData", {"action": "get", "collection": "meta", "doc_id": "page", "url": PAGE_URL},
-                     tool_id="meta1"),
-            result_rec("meta1", response_of([("page", data)]))]
+    return [used_rec("ArtifactData", {"action": "get", "collection": "meta", "doc_id": "page",
+                                      "url": url or PAGE_URL}, tool_id=tool_id),
+            result_rec(tool_id, response_of([("page", data)]))]
 
 
 def read_back_of_98():
@@ -1806,6 +1806,49 @@ def case_page_close_when_the_page_names_no_writer_blocks():
                  [owner_rec(NEUTRAL)] + writer_names(None) + read_back_of_98() + [close_on_page()])
     expect_send_missing("page: a read-back and a close on a page whose meta names no writer still blocks", p,
                         "fb-0958-7", "98")
+
+
+def case_page_writer_is_the_waiting_pages_own_meta():
+    """The writer is the one the meta/page get at the waiting page's url names. page_writer_id reads the newest
+    meta/page get on any page, so another page's get can decide for the waiting page. Each form reads back item 98
+    and closes it on the waiting page. The first two forms expect a block: the waiting page names this session as no
+    writer, or another writer, and a newer get of another page names this session. The third expects a pass: the
+    waiting page names this session, and a newer get of another page names another. The control is the waiting
+    page's meta naming this session alone, which passes."""
+    forms = (
+        ("no meta on the waiting page, another page's names this session",
+         writer_names(SELF, url=OTHER_PAGE_URL, tool_id="meta2"), True),
+        ("the waiting page names another writer, a newer meta of another page names this session",
+         writer_names(OTHER_WRITER) + writer_names(SELF, url=OTHER_PAGE_URL, tool_id="meta2"), True),
+        ("the waiting page names this session, a newer meta of another page names another",
+         writer_names(SELF) + writer_names(OTHER_WRITER, url=OTHER_PAGE_URL, tool_id="meta2"), False),
+    )
+    for label, metas, should_block in forms:
+        p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL)] + metas + read_back_of_98() + [close_on_page()])
+        name = "page: writer from the waiting page's own meta (%s)" % label
+        if should_block:
+            expect_send_missing(name + ": a close of item 98 still blocks", p, "fb-0958-7", "98")
+        else:
+            expect_silent(name + ": a close of item 98 passes", p)
+    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL)] + writer_names(SELF) + read_back_of_98() + [close_on_page()])
+    expect_silent("page: control, the waiting page's meta names this session alone, the close passes", p)
+
+
+def case_page_close_split_from_its_read_back_blocks():
+    """The read-back of item 98 and the close of it are two calls, and the close is sent before the read-back's result
+    comes back. The guard orders the two by call position, so the close passes though its read-back came after it.
+    Real transcripts put each parallel call in its own assistant record, with the results after them, so this split
+    is the real shape. The control is the same calls with the result back before the close, which passes."""
+    rb = read_back_of_98()
+    split = [owner_rec(NEUTRAL)] + writer_names(SELF) + rb[:1] + [close_on_page()] + rb[1:]
+    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))], split)
+    expect_send_missing("page: a close sent before its read-back's result came back still blocks", p,
+                        "fb-0958-7", "98")
+    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL)] + writer_names(SELF) + read_back_of_98() + [close_on_page()])
+    expect_silent("page: control, the read-back's result back before the close, passes", p)
 
 
 def case_page_send_with_an_error_result_does_not_count():
@@ -3864,6 +3907,8 @@ CASES = (
     case_page_close_before_its_read_back_blocks,
     case_page_close_with_another_page_url_blocks,
     case_page_close_when_the_page_names_no_writer_blocks,
+    case_page_writer_is_the_waiting_pages_own_meta,
+    case_page_close_split_from_its_read_back_blocks,
     case_page_send_with_an_error_result_does_not_count,
     case_page_artifactdata_write_with_an_error_result_does_not_count,
     case_send_with_a_good_result_still_counts,
