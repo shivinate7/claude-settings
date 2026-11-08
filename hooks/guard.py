@@ -3526,9 +3526,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")
                 # Rule reviewed-head-push. Cost: zero gh calls outside a merge-tool repo, for a dry run (skipped by
-                # read_verb above) and for a delete push; one pull request list read per push; one more paged repo-wide
-                # comment read when an open pull request has the destination as its head. Limit: only the current
-                # branch's destinations are checked, never `--all`, `--mirror` or a remote other than origin.
+                # read_verb above), for any push that deletes, for a remote other than origin, for `--all`, `--mirror`
+                # or a tags-only push, and when every destination is a glob or unresolved. Otherwise one pull request
+                # list read per push; one more paged repo-wide comment read when an open pull request has the
+                # destination as its head. Limit: only the current branch's destinations are checked, never `--all`,
+                # `--mirror` or a remote other than origin.
                 elif uses_merge_tool(where) and reviewed_head_push_hit(args, where, overrides):
                     ask_command("reviewed-head-push", REVIEWED_HEAD_PUSH_REASON, "git push " + " ".join(args),
                                 "push onto a reviewed head")
