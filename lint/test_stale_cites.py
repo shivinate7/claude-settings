@@ -2032,10 +2032,9 @@ class RouteClaimTests(StaleCase):
         self.assert_route_claims(rng, flagged)
 
     def test_route_claim_read_or_test_backing_naming_a_file_absent_at_head_is_a_dead_backing(self):
-        """Class (d), a test re-pointed by a ruling. Decision `record-cites-live-code` (claims about code cite live code
-        names): a cite to a code name missing there is red, so a dead cite has one home, STALE010. Decision
-        `stale-cites-at-merge` (stale prose never lands; ruled by the owner) governs it. The node id is that dead cite,
-        so the exit is 1. The read backing names no code name, so it keeps only its STALE005 report."""
+        """A node id that names a file absent at head is a dead cite. The PR adds the line, and STALE010 judges only lines
+        the PR adds, so the node id is a STALE010 finding and the exit is 1. The read backing names no code name, so it
+        keeps only its STALE005 report. Decision `stale-cites-at-merge` (stale prose never lands) governs this."""
         rows = [
             ("- The cloud cannot push to main (read hooks/guard.py:12).", False),  # the file exists at head: backed
             ("- The cloud cannot push to main (read hooks/gone.py:12).", True),  # no such file: a dead backing
@@ -2981,8 +2980,8 @@ def code_claims(out):
 class CodeClaimTests(StaleCase):
     """STALE009, range mode only, report only. An ADDED line of a decision record that states what code does or does
     not do (a code subject and a behaviour verb) must carry a cite, in a STALE002 form. A cite that names nothing
-    bound at head is STALE010 (NameCiteTests), not a report here. The exit code never changes (decision
-    source-prose-lint-ships-dark)."""
+    bound at head is STALE010 (NameCiteTests), not a report here. The exit code never changes: these lines report
+    and do not block."""
 
     def assert_code_claims(self, rng, expected):
         """The exit is 0, the verdict is PASS and no finding prints. The STALE009 report lines are exactly `expected`,
@@ -3023,10 +3022,8 @@ class CodeClaimTests(StaleCase):
         self.assert_code_claims(rng, [(DECISION, 1)])
 
     def test_a_cite_to_a_name_unbound_in_its_file_at_head_is_stale010_and_no_stale009_report(self):
-        """Class (d), a test re-pointed by a ruling: a dead cite moves from a STALE009 report to the STALE010 finding.
-        Decision `record-cites-live-code` (claims about code cite live code names): a cite to a code name missing there
-        is red, and STALE009 keeps only "a code claim with no cite". Decision `stale-cites-at-merge` (stale prose never
-        lands; ruled by the owner) governs it."""
+        """A cite to a name that head does not bind, or to a file head lacks, is a STALE010 finding and no STALE009 report.
+        STALE009 reports only a claim with no cite, so the uncited claim in the same range still reports."""
         cited =[(DEAD_PAREN, "no_such_name"), (DEAD_TICK, "no_such_name"), (GONE_FILE, "lane_lint")]
         rng, _ = self.rows_range([("- " + text, False) for text, _ in cited] + [("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
@@ -3087,10 +3084,8 @@ class CodeClaimTests(StaleCase):
         self.assert_code_claims(rng, [(DECISION, 2)])
 
     def test_report_lines_leave_the_exit_code_at_zero_and_the_verdict_at_pass(self):
-        """Class (d), a test re-pointed by a ruling. STALE009 keeps only "a code claim with no cite", so both lines here
-        stay report lines. A dead cite is STALE010, never a report line (decision `record-cites-live-code`: claims about
-        code cite live code names). Decision `stale-cites-at-merge` (stale prose never lands; ruled by the owner) governs
-        it."""
+        """Both lines are claims with no cite, so both stay STALE009 report lines and the exit stays 0. A dead cite would
+        be a STALE010 finding instead, and that would change the exit."""
         rng, flagged = self.rows_range([("- " + INCIDENT, True), ("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
         rc, out = self.run_check(rng)
