@@ -34,7 +34,7 @@ Rule outcomes-mechanize-rules (turn each rule into a check, and state what the c
 - A Stop that finds a row with a `tool_use_id` also reads the transcript and every file in `<session>/subagents/`, once (debt `refusal-settle-reads`). The cost is unmeasured. A session with no refusal reads none of them.
 - No new process, no timer, no log and no long-lived process.
 
-Proof: `lint/test_report_guard.py` cases `PendingRefusalTests.test_l` to `test_s` prove the once-per-refusal rule. They also prove that an agent's row and a blank reason are never recorded, and that a Stop with no refusals file writes nothing. `hooks/test_refusal_note.py` case `test_cost_one_refusal_creates_exactly_one_file` proves one file per refusal. `lint/test_report_guard.py` case `PendingRefusalTests.test_g_no_refusals_file_is_a_no_op` proves a Stop with no refusals file writes no file. No test counts the stat, so the one stat per Stop is unmeasured.
+Proof: `lint/test_report_guard.py` cases `PendingRefusalTests.test_l` to `test_s` prove the once-per-refusal rule. They also prove that an agent's row is never recorded, that a blank reason is never matched, and that a Stop with no refusals file writes nothing. `hooks/test_refusal_note.py` case `test_cost_one_refusal_creates_exactly_one_file` proves one file per refusal. `lint/test_report_guard.py` case `PendingRefusalTests.test_g_no_refusals_file_is_a_no_op` proves a Stop with no refusals file writes no file. No test counts the stat, so the one stat per Stop is unmeasured.
 
 Kind: process
 Home: hooks/refusal_note.py
