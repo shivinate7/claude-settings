@@ -2291,7 +2291,7 @@ def case_override_ask_cloud_grants_after_an_owner_turn():
                "yes override that", "once", OV_ONCE, transcript=full, remote="cse_seed0001")
 
 
-def case_override_ask_source_gates_the_judge():
+def case_override_ask_source_checks_before_the_judge():
     # A payload source other than the owner's (absent, null or user) never reaches the judge. `source: user` is the control.
     for source in ("loop_wakeup", "schedule_wakeup", "system"):
         ask_no_grant("source %s: `go ahead and override that for 2 hours`" % source,
@@ -2505,7 +2505,7 @@ def main():
         case_override_ask_off_word_leaves_the_override_standing()
         case_override_ask_cloud_seed_never_asks()
         case_override_ask_cloud_grants_after_an_owner_turn()
-        case_override_ask_source_gates_the_judge()
+        case_override_ask_source_checks_before_the_judge()
         case_override_ask_opus_word_never_asks_the_override_judge()
         case_override_ask_quoted_refusal_and_notices_never_ask()
         case_override_ask_pasted_block_is_cut_before_the_judge()
