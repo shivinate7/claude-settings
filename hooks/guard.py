@@ -421,7 +421,8 @@ while True:
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_REASON,
+            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_MONITOR_REASON,
+            WAITER_REASON,
             background_end_hit,
             live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
             narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
@@ -3731,6 +3732,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         poller = loop_condition_polls_a_pattern(segment) or poller
     matched = waiter_verdict(split_segments(stripped), background, monitor)
     if matched:
+        if monitor:
+            refuse(tool, "deny", "waiter", WAITER_MONITOR_REASON, matched)
         if poller:
             refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
         refuse(tool, "deny", "waiter", WAITER_REASON, matched)

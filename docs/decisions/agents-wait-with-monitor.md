@@ -11,9 +11,9 @@ Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-onc
 - `gh run watch` in the foreground or the background (`ci-wait-reads-run-status`, CI waits read the run status);
 - `timeout /t`, which the ruling did not name.
 
-It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background `gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. The remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.
+It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background `gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. In a quoted python, node or perl heredoc body, a `\'` escape keeps the string open (guard_core `_interpreter_text_spans`); its limit is the note `guard-heredoc-os-system`, which says the guard does not read those bodies. The remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.
 
-The guard sees a Monitor call as a Bash call. Monitor's input carries `timeout_ms`, and Bash's carries `timeout`. The guard tells Monitor by `timeout_ms` with no `timeout`, and no `run_in_background`. It then allows poll loops and pauses of any length. `gh pr checks --watch`, `gh run watch` and `timeout /t` stay refused: the two watchers serve a cached status wherever they run. The guard trusts `timeout_ms` because the Bash schema allows no such key. A Bash call with `timeout` is judged as a foreground call.
+The guard sees a Monitor call as a Bash call. Monitor's input carries `timeout_ms`, and Bash's carries `timeout`. The guard tells Monitor by `timeout_ms` with no `timeout`, and no `run_in_background`. It then allows poll loops and pauses of any length. `gh pr checks --watch`, `gh run watch` and `timeout /t` stay refused under Monitor. A watcher polls the API on its own clock (`gh run watch` made 131 calls in 60 s, decision `ci-wait-reads-run-status`), and a CI wait has its own home, the CI-wake notice. Monitor adds no wait the notice lacks. The refusal gives a Monitor-specific reason, `WAITER_MONITOR_REASON`. The guard trusts `timeout_ms` because the Bash schema allows no such key. A Bash call with `timeout` is judged as a foreground call.
 
 Cost: no new process and no new file. The guard reads one more key of the call it already judges.
 

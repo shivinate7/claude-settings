@@ -348,8 +348,8 @@ def waiter_verdict(segments, background: bool, monitor: bool = False) -> str:
     `monitor` marks a Monitor call, which the harness hands to the guard as a Bash call that carries
     `timeout_ms` (decision agents-wait-with-monitor). Monitor is the wait the record allows, so its poll
     loops and pauses of any length pass. `gh run watch`, `gh pr checks --watch` and `timeout /t` stay
-    refused. The two watchers serve a cached status wherever they run. The guard trusts `timeout_ms`
-    because the Bash schema allows no such key.
+    refused, with WAITER_MONITOR_REASON. A watcher polls the API on its own clock, and a CI wait has its
+    own home, the CI-wake notice. The guard trusts `timeout_ms` because the Bash schema allows no such key.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
@@ -408,8 +408,20 @@ WAITER_REASON = (
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
     "epoch with -gt or -ge, or an ISO date-time read against an ISO time with \\>. "
     "A single pause under 25 seconds is allowed in the foreground. Avoid gh pr checks --watch in the "
-    "foreground, which serves a cached status. For a server warm-up, use a "
+    "foreground. For a server warm-up, use a "
     "readiness check such as `curl --retry 5 --retry-connrefused http://localhost:3000`."
+)
+
+# The reason for a Monitor call that is refused for a watcher or a timer command. WAITER_REASON speaks of
+# foreground pauses, and a Monitor call has none. No command form sits in backticks: the remedy check reads
+# those, and the remedy never names the refused command.
+WAITER_MONITOR_REASON = (
+    "a watcher or a timer command in a Monitor call polls the API on its own clock, and a CI wait has its "
+    "own home. "
+    "Remedy: wait for the CI-wake notice that follows gh pr ready, which reads the run's status on a "
+    "back-off schedule. "
+    "To wait for a file, a port or another condition, keep the Monitor call and poll that condition in a "
+    "loop with a short pause."
 )
 
 
