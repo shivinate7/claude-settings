@@ -2444,6 +2444,22 @@ def base_job_caps(root, ref):
         texts.append(text)
     return scan_job_caps(texts)
 
+def apply_cap_floor(root, ref, path, m, deadline_set):
+    """Raise the merge block `m`'s deadlineMinutes to the floor, the largest job cap on `ref` + 5 (at most 360), and print one line for it.
+    A config with a file and one without take the same path. An unknown cap sets no floor, so with `deadline_set` false
+    (the config names no deadline, or there is no config) one line names the unknown jobs."""
+    caps, unknown_caps = base_job_caps(root, ref)
+    if unknown_caps and not deadline_set:  # only the repo's own deadline can outlast an unknown cap
+        say(f"merge: no wait floor for {', '.join(sorted(set(unknown_caps)))}: each timeout-minutes is an expression the merge tool cannot read. "
+            f"Set merge.deadlineMinutes in {path} to at least the real cap + 5 of the slowest of these jobs.")
+    dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
+    floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
+    if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
+        # Wait the floor, never stop: a stop here would block the very PR that raises the deadline.
+        m["deadlineMinutes"] = floor
+        say(f"merge: the largest job timeout-minutes in .github/workflows is {max(caps.values())}, so the wait is {floor} minutes, not {dm}. "
+            f"raise merge.deadlineMinutes in {path} to at least {floor}")
+
 def load_config(root, base, path):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
     No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops."""
@@ -2457,7 +2473,9 @@ def load_config(root, base, path):
     if not listed:
         branch = host_default_branch(root)
         say(f"merge: {path} not found on {ref}. Using the defaults: merge method merge, 45 minute deadline, required checks from branch protection, default branch {branch}.")
-        return {"defaultBranch": branch, "merge": dict(MERGE_DEFAULTS)}
+        defaults = dict(MERGE_DEFAULTS)
+        apply_cap_floor(root, ref, path, defaults, False)
+        return {"defaultBranch": branch, "merge": defaults}
     try:
         c, text = git(root, "show", f"{ref}:{path}")
         if c:
@@ -2473,20 +2491,10 @@ def load_config(root, base, path):
         raise Stop(f"{path} on {ref} has an unknown field in the merge block: {', '.join(unknown)}")
     if not isinstance(m.get("ignoreChecks", []), list):
         raise Stop(f"{path} on {ref}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.")
-    deadline_set = "deadlineMinutes" in m
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
         raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
-    caps, unknown_caps = base_job_caps(root, ref)
-    if unknown_caps and not deadline_set:  # an unknown cap sets no floor, so only the repo's own deadline can outlast it
-        say(f"merge: no wait floor for {', '.join(sorted(set(unknown_caps)))}: each timeout-minutes is an expression the merge tool cannot read. "
-            f"Set merge.deadlineMinutes in {path} to at least the real cap + 5 of the slowest of these jobs.")
-    floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
-    if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
-        # Wait the floor, never stop: a stop here would block the very PR that raises the deadline.
-        m["deadlineMinutes"] = floor
-        say(f"merge: the largest job timeout-minutes in .github/workflows is {max(caps.values())}, so the wait is {floor} minutes, not {dm}. "
-            f"raise merge.deadlineMinutes in {path} to at least {floor}")
+    apply_cap_floor(root, ref, path, m, "deadlineMinutes" in m)
     ne = lambda v: isinstance(v, str) and v.strip()
     # A branch name as `git ls-remote` lists it: no ref path, no glob, and one that `git check-ref-format --branch` takes as is
     # (it turns @{-1} into another name). The regex holds what a git build may take, such as the backslash.
