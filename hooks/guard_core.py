@@ -356,7 +356,8 @@ POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
 COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs",
                     "timeout", "verdict", "python", "python3", "exec", "builtin", "!", "&",
-                    "busybox", "stdbuf", "watch", "taskset", "chrt", "fakeroot", "pkexec", "uv"}
+                    "busybox", "stdbuf", "watch", "taskset", "chrt", "fakeroot", "pkexec", "uv",
+                    "uvx", "nsenter", "chroot", "setpriv", "numactl", "systemd-run", "parallel", "eatmydata"}
 # The flags of a wrapper that take the NEXT word as their value: `nice -n 5 git` runs git, not `5`.
 # Long flags are listed too: `sudo --user root git ...` runs git. A `--flag=value` is one token and
 # needs no entry.
@@ -396,6 +397,9 @@ UV_RUN_VALUE_FLAGS = {
     "--trusted-host", "--config-settings", "--preview-feature", "--preview-features", "--python-preference",
     "--python-fetch", "--torch-backend",
 }
+# `uvx` and `uv tool run` take the options of `uv run` that apply to a tool, plus those of `uvx --help` that
+# `uv run` lacks (read on uv 0.11.32): `--from`, `-c`/`--constraints`, `-b`/`--build-constraints` and `--overrides`.
+UVX_VALUE_FLAGS = UV_RUN_VALUE_FLAGS | {"--from", "-c", "--constraints", "-b", "--build-constraints", "--overrides"}
 # Runners that `wrapped_commands` reads, and the value flags of `stdbuf` (also a wrapper above) and of
 # the runners that are no `COMMAND_WRAPPERS` entry. They sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
@@ -404,7 +408,37 @@ WRAPPER_VALUE_FLAGS.update({
     # word, skipped in `_walk_wrappers`), but `chrt` has deadline times. `uv` reads only `uv [flags] run [flags] cmd`.
     "taskset": set(), "chrt": {"-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"},
     "fakeroot": {"-l", "--lib", "-f", "--faked", "-i", "-s", "-b"}, "pkexec": {"-u", "--user"},
-    "uv": UV_RUN_VALUE_FLAGS,
+    "uv": UV_RUN_VALUE_FLAGS, "uvx": UVX_VALUE_FLAGS,
+    # The runners below start the next word as a program. Each set is read from the tool's own `--help` where it is
+    # installed (nsenter, chroot, setpriv and systemd-run on this machine). A value flag missing from a set makes its
+    # value the command word, which hides the write verb behind it. `nsenter` takes `-S`, `-G`, `-r`, `-w` and each
+    # namespace flag with a glued value only (`--setuid[=<uid>]`), so those are no entry here.
+    "nsenter": {"-t", "--target", "-W", "--wdns"},
+    "chroot": {"--groups", "--userspec"},   # NEWROOT is skipped in `_walk_wrappers`
+    "setpriv": {"--ruid", "--euid", "--rgid", "--egid", "--reuid", "--regid", "--groups", "--inh-caps",
+                "--ambient-caps", "--bounding-set", "--securebits", "--pdeathsig", "--selinux-label",
+                "--apparmor-profile", "--landlock-access", "--landlock-rule", "--seccomp-filter", "--ptracer"},
+    "systemd-run": {"-H", "--host", "-M", "--machine", "-u", "--unit", "-p", "--property", "--description",
+                    "--slice", "--expand-environment", "--service-type", "--uid", "--gid", "--nice",
+                    "--working-directory", "-E", "--setenv", "--path-property", "--socket-property",
+                    "--on-active", "--on-boot", "--on-startup", "--on-unit-active", "--on-unit-inactive",
+                    "--on-calendar", "--timer-property", "--json", "--background"},
+    # `numactl` and `parallel` are not installed here: their sets come from numactl(8) and parallel(1), unchecked
+    # against a binary. `eatmydata` takes no value flag.
+    "numactl": {"-i", "--interleave", "-p", "--preferred", "-P", "--preferred-many", "-m", "--membind",
+                "-N", "--cpunodebind", "--cpubind", "-C", "--physcpubind", "-w", "--weighted-interleave",
+                "-S", "--shm", "-f", "--file", "-M", "--shmmode", "-I", "--shmid", "-o", "--offset",
+                "-L", "--length"},
+    "parallel": {"-j", "--jobs", "--procs", "-P", "--max-procs", "-S", "--sshlogin", "--sshloginfile", "--slf",
+                 "-a", "--arg-file", "--arg-file-sep", "--arg-sep", "-n", "--max-args", "-N", "-L", "-l",
+                 "--max-lines", "-s", "--max-chars", "-I", "-E", "-d", "--delimiter", "-C", "--colsep",
+                 "--header", "--results", "--res", "--joblog", "--tmpdir", "--tmp", "--timeout", "--delay",
+                 "--retries", "--load", "--memfree", "--memsuspend", "--nice", "--halt", "--halt-on-error",
+                 "--workdir", "--wd", "--basefile", "--bf", "--transferfile", "--tf", "--return", "--env",
+                 "--rpl", "--parens", "--block", "--block-size", "--recstart", "--recend", "--tagstring",
+                 "--sql", "--sqlandworker", "--sqlworker", "-J", "--profile", "--group-by", "--sshdelay",
+                 "--ssh", "--limit", "--termseq", "--tmux", "--shuf", "--max-replace-args"},
+    "eatmydata": set(),
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -699,12 +733,16 @@ def _walk_wrappers(tokens):
             if not (index < end and basename(tokens[index]) == "verdict"):
                 return start, tuple(chain), index > end
             index += 1
-        if word in ("taskset", "chrt"):
-            index += index < end   # the CPU mask or the priority
+        if word in ("taskset", "chrt", "chroot"):
+            index += index < end   # the CPU mask, the priority or the new root
         if word == "uv":
+            table = word
+            if index < end and tokens[index] == "tool":   # `uv tool run [flags] cmd` reads its flags as `uvx` does
+                index, _ = _wrapper_flags(word, tokens, index + 1)
+                table = "uvx"
             if not (index < end and tokens[index] == "run"):
                 return start, tuple(chain), index > end   # `uv pip install` runs no program
-            index, _ = _wrapper_flags(word, tokens, index + 1)
+            index, _ = _wrapper_flags(table, tokens, index + 1)
         while index < end and ASSIGNMENT.match(tokens[index]):
             index += 1
     return (index if index < end else None), tuple(chain), index > end

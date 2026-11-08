@@ -445,6 +445,7 @@ _RENAMES_A_COMMAND = re.compile(
     re.IGNORECASE)
 _PARAM_OPERATOR = re.compile(r"\$\{[^}]*@")
 _ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
+_LONG_FLAG_VALUE = re.compile(r"--[A-Za-z][\w-]*=")   # `--user="root"`: the flag and its value are one shell word
 _REDIRECT_CHARS = frozenset("0123456789<>&|")
 _NULL_TARGETS = ("/dev/null", "nul", "$null")
 # A descriptor dup or close after a redirect (`&1`, `&2-`, `&-`) names a descriptor, not a file.
@@ -784,6 +785,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 # A wrapper flag's value is one shell word: `--with "requests>=2"` and `-u "a b"` never split
                 # into pieces, or the resolver would read a piece as the command word.
                 value = _redirect_target_follows(raw, index) or guard_core.wrapper_awaits_value(heads)
+                # A `--name=value` word is one word whatever its quotes: split into pieces, the `root` of
+                # `--user="root"` would read as the command word and hide the write behind it.
+                value = value or bool(_LONG_FLAG_VALUE.match(word))
                 heads.extend([_unquoted(word)] if held_whole or value else pieces)
                 if "'" in word or '"' in word:
                     held.extend(_quoted_commands(word))
