@@ -22648,7 +22648,8 @@ GCX_TEMP = os.path.join(ROOT, "gcx_tmp")  # the temp folder the guard reads for 
 GCX_FIX = {}                           # the fixture's paths, built once by _gcx_fixture
 # Each @NAME in a command becomes the folder it names, so a command reads as the shell would type it.
 GCX_TOKENS = (("@SCRATCH_WT", "scratch_wt"), ("@SCRATCH_CLONE", "scratch_clone"), ("@TMP_CLONE", "tmp_clone"),
-              ("@PRIMARY", "primary"), ("@HOME", "home"), ("@SIB", "sib"), ("@RED", "red"), ("@EMPTY", "empty"))
+              ("@PRIMARY", "primary"), ("@HOME", "home"), ("@SIB", "sib"), ("@RED", "red"), ("@EMPTY", "empty"),
+              ("@LANE", "lane"))
 
 
 def _gcx_fixture():
@@ -22660,6 +22661,9 @@ def _gcx_fixture():
     primary, home, sib, _ = _cross_checkout_fixture(
         "gcx", lanes=("agent-" + GCX_HOME, "agent-" + GCX_SIB), origin=GCX_ORIGIN)
     red = sh_add_lane(primary, "agent-" + GCX_HOME + "-red")[0]
+    # A session's own lane, not an agent's: a top-level call records it as the session's home, and a session
+    # record never names an agent-shaped tree (session_home_agent_tree).
+    lane = sh_add_lane(primary, "lane-gcx")[0]
     pad = os.path.join(GCX_TEMP, "-home-user-claude-settings", GCX_SESSION, "scratchpad")
     scratch_wt = os.path.join(pad, "wt-notes")
     scratch_clone = os.path.join(pad, "clone")
@@ -22674,7 +22678,7 @@ def _gcx_fixture():
         sys.exit("fixture setup failed: the orphan worktree at %r: %s" % (empty, orphaned.stderr.strip()))
     _xcl_clone(scratch_clone, GCX_ORIGIN)
     _xcl_clone(tmp_clone, GCX_ORIGIN)
-    GCX_FIX.update(primary=primary, home=home, sib=sib, red=red, scratch_wt=scratch_wt,
+    GCX_FIX.update(primary=primary, home=home, sib=sib, red=red, lane=lane, scratch_wt=scratch_wt,
                    scratch_clone=scratch_clone, tmp_clone=tmp_clone, empty=empty)
     return GCX_FIX
 
@@ -22695,7 +22699,7 @@ def _gcx_listed(fix):
         return "git worktree list failed: %s" % listed.stderr.strip()
     named = {os.path.realpath(line[len("worktree "):]) for line in listed.stdout.splitlines()
              if line.startswith("worktree ")}
-    for key in ("primary", "home", "sib", "red", "scratch_wt", "empty"):
+    for key in ("primary", "home", "sib", "red", "lane", "scratch_wt", "empty"):
         if os.path.realpath(fix[key]) not in named:
             return "git worktree list does not name the %s checkout" % key
     return ""
@@ -22712,14 +22716,19 @@ def _gcx_scope_problem(fix):
     return _gcx_listed(fix)
 
 
-def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None):
+def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None, scope=None):
     """One case: the verdict on the command TEMPLATE from the folder named CWD_KEY ("home" or "primary"),
     as the agent GCX_HOME, or as a top-level call when AGENT is None. A deny must name other-checkout and
-    no path. An allow must pass."""
+    no path. An allow must pass. SCOPE is the scope check of a top-level row, run where an agent row
+    runs `_gcx_scope_problem`."""
     def check():
         fix = _gcx_fixture()
         if agent:
             problem = _gcx_scope_problem(fix)
+            if problem:
+                return False, problem
+        elif scope:
+            problem = scope(fix)
             if problem:
                 return False, problem
         command = _gcx_command(template)
@@ -22825,6 +22834,75 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a linke
 LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a clone in its own scratchpad is allowed",
                          _gcx_row("allow", "primary", "git -C @SCRATCH_CLONE commit -m x", agent=None,
                                   session=GCX_SESSION)))
+
+# ------------------------------------------------------------------ other-checkout: git -C, round 3
+#
+# Two groups of rows on other_checkout_hit's `git -C` judgment. The verb set leaves out the verbs that change a
+# checkout's files or index without moving a branch (`rm`, `mv`, `update-index`, `read-tree`,
+# `checkout-index`), so `git -C <primary> rm f` passes where `cd <primary> && git rm f` is refused. The rows
+# for that verb set are red on the head. The second group asks that a top-level call's `git -C` into the lane
+# its session record names, from the primary checkout, pass. Today a lone `cd` into that lane passes, and
+# `cd <lane> && git commit` and `git -C <lane> commit` are both refused, so those rows are red for the same
+# reason as the cd form. Whether the chained forms should pass is an open question, not settled by these rows.
+GCX_TOP_SESSION = "gcx-session-0003"  # a session whose top-level call from its own lane records that lane
+
+
+def _gcx_top_lane_scope(fix):
+    """'' when a top-level call from the session's lane is allowed and records that lane as the session's
+    home, else the problem. A top-level row reads its verdict only once this holds."""
+    got, reason = _decide_full("Bash", fix["lane"], session=GCX_TOP_SESSION, temp=GCX_TEMP, command="echo hi")
+    if got != "allow":
+        return "the session's recording call: want allow, got %s (%s)" % (got, reason[:120])
+    if not sh_holds(fix["primary"], GCX_TOP_SESSION, fix["lane"]):
+        return "the session's recording call wrote no session record naming its lane"
+    return ""
+
+
+# Refused: a git verb that changes a checkout's files or index, run by `git -C` into the primary checkout,
+# by an absolute path or a relative one that resolves there.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C rm in the primary checkout, by a relative path that "
+                         "resolves there, is refused",
+                         _gcx_row("deny", "home", "git -C ../../.. rm f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C mv in the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C @PRIMARY mv a b")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C update-index in the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C @PRIMARY update-index --add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C read-tree in the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C @PRIMARY read-tree HEAD")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C checkout-index in the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C @PRIMARY checkout-index -a")))
+# The cd form of the rm row: refused today, and the git -C rm above must be refused the same way.
+LOG_CHECKS_EXTRA.append(("the cd form of the git -C rm row: an agent's cd into the primary checkout, then git rm, is "
+                         "refused",
+                         _gcx_row("deny", "home", "cd @PRIMARY && git rm f")))
+# Allowed: the reads of the primary checkout, by an absolute path and by a relative one.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C ls-files of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "git -C @PRIMARY ls-files")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C ls-files by a relative path to the primary checkout "
+                         "is allowed",
+                         _gcx_row("allow", "home", "git -C ../../.. ls-files")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C status by a relative path to the primary checkout "
+                         "is allowed",
+                         _gcx_row("allow", "home", "git -C ../../.. status")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C rev-parse of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "git -C @PRIMARY rev-parse HEAD")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C show of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "git -C @PRIMARY show HEAD")))
+# The top-level group: a session's `git -C` into the lane its own session record names, from the primary
+# checkout, and its chained `cd` form, are asked to pass. The negative row is green: a sibling agent's home
+# stays refused under the same record. Scope first: the session's recording call from its lane writes the record.
+LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into the lane its session record names, from the "
+                         "primary checkout, is allowed",
+                         _gcx_row("allow", "primary", "git -C @LANE commit -m x", agent=None,
+                                  session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
+LOG_CHECKS_EXTRA.append(("the cd form of the git -C recorded-lane commit: a top-level cd into the lane its session "
+                         "record names, then git commit, is allowed",
+                         _gcx_row("allow", "primary", "cd @LANE && git commit -m x", agent=None,
+                                  session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
+LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a sibling agent's home, with a session record "
+                         "naming another lane, is refused",
+                         _gcx_row("deny", "primary", "git -C @SIB commit -m x", agent=None,
+                                  session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
