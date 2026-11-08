@@ -2969,6 +2969,7 @@ DEAD_PAREN = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/me
 DEAD_TICK = INCIDENT.replace("reads no CI state;", "reads no CI state, as `merge/merge.py` `no_such_name` shows;")
 GONE_FILE = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/gone.py lane_lint);")
 UNCITED = "The guard refuses a push to main."  # a code claim with no cite: STALE009 still reports it
+GUARD_CLASS = "class Guard:\n    def run(self):\n        return 1\n"  # `Guard` binds at module level; `run` is a method
 CLAIM = re.compile(r"^stale-cites: report, (?P<path>[^\s:]+):(?P<line>\d+): STALE009 (?P<text>.*)$", re.M)
 
 
@@ -3156,6 +3157,27 @@ class CodeClaimTests(StaleCase):
         ]
         rng, flagged = self.rows_range(rows)
         self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_live_dotted_cite_on_an_added_decision_line_is_no_missing_cite_and_its_uncited_twin_still_reports(self):
+        """A dotted cite whose first part a head file binds at module level is a cite, in either form (decision
+        `record-cites-live-code`, claims about code cite live code names). The two claim sentences carry one each and are
+        silent. The uncited twin in the same range still reports, so the sentences are judged as claims."""
+        rows = [
+            ("- The guard refuses a push to main, as `lint/x.py` `Guard.run` shows.", False),
+            ("- The guard refuses a push to main, as (lint/x.py Guard.run) shows.", False),
+            ("- " + UNCITED, True),
+        ]
+        text, flagged = rows_text(rows)
+
+        def change(repo):
+            write(repo, DECISION, text)
+            write(repo, "lint/x.py", GUARD_CLASS)
+            commit(repo)
+        rng = self.make_range(base_files(extra={DECISION: "# Heading\n", MERGE_PY: LANE_LINT}), change)
+        self.assertEqual(binding_kind(GUARD_CLASS, "Guard"), "def")  # scope: the first part is bound at module level
+        self.assertIn(DECISION, touched(rng))
+        self.assertIn("lint/x.py", touched(rng))
         self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
 
 
@@ -3421,6 +3443,81 @@ class NameCiteTests(StaleCase):
         # No ls-tree of the tree and no second cat-file. Passes already: a cost pin, not a red case.
         self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
         self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def assert_findings_first(self, rng, expected, cause):
+        """The findings are exactly `expected`, as (path, line, code), and the exit is 1 when any prints, else 0. The
+        findings are checked first, so a failure message names `cause` and not only the exit code."""
+        rc, out = self.run_check(rng)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), sorted(expected), "%s\n%s" % (cause, out))
+        self.assertEqual(rc, 1 if expected else 0, "%s\n%s" % (cause, out))
+        return parse(out)
+
+    def test_a_dotted_cite_whose_first_part_binds_no_name_at_head_is_stale010_even_when_its_last_part_is_bound(self):
+        """A dotted cite `file.py Name.part`, in either form, reads its first part as the name (decision
+        `record-cites-live-code`, claims about code cite live code names). `check` is bound in the file and `Guard` is
+        not, so a reader that takes the last part stays silent and fails here. A file absent at head and an empty file
+        give the same finding. The rows with a comment opener in a span and a lone apostrophe guard the scan."""
+        rows = [
+            ("- (lint/x.py Guard.check)", True),
+            ("- `lint/x.py` `Guard.check`", True),
+            ("- (lint/gone.py Guard.check)", True),
+            ("- `lint/gone.py` `Guard.check`", True),
+            ("- (lint/empty.py Guard.check)", True),
+            ("- Open a comment with `<!--` and cite `lint/x.py` `Guard.check`.", True),
+            ("- Don't count on `lint/x.py` `Guard.check`.", True),
+        ]
+        rng, flagged = self.route_range(rows, extra={"lint/empty.py": ""})
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the last part is bound
+        self.assertIsNone(binding_kind(CODE["lint/x.py"], "Guard"))  # scope: the first part is not
+        self.assertIsNone(binding_kind("", "Guard"))  # scope: the empty file binds nothing
+        self.assertNotIn("lint/gone.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope
+        found = self.assert_findings_first(rng, [(NOTES, n, "STALE010") for n in flagged],
+                                           "a dotted cite with no bound first part is not STALE010")
+        for path, number, code, text in found:
+            self.assertIn("Guard", text, "STALE010 at %s:%d does not name the first part" % (path, number))
+
+    def test_a_dotted_cite_whose_first_part_is_a_module_class_is_silent_and_a_dead_twin_in_the_range_still_prints(self):
+        """A dotted cite whose first part is a class bound at module level is silent, whatever its last part. The live
+        rows name the method `run`, which no module-level name binds, so a reader that looks up the whole dotted name
+        fails here. A dead twin in the same range must still print (decision `record-cites-live-code`). The full-size
+        file reaches the state a long file gives."""
+        big = "".join("def f%d():\n    return %d\n\n\n" % (i, i) for i in range(300)) + GUARD_CLASS
+        rows = [
+            ("- (lint/x.py Guard.run)", False),
+            ("- `lint/x.py` `Guard.run`", False),
+            ("- (lint/big.py Guard.run)", False),
+            ("- Open a comment with `<!--` and cite `lint/x.py` `Guard.run`.", False),
+            ("- Don't count on `lint/x.py` `Guard.run`.", False),
+            ("- (lint/x.py Nope.run)", True),
+        ]
+        rng, flagged = self.route_range(rows, extra={"lint/x.py": GUARD_CLASS, "lint/big.py": big})
+        self.assertEqual(binding_kind(GUARD_CLASS, "Guard"), "def")  # scope: the first part is a module-level class
+        self.assertIsNone(binding_kind(GUARD_CLASS, "run"))  # scope: the last part is a method, no module-level name
+        self.assertGreater(len(big), 8192)  # scope: the full-size file
+        self.assertEqual(binding_kind(big, "Guard"), "def")  # scope: the full-size file binds the class too
+        self.assert_findings_first(rng, [(NOTES, n, "STALE010") for n in flagged],
+                                   "a dotted cite of a module-level class is flagged, or its dead twin is not")
+
+    def test_a_dotted_cite_whose_first_part_the_range_removes_is_stale002_and_a_kept_first_part_stays_silent(self):
+        """STALE002 reads a dotted cite by its first part too (decision `record-cites-live-code`). The range removes
+        `Guard` from the file and keeps `Kept`. The `Guard.run` lines are STALE002, and no STALE010 fires for them
+        because the name is one the range removed. The `Kept.run` lines are silent."""
+        base = GUARD_CLASS + "\n\nclass Kept:\n    def run(self):\n        return 2\n\n\ndef keep():\n    return 1\n"
+        head = "class Kept:\n    def run(self):\n        return 2\n\n\ndef keep():\n    return 1\n"
+        rows = [
+            ("- (lint/x.py Guard.run)", True),
+            ("- `lint/x.py` `Guard.run`", True),
+            ("- (lint/x.py Kept.run)", False),
+            ("- `lint/x.py` `Kept.run`", False),
+        ]
+        rng, flagged = self.route_range(rows, extra={"lint/x.py": base},
+                                        head_change=lambda repo: write(repo, "lint/x.py", head))
+        self.assertEqual(binding_kind(base, "Guard"), "def")  # scope: the base file binds the first part
+        self.assertIsNone(binding_kind(head, "Guard"))  # scope: the head file no longer binds it
+        self.assertEqual(binding_kind(head, "Kept"), "def")  # scope: the kept first part stays bound
+        self.assertIn("lint/x.py", touched(rng))
+        self.assert_findings_first(rng, [(NOTES, n, "STALE002") for n in flagged],
+                                   "a dotted cite of a removed first part is not STALE002, or a kept one is flagged")
 
 
 if __name__ == "__main__":
