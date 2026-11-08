@@ -227,13 +227,35 @@ _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 def _mutates_as_command(command: str, words) -> bool:
     """True when the segment's own command (`command`, its resolved name) changes the files it names:
     a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
-    arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
-    if command in _RUNS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS:
+    arguments counts too, as it always did, so `find -exec rm` stays seen. A shell `-c` script is read at
+    its own command positions, so `bash -c "pytest -k install t.py"` reads and `bash -c "rm x"` writes."""
+    if command in guard_core.INLINE_SCRIPT_SHELLS:
+        return _script_mutates(guard_core.inline_script([command, *words]))
+    if command in _RUNS_ITS_ARGUMENTS:
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
         return any(word in ("mv", "rm") for word in rest[:2])
     return bool(re.fullmatch(MUTATING_COMMAND, command))
+
+
+# A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
+# or a backslash (an escaped quote or separator the split would read wrongly).
+_SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
+
+
+def _script_mutates(script: str) -> bool:
+    """True when a `sh -c` script may change files through a command of its own. No script found, or one
+    with a substitution or group in it, counts as a write, as it always did."""
+    if not script or _SCRIPT_RUNS_HIDDEN.search(script):
+        return True
+    for segment in split_segments(script):
+        command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
+        # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
+        if _mutates_as_command(command, rest) or (
+                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+            return True
+    return False
 
 
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
@@ -630,6 +652,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
     parsed = [[_typed(word, segment) for word in _quoted_words(segment)] for segment in segments]
+    # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
+    # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
+    scripts = ([[_typed(word, segment) for word in _quoted_words(segment, True)] for segment in segments]
+               if command_position else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
@@ -648,11 +674,12 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words, shown = [], []
+        words, shown, script = [], [], []
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
+                script.append('""')
             elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
                 # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
@@ -661,12 +688,14 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = _words_of(word) if _has_quote(word) else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
+                kept = scripts[number][index]
+                script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
-        for script in _powershell_scripts_of(segments[number]):
+        for nested in _powershell_scripts_of(segments[number]):
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
-            hit = _shell_write_hit(script, at, predicate, holds, follow_cd, command_position, predicate_command)
+            hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
             if hit:
                 return hit
         for word in words:
@@ -674,7 +703,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word
     return ""
 
