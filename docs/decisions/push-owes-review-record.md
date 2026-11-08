@@ -77,6 +77,8 @@ The cases are in `hooks/test_guard.py`, section 5f-3 (family `push-owes-review-r
 | H2, merge then push | As H1, with `merge origin/main` before the push | deny, `ask-alone` |
 | H3, pull --rebase then push | As H1, with `pull --rebase` before the push | deny, `ask-alone` |
 | H4, commit; push | As H1, joined by a semicolon | deny, `ask-alone` |
+| H6, builder push from its own worktree | Entry at H, no record. A builder commits past H in its own worktree of the repo and pushes from there | ask |
+| H6t, test-author push from its own worktree | As H6, a test-author pushing a test file | ask |
 | H5, status then push | As H1, with `status` before the push, which moves no HEAD | allow |
 
 ## The misses
