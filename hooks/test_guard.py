@@ -20228,6 +20228,7 @@ add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "d
 # argv starts with git is the rule's read of the origin.
 def lane_cost_run(body):
     """(children, decision, reason, probe error) of one judge run on `body`, judged in the probe with its own folders."""
+    materialize_for(body)  # the probe reads the origin of body's cwd, so that checkout is built first, not by the run loop
     os.makedirs(LB_DIR, exist_ok=True)
     run = tempfile.mkdtemp(dir=LB_DIR)
     try:
@@ -30007,6 +30008,201 @@ FIXTURELESS_CHECKS.add(sim_test_cap_check)
 
 # The SKIP rows join last, so a skip_case anywhere above, the simulator one too, prints its row.
 LOG_CHECKS = LOG_CHECKS + tuple(SKIP_ROWS)
+
+# Log checks that run without materialize_all. Each reads only the fixtures its own case names (decide
+# builds those through materialize_for), or none. A label is listed only after its check passed alone in a
+# fresh process with no blanket build. A check that goes red once listed needed a fixture: unlist it.
+_FIXTURELESS_LABELS = (
+    # family branch-worktree
+    'liveness: session_is_live carries True/False/None, never coercing unreadable to False',
+    'liveness: session_is_live reads an implied backwards clock step as unreadable, not dead',
+    'liveness: session_is_live says True for a repeated-hour start (01:30 CDT) in Chicago',
+    'liveness: session_is_live says True for a repeated-hour start (01:30 CST) in Chicago',
+    'liveness: worktree_live_session answers None on an unreadable record under target',
+    "liveness: worktree_live_session answers None when the identity fallback can't tell",
+    'liveness: worktree_live_session matches two spellings of one identity as under target',
+    'log: a forced worktree remove with an unreadable subject is still noted',
+    'log: a quoted or abbreviated force on a worktree remove is still noted',
+    'log: an unforced worktree remove with an unreadable subject records no note',
+    'per-file kill: log: a quoted or abbreviated force on a worktree remove is still noted',
+    # family builder-refuse
+    'builder-refuse: a builder that merges the lane tip and changes product files only is allowed and logs no builder-diff line',
+    "builder-refuse: a builder that pulls a test-author's fast-forward over its own product commit, then commits product work, is allowed and logs no builder-diff line",
+    'builder-refuse: a builder that rebases onto a lane tip and changes product files only is allowed and logs no builder-diff line',
+    'builder-refuse: a builder that resets to the lane tip and changes product files only is allowed and logs no builder-diff line',
+    'builder-refuse: a builder with its own product commit that then merges the lane tip is allowed and logs no builder-diff line',
+    "builder-refuse: a builder's cherry-pick of a test-author's commit is allowed and logs no builder-diff line",
+    "builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit, then a commit, is denied at push and at the first stop",
+    "builder-refuse: a builder's clean merge of main, where each side changed a different test file, is allowed and logs no builder-diff line",
+    "builder-refuse: a builder's conflicted merge of a product file, both sides changed it, is allowed and logs no builder-diff line",
+    "builder-refuse: a builder's conflicted merge of a test file, which it then resets away, is allowed and logs no builder-diff line",
+    "builder-refuse: a builder's squash merge of a test-author's lane is denied at push and at the first stop",
+    'builder-refuse: a deny on a test edit that matches neither of two received bases names no path or commit, and gives both undo routes',
+    'builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at push and stop, and logs no builder-diff line',
+    "builder-refuse: a pull --rebase onto main where a test-author's commit and main change the same test file in different hunks is allowed and logs no builder-diff line",
+    "builder-refuse: a rebase -i that squashes a fixup of the builder's product commits is allowed at commit, push and stop, and logs no builder-diff line",
+    'builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only',
+    "builder-refuse: a rebase onto main where a test-author's commit and main change the same test file in different hunks is allowed and logs no builder-diff line",
+    "builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing",
+    "builder-refuse: after a rebase, main's bytes written back over a test file and committed are denied at push and at the first stop",
+    # family diff
+    "author-diff: a test-author's mutation test edit logs no author-diff line",
+    "builder-diff: main's later tests merged into a long-lived worktree log nothing",
+    "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff",
+    # family env
+    'playwright: the refusal names the stale __dirlock and pgrep, and no other path',
+    # family fail-closed
+    "audit-high fail-closed list: FAILCLOSED_MODULES matches the guard's own constant",
+    # family frozen
+    'log: a project config edit is allowed and noted',
+    'log: one line per refusal and none for an allow',
+    'log: the refused file is named in the log and nowhere else',
+    # family handoff-unread
+    'handoff-unread: PostCompact sets the flag, Bash is refused, a Read of the handoff clears it, Bash is allowed',
+    'handoff-unread: an owner override lifts the refusal once, and the spent override refuses again',
+    'handoff-unread: importing reread_check does not end the process when precompact_handoff cannot import',
+    # family impeccable
+    'impeccable: settings.json names no impeccable plugin',
+    # family kill
+    'liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago',
+    'liveness: process_start_ms reads a repeated-hour start (01:30 CST) as its instant, in Chicago',
+    'liveness: process_start_ms splits alive/dead/unreadable apart',
+    'liveness: windows arm splits dead (error 87) from unreadable (error 5)',
+    # family mask-script
+    'guard-command-position: speed, a run of contraction pairs, judged in under 1 s CPU',
+    'guard-command-position: speed, a run of lone apostrophes, judged in under 1 s CPU',
+    'mask_script: 64 KB of nested closed templates stays under 200 MB',
+    'mask_script: normal scripts with escaped quotes keep their masks',
+    'mask_script: unclosed backtick quote then backslashes returns within 1 s',
+    'mask_script: unclosed double quote then 64 KB of escaped quotes returns within 1 s',
+    'mask_script: unclosed double quote then backslashes returns within 1 s',
+    'mask_script: unclosed single quote then backslashes returns within 1 s',
+    'split cache: the PowerShell flag is part of the split, not only the command',
+    # family merge
+    "merge-checks: a gh that never answers still denies, well inside the hook's 60s budget",
+    # family misc
+    'hand-made worktree: the pointer remedy names EnterWorktree, not worktree add',
+    'hand-made worktree: the refusal text points to isolation and EnterWorktree, names no target',
+    'roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default for bare only, no read for a literal destination, and reads the transcript only at the record branch',
+    # family model-cap
+    'cap: the printed reason is bounded, single-line and marks a cut',
+    'log: a cap lift is asked and logged with its file and value',
+    'log: a cap lift under a deep path still logs the model',
+    # family option-letter-keys
+    "option letter keys: a comment copy of letterOf does not stand for the page's line",
+    'option letter keys: a lone quote in a comment does not hide letterOf',
+    'option letter keys: a template literal copy of letterOf fails the check as ambiguous',
+    "option letter keys: the page's letterOf and NONE are the letters the guard checks",
+    # family override
+    'opus override: `opus 15m` lasts fifteen minutes and `opus off` ends it',
+    "opus override: `opus 2h` lets an Opus spawn through, an agent's too, until it ends",
+    'opus override: `opus builders 2h` lifts only builder spawns',
+    'opus override: an ambiguous prompt grants nothing',
+    'opus override: an unreadable or misshapen override file is no override',
+    'opus override: it covers only the session that typed it',
+    'opus override: the grant, each lift and the end each write one log line',
+    'override: `override off` ends an override at once',
+    "override: a builder's test change stays refused under a one-act override",
+    "override: a builder's test change stays refused under a timed override",
+    'override: a call that read a one-act override before it was spent is refused',
+    'override: a drifted agent stays refused as worktree-home under a timed override',
+    'override: a kill of pid 0, 1 or -1 stays refused under a one-act override',
+    'override: a kill of pid 0, 1 or -1 stays refused under a timed override',
+    'override: a kill of pid 1 ends with the no-override line',
+    'override: a lifted act writes one log line naming override and its rule',
+    'override: a one-act override lets an Opus spawn through once, then it is refused again',
+    'override: a one-act override lets through a kill of a pid list that pgrep made once, then it is refused again',
+    'override: a one-act override lets through a kill of a pid this session did not start once, then it is refused again',
+    'override: a one-act override lets through a killall by name once, then it is refused again',
+    'override: a one-act override lets through a pkill by name once, then it is refused again',
+    'override: a one-act override that nothing uses ends after 10 minutes',
+    'override: a refusal no override lifts stays when chained with one an override lifts, one-act override',
+    'override: a refusal no override lifts stays when chained with one an override lifts, timed override',
+    'override: a shell write of the agent model cap stays asked under a one-act override',
+    'override: a shell write of the agent model cap stays asked under a timed override',
+    'override: a timed override lets an Opus spawn through until it ends',
+    'override: a timed override lets through a kill of a pid list that pgrep made until it ends',
+    'override: a timed override lets through a kill of a pid this session did not start until it ends',
+    'override: a timed override reaches an agent until it ends',
+    'override: a write of the config settings ends with the no-override line',
+    'override: an agent never spends a one-act override',
+    'override: an override covers only the session that typed it',
+    'override: an unreadable override file is no override, and garbage text logs override-unread',
+    'override: frozen-path and git-env-set stay refused under a one-act override',
+    'override: frozen-path and git-env-set stay refused under a timed override',
+    'override: processes racing take() for one one-act override, exactly one gets it',
+    'override: settings.json denies neither pkill nor killall',
+    'override: two calls racing for one one-act override, exactly one gets it',
+    # family page-item-design
+    'page-item-design: a partial update with designs and no options is not judged: one noted line, no checker call',
+    'page-item-design: a partial update with options and no designs is not judged: one noted line, no checker call',
+    'page-item-design: an update that carries both options and designs is judged',
+    # family paths
+    'designer-diff: a design-folder diff logs no designer-diff line',
+    'designer-diff: a product path is logged at commit, push and stop',
+    'designer-scope: an unread layout allows no path',
+    'powershell: a backslash path survives tokenizing, a Bash one does not',
+    'split_segments: a comment starting a word ends its line, letter-before-# and quoted-# stay literal',
+    'trim: a guard crash fails open and logs a crash line',
+    # family port-question
+    'port question: an ArtifactData get is allowed and writes no guard.log line',
+    # family rm-var
+    'rm-var: 2000 unclosed $( spans are judged in under 2 s',
+    'rm-var: 4000 assignments and 4000 targets with pwd scale linearly in CPU',
+    'rm-var: 4000 bindings and 4000 flagged deletes scale linearly in CPU',
+    'rm-var: 64000 bindings before a delete scale linearly in CPU',
+    'rm-var: the taint spellings name the literal path at the assigned-value reader, never ${NAME:?}',
+    # family role-model
+    'role-model: an owner override lifts a test-author on sonnet once, then refuses again',
+    'role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)',
+    'role-model: opus test-authors 2h lifts a test-author on opus, and no builder',
+    'role-model: the no-model refusal stays under an owner override, and spends none',
+    'role-model: the typed override lifts a Workflow builder on opus with a variable brief, once',
+    # family rule9
+    'lane-repo-tag: a Read call starts no git process',
+    'lane-repo-tag: a non-lane create_session starts no git process',
+    # family session-log
+    "session-log: a guard crash line's time carries the colon UTC offset",
+    'session-log: a stale guard_core lacking both names still judges, and its line has five fields',
+    'session-log: an unwritable log never raises and never changes the verdict',
+    "session-log: every decision line ends in the hook's session_id",
+    'session-log: record() writes its time with a colon UTC offset',
+    'session-log: the column is the placeholder, or the id stripped and capped at 64',
+    "session-log: the environment's session id is never read",
+    'session-log: the writer with no session argument writes a six-field line',
+    # family shared-tree
+    'log: an unreadable subject is allowed and noted',
+    'stack: the refusal never names the action it refused',
+    # family worktree-home
+    'other-checkout: an owner override lifts a Write into a separate clone',
+    'other-checkout: an owner override lifts a cd into a separate clone',
+    "other-checkout: an owner override lifts a stranded cwd's relative write",
+    'worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise',
+    # family wsl
+    'wsl: a PowerShell script tag keeps its backslashes in segment_tokens',
+    'wsl: a split segment keeps the PowerShell tag its script had',
+    # family lane-closes-after-records
+    'lane-closes-after-records: a lane archive reads the open pull requests in one gh call',
+    'lane-closes-after-records: a non-lane archive makes no gh call',
+)
+# The simulator section registers these only where os.name != "nt" (its POSIX fakes), so Windows has none of them.
+_FIXTURELESS_POSIX_LABELS = (
+    # family simulator
+    'simulator: a held-lease allow of two leases makes two lease reads, one ps per lease (ruling 7)',
+    'simulator: a launch of a booted device makes no lease read (ruling 7)',
+    'simulator: an owner override lifts a raw boot once (a one-act override)',
+    'simulator: an owner override lifts a raw boot until it ends (a timed override)',
+    'simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)',
+    'simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)',
+    "simulator: the lease fixtures' fake ps answers each named pid's start and no other",
+    "simulator: the lease read writes nothing: a dead lease is refused and sim-lease's files keep their bytes",
+)
+_WANTED = set(_FIXTURELESS_LABELS) | (set(_FIXTURELESS_POSIX_LABELS) if os.name != "nt" else set())
+_LABELS_NOW = {label for label, _ in LOG_CHECKS}
+_MISSING = [label for label in _WANTED if label not in _LABELS_NOW]
+if _MISSING:
+    sys.exit("fixture setup failed: FIXTURELESS labels not in LOG_CHECKS: %s" % sorted(_MISSING))
+FIXTURELESS_CHECKS.update(check for label, check in LOG_CHECKS if label in _WANTED)
 
 # Log checks in the literal and the appended extras are tagged by section above. These prefixes give
 # each one its rule's family instead, so GUARD_FAMILY=<rule> runs its log checks too. A prefix that
