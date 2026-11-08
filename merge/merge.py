@@ -2752,7 +2752,7 @@ def prose_judge_calls(decision_watch, prompts):
 def prose_judge_run(plan, n):
     """Report-only (outcomes-mechanize-rules), after the lock is released: one decision_watch.invoke_model call per job in `plan`, all at once (prose_judge_calls), looked up
     at call time. A verdict maps to its line by (path, line). -> the report lines: one per line the model calls stale or unbacked, at most PROSE_JUDGE_MAX_LINES, then one count line for
-    the rest; then, for each line not judged, one named line per file per cause (path and line numbers, causes in PROSE_JUDGE_CAUSES order; they do not count against that cap), then one UNKNOWN count line by cause. Neither carries raw error text. A plan-level failure line names its exception type and message. Nothing here refuses a merge or writes a file."""
+    the rest; then, for each line not judged, one named line per file per cause (path and line numbers, causes in PROSE_JUDGE_CAUSES order; they do not count against that cap), then one UNKNOWN count line by cause. Neither carries raw error text. A plan-level failure line, or one for calls that could not start, names its exception type and message; the lines of those jobs are then a model error. Nothing here refuses a merge or writes a file."""
     findings = []
     plan_failures = []  # a plan-level UNKNOWN line stands alone, whole
     counts = dict.fromkeys(PROSE_JUDGE_CAUSES, 0)
@@ -2761,9 +2761,13 @@ def prose_judge_run(plan, n):
     def lose(cause, path, number):
         counts[cause] += 1
         unread[cause].setdefault(path, []).append(number)
+    answers = None  # None when the calls could not start: each job's lines are then a model error, and the past-cap lines still read past the cap
     try:
         import decision_watch
         answers = prose_judge_calls(decision_watch, [item[2] for item in plan or [] if not isinstance(item, str) and len(item) == 3])
+    except Exception as e:
+        plan_failures.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
+    try:
         for item in plan or []:
             if isinstance(item, str):
                 plan_failures.append(item)
@@ -2773,7 +2777,7 @@ def prose_judge_run(plan, n):
                     lose(item[0], path, number)
                 continue
             paths, rows, prompt = item
-            answer = next(answers)
+            answer = next(answers) if answers is not None else None
             if answer is None:  # a model that cannot run is unknown, never a refusal
                 for path, number in rows:
                     lose(MODEL_ERROR, path, number)
@@ -2800,7 +2804,7 @@ def prose_judge_run(plan, n):
     report += plan_failures
     for cause in PROSE_JUDGE_CAUSES:
         for path in sorted(unread[cause]):
-            report.append(f"merge: #{n} prose judge UNKNOWN ({cause}): {path}:{','.join(str(x) for x in sorted(unread[cause][path]))}")
+            report.append(plain_text(f"merge: #{n} prose judge UNKNOWN ({cause}): {path}:{','.join(str(x) for x in sorted(unread[cause][path]))}"))
     total = sum(counts.values())
     if total:
         report.append(f"merge: #{n} prose judge UNKNOWN: {total} lines not judged ({', '.join(f'{counts[c]} {c}' for c in PROSE_JUDGE_CAUSES if counts[c])})")
