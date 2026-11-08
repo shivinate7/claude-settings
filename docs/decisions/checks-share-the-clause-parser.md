@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The checks that read prose by sentence and clause use one module, `lint/_clause.py`. It holds the sentence and clause boundaries and one list for each word class: negators, adverbs, conditionals, reason links, determiners and the cannot-claim phrase forms. It reads text and a mask only. The module runs in linear time. The cannot-claim check does not: its doubling ratio is about 3.9 (measured 2026-11-08, 0.5 s for 500 phrases in one sentence, 2.0 s for 1,000 and 8.2 s for 2,000), because `_claim` in `lint/report_guard.py` scans the rest of the sentence once for each phrase it finds. Note `cannot-claim-comma-sentence-superlinear` stays open with that measure.
+The checks that read prose by sentence and clause use one module, `lint/_clause.py`. It holds the sentence and clause boundaries and one list for each word class: negators, adverbs, conditionals, reason links, determiners and the cannot-claim phrase forms. It reads text and a mask only. The module runs in linear time. The cannot-claim check does not. Measured 2026-11-08 at commit 9facc42f1: 0.27 s, 0.89 s and 3.44 s for 500, 1,000 and 2,000 phrases in one sentence, about 3.3x to 3.9x per doubling. The cause is `_claim` in `lint/report_guard.py`, which scans the rest of the sentence once for each phrase it finds. Note `cannot-claim-comma-sentence-superlinear` stays open with that measure.
 
 - `lint/report_guard.py` imports it for the cannot-claim check. That check is the only caller today.
 - The pre-existing-failure check and the comment narration gloss check are planned callers. Neither is built.
