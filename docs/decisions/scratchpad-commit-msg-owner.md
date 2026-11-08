@@ -11,7 +11,7 @@ The guard refuses a `git commit` from an agent's call when a `-F` or `--file` me
 - A variable that the same command binds to literals (`S=<path>; ... -F $S/msg`) is expanded with `_rm_values`. Any other variable, such as `$HOME/x`, stays as the environment gives it.
 - The gate is the guard's agent flag: a truthy `agent_id` or `agent_type`. An orchestrator's payload (both null) passes. A main session started with `--agent` that carries `agent_type` alone is refused too (unmeasured); its cost is one retry with `-F -` or `-m`. Same widening as debt note `kill-tag-agent-flag-widened`.
 - Allowed: `-F -` with a heredoc, `-m`, a file outside every scratchpad, and a `gh pr create --body-file`. The remedy names `-F -` and `-m`.
-- Named gaps, not refused: a glob in the file name, a file read through `$(cat <file>)`, `-F - < file` and `cat file | git commit -F -` (stdin from a scratchpad file), a variable the command binds in a way `_rm_values` cannot read, and a relative path after a `cd` the guard cannot follow.
+- Named gaps, not refused: a glob in the file name, and a file read through `$(cat <file>)`. Stdin from a scratchpad file is a gap too: `-F - < file` and `cat file | git commit -F -`. So are a variable the command binds in a way `_rm_values` cannot read, and a relative path after a `cd` the guard cannot follow.
 - The check runs inside the existing guard call: no process start, no file written.
 
 Mistake it stops: an agent committed another agent's message file from the shared scratchpad.
