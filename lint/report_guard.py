@@ -534,6 +534,8 @@ def answered_problem(text):
 # "on <base>". A bare base name is no run. A claim is one of three forms, in a sentence that holds a failure word:
 # - "pre-existing" that describes the failure: next comes a failure noun, a preposition or no word, or before it
 #   comes is/was/it. "A pre-existing test" or "the pre-existing guard" modifies another noun and is no claim.
+#   A failure noun that heads a longer noun ("failure mode") is no claim; a verb after it ("failure breaks CI") is.
+#   A cause noun (issue, bug) claims only with a failure word before it in its clause, or a failure verb after it.
 # - "already red" (fails, broken, there, present), in a sentence that names a base or "before this change".
 #   "Already red on the old code" names neither.
 # - a failure word, "too", "also" or "as well", and "on" or "at" a sha or a base. A clause that starts with the
@@ -542,27 +544,37 @@ def answered_problem(text):
 # list) exempts it. A clause ends at a conjunction, "as" and "which" as well as at the answered check's breaks.
 # A sentence that ends in `?` asks and claims nothing. Fenced blocks are skipped.
 PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre[- ]?existing(?![\w-])", re.I)
-PRE_END_OF_NOUN = r"(?=\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also|is|was|are|were|that|and|but|so|because|as)\b))"
+# A noun the failure word modifies ("failure mode", "error handling", "regression test"): the failure word is then
+# a modifier, not the claim. A verb after it ("a pre-existing failure breaks CI") is no modifier.
+PRE_HEAD_NOUN = (r"(?!\s+(?:modes?|handling|handlers?|tests?|cases?|messages?|logs?|counts?|rates?|reports?|lists?|"
+                 r"paths?|types?|class|code|output|strings?|rules?|guards?|checks?|suites?)\b)")
+# A plural word before the noun ("tests error out") is a modifier head, so only a singular word may sit there.
+PRE_ONE_WORD = r"(?:(?![\w-]*[^s\W]s\b)[\w-]+\s+)?"
 PRE_DESCRIBES_AFTER_RE = re.compile(
-    r"\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also)\b"
-    # A plural word before the noun ("tests error out") is a modifier head, so only a singular word may sit there.
-    r"|(?:(?![\w-]*[^s\W]s\b)[\w-]+\s+)?"
-    r"(?:failures?|errors?|regressions?|breakage|flakes?|flakiness|red|issues?|problems?|bugs?|defects?)\b"
-    + PRE_END_OF_NOUN + ")", re.I)
+    r"\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also)\b|" + PRE_ONE_WORD
+    + r"(?:failures?|errors?|regressions?|breakage|flakes?|flakiness|red)\b" + PRE_HEAD_NOUN + ")", re.I)
+# A cause noun (issue, problem, bug, defect) is a claim only with a failure word before it in its clause, or a
+# failure verb right after it. "Filed the pre-existing issue as a debt" has neither.
+PRE_CAUSE_AFTER_RE = re.compile(
+    r"\s*" + PRE_ONE_WORD + r"(?:issues?|problems?|bugs?|defects?)\b" + PRE_HEAD_NOUN
+    + r"(?P<verb>\s+(?:fail\w*|breaks?|broke|blocks?)\b)?", re.I)
+PRE_CAUSAL_BREAKS = ("because", "since", "as")
 # "a line that calls a failure pre-existing" describes a rule. An indefinite object marks a mention, not a claim.
 PRE_MENTION_BEFORE_RE = re.compile(
     r"\b(?:that|when|if|whenever)\s+(?:\w+\s+){0,3}?(?:calls?|says?|labels?|names?|marks?|claims?|treats?)"
     r"\s+(?:an?|any|every|each)\s+[\w-]+\s+$", re.I)
-PRE_NEGATED_AFTER_RE = re.compile(r"\s*(?:none|no|nothing|nil|zero|0)\b", re.I)
+# The whole clause after the colon says there are none; "none of them are mine" says more, so it is no negation.
+PRE_NEGATED_AFTER_RE = re.compile(r"\s*(?:none|nothing|nil|zero|0)(?:\s+(?:found|detected|seen|so\s+far))?\s*", re.I)
 PRE_DESCRIBES_BEFORE_RE = re.compile(
     r"\b(?:is|was|are|were|be|been|it|them)\s+(?:(?!(?:an?|the|this|that|its|my|our)\b)\w+\s+)?$", re.I)
 ALREADY_RE = re.compile(r"\balready\s+(?:red|fail\w*|broken|there|present)\b", re.I)
 FAILURE_RE = re.compile(r"\b(?:fail\w*|red|broken|breaks?|errors?|regress\w*|flak\w*)\b", re.I)
 SHA_WORD = r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
 BASE_REF = r"(?:origin/\w[\w./-]*|main|master)"
-# A base used as a ref ("on main", "main is"), not a noun modifier ("the main job").
+# A base used as a ref ("on main", "the main branch is"), not a noun modifier ("the main job").
 BASE_WORD_RE = re.compile(
-    r"\b(?:on|at|from|of|in)\s+{b}\b|\b{b}\s+(?:is|was|has\s+been|had\s+been)\b"
+    r"\b(?:on|at|from|of|in)\s+(?:the\s+)?{b}\b(?!\s+(?:job|check|workflow|ci|pipeline|run|step)\b)"
+    r"|\b{b}\s+(?:branch|is|was|has\s+been|had\s+been)\b"
     r"|\bbefore\s+(?:this|the|my)\s+change\b".format(b=BASE_REF), re.I)
 FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
 TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
@@ -572,7 +584,9 @@ PRE_CLAUSE_BREAK_RE = re.compile(
 PRE_CLAUSE_SPLIT_RE = re.compile("(" + PRE_CLAUSE_BREAK_RE.pattern + ")", re.I)
 SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
 MAIN_RUN_RE = re.compile(
-    r"\bon\s+{b}\s+(?:(?:at|tip)\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
+    r"\bon\s+{b}\s+(?:(?:at|tip)\s+(?:commit\s+)?{s}|\(\s*(?:commit\s+)?{s}\s*\)|{s})|\b{b}@{s}".format(
+        b=BASE_REF, s=SHA_WORD), re.I)
+TOO_ONLY_RE = re.compile(r"\s*(?:too|also|as\s+well)\s*", re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
 ON_BASE_RE = re.compile(r"\bon\s+%s\b" % BASE_REF, re.I)
 PRE_EXISTING_REASON = (
@@ -592,22 +606,42 @@ def _unnegated(clause, pos):
     return not ANSWERED_NEGATOR_RE.search(clause[:pos])
 
 
+def _failure_before(clause, end):
+    fail = FAILURE_RE.search(clause[:end])
+    return bool(fail and _unnegated(clause, fail.start()))
+
+
+def _cause_noun_claims(parts, i, m):
+    """True when the word at `m` in clause i names a cause noun (issue, bug) in a failure's company."""
+    clause = parts[i]
+    after = PRE_CAUSE_AFTER_RE.match(clause, m.end())
+    if not after:
+        return False
+    if after.group("verb") or _failure_before(clause, m.start()):
+        return True
+    return i >= 2 and parts[i - 1].strip().lower() in PRE_CAUSAL_BREAKS and _failure_before(parts[i - 2], len(parts[i - 2]))
+
+
 def _claims_pre_existing(sentence):
     """True when `sentence` holds a pre-existing claim with no negator in its clause before it."""
     plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
     if not FAILURE_RE.search(plain):
         return False
     names_base = bool(BASE_WORD_RE.search(plain))
-    earlier_fail = False
+    earlier_fail = ref_pending = False
     parts = PRE_CLAUSE_SPLIT_RE.split(plain)  # clauses at the even places, the breaks between them at the odd
     for i in range(0, len(parts), 2):
         clause = parts[i]
         # "Pre-existing failures: none." says there are none: a colon, semicolon or dash then a negator. "It is
         # pre-existing: none of it is ours" still claims, so a word like is or was before the claim voids this.
         negated_after = (i + 2 < len(parts) and parts[i + 1].strip() in (":", ";", "-", "--", "—", "–")
-                         and PRE_NEGATED_AFTER_RE.match(parts[i + 2]))
+                         and PRE_NEGATED_AFTER_RE.fullmatch(parts[i + 2]))
+        if ref_pending and TOO_ONLY_RE.fullmatch(clause):  # "Lint fails on main, too."
+            return True
+        ref_pending = False
         for m in PRE_EXISTING_RE.finditer(clause):
-            if (_pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start())
+            if ((_pre_existing_describes_failure(clause, m) or _cause_noun_claims(parts, i, m))
+                    and _unnegated(clause, m.start())
                     and not (negated_after and not PRE_DESCRIBES_BEFORE_RE.search(clause[:m.start()]))
                     and not PRE_MENTION_BEFORE_RE.search(clause[:m.start()])):
                 return True
@@ -618,6 +652,7 @@ def _claims_pre_existing(sentence):
         if fail:
             if TOO_RE.search(clause) and FAIL_REF_RE.search(clause) and _unnegated(clause, fail.start()):
                 return True
+            ref_pending = _unnegated(clause, fail.start()) and bool(FAIL_REF_RE.search(clause))
             earlier_fail = earlier_fail or _unnegated(clause, fail.start())
         elif earlier_fail and TOO_RE.search(clause) and FAIL_REF_RE.match(clause.strip()):
             return True
