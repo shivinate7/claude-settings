@@ -18,6 +18,7 @@ The cases pin this contract:
 - A comment that states a run's colour or result on a head, on main or on the base is history.
   It fails under the `history phrase` pattern. A colour phrase after when, if, unless, until, while or once in the
   same clause is a condition and stays clean.
+- A run of 200 slashes before a date ends within the scan bound, and the date stays flagged.
 - The check is one file. The suite copies only that file into the fixture repo, so the check finds
   the repo from its working directory or from its own location, and both give the fixture repo.
 """
@@ -187,7 +188,7 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args, path_tools=False, env=None, checker_root=None):
+    def lint(self, *args, path_tools=False, env=None, checker_root=None, timeout=None):
         args = args or ("--base", "origin/main")
         run_env = dict(GIT_ENV, **(env or {}))
         run_env.pop("CODE_CHECK_TOOLS", None)
@@ -196,7 +197,7 @@ class Case(unittest.TestCase):
         script = os.path.join(checker_root or self.tree, "lint", "check_comment_narration.py")
         r = subprocess.run([sys.executable, script, *args],
                            cwd=self.tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           env=run_env)
+                           env=run_env, timeout=timeout)
         return r.returncode, r.stdout + r.stderr
 
     def fake_tool(self, name, body):
@@ -496,6 +497,22 @@ class Quiet(Case):
         unflagged = [text for i, text in enumerate(texts)
                      if "date:" not in (self.hit_line(out, "n%d.py" % i, 2) or "")]
         self.assertEqual(unflagged, [], "a dated line that is not a cite is not flagged as a date:\n" + out)
+
+    def test_long_slash_run_before_a_date_is_flagged_within_the_bound(self):
+        # A run of slashes is not a cite, so the date stays flagged. The timeout keeps a stalled scan from hanging.
+        run = "/" * 200 + " Section 2026-11-08"
+        files = {"slash.py": "x = 1\n# %s\ny = 2\n" % run, "Slash.swift": "let x = 1\n// %s\n" % run}
+        self.base({"keep.py": "x = 1\n"})
+        self.change(files)
+        try:
+            rc, out = self.lint(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.fail("the scan did not end within 5 s on a 200-slash comment before a date")
+        self.assertEqual(rc, 1, out)
+        for path in ("slash.py", "Slash.swift"):
+            row = self.hit_line(out, path, 2)
+            self.assertIsNotNone(row, "no hit at %s:2 in:\n%s" % (path, out))
+            self.assertIn("date: 2026-11-08", row, out)
 
     def test_same_words_in_string_literals_do_not_fail(self):
         src = '''\
