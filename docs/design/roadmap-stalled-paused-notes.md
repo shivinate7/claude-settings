@@ -77,7 +77,7 @@ The detector found nothing. It reads the harness, not the screen in the frames.
 - Open: nothing on the screen teaches that stripes mean stalled and a ring means paused, except the
   bar's `title` on hover. The count words (item 4) carry it in the Now card. The phase head has no
   words. A question for the owner, not blocking: is the stalled band's red mark enough of a key?
-- Open: paused cells under ~3px read like done (measured 1.08-1.25:1); lane `nfp-narrow-paused-cell`
+- Open: paused cells under ~3px read like done (measured 1.08-1.25:1 on the roadmap tokens); lane `nfp-narrow-paused-cell`
   gives them a non-colour cue.
 - Open: Tint (item 3) fails in dark. It stays only so the owner can cull it.
 

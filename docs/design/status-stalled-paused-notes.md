@@ -63,7 +63,7 @@ stalled mark is already red.
 
 The detector found nothing. It reads the harness, not the screen in the frames.
 - Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's foot.
-- Open: paused cells under ~3px read like done (measured 1.08-1.25:1); lane `nfp-narrow-paused-cell`
+- Open: paused cells under ~3px read like done (measured 1.02-1.09:1 on this page's tokens); lane `nfp-narrow-paused-cell`
   gives them a non-colour cue.
 - Open: Tint (item 2) fails in dark. It stays only so the owner can cull it.
 
