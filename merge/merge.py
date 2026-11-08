@@ -2479,6 +2479,7 @@ PROSE_JUDGE_CALL_BYTES = 24000  # UTF-8 bytes one prose judge prompt may hold, e
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
 PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the UNKNOWN lines, in print order. The count line and the named lines (one per file per cause) carry no raw error text
 TIMED_OUT, MODEL_ERROR, NO_VERDICT, PAST_CAP, SKIPPED = PROSE_JUDGE_CAUSES
+COULD_NOT_RUN = "could not run"  # the cause on a named line for a line selected before the plan failed. It is no call-level cause, so it is outside PROSE_JUDGE_CAUSES and the count line
 
 def prose_judge_lines(wt, sha, base_ref, changed):
     """{path: {line: (text, [cite])}}: the governed prose lines the model judges, from the tree at `wt` (the head). A line that cites
@@ -2692,7 +2693,8 @@ def prose_judge_plan(wt, sha, base_ref, names, n):
     """Under the merge lock: read the tree and build every prompt, because the worktree goes when the lock does. -> a list in report order, each
     item a finished report line or a (paths, [(path, line)], prompt) job for prose_judge_run, which calls the model once the lock is released.
     The selected lines of all files are packed into at most PROSE_JUDGE_MAX_CALLS jobs (prose_judge_pack). A selection that failed is an UNKNOWN
-    line here. The lines that fit no job are one (PAST_CAP, [(path, line)]) item."""
+    line here. The lines that fit no job are one (PAST_CAP, [(path, line)]) item. A failure after the selection adds a (COULD_NOT_RUN, [(path, line)]) item of the selected lines."""
+    picked = {}
     try:
         if names is None:
             return [f"merge: #{n} prose judge UNKNOWN: the changed files could not be read, so no line was judged."]
@@ -2704,8 +2706,10 @@ def prose_judge_plan(wt, sha, base_ref, names, n):
             packed = {row for job in plan for row in job[1]}  # prose_judge_pack returns only the count of the lines past the cap, so the lines are the selected ones no job took
             plan.append((PAST_CAP, [(path, number) for path, by_line in sorted(picked.items()) for number in sorted(by_line) if (path, number) not in packed]))
         return plan
-    except Exception as e:  # selection failed: unknown, and the merge has landed
-        return [plain_text(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")]
+    except Exception as e:  # unknown, and the merge has landed. A failure after the selection also names each selected line (COULD_NOT_RUN); a failed selection has none to name
+        failed = [plain_text(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")]
+        rows = [(path, number) for path, by_line in sorted(picked.items()) for number in sorted(by_line)]
+        return failed + [(COULD_NOT_RUN, rows)] if rows else failed
 
 def readable_verdicts(verdict, keyed=False):
     """verdict["verdicts"] when every entry has an integer line and one of the three words, else None: the reply is then unread, never partly read.
@@ -2752,16 +2756,17 @@ def prose_judge_calls(decision_watch, prompts):
 def prose_judge_run(plan, n):
     """Report-only (outcomes-mechanize-rules), after the lock is released: one decision_watch.invoke_model call per job in `plan`, all at once (prose_judge_calls), looked up
     at call time. A verdict maps to its line by (path, line). -> the report lines: one per line the model calls stale or unbacked, at most PROSE_JUDGE_MAX_LINES, then one count line for
-    the rest; then, for each line not judged, one named line per file per cause (path and line numbers, causes in PROSE_JUDGE_CAUSES order; they do not count against that cap), then one UNKNOWN count line by cause. Neither carries raw error text. A plan-level failure line, or one for calls that could not start, names its exception type and message; the lines of those jobs are then a model error. Nothing here refuses a merge or writes a file."""
+    the rest; then, for each line not judged, one named line per file per cause (path and line numbers, causes in PROSE_JUDGE_CAUSES order; they do not count against that cap), then one UNKNOWN count line by cause. A (COULD_NOT_RUN, rows) plan item is named the same way but never counted. Neither carries raw error text. A plan-level failure line, or one for calls that could not start, names its exception type and message; the lines of those jobs are then a model error. Nothing here refuses a merge or writes a file."""
     findings = []
     plan_failures = []  # a plan-level UNKNOWN line stands alone, whole
     counts = dict.fromkeys(PROSE_JUDGE_CAUSES, 0)
-    unread = {c: {} for c in PROSE_JUDGE_CAUSES}  # cause -> path -> [line numbers]
+    unread = {c: {} for c in PROSE_JUDGE_CAUSES + (COULD_NOT_RUN,)}  # cause -> path -> [line numbers]
 
     reported = set()  # (path, line) of each line already judged or named, so a failure in the loop names only the rest
 
     def lose(cause, path, number):
-        counts[cause] += 1
+        if cause in counts:  # COULD_NOT_RUN is named, never counted
+            counts[cause] += 1
         unread[cause].setdefault(path, []).append(number)
         reported.add((path, number))
     answers = None  # None when the calls could not start: each job's lines are then a model error, and the past-cap lines still read past the cap
@@ -2795,11 +2800,12 @@ def prose_judge_run(plan, n):
             said = {(e["path"], e["line"]): e for e in entries}
             for path, number in rows:
                 e = said.get((path, number))
-                reported.add((path, number))
                 if e is None:
                     lose(SKIPPED, path, number)
-                elif e["verdict"] != "holds":
+                    continue
+                if e["verdict"] != "holds":
                     findings.append(prose_judge_row(n, path, number, e["verdict"], e.get("why") or ""))
+                reported.add((path, number))  # after the row is built: a raise in prose_judge_row leaves the line unreported, so the handler names it
     except Exception as e:
         plan_failures.append(plain_text(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]})."))
         for item in plan or []:  # the loop stopped: every line it did not reach is unknown, never a pass
@@ -2811,7 +2817,7 @@ def prose_judge_run(plan, n):
     if len(report) > PROSE_JUDGE_MAX_LINES:
         report[PROSE_JUDGE_MAX_LINES:] = [f"merge: #{n} prose judge: {len(findings) - PROSE_JUDGE_MAX_LINES} more lines not shown"]
     report += plan_failures
-    for cause in PROSE_JUDGE_CAUSES:
+    for cause in PROSE_JUDGE_CAUSES + (COULD_NOT_RUN,):
         for path in sorted(unread[cause]):
             report.append(plain_text(f"merge: #{n} prose judge UNKNOWN ({cause}): {path}:{','.join(str(x) for x in sorted(unread[cause][path]))}"))
     total = sum(counts.values())
