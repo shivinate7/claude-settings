@@ -186,8 +186,7 @@ def git(cwd, *a, input=None):
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
     that cut the history reads None, never False. The one home is hooks/git_reads.branch_is_ancestor."""
-    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
-    return git_reads.branch_is_ancestor(cwd, base, tip)
+    return _git_reads_home.branch_is_ancestor(cwd, base, tip)  # merge's private copy: a stale git_reads in sys.modules cannot answer
 
 RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
 RULE_PREFIX = "output-styles/"

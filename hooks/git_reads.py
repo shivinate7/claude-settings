@@ -6,9 +6,9 @@ reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
 so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
 that patches one of these names patches it here, on the module object that import returns.
-merge/merge.py loads its own private copy by path for `lists_refs` and `listing_text` only; its
-`ancestor` still imports this module from sys.modules, so a patch to the other names reaches merge. Standard
-library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
+The merge tool (merge/merge.py) is a consumer too. It loads its own private copy by path, for
+`lists_refs`, `listing_text` and `branch_is_ancestor`. A stale module of this name in sys.modules
+cannot answer for merge, and a patch to this module does not reach merge. Standard library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
 """
 import calendar
 import json
@@ -34,7 +34,7 @@ def _git(where: str, *args):
 
 
 def lists_refs(args):
-    """True for `git -C <dir> ls-remote ...`, the only call read stdout-only on success: its stdout is a ref list, and a stderr line (a trace, a warning) is no ref.
+    """True for `git -C <dir> ls-remote ...`, the only git call read stdout-only on success: its stdout is a ref list, and a stderr line (a trace, a warning) is no ref.
     Other git calls whose stdout is the answer, such as commit-tree and mktree, still join stderr. Keyed on the
     args, so each caller and each stand-in for a runner that passes the args on gets it. One home: merge/merge.py `sh` reads it through its own private copy of this module."""
     return args[:2] == ["git", "-C"] and args[3:4] == ["ls-remote"]
