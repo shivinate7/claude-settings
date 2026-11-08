@@ -5129,6 +5129,19 @@ sh("detached: a background job followed by another line, MEASURED to outlive the
    "python -m http.server 8781 &\necho started", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: a background job mid-line, followed by another command",
    "python3 server.py & echo started", "deny", "detached-launch", cwd=NOGIT)
+# A glued `&` is a background job too: bash reads `&echo` as `&` then `echo`. The spaced form is the control. The glued
+# red uses sleep 2: `sleep 99 &echo ok` is refused by the waiter (a pause of 25 s or more) before detached-launch runs,
+# so it cannot show this rule. The waiter pin keeps that refusal in place.
+sh("detached: sleep 2 &echo ok, a glued background job with no pid, is refused [glued red]",
+   "sleep 2 &echo ok", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: sleep 2 & echo ok, the spaced form, is refused [glued control]",
+   "sleep 2 & echo ok", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: sleep 99 & echo ok, the spaced form, is refused [glued control]",
+   "sleep 99 & echo ok", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: sleep 99 &echo ok is refused by the waiter first [glued pin]",
+   "sleep 99 &echo ok", "deny", "waiter", cwd=NOGIT)
+sh("detached: a glued & inside echo's quotes is text, allows [glued control]",
+   'echo "a &echo b"', "allow", cwd=NOGIT)
 sh("detached: disown on its own line after a background job",
    "python3 server.py &\ndisown", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: disown on its own line, even with a pid printed first",
