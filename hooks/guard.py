@@ -207,7 +207,10 @@ Other tools, in `judge` order:
                        each at line start) or a verdict line (a line with `verdict`, or a round label
                        with or without `result`, before its colon and a REVIEWER_VERDICT_WORDS word
                        right after it, or a leading verdict: a verdict word, a comma and `round N`, as in
-                       `FAIL, round N` or `PASS, round N of 3`). One short label of one to four
+                       `FAIL, round N` or `PASS, round N of 3`, or, right after a report label
+                       (BRIEF_REPORT_LABELS), a bare verdict word that ends its clause, as in
+                       `Done: FAIL, round not named` or `Done: PASS.`; a choice list such as
+                       `Done: PASS or FAIL` is not one). One short label of one to four
                        words and a colon may come first (`Done: FAIL, round N of 3`, `Prior review:
                        verdict: FAIL`, `Context: prior verdict: FAIL`, `Round N: reviewer verdict:
                        FAIL`). Marks (`-`, `*`,
@@ -2677,9 +2680,15 @@ BRIEF_BLIND_VERDICT = re.compile(
 # labelled line costs no more than the same line without a label: the text has a colon followed by a verdict word, or it
 # opens with a leading verdict (`FAIL, round N`). The label regex is anchored and bounded, and runs once per line.
 BRIEF_BLIND_LABEL = re.compile(
-    BRIEF_BLIND_OPEN + r"[A-Za-z][A-Za-z0-9]*(?:[ \t]+[A-Za-z0-9]+){0,3}[*_]*[ \t]*:[ \t]*([^\n]*)", re.M)
+    BRIEF_BLIND_OPEN + r"([A-Za-z][A-Za-z0-9]*(?:[ \t]+[A-Za-z0-9]+){0,3})[*_]*[ \t]*:[ \t]*([^\n]*)", re.M)
 _BRIEF_BLIND_AFTER_COLON = re.compile(r"[ \t]*[*_`\"'(]*(?:%s)\b" % BRIEF_BLIND_VERDICT_WORDS)
 _BRIEF_BLIND_LEADING = re.compile(r"(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+" % BRIEF_BLIND_VERDICT_WORDS)
+# After a report label (BRIEF_REPORT_LABELS), a bare verdict word that ends its clause (`Done: FAIL, ...`, `Done: PASS.`,
+# `Done: FAIL` at the line end) is a leading verdict too, with no round named. A verdict word that starts a choice list
+# (`Done: PASS, FAIL or PARTIAL, then ...`) or runs on into a word or a hyphen is not. Group 1 is the verdict word.
+_BRIEF_BLIND_BARE = re.compile(
+    r"[*_`]*(%(w)s)[*_`]*(?![\w-])(?![ \t]*(?:,|/|(?:or|and)\b)[ \t]*[*_`]*\b(?:%(w)s)\b)[ \t]*(?:[,.;!?]|$)"
+    % {"w": BRIEF_BLIND_VERDICT_WORDS})
 # A backtick span stays on one line. Group 1 is set when the span holds only a verdict word; brief_blind_verdict_text keeps
 # that span. One pattern pairs every span left to right, so a kept span's closing backtick never opens the next span.
 # A sentence ends at `.`, `;`, `!` or `?` before a space, a capital letter or the line end, so a path (`guard.py:12`) or a
@@ -2713,8 +2722,13 @@ def _brief_blind_after_label(m) -> str:
     """The line of a BRIEF_BLIND_LABEL match, then a copy of its text after the label when that text may read as a verdict
     line: it has a first colon followed by a verdict word, or it opens with a leading verdict. The copy stops after the
     leading verdict when that is all it holds. A leading mark gets an `x`, so BRIEF_BLIND_OPEN does not skip a mark that
-    the label's own scan would read."""
-    rest = m.group(1)
+    the label's own scan would read. After a report label, a bare verdict word that ends its clause is copied as the line
+    `Verdict: <word>`, which BRIEF_BLIND_VERDICT reads."""
+    rest = m.group(2)
+    if m.group(1) in BRIEF_REPORT_LABELS:
+        bare = _BRIEF_BLIND_BARE.match(rest)
+        if bare:
+            return m.group(0) + "\nVerdict: " + bare.group(1)
     colon = rest.find(":")
     if colon >= 0 and _BRIEF_BLIND_AFTER_COLON.match(rest, colon + 1):
         keep = rest
@@ -2729,7 +2743,7 @@ def _brief_blind_after_label(m) -> str:
 def brief_blind_verdict_text(brief: str) -> str:
     """The brief as the verdict scan reads it: backtick spans blanked except a lone verdict word, one sentence per line,
     the three label spellings rewritten, each choice list that ends its sentence blanked, and below each line with a short
-    label a copy of what follows the label."""
+    label a copy of what follows the label, or `Verdict: <word>` for a bare verdict word after a report label."""
     text = BRIEF_BLIND_SENTENCE_END.sub("\n", BRIEF_BLIND_SPAN.sub(lambda m: m.group(0) if m.group(1) else " ", brief))
     text = BRIEF_BLIND_ROUND_DASH.sub(r"\1: ", BRIEF_BLIND_COLON_MARKS.sub("", text))
     text = BRIEF_BLIND_ROUND_RESULT.sub("verdict", text)
