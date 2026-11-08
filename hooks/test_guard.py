@@ -4270,7 +4270,7 @@ _st_refuse("commit -o -m x F of a stale file edited in the work tree is refused"
            VCS + " commit -o -m x f.txt", EU_B)
 _st_refuse("commit -- F of a file the move deleted is refused while the stale index holds it",
            VCS + " commit -m x -- f.txt", DL_B)
-# A gap in the HEAD log marks the move (decision stale-tree-commit, ruling in 272a666e9): each entry here
+# A gap in the HEAD log marks the move (decision stale-tree-commit): each entry here
 # gaps against the one before it, so X is the lane commit, and f.txt stays stale in the index.
 _st_refuse("a commit after git pull --ff-only in the same tree is refused while f.txt stays stale",
            VCS + " commit -m x", PL_B)
