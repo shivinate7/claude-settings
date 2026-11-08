@@ -1,0 +1,11 @@
+{
+  "title": "An agent stops each long-lived process its probe started before it ends",
+  "phase": "next",
+  "status": "todo",
+  "order": 652,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "About 07:01 CST Nov 8, #1845's round-1 reviewer started a `node -e setInterval(...)` probe (pid 9331) and ended without stopping it; it orphaned to ppid 1, and the kill guard rightly refused both the reviewer's and the lane's kill, since an orphan's origin is unprovable (lane windows-stamp-suite-hang, via coordinator 07:29 CST).",
+  "note": "Done check: the reviewer and builder role text, or a Stop check for agents, makes an agent kill the `$!` of each background process it launched before it ends; a red test shows an agent Stop with a live child it started is refused. The lane recorded the incident as Fix: none (the container reclaim ends it), Until 2026-11-21. A fix for a found gap (item 410 a). Slug and title by triage.",
+  "updatedAt": "2026-11-08T07:26:00-06:00"
+}
