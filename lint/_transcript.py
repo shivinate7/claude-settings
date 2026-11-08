@@ -394,3 +394,115 @@ def page_writer_id(records):
                 if found:
                     writer = found
     return writer
+
+
+# ---- the finish of a background job or agent: the one reader hooks/stall_watch.py and hooks/guard_merge.py share.
+# No watcher side effects: each function reads what it is given. The notice tag (hooks/shared_names.py
+# TASK_NOTIFICATION_TAG) is a parameter, since lint/ does not import hooks/. A tag of None reads no notice.
+TERMINAL = ("completed", "failed", "killed", "stopped")
+RUNNING, FINISHED, UNKNOWN = "running", "finished", "unknown"
+LAUNCHED = "async_launched"
+STOP_TOOL = "TaskStop"
+TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
+TOOL_USE_ID = re.compile(r"<tool-use-id>(.*?)</tool-use-id>", re.S)
+TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
+STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
+
+
+def text_of(content):
+    """The text of a message content: a string, or the text and tool_result strings of a list."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = [b.get("text") or b.get("content") for b in content if isinstance(b, dict)]
+    return "\n".join(p for p in parts if isinstance(p, str))
+
+
+def notice_blocks(text, tag):
+    """[(task id, tool use id, status)] for each <task-notification> block in text. An id or the status the block
+    does not carry is None; the status is lower-cased and stripped. A block with neither id is left out."""
+    blocks = []
+    if not tag or not isinstance(text, str):
+        return blocks
+    for note in text.split(tag)[1:]:
+        tid, uid, st = TASK_ID.search(note), TOOL_USE_ID.search(note), TASK_STATUS.search(note)
+        if tid or uid:
+            blocks.append((tid.group(1).strip() if tid else None, uid.group(1).strip() if uid else None,
+                           st.group(1).strip().lower() if st else None))
+    return blocks
+
+
+def closed_by_notice(text, tag):
+    """The task ids of the <task-notification> blocks in text with a terminal status."""
+    return [tid for tid, _uid, st in notice_blocks(text, tag) if tid and st in TERMINAL]
+
+
+def stopped_ids(content):
+    """The id a TaskStop result closes: its message starts 'Successfully stopped task: <id>'. The
+    result is a JSON string with a message field; the whole id is matched, never a prefix."""
+    content = text_of(content)
+    try:
+        body = json.loads(content)
+        msg = body["message"] if isinstance(body, dict) else content
+    except Exception:
+        msg = content
+    m = STOPPED.match(msg) if isinstance(msg, str) else None
+    return [m.group(1)] if m else []
+
+
+def _notice_text(rec):
+    """The text a record can carry a notice in: a queued_command attachment's prompt, a queue-operation's
+    content, or a user message's content."""
+    kind = rec.get("type")
+    if kind == "attachment":
+        att = rec.get("attachment")
+        return att.get("prompt") if isinstance(att, dict) else ""
+    if kind == "queue-operation":
+        return rec.get("content")
+    if kind == "user":
+        return text_of((rec.get("message") or {}).get("content"))
+    return ""
+
+
+def agent_state(records, tool_use_id, tag):
+    """RUNNING, FINISHED or UNKNOWN for the Agent or Task spawn whose call id is `tool_use_id`.
+    FINISHED: the result is a plain tool_result (no toolUseResult) or a toolUseResult with a terminal status
+    (a foreground spawn), or a background launch whose agent id a terminal notice or a TaskStop result later closed.
+    RUNNING: an async_launched result and no such close. UNKNOWN: anything else the read cannot place, never
+    FINISHED: no result, an error result, a toolUseResult of another shape, a launch with no agentId, or a notice
+    that names the spawn with no or a non-terminal status. A notice names the spawn by its tool use id or its agent id.
+    `records` are the main session's, in order."""
+    found = None
+    for i, rec in enumerate(records):
+        for res in tool_results(rec):
+            if res.get("tool_use_id") == tool_use_id:
+                found = (i, rec, res)
+    if found is None or found[2].get("is_error") is True:
+        return UNKNOWN
+    at, rec, _res = found
+    if "toolUseResult" not in rec:
+        return FINISHED
+    launch = rec["toolUseResult"]
+    if not isinstance(launch, dict):
+        return UNKNOWN
+    status = launch.get("status")
+    if isinstance(status, str) and status.strip().lower() in TERMINAL:
+        return FINISHED
+    agent = launch.get("agentId")
+    if status != LAUNCHED or not isinstance(agent, str) or not agent:
+        return UNKNOWN
+    stops, unclear = set(), False
+    for later in records[at + 1:]:
+        for tid, uid, st in notice_blocks(_notice_text(later), tag):
+            if tid == agent or uid == tool_use_id:
+                if st in TERMINAL:
+                    return FINISHED
+                unclear = True
+        for use in tool_uses(later):
+            if use.get("name") == STOP_TOOL and isinstance(use.get("id"), str):
+                stops.add(use["id"])
+        for res in tool_results(later):
+            if res.get("tool_use_id") in stops and agent in stopped_ids(res.get("content")):
+                return FINISHED
+    return UNKNOWN if unclear else RUNNING

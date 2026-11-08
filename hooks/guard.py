@@ -127,6 +127,18 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that cannot load allows and is noted as `review-record-unread`. The reason names the
                        merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
                        call, no subprocess, no network. An override lifts it. (pr-review-record)
+  resume-finished-reviewer
+                       deny. A built-in `SendMessage` from a call with no `agent_id` whose `to` names a `reviewer` or
+                       `design-reviewer` Agent or Task spawn that has finished, so its isolated worktree is gone and a
+                       resume runs with no tree. `to` matches the launch result's `toolUseResult.agentId` or the
+                       spawn call's `name`; the latest spawn with that name wins. The state is read by
+                       `_transcript.agent_state`: a foreground result, or a background launch closed by a terminal
+                       notice or a TaskStop result, is finished; an async_launched result with no close is running.
+                       A state the read cannot place asks. A send to `main`, a name with no spawn, a running
+                       spawn, a spawn of another role, and a send with an agent_id pass. A missing or unreadable
+                       transcript passes and is noted as `resume-finished-reviewer-unread`. The reason says to spawn a
+                       fresh reviewer and pass it the prior report. One transcript read per judged send, no
+                       subprocess, no network. An override lifts it. (roles-resume-by-name)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -390,7 +402,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, review_record_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, resume_finished_hit, review_record_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -4904,6 +4916,16 @@ def judge(payload) -> None:
         record(tool, "noted", "review-record-unread", tool)
     if record_reason:
         refuse(tool, "deny", "review-record-after-round", record_reason, record_matched)
+
+    # A SendMessage to a reviewer or design-reviewer spawn that has finished (rule resume-finished-reviewer).
+    resume_decision, resume_reason, resume_matched, resume_unread = resume_finished_hit(
+        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))
+    if resume_unread:
+        record(tool, "noted", "resume-finished-reviewer-unread", tool)
+    if resume_decision == "deny":
+        refuse(tool, "deny", "resume-finished-reviewer", resume_reason, resume_matched)
+    if resume_decision == "ask":
+        refuse(tool, "ask", "resume-finished-reviewer", resume_reason, resume_matched)
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

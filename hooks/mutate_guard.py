@@ -74,6 +74,7 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+TRANSCRIPT = os.path.join(HERE, "..", "lint", "_transcript.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -86,6 +87,9 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # lint/_transcript.py, which guard_merge reads from ../lint beside the guard copy (the finish reader of a spawn).
+    # The anchor lands in the copy's own lint/ folder, after guard_beside lays it out. The suite is the guard's.
+    "transcript": (TRANSCRIPT, SUITE, "GUARD_UNDER_TEST", "transcript"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -2370,6 +2374,74 @@ MUTATIONS = [
      'trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))',
      'trust_transcript if isinstance(trust_transcript, str) else "", False)',
      "guard", "builder spawn (payload with agent_id) is not judged by this rule"),
+    # ---- resume-finished-reviewer (rule roles-resume-by-name): the arms of resume_finished_hit in hooks/guard_merge.py and
+    # its call in hooks/guard.py, then the arms of the finish reader agent_state in lint/_transcript.py (target "transcript").
+    ("resume-finished-reviewer: the first spawn with the name decides the state, not the latest",
+     'state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)',
+     'state = reader.agent_state(records, named[0].get("id"), TASK_NOTIFICATION_TAG)',
+     "guard", "an older running builder, then a newer finished reviewer, is refused"),
+    ("resume-finished-reviewer: the first spawn with the name decides the role, not the latest",
+     'if not named or named[-1]["input"].get("subagent_type") not in RECORD_REVIEWER_ROLES:',
+     'if not named or named[0]["input"].get("subagent_type") not in RECORD_REVIEWER_ROLES:',
+     "guard", "an older running builder, then a newer finished reviewer, is refused"),
+    ("resume-finished-reviewer: a spawn of any role is judged",
+     'if not named or named[-1]["input"].get("subagent_type") not in RECORD_REVIEWER_ROLES:',
+     'if not named:',
+     "guard", "a finished builder is allowed"),
+    ("resume-finished-reviewer: the agent id does not name a spawn",
+     ' or agents.get(use.get("id")) == target]',
+     ']',
+     "guard", "named by its agent id"),
+    ("resume-finished-reviewer: the spawn name does not name a spawn",
+     'if use["input"].get("name") == target or agents.get(use.get("id")) == target]',
+     'if agents.get(use.get("id")) == target]',
+     "guard", "named by its spawn name"),
+    ("resume-finished-reviewer: an agent's own send is judged",
+     '    if agent or tool != RESUME_TOOL or not isinstance(target, str)',
+     '    if tool != RESUME_TOOL or not isinstance(target, str)',
+     "guard", "an agent's own send (a payload with agent_id) is not judged by this rule"),
+    ("resume-finished-reviewer: the caller never passes the agent_id",
+     '    resume_decision, resume_reason, resume_matched, resume_unread = resume_finished_hit(\n'
+     '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))',
+     '    resume_decision, resume_reason, resume_matched, resume_unread = resume_finished_hit(\n'
+     '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", False)',
+     "guard", "an agent's own send (a payload with agent_id) is not judged by this rule"),
+    ("resume-finished-reviewer: a state the read cannot place is let through",
+     '    if state == reader.UNKNOWN:',
+     '    if False:',
+     "guard", "a reviewer whose launch result holds a bare string asks"),
+    ("resume-finished-reviewer: a state the read cannot place is refused as finished",
+     '        return "ask", RESUME_ASK_REASON, "%s to a %s of unknown state" % (tool, role), False',
+     '        return "deny", RESUME_REASON, "%s to a %s of unknown state" % (tool, role), False',
+     "guard", "a reviewer whose launch result holds a bare string asks"),
+    ("resume-finished-reviewer: a transcript that cannot be read is refused",
+     '    except Exception:\n        return "", "", "", True',
+     '    except Exception:\n        return "deny", RESUME_REASON, "unread transcript", True',
+     "guard", "a missing transcript is allowed, never refused"),
+    ("resume-finished-reviewer: a foreground result is not a finish",
+     '    if "toolUseResult" not in rec:\n        return FINISHED',
+     '    if "toolUseResult" not in rec:\n        return RUNNING',
+     "transcript", "a finished foreground reviewer, named by its spawn name, is refused"),
+    ("resume-finished-reviewer: a result of another shape reads as finished",
+     '    if not isinstance(launch, dict):\n        return UNKNOWN',
+     '    if not isinstance(launch, dict):\n        return FINISHED',
+     "transcript", "a reviewer whose launch result holds a bare string asks"),
+    ("resume-finished-reviewer: a terminal notice does not close the spawn",
+     '                if st in TERMINAL:\n                    return FINISHED\n                unclear = True',
+     '                if False:\n                    return FINISHED\n                unclear = True',
+     "transcript", "a finished background reviewer, named by its agent id, is refused"),
+    ("resume-finished-reviewer: a notice with no or a non-terminal status reads as running",
+     '    return UNKNOWN if unclear else RUNNING',
+     '    return RUNNING',
+     "transcript", "a reviewer whose notice names its id with no status asks"),
+    ("resume-finished-reviewer: any notice closes the spawn",
+     '            if tid == agent or uid == tool_use_id:',
+     '            if True:',
+     "transcript", "a running reviewer is allowed, though another spawn's finish notice is in the transcript"),
+    ("resume-finished-reviewer: a notice names the spawn by agent id only",
+     '            if tid == agent or uid == tool_use_id:',
+     '            if tid == agent:',
+     "transcript", "a finished background reviewer, named by its agent id, is refused"),
 ]
 
 
@@ -3006,7 +3078,7 @@ def run_mutant(sources, work: str, entry):
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "transcript"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
         # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
@@ -3021,7 +3093,8 @@ def run_mutant(sources, work: str, entry):
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         else:
-            mutate_shared.apply_mutant(tree, old, new)
+            if target == "guard":
+                mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
@@ -3031,6 +3104,8 @@ def run_mutant(sources, work: str, entry):
         # home of the review record marker). The mutant's config folder holds no pointer to a clone, so this
         # copy lays out lint/, merge/ and the alarm events beside hooks/.
         mutate_shared.guard_beside(root)
+        if target == "transcript":  # after guard_beside, which would copy the real file over a mutated one
+            mutate_shared.apply_mutant(root, old, new, files=[os.path.join("lint", "_transcript.py")])
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -3062,7 +3137,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "transcript"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
