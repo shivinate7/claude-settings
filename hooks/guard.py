@@ -1803,7 +1803,25 @@ WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 # A shell and its `-c` flag (`-c`, `-ec`, `-xec`): the quoted word after them is a command line of its own.
 WORKFLOW_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-WORKFLOW_SHELL_C = re.compile(r"^-[a-z]*c$")
+# Between the shell and `-c` pass option words: short clusters (`-l`, `-e`), long flags (`--norc`), and a cluster that
+# ends in `o` or `O` (`-eo pipefail`), which takes the next word as its value.
+WORKFLOW_SHELL_C = re.compile(r"^-[A-Za-z]*c$")
+WORKFLOW_SHELL_FLAG = re.compile(r"^-(?:-[\w-]+|[A-Za-z]+)$")
+
+
+def workflow_shell_c_scripts(tokens) -> set:
+    """The indexes of `tokens` that are the script word of a shell `-c`, past any option words."""
+    scripts = set()
+    for at, tok in enumerate(tokens):
+        if os.path.basename(tok) not in WORKFLOW_SHELLS:
+            continue
+        at += 1
+        while at < len(tokens) and WORKFLOW_SHELL_FLAG.match(tokens[at]):
+            if WORKFLOW_SHELL_C.match(tokens[at]):
+                scripts.add(at + 1)
+                break
+            at += 2 if tokens[at][-1] in "oO" and not tokens[at].startswith("--") else 1
+    return scripts
 
 
 def workflow_command_tests(command: str) -> set:
@@ -1843,9 +1861,8 @@ def workflow_command_tests(command: str) -> set:
         # (`bash -c "pytest tests/x"`), whatever its first word. It is read as a line of its own, each level dropping
         # one quote, so the recursion ends. A spaced word anywhere else is an argument, never a command: a path if
         # it names one (`'tests/a b/test_x.py'`), else none (`echo "python tests/x.py failed"`, `tr ' '`).
-        commands = [tok for at, tok in enumerate(tokens) if re.search(r"\s", tok) and (
-            at == 0
-            or (at >= 2 and WORKFLOW_SHELL_C.match(tokens[at - 1]) and os.path.basename(tokens[at - 2]) in WORKFLOW_SHELLS))]
+        shell_scripts = workflow_shell_c_scripts(tokens)
+        commands = [tok for at, tok in enumerate(tokens) if re.search(r"\s", tok) and (at == 0 or at in shell_scripts)]
         found.update(workflow_path(tok) for tok in args if tok not in commands and is_test_rel(workflow_path(tok)))
         for tok in commands:
             found |= workflow_command_tests(tok)
