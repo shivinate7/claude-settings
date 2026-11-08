@@ -2,7 +2,7 @@
 
 Owner, 2026-11-01 22:37 CST, in the coordinator's chat: "a grant here should allow for a grant there."
 
-Status: signed off as written (owner, Cockpit item 152, pick a, 2026-11-03 18:21 CST). Ruling: decision grant-reaches-lanes. Revalidated 2026-11-06 (owner, page item 221, 12:36 CST: 'is this still valid? A is ok to do'). Build waits on question 3.
+Status: signed off as written (owner, Cockpit item 152, pick a, 2026-11-03 18:21 CST). Ruling: decision grant-reaches-lanes. Revalidated 2026-11-06 (owner, page item 221, 12:36 CST: 'is this still valid? A is ok to do'). Question 3 answered a (item 435, 2026-11-08 11:56 CST). The refused-act probe is in decision grant-reaches-lanes.
 
 ## The problem
 
@@ -268,7 +268,7 @@ Design B: one file write per grant, one file read per tool call while the file e
 
 1. **The reframe.** The docs say hook text never becomes owner words to the classifier. Answered (a) by the 2026-11-03 sign-off (item 152 a): gate the named act before the classifier, as this plan does. Option (b), keep asking in each session, was not taken.
 2. **The grant form.** Answered (a) by the 2026-11-03 sign-off (item 152 a): the fixed words of section 2, catalogue in code. Option (b), free text judged by a model, lets a misread widen the act, against rule outcomes-grant-covers-named-act.
-3. **The first catalogue (open).** The act to gate is a lane's `Agent` spawn, not an Edit or Write. The candidate acts that wait on this question are `self-edit` (gates nothing as written, section 2) and `merge <pr>` (superseded). Options: (a) gate the lane's `Agent` spawn first; (b) defer until a probe shows the hook gate reaches an `Agent` spawn (section 2, Agents). Recommend (a): it is the only refused act on record. Meanwhile: the build waits.
+3. **The first catalogue.** Answered (a) by the owner, page item 435, 2026-11-08 11:56 CST: gate the lane's `Agent` spawn first. The act to gate is a lane's `Agent` spawn, not an Edit or Write. The candidate acts that wait on this question are `self-edit` (gates nothing as written, section 2) and `merge <pr>` (superseded). Options: (a) gate the lane's `Agent` spawn first; (b) defer until a probe shows the hook gate reaches an `Agent` spawn (section 2, Agents). Recommend (a): it is the only refused act on record.
 4. **Agents.** Moot under section 2: `self-edit` gates nothing as written. Options were: (a) `self-edit` reaches the target's agents, as a timed override does, and `merge` stays with the batch runner; (b) the lead session only. The `[Self-Modification]` refusal was a builder's.
 5. **The gate.** Answered (a) by the 2026-11-03 sign-off (item 152 a): probe the hook gate first, the mod gate second. Option (b), the mod gate only, rested on its documented skip. The hook gate is known to load in cloud sessions.
 6. **Computer sessions.** Answered (a) by the 2026-11-03 sign-off (item 152 a): Design A only, Design B if its probes fail. Option (b), both now, was not taken; (a) keeps one home.
