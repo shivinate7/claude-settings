@@ -28054,6 +28054,26 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdi
            "Re-check the floor fix.\nFinding quotes `verdict: FAIL`. Round 1 verdict: FAIL.\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict: FAIL after a choice list with no space after its period",
            "Re-check the floor fix.\nGive a verdict: PASS or FAIL.Prior verdict: FAIL.\nFiles: hooks/guard.py.")
+# A verdict word in backticks after its label is still the verdict. The span blank hides a quoted verdict, never the word
+# after a verdict label.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict: `FAIL`, the verdict word backticked",
+           "Re-check the floor fix.\nPrior verdict: `FAIL`\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict: `FAIL`, the verdict word backticked",
+           "Re-check the floor fix.\nRound 1 verdict: `FAIL`\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1: `FAIL`, the verdict word backticked",
+           "Re-check the floor fix.\nRound 1: `FAIL`\nFiles: hooks/guard.py.")
+# The sentence split and the span blank do not hide a verdict line. A period inside a path does not end a sentence, a
+# fenced block's lines are read as lines, and a backtick alone on its line does not pair with one on the next line.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict on hooks/guard.py: FAIL, the path's period is no sentence end",
+           "Re-check the floor fix.\nPrior verdict on hooks/guard.py: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict: FAIL inside a fenced block",
+           "Re-check the floor fix.\n```\nRound 1 verdict: FAIL\n```\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a lone backtick, then a Prior verdict: FAIL line",
+           "Re-check the floor fix `now.\nPrior verdict: FAIL\nFiles: `hooks/guard.py`.")
+# A verdict-word choice list blanks only when its sentence ends at the list. A list that runs on into other words is a
+# verdict, so it is refused.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief, Give a verdict: PASS and FAIL are the two words, the list runs on",
+           "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS and FAIL are the two words.\nFiles: hooks/guard.py.")
 
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
@@ -28115,6 +28135,16 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdi
           "Check the floor fix in hooks/guard.py.\nGive a verdict: **PASS** or **FAIL**.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a backticked report header quoted at line start, `FAIL, round 1 of 3, 2 findings`",
           "Check the floor fix.\n`FAIL, round 1 of 3, 2 findings`\nFiles: hooks/guard.py.")
+# A verdict-word choice list that ends its sentence is a format line, however the sentence ends. The split at `.`, `;`,
+# `!` and `?` ends a sentence only before a space, a capital or the line end, so `2.5` and `guard.py:12` do not split.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Give a verdict: PASS/FAIL.",
+          "Check the floor fix.\nGive a verdict: PASS/FAIL.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Give a verdict: PASS or FAIL; then list findings.",
+          "Check the floor fix.\nGive a verdict: PASS or FAIL; then list findings.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Is it done? Give a verdict: PASS or FAIL!",
+          "Check the floor fix.\nIs it done? Give a verdict: PASS or FAIL!\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict after a path and a number, See guard.py:12 and a 2.5 s run.",
+          "Check the floor fix.\nSee guard.py:12 and a 2.5 s run. Give a verdict: PASS or FAIL.\nFiles: hooks/guard.py.")
 # The empty state: a reviewer brief with no text holds no report, so it passes.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
 add("reviewer-brief-blind: allowed: a Workflow agent() reviewer on Round 2 of 3 with a findings list",
