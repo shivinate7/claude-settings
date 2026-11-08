@@ -1183,6 +1183,28 @@ def _opens_if_body(segments, at: int) -> bool:
             and bool(after) and after[0] == "then")
 
 
+def _dir_test_word(tokens):
+    """The folder a segment tests for, when the segment is only `[ -d T ]`, `[[ -d T ]]` or `test -d T`
+    (quotes already removed by the tokenizer), else None."""
+    shapes = {"[": 4, "[[": 4, "test": 3}
+    if not tokens or shapes.get(tokens[0]) != len(tokens) or tokens[1] != "-d":
+        return None
+    if tokens[0] != "test" and tokens[3] != {"[": "]", "[[": "]]"}[tokens[0]]:
+        return None
+    return tokens[2]
+
+
+def _never_runs(segments, ends, at: int, tokens, move) -> bool:
+    """True when the cd at `segments[at]` stands behind its own directory test joined by `&&`
+    (`[ -d M ] && cd M`) and its folder is missing at check time, so the test fails and the cd
+    never runs. The test must head its `&&` list: after a `||` or a pipe it may be skipped."""
+    if at < 1 or at > len(ends) or ends[at - 1] != "&&" or basename(tokens[0]) not in CD_WORDS:
+        return False
+    if at > 1 and ends[at - 2] in ("||", "|"):
+        return False
+    return move == _dir_test_word(segment_tokens(segments[at - 1]))
+
+
 def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """`_walk_segments`, which holds the walk and what it reads. Read with `failed_cd_stays`, a crash
     in the walk gives `stranded` with no folder, so git-after-cd refuses and the conflict-markers
@@ -1302,6 +1324,8 @@ def _walk_segments(segments, number: int, shell_cwd: str, ends=(), failed_cd_sta
                                           and not group_depth and basename(tokens[0]) in CD_WORDS)
                     if end == "||" and _exits_on_failure(segments, ends, at):
                         where, stranded = None, False
+                    elif _never_runs(segments, ends, at, tokens, move):
+                        old = prev   # the test fails, so the cd neither strands nor clears
                     elif negated_if or bare_under_errexit:
                         where, stranded = None, False
                     else:
