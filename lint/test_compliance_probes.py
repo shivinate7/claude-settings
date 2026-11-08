@@ -2055,6 +2055,35 @@ class CodeMask(unittest.TestCase):
                          "a double-tick span with a lone tick inside is masked")
 
 
+# Texts for the copy pin below. None holds a fence line, so only the inline branch of the guard's copy can match.
+INLINE_COPY_CORPUS = [
+    "", "x `y` z", "``a`b`` c", "```a` b``y", "a `b\nc` d", "a ` b", "`a` and `b`", "`` ` `` y", "a``b`c``",
+    "a `b`` c` d", "`a\n`b`", "``", "```", "` `", "café `’s` x", "`a` " * 500,
+]
+
+
+class InlineCodeCopy(unittest.TestCase):
+    """hooks/guard.py keeps a copy of the inline half of INLINE_CODE_RE (LANE_QUOTED), since the installed guard ships
+    without lint/. LANE_QUOTED also holds a fence branch and runs with MULTILINE and DOTALL, so its .pattern and .flags
+    never equal the mask's. The pin compares the spans the two find."""
+
+    def guard_quoted(self):
+        spec = importlib.util.spec_from_file_location("guard_under_pin", os.path.join(HERE, "..", "hooks", "guard.py"))
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        return guard.LANE_QUOTED
+
+    def test_the_guard_copy_finds_the_spans_of_the_inline_code_mask(self):  # green pin of an existing copy
+        copy = self.guard_quoted()
+        self.assertTrue(any(list(inline_code.INLINE_CODE_RE.finditer(text)) for text in INLINE_COPY_CORPUS),
+                        "scope: the inline-code mask opens a span in some corpus text, so the pin compares something")
+        for text in INLINE_COPY_CORPUS:
+            with self.subTest(text=text[:40]):
+                self.assertEqual([m.span() for m in copy.finditer(text)],
+                                 [m.span() for m in inline_code.INLINE_CODE_RE.finditer(text)],
+                                 "hooks/guard.py LANE_QUOTED finds other code spans than INLINE_CODE_RE")
+
+
 class Restates(unittest.TestCase):
     """A unit that copies a run of record text is refused. A unit with under 12 shared words passes, a record citation
     included."""
