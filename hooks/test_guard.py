@@ -14970,6 +14970,26 @@ LOG_CHECKS_EXTRA.append(("builder-cap: an unfiltered find past the walk cap over
                          builder_cap_outside_allowed_check))
 LOG_CHECKS_EXTRA.append(("builder-cap: a filtered find past the list cap in a checkout with a test is too large to check",
                          builder_cap_list_limit_check))
+# ---- round 3 of PR #2211: three findings the guard still gets wrong. Each case is red on the base (6b9f338a1),
+# and MUTATE_ONLY="builder-find:" runs these alone.
+# (a) A cp destination is not a walk root. FINDDEEP holds a test two folders down, under src/, so a copy into src/
+# that writes no test is allowed.
+sh("builder-find: a for loop of cp of a and b into src/, over a test two folders down, is allowed",
+   "for f in a b; do cp $f src/; done", "allow", **dict(BR, cwd=FINDDEEP))
+sh("builder-find: cp of a find substitution into src/, over a test two folders down, is allowed",
+   "cp $(find . -name '*.txt') src/", "allow", **dict(BR, cwd=FINDDEEP))
+sh("builder-find: xargs cp of each find hit into src/, over a test two folders down, is allowed",
+   "find . -name '*.txt' | xargs -I{} cp {} src/", "allow", **dict(BR, cwd=FINDDEEP))
+# (b) A find's -path and -regex only narrow the names it lists. The name filter alone reads the *.md files, and
+# docs/DEBTS.md is the only one, outside docs/ it is not listed, so the write is allowed. The plain walk of
+# FINDTESTS meets test_top.py at its root.
+sh("builder-find: find -name *.md with -not -path, piped to xargs, sed -i, over a test in the checkout, is allowed",
+   "find . -name '*.md' -not -path './docs/*' | xargs sed -i s/a/b/", "allow", **dict(BR, cwd=FINDTESTS))
+# (d) `mv` and `install` read a glued target as cp does: `-ttests` names the folder each file lands in.
+sh("builder-find: mv -ttests over a file is refused, the file lands in tests/",
+   "mv -ttests x", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
+sh("builder-find: install -ttests over a file is refused, the file lands in tests/",
+   "install -ttests x", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
