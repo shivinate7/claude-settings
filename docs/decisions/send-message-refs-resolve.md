@@ -10,7 +10,7 @@ Home: hooks/guard.py
 
 **Incident.** 2026-11-08, lane `notes-fix-large-1` sent batch runner 8 a record link it typed before the post returned. **Harm stopped:** a session acts on a ref that does not exist.
 
-**Ruling.** Coordinator, 2026-11-08 02:30 CST: reuse the sha function of decision `agent-report-shas-resolve` on `send_message`, with a rule for which repo a ref resolves against, and state the cost of each GitHub read.
+**Ruling.** Coordinator, 2026-11-08 02:30 CST: reuse the sha function of decision `agent-report-shas-resolve` on `send_message`. Name the repo each ref resolves against, and state the cost of each GitHub read.
 
 ## What is judged
 
@@ -39,7 +39,14 @@ With no origin, only shas are judged.
 
 ## Cost
 
-Per send: one `git config --get remote.origin.url` when the text names a PR, comment or commit URL; at most one `git cat-file` (10 s timeout), one `rev-parse --is-shallow-repository` on a miss, one `git ls-remote` (5 s), and one `gh` read per comment link up to 5 (5 s each). The worst case is about 45 s. A message with no ref starts no process. One with shas starts one `git cat-file --batch-check`. One with PR numbers starts one `git ls-remote origin` for all of them, a network read of about 0.6 s, measured once from a cloud container. Each comment link starts one `gh api repos/<owner>/<repo>/issues/comments/<id>`, a network read. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
+Per send, at most:
+
+- one `git config --get remote.origin.url`, when the text names a PR, a comment or a commit URL
+- one `git cat-file --batch-check` for all shas (10 s timeout), and one `rev-parse --is-shallow-repository` on a miss
+- one `git ls-remote origin` for all PR numbers (5 s), a network read of about 0.6 s, measured once from a cloud container
+- one `gh api repos/<owner>/<repo>/issues/comments/<id>` per comment link, up to 5 (5 s each), a network read
+
+The worst case is about 45 s. A message with no ref starts no process. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
 
 ## Known gaps
 
