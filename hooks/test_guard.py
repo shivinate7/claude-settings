@@ -26363,10 +26363,10 @@ ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
 ROLE_RULES_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                    "reviewer": "haiku", "builder": "sonnet", "planner": "sonnet",
                    "general-purpose": "sonnet", "claude": "sonnet"}
-# The refuter role (owner ruling, page item 279, pick d, 2026-11-06 12:43 CST): read-only, and it runs Opus by its own
-# standing grant. Its name is guard_core's REFUTER_ROLE, the one home of the name, read here and never typed. A guard_core
-# with no such name reads as REFUTER_MISSING: a spawn of that name is then refused as a role with no grant, and
-# refuter_name_check fails on the missing name itself (the same reading as the PowerShellScript cases).
+# The refuter role is read-only and runs Opus by its own standing grant (decision plan-refuter). Its name is
+# guard_core's REFUTER_ROLE, the one home of the name, read here and never typed. A guard_core with no such name
+# reads as REFUTER_MISSING: a spawn of that name is then refused as a role with no grant, and refuter_name_check
+# fails on the missing name itself (the same reading as the PowerShellScript cases).
 REFUTER_MISSING = "<no REFUTER_ROLE in guard_core>"
 _load_guard_module()  # sets sys.modules["guard_core"] for the read below
 REFUTER = getattr(sys.modules["guard_core"], "REFUTER_ROLE", REFUTER_MISSING)

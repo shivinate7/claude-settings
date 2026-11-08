@@ -314,8 +314,8 @@ add("line set: a missing agent type gets the writer set", "context", payload(),
 for _t in ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"]:
     add("line set: %s gets the five-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
-# The refuter is read-only: the five-line set, with no push, trailer, record-path or staged-diff line (owner ruling,
-# page item 279, pick d, 2026-11-06 12:43 CST). Failure class: a read-only role given the writer set.
+# The refuter is read-only, so it gets the five-line set: no push, trailer, record-path or staged-diff line
+# (decision plan-refuter). Failure class: a read-only role given the writer set.
 add("line set: refuter gets the five-line set", "context", payload(REFUTER), line_set_check(READER_RULES))
 # Plugin-prefixed read-only types take the reader set too (the prefix split must reach them).
 for _t in ["my-plugin:reviewer", "ns:Explore"]:
