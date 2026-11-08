@@ -230,8 +230,8 @@ def merge_check_reason(verdict: str, detail: str) -> str:
 
 
 REVIEWED_HEAD_PUSH_REASON = (
-    "Rule (Git, reviewed-head-push): this push lands on the head of an open pull request whose newest review record is "
-    "a record whose one fix check is used, whatever the record's state, so the merge tool can write no fix check for the new head (decision pr-review-record). "
+    "Rule (Git, reviewed-head-push): this push lands on the head of an open pull request whose newest review record "
+    "has used its one fix check, whatever the record's state, so the merge tool can write no fix check for the new head (decision pr-review-record). "
     "Remedy: stack the change on a new branch, and open its own pull request."
 )
 

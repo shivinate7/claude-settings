@@ -91,8 +91,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
-  reviewed-head-push   ask. A push onto the head of an open pull request whose newest review record is done
-                       and already holds its fix check. Only in a merge-tool repo. A read that fails lets the push through.
+  reviewed-head-push   ask. A push onto the head of an open pull request whose newest review record carries
+                       its fix check, whatever the record's state. Only in a merge-tool repo. A read that fails lets the push through.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
