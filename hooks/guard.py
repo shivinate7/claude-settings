@@ -4161,7 +4161,8 @@ def sim_lease_holds(session: str, udids: list) -> bool:
 
 def _sim_read():
     """(sweep module, device list) from the one `simctl list`, or (None, None) when the janitor is not beside this
-    file (a cloud copy), simctl is missing, or the list does not read. Every simulator rule fails open on None."""
+    file (a cloud copy), simctl is missing, or the list does not read. Every simulator rule fails open on None,
+    except a hold drive that names a device, which is refused."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep

@@ -1516,3 +1516,4 @@
 - reviewed-head-push-config-silent: when git cannot read the push remote (corrupt config), the guard lets the push through with no stderr line, though its record says one line (hooks/guard_merge.py `reviewed_head_push_hit`). Decision: pr-review-record.
 - reviewed-head-push-multi-source: a push of several refspecs asks unless every source equals the PR head, so `git push origin feat other` asks about feat's PR even when feat sends nothing (hooks/guard_merge.py `_sends_nothing`). Decision: pr-review-record.
 - reviewed-head-push-cases-thin: no case sets `branch.<b>.pushRemote`, `remote.pushDefault` against an origin branch remote, several refspecs or a detached HEAD, so a mutant of the remote order may live (hooks/test_guard.py). Decision: pr-review-record.
+- builder-edits-mutants: hooks/guard.py says a builder keeps off hooks/mutate_guard.py, but `builder_test_path` does not refuse a builder edit of it, so a builder could weaken a mutant. Decision: none.
