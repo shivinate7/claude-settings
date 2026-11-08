@@ -23,4 +23,4 @@ Cost: one guard run per Monitor call, no new process. A refusal adds one guard.l
 Monitor waits for a condition, such as a port or a file. A long command still runs in the background, and the agent waits for its completion notice.
 
 Kind: process
-Home: hooks/guard_stream.py
+Home: hooks/guard_stream.py (waiter rule), hooks/guard.py `judge_shell` (the Monitor exemption)

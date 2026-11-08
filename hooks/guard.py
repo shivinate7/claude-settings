@@ -162,7 +162,7 @@ Other tools, in `judge` order:
                        `agent_id` and a valid session id. Unreadable git passes. The shell form
                        reads the targets frozen-path reads, after a leading `cd`. An override
                        lifts it.
-                       A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
+                       A Bash, PowerShell or Monitor `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
                        `agent-<id>-<suffix>` red-run folder passes that act. A write strictly
