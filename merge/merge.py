@@ -3049,7 +3049,10 @@ def default_lock(root):
 # The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
 REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state
-REVIEW_RULE_REMEDY = "Put free text, such as a footer, below a line exactly `---` after the CI line."  # the one home of this sentence; the guard's refusal reads it too
+# The remedy sentences of a record that does not parse, one home for the guard and the runner. None ends in a stop: the caller adds it, or the line goes on with `;`.
+REVIEW_FOOTER_RULE = "a line exactly `---`, with nothing between the CI line and `---`"
+REVIEW_RULE_REMEDY = f"Put free text, such as a footer, below {REVIEW_FOOTER_RULE}"  # text follows the CI line
+REVIEW_FOOTER_REMEDY = f"If you add a footer, put it below {REVIEW_FOOTER_RULE}"  # the body breaks some other rule
 REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "no")
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
@@ -3114,13 +3117,19 @@ def parse_review(text):
         last = i
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix}
 
+def review_text_follows_ci(text):
+    """True when `text` is a marked record that does not parse only because text follows its first CI line: cut there, it parses. The one test of
+    that cause, so the form rules stay in parse_review alone."""
+    if not review_marked(text) or parse_review(text) is not None:
+        return False
+    lines = text.splitlines()
+    return REVIEW_CI_LINE in lines and parse_review("\n".join(lines[:lines.index(REVIEW_CI_LINE) + 1])) is not None
+
 def review_unparsed_why(text):
-    """-> None when `text` parses or is not a review record (no marker), else why it does not, with the remedy. Text that follows the CI line is
-    diagnosed by parsing the body cut at the first CI line, so the form rules stay in parse_review alone."""
+    """-> None when `text` parses or is not a review record (no marker), else why it does not, with the remedy and no closing stop."""
     if not review_marked(text) or parse_review(text) is not None:
         return None
-    lines = text.splitlines()
-    if REVIEW_CI_LINE in lines and parse_review("\n".join(lines[:lines.index(REVIEW_CI_LINE) + 1])) is not None:
+    if review_text_follows_ci(text):
         return f"text follows the CI line, so the record does not parse. {REVIEW_RULE_REMEDY}"
     return "the record does not parse. Render it with `merge <pr> --review-record ...` and post the output as it is"
 
