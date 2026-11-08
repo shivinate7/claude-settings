@@ -2425,11 +2425,12 @@ class RevivedNote(unittest.TestCase):
     def notes_at(self, rev):
         return self.r.sh("show", "%s:%s" % (rev, self.NOTES)).splitlines()
 
-    def start(self, union, retire=True, base=None, branch=None, main=None):
+    def start(self, union, retire=True, base=None, branch=None, main=None, edit_date=None):
         """A base whose notes hold untouched-note and retired-note, then an unrelated main commit, so the fork point is that
         commit and not the one that added the notes. The branch deletes retired-note, or with retire False appends a line of
         its own. Main then appends main-note after retired-note, so the two edits meet at the end of the file. `base`, `branch`
-        and `main` replace those notes lines (after the heading) for the cases that need other text. -> the branch's commit.
+        and `main` replace those notes lines (after the heading) for the cases that need other text. `edit_date` dates the
+        branch's edit commit, for a case that orders by date. -> the branch's commit.
         The layout file makes the notes path docs/debts/notes.md, as RetireCite does."""
         base = (self.UNTOUCHED, self.RETIRED) if base is None else base
         if branch is None:
@@ -2447,7 +2448,7 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(r.sh("check-attr", "merge", "--", self.NOTES).rsplit(": ", 1)[-1], "union" if union else "unspecified",
                          "premise: this variant's driver for the notes file")
         self.retire = None
-        edit = r.commit("the branch edits the notes", docs__debts__notes_md=self.text(*branch))
+        edit = r.commit("the branch edits the notes", date=edit_date, docs__debts__notes_md=self.text(*branch))
         if retire:
             self.retire = edit
         r.sh("checkout", "-q", "main")
@@ -2480,12 +2481,12 @@ class RevivedNote(unittest.TestCase):
         """How many copies of doubled-note the notes file at rev holds."""
         return self.body(rev).count(self.DOUBLED)
 
-    def commit_notes(self, msg, lines, on_main=False):
+    def commit_notes(self, msg, lines, on_main=False, date=None):
         """Commits the notes file as the heading and `lines`, on the branch or on main. Main is pushed, so the check's upstream
-        holds that commit. -> the sha."""
+        holds that commit. `date` dates both the author and the committer line. -> the sha."""
         if on_main:
             self.r.sh("checkout", "-q", "main")
-        sha = self.r.commit(msg, docs__debts__notes_md=self.text(*lines))
+        sha = self.r.commit(msg, date=date, docs__debts__notes_md=self.text(*lines))
         if on_main:
             self.r.push()
             self.r.sh("checkout", "-q", "feat")
@@ -2748,6 +2749,82 @@ class RevivedNote(unittest.TestCase):
             if self.r.verdict():
                 refused.append(reason)
         self.assertEqual(refused, [], "a reason that names retired-note with punctuation after it does not excuse it: %r" % refused)
+
+    def test_a_slug_in_backticks_in_the_reason_excuses_its_revival(self):
+        refused = []
+        for reason in ("the owner retired it - retired-note", "the owner retired it - `retired-note`"):  # the plain form is the control
+            self.start(union=True)
+            self.merge_main()
+            self.assert_refused(self.r.verdict())
+            self.trailer_commit(reason)
+            self.assertIn(self.NOTES, C.allowed(self.r.dir, "origin/main..HEAD"), "premise: the trailer is read for the notes path")
+            if self.r.verdict():
+                refused.append(reason)
+        self.assertEqual(refused, [], "a trailer that names retired-note in backticks does not excuse its revival: %r" % refused)
+
+    def test_a_refusal_for_a_lost_line_only_prints_no_slug_hint_in_the_footer(self):
+        self.start(union=True, retire=False)
+        self.merge_main(final=self.text(self.UNTOUCHED, self.RETIRED, self.OWN))
+        got = self.r.verdict()
+        self.assertTrue([p for p in got if "drops" in p and self.NOTES in p], "premise: a lost line on the notes path: %r" % got)
+        self.assertEqual([p for p in got if "note `" in p], [], "premise: no slug was lowered, so nothing is a revival: %r" % got)
+        _, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        footer = [l for l in text.splitlines() if l.startswith("silent-undo: put the work back")]
+        self.assertEqual(len(footer), 1, "premise: the refusal prints one footer line: %r" % text)
+        self.assertNotIn("- <slug>", footer[0], "the footer for a lost line suggests the slug form: %r" % footer[0])
+        self.assertNotIn("keep a revived note", footer[0], "the footer for a lost line carries the revival hint: %r" % footer[0])
+
+    def undo_check_refusal(self):
+        """merge.undo_check on this checkout, which must refuse. -> the Dropped message. The merge tool is the check's second
+        caller, as MergeTool shows, so its refusal text is read here."""
+        import merge
+        with self.assertRaises(merge.Dropped) as cm, contextlib.redirect_stdout(io.StringIO()):
+            merge.undo_check(self.r.dir, "origin/main")
+        return str(cm.exception)
+
+    def test_a_refusal_for_a_lost_line_only_from_the_merge_tool_names_no_slug_hint(self):
+        self.start(union=True, retire=False)
+        self.merge_main(final=self.text(self.UNTOUCHED, self.RETIRED, self.OWN))
+        msg = self.undo_check_refusal()
+        self.assertIn("drops", msg, "premise: the refusal is for a lost line: %r" % msg)
+        self.assertNotIn("note `", msg, "premise: no slug was lowered, so nothing is a revival: %r" % msg)
+        self.assertNotIn("keep a revived note", msg, "the merge tool's refusal for a lost line carries the revival hint: %r" % msg)
+        self.assertNotIn("- <slug>", msg, "the merge tool's refusal for a lost line suggests the slug form: %r" % msg)
+
+    def test_a_refusal_for_a_revival_from_the_merge_tool_carries_the_slug_hint(self):
+        self.start(union=True)
+        self.merge_main()
+        msg = self.undo_check_refusal()
+        self.assertIn("note `retired-note`", msg, "premise: retired-note is refused: %r" % msg)
+        self.assertIn("keep a revived note", msg, "the merge tool's refusal for a revival lacks the trailer hint: %r" % msg)
+        self.assertIn("- <slug>", msg, "the merge tool's refusal for a revival lacks the slug form: %r" % msg)
+
+    def start_side_readd(self, readd_date):
+        """The branch deletes retired-note at D, dated 2026-11-02. A side line off D re-adds it at R, dated readd_date, and keeps
+        main's MAIN line, so the head matches main. A --no-ff merge brings R in as the head H, dated 2026-11-05. -> (H, R)."""
+        self.start(union=True, main=(self.UNTOUCHED, self.RETIRED, self.MAIN), edit_date="2026-11-02T10:00:00")
+        self.r.sh("checkout", "-q", "-b", "side", self.retire)
+        readd = self.commit_notes("the side line re-adds the note on purpose", [self.UNTOUCHED, self.RETIRED, self.MAIN], date=readd_date)
+        self.r.sh("checkout", "-q", "feat")
+        self.r.sh("merge", "--no-ff", "-m", "Merge the side line into the branch", "side", date="2026-11-05T10:00:00")
+        return self.r.sh("rev-parse", "HEAD"), readd
+
+    def replay_order(self):
+        """The notes path's commits of origin/main..HEAD, oldest first, in the order the check replays them."""
+        return self.r.sh("log", "--no-merges", "--full-history", "--reverse", "--format=%H", "origin/main..HEAD", "--", self.NOTES).splitlines()
+
+    def test_a_note_re_added_on_a_side_line_passes_when_the_re_add_is_dated_before_the_delete(self):
+        head, readd = self.start_side_readd(readd_date="2026-11-01T10:00:00")
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 3, "premise: the head is a merge commit")
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the head holds retired-note")
+        self.assertEqual(self.replay_order(), [readd, self.retire], "premise: the replay lists the re-add before the delete, by its date")
+        self.assertEqual(self.r.verdict(), [], "a note the branch deleted and re-added on purpose was refused when the re-add is dated before the delete")
+
+    def test_a_note_re_added_on_a_side_line_passes_when_the_re_add_is_dated_after_the_delete(self):  # control
+        head, readd = self.start_side_readd(readd_date="2026-11-04T10:00:00")
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the head holds retired-note")
+        self.assertEqual(self.replay_order(), [self.retire, readd], "premise: the replay lists the delete before the re-add")
+        self.assertEqual(self.r.verdict(), [], "a note the branch deleted and re-added on purpose was refused when the re-add is dated after the delete")
 
 
 if __name__ == "__main__":
