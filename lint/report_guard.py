@@ -79,7 +79,7 @@ demand; the current reply counts by its blockquote. A bare `Recovered:` takes th
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
 the current Recovered line (split on ";" outside parentheses) names a source, matched ignoring case: git,
 page or digest as whole words, `commit <hex>`, `commits <hex>` or `sha <hex>` (7-40 hex characters with a digit;
-a colon or a backtick pair may sit between), `PR <n>`, `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
+a colon or a backtick pair may sit between), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
 `issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
 whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
 has the report shape. Cost: a scan of the records main()
@@ -726,11 +726,11 @@ CARRY_FORMS = {
                     "or `Handoff gave: none`",
 }
 # A source word or form, matched ignoring case: git, page, digest, `commit <hex>`, `commits <hex>` or `sha <hex>` (a
-# colon or a backtick pair may sit between), `PR <n>`, `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
+# colon or a backtick pair may sit between), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
 # `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
 # a digit, so a word such as "commit defaced" names no source.
 SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
-                       r"|\bPR\s*#?\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
+                       r"|\bPR\s*#\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
@@ -1961,6 +1961,13 @@ def main():
     incoming = last_incoming_index(records)
     turn = records if incoming is None else records[incoming + 1:]
     after = [] if last_human_idx is None else records[last_human_idx + 1:]
+    landing = after
+    if incoming is not None and last_human_idx is not None and incoming > last_human_idx:
+        # A peer message after a reply that ended its turn starts a new turn: its landing window holds
+        # no commit from before it. One that arrives mid-turn (a tool result came last) leaves the window whole.
+        prior = [r for r in records[:incoming] if not r.get("isSidechain")]
+        if prior and prior[-1].get("type") == "assistant" and not list(tool_uses(prior[-1])):
+            landing = records[incoming + 1:]
     route += success_route_flags(hook, after)
     note = ""
     pick_reason = ""
@@ -1976,7 +1983,7 @@ def main():
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
             pass
-    if last_human_idx is None or not turn_landed(after):
+    if last_human_idx is None or not turn_landed(landing):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
         pick = [pick_reason]
