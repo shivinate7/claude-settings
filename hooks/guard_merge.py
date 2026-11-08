@@ -1220,7 +1220,8 @@ _STEP_FILE = re.compile(r"(?:^|/)roadmap/data/steps/[^/]+\.json$")
 WRITTEN_ITEMS = "items"  # the ArtifactData collection whose `added` is judged
 WRITTEN_REASON = (
     "this written time ({what}) is {off} minutes ahead of the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
-    "The time is {now}, which is {central} and {utc}: write that time, then run the call again."
+    "The time is {now}, which is {central} and {utc}: write that time, then run the call again. "
+    "(decision local-time-central, sessions speak times in US Central)"
 )
 
 
