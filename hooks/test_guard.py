@@ -25273,7 +25273,7 @@ cs("commit_pathspec_denied: a path on the commit line", "deny", command=COMMIT +
 cs("commit_staged_record_allowed", "allow", command=COMMIT, cwd=CS_STAGED_RECORDS)
 cs("commit_unstaged_code_allowed: the commit holds nothing of it", "allow", command=COMMIT, cwd=CS_UNSTAGED_CODE)
 
-# ---- the three gates: each case repeats a denied call with one factor changed
+# ---- the three conditions: each case repeats a denied call with one factor changed
 cs_write("agent_write_passes", "allow", CS_CODE, agent_id="bld1", agent_type="builder")
 cs_shell("agent_write_passes", "allow", "echo x > src/app.py", agent_id="bld1", agent_type="builder")
 cs("agent_write_passes, a lane agent's commit", "allow", command=COMMIT, cwd=CS_STAGED_CODE, agent_id="bld1", agent_type="builder")
@@ -25820,7 +25820,7 @@ def cs_override_call(config, session, seconds, tool="Edit", tool_input=None, cwd
 # probe's `opens` seam counts the opens (LB_PROBE). The rule's own opens are the call's less those of the same call with
 # CLAUDE_CODE_REMOTE "false", where the rule leaves at its first condition and no other rule reads that variable; other rules'
 # own opens (the session record, say) cancel out. The layout and the config CLAUDE.md are also asserted unopened among
-# the call's whole opens, so a rule that read them before its gates cannot hide in the difference. The control row
+# the call's whole opens, so a rule that read them before its conditions cannot hide in the difference. The control row
 # shows the spy sees a read, so a pass is no blind spy's.
 CS_OPENS_DIR = os.path.join(ROOT, "cs-opens")
 
