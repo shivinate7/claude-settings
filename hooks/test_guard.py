@@ -10037,10 +10037,10 @@ def pr_update(name, expected, rule=None, body=None, live=PRBODY_1700, carries=()
         config=MERGECFG, carries=carries, lacks=lacks, owner="y", repo="x", pullNumber=12, **fields)
 
 
-def pr_edit(name, expected, command, rule=None, live=PRBODY_1700, env=None):
+def pr_edit(name, expected, command, rule=None, live=PRBODY_1700, env=None, tool="Bash"):
     """One `gh pr edit 5` call, judged with the fake gh `live` on PATH. `env` sets variables in the guard's
-    environment, and None unsets one."""
-    sh(name, command, expected, rule, cwd=NOGIT, env_path=live + os.pathsep + PY_PATH, env=env)
+    environment, and None unsets one. `tool` is the shell the call runs in: Bash, or PowerShell."""
+    sh(name, command, expected, rule, tool=tool, cwd=NOGIT, env_path=live + os.pathsep + PY_PATH, env=env)
 
 
 # A placeholder is refused whatever the live body holds, so each deny runs with a live body of 1700 characters on
@@ -10103,6 +10103,30 @@ pr_edit("pr-body-placeholder: echo 'BODY=x' before gh pr edit --body \"$BODY\" i
 # A backslash keeps the `$` literal in double quotes, so the shell sends PLACEHOLDER$, which is a placeholder.
 pr_edit("pr-body-placeholder: gh pr edit --body \"PLACEHOLDER\\$\" is denied, the shell sends PLACEHOLDER$", "deny",
         'gh pr edit 5 --body "PLACEHOLDER\\$"', PR_PLACEHOLDER)
+
+# A PowerShell variable is assigned by the same call, and PowerShell names ignore case. A `$body` the call assigns is
+# the body it sends, so it is no placeholder. Each allow is red today: the guard refuses it as a placeholder.
+PS_UNSET = {"BODY": None, "body": None}   # the guard's environment holds no body, under either case of the name
+pr_edit("pr-body-placeholder: PowerShell $body assigned, then gh pr edit --body $body is not denied", "allow",
+        '$body = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+pr_edit("pr-body-placeholder: PowerShell $Body assigned, then gh pr edit --body $body is not denied, case-blind",
+        "allow", '$Body = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+# A PowerShell call with no assignment is out of this rule's scope, so the guard passes it unjudged. Red today: the
+# guard refuses it as a placeholder.
+pr_edit("pr-body-placeholder: PowerShell gh pr edit --body $body with no assignment is not denied", "allow",
+        "gh pr edit 5 --body $body", live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+# Control, green today. The literal placeholder is denied in PowerShell too, so the allows above are not green only
+# because PowerShell is out of the rule.
+pr_edit("pr-body-placeholder: PowerShell gh pr edit --body PLACEHOLDER is denied", "deny",
+        "gh pr edit 5 --body PLACEHOLDER", PR_PLACEHOLDER, env=PS_UNSET, tool="PowerShell")
+# A lone `.` is an argument to ls, not a dot-source, so BODY stays unset for the call and the body reads as empty. The
+# guard reads that `.` as a dot-source that may assign BODY, so it passes the call unjudged today: red.
+pr_edit("pr-body-placeholder: ls . && gh pr edit --body \"$BODY\" with BODY unset is denied, "
+        "a lone dot is no dot-source",
+        "deny", 'ls . && gh pr edit 5 --body "$BODY"', PR_PLACEHOLDER, env=BODY_UNSET)
+# Control, green today: a dot-source at command position may assign BODY, so the call is not judged.
+pr_edit("pr-body-placeholder: . ./env.sh && gh pr edit --body \"$BODY\" is not denied, a dot-source may assign",
+        "allow", '. ./env.sh && gh pr edit 5 --body "$BODY"', live=GHMAIN, env=BODY_UNSET)
 
 # Controls, green today. A value the command sets before the call is the body the shell sends, so the guard may read
 # it. The value is real words, so no reading of it is a placeholder, and the live body is GHMAIN, so no shrink ask.
