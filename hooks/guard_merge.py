@@ -435,12 +435,12 @@ def _marked_bodies(bodies):
 
 
 def _unparsed(module, marked):
-    """Return `line N: <text>` (text cut to 80 characters) for the first line that broke the parse of the first marked body that does not
-    parse, else None. Reads nothing."""
+    """Return `line N: <text>` (`merge.review_bad_text`, the one home of the echo) for the earliest bad line of the first marked body that
+    does not parse, else None. Reads nothing."""
     for body in marked:
         record, bad = module.review_parse(body)
         if record is None:
-            return "line %d: %s" % (bad[0], cap_safe(bad[1], 80))
+            return module.review_bad_text(bad)
     return None
 
 
