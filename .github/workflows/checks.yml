@@ -225,7 +225,7 @@ jobs:
       - name: Guard wrappers fixture suite
         run: python3 hooks/test_wrappers.py
 
-      # Fuzzes the 120 deny checks behind judge_shell and judge (about 41 s on Linux). Linux only, like the other guard-module suites here.
+      # Fuzzes every deny check that judge_shell and judge reach, with each tool judge branches on. Linux only, like the other guard-module suites here.
       - name: Deny checks never raise suite
         run: python3 hooks/test_checks_never_raise.py
 
