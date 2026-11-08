@@ -1,0 +1,11 @@
+{
+  "title": "guard_frozen _resolve_vars reads quoted and shell-scoped assignments as the shell does",
+  "why": "Lane agent-worktree-add-in-tool-dir (session_013NEJL382EZLqWkzVvjj7UP), 17:41 CST Nov 8, found in review of the follow-up to #1977 (variable worktree-add target). (1) `BASE=.claude/worktrees; WT=\"$BASE\"/../lane` splits the value at the quote, so a write or worktree add lands somewhere other than the guard thinks (hooks/guard_frozen.py _resolve_vars about line 299; shared with _shell_write_hit about line 629). (2) A lone apostrophe in an earlier `echo \"don't\"` makes the `'[^']*'` match span segments, so a later reassignment is missed (about line 297). (3) A prefix assignment `S=x cmd \"$S\"` and a subshell `(S=x)` are read as setting S for later text, which the shell does not do. Each is a form Claude writes in normal work. The resolver feeds more than one rule, so it needs its own lane and review; the worktree-add follow-up reuses it as is. Rule building-scanner-respects-strings. Red cases: one per form above.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 847,
+  "updatedAt": "2026-11-08T17:41:00-06:00"
+}
