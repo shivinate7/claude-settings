@@ -13615,6 +13615,17 @@ sh("pwsh-followups: pwsh -c Set-Content of a smart-quoted test file is refused [
 sh("pwsh-followups: PowerShell tool Set-Content of a smart-quoted test file is refused "
    "[pwsh-followups green]",
    "Set-Content “hooks/test_x.py” x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Add-Content of an ASCII-quoted line that names a test file as text is allowed "
+   "[pwsh-followups red]",
+   "pwsh -c 'Add-Content docs/log.md \"edited hooks/test_guard.py\"'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Add-Content of an ASCII-quoted line that names a test file as text is allowed "
+   "[pwsh-followups red]",
+   'Add-Content docs/log.md "edited hooks/test_guard.py"', "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Copy-Item of an ASCII test file as its source is allowed [pwsh-followups red]",
+   "pwsh -c 'Copy-Item hooks/test_x.py docs/a.md'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Copy-Item of an ASCII test file as its source is allowed "
+   "[pwsh-followups red]",
+   "Copy-Item hooks/test_x.py docs/a.md", "allow", tool="PowerShell", **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
