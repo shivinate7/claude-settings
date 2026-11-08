@@ -3941,7 +3941,10 @@ def impeccable_shell_hit(segment: str) -> str:
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 
 
-_BACKTICK_SPAN = re.compile(r"(`(?:\\.|[^`\\])*`)")
+# A local copy of `_substitutions`' backtick-span rule (guard_env.py), which is a scan loop with no regex to
+# reuse: a span runs to the next unescaped backtick, an escaped char may be a newline (re.S), and an unclosed
+# span, or one that ends in a lone backslash, runs to the end of the text.
+_BACKTICK_SPAN = re.compile(r"(`(?:\\.|[^`\\])*(?:`|\\?\Z))", re.S)
 
 
 def shell_run_texts(raw: str) -> list:
@@ -3968,7 +3971,7 @@ def shell_run_texts(raw: str) -> list:
                 # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
                 # backtick span as a shell, `$(` and `<(` inside the span too. Outside a span they stay
                 # text: no interpreter reads them as a shell. Python's own backtick span is read too, a
-                # rare false alarm. The split follows _substitutions' span rule (to the next unescaped backtick).
+                # rare false alarm. The split follows _substitutions' span rule (see _BACKTICK_SPAN).
                 parts = _BACKTICK_SPAN.split(body)
                 inert = "".join(part if at % 2 else re.sub(r"([$<>])\(", r"\1 (", part)
                                 for at, part in enumerate(parts))
