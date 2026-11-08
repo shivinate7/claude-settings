@@ -535,6 +535,28 @@ class PushCheckTests(unittest.TestCase):
                          "was dropped for the tag of its name" % FEAT)
         self.assertIn("CI running on " + HEAD7, reason, "the branch head of the push is not named running: " + reason)
 
+    def test_new_branch_is_kept_when_a_tag_of_its_name_is_pushed_too(self):
+        # `git push origin feat --tags` prints a [new branch] line, which gives no sha, and a [new tag] line of one name.
+        # The head of a new branch is read from the remote-tracking ref the push sets, so the branch is checked and its
+        # head is that commit. The check drops the name for the tag (`sha is None and branch in new_tags`), so the turn
+        # passes with no CI line. The tag sits on an older commit, which the head read must not take. Red on the
+        # current code. The base (no filter) keeps the branch.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=None, tag=FEAT)  # the tag, on an older commit
+        head = git_commit(folder, remote_branch=FEAT, on_branch=FEAT)  # the new branch's head
+        output = (REMOTE_LINE + " * [new branch]      %s -> %s\n" % (FEAT, FEAT)
+                  + " * [new tag]         %s -> %s\n" % (FEAT, FEAT))
+        steps = push(output, command="git push origin %s --tags" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                           runs=[run_entry(None, sha=head, status="in_progress")])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less turn with a new branch and a tag of one name was not blocked "
+                         "(scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a push of new branch %s with --tags passed with no CI line: the branch was "
+                         "dropped for the tag of its name" % FEAT)
+        self.assertIn("CI running on " + head[:7], reason, "the new branch's head is not named running: " + reason)
+
     def test_colon_form_tag_only_push_needs_no_ci_line(self):
         # `git push origin v1.0:v1.0` names a tag in the colon form, with a [new tag] line and no ref line. The local
         # tag exists, as git needs for a push of it, so the name reads as a tag and no CI line is due. Green on the old
