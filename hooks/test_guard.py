@@ -22291,9 +22291,9 @@ FIXTURELESS_CHECKS.update((
 # tool_use is its own assistant record, and each result is a user record that comes after it.
 #
 # An earlier reviewer still runs when its call has no result yet, or when it launched in the background and no
-# completion notice has arrived for its agentId. A reviewer whose call returned a plain result finished. A
-# reviewer that a hook refused (an error result) never started. These shapes are the ones the session
-# transcripts carry.
+# completion notice, and no successful TaskStop result, has closed its agentId. A failed TaskStop closes nothing.
+# A reviewer whose call returned a plain result finished. A reviewer that a hook refused (an error result) never
+# started. These shapes are the ones the session transcripts carry.
 #
 # Each row is its own case, so a failure names one cause. A refusal pins deny, as the other spawn refusals do.
 FAMILY = "review-rounds"
@@ -22337,6 +22337,20 @@ def rr_refused(cid, prompt, model="haiku"):
     """A spawn that a PreToolUse hook refused: it never started, and its result is an error."""
     text = "PreToolUse:Agent hook error: agent-model-floor: Rule (agent model): this spawn is refused."
     return [rr_use(cid, prompt, model=model), rr_result(cid, text, "Error: " + text, is_error=True)]
+
+
+def rr_stop(aid, ok=True):
+    """A TaskStop call on the background agent aid, as the assistant records it, then its result. A stop that
+    worked returns the message the stop reader matches. A failed stop names the agent and is not the 'No task
+    found' error, which the session-board decision reads as a task that had already ended."""
+    cid = "toolu_stop_" + aid
+    use = {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": cid, "name": "TaskStop", "input": {"task_id": aid}}]}}
+    if not ok:
+        text = "Error: could not stop task %s: the stop request failed." % aid
+        return [use, rr_result(cid, text, text, is_error=True)]
+    body = {"message": "Successfully stopped task: %s (review the diff)" % aid, "task_id": aid}
+    return [use, rr_result(cid, json.dumps(body), body)]
 
 
 def rr_notice(aid, form):
@@ -22425,6 +22439,16 @@ rr_case("review-rounds: a builder's round 3 is not refused by this rule while a 
         agent="builder", model="opus")
 rr_case("review-rounds: round 2 on PR #2038 is allowed when the transcript holds no spawn", "allow",
         "ok-empty", [], RR_R2)
+
+# A TaskStop that worked closes its background reviewer, as a completion notice does. One that failed leaves the
+# reviewer running. A later-round reviewer beside another reviewer of its own round is allowed.
+rr_case("review-rounds: round 2 on PR #2038 is allowed once a TaskStop stops round 1 and its result says it worked, "
+        "with no notice", "allow", "ok-stop-success", rr_background("rr-q1", RR_R1) + rr_stop("rr-q1"), RR_R2)
+rr_case("review-rounds: round 2 on PR #2038 is refused while round 1's TaskStop fails with an error that names it",
+        "deny", "red-stop-error", rr_background("rr-q2", RR_R1) + rr_stop("rr-q2", ok=False), RR_R2,
+        carries=(("round 1", "Round 1"),))
+rr_case("review-rounds: round 2 on PR #2038 is allowed while another round 2 reviewer on PR #2038 runs", "allow",
+        "ok-same-round", rr_background("rr-q3", RR_R2), RR_R2)
 
 
 def rr_cost_check(agent, prompt, model, records, want_opens):
