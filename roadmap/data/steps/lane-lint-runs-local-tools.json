@@ -5,7 +5,7 @@
   "order": 0.97,
   "owner": "coordinator",
   "why": "Coordinator, 13:52 CST Nov 7.",
-  "note": "Stacked on #1417. Closes the debt of the same name. Built in #1461 (head 7e5812dc3), after #1417, with runner 8 (coordinator 14:34 CST). #1461 and #1481 now stack on #1417 at 02a72525f (coordinator, 00:03 CST Nov 8).",
+  "note": "Stacked on #1417. Closes the debt of the same name. Built in #1461 (head 7e5812dc3), after #1417, with runner 8 (coordinator 14:34 CST). #1461 and #1481 now stack on #1417 at 02a72525f (coordinator, 00:03 CST Nov 8). #1461 needs a fresh round 1 at its live head 796590d0e; the coordinator tells its lane (00:29 CST Nov 8).",
   "lane": "session_013NEJL1N3YkCMouc1pELXyu",
-  "updatedAt": "2026-11-08T00:03:00-06:00"
+  "updatedAt": "2026-11-08T00:28:00-06:00"
 }

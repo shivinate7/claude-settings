@@ -1,0 +1,11 @@
+{
+  "title": "A quiet lane-lint run does not trip the stall watch at 300 s",
+  "why": "The stall watcher cuts a quiet lane-lint wrapper at 300 s (lane batch63-lint-b, coordinator 00:29 CST Nov 8). Same class as done step ci-job-stall-strands, which fixed it for ci-job.",
+  "note": "Fix: the lane-lint wrapper prints a heartbeat line, or the stall watch reads it as a known long command, in the same home that ci-job-stall-strands used; red case first on a quiet lane lint past 300 s. Queue fix (owner 13:20 CST Nov 7: a found gap gets a fix). Slug from the coordinator. Filed 00:31 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 550,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T00:28:00-06:00"
+}
