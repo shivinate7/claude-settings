@@ -1770,11 +1770,11 @@ _RULE_IDS = []  # (roots, anchors), read once per hook run on the first slug tha
 
 def _names_rule_id(clause):
     """True when a slug in parentheses in `clause` (CANNOT_RULE_ID_RE) is a real rule or decision id: a `rule:<id>`
-    anchor in the rule files (rule_audit.RULE_FILES, the one home of that list) or a docs/decisions/<id>.md file. Both
-    are read in this file's checkout and in the checkout the global CLAUDE.md points at (guard.pointer_checkout): an
-    installed copy holds only the pointer and no decisions. Cost: on the first such slug of a hook run, the guard import
-    (cannot_problem needs it next anyway), one read of the pointer and of each rule file per checkout; per slug, one
-    file stat per checkout. A guard that does not load prints UNKNOWN and reads this checkout alone. When no checkout's
+    anchor in the rule files (rule_audit.RULE_FILES, the one home of that list) or an <id>.md file in the decisions
+    folder (layout.path). Both are read in this file's checkout and in the checkout the global CLAUDE.md points at
+    (guard.pointer_checkout): an installed copy holds only the pointer and no decisions. Cost: on the first such slug of
+    a hook run, the guard import (cannot_problem needs it next anyway), one read of the pointer, of each rule file and
+    of the layout per checkout; per slug, one file stat per checkout. A guard that does not load prints UNKNOWN and reads this checkout alone. When no checkout's
     rule files can be read, the slug skips with no note: a guard that cannot read cannot accuse."""
     slugs = [m.group(1).lower() for m in CANNOT_RULE_ID_RE.finditer(clause)]
     if not slugs:
@@ -1795,10 +1795,16 @@ def _names_rule_id(clause):
                 read = True
             except (OSError, UnicodeDecodeError):
                 continue
-        _RULE_IDS.append((roots, ids if read else None))
-    roots, ids = _RULE_IDS[0]
-    return ids is None or any(slug in ids or any(os.path.isfile(os.path.join(root, "docs", "decisions", slug + ".md"))
-                                                 for root in roots) for slug in slugs)
+        folders = []  # each checkout's decisions folder, from the layout; a checkout whose layout does not read adds none
+        for root in roots:
+            try:
+                folders.append(os.path.join(root, *layout.path(root, "decisions").split("/")))
+            except (layout.LayoutError, OSError):
+                continue
+        _RULE_IDS.append((folders, ids if read else None))
+    folders, ids = _RULE_IDS[0]
+    return ids is None or any(slug in ids or any(os.path.isfile(os.path.join(folder, slug + ".md")) for folder in folders)
+                              for slug in slugs)
 
 
 def _report_label_end(body):
