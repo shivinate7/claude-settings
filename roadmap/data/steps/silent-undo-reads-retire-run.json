@@ -1,11 +1,11 @@
 {
   "title": "The silent-undo check accepts a debt close with a valid Retire-run line",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 269.3,
   "owner": "coordinator",
   "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
   "why": "Runner 9: the silent-undo check refused q_max #1099's debt close even though its Retire-run line was valid (coordinator, 17:36 CST Nov 7). A false alarm that holds a merge.",
-  "note": "Done check: a red test where a deleted debt with an accepted Retire-run passes, and a wrong-slug Retire-run still refuses.",
-  "updatedAt": "2026-11-07T17:35:00-06:00"
+  "note": "Done check: a red test where a deleted debt with an accepted Retire-run passes, and a wrong-slug Retire-run still refuses. Built as #1677, with runner 8: round 3 PASS, net value zero (coordinator 18:39 CST). Follow-up: step silent-undo-ci-body.",
+  "updatedAt": "2026-11-07T18:40:00-06:00"
 }
