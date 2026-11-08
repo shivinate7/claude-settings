@@ -217,7 +217,8 @@ CORRECTION_TAIL = (
 
 MODELS_REASON = (
     "Model-name guard: a Done item that agents built or reviewed names each one's role "
-    "and model, like \"(builder sonnet, reviewer sonnet)\". Here: ")
+    "and model, like \"(builder sonnet, reviewer sonnet)\". A Done item no agent built may say "
+    "\"(no agent)\". Here: ")
 UNSTARTED_REASON = (
     "Unstarted guard: this turn ran a builder, so Next holds an \"Unstarted:\" line. "
     "Name each queued item with every question answered that you left unstarted, with "
@@ -539,7 +540,8 @@ def answered_problem(text):
 # A non-BUILT Done item marked "(no agent)" owes no model, so that gate skips it. A BUILT item is never skipped.
 # A Done pair is refused only when no spawn of that role anywhere in the session ran that model: an earlier
 # review round can sit before the window. The window still decides which roles must be named. Cost of the
-# session-wide read: one more pass over the in-memory records per Stop, no file or process.
+# session-wide read: one more pass over the in-memory records per Stop, plus one agents/<role>.md read per
+# spawn with no model field; no file written, no process.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
@@ -642,8 +644,8 @@ def done_models_problem(text, spawned, session_spawned=None):
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = session.get(role)
-        if ran is not None and "" not in ran and model not in ran:
+        ran = session.get(role, set()) - {""}
+        if ran and "" not in spawned.get(role, ()) and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
