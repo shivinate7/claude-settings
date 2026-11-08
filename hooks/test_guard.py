@@ -2990,9 +2990,8 @@ sh("per-file ask: restore \"$F\" -- keep.txt in a worktree still asks, unreadabl
 sh("per-file deny: -C lane status, then -C shared restore f.txt, from a plain folder",
    VCS + " -C " + slash(GITWT) + " status && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt",
    "deny", "shared-tree", cwd=NOGIT)
-# Once a cd into the shared checkout was an ask here (a limit of _run_dir reading the first -C against
-# the shell cwd). The cd act now refuses that cd, so the shared checkout is named by -C, and other-checkout
-# refuses the restore in it.
+# A leading cd into the worktree's own root names no other checkout, so the shared checkout is named by -C:
+# a cd into it is refused by other-checkout first. The row pins other-checkout's deny on the restore, not a chain ask.
 sh("per-file deny: a leading cd into the worktree's own root, then git -C shared restore f.txt, from a worktree",
    "cd " + slash(GITWT) + " && " + VCS + " -C " + slash(GITMAIN) + " restore f.txt", "deny",
    "other-checkout", cwd=GITWT, lacks=(CHAIN_ASK,))
@@ -22834,12 +22833,13 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a clone
                          _gcx_row("allow", "primary", "git -C @SCRATCH_CLONE commit -m x", agent=None,
                                   session=GCX_SESSION)))
 
-# ------------------------------------------------------------------ other-checkout: git -C, round 3
+# ------------------------------------------------------------------ other-checkout: git -C verbs
 #
-# Rows on other_checkout_hit's `git -C` judgment. The verb set leaves out the verbs that change a checkout's
-# files or index without moving a branch (`rm`, `mv`, `update-index`, `read-tree`, `checkout-index`), so
-# `git -C <primary> rm f` passes where `cd <primary> && git rm f` is refused. Those five rows are red on the
-# head. A `git -C` into a session's recorded lane is refused as its `cd && git` form is, so no row asks it to pass.
+# The rows pin other_checkout_hit's `git -C` judgment. It judges `git -C <other checkout>` for every verb in
+# OTHER_CHECKOUT_GIT_VERBS, including the verbs that change a checkout's files or index without moving a branch
+# (`rm`, `mv`, `update-index`, `read-tree`, `checkout-index`), and passes the reads. The -C form gets the verdict
+# the cd form gets: `git -C <primary> rm f` is refused as `cd <primary> && git rm f` is. A `git -C` into a
+# session's recorded lane is refused as its `cd && git` form is, so no row asks it to pass.
 GCX_TOP_SESSION = "gcx-session-0003"  # a session whose top-level call from its own lane records that lane
 
 
@@ -22867,7 +22867,7 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C read-tree in the pri
                          _gcx_row("deny", "home", "git -C @PRIMARY read-tree HEAD")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C checkout-index in the primary checkout is refused",
                          _gcx_row("deny", "home", "git -C @PRIMARY checkout-index -a")))
-# The cd form of the rm row: refused today, and the git -C rm above must be refused the same way.
+# The cd form of the rm row is refused, and the git -C rm above is refused the same way.
 LOG_CHECKS_EXTRA.append(("the cd form of the git -C rm row: an agent's cd into the primary checkout, then git rm, is "
                          "refused",
                          _gcx_row("deny", "home", "cd @PRIMARY && git rm f")))
