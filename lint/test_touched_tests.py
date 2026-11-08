@@ -296,8 +296,8 @@ class Selector(unittest.TestCase):
         self.assertEqual(files, [], "a source with no test file listed something")
 
     def test_mjs_source_lists_the_test_in_its_tests_folder(self):
-        test = "mods/plain-diff/tests/check.test.mjs"
-        files, _ = self.listed({test: "old\n", "mods/plain-diff/check.mjs": "old\n"}, {"mods/plain-diff/check.mjs": "new\n"})
+        test = "lint/tests/foo.test.mjs"
+        files, _ = self.listed(with_ci({test: "old\n", "lint/foo.mjs": "old\n"}, [test]), {"lint/foo.mjs": "new\n"})
         self.assertEqual(files, [test], "a touched .mjs did not list its dir/tests/x.test.mjs")
 
     def test_plain_english_map_script_lists_every_map_test(self):
