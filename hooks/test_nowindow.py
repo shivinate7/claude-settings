@@ -11,6 +11,8 @@ Pins the contract that lint/test_no_window_spawn.py relies on:
 - On Windows the wrapper ORs CREATE_NO_WINDOW (0x08000000) into the caller's creationflags and keeps
   every flag the caller passed. The constant is pinned as a number, because subprocess has no
   CREATE_NO_WINDOW on the Linux CI runner.
+- On Windows the wrapper also sets stdin=DEVNULL when the caller gives no stdin (or stdin=None) and no input,
+  and the check_output wrapper drops input=None there. A no-window child cannot use an inherited console stdin.
 - Elsewhere the wrapper adds no creationflags key. The kwargs reach subprocess unchanged.
 """
 import contextlib
@@ -81,6 +83,51 @@ class HelperContract(unittest.TestCase):
         with on_platform(True):
             self.h.Popen(["x"], creationflags=CREATE_NEW_PROCESS_GROUP)
         self.assertEqual(rec.call_args.kwargs["creationflags"], CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
+
+    def test_windows_gives_an_empty_stdin_when_the_caller_names_none(self):
+        # A no-window child's inherited console stdin is an invalid handle: its own subprocess calls hit WinError 6.
+        for name in WRAPPERS:
+            with self.subTest(wrapper=name):
+                rec = self.recorder(name)
+                with on_platform(True):
+                    getattr(self.h, name)(["x"])
+                self.assertIs(rec.call_args.kwargs.get("stdin"), subprocess.DEVNULL)
+
+    def test_windows_treats_stdin_none_as_no_stdin(self):
+        rec = self.recorder("run")
+        with on_platform(True):
+            self.h.run(["x"], capture_output=True, stdin=None)  # a caller forwarding an optional stdin
+        self.assertIs(rec.call_args.kwargs["stdin"], subprocess.DEVNULL)
+
+    def test_windows_keeps_the_callers_stdin_and_input(self):
+        rec = self.recorder("run")
+        with on_platform(True):
+            self.h.run(["x"], stdin=subprocess.PIPE)
+        self.assertIs(rec.call_args.kwargs["stdin"], subprocess.PIPE)
+        with on_platform(True):
+            self.h.run(["x"], input="data")
+        self.assertNotIn("stdin", rec.call_args.kwargs)  # subprocess.run refuses stdin= beside input=
+        self.assertEqual(rec.call_args.kwargs["input"], "data")
+        with on_platform(True):
+            self.h.run(["x"], input="")  # an empty input still sets stdin itself
+        self.assertNotIn("stdin", rec.call_args.kwargs)
+        with on_platform(True):
+            self.h.run(["x"], input=None)  # no input: the child needs a valid stdin
+        self.assertIs(rec.call_args.kwargs["stdin"], subprocess.DEVNULL)
+
+    def test_windows_check_output_with_input_none_names_no_input_beside_stdin(self):
+        # check_output turns input=None into "", and subprocess refuses input beside stdin.
+        rec = self.recorder("check_output")
+        with on_platform(True):
+            self.h.check_output(["x"], input=None)
+        self.assertIs(rec.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertNotIn("input", rec.call_args.kwargs)
+
+    def test_posix_check_output_keeps_input_none(self):
+        rec = self.recorder("check_output")
+        with on_platform(False):
+            self.h.check_output(["x"], input=None)
+        self.assertEqual(rec.call_args.kwargs, {"input": None})
 
     def test_posix_sets_no_creationflags_key(self):
         for name in WRAPPERS:
