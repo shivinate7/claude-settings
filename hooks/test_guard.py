@@ -11138,14 +11138,14 @@ def rr_spawn(tool_id, subagent_type, tool="Agent", agent=None):
 
 
 def rr_notice(tool_id, agent):
-    """The completion notice of background agent `agent`, as an attachment line."""
-    return json.dumps({"type": "user", "isSidechain": False,
-                       "attachment": {"type": "queued_command", "prompt": RR_NOTICE % (agent, tool_id, agent)}})
+    """The completion notice of background agent `agent`, as an attachment line in a one-item list."""
+    return [json.dumps({"type": "user", "isSidechain": False,
+                        "attachment": {"type": "queued_command", "prompt": RR_NOTICE % (agent, tool_id, agent)}})]
 
 
 def rr_notice_line(tool_id, agent):
-    """The same completion notice as a user line whose content is the notice text."""
-    return json.dumps({"type": "user", "message": {"role": "user", "content": RR_NOTICE % (agent, tool_id, agent)}})
+    """The same completion notice as a user line whose content is the notice text, in a one-item list."""
+    return [json.dumps({"type": "user", "message": {"role": "user", "content": RR_NOTICE % (agent, tool_id, agent)}})]
 
 
 def rr_comment(tool_id, body):
