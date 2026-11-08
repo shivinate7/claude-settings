@@ -246,10 +246,31 @@ MUTATIONS = [
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, [header for _, _, header in bodies]):\n'
+     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text):\n'
      '        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+    # The run-file keep of strip_heredoc_bodies: a body whose written file a command runs stays in view. Dropped,
+    # a written file that holds a refused command is run unread.
+    ("heredoc: drop the run-file keep, a body a command runs stays out of view",
+     '    keep = _kept_bodies(text, bodies, body_at)',
+     '    keep = set()', "guard",
+     'heredoc-keep: a written file holding gh pr create --title x, run by bash f, denies'),
+    # _walk_heredocs: a kept body keeps its closing line. Dropped, the text re-walks with the heredoc open and a
+    # launch after the body reads as body.
+    ("heredoc: a kept body loses its closing line, the launch after it reads as body",
+     '                end = index + 1 if closed else index',
+     '                end = index', "guard",
+     'heredoc-keep: a kept body, then nohup of the file, a detached launch, denies'),
+    # _reads_only: a pure reader is no reader, so its operands count as run beside a runner.
+    ("heredoc: a pure reader is not read as one, ls f piped into xargs runs f",
+     '        if name in _READERS:\n            return True',
+     '        if False:\n            return True', "guard",
+     'heredoc-keep: retire, a gh pr create line written then run by ls f | xargs wc, allowed'),
+    # _data_positions: an interpreter's operands after its script are no data, so python3 check.py f runs f.
+    ("heredoc: an interpreter's operand after its script is run, python3 check.py runs f",
+     '            data.update(range(step + 1, len(words)))',
+     '            data.update(())', "guard",
+     'heredoc-keep: retire, a gh pr create line written then run by python3 check.py brief.md, allowed'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
@@ -550,7 +571,7 @@ MUTATIONS = [
      '                handle.write(line + "\\n")',
      '                pass', "guard", 'log: one line per refusal and none for an allow'),
     ("shared-tree: keep heredoc bodies in every rule",
-     '    return "\\n".join(_split_heredocs(cmd)[0])',
+     '    return "\\n".join(_walk_heredocs(cmd, keep=keep)[0])',
      '    return cmd', "guard", 'heredoc: prose naming the stash with no interpreter'),
     ("env-file: name the file in the environment reason, the reviewed defect",
      '        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)',

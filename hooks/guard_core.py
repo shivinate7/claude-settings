@@ -755,7 +755,8 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
 
 
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
-                   kept_at: "list | None" = None):
+                   kept_at: "list | None" = None, body_at: "list | None" = None,
+                   keep: "set | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -764,7 +765,9 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
-    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
+    A caller that passes `kept_at` gets the line index of each kept line appended to it. `body_at` gets the
+    line index of each body's header line, in the order of the bodies. A body whose header line index is in
+    `keep` stays in view, its lines and its closing delimiter line kept after its header."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -778,6 +781,7 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
         if kept_at is not None:
             kept_at.append(index)
         header_line = lines[index]
+        header_at = index
         heads, stack = heredoc_heads(header_line, stack, index < last, legacy)   # a later line holds a `'`
         index += 1
         for quote, delimiter in heads:
@@ -785,25 +789,36 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
-            if index < len(lines):
-                index += 1  # drop the closing delimiter line too
+            if body_at is not None:
+                body_at.append(header_at)
+            closed = index < len(lines)
+            if keep and header_at in keep:
+                # The closing line stays with its body, so a re-walk of the kept text closes the heredoc and
+                # reads every line after it as a command, not as body.
+                end = index + 1 if closed else index
+                kept.extend(lines[start:end])
+                if kept_at is not None:
+                    kept_at.extend(range(start, end))
+            if closed:
+                index += 1  # a dropped body drops its closing delimiter line too
             else:
                 unclosed = True   # bash reads to the end of input, so a caller that judges runs reads on
     return kept, bodies, unclosed
 
 
-def _drop_heredoc_bodies(cmd: str) -> str:
-    """Drop the body of every heredoc, keeping every header line. The one loop
+def _drop_heredoc_bodies(cmd: str, keep: "set | None" = None) -> str:
+    """Drop the body of every heredoc, keeping every header line. `keep` holds the header line indices
+    of the bodies that stay in view (a file a command runs). The one loop
     `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
     guards it with the interpreter exception, the second never does, and neither re-implements
     the walk itself."""
     lane_at, main_at = [], []
-    _walk_heredocs(cmd, kept_at=lane_at)
-    _walk_heredocs(cmd, legacy=True, kept_at=main_at)   # BANDAID: main's own walk, see _MAIN_HEADER
+    _walk_heredocs(cmd, kept_at=lane_at, keep=keep)
+    _walk_heredocs(cmd, legacy=True, kept_at=main_at, keep=keep)   # BANDAID: main's own walk, see _MAIN_HEADER
     if lane_at != main_at:
-        keep = set(lane_at) | set(main_at)   # a line stays in view when either walk keeps it
-        return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in keep)
-    return "\n".join(_split_heredocs(cmd)[0])
+        in_view = set(lane_at) | set(main_at)   # a line stays in view when either walk keeps it
+        return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in in_view)
+    return "\n".join(_walk_heredocs(cmd, keep=keep)[0])
 
 
 # A file a heredoc header writes (`> f`, `>> f`, `>| f`, `&> f`, `tee -a f`), the words of the command, and a
@@ -811,25 +826,180 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
-_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
+_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|xargs|sudo|env|timeout|nohup|nice|command"
                      r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+# An interpreter reads its operand as a script. The other runners (`sudo`, `timeout`, `xargs` ...) run the command
+# after them, so a flag before it may take a value (`sudo -u root f`).
+_INTERPRETER = re.compile(r"(?:" + _INTERPRETERS + r")(?:\.exe|\.cmd)?").fullmatch
+# A word that runs shell text, whose files no reader below can follow: a quoted script (`bash -lc "bash f"`),
+# xargs into a shell, a subshell piped into one, `bash -s` on stdin. `.` counts only as a command.
+_SHELL_WORD = re.compile(r"(?:" + _SHELLS + r"|eval|source|exec)(?:\.exe|\.cmd)?").fullmatch
+_LEADING_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "{"}
+# Wrappers that run the command after them, and the commands that only read a file named after them.
+_WRAPPERS = {"sudo", "env", "timeout", "nohup", "nice", "command", "time", "xargs"}
+_READERS = {"cat", "wc", "head", "tail", "less", "grep", "jq", "diff"}
+# An interpreter flag that takes a value which is no script, and a flag whose value is code, not a file.
+_VALUE_FLAGS = {"-W", "-X", "-r", "--require", "-o", "-O"}
+_CODE_FLAGS = {"-c", "-e"}
+_SHELL_SCRIPT = re.compile(r"\.(?:sh|bash|zsh)$").search
+_STDIN_FILE = re.compile(r"(?<![<\d&])<(?![<(])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
+_SUBSTITUTION = re.compile(r"\$\(|<\(|`")
 
 
 def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers) -> bool:
-    """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
-    (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
-    runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
-    written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
-    for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
-        stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
-        if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
+def _basename_word(word: str) -> str:
+    return word.rsplit("/", 1)[-1]
+
+
+def _is_flag(word: str) -> bool:
+    return word.startswith("-") and len(word) > 1
+
+
+def _command_start(words) -> int:
+    start = 0
+    while start < len(words) and words[start] in _LEADING_KEYWORDS:
+        start += 1
+    return start
+
+
+def _holds_shell(line: str) -> bool:
+    """True when a line holds a shell word anywhere, in a subshell, a substitution or a quoted script too, or an
+    xargs that runs more than a pure reader (`xargs -I{} $SHELL -c {}`, `xargs -I{} python3 -c {}`)."""
+    if any(_SHELL_WORD(_basename_word(word)) for word in _WORDS(line)):
+        return True
+    for part in re.split(r"[;&|()`]|\$\(|<\(", line):
+        words = _plain_words(_WORDS(part))
+        if words[_command_start(words):][:1] == ["."]:
+            return True
+        if "xargs" in map(_basename_word, words) and not _reads_only(words):
             return True
     return False
+
+
+def _stage_runs(words):
+    """(the command word of a stage, whether it reads a script on stdin). An interpreter in the chain from the
+    command word (`python3`, `sudo node`, `timeout 5 perl`) reads stdin when it has no operand after its flags,
+    or `-`. The word after a wrapper's flag may be the flag's value (`sudo -u root python3`). The caller passes
+    no line that holds a shell word."""
+    start = _command_start(words)
+    ran = words[start:start + 1]
+    stdin = False
+    at = start
+    while at < len(words):
+        name = _basename_word(words[at])
+        if not _RUNNER(name):
+            break
+        script = bool(_INTERPRETER(name))
+        flags = []
+        picked = []
+        end = at
+        for end in range(at + 1, len(words)):
+            if _is_flag(words[end]):
+                flags.append(words[end])
+                continue
+            picked.append(words[end])
+            if script or not flags or len(picked) == 2:
+                break
+        if script:
+            stdin = not picked or picked[0] == "-"
+        if script and "-c" not in flags:
+            break   # its operand is a file, so no runner after it is in the chain
+        at = next((i for i in range(at + 1, end + 2) if i < len(words) and _RUNNER(_basename_word(words[i]))),
+                  len(words))
+    return ran, stdin
+
+
+def _reads_only(words) -> bool:
+    """True when the command of a stage, through its wrappers (`sudo cat f`, `timeout 5 wc f`, `xargs wc`), is a
+    pure reader: the words after it are files it reads, and none runs. Any other command, `ssh host cat f`
+    too, is not."""
+    at = _command_start(words)
+    while at < len(words):
+        name = _basename_word(words[at])
+        if name in _READERS:
+            return True
+        if name not in _WRAPPERS:
+            return False
+        at += 1
+        while at < len(words) and _is_flag(words[at]):
+            at += 1
+        if at < len(words) and _basename_word(words[at]) not in _READERS and not _RUNNER(_basename_word(words[at])):
+            at += 1   # a value of the wrapper or of its flag (`timeout 5 wc`, `sudo -u root cat`)
+    return False
+
+
+def _data_positions(words) -> set:
+    """The positions of the operands a script interpreter takes after its script (`python3 check.py f`,
+    `python3 -m json.tool f`): data, not a file it runs. An interpreter given code (`-c`, `-e`)
+    has none, as its code may run a file."""
+    data = set()
+    for at, word in enumerate(words):
+        if not _INTERPRETER(_basename_word(word)):
+            continue
+        step = at + 1
+        code = False
+        while step < len(words) and _is_flag(words[step]):
+            code = code or words[step] in _CODE_FLAGS
+            step += 2 if words[step] in _VALUE_FLAGS else 1
+        if not code:
+            data.update(range(step + 1, len(words)))   # `step` is the script
+    return data
+
+
+def _run_files(text: str, written) -> set:
+    """The files of WRITTEN that a command in TEXT runs. Each one a line names that holds a shell word, as main
+    (`bash f`, `(cat f) | sh`, `xargs -I{} sh -c {}`, `ssh host bash < f`). On any other line: the command
+    word (`./f`), a runner's stdin (`python3 < f`), a pipe into a runner (`cat f | python3 -`), a runner's
+    substitution (`python3 -c "$(cat f)"`), or a word in a pipeline that holds a runner (`ssh host < f`,
+    `kubectl exec p -- python3 f`), less an operand of a pure reader (`wc -c f`, `sudo cat f`, `ls f | xargs wc`)
+    and an operand after the script of an interpreter (`python3 check.py f`). The word is compared as written,
+    so `$HOME/f` matches only itself."""
+    ran = set()
+    for line in _WRITE_TARGET.sub(" ", text).split("\n") if written else ():
+        line_words = _plain_words(_WORDS(line))
+        if _holds_shell(line):
+            ran.update(written.intersection(line_words))
+            continue
+        if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):
+            ran.update(written.intersection(line_words))
+        # A substitution is a command of its own: `cat f` inside `python3 -c "$(cat f)"` reads f, and the line above
+        # decides whether the runner runs what it prints. A `)` ends no pipeline, so `(cat f) | python3 -` pipes f.
+        for pipeline in re.split(r";|&&|\|\||&|\$\(|<\(|`", line):
+            stages = pipeline.split("|")
+            words = [_plain_words(_WORDS(stage)) for stage in stages]
+            reads = [_reads_only(stage_words) for stage_words in words]
+            holds_runner = any(not only and any(_RUNNER(_basename_word(word)) for word in stage_words)
+                               for only, stage_words in zip(reads, words))
+            for at, (stage, stage_words, only) in enumerate(zip(stages, words, reads)):
+                runs, stdin = _stage_runs(stage_words)
+                ran.update(written.intersection(runs))
+                if stdin:
+                    ran.update(written.intersection(_plain_words(_STDIN_FILE.findall(stage))))
+                    ran.update(written.intersection(word for earlier in words[:at] for word in earlier))
+                if holds_runner and not only:
+                    data = _data_positions(stage_words)
+                    ran.update(word for place, word in enumerate(stage_words)
+                               if word in written and place not in data)
+    return ran
+
+
+def _kept_bodies(text: str, bodies, body_at) -> set:
+    """The header line indices of the bodies to keep in view: each body written to a shell script (`*.sh`,
+    `*.bash`, `*.zsh`, which a later call may run), each body whose written file a command runs, and each body
+    whose written file a kept body names, by its basename (`a.sh` sources `b.sh`, `bash "$(dirname $0)/part.txt"`)."""
+    writes = [set(_plain_words(_WRITE_TARGET.findall(header))) for _, _, header in bodies]
+    ran = _run_files(text, set().union(*writes))
+    keep = {at for at, written in enumerate(writes) if written & ran or any(map(_SHELL_SCRIPT, written))}
+    writes = [written | {_basename_word(word) for word in written} for written in writes]
+    while True:
+        named = {_basename_word(word) for at in keep for word in _plain_words(_WORDS(bodies[at][1]))}
+        more = {at for at, written in enumerate(writes) if at not in keep and written & named}
+        if not more:
+            return {body_at[at] for at in keep}
+        keep |= more
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
@@ -837,7 +1007,8 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     only when a shell reads it, for a rule that judges shell lines."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
-    _, bodies, unclosed = _walk_heredocs(cmd)
+    body_at = []
+    _, bodies, unclosed = _walk_heredocs(cmd, body_at=body_at)
     if unclosed:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
     # bash runs each substitution of an unquoted body while it writes the body, so those stay in view as
@@ -852,12 +1023,14 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
             runs += [text for text, _ in texts[:-1]]   # the last text is the body around them
     dropped = _drop_heredoc_bodies(cmd)
     # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
-    # is text, and no body line may make another body look run.
-    text = _without_message_values(dropped)
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, [header for _, _, header in bodies]):
+    # is text, and no body line may make another body look run. A file a header writes is no shell word
+    # (`cat > run.sh <<'EOF'` is no `sh <<` header); a command that runs the file is read by _kept_bodies.
+    text = _WRITE_TARGET.sub(" ", _without_message_values(dropped))
+    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text):
         return cmd  # the body may be executed, so keep it under inspection
-    return "\n".join([dropped] + runs)
+    # A body stays in view only when a command runs the file it writes; every other body is text.
+    keep = _kept_bodies(text, bodies, body_at)
+    return "\n".join([_drop_heredoc_bodies(cmd, keep) if keep else dropped] + runs)
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
