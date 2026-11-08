@@ -34,6 +34,7 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
+import report_guard as rg  # noqa: E402  bare_cite, the one home of the item-cite check (lint/report_guard.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
@@ -842,6 +843,114 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True}
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
+
+
+class ItemCiteTests(unittest.TestCase):
+    """speak-cite-id-plus-gloss for page item numbers: bare_cite in report_guard.py, and the Stop hook.
+
+    An item cite is `item <n>`, `items <n> and <m>` or `items <n>, <m>`, with an optional `page` or
+    `waiting-page` before it. The first time a number appears in a reply, it needs its short name beside
+    it. A later cite of that number needs none. The text matrix lives here, on bare_cite. The Stop cases
+    prove only the wiring.
+    """
+
+    def setUp(self):
+        # test-temp-standard: this case's folder comes from the run folder, never the system temp dir
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.addCleanup(self.tmp.cleanup)
+
+    def assert_refused(self, text):
+        got = rg.bare_cite(text)
+        self.assertTrue(got, "item cite with no short name must be refused: %r gave no cite" % text)
+
+    def assert_passes(self, text):
+        got = rg.bare_cite(text)
+        self.assertEqual(got, "", "item cite with its short name must pass: %r gave %r" % (text, got))
+
+    # refused: a number with no name beside it
+    def test_icite_red_bare_item_number_is_refused(self):
+        self.assert_refused("item 46")
+
+    def test_icite_red_bare_items_pair_is_refused(self):
+        self.assert_refused("items 46 and 47")
+
+    def test_icite_red_bare_items_list_is_refused(self):
+        self.assert_refused("items 46, 47")
+
+    def test_icite_red_one_bare_number_in_a_pair_is_refused(self):
+        self.assert_refused("items 46 (search pill clear) and 47")
+
+    def test_icite_red_page_prefix_does_not_hide_a_bare_cite(self):
+        for text in ("page item 46", "waiting-page item 46"):
+            with self.subTest(text=text):
+                self.assert_refused(text)
+
+    def test_icite_red_first_bare_cite_is_refused_when_a_later_one_is_named(self):
+        self.assert_refused("Open item 46. Later, item 46 (search pill clear).")
+
+    def test_icite_red_comment_opener_in_a_code_span_does_not_hide_a_bare_cite(self):
+        self.assert_refused("Note `/* open` and item 46 waits.")
+
+    def test_icite_red_lone_quote_does_not_hide_a_bare_cite(self):
+        self.assert_refused("Don't skip item 46.")
+
+    def test_icite_red_lone_backtick_does_not_hide_a_bare_cite(self):
+        self.assert_refused("Use ` then item 46 waits.")
+
+    def test_icite_red_multi_line_template_literal_does_not_hide_a_bare_cite(self):
+        self.assert_refused("const s = `a\nb`; then item 46 waits.")
+
+    def test_icite_red_bare_cite_at_the_end_of_a_long_reply_is_refused(self):
+        # the full-size state: the bare cite is the last of 2000 lines
+        long_reply = "\n".join("Line %d of the report, no cite here." % n for n in range(2000))
+        self.assert_refused(long_reply + "\nThen item 46 waits.")
+
+    # passes: the name sits beside the number, or the number is a later cite of a named one
+    def test_icite_green_named_cites_pass(self):
+        for text in ("item 46 (search pill clear)", "page item 382 (merge-unreviewed-head)",
+                     "item 46, search pill clear", "items 46 (search pill clear) and 47 (stale head record)",
+                     "search pill clear (item 46)"):
+            with self.subTest(text=text):
+                self.assert_passes(text)
+
+    def test_icite_green_later_cite_of_a_named_number_passes(self):
+        self.assert_passes("item 46 (search pill clear) ... later item 46 again")
+
+    def test_icite_green_record_named_cites_pass(self):
+        for text in ("precompact-handoff, item 9", "docs/decisions/precompact-handoff.md, item 8",
+                     "c193-sizes.md item 3"):
+            with self.subTest(text=text):
+                self.assert_passes(text)
+
+    def test_icite_green_skipped_text_is_not_a_cite(self):
+        for text in ("Use `item 46` as the label.", "```\nitem 46\n```",
+                     "```\nrun item 46\nand item 47\n```",
+                     "See [item 46](https://x.test/p/46) for the page.",
+                     "Open https://x.test/items-46 now."):
+            with self.subTest(text=text):
+                self.assert_passes(text)
+
+    def test_icite_green_empty_and_numberless_text_pass(self):
+        for text in ("", "The item count went from 46 to 47.", "Items were fine and done."):
+            with self.subTest(text=text):
+                self.assert_passes(text)
+
+    # the Stop hook, through main: the wiring of the same check
+    def test_icite_red_bare_item_in_a_report_blocks_through_main(self):
+        reply = "Per item 46.\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
+        run = landed_run(self.tmp.name, reply)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue(run.stdout.strip(), "the Stop hook stayed silent on a bare item cite")
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Cite-gloss guard", out["reason"])
+        self.assertIn("46", out["reason"])
+
+    def test_icite_green_named_item_in_a_report_passes_through_main(self):
+        reply = "Per item 46 (search pill clear).\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
+        run = landed_run(self.tmp.name, reply)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.strip(), "", "the Stop hook blocked a named item cite: %s" % run.stdout[:200])
 
 
 class DoneNamesModelsTests(unittest.TestCase):
