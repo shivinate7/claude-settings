@@ -13893,7 +13893,7 @@ for _run, _target in HK_RETIRE_FORMS:
 # CLASS 3b. A data body that a read shares its line with. Nothing in the call runs the body, so each read allows.
 # Each read has a plain body beside it (P2): the same call with `hello` allows on both trees. The rows also hold the
 # reads that touch a body in f without running it: a quote with a lone apostrophe starts no run of f, and `$(< f)`
-# reads f as data (the false alarm the debt note heredoc-keep-redirect-read-alarm names).
+# reads f as data, not as a run.
 HK_READ_FORMS = (
     ("cat notes.md, then a python version probe", "notes.md", "cat notes.md; echo \"v: $(python3 --version)\""),
     ("a node version probe, then wc of notes.md", "notes.md", "echo $(node --version) && wc -l notes.md"),
