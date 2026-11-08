@@ -210,7 +210,9 @@ Other tools, in `judge` order:
                        `#`, bold) before a line's first word are skipped. A verdict word that opens a
                        choice list (verdict words joined by `,`, `/`, `or` or `and`, ending the line
                        or sentence) is a format line (`a verdict: PASS or FAIL`) and passes, as does
-                       a line with a backtick right before `verdict` mid-line.
+                       a line with a backtick right before `verdict` mid-line. A later label in
+                       the same line after such a sentence is read afresh (`... PASS or FAIL.
+                       Prior verdict: FAIL.` is refused).
                        Shapes at line start only, so a brief that quotes the rule's words passes. A
                        findings list passes. A Workflow call is judged with or without a model; one
                        whose agentType the scan cannot read passes. A reviewer call whose prompt the
@@ -2641,15 +2643,25 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # so a verdict word that opens a choice list (two or more verdict words joined by `,`, `/`, `or` or `and`, ending the line or
 # sentence) is a format line and passes; a list that runs on into other words is a verdict. A backtick right before `verdict`
 # marks a quote, so a finding that quotes `verdict: FAIL` mid-line passes; one backtick may open the line. The label scans
-# stay lazy and stop at a colon. Some long lines are still slow (debt note verdict-regex-slow-line).
+# stay lazy and stop at a colon. A choice-list sentence that ends in `.`, `;`, `!` or `?` does not end the scan: the next
+# sentence's label on the same line is read afresh (`Give a verdict: PASS or FAIL. Prior verdict: FAIL.` is refused).
+# Some long lines are still slow (debt note verdict-regex-slow-line).
 _BRIEF_BLIND_MARK = r"[*_`]*"
 _BRIEF_BLIND_SEP = r"[ \t]*(?:,[ \t]*(?:(?:or|and)\b[ \t]*)?|/[ \t]*|(?:or|and)\b[ \t]*)"
-BRIEF_BLIND_NOT_CHOICES = (r"(?!%(m)s%(sep)s%(m)s(?:%(w)s)%(m)s(?:%(sep)s%(m)s(?:%(w)s)%(m)s)*[ \t]*(?:[.;!?]|$))"
-                           % {"m": _BRIEF_BLIND_MARK, "sep": _BRIEF_BLIND_SEP, "w": BRIEF_BLIND_VERDICT_WORDS})
+_BRIEF_BLIND_CHOICES = (r"%(m)s%(sep)s%(m)s(?:%(w)s)%(m)s(?:%(sep)s%(m)s(?:%(w)s)%(m)s)*[ \t]*"
+                        % {"m": _BRIEF_BLIND_MARK, "sep": _BRIEF_BLIND_SEP, "w": BRIEF_BLIND_VERDICT_WORDS})
+BRIEF_BLIND_NOT_CHOICES = r"(?!%s(?:[.;!?]|$))" % _BRIEF_BLIND_CHOICES
+# The label scan up to and with its colon, and the verdict word after it.
+_BRIEF_BLIND_LABEL = (r"(?:(?:(?:`|[^\n:]*?(?<!`))\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?))"
+                      r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b" % BRIEF_BLIND_VERDICT_WORDS)
+# A choice-list sentence (`Give a verdict: PASS or FAIL.`) may come first on the line; the next sentence's label is matched
+# afresh. The lookahead reads to the first colon once, so the label scan below runs only on a line that holds such a sentence.
+_BRIEF_BLIND_CHOICE_SENTENCE = (r"(?=[^\n:]*:[ \t]*[*_`\"'(]*(?:%s)\b%s[.;!?])" % (BRIEF_BLIND_VERDICT_WORDS, _BRIEF_BLIND_CHOICES)
+                                + _BRIEF_BLIND_LABEL + _BRIEF_BLIND_CHOICES + r"[.;!?][ \t]+")
 BRIEF_BLIND_VERDICT = re.compile(
-    BRIEF_BLIND_OPEN + r"(?:(?:(?:`|[^\n:]*?(?<!`))\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
-    r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b%s|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)"
-    % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_NOT_CHOICES, BRIEF_BLIND_VERDICT_WORDS),
+    BRIEF_BLIND_OPEN + r"(?:" + _BRIEF_BLIND_CHOICE_SENTENCE + r")*"
+    r"(?:" + _BRIEF_BLIND_LABEL + BRIEF_BLIND_NOT_CHOICES + r"|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)"
+    % BRIEF_BLIND_VERDICT_WORDS,
     re.M)
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
                       "Send the task, the diff or a pointer to it, and the governing rulings. For a later round, send the "
