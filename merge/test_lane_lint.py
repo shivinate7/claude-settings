@@ -680,7 +680,7 @@ class BatchLintFlags(tm.Env):
         out = io.StringIO()
         with self.assertRaises(merge.Liftable) as raised:
             self.lane_lint(BATCH_NO_LINT, out)
-        self.assertIn("unknown", str(raised.exception), out.getvalue())
+        self.assertIn("no lint CI step ran", str(raised.exception), out.getvalue())
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint run that picked no lint step read as a pass: " + out.getvalue())
 
     def test_a_lint_step_that_runs_only_off_a_pull_request_is_named_on_the_pass_line(self):
