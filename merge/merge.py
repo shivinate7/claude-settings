@@ -2336,26 +2336,86 @@ def workflow_name(filename, text):
             jobs.add(m.group(1).strip("'\""))
     return name or f".github/workflows/{filename}", jobs
 
-def job_caps(texts):
-    """-> {job id or job name: timeout-minutes} from workflow file texts. A line scan, since the repo has no YAML reader:
-    only a job's own keys count, at four spaces under a two-space job id under `jobs:`. A step's cap, a comment, a block scalar
-    and a quoted string are deeper or start with another character. A quoted number counts. An expression (`${{ ... }}`) is unknown: the job has no cap."""
-    caps = {}
+MATRIX_NUMBER = r"""\d+|"\d+"|'\d+'"""
+MATRIX_FLOW_LIST = re.compile(rf"\[\s*(?:{MATRIX_NUMBER})(?:\s*,\s*(?:{MATRIX_NUMBER}))*\s*\]\s*(?:#.*)?$")
+
+def matrix_cap(lines, key):
+    """-> the largest whole number that `key` holds in the `strategy:` `matrix:` of one job's lines, or None when the job has no such number
+    or any part of it is not a plain literal. The key's flow list, its block list and each `include:` entry count; `exclude:` does not.
+    A value is a number only when the whole item matches, so a quote or `#` inside an item makes the read None."""
+    region, in_strategy, in_matrix = [], False, False
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent <= 4:
+            in_strategy, in_matrix = bool(re.match(r" {4}strategy:\s*(?:#.*)?$", line)), False
+        elif in_strategy and indent == 6:
+            in_matrix = bool(re.match(r" {6}matrix:\s*(?:#.*)?$", line))  # a matrix with a value on its line (`fromJSON`) has no list to read
+        elif in_matrix:
+            region.append((indent, line.strip()))
+    if not region:
+        return None
+    blank = re.compile(r"(?:#.*)?$")
+    numbers, section = [], None
+    for indent, text in region:
+        if indent == region[0][0]:
+            if not (m := re.match(r"([\w-]+):\s*(.*)$", text)):
+                return None
+            section, rest = m.groups()
+            if section == "include" and not blank.match(rest):
+                return None
+            if section == key and not blank.match(rest):
+                if not MATRIX_FLOW_LIST.match(rest):
+                    return None
+                numbers += map(int, re.findall(r"\d+", rest.split("]")[0]))
+        elif section == key:
+            if not (m := re.match(rf"-\s+({MATRIX_NUMBER})\s*(?:#.*)?$", text)):
+                return None
+            numbers.append(int(m.group(1).strip("'\"")))
+        elif section == "include" and re.match(rf"(?:-\s+)?{re.escape(key)}:", text):
+            if not (m := re.match(rf"(?:-\s+)?{re.escape(key)}:\s*({MATRIX_NUMBER})\s*(?:#.*)?$", text)):
+                return None
+            numbers.append(int(m.group(1).strip("'\"")))
+    return max(numbers, default=None)
+
+def scan_job_caps(texts):
+    """-> ({job id or job name: timeout-minutes}, the ids of jobs whose cap is an unknown expression) from workflow file texts. The one reader of caps.
+    A line scan, since the repo has no YAML reader: only a job's own keys count, at four spaces under a two-space job id under `jobs:`.
+    A step's cap, a comment, a block scalar and a quoted string are deeper or start with another character. A quoted number counts.
+    A bare `${{ matrix.<key> }}` is the largest literal number `matrix_cap` finds for <key> in the job's own matrix. Any other expression
+    (an operator, `fromJSON`, a missing key, a non-number) is unknown: the job has no cap and its id is in the second value."""
+    caps, unknown = {}, []
     for text in texts:
         in_jobs, job, jobs = False, None, []
         for line in text.splitlines():
             if re.match(r"[^\s#]", line):
                 in_jobs, job = line.startswith("jobs:"), None
             elif in_jobs and (m := re.match(r"^ {2}([\w-]+):\s*(?:#.*)?$", line)):
-                job = {"ids": [m.group(1)], "cap": None}
+                job = {"ids": [m.group(1)], "cap": None, "expr": False, "key": None, "lines": []}
                 jobs.append(job)
             elif job and (m := re.match(r"^ {4}name:\s*(.+?)\s*$", line)):
                 job["ids"].append(m.group(1).strip("'\""))
             elif job and (m := re.match(r"^ {4}timeout-minutes:\s*['\"]?(\d+)['\"]?\s*(?:#.*)?$", line)):
                 job["cap"] = int(m.group(1))
+            elif job and (m := re.match(r"^ {4}timeout-minutes:\s*\$\{\{\s*matrix\.([\w-]+)\s*\}\}\s*(?:#.*)?$", line)):
+                job["expr"], job["key"] = True, m.group(1)
+            elif job and re.match(r"^ {4}timeout-minutes:\s*['\"]?\$\{\{", line):
+                job["expr"] = True
+            if job:
+                job["lines"].append(line)
+        for j in jobs:
+            if j["key"]:
+                j["cap"] = matrix_cap(j["lines"], j["key"])
+            if j["expr"] and not j["cap"]:
+                unknown.append(j["ids"][0])
         for i, cap in ((i, j["cap"]) for j in jobs if j["cap"] for i in j["ids"]):
             caps[i] = max(cap, caps.get(i, 0))  # one id in two files: the larger cap, so neither the floor nor the warning runs short
-    return caps
+    return caps, unknown
+
+def job_caps(texts):
+    """-> {job id or job name: timeout-minutes} from workflow file texts. A job whose cap is an unknown expression has no entry (see scan_job_caps)."""
+    return scan_job_caps(texts)[0]
 
 def base_workflows(root, ref):
     """The workflow files on `ref`, read with git (the base branch, never the local tree)."""
@@ -2365,14 +2425,14 @@ def base_workflows(root, ref):
     return [f for f in listed.splitlines() if f.endswith((".yml", ".yaml"))]
 
 def base_job_caps(root, ref):
-    """job_caps of the workflow files on `ref`, read with git (the base branch, never the local tree)."""
+    """scan_job_caps of the workflow files on `ref`, read with git (the base branch, never the local tree)."""
     texts = []
     for f in base_workflows(root, ref):
         c, text = git(root, "show", f"{ref}:{f}")
         if c:
             raise Stop(f"cannot read {f} on {ref}: {text}")
         texts.append(text)
-    return job_caps(texts)
+    return scan_job_caps(texts)
 
 def load_config(root, base, path):
     """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
@@ -2403,10 +2463,14 @@ def load_config(root, base, path):
         raise Stop(f"{path} on {ref} has an unknown field in the merge block: {', '.join(unknown)}")
     if not isinstance(m.get("ignoreChecks", []), list):
         raise Stop(f"{path} on {ref}: merge.ignoreChecks must be a list, not {m['ignoreChecks']!r}.")
+    deadline_set = "deadlineMinutes" in m
     dm = m.get("deadlineMinutes", MERGE_DEFAULTS["deadlineMinutes"])
     if not isinstance(dm, int) or isinstance(dm, bool) or not 1 <= dm <= 360:  # 360: GitHub's longest job run
         raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
-    caps = base_job_caps(root, ref)
+    caps, unknown_caps = base_job_caps(root, ref)
+    if unknown_caps and not deadline_set:  # an unknown cap sets no floor, so only the repo's own deadline can outlast it
+        say(f"merge: job {', '.join(sorted(set(unknown_caps)))} has a timeout-minutes the merge tool cannot read, so it sets no floor. "
+            f"Set merge.deadlineMinutes in {path} to at least that job's real cap + 5.")
     floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
     if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
         # Wait the floor, never stop: a stop here would block the very PR that raises the deadline.
