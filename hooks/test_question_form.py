@@ -1984,6 +1984,14 @@ def case_cross_repo_task_names_checked_with():
             tcj.origin_page_repo(), ("checked_with",))
 
 
+def case_cross_repo_malformed_checked_with():
+    """(xii) A checked_with that is not session-shaped is refused, and the reason names checked_with."""
+    cross("(xii) checked_with is not a session id", "set", ma144(checked="batch runner 9"), PAGE_REPO_NAME,
+          ("checked_with",))
+    at_page("(xii) checked_with is not a session id", "set", ma144_write(checked="batch runner 9"),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
@@ -2014,7 +2022,7 @@ def main():
                  case_cross_repo_no_page_repo_passes, case_cross_repo_required,
                  case_cross_repo_checked_with_not_the_owner, case_cross_repo_str_replace_not_judged,
                  case_cross_repo_update_carrying_repo, case_cross_repo_closed_item_passes,
-                 case_cross_repo_task_names_checked_with):
+                 case_cross_repo_task_names_checked_with, case_cross_repo_malformed_checked_with):
         try:
             case()
         except Exception as exc:
