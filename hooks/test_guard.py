@@ -5696,6 +5696,14 @@ sh("check-tail: python3.11 lint script piped to tail, then && git push, is refus
    "check-tail", cwd=NOGIT)
 sh("check-tail: lint piped to tail, then ; echo done, is allowed",
    "python3 lint/ste_lint.py docs/x.md | tail -2; echo done", "allow", cwd=NOGIT)
+# Pins: a script outside lint/ is no lint stage, so a commit after its pipe is not refused. A commit before
+# a lint stage is not after it, and `echo commit` names no commit. Current behaviour, no new claim.
+sh("check-tail: a .py script outside lint/ piped to tail, then && git commit, is allowed",
+   "python3 scripts/ste_check.py docs/x.md | tail -2 && git commit -m m", "allow", cwd=NOGIT)
+sh("check-tail: a commit before a lint piped to tail is allowed",
+   "git commit -m m && python3 lint/ste_lint.py docs/x.md | tail -2", "allow", cwd=NOGIT)
+sh("check-tail: lint piped to tail, then ; echo commit, is allowed",
+   "python3 lint/ste_lint.py docs/x.md | tail -2; echo commit", "allow", cwd=NOGIT)
 sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
    "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
    cwd=NOGIT)
@@ -5739,6 +5747,11 @@ sh("check-tail: python3 -u with a 2>&1 redirect before the script, piped to tail
    "python3 -u 2>&1 merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: a 2>/dev/null redirect before the script, piped to head, is refused",
    "python3 2>/dev/null merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+# Pins: a redirect word and its target written apart (`2> /dev/null`) are two words, and the target is
+# skipped with it, so the lint script after them is still the operand. Current behaviour, no new claim.
+sh("check-tail: lint behind a separate 2> /dev/null redirect, piped to tail, then && commit, is refused",
+   "python3 2> /dev/null lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail",
+   cwd=NOGIT)
 # Pins: a nested substitution and a one-token backtick name the merge script, so each is refused too.
 sh("check-tail: a nested $(dirname $(git rev-parse)) script path piped to tail is refused",
    "python3 $(dirname $(git rev-parse --show-toplevel))/x/merge/merge.py --lane-lint 7 | tail -3",
