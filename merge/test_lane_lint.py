@@ -8,7 +8,7 @@ case reads what the tool ran, in which tree, at which head. The repo builder, th
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
-BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four step runs, about 0.5 s.
+BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases).
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -465,30 +465,31 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
 
 
-BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four steps below
+BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
 BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same batch with the Red-run trailer's script left out
-BATCH_STEPS = ("Silent undo check", "Comment narration check", "Red-run trailer", "STE lint")  # checks.yml's job `checks` steps this suite lints
-STE = "STE lint"  # the one step whose script is bin/ste-changed, not a file of the batch
+BASE = "main"  # the base the lint runs against: lane_lint's base, and the PR base the CI steps read
+BATCH_CI_STEPS = ("Silent undo check", "Comment narration check", "Red-run trailer", "STE lint")  # checks.yml's job `checks` CI steps this suite lints
+STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
 REPO = os.path.dirname(HERE)
 CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")  # read at test time; no expectation comes from a copy of it
 CALL_STUB = "import json, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n    print(json.dumps({'argv': sys.argv}), file=f)\n"  # logs its argv, exits 0
 
 
-def real_steps():
-    """(name, step text) of BATCH_STEPS in checks.yml's checks job, in file order, read by the shared parser."""
+def real_ci_steps():
+    """(name, CI step text) of BATCH_CI_STEPS in checks.yml's checks job, in file order, read by the shared parser."""
     with open(CHECKS_YML, encoding="utf-8") as f:
         block = job_block(f.read(), "checks")
-    return [(step_key(st, "name"), st) for st in step_blocks(block) if step_key(st, "name") in BATCH_STEPS]
+    return [(step_key(st, "name"), st) for st in step_blocks(block) if step_key(st, "name") in BATCH_CI_STEPS]
 
 
 def workflow_text(found):
-    """A workflow of one job, `checks`, holding the given step texts in order."""
+    """A workflow of one job, `checks`, holding the given CI step texts in order."""
     return "name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n" + "".join(text for _, text in found)
 
 
-def script_of(step):
-    """The script a step's run: line names, read as its argv reads it, before any env is expanded."""
-    return shlex.split(run_body(step).strip())[1]
+def script_of(ci_step):
+    """The script a CI step's run: line names, read as its argv reads it, before any env is expanded."""
+    return shlex.split(run_body(ci_step).strip())[1]
 
 
 def github_text(raw, values):
@@ -499,10 +500,10 @@ def github_text(raw, values):
     return values[m.group(1)]
 
 
-def expected_argv(step, values):
-    """The argv checks.yml gives a step's run: line, its env: expanded for `values` and split as a shell splits it."""
-    env = {name: github_text(raw, values) for name, raw in step_env(step).items()}
-    run = run_body(step).strip()
+def expected_argv(ci_step, values):
+    """The argv checks.yml gives a CI step's run: line, its env: expanded for `values` and split as a shell splits it."""
+    env = {name: github_text(raw, values) for name, raw in step_env(ci_step).items()}
+    run = run_body(ci_step).strip()
     if "${{" in run:
         raise AssertionError("a run: line of checks.yml holds an expression this suite does not read: %r" % run)
     return shlex.split(re.sub(r"\$(\w+)", lambda m: env[m.group(1)], run))
@@ -524,7 +525,7 @@ def gh_eval(expr, inputs):
 
 
 def gh_text(value):
-    """A GitHub expression's value as the env of a step holds it: booleans are the words true and false."""
+    """A GitHub expression's value as the env of a CI step holds it: booleans are the words true and false."""
     return "true" if value is True else "false" if value is False else str(value)
 
 
@@ -547,12 +548,12 @@ def link_or_copy(src, dst):
 
 
 class BatchLintFlags(tm.Env):
-    """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint steps runs once, with the argv checks.yml gives it."""
+    """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
 
     def setUp(self):
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
             super().setUp()
-        self.found = real_steps()
+        self.found = real_ci_steps()
         self.calls = os.path.join(self.t, "calls")
         os.makedirs(self.calls)
         self.ci_job = self.copy_ci_job()
@@ -568,7 +569,7 @@ class BatchLintFlags(tm.Env):
             return [json.loads(line) for line in f if line.strip()]
 
     def copy_ci_job(self):
-        """A copy of bin/ci-job in <t>/ci/bin, with a logging ste-changed beside it: ci-job runs its STE step as the file beside its
+        """A copy of bin/ci-job in <t>/ci/bin, with a logging ste-changed beside it: ci-job runs its STE CI step as the file beside its
         own BIN, never the one in the fixture. ci-job imports hooks and lint from the folder above BIN, and runs verdict beside itself."""
         bin_dir = os.path.join(self.t, "ci", "bin")
         os.makedirs(bin_dir)
@@ -582,42 +583,42 @@ class BatchLintFlags(tm.Env):
         return os.path.join(bin_dir, "ci-job")
 
     def push_batch(self, branch, skip=()):
-        """Push `branch` to origin: one commit on main holding checks.yml's four lint steps and a logging stub for each check script
+        """Push `branch` to origin: one commit on main holding checks.yml's four lint CI steps and a logging stub for each check script
         they run, except the scripts in `skip`. -> the branch's head sha."""
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
-        tm.sh(o, "git", "checkout", "-q", "-B", branch, "origin/main")
+        tm.sh(o, "git", "checkout", "-q", "-B", branch, "origin/" + BASE)
         tm.put(os.path.join(o, ".github", "workflows", "checks.yml"), workflow_text(self.found))
-        for name, step in self.found:
-            if name != STE and script_of(step) not in skip:
-                tm.put(os.path.join(o, script_of(step)), CALL_STUB % self.call_log(script_of(step)))
+        for name, ci_step in self.found:
+            if name != STE and script_of(ci_step) not in skip:
+                tm.put(os.path.join(o, script_of(ci_step)), CALL_STUB % self.call_log(script_of(ci_step)))
         tm.sh(o, "git", "add", "-A")
-        tm.sh(o, "git", "commit", "-q", "-m", branch + ": the checks job's lint steps and their stubs")
+        tm.sh(o, "git", "commit", "-q", "-m", branch + ": the checks job's lint CI steps and their stubs")
         tm.sh(o, "git", "push", "-q", "origin", branch)
         return tm.sh(o, "git", "rev-parse", "HEAD")
 
     def lane_lint(self, target, out):
-        """merge.lane_lint of `target` against main, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
+        """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
         env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            return merge.lane_lint(self.co, target, self.host, base="main")
+            return merge.lane_lint(self.co, target, self.host, base=BASE)
 
     def test_lane_lint_runs_each_batch_check_once_with_the_argv_checks_yml_gives(self):
         head = self.push_batch(BATCH)
-        self.assertEqual(sorted(name for name, _ in self.found), sorted(BATCH_STEPS),
-                         "checks.yml's checks job does not hold exactly the four steps this suite lints")
+        self.assertEqual(sorted(name for name, _ in self.found), sorted(BATCH_CI_STEPS),
+                         "checks.yml's checks job does not hold exactly the four CI steps this suite lints")
         out = io.StringIO()
         rc = self.lane_lint(BATCH, out)
         text = out.getvalue()
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(pass_lines(text)), 1, text)
-        values = {"github.base_ref": "main", "github.event.pull_request.head.sha": head}
-        for name, step in self.found:
+        values = {"github.base_ref": BASE, "github.event.pull_request.head.sha": head}
+        for name, ci_step in self.found:
             if name == STE:
                 continue
             with self.subTest(check=name):
-                want = expected_argv(step, values)
+                want = expected_argv(ci_step, values)
                 self.assertEqual(want[0], "python3", "checks.yml's run: of %s is not a python3 line" % name)
                 calls = self.stub_calls(want[1])
                 self.assertEqual(len(calls), 1, "%s: its script ran %d times, want once: %s" % (name, len(calls), text))
@@ -628,9 +629,9 @@ class BatchLintFlags(tm.Env):
             argv = calls[0]["argv"]
             self.assertEqual(os.path.realpath(argv[0]), os.path.realpath(self.ste_path),
                              "STE lint ran a ste-changed other than the one beside ci-job")
-            self.assertEqual(argv[1:], ["origin/main"], "STE lint: ste-changed got %s, want origin/main" % argv[1:])
+            self.assertEqual(argv[1:], ["origin/" + BASE], "STE lint: ste-changed got %s, want origin/%s" % (argv[1:], BASE))
             with_ = step_with(dict(self.found)[STE])
-            self.assertEqual(sorted(with_), ["fail", "scope"], "checks.yml's STE lint step has other with: keys than scope and fail")
+            self.assertEqual(sorted(with_), ["fail", "scope"], "checks.yml's STE lint CI step has other with: keys than scope and fail")
             source = ste_changed_env(os.path.join(REPO, "bin", "ste-changed"))
             self.assertIsNotNone(source, "bin/ste-changed builds no env dict with SCOPE")
             inputs = {"full_ste_audit": ""}  # the PR run: the input is empty
@@ -645,7 +646,9 @@ class BatchLintFlags(tm.Env):
         out = io.StringIO()
         with self.assertRaises(merge.Stop) as raised:
             self.lane_lint(BATCH_MISSING, out)
-        self.assertIn("Red-run trailer", str(raised.exception), "the refusal does not name the step whose script is missing: " + out.getvalue())
+        self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing check script reads as unknown, not as a failed check: " + out.getvalue())
+        self.assertIn("FAILs:", str(raised.exception), "the refusal does not say the lint FAILs: " + out.getvalue())
+        self.assertIn("Red-run trailer", str(raised.exception), "the refusal does not name the CI step whose script is missing: " + out.getvalue())
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint with a check script missing read as a pass: " + out.getvalue())
 
 
