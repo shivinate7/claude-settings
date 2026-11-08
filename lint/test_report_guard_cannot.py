@@ -887,6 +887,68 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("push the branch"), *failed_bash("python3.12 x.py", "tu_x"), landed_reply(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
+    # ---- a script try backs its claim only when the line names the script; a CI blocker gates merges only; an object window stops at a joining noun
+
+    def assert_blocks(self, out, line):
+        """A block by the cannot-claim guard that lists `line`, whatever its variant."""
+        self.assertIsNotNone(out, "no block came for %r" % line)
+        self.assertEqual(out.get("decision"), "block", "not a block: %s" % out)
+        self.assertIn(HEAD, out.get("reason", ""), "the block is not the cannot-claim guard: %s" % out)
+        self.assertIn(line, out.get("reason", ""), "the claim line is not listed: %s" % out)
+
+    def test_cc_red_a_script_try_backs_a_claim_only_when_the_line_names_the_script(self):
+        # Catches: a failed script whose name holds an act word read as a try of that act, so a line that does not name the
+        # script was backed by it. Without the name, the failed script backs no claim.
+        for command, code, line in (
+                ("echo {} | python3 hooks/guard_merge.py", 2, "I can't merge PR 12: the API refused the merge."),
+                ("echo {} | python3 hooks/guard_push_delete.py", 1,
+                 "I can't push the branch: the API refused the push.")):
+            with self.subTest(command=command):
+                out = self.stop([trg.human("act now"), *exit_bash(command, code, "tu_s"), landed_reply(line)])
+                self.assert_blocks(out, line)
+
+    def test_cc_green_a_failed_script_named_in_the_line_backs_its_claim(self):
+        # Control: a failed script named in the line backs the claim about its act, so the line passes.
+        for command, code, line in (
+                ("./open-pr.sh", 1, "I could not open the PR: `open-pr.sh` exited 1."),
+                ("merge 12", 1, "I couldn't merge PR 12: `merge 12` exited 1.")):
+            with self.subTest(command=command):
+                out = self.stop([trg.human("act now"), *exit_bash(command, code, "tu_s"), landed_reply(line)])
+                self.assert_passes(out, "a failed %s, named in the line" % command)
+
+    def test_cc_red_a_ci_blocker_passes_a_merge_claim_in_each_phrasing(self):
+        # Catches: a CI blocker in a phrasing the blocker clause does not reach, so the merge claim it gates blocked.
+        for line in ("I can't merge PR 12 because CI failed.", "I can't merge PR 12 as CI is red.",
+                     "CI is red and I can't merge PR 12."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_passes(out, "a merge claim gated by CI")
+
+    def test_cc_green_failing_ci_still_blocks_an_open_claim(self):
+        # Control: CI gates a merge only, so an open claim with no try still blocks while CI has failed.
+        line = "I can't open the PR because CI failed."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocks(out, line)
+
+    def test_cc_green_a_failed_server_is_no_blocker_for_a_merge_claim(self):
+        # Control: a failed server names no blocker, so the merge claim it sits beside still blocks.
+        line = "The MCP server failed and I can't merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocks(out, line)
+
+    def test_cc_red_an_object_window_stops_at_a_joining_noun(self):
+        # Catches: "open the CI logs and PR" read as an open of the PR, so the and joined a noun into the object.
+        line = "I could not open the CI logs and PR."
+        out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
+        self.assert_passes(out, "an open whose object is the CI logs, not the PR")
+
+    def test_cc_green_a_pr_object_or_a_verb_pair_still_claims(self):
+        # Control: an object PR after a modifier, or a verb pair before the object, is still an open or create claim.
+        for line in ("I could not open the follow-up PR.", "I can't create and push the PR."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
+                self.assert_blocks(out, line)
+
     # ---- a claim after a bold report label. "**Input Needed** Could not open the PR" is a hand-off form.
     # The label is no subject: the clause after it opens, so the phrase has an empty subject and is a claim.
 
@@ -958,9 +1020,9 @@ class CannotClaimTests(unittest.TestCase):
         extra = claimed_opened.count(refusals) - free_opened.count(refusals)
         self.assertEqual(extra, 1, "the refusals file read %d more times on a claim line, expected one" % extra)
 
-    # ---- the claim-backing debts: the blocker clause, the script try, and the check words, the api.github.com dot, the
-    # missed act words and the semicolon scan. A red line is a claim the check must read. A control is a line the check
-    # must leave as it is, and each control says what it passes or blocks.
+    # ---- the claim cases: the blocker clause, the script try, the check words, the api.github.com dot, the act words a
+    # window may not cross, and the semicolon scan. A red line is a claim the check must read. A control is a line the
+    # check must leave as it is, and each control says what it passes or blocks.
 
     def test_cc_red_blocker_because_ci_is_no_claim(self):
         # Catches: a claim whose clause carries a blocker (because CI) read as a claim with no try. A blocker is a true reason,
