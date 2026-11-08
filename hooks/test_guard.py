@@ -11062,6 +11062,22 @@ mtc_bash("a Bash heredoc fixture holding the old updatedAt literal is allowed", 
          'cat > "$D/fixture.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-06T18:00:00Z"}\nEOF')
 
 
+# Passes: a repair that rewrites an ahead value to the clock. The command holds the ahead value first and the right
+# time last. Only the last literal is the value the command leaves, so only that one is judged.
+mtc_bash("a Bash sed repair of updatedAt from 14:30 to 14:14 at -06:00 is allowed: the last literal is the clock", "allow",
+         r"""sed -i 's/"updatedAt": "2026-11-07T14:30:00-06:00"/"updatedAt": "2026-11-07T14:14:00-06:00"/' roadmap/data/steps/x.json""")
+mtc_bash("a Bash Python string replace of updatedAt from 14:30 to 14:14 at -06:00 is allowed: the last literal is the clock",
+         "allow",
+         r'''python3 -c "import json; p='roadmap/data/steps/x.json'; s=open(p).read(); open(p,'w').write(s.replace('\"updatedAt\": \"2026-11-07T14:30:00-06:00\"', '\"updatedAt\": \"2026-11-07T14:14:00-06:00\"'))"''')
+# Passes: `==` is a comparison, not a write, so the regex skips it. Only the assignment's value, 14:10 CST, is judged.
+mtc_bash("a Bash Python == check of updatedAt 14:30 at -06:00, then an = write of 14:10, is allowed: a comparison is not judged",
+         "allow",
+         r"""python3 -c 'import json; d=json.load(open("roadmap/data/steps/x.json")); assert d["updatedAt"] == "2026-11-07T14:30:00-06:00"; d["updatedAt"] = "2026-11-07T14:10:00-06:00"; json.dump(d, open("roadmap/data/steps/x.json","w"))'""")
+# Refused: the last literal is 14:30 at -06:00, 16 minutes ahead. The earlier 14:00 is behind, and does not hide it.
+mtc_bash("a Bash sed that sets updatedAt 14:00 to 14:30 at -06:00, the last literal ahead, is refused", "deny",
+         r"""sed -i 's/"updatedAt": "2026-11-07T14:00:00-06:00"/"updatedAt": "2026-11-07T14:30:00-06:00"/' roadmap/data/steps/x.json""")
+
+
 # ---- the document through file_path, and the str_replace action: `added` written two more ways
 # A set, an update or a batch entry may pass the document through `file_path`, a local JSON file, instead of `data`.
 # A str_replace edits one top-level string field in place. Both can carry `added` into collection items, so both
