@@ -366,9 +366,15 @@ def step_trailers(repo, ref):
     return [(sid, sha, owner.get(sha)) for sha, ids in steps.items() for sid in ids]
 
 
-def landed_marks(repo, ref, branch, steps):
-    """({open step: [pull request or commit]}, [trailer that names no step], why or None)."""
-    found = step_trailers(repo, ref) if ref else None
+NOT_READ = object()  # landed_marks' `trailers` default: the caller has not read the Step trailers, so it reads them
+
+
+def landed_marks(repo, ref, branch, steps, trailers=NOT_READ):
+    """({open step: [pull request or commit]}, [trailer that names no step], why or None).
+
+    `trailers` is step_trailers(repo, ref) already read (None for a failed read): a caller that also needs the
+    trailer ids reads once and passes the result, so main's Step trailers are read one time."""
+    found = trailers if trailers is not NOT_READ else step_trailers(repo, ref) if ref else None
     if found is None:
         return {}, [], "no %s branch in this checkout" % branch if ref is None else "git log failed on " + ref
     marks, strays = {}, []
@@ -802,7 +808,8 @@ def main(argv=None):
         data = load(source)
     info = build_info(repo, source, why)
     ref = main_ref(repo, args.main_branch)
-    marks, strays, unread = landed_marks(repo, ref, args.main_branch, data["steps"] if data else {})
+    trailers = step_trailers(repo, ref) if ref else None
+    marks, strays, unread = landed_marks(repo, ref, args.main_branch, data["steps"] if data else {}, trailers)
     info["landed"] = marks
     extra, where = extras(repo, source)
     slug, found = github_slug(repo, extra), homes(repo)
@@ -837,7 +844,7 @@ def main(argv=None):
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
-           slug, repo, args.main_branch, unread)
+           slug, repo, args.main_branch, unread, trailer_ids_of(trailers))
     lines = stalled_lines(info["stalled"])
     if lines:
         print("\n".join(lines))
@@ -1293,12 +1300,14 @@ def unfiled(steps, work):
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, trailer_ids=None):
     """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
     `hold (<reason>; lane <session id>)` for a lane that can never be judged, which is never archived: no cs-step tag,
-    or a step that is neither on the record branch nor named by a Step trailer on main. A lane that waits (step not
+    or a step that is neither on the record branch nor named by a Step trailer on main, or a step off the record branch
+    on a lane that also carries another repo's cs-repo tag (step ids repeat across repos, so this repo's trailer does
+    not prove the other repo's step landed; the hold names that tag). A lane that waits (step not
     done, open pull, open item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
-    on main, or status done; a step off the record branch counts only by its trailer). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
+    on main, or status done; a step off the record branch counts only by its trailer, and never on a two-repo lane). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
     that pull is a draft whose head sha is already in the default branch, and by an open waiting-page item whose
     `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
     status `closed` releases an item. When no live
@@ -1348,16 +1357,21 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
             out.append("hold (no cs-step tag; lane %s)" % sid)
             continue
         absent = [k for k in mine if k not in steps]
-        if absent and trailer_ids is None:
+        if absent and trailer_ids is None:  # only a caller that did not read the trailers (upkeep and the report pass them)
             found = step_trailers(repo, ref) if ref else None
             if found is None:
                 return ["unknown (the Step trailers on %s could not be read)" % (ref or main_branch)]
             trailer_ids = {t[0] for t in found}
         unproven = [k for k in absent if k not in trailer_ids]
+        others = sorted({t for t in tags if t.startswith(REPO_TAG) and not repo_tag_names(t, slug)}) if absent else []
         if unproven:
-            others = sorted({t for t in tags if t.startswith(REPO_TAG) and not repo_tag_names(t, slug)})
             out.append("hold (step %s not on the record branch and no Step trailer on main%s; lane %s)" % (
                 " ".join(unproven), "; also tagged " + " ".join(others) if others else "", sid))
+            continue
+        if others:
+            # Step ids repeat across repos: a trailer on this main does not prove the other repo's step landed.
+            out.append("hold (step %s not on the record branch and the lane is also tagged %s; lane %s)" % (
+                " ".join(absent), " ".join(others), sid))
             continue
         if any(k in steps and steps[k].get("status") != "done" and k not in marks for k in mine):
             continue
@@ -1371,6 +1385,11 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     return sorted(out)
 
 
+def trailer_ids_of(found):
+    """The set of step ids in a step_trailers read, or None for a failed read."""
+    return None if found is None else {t[0] for t in found}
+
+
 def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     """The idle_lanes entries for the checkout `repo`, read as the build reads them (record branch, Step trailers on
     main, the repo's GitHub name, the live file). `merge --idle-lanes` calls this. A read that could not run is one
@@ -1380,13 +1399,15 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     if source is None:
         return ["unknown (%s)" % why]
     steps = load(source)["steps"]
-    marks, _strays, unread = landed_marks(repo, main_ref(repo, main_branch), main_branch, steps)
+    ref = main_ref(repo, main_branch)
+    found = step_trailers(repo, ref) if ref else None
+    marks, _strays, unread = landed_marks(repo, ref, main_branch, steps, found)
     extra, _where = extras(repo, source)
     slug = github_slug(repo, extra)
-    return idle_lanes(live_work(live, steps, slug), steps, marks, slug, repo, main_branch, unread)
+    return idle_lanes(live_work(live, steps, slug), steps, marks, slug, repo, main_branch, unread, trailer_ids_of(found))
 
 
-def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None):
+def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, trailer_ids=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
     live = {d.get("phase") for _, d in open_ if d.get("status") == "active"}
@@ -1425,7 +1446,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
-            (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread)
+            (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread, trailer_ids)
              if repo is not None else ["unknown (the checkout was not named)"]),
             ("landed, waiting for a device trial", waiting),
             ("landed, waiting for triage to close", closing),
