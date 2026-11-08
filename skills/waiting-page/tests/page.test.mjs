@@ -95,8 +95,10 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
   // failCode rejects every send; goneThreads rejects a send into those thread ids with not_found.
   // threadFail maps a thread id to the code a send into that thread rejects with; anchorFail is the code an anchored send (no threadId) rejects with.
   window.__sent = [];
+  // comments.canHold: each canSendToClaude counts in window.__canHeld and waits for window.__releaseCan(), so a case can act while a send is still before its save.
+  let canOpen; const canLatch = new Promise((r) => { canOpen = r; }); window.__releaseCan = () => canOpen();
   const cm = comments && {
-    canSendToClaude: async () => { if (comments.canHangs) return new Promise(() => {}); if (comments.canThrows) throw { code: "unavailable" }; return comments.can || "available"; },
+    canSendToClaude: async () => { if (comments.canHangs) return new Promise(() => {}); if (comments.canHold) { window.__canHeld = (window.__canHeld || 0) + 1; await canLatch; } if (comments.canThrows) throw { code: "unavailable" }; return comments.can || "available"; },
     anchorFor: async (el) => ({ path: "h1", x: 0, y: 0, tag: el.tagName }),
     // A send is counted in __inflight from its call until it returns, sendDelay included, so a held send keeps the count above 0.
     sendToClaude: async (target) => {
@@ -127,7 +129,7 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, timers = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -149,6 +151,8 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   if (clock) await page.clock.setFixedTime(new Date(clock));
+  // timers: the page's timers run on a synthetic clock from the start. Time flows as usual until a case moves it with runTimers.
+  if (timers) await page.clock.install();
   await page.goto(ORIGIN);
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
@@ -157,6 +161,11 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   return page;
 }
 const card = (page, it) => page.locator(`#item-${it.id}`);
+// Runs the page's timers ms ahead on the synthetic clock (open({ timers: true }), or openStatus). Each timer due by then fires inside the call, with no real wait.
+// The clock keeps running in real time after the call, so the page stays usable. Resolves to the message of an error a timer threw, or null: the clock rethrows it here.
+const runTimers = (page, ms) => page.clock.runFor(ms).then(() => null, (e) => String(e && e.message || e).split("\n")[0]);
+// Ends once the page's queued promise work has run: a macrotask after the microtasks. No timer and no wait.
+const flush = (page) => page.evaluate(() => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); }));
 const answers = (page) => page.evaluate(() => window.__answers());
 // A tap on an option's picture opens the viewer (d9 ruling), so a pick taps the option's label text.
 const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
@@ -548,11 +557,15 @@ test("a white icon gets the dark tile", async (t) => {
 test("an icon that is not an inline svg or png data URI, or is too long, leaves the letter", async (t) => {
   const long = "data:image/svg+xml;base64," + "A".repeat(16385 - 26);
   assert.equal(long.length, 16385);
-  for (const icon of ["data:image/png;base64,AAAA", "https://example.com/icon.svg", long, "data:image/jpeg;base64,/9j/4AAQ", 42]) {
+  // A 1x1 opaque GIF: a valid image that the icon rule refuses, so a rule that let it through would show it as the mark.
+  const gif = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBADs=";
+  const scope = await open(t); if (!scope) return;
+  assert.equal(await scope.evaluate((src) => { const i = new Image(); i.src = src; return i.decode().then(() => i.naturalWidth, () => 0); }, gif), 1, "the GIF does not decode in this browser");
+  for (const icon of ["data:image/png;base64,AAAA", "https://example.com/icon.svg", long, "data:image/jpeg;base64,/9j/4AAQ", gif, 42]) {
     const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
     await named(page, "Compass");
-    // Kept as a sleep: no icon in this list decodes to a visible mark, so a loosened ICON_RE stays green and no signal ends its decode.
-    await page.waitForTimeout(150);
+    // The page decodes an icon it accepts before it sets the name, and the stub counts that decode until it settles.
+    await page.waitForFunction(() => window.__decoding === 0, null, { timeout: 5000 }).catch(() => assert.fail("an icon decode never settled in 5 s"));
     const m = await markState(page);
     assert.deepEqual([m.icon, m.img, m.text, m.hidden], [false, null, "C", false], String(icon).slice(0, 40));
     await page.close();
@@ -1550,7 +1563,7 @@ test("a second send replies into the stored thread", async (t) => {
 
 test("a tap on each star on two cards and one Send gives exactly one notice for the batch", async (t) => {
   const two = { ...DECISION, id: "pick-a-shape", n: 29, title: "Pick a shape" };
-  const page = await open(t, { items: [DECISION, two, TASK] }); if (!page) return;
+  const page = await open(t, { items: [DECISION, two, TASK], timers: true }); if (!page) return;
   await takePick(page, DECISION); await takePick(page, two);
   await send(page);
   await page.waitForFunction(() => window.__sent.length >= 1);
@@ -1558,8 +1571,8 @@ test("a tap on each star on two cards and one Send gives exactly one notice for 
   // The notice says a session was told, and the page has left its send.
   await page.waitForFunction(() => document.getElementById("sentStatus")?.textContent === "A wake was sent.", null, { timeout: 5000 }).catch(() => assert.fail("the notice never said a session was told, in 5 s"));
   await page.waitForFunction(() => !state.sending, null, { timeout: 5000 }).catch(() => assert.fail("the page still counts a send in progress 5 s after the notice"));
-  // Kept as a sleep: a second notice sent 150 ms late lands after sending clears, so no wait above sees it.
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
+  // A second notice sent 150 ms after the first lands after sending clears, so no wait above sees it. The synthetic clock runs 300 ms on, so it fires here.
+  assert.equal(await runTimers(page, 300), null, "a page timer threw after the notice");
   const s = await sent(page);
   assert.equal(s.length, 1, "one notice per batch");
   assert.match(s[0].text, /27 a/);
@@ -1722,12 +1735,15 @@ test("an owner name is capped at 80 characters", async (t) => {
 });
 
 test("pressing Send again while a batch is in flight does nothing", async (t) => {
-  const page = await open(t, { comments: { can: "available", sendDelay: 600 } }); if (!page) return;
+  const page = await open(t, { comments: { can: "available", sendDelay: 600, canHold: true } }); if (!page) return;
   await takePick(page, DECISION);
   await send(page);
+  // The first send parks in canSendToClaude, before its save, until the release. The clicks land while it is parked.
+  await page.waitForFunction(() => window.__canHeld >= 1, null, { timeout: 5000 }).catch(() => assert.fail("the first send never reached canSendToClaude in 5 s"));
   await page.evaluate(() => { for (let i = 0; i < 3; i++) document.getElementById("send").click(); });
-  // Kept as a sleep: the clicks land after the first send has saved and Send is disabled, so a mutant that lets clicks through in flight stays green.
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 1500)));
+  await page.evaluate(() => window.__releaseCan());
+  // A send is in flight from its sendToClaude call until it returns, so 0 with a send made means every send has finished.
+  await page.waitForFunction(() => window.__sent.length >= 1 && window.__inflight === 0, null, { timeout: 5000 }).catch(() => assert.fail("no send finished in 5 s"));
   assert.equal((await sent(page)).length, 1, "a second notice went out");
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "set").length, 1, "the batch saved twice");
 });
@@ -1775,8 +1791,8 @@ test("Undo refuses a delete once 8 seconds from the send have passed", async (t)
   await takePick(page, DECISION); await send(page);
   await page.locator("#undoBtn").waitFor();
   await page.evaluate(() => { const real = Date.now, b = document.getElementById("undoBtn"); Date.now = () => real() + 9000; b.click(); });
-  // Kept as a sleep: a mutant that moves the busy check after an await stays green, since the undo loop's own clock check still stops the delete.
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
+  // The refused Undo's work is promise work, so a flush ends it. A mutant that moves the entry check after an await still deletes nothing, since the loop's clock check refuses each delete.
+  await flush(page);
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete").length, 0, "a delete ran after the window");
   assert.ok((await answers(page))[DECISION.id]);
 });
@@ -4639,8 +4655,8 @@ const anchorOf = (page, sent) => page.evaluate((ids) => {
 }, sent.map((it) => "item-" + it.id));
 // Scroll anchoring stays off unless the case asks for it.
 // sentMove names the SENT_MOVE value a case pins (see withSentMove); none keeps the page's own value.
-const openSend = async (t, { items, width, height, scheme, anchored, sentMove }) => {
-  const page = await open(t, { items, scheme, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
+const openSend = async (t, { items, width, height, scheme, anchored, sentMove, timers }) => {
+  const page = await open(t, { items, scheme, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined, timers });
   if (page && !anchored) await noAnchor(page);
   return page;
 };
@@ -4961,7 +4977,7 @@ test("answered-sink: control: Undo of a Send from a card in view returns it to i
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
   const inView = mk("in-view", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false, timers: true }); if (!page) return;
   await settleAt(page, inView, "top", 40);
   const pre = await cardMap(page);
   const I = "item-in-view", B = "item-below";
@@ -4972,8 +4988,8 @@ async function answerWithoutSend(t, { width, scheme }) {
   const atOnce = await cardMap(page);
   assert.ok(atOnce[I].h >= pre[I].h - 1, `an answer without a Send dropped its height at once: ${pre[I].h}px to ${atOnce[I].h}px`);
   await frameWait(page, 2);
-  // Kept as a sleep: a mutant that drops releaseHeld's in-view check stays green here, since the card never leaves the view in this case.
-  await page.waitForTimeout(600);
+  // The synthetic clock runs 600 ms on, so a page timer that moves the page after the receipt fires here.
+  assert.equal(await runTimers(page, 600), null, "a page timer threw while the held card waited");
   const held = await cardMap(page);
   assert.ok(Math.abs(held[I].h - pre[I].h) <= 1, `an answer without a Send changed the card's height while in view: ${pre[I].h}px to ${held[I].h}px`);
   assert.ok(Math.abs(held[B].top - pre[B].top) <= 1, `an answer without a Send moved the card below: ${pre[B].top} to ${held[B].top}`);
@@ -5064,6 +5080,16 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
   });
 }
 
+// A scroll the page starts after armScroll: its first scroll event, then its scrollend. Signals, not a time.
+const armScroll = (page) => page.evaluate(() => {
+  window.__scrolling = false; window.__scrollSeen = false;
+  addEventListener("scroll", () => { window.__scrolling = true; window.__scrollSeen = true; }, { passive: true });
+  addEventListener("scrollend", () => { window.__scrolling = false; });
+});
+const scrollDone = async (page) => {
+  await page.waitForFunction(() => window.__scrollSeen === true, null, { timeout: 5000 }).catch(() => assert.fail("the page never scrolled in 5 s"));
+  await page.waitForFunction(() => window.__scrolling === false, null, { timeout: 5000 }).catch(() => assert.fail("the page's scroll never ended in 5 s"));
+};
 test("a rail jump after Send lands on its card", async (t) => {
   const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
   const page = await open(t, { items, viewport: { width: 1280, height: 800 } }); if (!page) return;
@@ -5071,28 +5097,52 @@ test("a rail jump after Send lands on its card", async (t) => {
   await choose(page, items[0], "a"); await choose(page, items[1], "a");
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
+  await armScroll(page);
   await page.click("#c-q9");
-  // Kept as a sleep: a mutant that drops releaseHeld's idle check stays green, since the rail jump still lands in the band.
-  await page.waitForTimeout(2500);
+  await scrollDone(page);
   // The card lands inside the band, just under the header's bottom edge.
   const band = await bandOf(page);
   const top = await card(page, items[9]).evaluate((e) => Math.round(e.getBoundingClientRect().top));
   assert.ok(top >= band.top - 1 && top <= band.top + 120, `the jump missed its card; it sits at ${top}, band top ${band.top}`);
 });
 
+// A held card that a jump scrolls off the screen: releaseHeld drops it only once the scroll is idle, since a drop mid-flight moves the jump's target.
+test("a held card that a rail jump scrolls off the screen drops only after the scroll ends", async (t) => {
+  const items = Array.from({ length: 14 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
+  const page = await open(t, { items, viewport: { width: 1280, height: 800 } }); if (!page) return;
+  await noAnchor(page);
+  // An answer from the database, as another session's save would write it, holds the card in view at its height.
+  await page.evaluate(async (id) => { const db = await window.claude.use("db"); await db.collection("answers").doc(id).set({ item: id, n: 1, at: "2026-10-30T14:00:00Z", choice: "a", note: "" }); }, items[0].id);
+  await page.locator("#item-q0 .receipt").waitFor();
+  await page.waitForFunction(() => !!document.getElementById("item-q0").style.minHeight, null, { timeout: 5000 }).catch(() => assert.fail("the answered card is not held 5 s after its receipt"));
+  await page.evaluate(() => {
+    window.__dropMidScroll = false;
+    const held = () => !!document.getElementById("item-q0")?.style.minHeight;
+    let had = held();
+    new MutationObserver(() => { const now = held(); if (had && !now && window.__scrolling) window.__dropMidScroll = true; had = now; })
+      .observe(document.body, { subtree: true, attributes: true, attributeFilter: ["style"] });
+  });
+  await armScroll(page);
+  await page.click("#c-q9");
+  await scrollDone(page);
+  await page.waitForFunction(() => !document.getElementById("item-q0")?.style.minHeight, null, { timeout: 5000 }).catch(() => assert.fail("the held card never dropped 5 s after the scroll"));
+  assert.equal(await page.evaluate(() => window.__dropMidScroll), false, "a held card dropped while the page was still scrolling");
+});
+
 test("a receipt wholly below the screen drops its height without moving the page", async (t) => {
   const items = Array.from({ length: 40 }, (_, i) => mk("q" + i, i + 1, { context: LONG }));
-  const page = await open(t, { items, viewport: { width: 390, height: 360 } }); if (!page) return;
+  const page = await open(t, { items, viewport: { width: 390, height: 360 }, timers: true }); if (!page) return;
   await noAnchor(page);
   await choose(page, items[0], "a");
   await page.evaluate(() => window.scrollTo(0, 60));
-  const railTop = () => page.evaluate(() => Math.round(document.querySelector(".ov-prog").getBoundingClientRect().top));
-  const at = await railTop();
+  // The sent card is in the flow, so a page scroll moves its top at any width. The rail is sticky above 960 px, so a scroll there leaves it in place.
+  const cardTop = () => page.evaluate(() => Math.round(document.getElementById("item-q0").getBoundingClientRect().top));
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
-  // Kept as a sleep: removing it would loosen the test without a proof (test-practices P9), and no signal here stands in for it.
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 600)));
-  assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
+  const at = await cardTop();
+  // The synthetic clock runs 600 ms on, so a page move that a receipt timer starts fires here.
+  assert.equal(await runTimers(page, 600), null, "a page timer threw while the receipt shrank");
+  assert.ok(Math.abs((await cardTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
 // A phone mockup shows whole, so the design caps its height at 480px (docs/design/c193-sizes.md item 3); it scales to its card and stays centred.
@@ -5526,12 +5576,13 @@ test("an option whose links is a string, not a list, renders with no page error 
     ],
     pick: "a", why: "It lands now.",
   });
-  const page = await open(t, { items: [it], errors }).catch((e) => { errors.push("open: " + e.message.split("\n")[0]); return null; });
+  const page = await open(t, { items: [it], errors, timers: true }).catch((e) => { errors.push("open: " + e.message.split("\n")[0]); return null; });
   if (!page) { assert.deepEqual(errors, [], "the page threw on a string links value"); return; }
   // A page error can land a tick after the card appears. The stub's callbacks are idle by then.
   await stubQuiet(page);
-  // Kept as a sleep: a page timer that throws 300 ms after the card renders is missed by stubQuiet, which covers the stub only.
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
+  // The window runs from the page's first links read, not from the card render: a timer that read starts throws 300 ms on, and the synthetic clock runs past it.
+  const timerErr = await runTimers(page, 400);
+  if (timerErr) errors.push("a page timer threw: " + timerErr);
   assert.deepEqual(errors, [], "the page threw on a string links value");
   assert.equal(await card(page, it).locator(".opt").count(), 2, "the option cards did not render");
   assert.equal(await card(page, it).locator(".links").count(), 0, "a string links value shows a links row");
@@ -5557,6 +5608,7 @@ const LEAK = {
 // The waiting part reads items, answers, groups, receipts and meta/page. A read of anything else is the status part's.
 const statusRead = (r) => r[0] === "steps" || r[0] === "topics" || (r[0] === "meta" && r[1] !== "page");
 const statusTab = (page) => page.getByRole("tab", { name: "Status", exact: true });
+const clocked = new WeakSet(); // pages whose synthetic clock openStatus has installed
 async function openStatus(page) {
   const tab = statusTab(page);
   assert.equal(await tab.count(), 1, "the page has no Status tab (role=tab, name Status)");
@@ -5564,9 +5616,12 @@ async function openStatus(page) {
   assert.ok(id, "the Status tab does not name its panel with aria-controls");
   const panel = page.locator("#" + id);
   assert.equal(await panel.isHidden(), true, "the Status panel shows before its tab is pressed");
+  // The synthetic clock starts before the tab shows, so the timers the show starts run on it.
+  if (!clocked.has(page)) { await page.clock.install(); clocked.add(page); }
   await tab.click();
   await panel.waitFor({ state: "visible" });
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))); // a late read lands here; at 0 ms a read 80 ms after the tab shows is missed
+  // The show's timers run 200 ms on, so a status read 80 ms after the tab shows fires here.
+  assert.equal(await runTimers(page, 200), null, "a timer the Status tab's show starts threw");
   return panel;
 }
 // Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
@@ -6126,7 +6181,7 @@ test("a stalled or paused row reads Stalled or Paused in its status, label and m
 });
 
 test("merged_page.py --live hands its JSON to the build as the live file", () => {
-  const live = { readAt: new Date().toISOString(), threads: [], pulls: [] };
+  const live = { readAt: "2026-10-30T14:00:00Z", threads: [], pulls: [] };
   const html = mergedPage("--live", JSON.stringify(live));
   const b = JSON.parse(BUILD_BLOCK.exec(html)[1]);
   assert.ok(b.live && Array.isArray(b.live.threads), "the build did not read the live file: " + JSON.stringify(b.live ?? null));
@@ -6893,8 +6948,9 @@ test("a lane shows 'waits on lane <slug>' as one text run in the top row, after 
 });
 
 test("on an open card the panel sits after the stake lines, before the context, and stays put while an option is picked", async (t) => {
-  const it = mk("pl-1a", 1, { added: ASKED_AFTER_SEND, holds: "A lane waits.", by: new Date(Date.now() + 3 * 864e5).toISOString(), lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
-  const page = await open(t, { items: [it] }); if (!page) return;
+  // The browser clock and the due date are both fixed, so the page's own reads of the date agree with the fixture (test-practices P5).
+  const it = mk("pl-1a", 1, { added: ASKED_AFTER_SEND, holds: "A lane waits.", by: "2026-11-02T12:00:00Z", lastAnswer: { choice: "a", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
+  const page = await open(t, { items: [it], clock: "2026-10-30T12:00:00Z" }); if (!page) return;
   const c = card(page, it);
   await laText(page, it);
   const title = await laBox(c.locator(".title")), holds = await laBox(c.locator(".stake.holds")), due = await laBox(c.locator(".stake.due"));
