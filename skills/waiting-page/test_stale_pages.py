@@ -287,14 +287,13 @@ class Stale(unittest.TestCase):
                 self.assertEqual(code, 1, out)
                 self.assertIn("behind: changed", out)
 
-    def carry_into_template(self, live, template=None):
-        """page.html (or `template`, a text) with the live page's blocks carried in (splice.py --carry), as the writer republishes it."""
+    def carry_into_template(self, live):
+        """page.html with the live page's blocks carried in (splice.py --carry), as the writer republishes it."""
         live_path = os.path.join(self.tmp.name, "live.html")
         carried_path = os.path.join(self.tmp.name, "carried.html")
         with open(live_path, "w", encoding="utf-8", newline="") as f:
             f.write(live)
-        template_path = os.path.join(HERE, "page.html") if template is None else write_text(os.path.join(self.tmp.name, "template.html"), template)
-        r = subprocess.run([sys.executable, SPLICE, "--page", template_path, "--carry", live_path,
+        r = subprocess.run([sys.executable, SPLICE, "--page", os.path.join(HERE, "page.html"), "--carry", live_path,
                             "--out", carried_path], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         with open(carried_path, encoding="utf-8", newline="") as f:
@@ -302,15 +301,17 @@ class Stale(unittest.TestCase):
 
     def test_a_carry_of_a_page_from_before_the_roadmap_block_keeps_its_designs_and_reads_current(self):
         # The first batch: every live page predates the roadmap block, and its designs must survive the republish.
-        self.live_with_both_blocks()  # the template has the block to keep
+        self.live_with_both_blocks()  # the shipped page.html has the empty block the carry keeps
         old = ROADMAP_RE.sub("", PAGE.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1), count=1)
         self.assertNotEqual(DESIGN_BLOCK.findall(old), DESIGN_BLOCK.findall(PAGE))
-        carried = self.carry_into_template(old, template=NULLED_PAGE)
+        carried = self.carry_into_template(old)
         self.assertEqual(DESIGN_BLOCK.findall(carried), DESIGN_BLOCK.findall(old), "the carry lost the live designData")
-        self.assertEqual(ROADMAP_RE.findall(carried), ROADMAP_RE.findall(NULLED_PAGE), "the carry lost the template's roadmap block")
+        self.assertTrue(re.search(re.escape(OPEN) + r"\s*" + re.escape(CLOSE), carried),
+                        "the carry did not keep the shipped page's empty roadmap block")
         self.fetch("JJJ", carried)
         code, out = self.run_cmd(self.repo("before", "JJJ"))
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 1, out)  # today: the empty block is flagged, and the verdict word stays current
+        self.assertIn(self.empty_block_line("before"), out.splitlines(), out)
         self.assertIn("current: before", out)
 
     def test_a_carry_reads_current_and_keeps_the_live_designs(self):
