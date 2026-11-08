@@ -12731,6 +12731,38 @@ class ReviewFixForm(unittest.TestCase):
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(head=REVIEW_HEAD),))),
                           "parse_review accepted a fix line whose reviewed head is the record's Head")
 
+class ReviewBodyRefusesBadValues(unittest.TestCase):
+    """review_body refuses to build a record parse_review would refuse (roadmap step review-body-rejects-bad-net: a lane built "Net value: n/a"
+    and posted it). Each bad value raises ValueError beside a well-formed control that must build."""
+
+    def build(self, **kw):
+        args = dict(n=7, head=REVIEW_HEAD, kind="normal", guard="no", rounds=[(1, "reviewer", "sonnet", "PASS")], net="not owed")
+        args.update(kw)
+        return review_fn(self, "review_body")(**args)
+
+    def test_a_well_formed_record_builds(self):
+        # control: the values the tables hold build a record the parser reads back
+        self.assertIsNotNone(review_fn(self, "parse_review")(self.build(guard="yes", net="zero")))
+
+    def test_a_value_outside_its_table_raises_and_names_the_field(self):
+        bad = {"Net value": dict(net="n/a"), "Kind": dict(kind="code"), "Guard or check": dict(guard="maybe")}
+        for field, kw in bad.items():
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError) as cm:
+                    self.build(**kw)
+                self.assertIn(field, str(cm.exception), f"the refusal does not name {field}: {cm.exception}")
+
+    def test_any_record_the_parser_refuses_raises(self):
+        bad = {"docs-only with guard yes": dict(kind="docs-only", guard="yes"), "a short head": dict(head=REVIEW_HEAD[:39]),
+               "rounds that start at 2": dict(rounds=[(2, "reviewer", "sonnet", "PASS")]),
+               "a round above 3": dict(rounds=[(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "FAIL"), (4, "reviewer", "opus", "PASS")]),
+               "verdict MAYBE": dict(rounds=[(1, "reviewer", "sonnet", "MAYBE")]),
+               "a fix check on the record head": dict(fix=(REVIEW_HEAD, "reviewer", "sonnet", "PASS"))}
+        for cause, kw in bad.items():
+            with self.subTest(cause=cause):
+                with self.assertRaises(ValueError, msg=f"review_body built a record with {cause}"):
+                    self.build(**kw)
+
 class ReviewRecordForm(unittest.TestCase):
     """The form: review_body prints a record and parse_review reads it back. The parser accepts the form and refuses what it does not allow."""
 

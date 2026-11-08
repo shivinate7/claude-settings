@@ -3211,11 +3211,18 @@ REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never 
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
-    fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value."""
-    return "\n".join([REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
+    fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value. Raises ValueError for a record parse_review
+    would refuse, so a caller cannot build one and post it: a kind, guard or net value outside its table is named, any other fault is the form's."""
+    for field, value, table in (("Kind", kind, REVIEW_KINDS), ("Guard or check", guard, REVIEW_GUARDS), ("Net value", net, REVIEW_NETS)):
+        if value not in table:
+            raise ValueError(f"{field}: {value!r} is not one of {', '.join(table)}")
+    body = "\n".join([REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
                       *([f"Fix check: {', '.join(fix)}"] if fix else []),
                       f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
+    if parse_review(body) is None:
+        raise ValueError("the record does not parse: see parse_review for the form")
+    return body
 
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
@@ -3578,7 +3585,9 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
-        if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)) is None:
+        try:
+            review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)
+        except ValueError:  # --kind, --guard and --net-value take only their tables' values, so the fault is in the rounds
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
