@@ -1,0 +1,11 @@
+{
+  "title": "A resume of a finished builder or test-author that ran in its own worktree is refused, as for a reviewer",
+  "why": "Lane agent-name-on-spawn (session_013NEJL1Aq6pKaCrB1kxda68), 09:18 CST Nov 8: it resumed its finished builder by name for a round 1 fix; the worktree was gone, so the worktree-home guard refused every call and the round was lost.",
+  "note": "Filed 10:17 CST Nov 8 from that lane. Fix: extend rule resume-finished-reviewer (#1917, hooks/guard_merge.py resume_finished_hit) to a builder or test-author spawned with isolation worktree. The test-author resume in the same lane worked only because it fetched a fresh checkout. Related: resume-finished-reviewer-no-tree (doing, #1917's lane); fold there only if that lane takes the scope.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 724,
+  "updatedAt": "2026-11-08T10:17:00-06:00"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "The time-pinned finder lists a poll inside a deadline loop as a hang guard, not a fixed sleep",
+  "why": "Lane timing-tests (session_013NEJL1jPC89ae6X6Pa4jmf), 10:14 CST Nov 8: lint/find_time_pinned.py lists 12 poll intervals inside deadline loops as fixed sleeps, though each loop already waits on a condition (janitor/test_sweep.py, sim_lease, wait_pid, lane_lint, merge/test_merge.py, hooks/test_stall_watch.py).",
+  "note": "Filed 10:17 CST Nov 8 from that lane; note time-pinned-sleeps-left on branch lane/convert-time-pinned-tests. Decision test-practices P5. Goal step: time-pinned-tests-go.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJL1jPC89ae6X6Pa4jmf",
+  "status": "todo",
+  "order": 725,
+  "updatedAt": "2026-11-08T10:17:00-06:00"
+}

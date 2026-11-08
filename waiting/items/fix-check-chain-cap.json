@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-08T16:17:00Z",
+  "context": "Goal: a small second fix after a passed fix check costs little, and fix checks never stand in for review rounds.\nProblem (rule): your pick 418 b makes every fix after a passed fix check start a fresh chain of 3 more rounds; your note asked whether a capped chain could be allowed instead.\nBased on (measured): review records on 575 PRs opened since 2026-11-02: 322 chains had a fix check; 294 (91%) had one, 28 (9%) had two, none recorded three. Read by script over issue comments at about 10:12 CST Nov 8.\nBased on (measured): main refuses a second fix check, so longer chains went to fresh chains or void notes (59 PRs carry such a note, an upper bound by pattern count). One known case needed three: PR #1892.\nDeparts from: main, where a record takes one fix check and then a new round \u2014 up to N fix checks per chain, then a fresh chain.\nMeanwhile: #1829 closes per 418 b, and the stack's standalone parts are rebuilt without chaining. In every option, a failed or wide fix check ends the chain, and after round 3 every link keeps the net-value test.",
+  "home": "fix-check-chain",
+  "id": "fix-check-chain-cap",
+  "kind": "decision",
+  "n": 426,
+  "options": [
+    {
+      "gain": "Covers every chain recorded this week, and saves a fresh chain of 3 rounds on about 9% of chains.",
+      "how": "A chain may hold two fix checks; a third small fix starts a fresh chain.",
+      "key": "a",
+      "label": "Cap at 2 fix checks per chain",
+      "lose": "A third small fix still pays for a fresh chain."
+    },
+    {
+      "gain": "Also covers the #1892 shape.",
+      "how": "A chain may hold three fix checks.",
+      "key": "b",
+      "label": "Cap at 3",
+      "lose": "One more fix with no full review in each chain, for a shape seen once this week."
+    },
+    {
+      "gain": "Simplest: each fix check sits right after a review round.",
+      "how": "One fix check per chain, then a fresh chain.",
+      "key": "c",
+      "label": "No chaining, as 418 b ruled",
+      "lose": "About 28 chains a week pay a fresh chain of 3 rounds for a second small fix."
+    }
+  ],
+  "owner": "lane fail-record-ancestor-head (session_013NEJKzYhDtNPLcEdeVFEVe)",
+  "pick": "a",
+  "ref": "item 418 b and its note; step fix-check-chain; PR #1829",
+  "short": "Fix checks: cap a chain",
+  "status": "open",
+  "title": "May a review chain hold more than one fix check, up to a cap?"
+}
