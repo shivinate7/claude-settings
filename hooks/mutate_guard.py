@@ -1794,7 +1794,7 @@ MUTATIONS = [
     ("test-author: the merge carve-out compares a root file's backslash name as a separator",
      '        want = os.path.normcase(rel.replace(os.sep, "/"))',
      '        want = os.path.normcase(norm(rel))', "guard",
-     "test-author: Edit of a root file named src\\app.py is refused while src/app.py is unmerged"),
+     "test-author: Edit of a root file named src\\app.py is refused while src/app.py is unmerged", "posix"),
     # The symlink case exists only where os.symlink works, so this mutant runs on POSIX only.
     ("test-author: the merge carve-out reads the spelled path, not the resolved one",
      'os.path.relpath(os.path.realpath(full), os.path.realpath(root))',
