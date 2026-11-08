@@ -1,0 +1,11 @@
+{
+  "title": "The guard reads a builder's workflow Edit in the whole file, not the fragment alone",
+  "why": "Lane test-author-ci-step-false-alarm (session_013NEJKzayeNCJa4csSCBG7k), via the coordinator 11:16 CST Nov 8: the guard judges a builder's workflow Edit on the fragment alone. Probed: an Edit that adds `continue-on-error: true` below a test step's name line passes when the step's `run:` line sits below the fragment. Wiring workflow_file_pair into the builder path also loosens workflow_drops_tests for a duplicated run, so this needs its own lane.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to start",
+  "status": "todo",
+  "order": 752,
+  "updatedAt": "2026-11-08T11:16:00-06:00"
+}
