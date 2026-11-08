@@ -19612,6 +19612,154 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
     model="sonnet")
 
 
+# ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
+# shared-trees-no-destructive-git). An Agent, Task or Workflow brief is denied when a command span in it is one that
+# shared_tree_match reads as a discard: a backtick span, a fenced line, or a line led by "$ ". A negation before the
+# span on its line (never, do not, don't, no), a "Must deny:" or "Add a case:" line, prose with no span, a git span that
+# discards nothing, and a repo under a session scratchpad are false alarms the rule must leave alone. Each deny is red
+# on main, where no rule reads a brief. Selector: MUTATE_ONLY=brief-destructive-git: runs these cases and log checks.
+BRIEF_DESTRUCTIVE = "brief-destructive-git"
+# A session id is 8 or more characters, so a short folder name would not read as a scratchpad (in_any_session_scratchpad).
+SCRATCH_REPO = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "repo")
+from agent_brief import COMMON  # noqa: E402  the standing-rules text the SubagentStart hook gives every agent
+STANDING_LINE_ONE = "\n".join(text for _, text in COMMON[:2])   # the heading, then the first rule line
+STANDING_ALL = "\n".join(text for _, text in COMMON)
+# Paragraphs 7 to 12 of the brief that set these cases, as a brief would carry them. Paragraph 12's scratch path is the
+# session-shaped one above, so the text reads the same way the rule reads it.
+BRIEF_ALLOW_PARAGRAPHS = (
+    'A prohibition: "Never run `git reset --hard`." and "Do not run `git stash`." '
+    "(a negation word before the span on its line: never, do not, don't, no).\n"
+    "Case data: a line that starts with `Must deny:` or `Add a case:` holding `git reset --hard`.\n"
+    "The standing-rules text from hooks/agent_brief.py COMMON line 1 pasted in a brief.\n"
+    'Prose with no command span: "the reset with the hard flag lost work".\n'
+    "A non-discarding git span: `git reset HEAD file.py`, `git stash list`, `git status`.\n"
+    "A scratch repo: `git -C " + SCRATCH_REPO + " reset --hard` (a path under a session scratchpad, as "
+    "`in_any_session_scratchpad` reads it) passes, mirroring the shell guard, which allows the session's own scratchpad."
+)
+add("brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders the reset in a fenced block is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Undo the bad commit first.\n```\ngit reset --hard HEAD~1\n```\nThen re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a `$ ` line that runs a bare git stash is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Set the work aside first.\n$ git stash\nThen redo the edit.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a `$ ` line that runs git clean -fd is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Clear the untracked files.\n$ git clean -fd\nThen redo the edit.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git checkout -- .` in a backtick span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Drop your edits: `git checkout -- .`, then redo the change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Workflow agent prompt that holds `git reset --hard` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script=_step_flow("'Run `git reset --hard` and redo the edit.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Task spawn whose brief orders `git reset --hard origin/main` is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Task", prompt="Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+# The scanner reads a brief and a Workflow script as text, so each case below holds a comment opener in a string, a
+# lone quote, or a multi-line template literal in front of the ordered reset.
+add("brief-destructive-git: builder brief with a lone apostrophe before the ordered reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="It's late. Then run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief with a hash opener inside the reset span is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Then run `git reset --hard HEAD~1 # undo the change` and re-apply it.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: Workflow reset after a // inside a string on the same line is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const home = 'https://compass.example'; "
+           + _step_flow("'Run `git reset --hard origin/main`.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Workflow reset after a /* inside a string on the same line is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const tag = '/* keep */'; "
+           + _step_flow("'Run `git reset --hard origin/main`.'", "agentType: 'builder', model: 'sonnet'"))
+add("brief-destructive-git: Workflow reset in a multi-line template literal prompt is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const r = await agent(`Keep the scan.\nRun \\`git reset --hard origin/main\\` and redo the edit.`, "
+           "{agentType: 'builder', model: 'sonnet'}); return r")
+add("brief-destructive-git: builder brief with the reset on line 30 of a long brief is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt=LONG_BRIEF + "\nThen run `git reset --hard origin/main` and re-apply your change.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Never run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git stash` is allowed", "allow",
+    tool="Agent", prompt="Do not run `git stash`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git clean -fd` with don't is allowed", "allow",
+    tool="Agent", prompt="Don't run `git clean -fd`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that prohibits `git checkout -- .` with no is allowed", "allow",
+    tool="Agent", prompt="No `git checkout -- .` in this lane.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a Must deny line holding `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Must deny: `git reset --hard origin/main` is refused.",
+    subagent_type="test-author")
+add("brief-destructive-git: an Add a case line holding `git stash` is allowed", "allow",
+    tool="Agent", prompt="Add a case: `git stash` on a dirty tree is denied.", subagent_type="test-author")
+add("brief-destructive-git: the standing-rules heading and first rule from agent_brief COMMON are allowed", "allow",
+    tool="Agent", prompt=STANDING_LINE_ONE, subagent_type="builder", model="sonnet")
+add("brief-destructive-git: the whole standing-rules text from agent_brief COMMON is allowed", "allow",
+    tool="Agent", prompt=STANDING_ALL, subagent_type="builder", model="sonnet")
+add("brief-destructive-git: prose with the reset and the hard flag and no span is allowed", "allow",
+    tool="Agent", prompt="Earlier, the reset with the hard flag lost work.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset that only unstages a path is allowed", "allow",
+    tool="Agent", prompt="Run `git reset HEAD file.py` to unstage it.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: git stash list is a read and is allowed", "allow",
+    tool="Agent", prompt="Run `git stash list` to see the stack.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: git status is allowed", "allow",
+    tool="Agent", prompt="Run `git status`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed", "allow",
+    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO + " reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
+    tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
+add("brief-destructive-git: an empty brief is allowed", "allow",
+    tool="Agent", prompt="", subagent_type="builder", model="sonnet")
+
+
+# The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override
+# lets the first brief through, a timed one lets every brief through until it ends. Each story is refused with no override.
+BRIEF_DESTRUCTIVE_SPAWN = {"prompt": "Then run `git reset --hard origin/main` and re-apply your change.",
+                           "model": "sonnet", "subagent_type": "builder"}
+
+
+def brief_destructive_override_check(timed):
+    kind = "timed" if timed else "once"
+
+    def check():
+        config, session = ov_config("brief-destructive-" + kind), "ov-brief-destructive-" + kind
+
+        def call(seconds):
+            return lambda: ov_call("Agent", dict(BRIEF_DESTRUCTIVE_SPAWN), NOGIT, config, session, seconds)
+
+        ok, why = ov_story([("with no override", call(0), "deny", BRIEF_DESTRUCTIVE)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override 15m" if timed else "override")
+        if timed:
+            steps = [("first brief", call(60), "allow", BRIEF_DESTRUCTIVE),
+                     ("brief just before the end", call(OV_TIMED_SECONDS - 1), "allow", BRIEF_DESTRUCTIVE),
+                     ("brief at the end instant", call(OV_TIMED_SECONDS), "deny", BRIEF_DESTRUCTIVE)]
+        else:
+            steps = [("first brief", call(60), "allow", BRIEF_DESTRUCTIVE),
+                     ("second brief, override spent", call(120), "deny", BRIEF_DESTRUCTIVE)]
+        ok, why = ov_story(steps, note)
+        if not ok:
+            return False, why
+        return True, "a brief's discard order was refused with no override, then went through %s" % (
+            "until the end" if timed else "once")
+    return check
+
+
+for _is_timed in (False, True):
+    _override_check = brief_destructive_override_check(_is_timed)
+    LOG_CHECKS_EXTRA.append((
+        "brief-destructive-git: an owner override lifts a brief's discard order %s"
+        % ("until it ends" if _is_timed else "for one brief"), _override_check))
+    FIXTURELESS_CHECKS.add(_override_check)  # it builds its own config folders and reads no lazy fixture
+
+
 # ---- Brief-claim edges (rule brief-claim-has-probe). A claim can hide behind a backticked subject, a fence, a passive
 # form, another verb, a probe for a longer input, a plain-quoted input, a path locator, or a quoted red-case text. It
 # can also sit apart from its inputs (both, them, or a list above it), be negated, use "lets ... through", or sit
