@@ -67,7 +67,6 @@
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py)
 - git-env-set-untested-forms: no case pins the PowerShell backtick escape, group-opener pattern or heredoc quote text (hooks/test_guard.py)
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks)
-- glob-pathspec-root-unexpanded: a glob pathspec whose root holds the glob, such as `git ls-files '*.py'`, is not expanded against the tree; the root is read as a literal word (hooks/guard_frozen.py `_git_listing_roots`). Decision: builders-cannot-edit-tests.
 - glued-subshell-unread: (rm -rf .) and x=$(tail -f y) pass because the closing parenthesis is glued to the last word (guard_push_delete, guard_stream)
 - guard-abtests-test-path: native/ABTests/ reads as a test folder, so a builder cannot edit product code there (hooks/guard.py)
 - guard-audit-agent-stop-open: SubagentStop fails open on a missing guard module, on purpose, with one log line (hooks/guard.py)
