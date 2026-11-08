@@ -3223,6 +3223,23 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(self.finished_count(), 2,
                          "the count is not 2: the leading-space lane and the control, with the two repo-tag rows left out")
 
+    def test_a_review_ready_lane_whose_step_tag_has_a_leading_space_is_held_by_its_pull(self):
+        # idle_lanes strips a step tag before it reads it, so " cs-step:c3" is step c3, and the open pull on lane/c3 holds
+        # the lane. finished_lanes slices the unstripped tag, reads the step as ":c3", and counts the lane. The plain tag
+        # is a control: the same pull holds that lane, so the pull works and only the leading space breaks the hold.
+        self.finished_steps()
+        control = self.lane("session_e", "c4", bucket=BUCKET_REVIEW_READY)
+        pulls = [{"number": 74, "title": "lane c3", "branch": "lane/c3"}]
+        self.publish(sessions=[control, self.lane("session_plain", "c3", bucket=BUCKET_REVIEW_READY)], pulls=pulls)
+        self.assertEqual(self.finished_count(), 1,
+                         "the plain-tag control reads a count other than 1: its review-ready lane is not held by lane/c3")
+        spaced = session_row("session_spaced", "SESSION_STATUS_IDLE", "cs-build:lane", " cs-step:c3", self.REPO,
+                             status_bucket=BUCKET_REVIEW_READY)
+        self.publish(sessions=[control, spaced], pulls=pulls)
+        self.assertEqual(self.finished_count(), 1,
+                         "a review-ready lane whose step tag has a leading space is counted beside its open pull on "
+                         "lane/c3: the count is not 1")
+
     def test_thirty_two_finished_lanes_are_all_counted_beside_a_working_one(self):
         # Full size: 32 lanes, completed and failed in turn, and one working lane that is not counted.
         self.land({"L%02d" % n: {"status": "done", "order": n} for n in range(1, 34)})
