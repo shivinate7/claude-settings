@@ -6,4 +6,4 @@
 
 **Decision.** None; rule `speak-cite-id-plus-gloss` (an id carries a short name).
 
-**Retire.** The tail joins a number only when no gloss sits between it and the head's last number, or when the number is followed by its own gloss or the reply's end. Closed when both inputs above pass and `items 46 (search pill) and 47` still refuses.
+**Retire.** The tail joins a number only when no gloss sits between it and the head's last number. A number with its own gloss also joins. Closed when both inputs above pass and `items 46 (search pill) and 47` still refuses.
