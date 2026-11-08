@@ -2015,12 +2015,22 @@ class PickClaims(UpkeepFixture):
                 found[str(p)] = (st.st_mtime_ns, st.st_size)
         return found
 
+    BACKDATED = 946684800  # 2000-01-01 UTC: a fixed past time, older than anything this test writes
+
+    def settle_index(self):
+        """Backdate the tracked files to BACKDATED, then refresh the index. Git rewrites .git/index when an entry's mtime
+        is not older than the index's, and the file clock is coarse, so which build pays for that rewrite depends on
+        timing. With every entry backdated, no entry is racy, and no build rewrites the index."""
+        for rel in filter(None, git(self.repo, "ls-files", "-z").split("\0")):
+            os.utime(self.repo / rel, (self.BACKDATED, self.BACKDATED))
+        git(self.repo, "update-index", "--refresh")
+
     def counted_build(self):
         """One build from main, counting each git process start, thread start, file write and file read. Returns
         {"processes", "threads" (counts), "writes" and "reads" (sets of paths), "out" and "code" (the build's)}.
-        The writes include git's own index refresh, which the build already causes; the cost check compares two
-        builds, so only what the claim row adds shows."""
+        The index is settled before the snapshot, so a counted write to .git/index is one the build causes."""
         self.on_main()
+        self.settle_index()
         before = self.snapshot()
         real_open, real_start = io.open, threading.Thread.start
         reads = set()
@@ -2196,7 +2206,6 @@ class PickClaims(UpkeepFixture):
     def test_the_claim_row_starts_no_process_writes_no_file_and_reads_only_the_live_file(self):
         self.commit_step("c153", note="Ruling: item 9 a.")
         self.publish(items=[], answers=[self.answer(9, "b")])
-        self.out_with_live()  # uncounted warm-up: the first build refreshes .git/index
         with_row = self.counted_build()
         self.assertEqual(self.flagged(with_row["out"]), (1, ['c153 (claim "item 9 a")']),
                          "the row does not run on this file, so its cost is not measured")  # scope first
