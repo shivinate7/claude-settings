@@ -26,7 +26,10 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               branch's own non-merge commits (upstream..head) are replayed oldest first, each counted from its file
               state and its parent's. A slug is refused when its last count change was a delete and head holds more
               copies than that commit left. A note re-added by a non-merge commit passes, and so does a dedupe that
-              keeps a copy. An edit in place changes no count, so it does not keep a note. Cost, per run and per
+              keeps a copy. An edit in place changes no count, so it does not keep a note. A Drops-lines trailer
+              for the notes path excuses a revived note only when its reason names the slug as `- <slug>`
+              (`Drops-lines: docs/debts/notes.md -- the owner retired both - slug-a - slug-b`); every other revival
+              stays refused, and the refusal says how to name it. Cost, per run and per
               notes path (lint/layout.py, kind debt-notes): a missing file at head, two git reads (`git show`, then
               `git ls-tree`). A file with no note, one read. A file with a note, two: `git show head:<file>` and one
               `git log` of upstream..head over the file. When that log names a commit, one `git cat-file --batch`
@@ -135,17 +138,32 @@ def last_paragraph(pr_body):
     return paras[-1]
 
 
-def allowed(cwd, rng, pr_body=""):
-    """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
-    (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing."""
+def trailer_reasons(cwd, rng, pr_body=""):
+    """{path: [reason, ...]} from every `Drops-lines: <path> -- <reason>` trailer on any commit of the range (a rev or a..b),
+    and from such lines in pr_body (its last_paragraph), in the order read. A line with no reason is left out."""
     _, out = git(cwd, "log", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
     body = re.findall(r"^" + TRAILER + r":(.*)$", last_paragraph(pr_body), re.I | re.M | re.ASCII)
     res = {}
     for line in out.splitlines() + body:
         m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
         if m:
-            res[m.group(1)] = m.group(2)
+            res.setdefault(m.group(1), []).append(m.group(2))
     return res
+
+
+def allowed(cwd, rng, pr_body=""):
+    """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
+    (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing.
+    With two trailers for a path, the last one read is the reason shown."""
+    return {p: rs[-1] for p, rs in trailer_reasons(cwd, rng, pr_body).items()}
+
+
+NAMED = re.compile(r"(?:^|\s)-\s+([^\s:]+)")
+
+
+def named_slugs(reasons):
+    """The slugs the reasons of one path's trailers name, each as `- <slug>` after a space or at the start."""
+    return {m for r in reasons for m in NAMED.findall(r)}
 
 
 def misplaced(cwd, rng):
@@ -574,7 +592,7 @@ def note_counts(text):
     return collections.Counter(m.group(1) for m in map(NOTE.match, text.splitlines()) if m)
 
 
-def revived_notes(cwd, upstream, head):
+def revived_notes(cwd, upstream, head, named=None):
     """[(notes path, problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
     counted per slug. The branch's own non-merge commits (upstream..head) are replayed oldest first, each read from its file
     state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
@@ -582,7 +600,9 @@ def revived_notes(cwd, upstream, head):
     put a copy back. A last event that raised the count is a deliberate re-add and passes. An edit in place changes no
     count, so it keeps nothing: a sweep edit, such as a mass `Until:` change, would otherwise keep every revived note. A
     note with no `- <slug>:` form has no slug, so the check does not see it. The texts are read one commit at a time, so
-    at most two are held at once."""
+    at most two are held at once. `named` is {notes path: slugs its Drops-lines trailers name as `- <slug>`}: a revived slug in
+    it is left out, because the trailer excuses that note. The path's other revivals stay."""
+    named = named or {}
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import layout  # lazy, as retire_excuses loads check_debt_retire
     try:
@@ -615,12 +635,13 @@ def revived_notes(cwd, upstream, head):
             blobs.close()
         for slug in sorted(last):
             sha, left = last[slug]
-            if present[slug] > left:
+            if present[slug] > left and slug not in named.get(path, ()):
                 found.append((path, "%s: note `%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back, and "
                               "an edit in place does not keep a note. Delete the extra %s to bring the count back to %d. To keep "
-                              "it on purpose, delete it in one commit and add it back in a later commit."
+                              "it on purpose, delete it in one commit and add it back in a later commit. To drop it on purpose, name it in a %s "
+                              "trailer for %s: put `- %s` in the trailer's reason."
                               % (path, slug, present[slug], "y" if present[slug] == 1 else "ies", sha[:9], left,
-                                 "line" if present[slug] - left == 1 else "lines", left)))
+                                 "line" if present[slug] - left == 1 else "lines", left, TRAILER, path, slug)))
     return found
 
 
@@ -694,13 +715,17 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     h = git(cwd, "rev-parse", head + "^{commit}")[1].strip()
     if git(cwd, "merge-base", "--is-ancestor", h, upstream, ok=(0, 1))[0] == 0:
         return [], []  # at or behind upstream: nothing lands
-    ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
+    reasons = trailer_reasons(cwd, "%s..%s" % (upstream, h), pr_body)
+    ok = {p: rs[-1] for p, rs in reasons.items()}
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
     items = []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
-    items += revived_notes(cwd, upstream, h)
+    # A trailer excuses a notes path's revival only for the slugs it names, so a revival on a trailer's path skips the path judge.
+    revived = revived_notes(cwd, upstream, h, {p: named_slugs(rs) for p, rs in reasons.items()})
+    items += [x for x in revived if x[0] not in ok]
+    forced = [x[1] for x in revived if x[0] in ok]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]
@@ -722,6 +747,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     if open_paths:
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
+    bad = forced + bad
     return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 
 
