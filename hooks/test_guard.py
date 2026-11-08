@@ -18920,7 +18920,8 @@ for _tool in ("Agent",):
     for _role in HAIKU_ROLES:
         for _model in HAIKU_MODELS:
             add("floor: %s %s with model %s is allowed" % (_tool, _role, _model), "allow",
-                tool=_tool, prompt="do it", model=_model, subagent_type=_role)
+                tool=_tool, prompt=("Review PR #1864." if _role == "reviewer" else "do it"),
+                model=_model, subagent_type=_role)
     for _role in ("builder", "Plan", "general-purpose", "claude", "reviewer-lite", "not-explore"):
         add("floor: %s %s with model haiku is denied" % (_tool, _role), "deny",
             "agent-model-floor", tool=_tool, prompt="do it", model="haiku", subagent_type=_role)
@@ -18973,14 +18974,14 @@ add("floor step-up: reviewer Round 3 of 3 on haiku names sonnet, and not Sonnet 
 add("floor step-up: reviewer Round 2 of 3 on opus is denied (ceiling)", "deny", STEP_UP,
     tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="opus", subagent_type="reviewer")
 add("floor step-up: reviewer Round 2 of 3 on sonnet is allowed", "allow",
-    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff. Review PR #1864.", model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer Round 2 of 3 with no model is denied (no sonnet named)", "deny",
     STEP_UP, tool="Agent", prompt="Round 2 of 3. Re-check the diff.", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 with model inherit is denied", "deny", STEP_UP,
     tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="inherit",
     subagent_type="reviewer")
 add("floor step-up: reviewer Round 2 of 3 on claude-sonnet-5-5 is allowed", "allow",
-    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="claude-sonnet-5-5",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff. Review PR #1864.", model="claude-sonnet-5-5",
     subagent_type="reviewer")
 add("floor step-up: builder Try 3 of 3 on sonnet is denied", "deny", STEP_UP,
     tool="Agent", prompt="Try 3 of 3. Finish the fix.", model="sonnet", subagent_type="builder")
@@ -18991,9 +18992,9 @@ add("floor step-up: builder Try 1 of 3 on opus is denied (only try 3 is a standi
     subagent_type="builder")
 add("floor step-up: reviewer Round 1 of 3 on haiku with prose round 2 and round 3 is allowed",
     "allow", tool="Agent", subagent_type="reviewer", model="haiku",
-    prompt="Round 1 of 3. The earlier review round 2 and round 3 notes are in the record.")
+    prompt="Round 1 of 3. The earlier review round 2 and round 3 notes are in the record.\nReview PR #1864.")
 add("floor step-up: reviewer with no round line on haiku is allowed", "allow",
-    tool="Agent", prompt="Check the diff for typos.", model="haiku", subagent_type="reviewer")
+    tool="Agent", prompt="Check the diff for typos. Review PR #1864.", model="haiku", subagent_type="reviewer")
 add("floor step-up: round line after a lone quote on line two is denied", "deny", STEP_UP,
     tool="Agent", prompt="Don't skip the check.\nRound 2 of 3. Re-check the diff.",
     model="haiku", subagent_type="reviewer")
@@ -19002,7 +19003,7 @@ add("floor step-up: reviewer Round 2 of 3 on line three on haiku is denied", "de
     tool="Agent", prompt="Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff.",
     model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on sonnet is allowed", "allow",
-    tool="Agent", prompt="Round 3 of 3. Re-check the diff.", model="sonnet", subagent_type="reviewer")
+    tool="Agent", prompt="Round 3 of 3. Re-check the diff. Review PR #1864.", model="sonnet", subagent_type="reviewer")
 add("floor step-up: reviewer Round 3 of 3 on opus is denied (the grant is per spawn, not standing)", "deny",
     "agent-model-cap", tool="Agent", prompt="Round 3 of 3. Re-check the diff.",
     model="claude-opus-5-5", subagent_type="reviewer")
@@ -19139,7 +19140,8 @@ add("ceiling: Task Plan with model claude-opus-5-5 is allowed (standing grant)",
 for _role in ("designer", "design-reviewer"):
     for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
         add("ceiling: %s %s on %s is allowed (standing grant)" % (_tool, _role, _model), "allow",
-            tool=_tool, prompt="Draw the mockup.", model=_model, subagent_type=_role)
+            tool=_tool, prompt=("Review PR #1864." if _role == "design-reviewer" else "Draw the mockup."),
+            model=_model, subagent_type=_role)
 for _role in ("design", "designers", "design-review", "Designer"):
     add("ceiling: Agent %s on opus is denied (no standing grant)" % _role, "deny", CEILING,
         tool="Agent", prompt="Draw the mockup.", model="opus", subagent_type=_role)
@@ -19219,7 +19221,7 @@ add("first-line marker: reviewer on opus with Round 3 of 3 first and Round 2 of 
     prompt="Round 3 of 3. The Round 2 of 3 report found one defect.")
 add("first-line marker: reviewer with no model, Round 1 of 3 first and Round 3 of 3 later, is allowed",
     "allow", tool="Agent", subagent_type="reviewer",
-    prompt="Round 1 of 3: check that Round 3 of 3 logic works")
+    prompt="Round 1 of 3: check that Round 3 of 3 logic works\nReview PR #1864.")
 # A first line that already starts with a marker, in any case or spelling, is read by that start alone.
 # A first line whose leftmost marker-shaped text is the old spelling adds nothing either. A later
 # marker on the line is prose in both.
@@ -19230,7 +19232,7 @@ for _label, _first in (("the old spelling at the start", "Try 2 of 3. Do not jum
         tool="Agent", prompt=_first, model="opus", subagent_type="builder")
 add("first-line marker: reviewer with no model, lowercase round 1 first and Round 2 of 3 later, is allowed",
     "allow", tool="Agent", subagent_type="reviewer",
-    prompt="round 1 of 3: check Round 2 of 3 logic")
+    prompt="round 1 of 3: check Round 2 of 3 logic\nReview PR #1864.")
 add("first-line marker: builder on sonnet with ROUND 2 OF 3 first and a later Round 3 of 3 gets no step-up refusal",
     "allow", tool="Agent", model="sonnet", subagent_type="builder",
     prompt="ROUND 2 OF 3 and Round 3 of 3")
@@ -27401,12 +27403,12 @@ role_model_allow("role-model: explore in lowercase on opus with Audit: on line o
 role_model_allow("role-model: Explore padded with spaces on opus with Audit: on line one is allowed", " Explore ", "opus",
            "Audit: check X")
 role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line is allowed", "reviewer", "sonnet",
-           "Round 2 of 3. Re-check the diff.")
+           "Round 2 of 3. Re-check the diff. Review PR #1864.")
 role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is allowed", "reviewer", "sonnet",
-           "Round 3 of 3. Re-check the diff.")
+           "Round 3 of 3. Re-check the diff. Review PR #1864.")
 # The row reads a round line on line three too: the same scan the step-up reads.
 role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line three is allowed", "reviewer", "sonnet",
-           "Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff.")
+           "Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff. Review PR #1864.")
 role_model_allow("role-model: builder on sonnet with no round line is allowed", "builder", "sonnet",
            "Fix the failing case.")
 role_model_allow("role-model: designer on opus is allowed (standing grant)", "designer", "opus",
@@ -27435,7 +27437,7 @@ role_opus_refuse("role-model: reviewer on opus with Round 3 of 3 is denied under
 # Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, and a builder's third round.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
 role_model_allow("role-model: design-reviewer on opus is allowed (standing grant)", "design-reviewer", "opus",
-                 "Review the mockup.")
+                 "Review the mockup for PR #1864.")
 role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
                  "Round 3 of 3. Finish the fix.")
 
@@ -27568,7 +27570,7 @@ role_model_refuse("role-model: builder with no model is denied when the default 
 role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
            "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
 role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
-           "reviewer", None, "Check the diff for typos.", env=UNSET_DEFAULT)
+           "reviewer", None, "Check the diff for typos. Review PR #1864.", env=UNSET_DEFAULT)
 role_model_allow("role-model: test-author with no model is allowed when the default is unset (its file pins haiku)",
            "test-author", None, "Write the failing cases.", env=UNSET_DEFAULT)
 role_model_allow("role-model: Explore with no model is allowed when the default is unset (its file pins haiku)",
@@ -27578,7 +27580,7 @@ role_model_allow("role-model: Explore with no model is allowed when the default 
 role_model_allow("role-model: a missing decision file fails open for test-author on sonnet",
            "test-author", "sonnet", "Write the failing cases.", config=ROLE_MISSING_CFG)
 role_model_allow("role-model: an unreadable decision file fails open for reviewer on sonnet",
-           "reviewer", "sonnet", "Check the diff for typos.", config=ROLE_UNREADABLE_CFG)
+           "reviewer", "sonnet", "Check the diff for typos. Review PR #1864.", config=ROLE_UNREADABLE_CFG)
 role_model_allow("role-model: no pointer line fails open for test-author on sonnet",
            "test-author", "sonnet", "Write the failing cases.", config=CFG)
 role_model_allow("role-model: a missing decision file never denies a builder with no model",
@@ -27767,7 +27769,7 @@ def role_unread_missing_check():
 
 
 def role_unread_bad_check():
-    return role_unread_log_check(ROLE_UNREADABLE_CFG, role_input("reviewer", "sonnet", "Check the diff for typos."),
+    return role_unread_log_check(ROLE_UNREADABLE_CFG, role_input("reviewer", "sonnet", "Check the diff for typos. Review PR #1864."),
                                  "unreadable")
 
 
