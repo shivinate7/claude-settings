@@ -119,10 +119,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        with no cs-topic is judged by its cs-step tags: the brief's step must be one. The marker matches
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A brief to a lane that
-                       clears those checks is refused unless its text names `Triage: session_<id>` and
-                       `Batch runner: session_<id>` (label without case, optional number and parenthetical gloss, anywhere
-                       in the message). A message without the marker reads no transcript. An
-                       override lifts it.
+                       clears those checks is refused unless its text names a session id for each of Coordinator,
+                       Triage and Batch runner (guard_merge.ROLE_LABELS): per label, without case, a word boundary
+                       before and after, then on the same line a gap of up to guard_merge.ROLE_GAP_MAX characters
+                       with no other role label and no `session_`, then `session_` and an id that holds a digit
+                       (anywhere in the message; form only, no roster match). cost: message text only.
+                       A message without the marker reads no transcript. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)

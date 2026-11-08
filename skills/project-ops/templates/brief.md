@@ -1,6 +1,7 @@
 Lane brief: <step-slug>. Topic: <topic-slug>. <Plain name of the step>.
 
-Coordinator: session_<id>. Batch runner: session_<id>. Triage: session_<id>. The guard refuses a brief that lacks the last two (rule `lane-one-topic`).
+Coordinator: session_<id>. Triage: session_<id>. Batch runner: session_<id>.
+The coordinator fills them from the Standing sessions roster in the record branch's CLAUDE.md, and the guard refuses a brief that lacks any of the three (rule `lane-one-topic`).
 
 <Who runs it: a cloud lane session, or a lane session on a named local machine.> The coordinator
 starts it with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
