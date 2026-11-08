@@ -1,0 +1,11 @@
+{
+  "phase": "guards",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "title": "The question form reads a program named by its full path, such as /usr/bin/chmod",
+  "why": "SHELL_PROGRAMS lacks chmod and grep, so `/usr/bin/chmod +x f` and `/usr/bin/grep -r x` pass as prose.",
+  "note": "Filed 09:23 CST Nov 8 from lane notes-fix-page (review note 49). hooks/question_form.py:419 and :631-643 on main e2703c611. #1785 fixes it with SPAN_FLAG (its :436-442, pin :1206). Merge after: #1785. If #1785 merges, set done; else port that rule.",
+  "order": 698,
+  "updatedAt": "2026-11-08T09:23:00-06:00"
+}

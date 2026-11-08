@@ -1,11 +1,11 @@
 {
   "title": "Every lint that skips inline code reads backtick spans through one home, INLINE_CODE_RE",
   "why": "The double-backtick mis-pair fixed in lint/ste_lint.py by #1914 also sits in lint/report_guard.py:457 (CITE_SKIP_RE), :670 (QUOTED_RE) and :1712; lint/hook_catalog.py:107 and :111; lint/check_ruling_kind.py:78; lint/stale_cites.py:418; and lint/check_skill_model_rows.py:27 (lane notes-fix-large-3, 05:23 CST Nov 8).",
-  "note": "Fix: point each site at INLINE_CODE_RE from #1914, red case first per site on a double-backtick span. Rides in lane notes-fix-large-3 after #1914 merges (item 386 b). Queue fix (owner 13:20 CST Nov 7). Filed 05:27 CST Nov 8.",
+  "note": "Fix: point each site at INLINE_CODE_RE from #1914, red case first per site on a double-backtick span. Rides in lane notes-fix-large-3 after #1914 merges (item 386 b). Queue fix (owner 13:20 CST Nov 7). Filed 05:27 CST Nov 8. Started 09:23 CST Nov 8 on branch backtick-mask-one-home from #1914's head, merge after #1914 (coordinator moved it ahead of the merge, 09:18 CST).",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 617,
   "owner": "triage",
   "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
-  "updatedAt": "2026-11-08T05:24:00-06:00"
+  "updatedAt": "2026-11-08T09:23:00-06:00"
 }
