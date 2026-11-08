@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, inline_script, inner_commands, is_python_word, PYTHON_VALUE_FLAGS, resolve_command, resolve_default_base, segment_tokens, split_segments,
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -580,13 +580,6 @@ def _page_tracked(top):
 
 _GENERATOR = "hook_catalog.py"
 _GENERATOR_READS = {"--check", "--print"}   # the two modes that write no page
-_PYTHON_VALUE_FLAGS = {"-X", "-W"}
-
-
-def _is_python(word):
-    word = word.lower()
-    word = word[:-4] if word.endswith(".exe") else word
-    return word in ("py", "python") or (word.startswith("python") and word[6:].replace(".", "").isdigit())
 
 
 def _runs_generator(segment):
@@ -597,12 +590,12 @@ def _runs_generator(segment):
     if index is None:
         return False
     word, rest = basename(tokens[index]), tokens[index + 1:]
-    if _is_python(word):
+    if is_python_word(word):
         while rest and rest[0].startswith("-"):
             flag = rest.pop(0)
             if flag in ("-c", "-m", "-"):
                 return False
-            if flag in _PYTHON_VALUE_FLAGS and rest:
+            if flag in PYTHON_VALUE_FLAGS and rest:
                 rest.pop(0)
         if not rest:
             return False

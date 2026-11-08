@@ -2422,61 +2422,94 @@ def bare_words(segment: str):
     return words, {i for i, (_, b) in enumerate(spans) if b}
 
 
-PYTHON_NAME = re.compile(r"^(?:python|py)(?:\d+(?:\.\d+)*)?(?:\.exe)?$")
+# The python flags that take a value, ahead of `-c` or the script (`python3 -W ignore -c BODY`).
+PYTHON_VALUE_FLAGS = {"-X", "-W"}
 _SUBPROCESS_RUNNERS = {"run", "call", "check_call", "check_output", "Popen"}
+_OS_SHELLS = {"system", "popen"}
+
+
+def is_python_word(word: str) -> bool:
+    """True when `word` names a python interpreter: py, python, python3, python3.11, with or
+    without `.exe`. The one reader of the name."""
+    word = word.lower()
+    word = word[:-4] if word.endswith(".exe") else word
+    return word in ("py", "python") or (word.startswith("python") and word[6:].replace(".", "").isdigit())
 
 
 def _folded_string(node):
-    """The string a constant, or constants joined by `+`, make; else None."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = _folded_string(node.left), _folded_string(node.right)
-        return None if left is None or right is None else left + right
+    """The string a constant, or constants joined by `+`, make; else None. Read with a stack, so a
+    long run of operands is no recursion."""
+    parts, stack = [], [node]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            parts.append(node.value)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            stack += [node.right, node.left]
+        else:
+            return None
+    return "".join(parts)
+
+
+def _python_run_text(module: str, name: str, call):
+    """The command text one call starts, else None: `subprocess.run`, `call`, `check_call`,
+    `check_output` or `Popen` with a list of foldable strings, or with a foldable string and
+    `shell=True`; `os.system` or `os.popen` with a foldable string."""
+    keys = {kw.arg: kw.value for kw in call.keywords}
+    if module == "subprocess" and name in _SUBPROCESS_RUNNERS:
+        arg = call.args[0] if call.args else keys.get("args")
+        if isinstance(arg, (ast.List, ast.Tuple)):
+            words = [_folded_string(item) for item in arg.elts]
+            return shlex.join(words) if words and None not in words else None
+        shell = keys.get("shell")
+        if arg is not None and isinstance(shell, ast.Constant) and shell.value is True:
+            return _folded_string(arg) or None
+    elif module == "os" and name in _OS_SHELLS:
+        arg = call.args[0] if call.args else keys.get("command", keys.get("cmd"))
+        return (_folded_string(arg) if arg is not None else None) or None
     return None
 
 
 def _python_runs(code: str):
-    """The command text of each process a Python `-c` body starts: `subprocess.run`, `call`,
-    `check_call`, `check_output` or `Popen` with a list of foldable strings, and `os.system` with a
-    foldable string. Read with Python's own parser, so text that only names a command, such as a
-    `print`, runs nothing. A call with an argument that does not fold, or a body that does not
-    parse, is no read."""
+    """The command text of each process a Python `-c` body starts (`_python_run_text`), through
+    `subprocess.NAME`, `os.NAME`, or a bare name from `from subprocess import NAME`. Read with
+    Python's own parser, so text that only names a command, such as a `print`, runs nothing. A call
+    that does not fold is no read, and a body that does not parse, or is too deep to read, is none."""
     try:
         tree = ast.parse(code)
-    except (SyntaxError, ValueError, RecursionError, MemoryError):
-        return []
-    found = []
-    for node in ast.walk(tree):
-        func = node.func if isinstance(node, ast.Call) else None
-        if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
-            continue
-        keys = {kw.arg: kw.value for kw in node.keywords}
-        arg = node.args[0] if node.args else keys.get("args" if func.value.id == "subprocess" else "command")
-        if func.value.id == "subprocess" and func.attr in _SUBPROCESS_RUNNERS and isinstance(
-                arg, (ast.List, ast.Tuple)):
-            words = [_folded_string(item) for item in arg.elts]
-            if words and None not in words:
-                found.append(PosixScript(shlex.join(words)))
-        elif func.value.id == "os" and func.attr == "system" and arg is not None:
-            text = _folded_string(arg)
+        names = {(alias.asname or alias.name): (node.module, alias.name)
+                 for node in ast.walk(tree)
+                 if isinstance(node, ast.ImportFrom) and node.module in ("subprocess", "os") and not node.level
+                 for alias in node.names}
+        found = []
+        for node in ast.walk(tree):
+            func = node.func if isinstance(node, ast.Call) else None
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                target = (func.value.id, func.attr)
+            elif isinstance(func, ast.Name):
+                target = names.get(func.id)
+            else:
+                target = None
+            text = _python_run_text(*target, node) if target else None
             if text:
                 found.append(PosixScript(text))
-    return found
+        return found
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return []
 
 
 def python_script_runs(tokens):
     """The command texts a `python -c BODY` segment starts (`_python_runs`), else []."""
     at = resolve_command(tokens)
-    if at is None or not PYTHON_NAME.match(basename(tokens[at])):
+    if at is None or not is_python_word(basename(tokens[at])):
         return []
-    for index in range(at + 1, len(tokens)):
+    index = at + 1
+    while index < len(tokens) and tokens[index].startswith("-"):
         token = tokens[index]
-        if not token.startswith("-"):
-            return []   # a script file, not a body
         if re.fullmatch(r"-[A-Za-z]*c", token):
             return _python_runs(tokens[index + 1]) if index + 1 < len(tokens) else []
-    return []
+        index += 2 if token in PYTHON_VALUE_FLAGS else 1
+    return []   # a script file, not a body
 
 
 def inner_commands(tokens):
