@@ -11605,6 +11605,20 @@ sh("frozen: a substitution sed -i onto a frozen hook is denied",
    "echo $(sed -i '' s/a/b/ " + CFG_HOOK + ")", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: busybox cp onto a frozen hook is denied", "busybox cp /tmp/x " + CFG_HOOK, "deny",
    "frozen-path", cwd=NOGIT)
+# AN ENV VALUE THAT NAMES A WRITE WORD IS NOT A WRITE VERB. A run of bin/verdict with an env value holding
+# `install`, `cp` or `tee` as a whole word only runs the frozen file, so each row below expects allow. A
+# write verb as the command itself still denies, as the two rows after them.
+CFG_VERDICT = slash(os.path.join(CFG, "bin", "verdict"))
+sh("frozen: a run of bin/verdict with an env value naming install.sh is a run, and is allowed",
+   "INSTALL_SH_UNDER_TEST=/tmp/x/redmut/install/install.sh " + CFG_VERDICT + " sh t.sh", "allow", cwd=NOGIT)
+sh("frozen: a run of bin/verdict with an env value naming a cp directory is a run, and is allowed",
+   "INSTALL_SH_UNDER_TEST=/tmp/x/cp/install.sh " + CFG_VERDICT + " sh t.sh", "allow", cwd=NOGIT)
+sh("frozen: a run of bin/verdict with an env value naming a tee directory is a run, and is allowed",
+   "INSTALL_SH_UNDER_TEST=/tmp/x/tee/install.sh " + CFG_VERDICT + " sh t.sh", "allow", cwd=NOGIT)
+sh("frozen: install onto bin/verdict is a write, and is denied",
+   "install -m 755 x " + CFG_VERDICT, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp onto bin/verdict is a write, and is denied", "cp x " + CFG_VERDICT, "deny", "frozen-path",
+   cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
