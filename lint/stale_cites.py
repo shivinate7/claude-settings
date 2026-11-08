@@ -989,22 +989,44 @@ def named_too_large(text):
     return len(text) > NAMED_MAX_BYTES or (len(text) * 4 > NAMED_MAX_BYTES and len(text.encode("utf-8", "replace")) > NAMED_MAX_BYTES)
 
 
-def named_excerpt(names, text, around=3, limit=40):
+QUOTED = re.compile(r'"([^"\n]*)"|\u201c([^\u201d\n]*)\u201d')
+
+
+def quoted_phrases(row):
+    """The phrases of two or more words that `row` puts in straight or curly double quotes, in order, no repeats. Text inside a code span is
+    no quote, and a lone quote pairs with nothing. A prose judge matches these against a named file, since a quoted test title is the one
+    exact string the line gives for the row it means."""
+    plain = CODE_SPAN.sub(lambda m: " " * len(m.group(0)), row)
+    found = (" ".join((m.group(1) or m.group(2) or "").split()) for m in QUOTED.finditer(plain))
+    return list(dict.fromkeys(p for p in found if len(p.split()) >= 2))
+
+
+def named_excerpt(names, text, around=3, limit=40, phrases=()):
     """The numbered lines of a file's `text` within `around` lines of each line that holds one of `names` as a whole word, at most
     `limit` lines, a "..." row between two windows that do not touch. Each row is cut to NAMED_ROW_CHARS characters with a marker.
+    A line that holds one of `phrases` (a quoted title, as quoted_phrases gives them) counts too and is kept first: the cap drops the
+    window rows of a name before the rows around a phrase, so a weak name that hits many lines never crowds the exact title out.
     When the `limit` drops later lines, the excerpt ends with a marker line that says so; it has none otherwise. None when no line holds
-    a name, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line that names the file in
-    backticks, so the model reads the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS characters."""
+    a name or a phrase, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line that names the file in
+    backticks, so the model reads the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS characters, with or without phrases."""
     if named_too_large(text):
         return None
     rows = text.replace("\r\n", "\n").split("\n")
     hits = [re.compile(r"(?<!\w)%s(?!\w)" % re.escape(name)) for name in names]
-    keep = set()
+    flat = [" ".join(row.split()) for row in rows] if phrases else []
+    rank = {}  # line number -> 0 a row that holds a phrase, 1 within `around` of one, 2 within `around` of a name
+
+    def keep(n, level):
+        for m in range(max(n - around, 1), min(n + around, len(rows)) + 1):
+            rank[m] = min(rank.get(m, 2), level)
     for n, row in enumerate(rows, 1):
+        if phrases and any(p in flat[n - 1] for p in phrases):
+            keep(n, 1)
+            rank[n] = 0
         if any(h.search(row) for h in hits):
-            keep.update(range(max(n - around, 1), min(n + around, len(rows)) + 1))
-    ordered = sorted(keep)
-    shown = ordered[:limit]
+            keep(n, 2)
+    ordered = sorted(rank)
+    shown = sorted(sorted(rank, key=lambda m: (rank[m], m))[:limit])
     if not shown:
         return None
     out, last = [], None
