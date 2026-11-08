@@ -6405,6 +6405,16 @@ test("the row tint: a paused row's title has the in-progress title's font weight
   const paused = await computedOf(page.locator("#s-a3 .rrow .ttl"), "fontWeight"), active = await computedOf(page.locator("#s-a4 .rrow .ttl"), "fontWeight");
   assert.equal(paused, active, `the paused step's title is weight ${paused}, not the in-progress title's ${active}`);
 });
+// The paused title's match with the in-progress title means something only if that title is bolder than a plain one. With both titles
+// plain, the paused match above passes, so this case fails: it is the anchor for that match.
+test("the row tint: the in-progress title is bolder than a to-do title", async (t) => {
+  const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
+  await openStatus(page);
+  assert.match(await page.locator("#s-a4 .rrow").getAttribute("aria-label"), /In progress/, "step a4 does not read In progress");
+  assert.match(await page.locator("#s-t7 .rrow").getAttribute("aria-label"), /To do/, "step t7 does not read To do");
+  const active = await computedOf(page.locator("#s-a4 .rrow .ttl"), "fontWeight"), todo = await computedOf(page.locator("#s-t7 .rrow .ttl"), "fontWeight");
+  assert.ok(Number(active) > Number(todo), `the in-progress title is weight ${active}, not bolder than the to-do title's ${todo}`);
+});
 // A paused row keeps no tint at rest, but takes the hover fill when the pointer is on it. The rule that gives it the fill is
 // .rsteps .pzd-row > .rrow:hover: it outranks the paused row's own background: none, which the plain .rrow:hover fill cannot beat.
 // The fill is read on the hovered row and compared with a probe of the same colour. The probe must not read transparent, or the
