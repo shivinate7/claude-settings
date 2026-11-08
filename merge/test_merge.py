@@ -13101,15 +13101,16 @@ class ReviewFixPassChain(ReviewChainFixture):
                 self.assertIn(verdict, err, f"the refusal does not name the newest fix check's {verdict} verdict:\n" + err)
 
     def test_a_newest_head_the_live_head_has_diverged_from_or_is_behind_is_refused_after_its_compare_is_read(self):
-        # the base is the newest Head, so its one compare is with the live head. A diverged pair is no ancestor, and a behind pair is one where
-        # the live head is older than the base
-        for status, diffs in (("diverged", {}), ("behind", {(self.LIVE, self.NEWEST): compare_of("ahead", self.CODE)})):
-            with self.subTest(status=status):
+        # the base is the newest Head, so its one compare is with the live head. A diverged pair is no ancestor. Where the live head is an ancestor
+        # of the base, the base is the newer head, so the refusal says the base is ahead of the live head
+        ancestor = {(self.LIVE, self.NEWEST): compare_of("ahead", self.CODE)}
+        for label, diffs, wording in (("diverged", {}, "diverged"), ("the live head an ancestor of the base", ancestor, "ahead of")):
+            with self.subTest(label=label):
                 rc, out, err, host = self.run_chain(self.NEWEST, self.pair("PASS"), diffs=diffs)
                 self.assertEqual(host.compare_reads, [(self.NEWEST, self.LIVE)],
-                                 f"a {status} base did not get exactly one compare of base and the live head before the refusal")
+                                 f"{label}: the base did not get exactly one compare of base and the live head before the refusal")
                 self.assert_refused(rc, out, err)
-                self.assertIn(status, err, f"the refusal does not name the {status} compare:\n" + err)
+                self.assertIn(wording, err, f"{label}: the refusal does not say {wording!r}:\n" + err)
 
     def test_a_base_that_is_not_the_newest_head_is_refused_by_the_base_rule(self):
         # OTHER is ahead of the live head, so the ancestor read alone would accept it. The base rule reads OTHER against the newest Head, and
