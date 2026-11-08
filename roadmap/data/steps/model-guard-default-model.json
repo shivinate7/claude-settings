@@ -1,11 +1,11 @@
 {
   "title": "The model-name check reads a spawn's agent-file default and matches each round to its own spawn",
   "phase": "next",
-  "status": "done",
+  "status": "ready",
   "order": 657,
   "owner": "lane model-guard-reads-next",
   "lane": "session_013NEJL1SsG5NZULw1mG6qgB",
   "why": "Three lanes (builder-report-in-head, verdict-format-line, notes-fix-delete-leftovers) hit the model-name false alarm on Nov 8: a spawn with no model field read as sonnet, and a Done item's reviewer model matched only the latest spawn.",
-  "note": "Done check: red cases built from the three lanes' refusal texts, then green; review rounds 1-3. Also covers model-guard-next-only and step report-guard-all-spawns. Overlap settled (coordinator, 07:57 CST Nov 8): built on top of #1919 and #1946 with no second copy; it fixes only what still fails on that base. Doing in lane model-guard-reads-next (coordinator, 07:51 CST Nov 8). Built as #2040 (tests only; covers model-guard-default-model, model-guard-next-only and report-guard-all-spawns), with runner 8 (lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), 08:18 CST Nov 8). Folded (coordinator 15:29 CST Nov 8) into lane report-guard-spawn-model (session_013NEJL3DwgdW1HVejfR77Se); step report-guard-spawn-model carries the work.",
-  "updatedAt": "2026-11-08T15:31:00-06:00"
+  "note": "Done check: red cases built from the three lanes' refusal texts, then green; review rounds 1-3. Also covers model-guard-next-only and step report-guard-all-spawns. Overlap settled (coordinator, 07:57 CST Nov 8): built on top of #1919 and #1946 with no second copy; it fixes only what still fails on that base. Doing in lane model-guard-reads-next (coordinator, 07:51 CST Nov 8). Built as #2040 (tests only; covers model-guard-default-model, model-guard-next-only and report-guard-all-spawns), with runner 8 (lane model-guard-reads-next (session_013NEJL1SsG5NZULw1mG6qgB), 08:18 CST Nov 8). Folded (coordinator 15:29 CST Nov 8) into lane report-guard-spawn-model (session_013NEJL3DwgdW1HVejfR77Se); step report-guard-spawn-model carries the work. Closes when #2307 merges (step report-guard-spawn-model; coordinator 16:30 CST Nov 8), not before.",
+  "updatedAt": "2026-11-08T16:30:00-06:00"
 }

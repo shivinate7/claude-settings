@@ -100,3 +100,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - pick-claim-quoted-word-no-item (lane step-pick-claims-match-page, #2294): a quoted word between the pick and `on item N` reads as a claim with no item.
 - (debt) draft-rule-ready-bypass (lane lane-pr-opens-as-draft, #2284, Step: lane-pr-opens-as-draft): a `gh api` POST, or MCP update_pull_request with draft:false, can mark a PR ready, which goes around the draft rule.
 - (debt) guard-matcher-no-mcp-merge (lane lane-pr-opens-as-draft, #2284, Step: mcp-tools-in-guard-matcher): the guard's matcher does not cover the MCP merge_pull_request tool.
+- spawn-model-any-earlier-match (lane report-guard-spawn-model, #2307): any earlier real spawn of a role can match a model the report names.
+- spawn-model-no-window-spawn-untested (lane report-guard-spawn-model, #2307): a role the report names with no spawn in the window is now checked against earlier models, with no test either way.
+- spawn-model-env-read-order-unmeasured (lane report-guard-spawn-model, #2307): the order of the model reads (call model, then file pin, then env var) is unmeasured.
