@@ -995,6 +995,104 @@ def quiet_job_with_no_named_log_stalls():
     return problems
 
 
+def grown_problems(rc, text, want):
+    """Checks for a job that writes `want` and names it in its log: the job wrote the file (its scope),
+    no STALL came, and the job exited 0. Return a list of problems."""
+    if not (os.path.isfile(want) and os.path.getsize(want) > 0):
+        return [f"the job wrote nothing to {want}, so it did not run where the case says"]
+    if "STALL:" in text:
+        return [f"a STALL came though {want} grew"]
+    return expect(rc == 0, f"exit {rc}, want 0")
+
+
+def cd_then_grow_job(cwd, log):
+    """`cd` to cwd, then a job that writes `log` as the command spells it. The job runs in a subshell, so
+    its cwd is cwd and the watcher's cwd is not."""
+    return "cd %s && (%s)" % (shlex.quote(cwd), growing_log_job(log, steps=3))
+
+
+@posix_case
+def relative_log_after_cd_is_read_or_refused():
+    """26a. cd X && (job >> rel.log): the watch reads X/rel.log, or the hook refuses and its text names X/rel.log"""
+    X = new_dir()
+    want = os.path.join(X, "rel.log")
+    orig = cd_then_grow_job(X, "rel.log")
+    rc_h, out, err = hook(orig)
+    try:
+        rewritten = isinstance(json.loads(out)["hookSpecificOutput"].get("updatedInput"), dict)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        rewritten = False
+    if not rewritten:  # a refusal: its remedy must name the absolute path the job writes
+        said = out + err
+        return expect(want in said or os.path.realpath(want) in said,
+                      f"the hook gave no rewrite and its text does not name {want} (exit {rc_h}): {said[:160]!r}")
+    rc, text, _secs, _cmd = run_rewritten(orig)
+    reap()
+    return grown_problems(rc, text, want)
+
+
+@posix_case
+def absolute_log_after_cd_is_read():
+    """26b. control: cd X && (job >> X/rel.log) with the absolute path: the watch reads it, no STALL, exit 0"""
+    X = new_dir()
+    want = os.path.join(X, "rel.log")
+    rc, text, _secs, _cmd = run_rewritten(cd_then_grow_job(X, shlex.quote(want)))
+    reap()
+    return grown_problems(rc, text, want)
+
+
+@posix_case
+def cd_inside_quotes_or_comment_is_not_read():
+    """26c. a `cd X` that is only text, in quotes or after #, is no cd: rel.log is read where the job stands, no STALL"""
+    X = new_dir()
+    forms = {
+        "quoted": "echo \"don't cd %s\" >%s; %s" % (X, os.devnull, growing_log_job("rel.log", steps=3)),
+        "comment": "%s # cd %s" % (growing_log_job("rel.log", steps=3), X),
+    }
+    problems = []
+    for name, orig in forms.items():
+        rc, text, _secs, _cmd = run_rewritten(orig)
+        reap()
+        if "STALL:" in text:
+            problems.append(f"{name}: a STALL came though the job's rel.log grew")
+        elif rc != 0:
+            problems.append(f"{name}: exit {rc}, want 0")
+    return problems
+
+
+def busy_child(secs=5):
+    """A Python child that spins one CPU for secs seconds with no output, then prints done."""
+    code = ("import time\nend = time.monotonic() + %d\nwhile time.monotonic() < end:\n    pass\nprint('done')"
+            % secs)
+    return "%s -c %s" % (shlex.quote(PY), shlex.quote(code))
+
+
+def pipe_job(child):
+    """The child's output goes to tail, so nothing reaches the log until the child ends."""
+    return child + " | tail -1"
+
+
+@posix_case
+def busy_child_behind_a_pipe_is_no_stall():
+    """25a. a busy child with no output, behind `| tail -1`, under a 2 s quiet: its CPU time is life, so no STALL, exit 0"""
+    rc, text, _secs, cmd = run_rewritten(pipe_job(busy_child()))
+    reap()
+    if "--also" in cmd:  # scope: a named log would explain the life, so the case would prove nothing
+        return ["the rewrite names a log, so the case cannot tell CPU time from log growth"]
+    if "STALL:" in text:
+        return ["a STALL came for a busy child with no output: its CPU time did not count as life"]
+    return expect(rc == 0, f"exit {rc}, want 0")
+
+
+@posix_case
+def sleeping_child_behind_a_pipe_still_stalls():
+    """25b. control: sleep 30 behind `| tail -1` has no CPU time and no output: STALL, exit 3, the sleep alive"""
+    rc, text, secs, _cmd = run_rewritten(pipe_job("sleep 30"))
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
 VERDICT_QUIET = "3"  # the quiet time of the watch in the verdict cases
 VERDICT_SLEEP = 6  # the verdict child runs this many seconds, above the quiet time
 
