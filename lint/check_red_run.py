@@ -20,11 +20,10 @@ mentions red-run mid-line is not judged. The failed form judges the first word o
 typo is not read as a failed form. First, it refuses a word that starts with `mutant` or `mutation` (`mutants:`,
 `mutant(A)`, `mutant-A`, `mutant=x`, a no-colon `mutant A (...)`), or is exactly `none` or `non` once a trailing
 colon is dropped. Second, unless the word is an environment assignment (`NAME=value`, quoted or not, such as
-`MUTATE_ONLY=x` or main commit 049f8d8c0's `MUTATE_ONLY="worktree-home: ..."`), it refuses a word that starts with
+`MUTATE_ONLY=x` or `MUTATE_ONLY="worktree-home: ..."`), it refuses a word that starts with
 `mutat` or `mutan` (`mutate`, `mutated`, `mutan:`), or that ends in a colon (`runner:`, `nonee:`). The valid `mutant:` and `none:`
 forms are routed to their own patterns before the failed form, so neither layer reads them. Real commands pass
-(`mutmut run`, `./mutation_probe.sh`, `NONE=1 python3 ...`, `env X=1 python3 ...`, `nonstop ...`). Three main commits
-(408340997, 1762ec79f, b2f0fb754) wrote the no-colon mutant form.
+(`mutmut run`, `./mutation_probe.sh`, `NONE=1 python3 ...`, `env X=1 python3 ...`, `nonstop ...`).
 
 A line whose keyword reads `mutant` is judged by the mutant form alone, never by the command form. The mutant
 pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case,
