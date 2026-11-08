@@ -11598,6 +11598,24 @@ sh("frozen: quoted-value copy, a MUTATE_ONLY value holding // and /* is allowed"
    'MUTATE_ONLY="a // b /* c" ' + CFG_VERDICT + " python3 hooks/test_guard.py", "allow", cwd=NOGIT)
 sh("frozen: quoted-value copy, a MUTATE_ONLY value holding a lone quote is allowed",
    "MUTATE_ONLY=\"don't\" " + CFG_VERDICT + " python3 hooks/test_guard.py", "allow", cwd=NOGIT)
+# A quoted MUTATE_ONLY value that holds the word copy is text, so the verdict wrapper's run of the test file is a read
+# whether its output is redirected or an echo follows it. A pipe out of the wrapper is its own rule (verdict-pipe), so
+# these cases do not pipe. The builder's checkout has the same cases, after its BR context is defined.
+sh("frozen: quoted-value copy, a copy of b redirected to a log, then an rc echo, is allowed",
+   'MUTATE_ONLY="a copy of b" ' + CFG_VERDICT + " python3 hooks/test_guard.py >/tmp/g.log 2>&1; "
+   'echo "rc=$?"', "allow", cwd=NOGIT)
+sh("frozen: quoted-value copy, echo, then a copy of b, then an rc echo, is allowed",
+   "echo 'start'; MUTATE_ONLY=\"a copy of b\" " + CFG_VERDICT + " python3 hooks/test_guard.py; "
+   'echo "rc=$?"', "allow", cwd=NOGIT)
+# A shell that expands a double-quoted variable and runs the result copies onto the frozen settings, as `sh -c '$X'`
+# does, so each form stays denied. In `X=... bash -c "${X}"` the outer shell expands ${X} before the assignment takes
+# effect, so that form runs `bash -c ""`; it is held denied as the conservative reading.
+sh("frozen: quoted-value copy, sh -c runs a default-value expansion onto the frozen settings, is denied",
+   'X="cp a ' + CFG_SETTINGS + '"; sh -c "${X:-}"', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: quoted-value copy, sh -c runs a plain expansion onto the frozen settings, is denied",
+   'X="cp a ' + CFG_SETTINGS + '"; sh -c "$X"', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: quoted-value copy, bash -c runs a braced expansion onto the frozen settings, is denied",
+   'X="cp a ' + CFG_SETTINGS + '" bash -c "${X}"', "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -13526,6 +13544,13 @@ sh("builder-test: shell pytest -k with a mutating word is allowed",
 # The control is the plain redirect onto the same guard test, which a builder may never write.
 sh("builder-test: a MUTATE_ONLY value naming a copy, then a run of a test file, is allowed",
    'MUTATE_ONLY="a copy whose source is in another checkout" python3 hooks/test_guard.py', "allow", **BR)
+# The frozen block's redirected and echoed forms, from a builder's checkout: the quoted value is text, so both are reads.
+sh("builder-test: quoted-value copy, a copy of b redirected to a log, then an rc echo, is allowed",
+   'MUTATE_ONLY="a copy of b" ' + CFG_VERDICT + " python3 hooks/test_guard.py >/tmp/g.log 2>&1; "
+   'echo "rc=$?"', "allow", **BR)
+sh("builder-test: quoted-value copy, echo, then a copy of b, then an rc echo, is allowed",
+   "echo 'start'; MUTATE_ONLY=\"a copy of b\" " + CFG_VERDICT + " python3 hooks/test_guard.py; "
+   'echo "rc=$?"', "allow", **BR)
 sh("builder-test: echo redirect onto hooks/test_guard.py, from a builder, is refused",
    "echo x > hooks/test_guard.py", "deny", rule=BT, carries=("test-author",), **BR)
 # A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
