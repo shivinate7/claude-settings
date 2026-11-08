@@ -298,12 +298,16 @@ class LexiconTests(unittest.TestCase):
         self.assertEqual(set(clause.NEGATORS), {"not", "n't", "never", "no"}, "NEGATORS")
 
     def test_adverbs_are_the_one_adverb_list_of_the_check(self):
-        # Catches: an adverb dropped from ADVERBS, or ADVERBS drifting from the check's _ADVERB pattern.
+        # Catches: an adverb dropped from ADVERBS.
         words = {"even", "yet", "currently", "actually", "really", "still", "also", "just", "now", "directly",
                  "simply", "unfortunately"}
         self.assertEqual(set(clause.ADVERBS), words, "ADVERBS")
-        self.assertEqual(set(clause.ADVERBS), set(re.findall(r"[a-z]+", report_guard._ADVERB)),
-                         "ADVERBS differs from report_guard._ADVERB")
+
+    def test_writer_pattern_is_built_from_the_one_adverb_pattern(self):
+        # Catches: the check's writer pattern built from its own adverb list rather than from ADVERB_PATTERN, so an -ly
+        # adverb outside the list ("temporarily") is not written by the writer.
+        self.assertIn(clause.ADVERB_PATTERN, report_guard.CANNOT_WRITER_RE.pattern,
+                      "the writer pattern is not built from ADVERB_PATTERN")
 
     def test_conditionals_are_the_words_that_make_a_clause_conditional(self):
         # Catches: a conditional word dropped from CONDITIONALS.
