@@ -2063,6 +2063,25 @@ def case_prompt_marker_names_the_sections():
           sorted(names) == sorted(SECTION_NAMES), "names: %r" % names)
 
 
+def case_step4_bullets_lead_with_the_marker_names():
+    """Each section name on the marker leads a bullet of step 4, so the list the prompt shows reads as the list the
+    guard enforces. The lead is the name itself, followed by a mark or a space, at the start of a bullet. A bullet's
+    wrapped lines are indented, so they are no bullet of their own."""
+    text = prompt_source()
+    step4 = step_body(text, 4) or ""
+    found = MARKER_LINE.findall(text)
+    names = [n.strip() for n in found[0].split("|") if n.strip()] if found else []
+    bullets = [b.strip() for b in re.findall(r"^- (.*)$", step4, re.M)]
+    check("step 4 leads: scope: step 4 holds the marker, and at least one bullet per marker name",
+          bool(names) and MARKER_LINE.search(step4) is not None and len(bullets) >= len(names),
+          "names: %r, bullets: %d" % (names, len(bullets)))
+    for name in names:
+        lead = re.compile(r"^%s(?!\w)" % re.escape(name), re.I)
+        check("step 4 leads: a bullet of step 4 leads with %r" % name,
+              any(lead.match(b) for b in bullets),
+              "no bullet leads with it; the bullets begin: %r" % [b[:32] for b in bullets])
+
+
 def case_code_holds_no_section_names():
     """The six names live in the prompt's marker and nowhere in the code, so no copy can go stale. Python's
     own tokenizer reads the module: a name in a comment is no copy, and a name in a string or a docstring is.
@@ -2327,6 +2346,7 @@ def main() -> int:
     case_precompact_digest_starts_at_handoff()
     case_precompact_digest_without_handoff()
     case_prompt_marker_names_the_sections()
+    case_step4_bullets_lead_with_the_marker_names()
     case_code_holds_no_section_names()
     case_nudge_flags_a_damaged_handoff_once_per_mtime()
     case_nudge_sections_quiet_when_complete_absent_or_active()

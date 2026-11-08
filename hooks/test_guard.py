@@ -69,6 +69,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
+import local_time  # noqa: E402  the one home of the inbox paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
 
 # Assembled, so this file never holds the token whole.
@@ -27319,6 +27320,8 @@ HS_CFG_DIR = os.path.join(ROOT, "hs-dir")          # the prompt path is a direct
 HS_CFG_BYTES = os.path.join(ROOT, "hs-bytes")      # the prompt is not UTF-8
 HS_CFG_EXTRA = os.path.join(ROOT, "hs-extra")      # the marker names one section more
 HS_CFG_LESS = os.path.join(ROOT, "hs-less")        # the marker drops Files and commands
+HS_CFG_PUNCT = os.path.join(ROOT, "hs-punct")      # the marker names Goal) and Next steps., with their punctuation
+HS_PUNCT_NAMES = {"Goal": "Goal)", "Next steps": "Next steps."}   # a section's name in the marker and its heading
 HS_PROMPT = os.path.join(HERE, "precompact_handoff_prompt.md")
 HS_OPEN = "Open questions"                         # the section HS_CFG_EXTRA's marker adds
 
@@ -27404,12 +27407,28 @@ def _build_hs_less():
                                                   if n != "Files and commands"]))
 
 
+def hs_punct_text(omit=()):
+    """A handoff holding every section but those in `omit`, each heading the marker's name verbatim: Goal) and
+    Next steps. keep their punctuation."""
+    parts = ["# Handoff\n\n"]
+    for name in HS_SECTIONS:
+        if name not in omit:
+            parts.append("## %s\n%s\n" % (HS_PUNCT_NAMES.get(name, name), HS_BODIES[name]))
+    return "".join(parts)
+
+
+def _build_hs_punct():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_PUNCT, hs_prompt_with(text, [HS_PUNCT_NAMES.get(n, n) for n in HS_SECTIONS]))
+
+
 lazy_fixture([HS_CFG], _build_hs_intact)
 lazy_fixture([HS_CFG_NOMARK], _build_hs_nomark)
 lazy_fixture([HS_CFG_DIR], _build_hs_dir)
 lazy_fixture([HS_CFG_BYTES], _build_hs_bytes)
 lazy_fixture([HS_CFG_EXTRA], _build_hs_extra)
 lazy_fixture([HS_CFG_LESS], _build_hs_less)
+lazy_fixture([HS_CFG_PUNCT], _build_hs_punct)
 HS_HANDOFF = hs_handoff(HS_CFG)
 
 # A refusal names every missing section, and names no section that is present. The reason may name the
@@ -27564,6 +27583,73 @@ add("handoff-sections: a heading numbered `3)` is no step heading: a Write with 
     carries=("Where things stand",), lacks=("Goal", "Working premises", "Work in flight", "Next steps",
                                             "Files and commands"),
     file_path=HS_HANDOFF, content=hs_text().replace("## Where things stand\n", "## 3) Where things stand\n"))
+
+
+# The rule judges only the session's handoff, <sid>.md, in the handoffs folder. The owner-feedback inbox sits beside
+# it as <sid>.inbox.md and holds item lines, not sections, so a Write to it passes. Its path is local_time's, the one
+# home of the inbox names.
+def hs_inbox(config, session=HS_SID):
+    """The session's owner-feedback inbox, as local_time.inbox_paths builds it."""
+    with hu_config(config):
+        return local_time.inbox_paths(session)[0]
+
+
+HS_INBOX_TEXT = "### 2026-11-08 16:40 CST (UTC-06:00)\n- fb-0958-7 [page] -> page:98\n"
+HS_INBOX_FULL = "### 2026-11-08 16:40 CST (UTC-06:00)\n" + "".join(
+    "- fb-0958-%d [page] -> page:98\n" % n for n in range(1, 2001))
+
+
+def hs_inbox_scope():
+    """The inbox cases write <sid>.inbox.md beside <sid>.md in the handoffs folder: the file the rule must not judge."""
+    inbox, handoff = hs_inbox(HS_CFG), hs_handoff(HS_CFG)
+    if os.path.basename(inbox) != HS_SID + ".inbox.md":
+        return False, "the inbox is %r, want %s.inbox.md" % (os.path.basename(inbox), HS_SID)
+    if os.path.basename(handoff) != HS_SID + ".md" or os.path.dirname(inbox) != os.path.dirname(handoff):
+        return False, "the inbox is not beside the session handoff in the handoffs folder"
+    return True, "the inbox is <sid>.inbox.md, beside <sid>.md in the handoffs folder"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the inbox cases write <sid>.inbox.md beside the session handoff",
+                         hs_inbox_scope))
+add("handoff-sections: a Write to the owner-feedback inbox, item lines and no sections, passes silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content=HS_INBOX_TEXT)
+add("handoff-sections: an empty owner-feedback inbox passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content="")
+add("handoff-sections: a full-size owner-feedback inbox passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=hs_inbox(HS_CFG), content=HS_INBOX_FULL)
+add("handoff-sections: control: the same item lines written to the session handoff are refused, naming all six sections",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_SECTIONS, file_path=HS_HANDOFF, content=HS_INBOX_TEXT)
+
+
+# A marker name that ends in punctuation matches its verbatim heading. The heading matcher ends each name with (?!\w):
+# a `\b` after `)` or `.` needs a word character next, so `## Goal)` never matched, and the marker refused every write
+# that held it.
+def hs_punct_scope():
+    """The punctuated fixture's installed marker names Goal) and Next steps., verbatim, so the cases below judge the
+    punctuation. A marker that did not change would allow the punctuated write for the wrong reason."""
+    materialize(HS_CFG_PUNCT)
+    with hu_config(HS_CFG_PUNCT):
+        names = ph.required_sections()
+    want = [HS_PUNCT_NAMES.get(n, n) for n in HS_SECTIONS]
+    if names != want:
+        return False, "the installed marker reads %r, want %r" % (names, want)
+    return True, "the installed marker names Goal) and Next steps. verbatim, and the other four as before"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: scope: the punctuated fixture's marker names Goal) and Next steps.",
+                         hs_punct_scope))
+add("handoff-sections: a marker name ending in punctuation matches its verbatim heading: a Write with `## Goal)` and "
+    "`## Next steps.` passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_PUNCT, silent=True,
+    file_path=hs_handoff(HS_CFG_PUNCT), content=hs_punct_text())
+add("handoff-sections: a punctuated marker still refuses a Write without its `## Next steps.` heading, naming Next steps.",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_PUNCT,
+    carries=("Next steps.",), lacks=("Working premises", "Where things stand", "Work in flight", "Files and commands"),
+    file_path=hs_handoff(HS_CFG_PUNCT), content=hs_punct_text(omit=("Next steps",)))
 
 
 def hs_case(config, tool, tool_input, session=HS_SID):
