@@ -100,6 +100,13 @@ class Unread(Dropped):
 class UnreadText(str):
     """The `why` of a `small_base_move` read that could not run. `holds_base` tells it from a refusal by this class."""
 
+class OpenHeads(dict):
+    """Host.open_heads's dict, with `numbers`: {head sha: [the open pull request numbers at it]}, so the round-3 check names each tip with no
+    record from the one open-PR read it makes."""
+    def __init__(self, numbers=None):
+        super().__init__()
+        self.numbers = numbers or {}
+
 class Held(Stop):
     pass
 
@@ -890,12 +897,15 @@ class Host:
         return found
 
     def open_heads(self):
-        """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
-        which would say no PR is open. A head with two open PRs (a backport, or a fork's branch of the same name) gets base None under
-        its name, and every one of its rows is kept under name:index, a key no branch can have, so every base still counts, in any row order."""
+        """-> OpenHeads {head branch name: (head sha, PR base)} of the open pull requests, every page, and its `numbers` {head sha: [PR numbers]}.
+        A failed read raises Stop: never an empty set, which would say no PR is open. A head with two open PRs (a backport, or a fork's branch of
+        the same name) gets base None under its name, and every one of its rows is kept under name:index, a key no branch can have, so every base
+        still counts, in any row order."""
         rows = self.pages("pulls", fields={"state": "open"})
         seen = [d["head"]["ref"] for d in rows]
-        heads = {}
+        heads = OpenHeads()
+        for d in rows:
+            heads.numbers.setdefault(d["head"]["sha"], []).append(d["number"])
         for i, d in enumerate(rows):
             name, row = d["head"]["ref"], (d["head"]["sha"], d["base"]["ref"])
             if seen.count(name) > 1:
@@ -1484,12 +1494,25 @@ def head_claim(wt):
     """The Record-claim ids on HEAD's last commit, or ''."""
     return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
 
+CLAIM_SUBJECT, REBUILD_SUBJECT = "Claim record numbers", "Rebuild the records page"  # the subjects of the tool's own commits (commit_claim)
+REBUILD_DROPS = f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator"  # the rebuild's trailer; the silent-undo check reads the page as generated
+
+def tool_commit(body):
+    """True when commit message `body` is one commit_claim writes: a claim (its subject and a Record-claim trailer) or a records rebuild (its subject
+    and its Drops-lines trailer). Such a commit is the merge tool's own, and no lane work (owner pick a, page item 382)."""
+    lines = body.strip().splitlines()
+    if not lines:
+        return False
+    if lines[0] == CLAIM_SUBJECT:
+        return any(l.startswith("Record-claim: ") for l in lines[1:])
+    return lines[0] == REBUILD_SUBJECT and REBUILD_DROPS in lines[1:]
+
 def claim_under_head(wt, base_ref):
     """The sha of a claim this branch holds below its head (a merge commit sits on it), or None. A claim a later revert undid is not held."""
     c, out = git(wt, "log", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{base_ref}..HEAD")
     for line in out.splitlines() if not c else ():
         sha, subject, ids = (line.split("\t") + ["", ""])[:3]
-        if subject.startswith('Revert "Claim record numbers"'):
+        if subject.startswith(f'Revert "{CLAIM_SUBJECT}"'):
             return None
         if ids.strip():
             return sha
@@ -1524,8 +1547,7 @@ def identity(wt):
 def commit_claim(wt, trailer):
     """One commit for the claim and the rebuilt records page. No trailer: the page alone."""
     git(wt, "add", "-A")
-    msg = ["-m", "Claim record numbers", "-m", trailer] if trailer else ["-m", "Rebuild the records page",
-           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator"]  # the silent-undo check reads the rebuilt page as generated
+    msg = ["-m", CLAIM_SUBJECT, "-m", trailer] if trailer else ["-m", REBUILD_SUBJECT, "-m", REBUILD_DROPS]  # tool_commit reads these back
     c, out = git(wt, *identity(wt), "commit", "-q", *msg)
     if c:
         raise Stop("cannot commit the claim " + STAMP_RUN_CITE + ": " + out)
@@ -2096,7 +2118,7 @@ def cut_local(root, branch, merged):
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
-def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None):
+def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None, chain_out=None):
     """-> (tips, dropped). tips: the review tips, parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
     (a merge of the base into the branch has a base commit as its second parent) and any on `default_ref`, the default branch (a stacked pull request whose base is a lane branch
     that merged the default branch: the default branch's new commit is on neither the base nor in any lane, and is no review tip). dropped: the tips whose every such
@@ -2104,17 +2126,21 @@ def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None):
     undoes it, so an odd chain is a revert. The dropped-lane read is never cut at `default_ref`: a revert of a lane's merge that the default branch holds still drops that lane, so `dropped`
     may name a tip that `tips` does not. The cut costs one extra local read, `git rev-list base..sha ^default_ref`, made only when `default_ref` is given and differs from the base, and one `ancestor()` call per
     on-default parent of a merge (the lane-tip read already makes one per tip); a default_ref the clone does not hold cuts nothing. A read that fails raises. `own_out`, a list, receives the commits the pull request adds itself: the non-merge commits
-    of base_ref..sha that no review tip holds and the default branch lacks. A pull request with tips and none of these is an integration pull request."""
+    of base_ref..sha that no review tip holds and the default branch lacks, less the merge tool's own commits (tool_commit), which are no lane work. A pull request with
+    tips and none of these is an integration pull request. `chain_out`, a list, receives `sha` and each first parent under it while the commit above is the tool's own,
+    within base_ref..sha: its last entry is the head the lane's own work ends at."""
     c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
     if c:
         raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
-    undone, took, parents_of = {}, {}, {}  # commit -> the commit that reverts it; tip -> the merges that took it in; commit -> its parents
+    undone, took, parents_of, tool = {}, {}, {}, set()  # commit -> the commit that reverts it; tip -> the merges that took it in; commit -> its parents; the tool's own commits
     for rec in out.split("\0"):
         parts = rec.strip().split("\x01", 2)
         if len(parts) != 3:
             continue
         h, parents, body = parts
         parents_of[h] = parents.split()
+        if len(parents_of[h]) < 2 and tool_commit(body):
+            tool.add(h)
         for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
             undone[r] = h
         for t in parents.split()[1:]:
@@ -2147,7 +2173,11 @@ def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None):
             if h not in held and h in parents_of:
                 held.add(h)
                 todo.extend(parents_of[h])
-        own_out.extend(h for h, ps in parents_of.items() if len(ps) < 2 and h not in held and h not in on_default)
+        own_out.extend(h for h, ps in parents_of.items() if len(ps) < 2 and h not in held and h not in on_default and h not in tool)
+    if chain_out is not None:
+        chain_out.append(sha)
+        while chain_out[-1] in tool and parents_of[chain_out[-1]] and parents_of[chain_out[-1]][0] in parents_of:
+            chain_out.append(parents_of[chain_out[-1]][0])
     return tips, {t for t in lanes if all(reverted(h) for h in took[t])}
 
 def lane_tips(wt, base_ref, sha):
@@ -2158,14 +2188,14 @@ def lane_tips(wt, base_ref, sha):
         say(f"merge: no lane branch is deleted: the batch's merge commits could not be read ({type(e).__name__}: {e}).")
         return [], set()
 
-def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out=None, default_ref=None):
+def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out=None, default_ref=None, chain_out=None):
     """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
     the revert silently deletes its files (batch #663: the platform-ask lane lost 11 of 13 files). Refuse it before anything
     is claimed. A read that fails refuses too, unless the run has the reason flag --undo-check-unknown-ok "<reason>", which Claude may type with a reason.
-    A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, and `own_out` the pull request's own commits, so the round-3 check reads no second time. `default_ref` (origin/<default branch>) is passed to read_lanes: a commit of the default
+    A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, and `own_out` the pull request's own commits and `chain_out` its head's chain (read_lanes), so the round-3 check reads no second time. `default_ref` (origin/<default branch>) is passed to read_lanes: a commit of the default
     branch is no review tip and no own commit, but the dropped-lane read stays uncut, so a default-branch revert of a lane's merge is seen. The cut adds one local git read (rev-list)."""
     try:
-        tips, dropped = read_lanes(wt, base_ref, sha, own_out, default_ref)
+        tips, dropped = read_lanes(wt, base_ref, sha, own_out, default_ref, chain_out)
         if tips_out is not None:
             tips_out.extend(tips)
     except Exception as e:
@@ -2256,20 +2286,18 @@ ROUND_REMEDY = {"held": "Run no more rounds on a lane held for the owner: bring 
                 "unreviewed": "Each such lane has no done record for this head: run the review and post the tool's record, then run again."}
 UNREVIEWED_CITE = "(decision pr-review-record, Q1: a lane tip with no done review record for its head does not merge)"
 
-def unreviewed_lane(host, sha, num=None):
-    """-> how the round-3 refusal names lane head `sha` that no record names: "#num (head sha)" for the own head, else "#N (tip sha)" with the PR number from the open
-    pull requests whose head sits at `sha`. It only names: a failed open-PR read, or a head no open pull request holds, names the tip alone, and the lane is refused all the same."""
+def unreviewed_lane(sha, num=None, numbers=None):
+    """-> how the round-3 refusal names lane head `sha` that no record names: "#num (head sha)" for the own head, else "#N (tip sha)" with the PR number from
+    `numbers` ({head sha: [open PR numbers]}, OpenHeads.numbers, read once per run). It only names: a failed open-PR read, or a head no open pull request holds,
+    names the tip alone, and the lane is refused all the same."""
     if num is None:
-        try:
-            nums = sorted(d["number"] for d in host.pages("pulls", fields={"state": "open"}) if d["head"]["sha"] == sha)
-        except Exception:
-            nums = []
+        nums = sorted((numbers or {}).get(sha, []))
         if not nums:
             return f"lane tip {sha[:9]}"
         return " and ".join(f"#{x}" for x in nums) + f" (tip {sha[:9]})"
     return f"#{num} (head {sha[:9]})"
 
-def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread=False, own=()):
+def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread=False, own=(), chain=()):
     """The round-3 check (decision hold-unsafe-after-round-3; owner item 359 pick b) and the review check (decision pr-review-record, Q1). A lane is one of `tips`, the batch's lane tips, or the pull request's own head (`info["head"]`, pull request `n`). Each is matched to a record by
     the record's Head line, and the PR number comes from the comment's issue. Refuse before anything is claimed when a lane tip has no done record for its head, whatever
     its Guard or check value (no record names it, or its newest record is not done and has Guard or check no: kind "unreviewed"), or when a lane's newest record for its
@@ -2277,13 +2305,15 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
     decision still refuses (kinds held, net, round; owed_round), whether or not the head has a commit of its own. The own head is a lane, and owes a done
     record for it, when the tips were read and the pull request has no lane tip (a lone lane) or adds a commit of its own: `own`, the non-merge commits of base..head that no lane tip
     holds (read_lanes' own_out; merge commits never count as own, so an edited merge on an integration head is read through its tips only; a revert of a lane merge and a revert of that revert
-    are two own commits, a rare false alarm). Only when every commit of its own is a merge of lane tips is it an integration pull request. Per head, the newest record that names it decides, across
+    are two own commits, a rare false alarm). The merge tool's own commits (tool_commit) are no lane work: never own, and the own head is read through them. `chain` (read_lanes'
+    chain_out) is the own head and each commit under the tool's own commits on top of it; the newest of these that a record names is the own head the check judges, and when no
+    record names any of them, the refusal names `info["head"]`. Only when every commit of its own is a merge of lane tips is it an integration pull request. Per head, the newest record that names it decides, across
     every pull request (owed_round), and its PR line must be the PR it was posted on. A pull request whose newest record has Guard or check yes and whose records name no lane tip and not the own head is refused too (stale_guard_round),
     when that record's head is new to the batch: in the history of the pull request's own head and not on its base. A record for a head outside that history is another
     pull request's, and one for a head on the base is a pull request's merged earlier.
     Reads one thing from GitHub: the repo's comments, since the oldest commit new to the base (less a day), or since this pull request opened when no commit is new.
-    That date and each stale record's history are local git reads. The open pull requests are read only to name the pull request of a tip with no record (unreviewed_lane),
-    so a failed open-PR read cannot refuse a batch or stop a refusal. `tips_unread`: the dropped-lane read failed and its reason flag lifted it, so `tips` is empty because
+    That date and each stale record's history are local git reads. The open pull requests are read once per run, through host.open_heads, and only when a tip has no
+    record, to name its pull request (unreviewed_lane), so a failed open-PR read cannot refuse a batch or stop a refusal. `tips_unread`: the dropped-lane read failed and its reason flag lifted it, so `tips` is empty because
     the tips were never read, and the check says so and runs on the own head alone, asking no done record of it (it may be an integration head).
     A read that fails refuses (unknown is red, READ_CITE), unless the run has the reason flag --undo-check-unknown-ok "<reason>", as refuse_dropped_lane does:
     the same flag lifts the dropped-lane check. A lift returns its reason; a lifted date read reads every comment, so the own head is still checked.
@@ -2311,18 +2341,31 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
             return unknown_ok.strip()
         raise Liftable(f"the round-3 check could not read the lanes or their records ({type(e).__name__}: {e}).\n"
                        f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {READ_CITE}")
-    heads = list(dict.fromkeys([*tips, info["head"]]))
+    chain = list(chain) or [info["head"]]
+    heads = list(dict.fromkeys([*tips, *chain]))
     own_lane = not tips_unread and (not tips or bool(own))  # a lone lane, or a commit of its own beyond the lane tips: its own head needs a done record
-    checked = [*tips, info["head"]]  # the own head's records are always read for an owed round; it owes a done record only when it is a lane (own_lane)
-    found = []
-    for sha in dict.fromkeys(checked):
+    found, opened = [], []  # opened: the one open-PR read, made at the first tip with no record
+    def numbers():
+        if not opened:
+            try:
+                opened.append(getattr(host.open_heads(), "numbers", None) or {})
+            except Exception:  # it only names: an unread list names the tip alone
+                opened.append({})
+        return opened[0]
+    for sha in dict.fromkeys(tips):
         r = owed_round(records, sha)
-        if sha == info["head"] and not own_lane and r and r[0] in ("unnamed", "unreviewed"):
-            continue  # an integration head is read through its tips: no done record is asked of it. A record of its own that owes round 3, net value or a fix still refuses
         if r and r[0] == "unnamed":
-            found.append(("unreviewed", f"{unreviewed_lane(host, sha, n if sha == info['head'] else None)} {r[1]}."))
+            found.append(("unreviewed", f"{unreviewed_lane(sha, numbers=numbers())} {r[1]}."))
         elif r:
-            found.append((r[0], f"#{r[2]} ({'head' if sha == info['head'] and r[2] == n else 'tip'} {sha[:9]}) {r[1]}."))
+            found.append((r[0], f"#{r[2]} (tip {sha[:9]}) {r[1]}."))
+    # the own head's records are always read for an owed round; it owes a done record only when it is a lane (own_lane)
+    sha, r = next(((h, r) for h in chain for r in [owed_round(records, h)] if not (r and r[0] == "unnamed")), (info["head"], owed_round(records, info["head"])))
+    if sha in tips or not r or not own_lane and r[0] in ("unnamed", "unreviewed"):
+        pass  # an integration head is read through its tips: no done record is asked of it. A record of its own that owes round 3, net value or a fix still refuses
+    elif r[0] == "unnamed":
+        found.append(("unreviewed", f"{unreviewed_lane(sha, n)} {r[1]}."))
+    else:
+        found.append((r[0], f"#{r[2]} ({'head' if r[2] == n else 'tip'} {sha[:9]}) {r[1]}."))
     def new_to_batch(h):  # the own head's history first: once it holds `h`, the clone holds `h`, so an exit 128 on the base read is a bad base and refuses
         return head_in_history(root, h, info["head"]) and not head_in_history(root, h, base_ref)
     try:
@@ -2647,7 +2690,7 @@ def refuse_bad_pr(info):
 def open_worktree(root, info, base, default=None):
     """Fetch, check that the head is the one gh named, and make a detached worktree there. `default` (the default branch's name), given by the callers that
     read lanes, is fetched too when the base is another branch: a stacked pull request's lane read cuts at origin/<default>, and a stale one reads the default
-    branch's newer commit as an unreviewed lane tip. One more fetch, for stacked pull requests only. A failed fetch of it is ignored, and the read then runs on
+    branch's newer commit as an unreviewed lane tip. One more fetch, for stacked pull requests only. A failed fetch of it prints one line, and the read then runs on
     whatever origin/<default> the clone holds. A stale one is not always the stricter read: its cut keeps a newer default-branch commit as a lane tip, which passes when a
     done record names that commit, while a fresh cut drops it and a stacked head left with no lane tip reads as a lone lane that owes a done record of its own. A failed
     fetch can change a verdict in either direction."""
@@ -2656,7 +2699,9 @@ def open_worktree(root, info, base, default=None):
         if c:
             raise Stop(f"git fetch origin {ref} failed: {out}")
     if default and default != base:
-        git(root, "fetch", "-q", "origin", f"+refs/heads/{default}:refs/remotes/origin/{default}")
+        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{default}:refs/remotes/origin/{default}")
+        if c:
+            say(f"merge: the fetch of origin/{default} failed, so the lane read cuts at the origin/{default} this clone holds: {' '.join(out.split()) or f'exit {c}'}")
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"]:
         raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
@@ -3005,9 +3050,9 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
             debt_check(wt, f"origin/{base}", host, info)
-            tips, own = [], []
-            lifted = refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}")
-            refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted), own=own)
+            tips, own, chain = [], [], []
+            lifted = refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}", chain)
+            refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted), own=own, chain=chain)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
             current = current or stands and stands + ". The green run stands."
@@ -3154,10 +3199,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         tmp, wt = open_worktree(root, info, base, cfg["defaultBranch"])
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
-        tips, own = [], []
-        lifted = refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}")
+        tips, own, chain = [], [], []
+        lifted = refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}", chain)
         record_lift(lifts, UNDO_FLAG, lifted)
-        record_lift(lifts, UNDO_FLAG, refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted), own=own))  # a lifted lane read leaves no tips: the own head is still checked
+        record_lift(lifts, UNDO_FLAG, refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted), own=own, chain=chain))  # a lifted lane read leaves no tips: the own head is still checked
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")
