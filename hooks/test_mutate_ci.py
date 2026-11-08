@@ -1477,6 +1477,21 @@ CHAIN_LOOP_OPENS = (CHAIN_HEAD + "for name in (\"leaf.py\", \"other.py\"):\n"  #
                     "    with open(os.path.join(HERE, name), encoding='utf-8') as handle:\n        handle.read()\n")
 CHAIN_LOOP_COPIES = (CHAIN_HEAD + "import shutil\n\nfor name in (\"leaf.py\", \"other.py\"):\n"  # or copies each one
                      "    shutil.copy(os.path.join(HERE, name), HERE)\n")
+CHAIN_LOOP_FORMS = {  # the suite opens leaf.py and other.py through each loop form that the scan does not bind yet
+    "comprehension": CHAIN_HEAD + "CONTENTS = [open(os.path.join(HERE, n), encoding='utf-8').read() for n in (\"leaf.py\", \"other.py\")]\n",
+    "generator": CHAIN_HEAD + "SIZES = sum(len(open(os.path.join(HERE, n), encoding='utf-8').read())\n"
+                              "            for n in (\"leaf.py\", \"other.py\"))\n",
+    "sorted": CHAIN_HEAD + "for name in sorted((\"leaf.py\", \"other.py\")):\n"
+                           "    with open(os.path.join(HERE, name), encoding='utf-8') as handle:\n        handle.read()\n",
+    "enumerate": CHAIN_HEAD + "for index, name in enumerate((\"leaf.py\", \"other.py\")):\n"
+                              "    with open(os.path.join(HERE, name), encoding='utf-8') as handle:\n        handle.read()\n",
+    "alias": CHAIN_HEAD + "FIRST = (\"leaf.py\", \"other.py\")\nNAMES = FIRST\n"
+                          "for name in NAMES:\n    with open(os.path.join(HERE, name), encoding='utf-8') as handle:\n        handle.read()\n",
+}
+CHAIN_POOLED_NAME = (CHAIN_HEAD + "\n\ndef load():\n    for n in (\"leaf.py\",):\n"  # the loop that loads leaf.py
+                     "        with open(os.path.join(HERE, n), encoding='utf-8') as handle:\n            handle.read()\n\n\n"
+                     "def names():\n    seen = []\n    for n in [\"guard.py\", \"notes.md\"]:  # a loop that reaches no load\n"
+                     "        seen.append(n)\n    return seen\n")
 CHAIN_HELPER_OPENS = "with open(os.path.join(HERE, \"helper.py\"), encoding='utf-8') as handle:\n    handle.read()\n"
 CHAIN_CYCLE_HELPER = (CHAIN_HEAD + "with open(os.path.join(HERE, \"entry.py\"), encoding='utf-8') as handle:\n"
                       "    handle.read()\n")  # helper.py loads entry.py, and entry.py loads helper.py: a cycle
@@ -1501,8 +1516,10 @@ class LintSuitesChainTests(unittest.TestCase):
     """`--lint-suites BASE` picks a suite that reaches a changed file through the modules it loads, however deep. CHAIN_SUITE
     opens hooks/entry.py by a path constant, and entry.py loads hooks/leaf.py by an import, or by importlib.import_module. A
     diff that changes only leaf.py picks the suite (one case per form). A diff that changes entry.py picks it too (the
-    control). A path that an intermediate module loads, and a path a loop variable names, are followed too. A file that
-    nothing loads picks no suite, and a cycle of loads ends (the controls)."""
+    control). A path that an intermediate module loads, and a path a loop variable names, are followed too: in a for loop,
+    a comprehension, a sorted() or enumerate() loop, or through an alias. A loop name that another loop binds to a list
+    picks no suite (the over-pick case and its control). A file that nothing loads picks no suite, and a cycle of loads
+    ends (the controls)."""
 
     def picked(self, repo):
         code, out, err = run_cli(["--lint-suites", "main"], cwd=repo)
@@ -1559,6 +1576,56 @@ class LintSuitesChainTests(unittest.TestCase):
         self.assertIn(CHAIN_SUITE, self.picked(repo),
                       "--lint-suites must pick %s for a diff of only hooks/leaf.py: it copies each name of a loop, and leaf.py "
                       "is one of them" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_a_suite_opens_in_a_comprehension_picks_the_suite(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_LOOP_FORMS["comprehension"])
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: it opens each name of a list comprehension, "
+                      "and leaf.py is one of them" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_a_suite_opens_in_a_generator_picks_the_suite(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_LOOP_FORMS["generator"])
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: it opens each name of a generator expression, "
+                      "and leaf.py is one of them" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_a_suite_opens_in_a_sorted_loop_picks_the_suite(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_LOOP_FORMS["sorted"])
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: it opens each name of sorted() over a tuple, "
+                      "and leaf.py is one of them" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_a_suite_opens_in_an_enumerate_loop_picks_the_suite(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_LOOP_FORMS["enumerate"])
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: it opens each name of enumerate() over a "
+                      "tuple, and leaf.py is one of them" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_a_suite_opens_in_a_loop_over_an_alias_picks_the_suite(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_LOOP_FORMS["alias"])
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: it loops over a name bound to another name "
+                      "bound to a tuple, and leaf.py is in it" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_guard_py_does_not_pick_a_suite_whose_loop_name_another_loop_binds_to_a_list(self):
+        repo = chain_repo("V = 0\n", {"hooks/guard.py": "V = 2\n"}, suite=CHAIN_POOLED_NAME, base={"hooks/guard.py": "V = 1\n"})
+        self.assertEqual(self.changed(repo), ["hooks/guard.py"], "the scope: the diff holds only hooks/guard.py")
+        self.assertNotIn(CHAIN_SUITE, self.picked(repo),
+                         "--lint-suites must not pick %s for a diff of only hooks/guard.py: the name n that a loop opens leaf.py by "
+                         "is also bound, in another loop, to a list that holds guard.py, and that loop reaches no load"
+                         % CHAIN_SUITE)
+
+    def test_a_diff_of_only_leaf_py_picks_the_suite_whose_loop_name_another_loop_binds_to_a_list(self):  # the control
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_POOLED_NAME)
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: its loop opens leaf.py by the shared name"
+                      % CHAIN_SUITE)
 
     def test_a_diff_of_a_file_that_nothing_loads_picks_no_suite(self):  # the control for cost
         repo = chain_repo(CHAIN_MID_LOADS["spec"], {"merge/orphan.py": "X = 2\n"},
