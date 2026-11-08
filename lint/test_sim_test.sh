@@ -32,6 +32,9 @@
 #  - Its own boot takes the lease for its role (`sim-lease take --device duo|pro --udid`) before simctl boot. At a 5-minute
 #    load of 100 or a 1-minute load of 60 it waits, then exits 1 with no boot. The lease is released on every exit, INT and
 #    TERM too. The reuse path takes no lease.
+#  - Own boot, after its record call: the first-frame check runs `hooks/sim_boot_record.py --check UDID` (one sim_ok run:
+#    bootstatus, then a screenshot that frame_uniform judges). A failed check prints one stderr line naming the check and
+#    the UDID, runs no xcodebuild and no hold child, and exits 1; the trap shuts down the device it booted. A reuse runs no check.
 #  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
 #  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
@@ -128,7 +131,8 @@ if [ -n "${STUB_HANG:-}" ] || [ "$n" -gt 0 ]; then : > "$RUN/started"; sleep "${
 exit ${STUB_RC:-0}
 SH
 # xcrun: simctl only. $RUN/booted holds the "Booted" lines of `simctl list devices booted`, and $RUN/devices.json answers
-# `simctl list devices --json` (the record mode's read). Each simctl call logs its
+# `simctl list devices --json` (the record mode's read). `simctl io UDID screenshot FILE` copies the frame named in
+# $RUN/frame to FILE (the first-frame check's read); bootstatus exits 0. Each simctl call logs its
 # verb and whether the lock folder exists (lock_simctl), so a case can check the lock across list, boot and shutdown.
 # STUB_LIST_RC makes every simctl list exit with that code. STUB_BOOT_HOLD holds a boot open: it writes $RUN/boot_started,
 # then waits (at most 20 s) for $RUN/boot_release, so a case can send a signal while the boot is in flight.
@@ -150,6 +154,7 @@ case "$1" in
     if [ -n "${STUB_BOOT_HOLD:-}" ]; then : > "$RUN/boot_started"; n=0; while [ ! -e "$RUN/boot_release" ] && [ "$n" -lt 40 ]; do sleep 0.5; n=$((n + 1)); done; fi
     case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
   shutdown) : > "$RUN/booted" ;;
+  io) src=$(cat "$RUN/frame" 2>/dev/null); [ -n "$src" ] && cp "$src" "$4" ;;
 esac
 exit 0
 SH
@@ -188,6 +193,22 @@ fi
 SH
 chmod +x "$stubs"/*
 
+# frames: the screenshots the xcrun stub copies to the path the first-frame check gives it. The PNG encoder is the one in
+# hooks/test_sim_boot_record.py: this suite runs it and does not copy it. That module registers its run folder for removal
+# at the end of a unittest run, which this helper never makes, so the helper runs those cleanups itself.
+/bin/mkdir -p "$work/frames"
+FRAME_MAKER='import importlib.util, os, sys, unittest
+spec = importlib.util.spec_from_file_location("sim_boot_record_frames", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+unittest.doModuleCleanups()
+frames = {"live": mod.make_png(mod.live_rows(32, 64, 4), 32, colour_type=6, filters=[0, 1, 2, 3, 4]),
+          "black": mod.make_png(mod.rows_of(390, 844, mod.BLACK_RGBA), 390, colour_type=6)}
+for name, data in frames.items():
+    with open(os.path.join(sys.argv[2], name + ".png"), "wb") as handle:
+        handle.write(data)'
+python3 -I -c "$FRAME_MAKER" "$root/hooks/test_sim_boot_record.py" "$work/frames" || { echo "sim-test suite: cannot make the screenshot frames" >&2; exit 1; }
+
 # hold_cmd: the child of a `--hold -- CMD` case. It records SIM_TEST_UDID, its arguments and the lock it sees, then exits 7.
 hold_cmd=$work/hold_cmd.sh
 cat > "$hold_cmd" <<'SH'
@@ -203,8 +224,10 @@ SH
 chmod +x "$hold_cmd"
 
 booted() { printf '    %s (%s) (Booted) \n' "$1" "$2" >> "$booted_file"; }
+# set_frame NAME: the frame the first-frame check reads is frames/NAME.png, which the xcrun stub copies.
+set_frame() { printf '%s\n' "$work/frames/$1.png" > "$work/frame"; }
 # fresh: a clean fixture. It removes the lock folder, the crash dir and every observation file, so no lock or report
-# leaks into the next case.
+# leaks into the next case. The screenshot frame is a live one again.
 fresh() {
   : > "$calls"; : > "$booted_file"
   rm -f "$work/topcalls" "$work/started" "$work/xc_finished" "$work/watchdog_fired" "$work/lock_during" \
@@ -213,6 +236,7 @@ fresh() {
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
   rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
   /bin/mkdir -p "$crashdir" "$work/home"
+  set_frame live
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
 # to run.std and run.err. Defaults: a temp HOME, no CLAUDE_CONFIG_DIR, the crash dir in the run folder, a 1 s poll and
@@ -1009,6 +1033,51 @@ need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
+
+# ---- Cases 81 to 84: the first-frame check after its own boot (owner ruling, 2026-11-08 12:00 CST). It runs
+# `sim_boot_record.py --check UDID` once, after the record call. A failed check stops the run before any test or hold.
+check_ran_on() { grep -Fxq "simctl bootstatus $1" "$calls" && grep -Fq "simctl io $1 screenshot " "$calls"; }
+no_check_call() { ! grep -Eq '^simctl (bootstatus|io) ' "$calls"; }
+no_holding_line() { ! grep -Fq "sim-test: holding" "$work/run.std"; }
+no_check_msg() { ! grep -Fq "first-frame check failed" "$work/run.err"; }
+# check_stderr: the stderr is one line, and it names the failed check and the Duo.
+check_stderr() { [ "$(grep -c . "$work/run.err")" -eq 1 ] && grep -Fq "first-frame check failed" "$work/run.err" && grep -Fq "$DUO1" "$work/run.err"; }
+
+fresh; set_frame black; run
+need "the check ran on the Duo it booted" check_ran_on "$DUO1"
+need "exit 1" rc_is 1
+need "no xcodebuild call" no_xcodebuild
+need "shutdown of the Duo it booted, once" test "$(grep -c "^simctl shutdown $DUO1\$" "$calls")" -eq 1
+need "stderr is one line: first-frame check failed, naming the Duo" check_stderr
+need "lease given" lease_released
+need "lock freed" lock_gone
+end_case "81 own boot, one-colour first frame: exit 1, no xcodebuild, one stderr line, the Duo shut down"
+
+fresh; run
+need "the check ran on the Duo it booted" check_ran_on "$DUO1"
+need "exit code is xcodebuild's, 0" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "no first-frame failure on stderr" no_check_msg
+end_case "82 own boot, live first frame: the check runs and the tests run as before"
+
+# Control: a reuse runs no check. The base code runs none either, so this case is green on base.
+fresh; booted "iPhone Duo" $DUO1; set_frame black; run
+need "reuses the Duo booted before the run" dest_is "$DUO1"
+need "steps are run only" steps_are "run "
+need "no check call on a reused Duo, even with a one-colour frame" no_check_call
+need "exit code is xcodebuild's, 0" rc_is 0
+end_case "83 control: a reused Duo gets no first-frame check, even with a one-colour frame"
+
+fresh; set_frame black; ARGS=(--hold -- "$hold_cmd" alpha beta); run; ARGS=(-scheme X)
+need "the check ran on the Duo it booted" check_ran_on "$DUO1"
+need "exit 1" rc_is 1
+need "no hold child ran" test ! -e "$work/cmd_udid"
+need "no holding line: the hold never began" no_holding_line
+need "shutdown of the Duo it booted, once" test "$(grep -c "^simctl shutdown $DUO1\$" "$calls")" -eq 1
+need "stderr is one line: first-frame check failed, naming the Duo" check_stderr
+need "lease given" lease_released
+need "lock freed" lock_gone
+end_case "84 --hold own boot, one-colour first frame: no hold child, exit 1, the Duo shut down"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
