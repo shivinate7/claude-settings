@@ -3797,6 +3797,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for segment in (part for text in texts for part in split_segments(text)):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             verdict = push_verdict(args, where, overrides)
+            # A new branch at another branch's tip is refused (rule push-new-branch). It runs before a force
+            # refusal, so a `+refspec` that makes the new branch names this rule; an ask keeps its own prompt,
+            # and `--force` or a lease is never judged here, so the force rule stands for them.
+            if verdict != "ask" and not read_verb("push", args):
+                if push_new_branch_hit(args, where, overrides):
+                    refuse(tool, "deny", "push-new-branch", PUSH_NEW_BRANCH_REASON, "git push " + " ".join(args))
             if verdict == "ask":
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
@@ -3804,9 +3810,6 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif not read_verb("push", args):
                 # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
                 # implied destination off the branch's upstream. A dry run writes nothing.
-                # A new branch at another branch's tip is refused (rule push-new-branch).
-                if push_new_branch_hit(args, where, overrides):
-                    refuse(tool, "deny", "push-new-branch", PUSH_NEW_BRANCH_REASON, "git push " + " ".join(args))
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
