@@ -24,13 +24,14 @@
                           PR's issue comments since the PR opened.
   merge --reviewed        the ledger: one line per open PR, `#n branch act age`, with its one next act read from GitHub alone, first match wins:
                           `lane lint red: <steps>` (a done record for the live head, and a `Lint: red <live head> <steps>` comment that
-                          `merge --build-batch` posted: it comes before `batch`), `batch` (a done review record for the live head),
+                          `merge --build-batch` posted: it comes before `batch`), `lane batch red: <job>` (the same, for a `Batch: red <live head> <job>`
+                          comment, the drop's record: the newer of the two lines wins), `batch` (a done review record for the live head),
                           `lane round n` (an open record, or one for another head),
                           `waits on debt:<slug>|page:<item id>` (a held, parked or replaced label and a `Waits on:` comment line),
                           `batch run` (the `batch` label: an integration PR, aged from its labeled event, the batch limit),
                           `blocked on #N` (its base is the head branch of another PR of this repo; a fork's head never counts),
                           `lane round n` with n 1 (a draft with no record; a failed fix check reads n 1 too), else `NO NEXT ACT`. A line past its limit
-                          (merge.PR_STATE_AGE_HOURS) or with no next act is RED. When the base's latest run is red, each batch line adds
+                          (merge.PR_STATE_AGE_HOURS; the two red acts take the lane round limit) or with no next act is RED. When the base's latest run is red, each batch line adds
                           `held by main red <age>`. The last line: the longest wait since a done record, and the count with no next act.
                           Exit 0 nothing red, 1 any red, 2 on a failed read, with no list printed. Cost: the open-pull list, the repo's
                           comments since the oldest open PR (one read), one issue-events read per held or batch-labelled PR, one read of the base's latest run.
@@ -45,9 +46,9 @@
                           or ref refuses) adds the `batch` label to the PR after a PASS, never after a FAIL or an unknown; a failed
                           label POST says the label is unknown and keeps the lint's verdict and exit code. Cost per call: one ci-job
                           run (about 550 s, measured once on one PR head), one worktree, and with --integration one POST to issues/N/labels.
-  merge --build-batch [--base BRANCH] [--push BRANCH]
+  merge --build-batch [--base BRANCH] [--push BRANCH] [--drop-red PR] [--on BRANCH]
                           build an integration branch from PR state alone, with no count limit; stands alone. The candidates are the open PRs whose
-                          ledger act is `batch` (a done review record for the live head, and no `Lint: red <head>` comment for it); one with a
+                          ledger act is `batch` (a done review record for the live head, and no `Lint: red <head>` or `Batch: red <head>` comment for it); one with a
                           held, parked or replaced label is left out as `label <name>`. They join in PR order, a base before the PRs stacked on
                           it and a `Merge after #n` PR after #n; a stack joins whole or not at all, and a PR whose merge-after target is neither
                           merged nor in the batch is left out. Each is merged --no-ff onto the base and onto the batch so far (a conflict only on
@@ -56,11 +57,16 @@
                           main's commits since that base nor the head's own diff touch a path a lint step reads. A red lint leaves the PR out and
                           posts one `Lint: red <head> <steps>` comment, which the ledger reads as `lane lint red: <steps>`. Prints `joins:`,
                           `left out:` and `skipped lint:` lines, then `batch: N PRs`. Only --push moves a ref: it pushes the batch to a new branch,
-                          and refuses the base or a branch that exists. Exit 0 when the build ran, 2 on a failed read (nothing printed).
+                          and refuses the base or a branch that exists. A lint that fails is run once more: a pass on the re-run joins and a
+                          `lint re-ran:` line says so; a second fail is red. An unknown is never re-run. A PR whose live head carries a
+                          `Batch: red <head> <job>` comment (the drop's record) reads `lane batch red` and is left out. --drop-red PR (the red
+                          integration PR's number) and --on BRANCH (build on the head of the batch whose CI is running, not on the base) are not
+                          built yet: each stops the run with a line saying so. Exit 0 when the build ran, 2 on a failed read (nothing printed).
                           Cost: the open-pull list and the repo's comments (one read each), one `pulls/<n>` read per merge-after target outside the
                           open list, one fetch of the base and one per candidate, two worktrees plus one per running lint, one or two merges per
-                          candidate (more only when a PR is left out), one lint run per candidate not skipped, one POST per red lint, and with
-                          --push one ls-remote and one push. The lint skip adds one full `git log` of the base, one `ci-job checks --lint --plan`
+                          candidate (more only when a PR is left out), one lint run per candidate not skipped, one more lint run (about 550 s,
+                          measured once on one PR head) per head whose first lint fails, one POST per red lint, and with
+                          --push one ls-remote and one push. One comment read covers both red lines (`Lint: red` and `Batch: red`). The lint skip adds one full `git log` of the base, one `ci-job checks --lint --plan`
                           start, a merge-base, a rev-list and a diff per candidate, one `hit_suites` call per candidate whose paths are not empty,
                           and, for the newest lint change, one `hit_suites` call per base commit that changes a path, newest first, until one
                           hits: the worst case is every such commit of the base's history, when none hits (then every head is linted). Each merge
@@ -2772,7 +2778,9 @@ class BatchBuild:
 
     # ---- the lints
     def lint_unit(self, members):
-        """Run in the pool: lane lint of each member in turn, at its own head, stopping at the first that is not a pass. -> {n: ci_job_run's result}."""
+        """Run in the pool: lane lint of each member in turn, at its own head, stopping at the first that is not a pass. A `fail` is run once more in
+        the same tree, since a lint step can fail on a flaky read and pass on the next (the second result stands, and a pass says it was re-run); an
+        `unknown` is never re-run, because a missing tool or a timeout repeats. -> {n: ci_job_run's result}."""
         out = {}
         for n in members:
             try:
@@ -2780,6 +2788,11 @@ class BatchBuild:
                     tmp, wt = add_worktree(self.root, self.info[n]["sha"])
                 try:
                     out[n] = ci_job_run(wt, "checks", "--lint", "--base", self.base_ref)
+                    if out[n][0] == "fail":
+                        first = ", ".join(lint_red_steps(out[n][1]) or ["(no failing step named)"])
+                        out[n] = ci_job_run(wt, "checks", "--lint", "--base", self.base_ref)
+                        if out[n][0] == "pass":
+                            self.lines.append(f"lint re-ran: #{n} {self.info[n]['branch']}: the first run failed ({first}) and the second passed")
                 finally:
                     with self.lock:
                         drop_worktree(self.root, tmp, wt)
@@ -2879,25 +2892,31 @@ def units_of(info, bases):
         return d
     return sorted((sorted(g, key=lambda n: (depth(n), n)) for g in groups.values()), key=min)
 
-def build_batch(root, h, base, push=""):
+def build_batch(root, h, base, push="", drop_red=None, on=None):
     """merge --build-batch: build an integration branch from pull request state alone. -> 0 when the build ran (a PR left out is no failure), 2 when a
     read failed (nothing printed), else raises Stop (a refused --push, a failed fetch or push).
-    The candidates are the open PRs whose ledger act (pr_acts) is `batch`: a done review record for the live head, and no `Lint: red` line for it.
+    The candidates are the open PRs whose ledger act (pr_acts) is `batch`: a done review record for the live head, and no `Lint: red` or `Batch: red` line for it.
     They join in PR-number order, a base before the PRs stacked on it, a `Merge after #n` PR after #n; a stack is one unit that joins whole or not
     at all (BatchBuild). A PR whose merge-after target is neither merged nor in the batch is left out. Each is merged --no-ff onto the base and
     onto the batch so far, and lane-linted at its head against the base unless its merge base holds main's newest lint-step change; lints run in
-    parallel, at most os.cpu_count() - 2 (at least 1) at once. A lint-red PR gets one `Lint: red <head> <steps>` comment. Only --push moves a ref:
+    parallel, at most os.cpu_count() - 2 (at least 1) at once. A lint that fails is run once more (a flaky step); a PR is red only when both runs
+    fail, and gets one `Lint: red <head> <steps>` comment. `drop_red` (--drop-red) and `on` (--on) are flag skeletons: each raises Stop, not built yet. Only --push moves a ref:
     it makes the new branch `push`, and refuses the base or a branch that exists.
     Output, printed at the end: the cap line, `skipped lint:` lines, a `joins: #n branch sha` line per joined PR in merge order, a `left out: #n
     branch: why` line per PR left out in PR order, and `batch: N PRs`.
     Cost: the open-pull list and the repo's comments (one read each), one `pulls/<n>` read per merge-after target outside the open list, one fetch
     of the base and one per candidate branch, two worktrees (the batch tree and a probe tree at the base) and one more per running lint, one or two
     merges per candidate (onto the base and onto the batch) and a replay of the joined ones when one was left out, one lint run per candidate not
-    skipped, one comment POST per red lint, and with --push one ls-remote and one push. The lint skip (BatchBuild.lint_skip) adds one full `git log`
+    skipped, one more lint run (about 550 s, measured once on one PR head) per head whose first lint fails, one comment POST per red lint, and with
+    --push one ls-remote and one push. One comment read covers both red lines (`Lint: red` and `Batch: red`). The lint skip (BatchBuild.lint_skip) adds one full `git log`
     of the base (history), one `ci-job checks --lint --plan` start (lint_steps), a merge-base, a rev-list and a diff per candidate, one hit_suites
     call per candidate with paths, and for newest_lint_change one hit_suites call per base commit that changes a path, newest first, until one
     hits: every such commit of the base's history in the worst case, when none hits (then every head is linted). Each merge that conflicts only on
     the records page runs the records generator once (heal_records_page), and again when rebuild replays it. No timer, file or log of its own."""
+    if drop_red is not None:
+        raise Stop("--drop-red is not built yet")
+    if on is not None:
+        raise Stop("--on is not built yet")
     if push:
         if push == base:
             raise Stop(f"--push names the base {base}: a batch goes to a new branch, never to the base. {PUSH_BASE_CITE}")
@@ -3198,6 +3217,42 @@ def batch_refusal(host, n, base, head):
     return (f"#{n} does not merge to {base} while another ready PR's CI runs and that PR's head does not contain this head: " + "; ".join(blockers) + ".\n"
             f"Wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the session that watches that PR. Then run again. {BATCH_CITE}")
 
+BATCH_RED_CITE = "(rule git-integration-branch-merge, a red batch drops its failing lane and is rebuilt, never merged)"
+
+def comments_since(host, since):
+    """-> the repo's issue comments updated since `since` (Host.issue_comments). A 404 on the list is no comments, as merged_into reads a 404 on a pull
+    request: a repo whose comment list is not there holds no line, and every other read of this run fails first. A host with no comment read
+    (the scripted hosts of the cases that never read comments) holds none. Any other failed read is a Stop: unknown is red (READ_CITE)."""
+    read = getattr(host, "issue_comments", None)
+    if read is None:
+        return []
+    try:
+        return read(since)
+    except Stop as e:
+        if "404" in str(e):
+            return []
+        raise Stop(f"{e} The check for a `{BATCH_RED_WORD}` line could not read the comments. {READ_CITE}")
+
+def refuse_batch_red(host, wt, base_ref, info):
+    """A `Batch: red <head> <job>` comment says the batch at <head> ran red and its lane was dropped. A head that carries such a line for itself, or
+    holds a lane head that does, is the red batch: refuse it before anything is claimed. No reason flag lifts it, because only a rebuild without the
+    lane clears the red. The comments are read since the pull request opened, one list read. A failed read is a Stop (unknown is red), and an
+    unreadable lane list leaves the head's own line as the check (refuse_dropped_lane reads the same list and has refused on its failure)."""
+    heads = {info["head"]}
+    try:
+        heads |= set(read_lanes(wt, base_ref, info["head"])[0])
+    except Exception:
+        pass
+    red = {}
+    for c in comments_since(host, info.get("created") or "1970-01-01T00:00:00Z"):
+        m = BATCH_RED.fullmatch(((c.get("body") or "").splitlines() or [""])[0])
+        if m and m.group(1) in heads:
+            red[m.group(1)] = m.group(2)
+    if red:
+        raise Dropped("the batch ran red: " + "; ".join(f"{sha[:9]} ({job})" for sha, job in sorted(red.items())) + " carries a `" + BATCH_RED_WORD
+                      + " <head> <job>` line, and this tree still holds that lane.\n"
+                      f"Instead, rebuild the batch without the lane: run `merge --build-batch --push <new branch>`, open its pull request, and merge that one. {BATCH_RED_CITE}")
+
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
     refuse_bad_pr(info)  # a draft is previewed, so its silent undos show before it is marked ready
@@ -3211,6 +3266,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
             debt_check(wt, f"origin/{base}", host, info)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
+            refuse_batch_red(host, wt, f"origin/{base}", info)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
             current = current or stands and stands + ". The green run stands."
@@ -3357,6 +3413,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
+        refuse_batch_red(host, wt, base_ref, info)
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")
@@ -3653,12 +3710,16 @@ def review_state(rec, head):
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
 # The age limit of each next act, in hours; one home. A line past its limit is RED, so no wait runs unbounded.
-# Keys: the next acts (batch, lane round, lane lint red) and the hold labels (held, parked, replaced). Every limit is unmeasured: each is a first guess,
-# not read from any run history (ruling of 12:30 CST Nov 7; the lane lint red limit is a pick as unmeasured as the rest). Move one when a measured wait says otherwise. A pull request with the BATCH_LABEL (a batch run) counts
-# against the batch limit too.
-PR_STATE_AGE_HOURS = {"batch": 24, "lane round": 72, "lane lint red": 72, "held": 168, "parked": 720, "replaced": 24}
+# Keys: the next acts (batch, lane round) and the hold labels (held, parked, replaced). Every limit is unmeasured: each is a first guess,
+# not read from any run history (ruling of 12:30 CST Nov 7). Move one when a measured wait says otherwise. A pull request with the BATCH_LABEL (a batch run) counts
+# against the batch limit too. A red-lint or red-batch PR waits on its lane, the same actor as a lane round, so those two acts read the lane round key (AGE_KEY).
+PR_STATE_AGE_HOURS = {"batch": 24, "lane round": 72, "held": 168, "parked": 720, "replaced": 24}
+AGE_KEY = {"batch run": "batch", "lane lint red": "lane round", "lane batch red": "lane round"}  # next-act kind -> its PR_STATE_AGE_HOURS key, where the key is not the kind's own name
 LINT_RED_WORD = "Lint: red"  # the first line of the comment `merge --build-batch` posts on a lint-red head: `Lint: red <40-hex head> <steps>`. build_batch writes it, pr_acts reads it
 LINT_RED = re.compile(rf"{LINT_RED_WORD} ({REVIEW_SHA}) (\S.*?)\s*", re.ASCII)
+BATCH_RED_WORD = "Batch: red"  # the first line of the comment on a lane dropped from a red batch: `Batch: red <40-hex head> <job>`. pr_acts and refuse_batch_red read it
+BATCH_RED = re.compile(rf"{BATCH_RED_WORD} ({REVIEW_SHA}) (\S.*?)\s*", re.ASCII)
+RED_LINES = (("lane lint red", LINT_RED), ("lane batch red", BATCH_RED))  # the red lines pr_acts reads, as (next-act kind, pattern)
 HOLD_LABELS = ("held", "parked", "replaced", BATCH_LABEL)  # the labels that stand in for a review record; all but the BATCH_LABEL also need a Waits on line
 WAITS_ON_LINE = "Waits on:"
 
@@ -3727,10 +3788,10 @@ def pr_acts(h, pulls, holds=True):
             state = review_state(rec, sha)[0]
             if state == "done":
                 act = ("batch", "batch", at, None)
-                red = next(((t, m) for t, text in reversed(plain.get(n, [])) for m in [LINT_RED.fullmatch((text.splitlines() or [""])[0])]
-                            if m and m.group(1) == sha), None)  # the newest red line for the live head; a line for an older head is stale
-                if red:  # the lint of the head the record passed is red: the pull request is no candidate, whatever its record says
-                    act = (f"lane lint red: {red[1].group(2)}", "lane lint red", red[0], None)
+                red = next(((t, kind, m) for t, text in reversed(plain.get(n, [])) for kind, pattern in RED_LINES
+                            for m in [pattern.fullmatch((text.splitlines() or [""])[0])] if m and m.group(1) == sha), None)  # the newest red line for the live head; a line for an older head is stale
+                if red:  # the lint or the batch of the head the record passed is red: the pull request is no candidate, whatever its record says
+                    act = (f"{red[1]}: {red[2].group(2)}", red[1], red[0], None)
             elif state in ("open", "stale"):
                 owed = min(max((i for i, *_ in rec["rounds"]), default=0) + 1, REVIEW_LAST_ROUND)
                 if state == "open" and rec["fix"] and rec["fix"][3] != "PASS":  # a failed fix check starts the lane over: the fix needs a new lane, so n is the first round
@@ -3760,7 +3821,8 @@ def pr_acts(h, pulls, holds=True):
 def _reviewed_lines(h, root):
     """-> (lines, red) of `merge --reviewed`, built before any is printed so a failed read prints none (a Stop). Every open pull request gets one next
     act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch` (`lane lint red: <steps>` instead, when
-    the newest `Lint: red <live head> <steps>` comment of the pull request names the live head); the record is open or for another
+    the newest `Lint: red <live head> <steps>` comment of the pull request names the live head, and `lane batch red: <job>` for a `Batch: red <live head> <job>`
+    comment; the newer of the two lines wins); the record is open or for another
     head, `lane round n` (n the next round owed, at most 3; 1 when its fix check failed); a label of held, parked or replaced and a
     `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line, `waits on <id>`; the BATCH_LABEL, `batch run` (the batch limit); its base
     is the head branch of another open pull request of the same repo, `blocked on #N` (a fork's head never counts); a draft, the first `lane round`;
@@ -3795,7 +3857,7 @@ def _reviewed_lines(h, root):
             return True
         if kind == "blocked":  # no limit of its own: it inherits the red of the pull request it waits on
             return blocker not in seen and red_of(blocker, (*seen, n))
-        return hours(since) > PR_STATE_AGE_HOURS["batch" if kind == "batch run" else kind]  # a batch run counts against the batch limit
+        return hours(since) > PR_STATE_AGE_HOURS[AGE_KEY.get(kind, kind)]  # a batch run counts against the batch limit, a red line against the lane round limit
     lines, reds = [], 0
     for n in sorted(acts):
         branch, act, kind, since, _ = acts[n]
@@ -3917,6 +3979,8 @@ def main(argv, host=None, lock=None):
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--build-batch", action="store_true", help="build an integration branch from PR state alone: the PRs whose act is batch, merged in order and linted in parallel; moves no ref without --push")
     p.add_argument("--push", metavar="BRANCH", help="with --build-batch: push the batch to this new branch of origin (never the base, never a branch that exists)")
+    p.add_argument("--drop-red", type=int, metavar="PR", help="with --build-batch: rebuild without the lane the red integration pull request PR names (not built yet)")
+    p.add_argument("--on", metavar="BRANCH", help="with --build-batch: build on this branch, the head of the batch whose CI is running, not on the base (not built yet)")
     p.add_argument("--reviewed", action="store_true", help="the ledger: each open pull request with its one next act and age; exit 1 when any line is RED")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
@@ -3933,6 +3997,8 @@ def main(argv, host=None, lock=None):
         p.error("--live goes with --idle-lanes")
     if a.push is not None and not a.build_batch:
         p.error("--push goes with --build-batch")
+    if (a.drop_red is not None or a.on is not None) and not a.build_batch:
+        p.error("--drop-red and --on go with --build-batch")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint or a.build_batch):
         p.error("--idle-lanes stands alone")
@@ -3981,7 +4047,7 @@ def main(argv, host=None, lock=None):
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             h = host or Host()
             with release_on_signals():  # a signal ends the run through build_batch's `finally`, which removes the trees
-                return build_batch(root, h, a.base or h.base, a.push or "")  # before the role check and any lock: it reads, and moves a ref only under --push
+                return build_batch(root, h, a.base or h.base, a.push or "", a.drop_red, a.on)  # before the role check and any lock: it reads, and moves a ref only under --push
         if a.lane_lint:
             c, root = sh(["git", "rev-parse", "--show-toplevel"])
             if c:

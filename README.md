@@ -143,15 +143,16 @@ merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default br
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
                         Posts nothing: the lane posts it as a PR comment.
-merge --reviewed        the ledger: one line per open PR with its one next act (lane lint red: <steps>, batch, batch run, lane round n, waits on <id>,
+merge --reviewed        the ledger: one line per open PR with its one next act (lane lint red: <steps>, lane batch red: <job>, batch, batch run, lane round n, waits on <id>,
                         blocked on #N, or NO NEXT ACT) and its age in hours, read from GitHub alone. `lane lint red` comes before `batch`: a
-                        `Lint: red <live head> <steps>` comment, posted by `merge --build-batch`, names the live head. A draft with no record reads `lane round 1`; a PR
+                        `Lint: red <live head> <steps>` comment, posted by `merge --build-batch`, names the live head; a `Batch: red <live head> <job>` comment reads `lane batch red`. A draft with no record reads `lane round 1`; a PR
                         with the `batch` label reads `batch run`. When main's latest run is red, each batch line adds `held by main red <age>`.
                         RED past the age limit or with no next act. The last line: the longest wait since a done record, and the count
                         with no next act. Exit 0 nothing red, 1 any red, 2 on a failed read (a malformed field too).
-merge --build-batch [--base BRANCH] [--push BRANCH]   build an integration branch from PR state alone: the PRs whose act is `batch`
+merge --build-batch [--base BRANCH] [--push BRANCH] [--drop-red PR] [--on BRANCH]   build an integration branch from PR state alone: the PRs whose act is `batch`
                         (a PR with a held, parked or replaced label is left out), merged in PR order, a stack whole or not at all, each lane-linted
-                        in parallel unless its merge base holds main's newest lint change. A red lint leaves the PR out and posts `Lint: red <head> <steps>`.
+                        in parallel unless its merge base holds main's newest lint change. A lint that fails is run once more; a second fail leaves the PR out and posts `Lint: red <head> <steps>`.
+                        `--drop-red` and `--on` are not built yet.
                         Prints `joins:`, `left out:` and `batch: N PRs`. Only --push moves a ref, to a new branch.
 merge --lane-lint <pr> --integration   the lane lint; after a PASS it adds the `batch` label to the integration PR (one POST).
 merge --dev ...         run the checkout's own tree, not origin main
