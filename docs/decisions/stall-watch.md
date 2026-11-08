@@ -51,10 +51,11 @@ guard rule, so the watcher does the waiting and the session is told once.
   `STALL_WATCH_BEAT`, and passes to the watcher as `--beat`. The watcher relays the file's new bytes to its
   own output, the harness output file. So a redirect in the command (`2>&1 | grep`, `2>/dev/null`)
   hides the line from neither the watcher nor the Stop check. `ci-job` appends each `start: <step>` line to the
-  beat file too, once as the step starts (never on a timer), so a lint of short steps with stderr hidden is not cut.
-  The start line is written only when a step starts, never on a timer. Every ci-job step runs under `verdict`, whose
-  heartbeat feeds the watch every 120 s, so the watch does not cut a hung step: under it, a hung lane lint is bounded by
-  merge's `LINT_SECONDS` (1200 s). The append is hooks/stall_beat.py, shared with `verdict`.
+  beat file too, once as the step starts (never on a timer). It also writes a `fetch:` line once before its
+  unshallow fetch, only on a shallow clone. So a lint of short steps with stderr hidden is not cut.
+  The start and fetch lines are written once, as the event happens, never on a timer. Every ci-job step runs under `verdict`, whose
+  heartbeat feeds the watch every 120 s, so the watch does not cut a hung step: merge stops waiting on a hung lane lint after
+  `LINT_SECONDS` (1200 s), though the process may run on (see docs/debts/notes.md). The append is hooks/stall_beat.py, shared with `verdict`.
 - A job that sends that line to a log it names is still writing, so it is no stall (owner ruling,
   2026-10-26: the watcher reads named logs, in place of the rule that it does not change). Reason:
   `merge.py ... > LOG 2>&1` was reported stalled while it worked, and a false STALL teaches the reader to
