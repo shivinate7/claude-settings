@@ -1,0 +1,11 @@
+{
+  "title": "Triage traces a record sentence's first commit with --full-history",
+  "phase": "process",
+  "status": "todo",
+  "order": 694,
+  "owner": "triage",
+  "lane": "",
+  "why": "At 08:35 CST Nov 8 triage cited batch 23 (#840, 6ddcf3406) as where a project-ops sentence landed. Plain `git log -S` simplified merge history and showed the merge; the sentence first appears in 17e9675c0 (2026-10-26). Lane role-ids-in-brief caught it at 09:07 CST. A wrong first commit can turn a ruling trace the wrong way.",
+  "note": "Fix: triage's ruling-trace method (premise P44, and the waiting-page skill's past-ruling check) runs `git log --full-history -S '<sentence>' -- <record>` and cites the oldest commit. Done check: the skill text names --full-history. Filed by triage 09:09 CST Nov 8.",
+  "updatedAt": "2026-11-08T09:09:00-06:00"
+}
