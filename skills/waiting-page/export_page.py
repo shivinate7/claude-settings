@@ -220,22 +220,25 @@ WORD_SEGMENT = re.compile(r"[a-z]+|[A-Z]+|[A-Z][a-z]+")  # one word in lower cas
 LOWER_WORD = re.compile(r"[a-z]+")  # a separated part in lower case only
 CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)  # four consonants in a row; `y` counts as one, so `monstrous` (nstr) is refused by the run
 LOWER_RUN = re.compile(r"[b-df-hj-np-tv-z]{5,}", re.I)  # five in a row, used per part by the lower-case separated form
+HAS_VOWEL = re.compile(r"[aeiouy]", re.I)  # a vowel for the separated form, where `y` counts (`my`, `by`); the run regex counts `y` as a consonant
 
 
 def letters_are_words(value):
-    """True when a letters-only value reads as words: each `_` or `-` part is one word in one case form. A value of
-    two or more parts split on `-` or `_`, all lower case (`tight-compact`, `page_length_limit`), skips the vowel share
-    and is refused only when one part holds a run of five or more consonants. Any other value needs at least 30% of its
-    letters to be vowels and no run of four or more consonants across the joined letters. `REPLACE_WITH_YOUR_KEY` and
-    `infrastructure` pass. Random letters in a mixed case or with few vowels do not. Random lower-case letters with
-    enough vowels still pass."""
+    """True when a letters-only value reads as words. Every part split on `-` or `_` (empty parts dropped) must be one
+    word in one case form (lower case, upper case or capitalised), or the value is refused. Then one of two checks runs.
+    Separated form: the value splits on `-` or `_` into two or more parts, none empty, all lower case
+    (`tight-compact`, `page_length_limit`). It passes when every part holds a vowel (`a e i o u y`) and no part holds
+    five or more consonants in a row (`y` counts as a consonant in the run). It skips the vowel share. `kqzv_bxjw_tmrl`
+    is refused. Any other value (one part, a mixed case, or an empty part as in `tight--compact`): at least 30% of its
+    letters are vowels (`a e i o u`) and no run of four or more consonants across the joined letters. `REPLACE_WITH_YOUR_KEY`
+    and `infrastructure` pass. Random single-part lower-case letters with enough vowels still pass."""
     parts = [p for p in re.split(r"[_-]", value) if p]
     letters = "".join(parts)
     if not (letters and all(WORD_SEGMENT.fullmatch(p) for p in parts)):
         return False
     separated = re.split(r"[_-]", value)
     if len(separated) > 1 and all(LOWER_WORD.fullmatch(p) for p in separated):
-        return not any(LOWER_RUN.search(p) for p in separated)
+        return all(HAS_VOWEL.search(p) and not LOWER_RUN.search(p) for p in separated)
     return (sum(c in "aeiouAEIOU" for c in letters) * 10 >= len(letters) * 3
             and not CONSONANT_RUN.search(letters))
 
