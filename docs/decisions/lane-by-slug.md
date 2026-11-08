@@ -4,8 +4,8 @@
 
 Owner, 2026-10-13 14:13 CDT, relayed by the oversight session: the guard refuses a session number that names a lane, such as `N20` or `(N16)`. Name the lane by its branch slug, such as `lane-number-cite`.
 
-- The refusal covers four acts: a `git commit` message, a `gh pr create` body or title, a `gh pr edit` body or title, and a `gh pr merge` subject or body.
-- `LANE_NUMBER` in `hooks/guard.py` is `\bN\d{1,3}b?\b`. It reads the same message text as the cite-by-id rule, for the message, body, file and title flags.
+- The refusal covers five acts: a `git commit` message, a `gh pr create` body or title, a `gh pr edit` body or title, a `gh pr merge` subject or body, and the MCP `create_pull_request` body or title.
+- `LANE_NUMBER` in `hooks/guard.py` is `\bN\d{1,3}b?\b`. It reads the same message text as the cite-by-id rule, for the message, body, file and title flags. On the MCP `create_pull_request` tool, the cite-by-id rule reads only the body; this rule reads the body and the title.
 - Matches: `N20`, `N3b`, `(N16)`, `Lane N16`, `N1-N6`. Case-sensitive: `n20` passes. Four or more digits pass: `N1234`. Not a lane: `NaN`, `N/A`, `IPv4N1`, `N100000`, `N+1`.
 - Quoted text is blanked first: a backtick code span on one line, and a fence opened by three backticks.
 - A message file that cannot be read passes this rule. Cite-by-id refuses an unread file.
