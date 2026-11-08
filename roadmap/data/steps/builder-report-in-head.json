@@ -1,11 +1,11 @@
 {
   "title": "A builder's report names each file it changed, and the lane checks each one is in the pushed head's diff before review",
   "why": "PR 1179, 2026-11-08: a builder reported an edit that never applied (a hook refused its Bash call, and it did not re-check); a test-author's red test caught it (lane prose-governance-workflow, 05:24 CST Nov 8).",
-  "note": "Fix: the builder's report lists each changed file; before review the lane checks each one appears in `git diff` of the pushed head, red case first on a reported file with no diff. Not a duplicate of step builder-diff-merge-commit (that one counts test paths at a merge commit). Note builder-edit-unchecked-at-head in draft PR 1929 cites this step. Coordinator approved 05:23 CST. Queue fix (owner 13:20 CST Nov 7). Filed 05:30 CST Nov 8; no lane named. Doing in lane session_013NEJKywfKL1Vp4zHaUEbot (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane).",
-  "status": "doing",
+  "note": "Fix: the builder's report lists each changed file; before review the lane checks each one appears in `git diff` of the pushed head, red case first on a reported file with no diff. Not a duplicate of step builder-diff-merge-commit (that one counts test paths at a merge commit). Note builder-edit-unchecked-at-head in draft PR 1929 cites this step. Coordinator approved 05:23 CST. Queue fix (owner 13:20 CST Nov 7). Filed 05:30 CST Nov 8; no lane named. Doing in lane session_013NEJKywfKL1Vp4zHaUEbot (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane). Built and reviewed: draft PR #1978 (replaces closed #1972) is with runner 8 (lane builder-report-in-head, 06:58 CST Nov 8). Done when #1978 merges.",
+  "status": "ready",
   "order": 618,
   "lane": "session_013NEJKywfKL1Vp4zHaUEbot",
   "phase": "now",
   "owner": "triage",
-  "updatedAt": "2026-11-08T06:21:00-06:00"
+  "updatedAt": "2026-11-08T07:00:00-06:00"
 }
