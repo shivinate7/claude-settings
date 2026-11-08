@@ -1689,6 +1689,50 @@ def workflow_script_index(args):
     return index if index < len(args) else None
 
 
+# Commands that run the command after them. Each maps to the flags that take a value (their next token is
+# not the wrapped command); `timeout` also takes a duration, and `coverage` and `uv` run their subcommand `run`.
+WORKFLOW_WRAPPERS = {
+    "timeout": {"-k", "-s", "--kill-after", "--signal"},
+    "xvfb-run": {"-e", "-n", "-f", "-s", "-w", "--error-file", "--server-num", "--auth-file",
+                 "--server-args", "--wait"},
+    "env": {"-u", "-C", "--unset", "--chdir"},
+    "nice": {"-n", "--adjustment"},
+    "coverage": {"--rcfile", "--include", "--omit", "--source", "--data-file", "--context"},
+    "uv": {"--with", "--python", "-p", "--project", "--directory", "--group", "--extra", "--env-file",
+           "--package", "-w", "--with-requirements"},
+}
+WORKFLOW_RUN_SUBCOMMAND = {"coverage", "uv"}
+
+
+def workflow_unwrap(tokens):
+    """`tokens` without the wrapper commands before the command they run (`timeout 600`, `xvfb-run -a`,
+    `env FOO=1`, `nice`, `coverage run`, `uv run`, `python -m coverage run`), each with its own flags and
+    values. A wrapper that wraps nothing, or `coverage` or `uv` with another subcommand, is left as it is."""
+    tokens = list(tokens)
+    while tokens:
+        if (tokens[0] in WORKFLOW_INTERPRETERS and tokens[1:4] == ["-m", "coverage", "run"]):
+            tokens = tokens[4:]
+            name = "coverage"
+        elif tokens[0] in WORKFLOW_WRAPPERS:
+            name, tokens = tokens[0], tokens[1:]
+            if name in WORKFLOW_RUN_SUBCOMMAND:
+                # `uv` takes global flags before `run`; skip them to find it.
+                probe = 0
+                while probe < len(tokens) and tokens[probe].startswith("-"):
+                    probe += 2 if tokens[probe] in WORKFLOW_WRAPPERS[name] else 1
+                if tokens[probe:probe + 1] != ["run"]:
+                    return [name] + tokens
+                tokens = tokens[probe + 1:]
+        else:
+            break
+        values = WORKFLOW_WRAPPERS[name]
+        while tokens and (tokens[0].startswith("-") or (name == "env" and re.match(r"^\w+=", tokens[0]))):
+            tokens = tokens[2:] if tokens[0] in values else tokens[1:]
+        if name == "timeout" and tokens:
+            tokens = tokens[1:]   # the duration
+    return tokens
+
+
 def workflow_step_disables(line: str) -> bool:
     """True when one step line is `continue-on-error: true` or `if: false`, so the step runs no test that counts."""
     return bool(WORKFLOW_DISABLE_STEP.match(line))
@@ -1711,6 +1755,7 @@ def workflow_run_is_test(value: str) -> bool:
     if any(set(tok) <= set(lexer.punctuation_chars) for tok in tokens):
         return False
     script = 0
+    tokens = workflow_unwrap(tokens)
     if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
         tokens = tokens[1:]
         script = workflow_script_index(tokens)
@@ -1780,9 +1825,21 @@ def workflow_command_tests(command: str) -> set:
     test path. A lint tool that is given a test folder (`ruff check tests/`) runs none."""
     found = set()
     for segment in WORKFLOW_COMMAND_SPLIT.split(command):
-        tokens = [tok.strip("\"'") for tok in segment.split()]
-        while tokens and (re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time")):
-            tokens.pop(0)
+        # A quoted value with a space is one word. No escape character, so a Windows `tests\x.py` keeps its
+        # backslash for `workflow_path` to turn into `/`.
+        lexer = shlex.shlex(segment, posix=True)
+        lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
+        try:
+            tokens = list(lexer)
+        except ValueError:
+            tokens = [tok.strip("\"'") for tok in segment.split()]
+        while tokens:
+            if re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time"):
+                tokens.pop(0)
+            elif workflow_unwrap(tokens) != tokens:
+                tokens = workflow_unwrap(tokens)
+            else:
+                break
         if not tokens:
             continue
         runner = bool(TEST_RUNNER_CONTEXT.search(segment))
