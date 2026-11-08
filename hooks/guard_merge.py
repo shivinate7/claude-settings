@@ -1106,8 +1106,8 @@ BRIEF_STEP_REASON = (
 )
 BRIEF_IDS_REASON = (
     "this brief does not name a session id for {missing}, so the lane cannot reach {them}. Add each as "
-    "`" + "; ".join(label + ": session_<id>" for label in ROLE_LABELS) + "`, the three ids the coordinator copies from its own "
-    "records. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no other "
+    "`" + "; ".join(label + ": session_<id>" for label in ROLE_LABELS) + "`, the three ids the coordinator copies from the "
+    "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no other "
     "role label and no `session_`; an id holds a digit. (decision session-tiers, a lane holds one topic)"
 )
 

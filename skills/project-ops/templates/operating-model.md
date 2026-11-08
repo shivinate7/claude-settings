@@ -91,8 +91,8 @@ parent, or miss a message while busy.
      `python3 ~/.claude/skills/project-ops/scripts/check_handoff.py <file>` on the file and
      fixes each problem before the successor starts.
   4. The coordinator archives the old session, then the coordinator starts the successor from
-     the hand-off file and updates the roster. The coordinator sends no broadcast. Sessions read
-     the roster.
+     the hand-off file and tells triage. Triage updates the roster. The coordinator sends no
+     broadcast. Sessions read the roster.
   5. The successor watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
      before any other act. It reads each page's comments since the time in the hand-off file.
      It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session

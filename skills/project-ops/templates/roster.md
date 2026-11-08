@@ -1,7 +1,7 @@
 ## Standing sessions
 
-This roster is the one record of who holds each standing session. The coordinator updates it in
-the same turn that a session rotates. A session reads it right before it messages a standing session.
+This roster is the one record of who holds each standing session. Triage rewrites a line when a role
+changes hands. The coordinator tells triage when a session rotates. A session reads it right before it messages a standing session.
 
 - Coordinator (starts every other session, holds lane state and any standing merge grant, talks with the owner): "<session title>",
   <session id>, since <date and time>. It compacts in place and has no successor.
