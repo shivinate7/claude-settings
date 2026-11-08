@@ -250,6 +250,61 @@ class LayoutFile(Tree):
             self.layout.kinds(self.tree)
 
 
+class NamedCandidates(Tree):
+    """`named_candidates(name, kind)`: the paths a call that names a repo may treat as a kind (decision one-layout-every-repo).
+    The layout path is always one. A repo the layout lists under legacy-repos gets its own path first, then the layout's legacy
+    spelling. An unlisted repo gets the layout path only: a call from another checkout cannot read that repo's rollout, so no
+    legacy spelling is a home for it. A call that names no repo gets the legacy spelling and the layout path. The repo names and
+    paths come from the layout file, so none is copied here."""
+    UNLISTED = "acme/widgets"  # a GitHub name that no legacy-repos entry holds
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def listed(self):
+        """{repo: {kind: path}} from legacy-repos. The cases need at least one listed repo, so an empty map fails here."""
+        found = self.layout.layout().get("legacy-repos", {})
+        self.assertTrue(found, "legacy-repos lists no repo, so no listed repo is judged")
+        self.assertNotIn(self.UNLISTED, found, "the unlisted name is listed, so it judges nothing")
+        return found
+
+    def test_the_layout_path_is_always_a_candidate(self):
+        for name in (None, self.UNLISTED, *self.listed()):
+            for kind, entry in self.layout.layout()["kinds"].items():
+                with self.subTest(name=name, kind=kind):
+                    self.assertIn(entry["path"].strip("/"), self.layout.named_candidates(name, kind),
+                                  "the layout path is not a candidate")
+
+    def test_a_listed_repo_gets_its_legacy_repos_path_first_in_any_case(self):
+        for repo, entry in self.listed().items():
+            for kind, path in entry.items():
+                for name in (repo, repo.upper()):
+                    with self.subTest(name=name, kind=kind):
+                        self.assertEqual(self.layout.named_candidates(name, kind)[0], path.strip("/"),
+                                         "a listed repo's legacy-repos path is not its first candidate")
+
+    def test_a_listed_repo_keeps_the_legacy_spelling_and_the_layout_path(self):
+        for repo in self.listed():
+            with self.subTest(repo=repo):
+                self.assertEqual(self.layout.named_candidates(repo, "decisions"), ("decisions", "docs/decisions"))
+
+    def test_an_unlisted_repo_gets_the_layout_path_and_no_legacy_spelling(self):
+        self.listed()
+        for kind, entry in self.layout.layout()["kinds"].items():
+            with self.subTest(kind=kind):
+                self.assertEqual(self.layout.named_candidates(self.UNLISTED, kind), (entry["path"].strip("/"),),
+                                 "an unlisted repo holds a legacy spelling as a home")
+
+    def test_an_unlisted_repo_gets_no_legacy_spelling_in_any_case(self):
+        self.listed()
+        self.assertEqual(self.layout.named_candidates(self.UNLISTED.upper(), "decisions"), ("docs/decisions",),
+                         "an unlisted repo holds a legacy spelling as a home")
+
+    def test_a_call_that_names_no_repo_gets_the_legacy_spelling_and_the_layout_path(self):
+        self.assertEqual(self.layout.named_candidates(None, "decisions"), ("decisions", "docs/decisions"))
+
+
 class WaitingPage(Tree):
     """The waiting page's URL is one key in a repo's extras file (skill waiting-page)."""
     URL = "https://claude.ai/artifact/abc123"
