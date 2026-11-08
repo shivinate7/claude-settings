@@ -348,25 +348,33 @@ class Budget:
         return min(self.per_read, left)
 
 
-def commit_read(ref, cwd, timeout=HEAD_READ):
-    """The full commit hash `ref` names in the folder, "" when the read ran and no ref names a commit, and a raised
-    Unknown when the read itself failed (the tool is missing, timed out or could not start)."""
+def git_out(args, cwd, timeout, what):
+    """-> (returncode, stdout) of one local git read in the folder, the one home of the Stop-side git reads. A
+    raised Unknown when the read itself failed (the tool is missing, timed out or could not start); `what` names the
+    read in that message."""
     try:
         import _nowindow
     except ImportError:
         _nowindow = subprocess
     exe = shutil.which("git")
     if exe is None:
-        raise Unknown("git read of %s failed: git is not on PATH" % ref)
+        raise Unknown("git read of %s failed: git is not on PATH" % what)
     try:
-        p = _nowindow.run([exe, "rev-parse", "--verify", "-q", ref + "^{commit}"], cwd=cwd,
-                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+        p = _nowindow.run([exe, *args], cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                          timeout=timeout)
     except subprocess.TimeoutExpired:
-        raise Unknown("git read of %s timed out" % ref)
+        raise Unknown("git read of %s timed out" % what)
     except OSError as e:
-        raise Unknown("git read of %s failed: %s" % (ref, type(e).__name__))
-    out = p.stdout.strip()
-    return out if p.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", out) else ""
+        raise Unknown("git read of %s failed: %s" % (what, type(e).__name__))
+    return p.returncode, p.stdout
+
+
+def commit_read(ref, cwd, timeout=HEAD_READ):
+    """The full commit hash `ref` names in the folder, "" when the read ran and no ref names a commit, and a raised
+    Unknown when the read itself failed (the tool is missing, timed out or could not start)."""
+    code, out = git_out(["rev-parse", "--verify", "-q", ref + "^{commit}"], cwd, timeout, ref)
+    out = out.strip()
+    return out if code == 0 and re.fullmatch(r"[0-9a-f]{40}", out) else ""
 
 
 def commit_of(ref, cwd, timeout=HEAD_READ):
@@ -377,10 +385,149 @@ def commit_of(ref, cwd, timeout=HEAD_READ):
         return ""
 
 
-def head_state(sha, branch, cwd, budget=None):
-    """-> (state, detail) for a head pushed to `branch`; sha may be short. One read, no wait.
-    state: "none" (no CI to wait for: no open PR, a draft PR, a head the PR has moved past, or a repo with no
-    workflows, read once when the run list is empty), "green",
+WORKFLOW_DIR = ".github/workflows"
+NO_PUSH_EVENTS = ("workflow_dispatch", "schedule")   # events that start no run for a push
+
+
+def _glob_regex(pattern):
+    """A workflow path-filter pattern as a regex: `**` crosses folders, `*` and `?` stay inside one."""
+    out, i = "", 0
+    while i < len(pattern):
+        two = pattern[i:i + 2]
+        if two == "**":
+            out, i = out + ".*", i + 2
+            continue
+        c = pattern[i]
+        if c == "[" and "]" in pattern[i:]:
+            j = pattern.index("]", i)
+            out, i = out + pattern[i:j + 1], j + 1
+            continue
+        out += "[^/]*" if c == "*" else "[^/]" if c == "?" else re.escape(c)
+        i += 1
+    return re.compile(out + r"\Z")
+
+
+def _path_passes(path, patterns):
+    """True when a filter's pattern list lets `path` through: the last pattern that matches decides, and `!` negates."""
+    passed = False
+    for pattern in patterns:
+        negated = pattern.startswith("!")
+        if _glob_regex(pattern[1:] if negated else pattern).match(path):
+            passed = not negated
+    return passed
+
+
+def _unquote(word):
+    word = word.strip()
+    return word[1:-1] if len(word) > 1 and word[0] == word[-1] and word[0] in "'\"" else word
+
+
+def _workflow_lines(text):
+    """-> [(indent, content)] of a workflow's non-blank lines, comments dropped (a `#` at a line start or after a space)."""
+    lines = []
+    for raw in text.splitlines():
+        content = re.sub(r"(^|\s)#.*$", "", raw).rstrip()
+        if content.strip():
+            lines.append((len(content) - len(content.lstrip()), content.strip()))
+    return lines
+
+
+def _filter_list(block, key):
+    """The patterns of `key:` in a push block's lines ([(indent, content)]), or None when the key is absent. Reads a
+    flow list (`[a, b]`), a lone scalar and a block list (`- a`)."""
+    for n, (indent, content) in enumerate(block):
+        head, colon, rest = content.partition(":")
+        if head.strip() != key or not colon:
+            continue
+        rest = rest.strip()
+        if rest.startswith("["):
+            return [_unquote(w) for w in rest.strip("[]").split(",") if w.strip()]
+        if rest:
+            return [_unquote(rest)]
+        items = []
+        for deeper, line in block[n + 1:]:
+            if deeper < indent or (deeper == indent and not line.startswith("- ")):
+                break
+            if line.startswith("- "):
+                items.append(_unquote(line[2:]))
+        return items
+    return None
+
+
+def workflow_runs_for(text, files):
+    """False only when a workflow's `on:` block reads cleanly and no push of `files` starts a run of it: it has no
+    event but workflow_dispatch and schedule, or its push event carries a `paths` or `paths-ignore` filter that every
+    file fails. A form this reader does not parse (a flow map, a key it does not know) reads True, so a run stays due.
+    Stdlib only: CI and the Stop hook have no YAML parser."""
+    lines = _workflow_lines(text)
+    start = next((n for n, (i, c) in enumerate(lines) if i == 0 and re.match(r"""["']?on["']?\s*:""", c)), None)
+    if start is None:
+        return True
+    inline = lines[start][1].partition(":")[2].strip()
+    if inline:
+        words = set(re.findall(r"[\w-]+", inline))
+        return inline.startswith("{") or bool(words - set(NO_PUSH_EVENTS))
+    body = []
+    for indent, content in lines[start + 1:]:
+        if indent == 0:
+            break
+        body.append((indent, content))
+    if not body:
+        return True
+    base = body[0][0]
+    events, push_block, in_push = [], [], False
+    for indent, content in body:
+        if indent == base and not content.startswith("- "):
+            name, _, rest = content.partition(":")
+            events.append(_unquote(name))
+            in_push = _unquote(name) == "push"
+            if in_push and rest.strip():
+                return True
+        elif in_push:
+            push_block.append((indent, content))
+    if any(e not in NO_PUSH_EVENTS and e != "push" for e in events):
+        return True
+    if "push" not in events:
+        return False
+    paths, ignore = _filter_list(push_block, "paths"), _filter_list(push_block, "paths-ignore")
+    if (paths is None) == (ignore is None):
+        return True
+    if paths is not None:
+        return any(_path_passes(f, paths) for f in files)
+    return any(not _path_passes(f, ignore) for f in files)
+
+
+def push_may_start_run(full, old, cwd, budget):
+    """False only when the workflow files at the pushed head all read cleanly and none can start a run for the files
+    the push changed (`old..full`): a push no path filter matches starts no run, so none is due. Any read that fails,
+    no workflow file, or a push with no `old` head (a new branch) reads True, so a run stays due. Cost: 2 git
+    processes plus 1 per workflow file."""
+    if not old:
+        return True
+    try:
+        code, out = git_out(["diff", "--name-only", "-z", old, full], cwd, budget.next_timeout(), "the push's files")
+        files = [f for f in out.split("\0") if f]
+        if code != 0:
+            return True
+        code, out = git_out(["ls-tree", "--name-only", "-z", full, WORKFLOW_DIR + "/"], cwd, budget.next_timeout(),
+                            "the workflow files")
+        names = [n for n in out.split("\0") if n.endswith((".yml", ".yaml"))]
+        if code != 0 or not names:
+            return True
+        for name in names:
+            code, text = git_out(["show", "%s:%s" % (full, name)], cwd, budget.next_timeout(), name)
+            if code != 0 or workflow_runs_for(text, files):
+                return True
+        return False
+    except Unknown:
+        return True
+
+
+def head_state(sha, branch, cwd, budget=None, old=None):
+    """-> (state, detail) for a head pushed to `branch`; sha may be short. One read, no wait. old is the head the
+    remote held before the push (the push's ref line), or None.
+    state: "none" (no CI to wait for: no open PR, a draft PR, a head the PR has moved past, a repo with no
+    workflows, read once when the run list is empty, or a push no workflow path filter matches), "green",
     "pending" (a run has not ended, or a ready PR has no run yet), "red" (a run ended not green), or "unknown"
     (a read failed or ran out of budget). A push to main reads the head's runs direct. A ready PR's runs drop
     skipped ones as `wait_for` does, then judge_runs judges the rest (the cancelled-twin rule is its own)."""
@@ -396,15 +543,21 @@ def head_state(sha, branch, cwd, budget=None):
                 return "none", "no open PR"
             if pr.get("isDraft"):
                 return "none", "draft PR"
-            if not pr["headRefOid"].startswith(sha):
+            if pr["headRefOid"].startswith(sha):
+                full = pr["headRefOid"]
+            elif old and pr["headRefOid"].startswith(old):
+                # The PR read lags the push: it still names the head before it, so the pushed head is read direct.
+                full = commit_of(sha, cwd, budget.next_timeout()) or sha
+            else:
                 return "none", "the PR head has moved past %s" % sha[:7]
-            full = pr["headRefOid"]
         args = ["run", "list", "--commit", full, "--limit", "100", "--json", RUN_FIELDS]
         runs = [r for r in gh_json(args, cwd, timeout=budget.next_timeout()) if r["conclusion"] != "skipped"]
         if not runs:
             # No run is listed: either the repo has no CI (nothing to wait for) or the run has not started.
             if no_workflows(cwd, "", budget.next_timeout()):
                 return "none", "the repo has no workflows"
+            if not push_may_start_run(full, old, cwd, budget):
+                return "none", "no workflow path filter matches the push"
             return ("unknown", "no run is listed for a push to %s" % branch) if main else ("pending", "no run yet")
         from guard_merge import merge_module
         merge = merge_module()
