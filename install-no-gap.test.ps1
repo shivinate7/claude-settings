@@ -779,6 +779,42 @@ public static class FileIdentity
     } finally {
         Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
     }
+    # ---- skillfail1: a skill folder that cannot be refreshed makes install.ps1 exit non-zero ----------
+    # A skill folder that still cannot be refreshed after the Resolve-Failures retries must make the run
+    # exit non-zero and name the folder. A handle held on one landed skill file, with FileShare.Read,
+    # blocks the in-place refresh of its folder on every retry.
+    $Sf      = New-Scratch 'skill-fail' @('skills')
+    Write-FixtureFile (Join-Path $Sf.Clone 'skills\failskill\SKILL.md') '# failskill v1'
+    Write-FixtureFile (Join-Path $Sf.Clone 'skills\failskill\notes.md') '# notes v1'
+    $SfSkill = Join-Path $Sf.Cfg 'skills\failskill'
+    $SfNotes = Join-Path $SfSkill 'notes.md'
+    $env:CLAUDE_CONFIG_DIR = $Sf.Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rcSf1 = Invoke-Install $Sf.Clone 'skillfail1-run1.log'
+        Check "skillfail1: run 1 (forced copy) exits 0 (exit $rcSf1)" ($rcSf1 -eq 0)
+        Check "skillfail1: run 1 lands notes.md as a real file" ((Test-Path -LiteralPath $SfNotes) -and -not (Test-ReparsePoint $SfNotes))
+        Check "skillfail1: run 1 writes the copy marker, so run 2 is not a first run" (Test-Path -LiteralPath (Join-Path $Sf.Cfg '.claude-settings-installed'))
+        Write-FixtureFile (Join-Path $Sf.Clone 'skills\failskill\SKILL.md') '# failskill v2'
+        Write-FixtureFile (Join-Path $Sf.Clone 'skills\failskill\notes.md') '# notes v2'
+        $SfHeld = $null
+        if (Test-Path -LiteralPath $SfNotes) { $SfHeld = [IO.FileStream]::new($SfNotes, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read) }
+        try {
+            # Fixture: the open handle must refuse a write, or run 2 proves nothing.
+            $SfBlocked = $false
+            if ($null -ne $SfHeld) { try { [IO.File]::Open($SfNotes, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite).Dispose() } catch { $SfBlocked = $true } }
+            Check "skillfail1 fixture: a write to the held notes.md is refused while the handle is open" $SfBlocked
+            $rcSf2 = Invoke-Install $Sf.Clone 'skillfail1-run2.log'
+        } finally {
+            if ($null -ne $SfHeld) { $SfHeld.Dispose() }
+        }
+        $SfLog = Get-RunText (Join-Path $Tmp 'skillfail1-run2.log')
+        Check "skillfail1: run 2 exits non-zero when a skill folder cannot be refreshed for good (exit $rcSf2)" ($rcSf2 -ne 0)
+        Check "skillfail1: run 2 names the skill folder it could not replace or refresh" ($SfLog -match 'could not (replace|refresh) .*failskill')
+    } finally {
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
+
     # ---- prose1: only the exact placeholder line is stamped; a prose comment is copied unchanged -----
     # A comment that starts INSTALL_ID = " but says something else is not the placeholder. Each stamper
     # (install.ps1's copy path, the post-merge hook) must leave it as it is, so the
