@@ -1100,7 +1100,7 @@ def _exits_on_failure(segments, ends, at: int) -> bool:
 
 _COMPOUND_CLOSER = {
     # a closing word, with a `)` that ends a subshell and an attached redirect cut off: `}>/dev/null`
-    wide: re.compile(r"(?:\}|fi|done%s)\)*(?:(?:\d*|&)[<>].*)?" % ("|esac" if wide else ""))
+    wide: re.compile(r"(?:\}|fi|done%s)\)*(?:&?[<>].*)?" % ("|esac" if wide else ""))
     for wide in (False, True)}
 _FUNCTION_NAME = re.compile(r"[^\s(){}]+\(\)(\{?)")   # `f()` and `f(){`
 
@@ -1296,9 +1296,9 @@ def _walk_segments(segments, number: int, shell_cwd: str, ends=(), failed_cd_sta
                         skip_if = 0   # the `then` body runs only when the test passes
                     # The shell exits on a failure: later segments follow a cd that landed. That holds for an
                     # `|| exit`, an `if ! cd` whose then body starts with `exit`, and a bare cd under `set -e`.
-                    negated_if = end in (";", "\n") and tokens[:2] == ["if", "!"] and _exits_on_failure(segments, ends, at)
+                    negated_if = prev_end not in ("&&", "||") and end in (";", "\n") and tokens[:2] == ["if", "!"] and _exits_on_failure(segments, ends, at)
                     # Inside a group, `if` or loop the exit may not happen: `{ cd X; push; } || true` ignores errexit.
-                    bare_under_errexit = (errexit and end not in ("&&", "||", "|") and not stack and not marks
+                    bare_under_errexit = (errexit and prev_end not in ("&&", "||") and end not in ("&&", "||", "|") and not stack and not marks
                                           and not group_depth and basename(tokens[0]) in CD_WORDS)
                     if end == "||" and _exits_on_failure(segments, ends, at):
                         where, stranded = None, False
