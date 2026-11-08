@@ -13579,6 +13579,10 @@ WORKFLOW_GLOB_REFUSED = (
     ("yq -i edits checks.yml in place", "yq -i '.on = \"push\"' .github/workflows/checks.yml"),
     ("dd of= writes checks.yml", "dd of=.github/workflows/checks.yml if=/tmp/x"),
     ("rsync copies a file into .github/workflows/", "rsync /tmp/x.yml .github/workflows/"),
+    ("yq -i with a | and a quoted string in its expression, edits checks.yml",
+     "yq -i '.on |= \"push\" | .x = 1' .github/workflows/checks.yml"),
+    ("yq -i with a ; between two expressions, edits checks.yml", "yq -i '.a = 1; .b = 2' .github/workflows/checks.yml"),
+    ("rsync with a --timeout flag after the workflow folder", "rsync -a src/ .github/workflows/ --timeout 30"),
 )
 for _name, _command in WORKFLOW_GLOB_REFUSED:
     sh("builder-test: workflow shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13601,6 +13605,9 @@ WORKFLOW_GLOB_ALLOWED = (
     ("sed -i over a glob of docs", "sed -i s/a/b/ docs/*.md"),
     ("touch of a new doc", "touch docs/new.md"),
     ("rsync out of .github/workflows/", "rsync .github/workflows/ /tmp/wf/"),
+    # The tests/ source is only read. A redirect word makes the rsync reader take no source as read (_rsync_reads).
+    ("rsync of tests/ to /tmp, stderr to /dev/null", "rsync -a tests/ /tmp/t/ 2>/dev/null"),
+    ("yq reads checks.yml and pipes the value to cat", "yq '.on' .github/workflows/checks.yml | cat"),
 )
 for _name, _command in WORKFLOW_GLOB_ALLOWED:
     sh("builder-test: workflow shell control, %s, is allowed" % _name, _command, "allow", **dict(B, cwd=WFGIT))
