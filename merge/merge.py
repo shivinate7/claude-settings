@@ -107,6 +107,7 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
+MERGED_LINE = "merge: #{n} merged as {commit}."  # the one home of the merged line; lint/report_guard.py runner_hold reads it back
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
 def resolve_program(name, env=None):
@@ -3035,7 +3036,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise
         except Exception as e:
             fail(f"unexpected {type(e).__name__} after the claim was pushed: {e}")
-        say(f"merge: #{n} merged as {commit[:9]}.")
+        say(MERGED_LINE.format(n=n, commit=commit[:9]))
         if rule_files is None:
             say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
         for x in rule_files or []:

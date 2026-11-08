@@ -11,7 +11,8 @@ import json
 import os
 import re
 
-SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
+SEND_MESSAGE = "mcp__claude-code-remote__send_message"  # the claude-code-remote MCP send; SendMessage is the in-process one
+SEND_TOOLS = (SEND_MESSAGE, "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
 

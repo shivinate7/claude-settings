@@ -101,6 +101,12 @@ transcript read of its own on a plain Stop (it shares main's read). Only when a 
 build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
 override read.
 
+The batch runner hold (runner_hold): a session whose own newest get_session record carries cs-build:batch-runner cannot
+end a turn while a merge result (merge.MERGED_LINE) is newer than its newest `merge --idle-lanes` run, or while a
+send-back line (merge.REVIEW_SEND_BACK) has no later send_message to its session id that names the PR. It reads
+direct, background and verdict-log results, joins the triage hold's refusal, and releases and fails open as the triage
+hold does. Its docstring holds the cost and the known limit (a verdict run that passes prints no log).
+
 Route-row flags (hooks/route_match.py holds the rows, the surface and the match): a refused call that a "works" row
 matches gets a `route_flag` in its refusals row (hooks/refusal_note.py), and a successful call of the turn that a
 "refused" row matches gets one here. Each flag rides in the systemMessage of the line this Stop prints and never
@@ -133,6 +139,7 @@ sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
+from _transcript import SEND_MESSAGE  # noqa: E402
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -1263,9 +1270,10 @@ def pending_refusals(hook, text):
         return []
 
 
-def hold_reason(entries):
-    """The block reason for the triage hold, naming its `entries` (joined)."""
-    return HOLD_REASON % entries
+def hold_reason(entries, runner=""):
+    """The block reason for the holds: the triage hold's, naming its `entries` (joined), then the runner hold's
+    own text (`runner`, from runner_hold). Either may be empty."""
+    return " ".join(part for part in (HOLD_REASON % entries if entries else "", runner) if part)
 
 
 def _shown_flags(hook, flags):
@@ -1493,9 +1501,9 @@ def hand_off_problem(hook, text):
     return (" ".join(unique) + HAND_OFF_TAIL if unique else ""), " ".join(dict.fromkeys(notes))
 
 
-def refusal_reason(tools, hold=""):
-    """The block reason for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
-    held = hold_reason(hold) if hold else ""
+def refusal_reason(tools, hold="", runner=""):
+    """The block reason for refused tools the reply has not raised, and for the holds, or ''."""
+    held = hold_reason(hold, runner)
     if not tools:
         return held
     names = ", ".join("`%s`" % tool for tool in tools)
@@ -1867,6 +1875,147 @@ def triage_hold(hook, records, active):
         return ""
 
 
+RUNNER_TIER = "batch-runner"
+RUNNER_MERGE_REASON = (
+    "Batch runner hold: %s merged and no `merge --idle-lanes --live FILE` run followed. Run it, then run get_session "
+    "on each lane it lists alone and archive it; or name the PR under Input Needed to escalate "
+    "(decision session-tiers, the batch runner's archive act)."
+)
+RUNNER_SEND_REASON = (
+    "Batch runner hold: the review sent #%d back to %s and no send_message to that session names #%d. Send it, "
+    "then end; or name the PR under Input Needed to escalate (decision session-tiers, the batch runner)."
+)
+# A Bash command that runs the merge tool: `merge` or `merge.py` as a word, past any path. A `merge --idle-lanes` run
+# is the lane sweep. A grep or cat of merge.py names the word too, but its result holds no merged line to read.
+MERGE_RUN_RE = re.compile(r"(?:^|[\s/;&|(])merge(?:\.py)?(?=[\s;&|)]|$)")
+IDLE_RUN_RE = re.compile(r"(?:^|[\s/;&|(])merge(?:\.py)?\s[^;&|\n]*--idle-lanes(?=[\s;&|)]|$)")
+COMPLETION_RE = re.compile(r"<tool-use-id>([^<\s]+)</tool-use-id>.*?<output-file>([^<]+)</output-file>", re.S)
+
+
+def _merge_constants():
+    """(MERGED_LINE, REVIEW_SEND_BACK or None) from merge/merge.py, the one emitter, loaded only when a merge run is in
+    the transcript. REVIEW_SEND_BACK is read with getattr: while merge.py lacks it, no send-back is read."""
+    import importlib.util
+    path = os.path.join(HERE, "..", "merge", "merge.py")
+    spec = importlib.util.spec_from_file_location("merge_for_hold", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.MERGED_LINE, getattr(module, "REVIEW_SEND_BACK", None)
+
+
+def _run_text(shown):
+    """The text of a merge run: its own output, or the log a verdict line names (None when that log is gone)."""
+    logged = VERDICT_LOG_RE.search(shown)
+    return _verdict_log_text(logged.group(1)) if logged else shown
+
+
+def _merge_runs(records):
+    """[(record index, command, text)] for each finished Bash run of the merge tool, in order. `text` is the result a
+    direct run shows, the output file a background run's completion record names, or the log a verdict line names; it
+    is None when that file is missing or unreadable."""
+    calls, runs = {}, []
+    for i, rec in enumerate(records):
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            inp = use.get("input")
+            if use.get("name") == "Bash" and isinstance(inp, dict) and MERGE_RUN_RE.search(str(inp.get("command", ""))):
+                calls[use.get("id")] = (str(inp.get("command", "")), bool(inp.get("run_in_background")))
+        for result in tool_results(rec):
+            call = calls.get(result.get("tool_use_id"))
+            if call and not call[1]:  # a background run's result holds no output: its completion record names the file
+                runs.append((i, call[0], _run_text(_result_text(result.get("content")))))
+        attachment = rec.get("attachment")
+        prompt = attachment.get("prompt") if rec.get("type") == "attachment" and isinstance(attachment, dict) else None
+        found = COMPLETION_RE.search(prompt) if isinstance(prompt, str) else None
+        if found and calls.get(found.group(1), (None, False))[1]:
+            try:
+                with open(found.group(2).strip(), encoding="utf-8", errors="replace") as handle:
+                    text = _run_text(handle.read())
+            except Exception:
+                text = None
+            runs.append((i, calls[found.group(1)][0], text))
+    return runs
+
+
+def _owed_sends(records, backs):
+    """The (n, session id) of each send-back line in `backs` ((record index, n, id), newest per pair) that no later
+    send_message to that id names. Only the claude-code-remote send_message counts; #640 does not name #64."""
+    owed = []
+    for at, n, sid in backs:
+        named = re.compile(r"#%d(?!\d)" % n)
+        sent = False
+        for rec in records[at + 1:]:
+            for use in tool_uses(rec):
+                inp = use.get("input")
+                if (use.get("name") == SEND_MESSAGE and isinstance(inp, dict) and inp.get("session_id") == sid
+                        and named.search(str(inp.get("message", "")))):
+                    sent = True
+        if not sent:
+            owed.append((n, sid))
+    return owed
+
+
+def runner_hold(hook, records, active):
+    """The block reason when this is a batch runner (own newest get_session record carries cs-build:batch-runner,
+    hooks/guard_merge.py _own_tier_proved) that owes an act, else ''. Two acts are owed:
+
+    - A merge result (merge.MERGED_LINE, `merge: #N merged as <sha>.`) newer than the newest `merge --idle-lanes` run:
+      the runner runs it and archives each lane it lists (decision session-tiers). Any --idle-lanes result after the
+      merge releases it, exit 1 included.
+    - A send-back line (merge.REVIEW_SEND_BACK, then `#N <session id> (<reason>)`, from `merge --reviewed`) with no
+      later claude-code-remote send_message to that session id that names #N. `no session` in the id's place is not
+      owed. A merge.py without REVIEW_SEND_BACK leaves send-backs unread.
+
+    A Stop after a refusal releases each entry whose PR the report's Input Needed names. An owner override lifts the
+    hold, and a one-act override is spent here, after every other release has been ruled out. Fails open on any error.
+    Known limit: a merge run through verdict that PASSES prints no log path (bin/verdict), so its result is unread; a
+    run that exits 1 shows the log and is read.
+    Cost: no process, no file written; it reads the transcript the Stop already read. Only when a Bash command names
+    the merge tool: merge/merge.py's import, and one log or output file read for a verdict or background run. Only when
+    an act is owed: the own-record read and one override read."""
+    try:
+        runs = _merge_runs(records)
+        if not runs:
+            return ""
+        merged_line, back_prefix = _merge_constants()
+        merged_re = re.compile(
+            "^" + re.escape(merged_line).replace(re.escape("{n}"), r"(\d+)").replace(re.escape("{commit}"), r"\w+"), re.M)
+        back_re = re.compile(r"^%s#(\d+) (?!no session\b)(\S+) \(" % re.escape(back_prefix), re.M) if back_prefix else None
+        idle_at, merges, backs = -1, [], {}
+        for at, command, text in runs:
+            if IDLE_RUN_RE.search(command):
+                idle_at = at
+            for n in merged_re.findall(text or ""):
+                merges.append((at, int(n)))
+            for n, sid in back_re.findall(text or "") if back_re else ():
+                backs[(int(n), sid)] = at
+        merged = []
+        for at, n in merges:
+            if at > idle_at and n not in merged:
+                merged.append(n)
+        sends = _owed_sends(records, [(at, n, sid) for (n, sid), at in backs.items()])
+        if active:  # a Stop after a refusal: an entry whose PR Input Needed names is released
+            section = input_needed_section(last_reply(hook))
+            merged = [n for n in merged if not re.search(r"#%d(?!\d)" % n, section)]
+            sends = [(n, sid) for n, sid in sends if not re.search(r"#%d(?!\d)" % n, section)]
+        if not merged and not sends:
+            return ""
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        from guard_merge import _own_tier_proved
+        if not _own_tier_proved(hook.get("transcript_path"), RUNNER_TIER):
+            return ""
+        import override
+        if override.take(hook.get("session_id"), None, override.now()) in override.LIFTS:
+            return ""
+        reasons = [RUNNER_MERGE_REASON % ", ".join("#%d" % n for n in merged)] if merged else []
+        reasons += [RUNNER_SEND_REASON % (n, sid, n) for n, sid in sends]
+        return " ".join(reasons)
+    except (Exception, SystemExit) as exc:
+        print("runner hold failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        return ""
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -1877,7 +2026,7 @@ def main():
     if hook.get("hook_event_name") != "Stop":
         return
     path = hook.get("transcript_path")
-    hold = ""
+    hold, runner = "", ""
     active = bool(hook.get("stop_hook_active"))
     records, read_failed = [], False
     if path and os.path.exists(path):
@@ -1889,17 +2038,22 @@ def main():
             hold = triage_hold(hook, records, active)
         except Exception:
             pass
+        try:
+            runner = runner_hold(hook, records, active)
+        except Exception:
+            pass
+    held = bool(hold or runner)
     if active:
         pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
-        if hold and not reasons:
-            print(json.dumps({"decision": "block", "reason": hold_reason(hold)}))
+        if held and not reasons:
+            print(json.dumps({"decision": "block", "reason": hold_reason(hold, runner)}))
             return
-        if hold:
-            reasons.insert(0, hold_reason(hold))
+        if held:
+            reasons.insert(0, hold_reason(hold, runner))
         if reasons:
-            tail = "" if hold else CORRECTION_TAIL  # a held Stop is refused for its entries, not for the report's shape
+            tail = "" if held else CORRECTION_TAIL  # a held Stop is refused for its entries, not for the report's shape
             print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + tail}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
@@ -1931,7 +2085,7 @@ def main():
 
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
     pending = pending_refusals(hook, reply)
-    refusal = refusal_reason(pending, hold)  # the triage hold joins the refusals
+    refusal = refusal_reason(pending, hold, runner)  # the triage and runner holds join the refusals
 
     def stop_for_refusal():
         finish({"decision": "block", "reason": refusal} if refusal else None)
@@ -1988,7 +2142,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not hold else "")
+                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not held else "")
                 finish({"decision": "block", "reason": reason})
             else:
                 finish({"systemMessage": note} if note else None)
@@ -2047,7 +2201,7 @@ def main():
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not held else "")
         if not shape_ok:
             write_marker(hook, last_human_idx)
         finish({"decision": "block", "reason": reason})
