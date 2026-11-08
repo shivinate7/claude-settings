@@ -13796,10 +13796,13 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --re
 # ---- heredoc-keep: a body a run line reads (`> run.sh`, then `bash run.sh`) stays in view. The kept body keeps its
 # closing line in the text, so every line after it is judged as the command it is. Class 1 is the re-walk invariant,
 # class 2 the refusals after a kept body, class 3 the retire forms of the false alarm (a harmless run of a file a
-# body writes), class 4 the true refusals that stay. Red on main: class 3 only. Red on the held
-# fix (the closing line dropped): class 1 and the detached-launch forms of class 2.
+# body writes), class 3b the reads of a data body, class 4 the true refusals that stay, class 5b the readers that
+# class 5 does not name, class 7 the pins for forms with no case. Red on main: class 3 only. Red on the held
+# fix (the closing line dropped): class 1, the detached-launch forms of class 2, class 3b, class 5b, and the class 7
+# pins whose verdict differs from main's.
 FAMILY = "heredoc-keep"
 HK_KEPT = "cat > run.sh <<'EOF'\necho hi\nEOF\n"
+HK_DATA = "cat > notes.md <<'EOF'\nhello\nEOF\n"   # a data body: no command in its call runs it
 
 
 # CLASS 1. The re-walk invariant. For an input whose heredocs all close, the text strip_heredoc_bodies returns for it
@@ -13808,6 +13811,8 @@ HK_KEPT = "cat > run.sh <<'EOF'\necho hi\nEOF\n"
 HK_INVARIANT_INPUTS = (
     ("a kept body, then a detached launch of the file", HK_KEPT + "nohup bash run.sh &"),
     ("two kept bodies, each run later", "cat > a.sh <<'EOF'\necho a\nEOF\ncat > b.sh <<'EOF'\necho b\nEOF\nbash a.sh\nsh b.sh"),
+    ("a kept body and a data body, then a bash run and a background npm start",
+     HK_KEPT + HK_DATA + "bash run.sh\nnpm start &"),
     ("a kept body under the legacy header E-1", "cat > run.sh <<'E-1'\necho hi\nE-1\nnohup bash run.sh &"),
     ("a kept body with a lone apostrophe and comment openers in quotes",
      "cat > run.sh <<'EOF'\necho don't \"# x // y\"\nEOF\nnohup bash run.sh &"),
@@ -13855,6 +13860,11 @@ sh("heredoc-keep: a kept body, a bash run, then gh pr create without --draft, de
    carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 sh("heredoc-keep: a kept body, a bash run, then rm -rf of the working folder, denies",
    HK_KEPT + "bash run.sh\nrm -rf ./*", "deny", "destructive-delete", cwd=NOGIT)
+# A data body between the kept body and its run: the kept body's closing line must survive the data body.
+sh("heredoc-keep: a kept body and a data body, then a bash run and a background npm start, denies",
+   HK_KEPT + HK_DATA + "bash run.sh\nnpm start &", "deny", "detached-launch", cwd=NOGIT)
+sh("heredoc-keep: a kept body and a data body, then a bash run and nohup of the file, denies",
+   HK_KEPT + HK_DATA + "bash run.sh\nnohup bash run.sh &", "deny", "detached-launch", cwd=NOGIT)
 
 
 # CLASS 3. The retire forms of the false alarm. Each is one call: a heredoc write of a data body, then the run of the
@@ -13878,6 +13888,20 @@ for _run, _target in HK_RETIRE_FORMS:
     for _body_label, _body in HK_RETIRE_BODIES:
         sh("heredoc-keep: retire, %s written then run by %s, allowed" % (_body_label, _run),
            _write + _body + "\nEOF\n" + _run, "allow", cwd=NOGIT)
+
+
+# CLASS 3b. A data body that a read shares its line with. Nothing in the call runs the body, so each read allows.
+# Each read has a plain body beside it (P2): the same call with `hello` allows on both trees.
+HK_READ_FORMS = (
+    ("cat notes.md, then a python version probe", "cat notes.md; echo \"v: $(python3 --version)\""),
+    ("a node version probe, then wc of notes.md", "echo $(node --version) && wc -l notes.md"),
+    ("a node version held in V, then cat of notes.md", "V=$(node --version); cat notes.md"),
+)
+for _label, _read in HK_READ_FORMS:
+    sh("heredoc-keep: a body in notes.md, then %s, allows" % _label,
+       "cat > notes.md <<'EOF'\ngh pr create --title x\nEOF\n" + _read, "allow", cwd=NOGIT)
+    sh("heredoc-keep: control, a plain body in notes.md, then %s, allowed" % _label,
+       "cat > notes.md <<'EOF'\nhello\nEOF\n" + _read, "allow", cwd=NOGIT)
 
 
 # CLASS 4. The true refusals stay. A body a shell runs is code: bash reads a heredoc straight, and a file the header
@@ -13913,6 +13937,28 @@ sh("heredoc-keep: reader, a body in f that a cat pipes into python3, denies",
 sh("heredoc-keep: reader, a body in run.sh that no command in this call runs, denies",
    "cat > run.sh <<'EOF'\ngh pr create --title x\nEOF",
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+
+
+# CLASS 5b. Readers that class 5 does not name: a python flag before the `-` or the script name, a launcher before the
+# interpreter, and node or perl that loads a body file by name. Each body holds `gh pr create --title x`, so each run
+# denies on main. Each has a plain-body control beside it (P2).
+HK_READER_FORMS = (
+    ("python3 -W ignore - < f", "f", "python3 -W ignore - < f"),
+    ("python3 -X utf8 - < f", "f", "python3 -X utf8 - < f"),
+    ("a pipe into python3 -X utf8 -", "f", "cat f | python3 -X utf8 -"),
+    ("uv run python - < f", "f", "uv run python - < f"),
+    ("a pipe into stdbuf -oL python3 -", "f", "cat f | stdbuf -oL python3 -"),
+    ("a pipe into flock x python3 -", "f", "cat f | flock x python3 -"),
+    ("node -p require of ./f.js", "f.js", "node -p \"require('./f.js')\""),
+    ("node --eval require of ./f.js", "f.js", "node --eval \"require('./f.js')\""),
+    ("perl -E do of ./f", "f", "perl -E 'do \"./f\"'"),
+)
+for _label, _file, _call in HK_READER_FORMS:
+    sh("heredoc-keep: reader, a body in %s run by %s, denies" % (_file, _label),
+       "cat > %s <<'EOF'\ngh pr create --title x\nEOF\n%s" % (_file, _call), "deny", "draft-pr",
+       cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+    sh("heredoc-keep: control, a plain body in %s run by %s, allowed" % (_file, _label),
+       "cat > %s <<'EOF'\nhello\nEOF\n%s" % (_file, _call), "allow", cwd=NOGIT)
 
 
 # CLASS 6. A run that reaches a file a body writes: a builtin that sources it, or a pipe into ssh or sudo. Each body
@@ -13954,6 +14000,26 @@ HK_FORM_CONTROLS = (
 )
 for _label, _form in HK_FORM_CONTROLS:
     sh("heredoc-keep: control, a plain body in %s, allowed" % _label, _form % "hello", "allow", cwd=NOGIT)
+
+
+# CLASS 7. Pins for forms that had no case. Each pins main's verdict. Main allows a run of a body after `then` or
+# `do`, and denies a body piped into check.py. Each has a plain-body control beside it (P2).
+HK_PIN_FORMS = (
+    ("python3 -W ignore f", "f", "python3 -W ignore f", "deny"),
+    ("a pipe into ssh -p 22 host", "f", "cat f | ssh -p 22 host", "deny"),
+    ("if ./f; then :; fi", "f", "if ./f; then :; fi", "allow"),
+    ("do ./f in a for loop", "f", "for i in 1; do ./f; done", "allow"),
+    ("a pipe into python3 check.py", "f", "cat f | python3 check.py", "deny"),
+)
+for _label, _file, _call, _want in HK_PIN_FORMS:
+    _body = "cat > %s <<'EOF'\ngh pr create --title x\nEOF\n%s" % (_file, _call)
+    if _want == "deny":
+        sh("heredoc-keep: pin, a body in %s run by %s, denies" % (_file, _label), _body, "deny", "draft-pr",
+           cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+    else:
+        sh("heredoc-keep: pin, a body in %s run by %s, allows" % (_file, _label), _body, "allow", cwd=NOGIT)
+    sh("heredoc-keep: control, a plain body in %s run by %s, allowed" % (_file, _label),
+       "cat > %s <<'EOF'\nhello\nEOF\n%s" % (_file, _call), "allow", cwd=NOGIT)
 
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
