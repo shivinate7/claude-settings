@@ -69,7 +69,8 @@ clear it. A paren group that is no cite stays in the sentence, so "The guard (ho
 Prose lines of a paragraph are joined before sentences are split. Fenced text (stale_cites.fenced_lines), quoted text
 and inline code spans (stale_cites.MENTION, CODE_SPAN; a lone file path in them stays) and past tense pass. A forecast
 whose clause asks for the verdict (VERDICT_ASK_WORDS: whether, if, verify, confirm, prove, probe, find out, or a
-label "Unknown:") is a question, not a claim. A send that also fails the owner-question check is refused once, naming both rules, and both checks run
+label "Unknown:"; VERDICT_WH_WORDS: which or what before the actor, as in "Which check will fail?") is a question, not
+a claim. A send that also fails the owner-question check is refused once, naming both rules, and both checks run
 before that refusal. A send with no forecast word and verdict word exits before any import, transcript read or model
 call. The refusal goes through refuse(), so the owner override lifts it. A source that cannot be read allows, with one
 stderr line.
@@ -129,9 +130,11 @@ VERDICT_SUBJECT_WORDS = ("check", "checks", "guard", "guards", "hook", "hooks", 
 # What the verdict verb acts on: a send, a change, a PR, or a pronoun for one. "will catch OSError" acts on an error
 # class, so it is no forecast about a verdict. A passive verb ("will be refused") needs no object.
 VERDICT_OBJECTS = r"(?:it|this|that|them|the send|the change|(?:the |a )?PRs?)\b"
-# A forecast verb with no object ("The test will fail.") counts when it ends the sentence or its clause. It is no
-# claim before an object that is not listed ("will catch OSError"), so this tail never reads past a word.
-VERDICT_NO_OBJECT_END = r"(?=\s*(?:[.!?,;:]|\s[-–—]\s|$))"
+# A forecast verb with no object ("The test will fail.") counts when it ends the sentence or its clause, or when an
+# open paren ("will fail (see ...)") or closing emphasis ("**The guard will refuse**") follows it. It is no claim
+# before an object that is not listed ("will catch OSError"), so this tail never reads past a word. Named limit: a
+# tail that opens with a preposition or a conjunction ("will fail on the old code", "will fail because ...") is no end.
+VERDICT_NO_OBJECT_END = r"(?=\s*(?:[.!?,;:(]|[*_]+(?!\w)|\s[-–—]\s|$))"
 # The one adverb a forecast may carry before its verb ("will probably refuse it"); any word in -ly counts too.
 VERDICT_ADVERBS = ("probably", "still", "also", "never", "then", "definitely", "likely", "surely", "certainly", "just",
                    "now", "again", "always", "only", "really", "even", "already", "ever", "simply", "clearly")
@@ -139,6 +142,9 @@ VERDICT_ADVERBS = ("probably", "still", "also", "never", "then", "definitely", "
 ACTOR_PRONOUNS = ("i", "you", "we", "they", "he", "she", "it")
 # The words that make a forecast's clause an ask: "Verify the check will pass it" asks for the run, it claims nothing.
 VERDICT_ASK_WORDS = ("whether", "if", "verify", "confirm", "prove", "probe", "find out", "unknown")
+# A wh-word asks only when it comes before the actor: "Which check will fail?" asks, while in "The check which runs
+# first will refuse it" the wh-word follows the actor and the claim stands.
+VERDICT_WH_WORDS = ("which", "what")
 VERDICT_CLAIM_REMEDY = (
     "this message forecasts what a check will refuse, block, catch, flag, fail, allow or pass, and the turn did "
     "not run it. Run the check first, and name the file in the sentence (outside any cite) so the run backs it, or add a "
@@ -538,6 +544,7 @@ SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _SUBJECT_WORDS = {w.lower() for w in VERDICT_SUBJECT_WORDS if w != "CI"}  # CI counts only in capitals
 # A forecast in a clause that asks for the verdict is a question, not a claim: "Find out if CI will fail it".
 _ASK_WORDS = re.compile(r"\b(?:%s)\b" % "|".join(w.replace(" ", r"\s+") for w in VERDICT_ASK_WORDS), re.I)
+_WH_WORDS = re.compile(_any_re(VERDICT_WH_WORDS), re.I)
 _UNKNOWN_LABEL = re.compile(r"\bunknown\s*$", re.I)  # "Unknown: the check will refuse it" reports a read that did not run
 
 
@@ -579,9 +586,11 @@ def split_clause(prefix):
 
 def is_ask(prefix):
     """True when the forecast that ends `prefix` is asked, not claimed: its clause holds an ask word ("Verify the check
-    will pass it", "whether the check will refuse it"), or a label "Unknown:" opens it."""
+    will pass it", "whether the check will refuse it"), a wh-word sits before the actor ("Which check will fail?"),
+    or a label "Unknown:" opens it."""
     head, clause = split_clause(prefix)
-    return _ASK_WORDS.search(clause) is not None or _UNKNOWN_LABEL.search(head) is not None
+    return _ASK_WORDS.search(clause) is not None or _UNKNOWN_LABEL.search(head) is not None \
+        or any(has_subject(clause[wh.end():].split()) for wh in _WH_WORDS.finditer(clause))
 
 
 def actor_before(prefix):
