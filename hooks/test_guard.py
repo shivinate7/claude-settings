@@ -14145,6 +14145,15 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
+# A brace word must not crash the builder scan, which would let the call through.
+sh("builder-test: shell sed -i onto a test through a brace list is refused",
+   "sed -i s/x/y/ tests/{x,y}.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell cp onto a test through a brace list is refused",
+   "cp a.py tests/{b,c}.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell mkdir of a brace list under src is allowed",
+   "mkdir -p src/{a,b}", "allow", **BR)
+sh("builder-test: shell cp onto a brace list under src is allowed",
+   "cp a.py src/{b,c}.py", "allow", **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
