@@ -32,8 +32,9 @@ excuses its path. A trailer or line with no reason excuses nothing. A deleted de
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
 the debts folder. The merge tool passes a PR body and a run reader. The CLI reads the body only with `--pr-body-env NAME` (the
-body is env NAME; unset or empty is no body); CI passes it. The flag also gives the run reader, merge.Host.cited_run, and
-judges the cite against --head. Without the flag the CLI reads no body. Each use prints
+body is env NAME; unset or empty is no body); CI passes it. The flag also gives the run reader, merge.Host.cited_run, built
+only when a cite is read, and judges the cite against --head. A cite that cannot be read prints `cite for <slug> not read:
+<why>`, and the finding stays. Without the flag the CLI reads no body. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
@@ -682,15 +683,30 @@ def say(line):
     print(line.encode(enc, "backslashreplace").decode(enc))
 
 
-def run_reader(repo):
-    """The merge tool's Host.cited_run for `repo`: the one home of the run read. None when merge cannot be imported or
-    the Host cannot be built, so a cite excuses nothing."""
-    try:
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "merge"))
-        import merge  # lazy: the merge tool imports this module
-        return merge.Host(cwd=repo).cited_run
-    except Exception:
-        return None
+class RunReader:
+    """The merge tool's Host.cited_run for `repo`, the one home of the run read, built on the first read: a branch with no
+    unexcused finding and a cite never imports merge. A failed import, Host build or read raises to the caller, which reads it
+    as an unreadable run, and is kept in `failed` (url -> why)."""
+
+    def __init__(self, repo):
+        self.repo, self.read, self.failed = repo, None, {}
+
+    def __call__(self, url):
+        try:
+            if self.read is None:
+                sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "merge"))
+                import merge  # lazy: the merge tool imports this module
+                self.read = merge.Host(cwd=self.repo).cited_run
+            return self.read(url)
+        except Exception as e:
+            self.failed[url] = " ".join(str(e).split()) or type(e).__name__
+            raise
+
+
+def unread_cites(reader, pr_body):
+    """One line per debt slug whose cited run the reader failed to read."""
+    import check_debt_retire  # lazy: it imports this module at its top; the one home of cite parsing
+    return ["cite for %s not read: %s" % (slug, reader.failed[url]) for slug, url in check_debt_retire.cites(pr_body).items() if url in reader.failed]
 
 
 def main(argv):
@@ -710,8 +726,9 @@ def main(argv):
             say("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
             return 0
         if a.pr_body_env:
-            problems, notes = check(a.repo, a.upstream, a.head, pr_body=os.environ.get(a.pr_body_env) or "",
-                                    run_state=run_reader(a.repo), retire_head=a.head)
+            body, reader = os.environ.get(a.pr_body_env) or "", RunReader(a.repo)
+            problems, notes = check(a.repo, a.upstream, a.head, pr_body=body, run_state=reader, retire_head=a.head)
+            notes += unread_cites(reader, body)
         else:
             problems, notes = check(a.repo, a.upstream, a.head)
     except Unknown as e:
