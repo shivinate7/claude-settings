@@ -2180,3 +2180,7 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- report-sha-diff-header-false-alarm: a pasted diff header `index 054535674..3e943ee3c` judges blob ids as commits, so report-sha-missing refuses a report that quotes it (hooks/guard.py `report_shas`). Decision: agent-report-shas-resolve.
+- report-sha-compare-url-right-side: a compare URL `.../compare/abc1234...def5678` judges the right side and skips the left, so another repo's compare link can refuse (hooks/guard.py `report_shas`). Decision: agent-report-shas-resolve.
+- report-sha-ref-range-unjudged: a range with a ref on one side (`main..sha`, `sha..HEAD`, `sha..origin/main`) is not judged (hooks/guard.py `report_shas`). Decision: agent-report-shas-resolve.
+- report-sha-quoted-forms-pass: a made-up sha passes inside `"..."` (JSON `{"commit": "sha"}` too), as `head=<sha>`, as a 13-39 hex token, or after a lone `"` on its line, by the lane's token rulings. Decision: agent-report-shas-resolve.
