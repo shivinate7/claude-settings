@@ -2907,10 +2907,14 @@ class PrBase(unittest.TestCase):
         self.r.sh("config", "branch.lane.gh-merge-base", "pr-base")
         self.assert_theirs_scope()
         rc, text = self.run_default({"GITHUB_BASE_REF": ""})
+        self.assertIsNone(EMPTY_BASE.search(text), "GITHUB_BASE_REF='' was read as a candidate: a note names origin/ with no branch: %r" % text)
+        source = [x for x in text.splitlines() if "origin/pr-base" in x and "gh-merge-base" in x]
+        self.assertTrue(source, "the note does not name origin/pr-base and the gh-merge-base source: %r" % text)
         self.assertIn("added by pr-base", text, "GITHUB_BASE_REF='' was not read as unset: the configured pr-base was not used")
         self.assertEqual(rc, 1, "the run printed the base's FAIL but exited %d, not 1" % rc)
         self.r.sh("config", "--unset", "branch.lane.gh-merge-base")
         rc, text = self.run_default({"GITHUB_BASE_REF": ""})
+        self.assertIsNone(EMPTY_BASE.search(text), "with no base named, a note names origin/ with no branch: %r" % text)
         notes = [x for x in text.splitlines() if "origin/main" in x and "unknown" in x.lower()]
         self.assertTrue(notes, "with no base named, no line says the base is unknown and names origin/main: %r" % text)
         self.assertEqual(rc, 0, "the default run on origin/main exited %d on a lane origin/main holds" % rc)
