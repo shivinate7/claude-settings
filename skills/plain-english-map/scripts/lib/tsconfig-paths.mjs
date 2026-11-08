@@ -10,6 +10,9 @@ const EXTENDS_NOT_FOUND = 6053; // `extends` names a package that is not install
 // error (an unknown or bad compiler option, such as 5023 or 6046): TypeScript drops that option and keeps the rest.
 const EXTENDS_FAULTS = new Set([EXTENDS_NOT_FOUND, 5083 /* cannot read the file */, 18000 /* circular */]);
 
+// TypeScript turns every `\` in a path into `/` on every platform (its `normalizeSlashes`) and asserts that the names it is given match.
+// So the root and the file name handed to TypeScript, and the root `rel` measures from, take the same conversion.
+const slashes = (p) => p.replace(/\\/g, '/');
 const rel = (root, abs) => path.relative(root, abs).split(path.sep).join('/');
 
 /**
@@ -19,17 +22,19 @@ const rel = (root, abs) => path.relative(root, abs).split(path.sep).join('/');
  */
 export const readPathAliases = (root) => {
   const file = path.join(root, 'tsconfig.json');
+  const tsRoot = slashes(root);
+  const tsFile = slashes(file);
   let text;
   try { text = readFileSync(file, 'utf8'); } catch (e) {
     return e.code === 'ENOENT' ? { ok: true, aliases: null } : { ok: false, reason: `tsconfig.json cannot be read: ${e.code ?? e.message}` };
   }
   const say = (d) => ts.flattenDiagnosticMessageText(d.messageText, ' ');
   try {
-    const { config, error } = ts.readConfigFile(file, () => text);
+    const { config, error } = ts.readConfigFile(tsFile, () => text);
     if (error) return { ok: false, reason: `tsconfig.json cannot be parsed: ${say(error)}` };
     // `readDirectory` returns nothing, so the parse never walks the `include` globs of the host.
     const host = { useCaseSensitiveFileNames: true, readDirectory: () => [], fileExists: ts.sys.fileExists, readFile: ts.sys.readFile };
-    const parsed = ts.parseJsonConfigFileContent(config, host, root, undefined, file);
+    const parsed = ts.parseJsonConfigFileContent(config, host, tsRoot, undefined, tsFile);
     const errors = parsed.errors.filter((d) => d.code !== NO_INPUTS);
     const { baseUrl, paths, pathsBasePath } = parsed.options;
     const chain = errors.find((d) => EXTENDS_FAULTS.has(d.code));
@@ -44,9 +49,9 @@ export const readPathAliases = (root) => {
     return {
       ok: true,
       aliases: {
-        baseUrl: baseUrl === undefined ? null : rel(root, baseUrl),
+        baseUrl: baseUrl === undefined ? null : rel(tsRoot, baseUrl),
         paths: paths ?? null,
-        pathsBase: rel(root, baseUrl ?? pathsBasePath),
+        pathsBase: rel(tsRoot, baseUrl ?? pathsBasePath),
       },
     };
   } catch (e) {
