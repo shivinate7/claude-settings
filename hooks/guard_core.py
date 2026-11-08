@@ -1214,9 +1214,10 @@ def _compound_delta(segment: str, wide: bool = False) -> int:
     return delta
 
 
-def _sets_errexit(tokens, sure: bool) -> bool | None:
+def _sets_errexit(tokens, sure: bool, option: str = "errexit", letter: str = "e") -> bool | None:
     """True or False when the segment holds a `set` that turns `-e` (or `-o errexit`) on or off, None
-    when it holds none. A `set +e` counts wherever it stands, in a group, an `if`, a function or a
+    when it holds none. OPTION and LETTER name another option the same way: `-o pipefail` has no letter
+    (`letter=""`), and git_push_after_check_hit reads it with this function. A `set +e` counts wherever it stands, in a group, an `if`, a function or a
     `( ... )`, since it may run: errexit is then off, which fails closed. A `set -e` counts only when
     `sure` (the caller says the segment is sure to run) and the `set` is the segment's first word.
     Options end at the first word that is not one: `set -- -e` sets no option, and `set -- ""` ends
@@ -1233,9 +1234,9 @@ def _sets_errexit(tokens, sure: bool) -> bool | None:
                 break
             flags = token[1:]
             on = token[0] == "-"
-            changes = "e" in flags
+            changes = bool(letter) and letter in flags
             if "o" in flags:
-                changes = changes or tokens[at:at + 1] in (["errexit"], ["errexit)"])
+                changes = changes or tokens[at:at + 1] in ([option], [option + ")"])
                 at += 1   # `-o` takes the next word as the option's name
             if changes and not on:
                 state = False

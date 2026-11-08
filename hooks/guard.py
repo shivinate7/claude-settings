@@ -356,7 +356,7 @@ while True:
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             CD_WORDS, _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
-            _compound_delta, _exits_on_failure, subshell_depth,
+            _compound_delta, _exits_on_failure, _sets_errexit, segment_parens, subshell_depth,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -4846,9 +4846,12 @@ def git_push_after_check_hit(command: str) -> str:
     they do not cover (`echo $(make x) || exit 1`), so it refuses. An `exit` inside a `( )` group leaves only that
     group, so neither it nor an exit tail inside one clears anything. Any other command refuses, a subshell
     included. The walk ends and passes at the start of the command line.
-    A `||` or `|` before the start of the push's chain is no `;` join and passes, except `A || echo x && push`
-    (`_push_hidden_by_tail`): the tail after the `||` runs when the check A fails, and may succeed, so the chain runs on to the push. A dry run
+    A `||` or `|` before the start of the push's chain is no `;` join. It still refuses when the push runs on a
+    failed check or whatever a check did (`_push_hidden_by_tail`): `A || echo x && push`, `A || push`,
+    `A || { echo x && push; }`, and `A | B && push` unless `set -o pipefail` is sure to run first. An interpreter
+    heredoc's body is dropped before the walk, so a lone quote in it hides no `;`. A dry run
     (`git_write_verb`) and an unreadable segment pass."""
+    command = strip_heredoc_bodies(command, shells_only=True)   # an interpreter's body is data: a lone quote in it hides no `;`
     ends = []
     segments = split_segments(command, ends)
     if len(ends) < len(segments):
@@ -4904,20 +4907,27 @@ def git_push_after_check_hit(command: str) -> str:
 
 
 def _push_hidden_by_tail(segments, ends, start: int, position: int) -> bool:
-    """True for `A || T && ... && push`, where `segments[start]` starts the push's `&&` chain and a `||` stands
-    before it. T is the first step after the `||` (the head of its `|` pipeline): when T is no exit, T runs on a
-    failed check A, may succeed (`echo x`, `command echo x`, `(echo x)`, `echo x | cat`, `cat log`), and the `&&`
-    chain goes on to the push whatever stands between them. A is a check when its list holds a command that is
-    not inert. A bare `exit` as T stops the shell on A's failure, and hides only a substitution it cannot read
-    (`_exit_hides_check`). A `{` group as T is not read, and neither is a push that is T itself."""
+    """True when the push's `&&` chain, which `segments[start]` starts, runs whatever a check before it did, or runs
+    only when that check fails. Three shapes:
+    - `A | B && push`: a pipe's status is its last stage's, so the `&&` after it ignores A (`_pipe_hides_check`).
+    - `A || T && ... && push`, with a `||` before the chain. T is the first step after the `||` (the head of its
+      `|` pipeline): when T is no exit, T runs on a failed check A, may succeed (`echo x`, `command echo x`,
+      `(echo x)`, `echo x | cat`, `cat log`), and the `&&` chain goes on to the push whatever stands between them.
+      A bare `exit` as T stops the shell on A's failure, and hides only a substitution it cannot read
+      (`_exit_hides_check`).
+    - `A || push` and `A || { ...; push; }`: the push is T, or stands in the `{` group that is T, so it runs only
+      when A fails. A `{` group that closes before the push is not read.
+    A is a check when its list holds a command that is not inert."""
     head = start
     while head > 0 and ends[head - 1] in ("&&", "|"):
         head -= 1
-    if head == 0 or ends[head - 1] != "||" or head >= position:
+    if _pipe_hides_check(segments, ends, head, position):
+        return True
+    if head == 0 or ends[head - 1] != "||":
         return False
     words = [word.lstrip("(") for word in segment_tokens(segments[head]) or []]
     words = [word for word in words if word]
-    if words[:1] == ["{"]:
+    if words[:1] == ["{"] and sum(_compound_delta(part, wide=True) for part in segments[head:position + 1]) <= 0:
         return False
     if words[:1] == ["exit"]:
         return _exit_hides_check(segments, ends, head - 1)[1]
@@ -4925,6 +4935,38 @@ def _push_hidden_by_tail(segments, ends, start: int, position: int) -> bool:
     while left > 0 and ends[left - 1] in ("&&", "||", "|"):
         left -= 1
     return any(_push_segment_inert(part) is False for part in segments[left:head])
+
+
+def _pipe_hides_check(segments, ends, head: int, position: int) -> bool:
+    """True when a `|` stands in the `&&` chain `segments[head:position]` before the push, and a stage before the
+    last runs a check: the pipeline's status is its last stage's, so `pytest -q | tail -5 && push` runs the push
+    when pytest failed. `set -o pipefail` sure to run first (`_pipefail_sure`) makes the pipe fail with the check.
+    A call of the version-control tool is no check here: it is the step the chain carries on, as in
+    `<vcs> commit | tail -1 && <vcs> push`."""
+    for at in range(head, position):
+        if ends[at] != "|" or _push_segment_inert(segments[at]) is not False or git_calls(segments[at]):
+            continue
+        return not _pipefail_sure(segments, ends, head)
+    return False
+
+
+def _pipefail_sure(segments, ends, upto: int) -> bool:
+    """True when `set -o pipefail` ran before `segments[upto]` and is sure to run: a top-level segment whose first
+    word is `set`, not in a group, `if`, loop or `( )`, not after `&&` or `||`, not piped or in the background. A
+    `set +o pipefail` turns it off wherever it stands (`_sets_errexit` reads the option)."""
+    on, depth, parens = False, 0, 0
+    for at in range(upto):
+        segment = segments[at]
+        marks = segment_parens(segment)
+        prev_end = ends[at - 1] if at else ""
+        sure = (not depth and not parens and not marks and prev_end not in ("&&", "||")
+                and "|" not in (ends[at], prev_end) and ends[at] not in ("&&", "||")
+                and not segment.rstrip().endswith("&"))
+        flipped = _sets_errexit(segment_tokens(segment) or [], sure, option="pipefail", letter="")
+        on = on if flipped is None else flipped
+        depth += _compound_delta(segment, wide=True)
+        parens += marks.count("(") - marks.count(")")
+    return on
 
 
 def _status_is_own(segment: str) -> bool:
@@ -4964,7 +5006,8 @@ def _cannot_fail(segment: str) -> bool:
     words = [word for word in words if word]
     while words[:1] in (["command"], ["builtin"]):
         words = words[1:]
-    return bool(words) and basename(words[0]) in ("echo", "true", ":") and not _runs_substitution(words)
+    return (bool(words) and basename(words[0].rstrip(")")) in ("echo", "true", ":")   # `(true)` closes on its head word
+            and not _runs_substitution(words))
 
 
 def _push_exit_tails(segments, ends):
