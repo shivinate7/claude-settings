@@ -26,6 +26,7 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 import check_glossary  # noqa: E402  the glossary the words group reads; a case patches it in this process
+import inline_code  # noqa: E402  the one home of the inline-code mask (lint/inline_code.py)
 import layout  # noqa: E402
 import rule_audit  # noqa: E402  the live anchors the supersede group reads; a case patches it in this process
 
@@ -2034,6 +2035,24 @@ def item_for(out, where):
     """The item line that names `where`, a file and line, or None."""
     pattern = re.compile(re.escape(where) + r"(?!\d)")
     return next((line for line in out.splitlines()[1:] if pattern.search(line)), None)
+
+
+class CodeMask(unittest.TestCase):
+    """plain_words reads the words of prose that no code span holds. Its span mask is the one inline-code mask."""
+
+    def test_a_code_mask_opener_inside_a_tick_run_masks_no_words(self):  # red on the old code: a span starts mid-run
+        import compliance_probes
+        text = "```a` b``y"
+        self.assertEqual([m.group() for m in inline_code.INLINE_CODE_RE.finditer(text)], [],
+                         "scope: the one inline-code mask opens no code span in this text")
+        self.assertEqual(compliance_probes.plain_words(text), ["a", "b", "y"],
+                         "plain_words masks a code span that the inline-code mask does not open, so a and b are hidden")
+
+    def test_a_code_mask_closed_spans_are_masked_as_before(self):  # green control: spans that close are masked
+        import compliance_probes
+        self.assertEqual(compliance_probes.plain_words("x `y` z"), ["x", "z"], "a closed code span is masked")
+        self.assertEqual(compliance_probes.plain_words("``a`b`` c"), ["c"],
+                         "a double-tick span with a lone tick inside is masked")
 
 
 class Restates(unittest.TestCase):

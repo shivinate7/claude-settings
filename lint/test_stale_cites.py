@@ -1411,6 +1411,28 @@ class ReportTests(StaleCase):
                          "a backticked mention, `<!-- rule:fake -->`, is named as an anchor\n" + out)
         self.assertEqual(rc, 0, out)
 
+    def test_a_code_mask_anchor_inside_a_fence_is_not_reported(self):
+        # Red on the code-mask change: a fenced anchor added to CLAUDE.md is reported as a new anchor.
+        base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
+        head_claude = ("Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n\n"
+                       "```\nSee <!-- rule:fenced-guard --> for the form.\n```\n")
+        mech = mechanisms({
+            "git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"},
+            "fenced-guard": {"kind": "guard", "ref": "fenced-guard-ref"},
+        })
+
+        def change(repo):
+            write(repo, CLAUDE, head_claude)
+            commit(repo)
+        rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
+        self.assertEqual(touched(rng), {CLAUDE}, "scope: only CLAUDE.md changed")
+        rc, out = self.run_check(rng)
+        self.assertTrue(any("main-moves-by-pull-request" in line for line in slug_lines(out, "git-main-only-by-pr")),
+                        "scope: the real anchor, reworded in its own block, is not named\n" + out)
+        self.assertFalse(named(out, "fenced-guard") or "fenced-guard-ref" in out,
+                         "an anchor inside a fenced block is reported as an anchor\n" + out)
+        self.assertEqual(rc, 0, out)
+
     def test_a_malformed_mechanisms_file_prints_one_unknown_line_and_keeps_the_exit_code(self):
         base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
         head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
@@ -2278,6 +2300,19 @@ class AnchorSentenceTests(unittest.TestCase):
         red = "The gate reads `alpha\n<!-- rule:cross-anchor --> holds the line `beta\n"  # a lone backtick on each of two lines
         self.assertEqual(self.stale.anchor_sentences(red), {"cross-anchor": "The gate reads `alpha"},
                          "a code span crosses a line break and hides the anchor from anchor_sentences")
+
+    def test_a_code_mask_anchor_inside_a_fence_is_no_anchor(self):
+        # Red on the code-mask change: the fence's lines no longer hide the anchor. Scope first: no blank line
+        # splits the fence from its anchor, so the fence alone decides it.
+        text = "Run it like this:\n```\nSee <!-- rule:fenced-guard --> for the form.\n```\n"
+        self.assertNotIn("\n\n", text, "scope: the fence and its anchor share one block")
+        self.assertEqual(self.stale.anchor_sentences(text), {},
+                         "an anchor inside a fenced block is counted as an anchor")
+
+    def test_a_code_mask_anchor_outside_a_fence_is_an_anchor(self):  # green control: the same anchor with no fence
+        control = "Run it like this:\nSee <!-- rule:fenced-guard --> for the form.\n"
+        self.assertEqual(self.stale.anchor_sentences(control), {"fenced-guard": "Run it like this: See"},
+                         "control: an anchor outside a fence is found, with the prose before it")
 
 
 class CitedExcerptTests(unittest.TestCase):
