@@ -413,10 +413,22 @@ def unstaged_edit_hit(where, args) -> str:
     return ", ".join(shown) + (" and %d more" % more if more else "")
 
 
+# Git subcommands that change the index or the work tree. An earlier segment of the same command that
+# runs one makes the state at guard time stale (`git add -A && git commit`), so the commit passes.
+INDEX_CHANGING_SUBCOMMANDS = {
+    "add", "stage", "rm", "mv", "restore", "reset", "checkout", "switch", "apply", "stash", "merge",
+    "rebase", "cherry-pick", "revert", "pull", "clean", "commit", "am", "read-tree", "update-index",
+}
+
+
 def unstaged_edit_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
     """The left-out paths when `segments[number]` is a plain `git commit` that leaves a tracked edit
-    unstaged beside a staged path in the same folder, else ''."""
+    unstaged beside a staged path in the same folder, else ''. A commit that follows a git call that
+    changes the index in the same command passes: its state is not read yet."""
     site = _commit_site(segments, number, cwd, ends)
+    if site and any(subcommand in INDEX_CHANGING_SUBCOMMANDS
+                    for earlier in segments[:number] for subcommand, _args in git_calls(earlier)):
+        return ""
     return unstaged_edit_hit(site[1], site[0]) if site else ""
 
 
