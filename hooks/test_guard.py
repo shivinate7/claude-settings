@@ -23073,10 +23073,12 @@ spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: 
 # Rule scratchpad-owner, more cases. Each case is red on head where its label says asked, allowed or passes,
 # and each control beside it stays green: the writer runs the same call, so a red case names this rule's gap.
 
-SPO_PROBE_TEXT = "print(2)\n"
+# A different length from PY_TEXT, so a record keyed on size tells the two texts apart.
+SPO_OVERWRITE_TEXT = "print(1234)\n"
+# The owner entry points and the sidecar helpers they reach. The scratchpad-root helpers are not named: the
+# shared-tree rules call them too, and a call from those rules is not an owner call.
 SPO_HELPERS = ("scratchpad_agent", "scratchpad_writes", "scratchpad_owner_write", "scratchpad_owner_hit",
-               "session_scratchpad_root", "under_session_scratchpad", "scratchpad_writer_record",
-               "scratchpad_record_writer", "scratchpad_writer_of")
+               "scratchpad_writer_record", "scratchpad_record_writer", "scratchpad_writer_of")
 # The guard run as the harness runs it, with the disk calls of the scratchpad-owner helpers counted. A call
 # counts while a helper is on the stack, so the count holds whichever module imported the helper.
 SPO_COUNTING_GUARD = '''import atexit, builtins, json, os, runpy, sys, tempfile
@@ -23200,29 +23202,34 @@ def spo_approved_case():
         return ov_call(tool, tool_input, fx["work"], config, fx["sid"], seconds, agent_id=SPO_OTHER,
                        temp=fx["tmp"])
 
-    overwrite = {"file_path": probe, "content": SPO_PROBE_TEXT}
+    overwrite = {"file_path": probe, "content": SPO_OVERWRITE_TEXT}
     got, reason = call("Write", overwrite, 0)
     problems.append(spo_asked("approved, B's overwrite before the override", got, reason,
                               (fx["scratch"], "probe2.py")))
     note = ov_type(config, fx["sid"], "override 15m", 30)
     got, reason = call("Write", overwrite, 60)
     problems.append(spo_allowed("approved, B's overwrite under the override", got, reason))
+    if got == "allow":
+        write(probe, SPO_OVERWRITE_TEXT)   # the approved act lands its bytes, as the tool would
     later = OV_TIMED_SECONDS + 120   # the override typed at 30 s ends 15 min on
     got, reason = call("Bash", {"command": "python3 %s" % probe}, later)
     problems.append(spo_allowed("approved, B's run after the override ended", got, reason))
     got, reason = call("Write", overwrite, later + 60)
     problems.append(spo_allowed("approved, B's rewrite after the override ended", got, reason))
+    if got == "allow":
+        write(probe, SPO_OVERWRITE_TEXT)
     if note and any(problems):
         problems.append("the override was not typed through override.grant: " + note)
     return spo_result(problems, "an approved overwrite moves the record: B's later run and rewrite are allowed")
 
 
-def spo_top_write(fx, probe):
-    return spo_call(fx, "Write", None, file_path=probe, content=SPO_PROBE_TEXT)
+def spo_top_write(fx, probe, name):
+    return spo_wrote(fx, name, None, probe, SPO_OVERWRITE_TEXT)
 
 
-def spo_top_redirect(fx, probe):
-    return spo_run(fx, None, "echo 'print(2)' > %s" % probe)
+def spo_top_redirect(fx, probe, name):
+    return spo_wrote(fx, name, None, probe, SPO_OVERWRITE_TEXT, tool="Bash",
+                     command="echo 'print(1234)' > %s" % probe)
 
 
 def spo_top_level_case(tag, name, overwrite):
@@ -23234,8 +23241,7 @@ def spo_top_level_case(tag, name, overwrite):
     got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
     problems.append(spo_asked(name + ", control before the overwrite", got, reason,
                               (fx["scratch"], "probe2.py")))
-    got, reason = overwrite(fx, probe)
-    problems.append(spo_allowed(name + ", the top-level overwrite", got, reason))
+    problems += overwrite(fx, probe, name)
     got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
     problems.append(spo_allowed(name + ", B's run after it", got, reason))
     return spo_result(problems, "a top-level overwrite leaves no record: B's run after it is allowed")
@@ -23248,7 +23254,7 @@ def spo_removed_case():
     fx = spo_fixture("removed")
     probe = os.path.join(fx["scratch"], "probe2.py")
     problems = [spo_scope(fx, "removed", probe)] + spo_wrote(fx, "removed", SPO_WRITER, probe, PY_TEXT)
-    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=probe, content=SPO_PROBE_TEXT)
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=probe, content=SPO_OVERWRITE_TEXT)
     problems.append(spo_asked("removed, control before the removal", got, reason, (fx["scratch"], "probe2.py")))
     os.remove(probe)
     if os.path.exists(probe):
