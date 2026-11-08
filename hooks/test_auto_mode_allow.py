@@ -104,6 +104,7 @@ CI_REFUSED = (("default branch", "default branch"),
               ("branch this session did not visibly push", "branch this session did not visibly push"),
               ("run_workflow", "`run_workflow`"), ("rerun_failed_jobs", "`rerun_failed_jobs`"),
               ("delete_workflow_run_logs", "`delete_workflow_run_logs`"),
+              ("any other method of that tool", "any other method of that tool"),
               ("repo outside shivinate7", "outside shivinate7"))
 # (name, case-insensitive pattern) for the run the Own CI Run Cancel Covers text must name.
 CI_SCOPE = (("run on a branch this session pushed earlier",
