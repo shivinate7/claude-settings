@@ -11,7 +11,8 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
             A missing interpreter, a failed start, or a timeout is unknown.
   prose     a Retire that names no runnable check holds the close, unless the PR body cites a run:
             `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
-            green and on the PR head or a commit above it. A cite also clears a check that could not run here (unknown);
+            green and on the PR head or a commit above it. A run on a commit in base..head (a lane commit of the batch) is
+            deferred to merge: CI excuses it with a note, and the merge tool holds it on the head's own checks run. A cite also clears a check that could not run here (unknown);
             a red check is never cleared by a cite.
 
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
@@ -103,18 +104,70 @@ def run_span(wt, span, timeout):
     return None
 
 
+def key_lines(pr_body):
+    """The `Retire-run:` and `Drops-lines:` lines of the PR body's last counted paragraph, trailing space cut, in order. The one home of
+    which lines a batch's integration PR must carry for its lanes (the merge tool copies them there)."""
+    return [m.group(0).rstrip() for m in re.finditer(r"^(?:%s|%s):.*$" % (CITE, undo.TRAILER), undo.last_paragraph(pr_body), re.I | re.M | re.ASCII)]
+
+
+def cite_of(value):
+    """(slug, run URL) of the text after `Retire-run:`, or None. The one home of that parse."""
+    m = CITE_LINE.match(value)
+    return (m.group(1), m.group(2)) if m else None
+
+
 def cites(pr_body):
     """{debt slug: run URL} from the `Retire-run: <slug> -- <url>` lines of the PR body's last paragraph. The last cite of a slug wins."""
     res = {}
     for line in re.findall(r"^" + CITE + r":(.*)$", undo.last_paragraph(pr_body), re.I | re.M | re.ASCII):
-        m = CITE_LINE.match(line)
-        if m:
-            res[m.group(1)] = m.group(2)
+        if (got := cite_of(line)):
+            res[got[0]] = got[1]
     return res
 
 
-def judge_run(wt, head, url, run_state):
-    """(kind, text) for a cited run, or None when it is green on the head or a commit above it."""
+def line_key(line):
+    """What a key line says, so two lines that say the same thing compare equal: ("retire", slug) for a cite, ("drops", path) for an
+    excuse, and ("line", the text) for a key line with no reason, which excuses nothing."""
+    name, _, value = line.partition(":")
+    got = cite_of(value) if name.strip().lower() == CITE.lower() else undo.drop_of(value)
+    return (("retire" if name.strip().lower() == CITE.lower() else "drops"), got[0]) if got else ("line", " ".join(line.split()))
+
+
+class Deferred:
+    """A cite held for the merge: the run is green on `sha`, in base..head (a lane commit of the batch). Neither a Finding nor a pass."""
+
+    def __init__(self, sha):
+        self.sha = str(sha)
+
+
+def judge_head_run(head, url, head_run):
+    """(kind, text) when the head's own checks run does not hold a deferred cite, else None. head_run(sha) -> (conclusion, url) or None."""
+    try:
+        got = head_run(head)
+    except Exception as e:  # a failed read: the head's run is unknown, never clear
+        return "unknown", "the cite %s is deferred to merge, and the head's own checks run could not be read: %s" % (url, " ".join(str(e).split()))
+    if got is None:
+        return "unknown", "the cite %s is deferred to merge, and the PR head %s has no checks run" % (url, head[:9])
+    conclusion, run = got
+    if conclusion is None:
+        return "unknown", "the cite %s is deferred to merge, and the head's own checks run %s is still pending" % (url, run)
+    if conclusion != "success":
+        return "red", "the cite %s is deferred to merge, and the head's own checks run %s ended %s, not success" % (url, run, conclusion)
+    return None
+
+
+def ancestry(wt, a, b):
+    """True when commit `a` is an ancestor of `b` (or equal), False when it is not, None when git could not tell."""
+    rc = _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", a, b], capture_output=True).returncode
+    return True if rc == 0 else False if rc == 1 else None
+
+
+def judge_run(wt, head, url, run_state, base, head_run=None, defer=False):
+    """(kind, text) for a cited run, None when it is green on the head or a commit above it, or a Deferred when it is green on a
+    commit in base..head (a lane commit of the batch) and the mode defers. `base` is the base the PR is judged against; it is required,
+    so no call falls back to deferring any ancestor. Merge mode (head_run given) holds that cite on the head's own checks run: None when
+    it ended success, else (kind, text) that names the run. CI mode (defer, no head_run) returns the Deferred. With neither, it is red.
+    A commit the base already holds is a main run: red. A failed ancestor read is unknown, never "not an ancestor"."""
     if run_state is None:
         return "unknown", "no reader for the cited run %s" % url
     try:
@@ -123,70 +176,129 @@ def judge_run(wt, head, url, run_state):
         return "unknown", "the cited run %s could not be read: %s" % (url, " ".join(str(e).split()))
     if conclusion != "success":
         return "red", "the cited run %s ended %s, not success" % (url, conclusion)
-    rc = _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", head, str(sha)], capture_output=True).returncode
-    if rc == 0:
+    sha = str(sha)
+    unknown = "unknown", "the cited run %s is on %s, which this checkout does not hold, or git could not place it against the head %s and the base" % (url, sha[:9], head[:9])
+    above = ancestry(wt, head, sha)
+    if above:
         return None
-    if rc == 1:
-        return "red", "the cited run %s is on %s, not on the PR head %s or a commit above it" % (url, str(sha)[:9], head[:9])
-    return "unknown", "the cited run %s is on %s, which this checkout does not hold" % (url, str(sha)[:9])
+    if above is None:
+        return unknown
+    below = ancestry(wt, sha, head)
+    if below is None:
+        return unknown
+    if below:
+        on_base = ancestry(wt, sha, base)
+        if on_base is None:
+            return unknown
+        if on_base:
+            return "red", "the cited run %s is on %s, a commit main already holds below the PR head %s: a main run, not on the PR head or a commit above it" % (url, sha[:9], head[:9])
+        if head_run is not None or defer:
+            return judge_head_run(head, url, head_run) if head_run is not None else Deferred(sha)
+    return "red", "the cited run %s is on %s, not on the PR head %s or a commit above it" % (url, sha[:9], head[:9])
 
 
-def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False):
-    """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
-    run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
-    isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt`;
-    off, a test runs in `wt` itself."""
+SKIP = object()  # a rename inside the debts folder with its Retire unchanged: not a close
+
+
+def closes(wt, base_ref, head):
+    """(debt, closed, head sha, merge base, tracked files) for the debts `head` closes against `base_ref`, or None when it closes none. Raises Unknown."""
     try:
         debt = records.debt_file(wt)
     except layout.LayoutError as e:
         raise Unknown("the debts folder is not known: %s" % e)
-    # A rename inside the folder is a close only when its Retire changed (decided below, once the texts are read).
+    # A rename inside the folder is a close only when its Retire changed (decided in judge_close, once the texts are read).
     closed = [(old, new) for status, old, new in records.changes(wt, base_ref, head)[1]
               if debt(old) and (status == "D" or (status == "R" and (not debt(new) or new != old)))]
     if not closed:
-        return []
+        return None
     head = records.git_names(wt, "rev-parse", head + "^{commit}")[0].strip()
     mb = records.git_names(wt, "merge-base", base_ref, head)[0].strip()
     tracked = set(records.git_names(wt, "ls-tree", "-r", "-z", "--name-only", head))
+    return debt, closed, head, mb, tracked
+
+
+def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, head_run=None, defer=False):
+    """The one judgment of a closed debt: a Finding, None when its Retire holds, a Deferred when only a deferred cite holds it, or SKIP when the rename is no close."""
+    slug = os.path.basename(old)[:-3]
+    try:
+        lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
+    except Unknown:
+        lines = records.show(wt, mb, old)  # the base tip no longer holds the file: the fork point's
+    text = retire_text(lines)
+    if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
+        return SKIP
+    todo = spans(text, tracked)
+    if todo:
+        got = None
+        for span in todo:
+            with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
+                one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
+            if one and one[0] == "red":
+                got = one
+                break
+            got = got or one  # an unknown sticks: only a red outranks it, whatever the order
+        if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
+            cite = judge_run(wt, head, cited[slug], run_state, base_ref, head_run, defer)
+            if cite is None or isinstance(cite, Deferred):
+                return cite
+            got = cite
+        if got:
+            return Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text))
+        return None
+    got = judge_run(wt, head, cited[slug], run_state, base_ref, head_run, defer) if slug in cited else ("prose", None)
+    if got is None or isinstance(got, Deferred):
+        return got
+    if got[0] == "prose":
+        got = "prose", ("debt %s closes with a Retire that names no runnable check. Retire: %s\n"
+                        "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`."
+                        % (slug, text or "(no Retire line)", CITE, slug))
+    else:
+        got = got[0], "debt %s: %s" % (slug, got[1])
+    return Finding(slug, *got)
+
+
+def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False, head_run=None, defer=False):
+    """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
+    run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
+    head_run(sha) -> (conclusion, run URL) of the head's own checks run, None when it has none, or raises: merge mode. A cite on a commit
+    in base..head (a lane commit of the batch) holds only when that run ended success. defer: CI mode. With no head_run, that cite is deferred to merge and is no finding.
+    With neither, it is red (a deferral is never assumed).
+    isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt`;
+    off, a test runs in `wt` itself."""
+    got = closes(wt, base_ref, head)
+    if not got:
+        return []
+    debt, closed, head, mb, tracked = got
     cited = cites(pr_body)
     found = []
     for old, new in closed:
-        slug = os.path.basename(old)[:-3]
-        try:
-            lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
-        except Unknown:
-            lines = records.show(wt, mb, old)  # the base tip no longer holds the file: the fork point's
-        text = retire_text(lines)
-        if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
-            continue  # a rename inside the folder with its Retire unchanged
-        todo = spans(text, tracked)
-        if todo:
-            got = None
-            for span in todo:
-                with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
-                    one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
-                if one and one[0] == "red":
-                    got = one
-                    break
-                got = got or one  # an unknown sticks: only a red outranks it, whatever the order
-            if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
-                if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
-                    continue
-                got = cite
-            if got:
-                found.append(Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text)))
-            continue
-        got = judge_run(wt, head, cited[slug], run_state) if slug in cited else ("prose", None)
-        if got is None:
-            continue
-        if got[0] == "prose":
-            got = "prose", ("debt %s closes with a Retire that names no runnable check. Retire: %s\n"
-                            "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`."
-                            % (slug, text or "(no Retire line)", CITE, slug))
-        else:
-            got = got[0], "debt %s: %s" % (slug, got[1])
-        found.append(Finding(slug, *got))
+        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, head_run, defer)
+        if isinstance(one, Finding):
+            found.append(one)
     return found
+
+
+def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None, head_run=None, defer=False):
+    """{debt path at base: reason} for each deleted debt whose slug the PR body cites and whose judgment gives no Finding (the
+    silent-undo check excuses that path's delete). A rename out of the folder is no delete: the file's lines live on at the new
+    path. paths, when given, limits the judged closes: an unflagged or uncited close is never judged, so its run is never read.
+    A deferred cite (see check) is excused with a reason that says `deferred to merge` and names the lane tip. Raises Unknown."""
+    cited = cites(pr_body)
+    got = closes(wt, base_ref, head) if cited else None
+    if not got:
+        return {}
+    debt, closed, head, mb, tracked = got
+    res = {}
+    for old, new in closed:
+        slug = os.path.basename(old)[:-3]
+        if new != old or slug not in cited or (paths is not None and old not in paths):
+            continue
+        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, head_run, defer)
+        if one is None:
+            res[old] = "%s: %s -- %s, the debt-close check holds" % (CITE, slug, cited[slug])
+        elif isinstance(one, Deferred):
+            res[old] = "%s: %s -- %s, deferred to merge: the run is on %s, a lane commit in base..head" % (CITE, slug, cited[slug], one.sha[:9])
+    return res
 
 
 def say(line):

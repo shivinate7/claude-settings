@@ -7,7 +7,9 @@ debt with a one-line gist. Only the merge tool rebuilds the page. A branch never
 
 The tool rebuilds the page on the integration branch before the branch goes ready. `merge <pr> --confirm`
 on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip, as
-`--confirm` does, and a head that carries a claim. It commits the page alone, pushes it, and stops: mark
+`--confirm` does, and a head that carries a claim. Before the ready mark, it copies each live lane's
+`Retire-run:` and `Drops-lines:` lines into the body's last counted paragraph. It stops if the body changed
+after its first read. It commits the page alone, pushes it, and stops: mark
 the PR ready, then run `--confirm` again. The tool sends no GraphQL, so the batch runner marks the PR ready
 by its session's route (route pr-ready-mcp-cloud), after the draft run of the pushed head shows (skill
 ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no

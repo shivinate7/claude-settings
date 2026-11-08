@@ -6,7 +6,7 @@ commits a base and a head, and asks the check for its findings. A fixture test s
 working folder to the file named by RETIRE_MARKS, so a case shows that a Retire check ran, or did not, from that file.
 No case waits on a clock. The Retire-run cases pass a fake run_state, so no case reads the network.
 """
-import atexit, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, inspect, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -40,6 +40,9 @@ FAIL = "Delete the old helper. Check: `tests/test_fail.py`."
 PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
+HEAD_URL = "https://github.com/fixture/repo/actions/runs/77"  # the PR head's own checks run
+NO_HEAD_RUN = "check() takes no head_run: the merge-mode read of the head's own checks run is not built (ruling 20:03 CST)"
 
 
 def sh(cwd, *cmd):
@@ -72,6 +75,18 @@ class Runs:
         self.urls.append(url)
         if isinstance(self.answer, BaseException):
             raise self.answer
+        return self.answer
+
+
+class HeadRuns:
+    """A fake head_run: answers the head's own checks run as (conclusion, url), or None when the head has no run. A conclusion of
+    None is a run still pending. Each call records the head sha it was asked about."""
+
+    def __init__(self, answer):
+        self.answer, self.shas = answer, []
+
+    def __call__(self, sha):
+        self.shas.append(sha)
         return self.answer
 
 
@@ -360,11 +375,126 @@ class RetireRun(Case):
         found = self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(pairs(found), [("d-prose", "red")], "a failing cited run did not refuse as red")
 
-    def test_r3_a_cite_of_a_green_run_on_an_older_commit_is_red(self):
+    def merge_mode(self, pr_body, run_state, head_run):
+        """check() in merge mode, as debt_check calls it: a deferred cite is held on the head's own checks run, read through head_run.
+        A check() with no head_run parameter fails the case by name."""
+        self.assertIn("head_run", inspect.signature(D.check).parameters, NO_HEAD_RUN)
+        return D.check(self.dir, self.base, head=self.head, pr_body=pr_body, run_state=run_state, head_run=head_run)
+
+    def sibling_sha(self):
+        """A commit on a branch cut from the base that the PR head does not contain. -> its sha. The checkout is back on main."""
+        sh(self.dir, "git", "checkout", "-q", "-b", "side", self.base)
+        put(os.path.join(self.dir, "side.txt"), "side\n")
+        sh(self.dir, "git", "add", "-A")
+        sh(self.dir, "git", "commit", "-q", "-m", "side")
+        side = sh(self.dir, "git", "rev-parse", "HEAD")
+        sh(self.dir, "git", "checkout", "-q", "main")
+        return side
+
+    def closed_prose_on_a_lane(self):
+        """The debt closed on a head that holds a lane tip: a commit cut from the base and merged into the head, so the tip is in base..head.
+        -> the lane tip's sha. self.head is the PR head."""
+        self.repo(debts={"d-prose": PROSE})
+        lane = self.sibling_sha()
+        sh(self.dir, "git", "merge", "-q", "--no-ff", "-m", "merge the lane", "side")
+        self.change(rm=["docs/debts/d-prose.md"])
+        return lane
+
+    def test_d1_a_deferred_cite_with_a_green_head_run_is_no_finding(self):
+        # Ruling 20:34 CST: a cited sha in base..head (a lane tip) is deferred to merge, and merge mode holds it on the head's run.
+        lane = self.closed_prose_on_a_lane()
+        head_runs = HeadRuns(("success", HEAD_URL))
+        found = self.merge_mode("Retire-run: d-prose -- %s\n" % RUN_URL, Runs(("success", lane)), head_runs)
+        self.assertEqual(head_runs.shas, [self.head], "the head's own checks run was not read")
+        self.assertEqual(pairs(found), [], "a deferred cite with a green head run did not clear the debt")
+
+    def test_d2_a_deferred_cite_with_a_red_head_run_is_a_finding_that_names_the_head_run(self):
+        lane = self.closed_prose_on_a_lane()
+        found = self.merge_mode("Retire-run: d-prose -- %s\n" % RUN_URL, Runs(("success", lane)), HeadRuns(("failure", HEAD_URL)))
+        self.assertEqual([f.slug for f in found], ["d-prose"], "a deferred cite with a red head run did not refuse")
+        self.assertIn(HEAD_URL, found[0].text, "the refusal does not name the head's checks run")
+
+    def test_r3_a_green_run_on_an_older_commit_is_deferred_and_a_missing_head_run_refuses(self):
+        # Ruling 20:34 CST: the lane tip is in base..head, so the cite is deferred, not red. With no head run it refuses.
+        lane = self.closed_prose_on_a_lane()
+        head_runs = HeadRuns(None)  # the PR head has no checks run
+        found = self.merge_mode("Retire-run: d-prose -- %s\n" % RUN_URL, Runs(("success", lane)), head_runs)
+        self.assertEqual(head_runs.shas, [self.head], "the head's own checks run was not read")
+        self.assertEqual([f.slug for f in found], ["d-prose"], "a deferred cite with no head run cleared the debt")
+
+    def test_d4_a_deferred_cite_with_a_pending_head_run_is_a_finding_that_names_the_head_run(self):
+        lane = self.closed_prose_on_a_lane()
+        found = self.merge_mode("Retire-run: d-prose -- %s\n" % RUN_URL, Runs(("success", lane)), HeadRuns((None, HEAD_URL)))
+        self.assertEqual([f.slug for f in found], ["d-prose"], "a deferred cite with a pending head run did not refuse")
+        self.assertIn(HEAD_URL, found[0].text, "the refusal does not name the pending head run")
+
+    def test_d5_a_cite_of_a_sha_the_head_does_not_contain_stays_red(self):  # control
         self.closed_prose()
-        runs = Runs(("success", self.base))  # the parent of the PR head: an ancestor, not a descendant
-        found = self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
-        self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on an older commit cleared the debt")
+        side = self.sibling_sha()
+        found = self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=Runs(("success", side)))
+        self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on a commit the head does not contain did not stay red")
+
+    def test_r14_a_green_run_on_an_old_main_commit_is_red_and_not_deferred(self):
+        # Ruling 20:34 CST: only a cited sha the branch holds (in base..head) is deferred. An ancestor of the base is judged as today.
+        self.repo(debts={"d-prose": PROSE})
+        old = self.base  # a main commit that the base and the head both hold
+        self.change(write={"notes/main.txt": "main\n"})
+        self.base = self.head  # the base the PR was cut from: main's tip, one commit on
+        self.change(rm=["docs/debts/d-prose.md"])
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        with self.subTest(mode="CI mode (defer)"):
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", old)), defer=True)
+            self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on an old main commit was deferred in CI mode, not judged red")
+            self.assertIn("not on the PR head", found[0].text, "the refusal does not give the cause: not on the PR head")
+        with self.subTest(mode="merge mode (head_run)"):
+            heads = HeadRuns(("success", HEAD_URL))
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", old)), head_run=heads)
+            self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on an old main commit was deferred in merge mode, not judged red")
+            self.assertEqual(heads.shas, [], "merge mode read the head's checks run for a cite that is not in base..head")
+
+    def test_r15_a_lane_tip_in_base_to_head_still_defers(self):  # control
+        self.repo(debts={"d-prose": PROSE})
+        lane = self.sibling_sha()  # the lane's commit, cut from the base
+        sh(self.dir, "git", "merge", "-q", "--no-ff", "-m", "merge the lane", "side")  # the batch takes the lane in: it is in base..head
+        self.change(rm=["docs/debts/d-prose.md"])
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        with self.subTest(mode="CI mode (defer)"):
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", lane)), defer=True)
+            self.assertEqual(pairs(found), [], "a lane tip in base..head was not deferred in CI mode")
+        with self.subTest(mode="merge mode (head_run)"):
+            heads = HeadRuns(("success", HEAD_URL))
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", lane)), head_run=heads)
+            self.assertEqual(pairs(found), [], "a lane tip in base..head with a green head run was refused in merge mode")
+            self.assertEqual(heads.shas, [self.head], "merge mode did not read the head's checks run for a lane tip in base..head")
+
+    def test_r16_a_green_run_on_the_base_tip_is_red_and_not_deferred(self):
+        # Ruling 20:34 CST: the base tip is a main commit, not a lane tip. A cite on it is judged as today: red, never deferred.
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])  # the head removes the debt on top of the base tip
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        with self.subTest(mode="CI mode (defer)"):
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", self.base)), defer=True)
+            self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on the base tip was deferred in CI mode, not judged red")
+            self.assertIn("not on the PR head", found[0].text, "the refusal does not give the cause: not on the PR head")
+        with self.subTest(mode="merge mode (head_run)"):
+            heads = HeadRuns(("success", HEAD_URL))
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", self.base)), head_run=heads)
+            self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on the base tip was deferred in merge mode, not judged red")
+            self.assertEqual(heads.shas, [], "merge mode read the head's checks run for a cite on the base tip")
+
+    def test_r17_a_cited_run_on_a_sha_this_checkout_does_not_hold_is_unknown(self):
+        # A run the checkout does not hold is unknown: never red, and never deferred to merge, in CI mode or merge mode.
+        self.closed_prose()
+        missing = "f" * 40  # no commit of this fixture has this sha
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        with self.subTest(mode="CI mode (defer)"):
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", missing)), defer=True)
+            self.assertEqual(pairs(found), [("d-prose", "unknown")], "a run on a sha this checkout does not hold was not unknown in CI mode")
+        with self.subTest(mode="merge mode (head_run)"):
+            heads = HeadRuns(("success", HEAD_URL))
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", missing)), head_run=heads)
+            self.assertEqual(pairs(found), [("d-prose", "unknown")], "a run on a sha this checkout does not hold was not unknown in merge mode")
+            self.assertEqual(heads.shas, [], "merge mode read the head's checks run for a sha this checkout does not hold")
 
     def test_r4_an_unreadable_cited_run_is_unknown(self):
         self.closed_prose()
@@ -410,6 +540,39 @@ class RetireRun(Case):
         found = self.findings(pr_body="Retire-run: d-fail -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the red check did not run in the head folder")
         self.assertEqual(pairs(found), [("d-fail", "red")], "a green cited run cleared a red check")
+
+    def retired_of(self, body, run_state):
+        """retired() for this case's PR. A missing function is a named red: no close can be excused without it."""
+        self.assertTrue(hasattr(D, "retired"), NO_RETIRED)
+        return D.retired(self.dir, self.base, head=self.head, pr_body=body, run_state=run_state)
+
+    def test_r10_retired_returns_the_debt_path_for_a_green_cite_on_a_prose_retire(self):
+        self.closed_prose()
+        body = "Summary.\n\nRetire-run: d-prose -- %s\n" % RUN_URL
+        self.assertEqual(self.findings(pr_body=body, run_state=Runs(("success", self.head))), [], "scope: the debt-close check clears it")
+        runs = Runs(("success", self.head))
+        self.assertEqual(set(self.retired_of(body, runs)), {"docs/debts/d-prose.md"}, "retired() does not name the closed debt")
+        self.assertEqual(runs.urls, [RUN_URL], "the cited run was not read")
+
+    def test_r11_retired_returns_nothing_for_a_red_runnable_retire_with_a_green_cite(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(rm=["docs/debts/d-fail.md"])
+        body = "Retire-run: d-fail -- %s\n" % RUN_URL
+        self.assertEqual(pairs(self.findings(pr_body=body, run_state=Runs(("success", self.head)))), [("d-fail", "red")], "scope")
+        self.assertEqual(self.retired_of(body, Runs(("success", self.head))), {})
+
+    def test_r12_retired_returns_nothing_for_an_uncited_close(self):
+        self.closed_prose()
+        runs = Runs(("success", self.head))
+        self.assertEqual(pairs(self.findings(run_state=runs)), [("d-prose", "prose")], "scope")
+        self.assertEqual(self.retired_of("Summary.\n", runs), {})
+        self.assertEqual(runs.urls, [], "a run was read with no cite")
+
+    def test_r13_retired_returns_nothing_without_a_run_reader(self):
+        self.closed_prose()
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
+        self.assertEqual(self.retired_of(body, None), {})
 
 
 if __name__ == "__main__":

@@ -75,6 +75,9 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     needs: scope
+    permissions:
+      contents: read
+      actions: read  # the silent-undo step reads the workflow run a Retire-run line cites
     # Cap 52 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 22.8 min
     # is 44% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
@@ -470,7 +473,9 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
+          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --pr-body-env PR_BODY --strict
 
       - name: Comment narration fixture suite
         run: python3 lint/test_check_comment_narration.py
