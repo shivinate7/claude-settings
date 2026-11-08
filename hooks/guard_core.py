@@ -1087,14 +1087,30 @@ def _head_word(segment: str) -> str:
 EXIT_BODY_PLAIN_WORDS = ("echo", "printf", "true", ":")
 
 
-def _leaves_body_never(tokens, segment: str, end: str, in_pipe: bool) -> bool:
-    """True when a then-body step, joined to the next by `;`, a newline or `&&`, is a bare `echo`, `printf`,
-    `true` or `:` with no substitution and no pipe: it cannot `exit`, `return`, `break` or fail, so an `exit`
-    later in the body still runs whenever the body does. A `&&` join counts only because each step before
-    it is such a print step (the walk stops at the first step that is not); a `||` join never counts."""
+def is_print_step(segment: str, redirect_ok: bool) -> bool:
+    """True when SEGMENT, past a leading `then`, is a bare `echo`, `printf`, `true` or `:` that cannot fail the
+    list it stands in, or leave a body: a substitution in it is fine, since the step's status is its own
+    (`echo "$(exit 1)"` is 0). A redirect can fail (`echo x > /no/dir`), so with REDIRECT_OK false it
+    is no print step. Not a print step: a pipe into it, a substitution or quote that this segment leaves open
+    (the split cut `echo $(a; exit 1)` in two), and any other command."""
+    tokens = segment_tokens(segment) or []
     word = tokens[1:2] if tokens[:1] == ["then"] else tokens[:1]
-    return (bool(word) and word[0] in EXIT_BODY_PLAIN_WORDS and end in (";", "\n", "&&") and not in_pipe
-            and not any(mark in segment for mark in ("`", "$(", "<(", ">(")))
+    if not word or word[0] not in EXIT_BODY_PLAIN_WORDS:
+        return False
+    marks = segment_parens(segment)
+    if segment.count("`") % 2 or marks.count("(") != marks.count(")"):
+        return False
+    return redirect_ok or not any(char in "<>" and not quote for _, char, quote in walk_quotes(segment))
+
+
+def _leaves_body_never(tokens, segment: str, end: str, in_pipe: bool) -> bool:
+    """True when a then-body step, joined to the next by `;`, a newline or `&&`, is a print step
+    (`is_print_step`): it cannot `exit`, `return`, `break` or fail, so an `exit` later in the body still runs
+    whenever the body does. After a `;` or newline a redirect is fine, since the exit runs whether or not the
+    step fails. Before `&&` it is not, since a failed redirect skips the exit. A `&&` join counts only because
+    each step before it is such a print step (the walk stops at the first step that is not); a `||` join never
+    counts."""
+    return end in (";", "\n", "&&") and not in_pipe and is_print_step(segment, end != "&&")
 
 
 def _exits_on_failure(segments, ends, at: int) -> bool:

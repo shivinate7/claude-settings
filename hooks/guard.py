@@ -356,7 +356,7 @@ while True:
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             CD_WORDS, _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
-            _compound_delta, _exits_on_failure, subshell_depth,
+            _compound_delta, _exits_on_failure, is_print_step, subshell_depth,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -4837,7 +4837,8 @@ def git_push_after_check_hit(command: str) -> str:
     them, so a `;`-joined check further back still refuses. An `exit` inside a `( )` group leaves only that
     group, so neither it nor an exit tail inside one clears anything. Any other command refuses, a subshell
     included. The walk ends and passes at the start of the command line.
-    A `||` or `|` before the start of the push's chain is no `;` join and passes. A dry run
+    A `||` or `|` before the start of the push's chain is no `;` join and passes, except `A || echo x && push`
+    (`_push_hidden_by_print`): the print succeeds when the check A fails, so the push runs. A dry run
     (`git_write_verb`) and an unreadable segment pass."""
     ends = []
     segments = split_segments(command, ends)
@@ -4870,6 +4871,8 @@ def git_push_after_check_hit(command: str) -> str:
                 break
             if ends[start - 1] not in (";", "\n"):
                 if first:
+                    if ends[start - 1] == "||" and _push_hidden_by_print(segments, ends, start, position):
+                        return "push"
                     break
                 return "push"
             before = segment_tokens(segments[start - 1])
@@ -4888,6 +4891,18 @@ def git_push_after_check_hit(command: str) -> str:
                 continue
             position, first = start - 1, False
     return ""
+
+
+def _push_hidden_by_print(segments, ends, start: int, position: int) -> bool:
+    """True for `A || echo x && push`: the `||` before the push's `&&` chain runs only print steps
+    (`is_print_step`) up to the push, so when the check A fails the print runs, succeeds, and the `&&` goes
+    on to the push. A is a check when its `&&` and `||` list holds a command that is not inert."""
+    if start >= position or not all(is_print_step(part, True) for part in segments[start:position]):
+        return False
+    left = start - 1
+    while left > 0 and ends[left - 1] in ("&&", "||"):
+        left -= 1
+    return any(_push_segment_inert(part) is False for part in segments[left:start])
 
 
 def _push_exit_tails(segments, ends):
