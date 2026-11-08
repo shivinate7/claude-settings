@@ -8,6 +8,8 @@ The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
+unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -424,6 +426,14 @@ class LintBase(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
         self.assertNotIn("default", out)
 
+    def test_a_pull_request_lint_step_with_no_base_and_no_origin_main_reads_unknown_not_skipped(self):
+        self.lane_adds_narration(origin=False)
+        _, lines, out = plan_lint(self.root, workflow(self.NARRATION), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), ["Comment narration check"], out)  # the scope: a pull-request run would run this lint step
+        rc, lines, out = self.run_job(self.NARRATION, args=("--lint",))
+        self.assertEqual(by_step(lines).get("Comment narration check"), "unknown", out)  # the exit code is no proof: the no-base line gives 2 too
+        self.assertEqual(rc, 2, out)
+
 
 class GithubBaseRef(Job):
     """A pull-request run sets GITHUB_BASE_REF in each step's env, as the Actions runner does: the base without its
@@ -824,7 +834,7 @@ class InstallSteps(Job):
             step("Install deps", "npm ci"),
             step("Lint check", self.LINT, **{"if": "${{ github.event_name == 'pull_request' }}"}),
             args=("--lint",), env=env)
-        self.assertEqual(by_step(lines).get("Lint check"), "skipped", out)
+        self.assertEqual(by_step(lines).get("Lint check"), "unknown", out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "installed.marker")),
                          "the install ran though no lint step after it runs\n" + out)
 
@@ -873,6 +883,21 @@ class NotRunLines(Job):
                                       step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
         self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
                                                     "Python lint": "FAIL"}), out)
+
+    NO_LINT = (DEGEN[0], DEGEN[1], DEGEN[3], DEGEN[4])  # DEGEN without its one lint step
+
+    def test_a_lint_run_that_picks_no_lint_step_is_unknown_and_exits_two(self):
+        _, lines, out = plan_lint(self.root, workflow(*self.NO_LINT), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), [], out)  # the scope: the job holds no lint step for --lint to pick
+        rc, lines, out = self.run_job(*self.NO_LINT, args=("--lint", "--base", "origin/main"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertEqual(rc, 2, out)
+
+    def test_a_lint_step_that_runs_only_off_a_pull_request_reads_skipped_and_the_run_exits_zero(self):  # the control
+        push_only = step("Push-only lint", "python3 lint/check_clean.py", **{"if": "${{ github.event_name != 'pull_request' }}"})
+        rc, lines, out = self.run_job(push_only, step("Python lint", "python3 lint/check_clean.py"),
+                                      args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, by_step(lines)), (0, {"Push-only lint": "skipped", "Python lint": "PASS"}), out)
 
 
 class Progress(Job):
