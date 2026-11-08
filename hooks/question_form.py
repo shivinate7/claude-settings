@@ -470,7 +470,14 @@ SESSION_PRESS = re.compile(r"^\s*(?:(?:the|a|this)\s+session|claude)\b", re.I)
 # never excused. "as he asked" and "after he clicked Approve" are past acts and ask for nothing.
 SESSION_HANDS_ON = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting|tell|tells|telling|remind|reminds"
                           r"|reminding|click|clicks|clicking|press|presses|pressing|tap|taps|tapping)\b", re.I)
-_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+# SESSION_PRESS_OWN is the session's own press verb right after its subject ("The session clicks Merge"): it is
+# no hand-on, so it is cut before SESSION_HANDS_ON reads the clause. "after your click" still hands on.
+SESSION_PRESS_OWN = re.compile(r"^(\s*(?:(?:the|a|this)\s+session|claude)(?:\s+(?:then|also|\w+ly))*)"
+                               r"\s+(?:clicks|presses|taps)\b", re.I)
+# "and approves" stays in its clause: "the owner reviews and approves it" is one owner act, not two clauses.
+# A bare "and approve" is an order to the owner, so it still starts a clause.
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|but|so|or)\b"
+                           r"|\band\b(?!\s+approv(?:es|ing)\b)", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
 _CLAUSE_JOIN = "; "
@@ -479,9 +486,18 @@ OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
 # The act is the verb the name is subject of: a modal, "to", "just", "please" or an -ly word may come
 # between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
 # Approve" (the button's name, after a past act) does not.
-OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please|\w+ly))*\s+"
+# "the owner's merge" and "the owner's approval" are presses not yet made, as "the owner's click" is, unless the
+# approval is already in ("the owner's approval is in"). "merge" is a press only as the last word of its phrase:
+# a noun after it ("the owner's merge commit", "merge queue", "merge button") names a thing, not his act.
+# "has to", "needs to" and "reviews and" stand before the act as a modal does. A bare "has" does not: "the owner
+# has merge rights" names no act, and "the owner has hit Merge" is a past one.
+OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please"
+                       r"|(?:has|have|needs?)\s+to|\w+ly|\w+s\s+and))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
-                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
+                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)"
+                       r"|['\u2019]s\s+(?:merge(?=\s*(?:[^\w\s]|$)|\s+(?:on|in|at|of|by|for|from|with|before|after"
+                       r"|first|and|or|then|so|but|once|when)\b)"
+                       r"|approval(?!\s+(?:is|was|has|are|came|comes|arrives?)\b)))\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
@@ -499,10 +515,11 @@ def _owner_press_text(label, how) -> tuple:
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
     session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
-               and not SESSION_HANDS_ON.search(c) and not _owner_acts(c)]
+               and not SESSION_HANDS_ON.search(SESSION_PRESS_OWN.sub(r"\1", c, count=1)) and not _owner_acts(c)]
     if not session:
         return text, text
-    done = " ".join(session).lower()
+    # The session's own click ("The session clicks Merge") excuses no "Click" in the label: that asks the owner.
+    done = " ".join(SESSION_PRESS_OWN.sub(r"\1", c, count=1) for c in session).lower()
     verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
              for m in PRESS_VERB.finditer(label)]
     label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
