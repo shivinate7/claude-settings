@@ -599,10 +599,11 @@ NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
-# and "builder and reviewer sonnet" all count.
+# and "builder and reviewer sonnet" all count. A hyphen before the role ("design-reviewer") makes it
+# another role, which is no named one.
 _ROLE = r"(?:builder|reviewer|test-author|record-writer)"
 ROLE_MODEL_RE = re.compile(
-    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
+    r"(?<![\w-])(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
 AGENTS_DIR = os.path.join(HERE, "..", "agents")
