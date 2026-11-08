@@ -1032,6 +1032,15 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
         self.assert_passes(out, "a merge claim whose blocker is CI that has failed")
 
+    def test_cc_red_a_connection_or_network_check_failure_is_an_outage_for_a_merge_claim(self):
+        # Catches: "connection check" and "network check" read as a CI check blocker, so a merge claim beside an outage with
+        # only a connect notice passed as backed. Both checks are outages, so the claim has no try and blocks.
+        for line in ("I can't merge PR 12 because the MCP connection check failed.",
+                     "I can't merge PR 12 because the network check failed."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), notice("github: failed to connect"), trg.assistant_text(line)])
+                self.assert_blocks(out, line)
+
     # ---- a claim after a bold report label. "**Input Needed** Could not open the PR" is a hand-off form.
     # The label is no subject: the clause after it opens, so the phrase has an empty subject and is a claim.
 
