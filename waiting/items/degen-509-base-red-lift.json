@@ -42,9 +42,9 @@
   "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "pick": "a",
   "ref": "degen #509 (ste-lint pin move, head c2958c087, CI green); degen milestone-proof run 41747042457 at 73f66dbfc; claude-settings #1760 waits on #509",
-  "reply": "Your answer (06:09 CST Nov 8): none of these; a local degen coordinator merges it, and you asked whether it is just #509. Yes: only degen #509 (the ste-lint pin move) is needed, so claude-settings #1760 can go out. Runner 9 stands down on #509. The merge tool refuses every degen merge while run 41747042457 stays red, in any session, so the local merge still needs a lift for #509 or a green milestone-proof run on main's head. Routed to runner 9 and the coordinator; home: step base-red-reads-gate. Closed 06:13 CST Nov 8.",
+  "reply": "Your answer (06:09 CST Nov 8): a local degen coordinator merges #509; yes, it is just #509, and that unblocks claude-settings #1760. Runner 9 stands down. Still open for you: the merge tool refuses every degen merge while Mac test run 41747042457 stays red, in any session. Your local coordinator needs either your one lift for #509 (option a) or a green milestone-proof run on main's head (option b). Pick one here. Triage, 06:22 CST Nov 8.",
   "repo": "degen",
   "short": "Degen #509 over red Mac run",
-  "status": "closed",
+  "status": "open",
   "title": "May runner 9 merge degen #509 over the old red Mac test run on main?"
 }
