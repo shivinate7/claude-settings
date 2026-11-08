@@ -8090,6 +8090,18 @@ for _file, _run in (("f.ts", "timeout 30 npx ts-node f.ts"), ("f.ts", "env X=1 n
                     ("f", "sudo python3 -m pytest f")):
     sh("trim: env: a heredoc file %s with an env read, run as %r, denies" % (_file, _run),
        "cat > %s <<'EOF'\ncat " % _file + ENV + "\nEOF\n" + _run, "deny", "env-file", cwd=NOGIT)
+# A heredoc file whose body reads the env file, then run as a module by a runner that starts it: streamlit, coverage,
+# flask, ipython, dotenv and a package's own tool each run the file, so the body stays in view and the env read denies.
+for _file, _run in (("f.py", "python3 -m streamlit run f.py"), ("f.py", "python3 -m coverage run f.py"),
+                    ("f.py", "python3 -m flask --app f.py run"), ("f.py", "python3 -m ipython f.py"),
+                    ("f", "python3 -m dotenv run f"), ("f", "python3 -m mypkg.tool f")):
+    sh("trim: env: a heredoc file %s with an env read, run as %r, denies" % (_file, _run),
+       "cat > %s <<'EOF'\ncat " % _file + ENV + "\nEOF\n" + _run, "deny", "env-file", cwd=NOGIT)
+# Controls: a module that only reads its file (json.tool, py_compile, pip's requirements read) runs nothing in it, so
+# the same write and run is allowed.
+for _run in ("python3 -m json.tool f", "python3 -m py_compile f", "python3 -m pip install -r f"):
+    sh("trim: env: a heredoc file with an env read, checked by %r, is allowed" % _run,
+       "cat > f <<'EOF'\ncat " + ENV + "\nEOF\n" + _run, "allow", cwd=NOGIT)
 sh("trim: env: the same assignment ahead of a non-runner still denies",
    "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
