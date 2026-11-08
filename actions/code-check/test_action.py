@@ -653,6 +653,8 @@ class RulingCheck(unittest.TestCase):
     PACKAGE_JSON = '{"name": "widget", "version": "1.0.0"}\n'
     # A repo that tracks TypeScript and a tsconfig: its tsc layer runs whenever the layer is not skipped.
     TS_BASE = {"tsconfig.json": '{"compilerOptions": {"strict": true}}\n', "src/a.ts": "export const n: number = 1;\n"}
+    # A repo that tracks Python: its ruff layer runs whenever the layers are not skipped.
+    PY_BASE = {"src/a.py": GOOD_PY}
 
     def run_head(self, body, when, files=None, base_files=None, main_files=None, send_base=True,
                  subject="Drop the widget docs", **env):
@@ -663,10 +665,10 @@ class RulingCheck(unittest.TestCase):
                      base_files=base_files or {"README.md": "# Widget\n"}, main_files=main_files, send_base=send_base,
                      head_message=subject + "\n\n" + body + "\n", head_date=when, **env)
 
-    def run_docs_only_pr(self, body, when, files=None, extra_base=None, send_base=True, subject="Drop the widget docs"):
-        """A docs-only PR in a repo with a package.json and no node_modules. The base holds .code-check.json, so the
-        shrink check reads a list, and main has moved on past it. extra_base adds files to the base; files replaces the
-        head's files. Returns (exit, output, log): read_calls(log) names each tool that started."""
+    def run_pr(self, body, when, files=None, extra_base=None, send_base=True, subject="Drop the widget docs"):
+        """A PR in a repo with a package.json and no node_modules. The base holds .code-check.json, so the shrink check
+        reads a list, and main has moved on past it. extra_base adds files to the base; files replaces the head's files.
+        Returns (exit, output, log): read_calls(log) names each tool that started."""
         log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "calls.log")
         shims = os.pathsep.join(path_shim(tool, 'echo "%s $*" >> %s' % (tool, shlex.quote(log))) for tool in self.TOOLS)
         base = {".code-check.json": config([]), "README.md": "# Widget\n", "package.json": self.PACKAGE_JSON}
@@ -697,7 +699,7 @@ class RulingCheck(unittest.TestCase):
 
     def test_docs_only_uncited_claim_fails_on_the_ruling_check_alone(self):
         """On a .md-only PR the ruling FAIL is the only problem: no layer runs and no tool starts."""
-        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00")
+        rc, out, calls = self.run_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00")
         self.assertFalse(os.path.exists(calls), "a tool started on a docs-only PR:\n" + out)
         layer_rows = re.findall(r"^code-check: \S+ (?:typecheck|lint|format): .*$", out, re.M)
         self.assertEqual(layer_rows, [], "a language layer ran on a docs-only PR:\n" + out)
@@ -711,7 +713,7 @@ class RulingCheck(unittest.TestCase):
         self.assertEqual(others, [], "a problem from another check appeared on a docs-only PR:\n" + out)
 
     def test_docs_only_cited_claim_passes_and_starts_no_tool(self):
-        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
+        rc, out, calls = self.run_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
                                                "2026-11-20T10:00:00-06:00")
         self.assertFalse(os.path.exists(calls), "a tool started on a docs-only PR:\n" + out)
         self.assertIn("comment check: pass", out, "the comment check did not pass a docs-only PR:\n" + out)
@@ -719,26 +721,26 @@ class RulingCheck(unittest.TestCase):
         self.assertIn("ruling check: pass", out, "the ruling check did not pass the cited commit:\n" + out)
 
     def test_ts_repo_docs_only_uncited_starts_no_tool(self):
-        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
+        rc, out, calls = self.run_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
                                                extra_base=self.TS_BASE)
         self.assertEqual(read_calls(calls), "", "tsc started on an uncited docs-only diff in a TypeScript repo:\n" + out)
 
     def test_ts_repo_docs_only_names_the_typecheck_skip_in_one_line(self):
-        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
+        rc, out, calls = self.run_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
                                                "2026-11-20T10:00:00-06:00", extra_base=self.TS_BASE)
         rows = re.findall(r"^code-check: typescript typecheck: .*$", out, re.M)
         self.assertEqual(len(rows), 1, "the typecheck layer did not print one line on a docs-only diff:\n" + out)
         self.assertIn("skipped", rows[0], "the typecheck layer ran instead of skipping on a docs-only diff:\n" + out)
 
     def test_ts_repo_docs_only_cited_exits_zero_and_starts_no_tool(self):
-        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
+        rc, out, calls = self.run_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
                                                "2026-11-20T10:00:00-06:00", extra_base=self.TS_BASE)
         self.assertEqual(read_calls(calls), "", "tsc started on a cited docs-only diff in a TypeScript repo:\n" + out)
         self.assertEqual(rc, 0, "a fully cited docs-only diff in a TypeScript repo failed the action:\n" + out)
 
     def test_ts_repo_docs_only_uncited_claim_still_fails_the_ruling_check(self):
         """Control, green on the old code: the ruling FAIL still fires in a TypeScript repo."""
-        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
+        rc, out, calls = self.run_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
                                                extra_base=self.TS_BASE)
         self.assertEqual(rc, 1, "an uncited claim on a docs-only diff in a TypeScript repo passed the action:\n" + out)
         self.assertTrue(one_line_with(out, "check_red_run: FAIL:", "Drop the widget docs", "no home and no time"),
@@ -746,7 +748,7 @@ class RulingCheck(unittest.TestCase):
 
     def test_ts_repo_ts_change_still_runs_tsc(self):
         """Control, green on the old code: a .ts change in the same repo still starts tsc."""
-        rc, out, calls = self.run_docs_only_pr("Tighten the widget type.", "2026-11-20T10:00:00-06:00",
+        rc, out, calls = self.run_pr("Tighten the widget type.", "2026-11-20T10:00:00-06:00",
                                                files={"src/a.ts": "export const n: number = 2;\n"},
                                                extra_base=self.TS_BASE, subject="Tighten the widget type")
         self.assertIn("tsc --noEmit", read_calls(calls), "a .ts change did not start tsc:\n" + out)
@@ -754,7 +756,7 @@ class RulingCheck(unittest.TestCase):
     def test_no_base_runs_the_layers_and_skips_the_ruling_check(self):
         """Control, green on the old code: with no --base the ruling and comment checks skip with their reasons, the
         shrink check reads unknown, and the layers still run, so tsc starts on a .md-only diff."""
-        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
+        rc, out, calls = self.run_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
                                                extra_base=self.TS_BASE, send_base=False)
         self.assertIn("tsc --noEmit", read_calls(calls), "the layers did not run with no base:\n" + out)
         self.assertIn("ruling check: skipped, no base to diff against", out, "the ruling check did not skip:\n" + out)
@@ -762,6 +764,52 @@ class RulingCheck(unittest.TestCase):
         self.assertIn("code-check: list shrink check unknown: no base ref given", out,
                       "the shrink check did not report unknown:\n" + out)
         self.assertEqual(rc, 0, "an uncited claim with no base failed the action:\n" + out)
+
+    def test_tsconfig_only_diff_starts_the_layers(self):
+        """A tsconfig.json-only diff is code: the tsc layer must start."""
+        rc, out, calls = self.run_pr("", "2026-11-20T10:00:00-06:00",
+                                     files={"tsconfig.json": '{"compilerOptions": {"strict": false}}\n'},
+                                     extra_base=self.TS_BASE, subject="Loosen the widget type")
+        self.assertIn("tsc --noEmit", read_calls(calls), "a tsconfig.json-only diff did not start tsc:\n" + out)
+
+    def test_toml_only_diff_starts_the_layers(self):
+        """A ruff.toml-only diff is code: the ruff layer must start."""
+        rc, out, calls = self.run_pr("", "2026-11-20T10:00:00-06:00",
+                                     files={"ruff.toml": '[lint]\nselect = ["E", "F"]\n'},
+                                     extra_base={**self.PY_BASE, "ruff.toml": '[lint]\nselect = ["E"]\n'},
+                                     subject="Select the widget lint rules")
+        self.assertIn("ruff check", read_calls(calls), "a ruff.toml-only diff did not start ruff:\n" + out)
+
+    def test_code_check_json_only_diff_starts_the_layers(self):
+        """A .code-check.json-only diff that lists a Python module must start mypy on it."""
+        rc, out, calls = self.run_pr("", "2026-11-20T10:00:00-06:00",
+                                     files={".code-check.json": config(["src/a.py"])},
+                                     extra_base=self.PY_BASE, subject="List the widget module for mypy")
+        self.assertIn("mypy --strict", read_calls(calls), "a .code-check.json-only diff did not start mypy:\n" + out)
+
+    def test_json_delete_only_diff_starts_the_layers(self):
+        """A diff that only deletes a .json file is code: the ruff layer must start."""
+        rc, out, calls = self.run_pr("", "2026-11-20T10:00:00-06:00", files={"data.json": None},
+                                     extra_base={**self.PY_BASE, "data.json": '{"x": 1}\n'},
+                                     subject="Drop the widget data")
+        self.assertIn("ruff check", read_calls(calls),
+                      "a diff that only deletes a .json file did not start ruff:\n" + out)
+
+    def test_yml_only_diff_starts_the_layers(self):
+        """A .yml-only diff (a workflow pin move) is code for the layers: the ruff layer must start."""
+        rc, out, calls = self.run_pr("", "2026-11-20T10:00:00-06:00",
+                                     files={".github/workflows/checks.yml": "name: checks\non: push\n"},
+                                     extra_base={**self.PY_BASE, ".github/workflows/checks.yml": "name: checks\n"},
+                                     subject="Move the workflow pin")
+        self.assertIn("ruff check", read_calls(calls), "a .yml-only diff did not start ruff:\n" + out)
+
+    def test_png_and_md_diff_skips_the_layers(self):
+        """Control, green on bda9f0237: a picture and a note are docs, so no layer starts."""
+        rc, out, calls = self.run_pr("", "2026-11-20T10:00:00-06:00",
+                                     files={"docs/widget.md": "Widget docs.\n", "docs/widget.png": "picture\n"},
+                                     extra_base=self.PY_BASE, subject="Add the widget picture")
+        self.assertEqual(read_calls(calls), "", "a .png and .md diff started a tool:\n" + out)
+        self.assertEqual(rc, 0, "a .png and .md diff failed the action:\n" + out)
 
 
 def tearDownModule():
