@@ -1054,34 +1054,40 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, skipped=None):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
-    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
+    back, a `cd` inside `( ... )` ends with the parenthesis, a `popd` returns to the folder the
+    matching `pushd` left (not tracked when no `pushd` of this walk matches it), a path that holds
+    a variable is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    a segment in it gets `skipped` (None unless the caller names a value, so it can tell a segment
+    that never runs from a folder it cannot read), and its own `cd` moves nothing. `failed_cd_stays`
+    is off by default, so a rule that fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    dirs = []   # the `pushd` stack: folders to `popd` back to, or None once it cannot be told
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
-        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        found = [(place, char) for place, char, quote in walk_quotes(segment) if not quote and char in "()"]
+        marks = [char for _, char in found]
+        for place, _ in found:   # a parenthesis the shell reads as syntax is no part of the word beside it: `(cd A)`
+            segment = segment[:place] + " " + segment[place + 1:]
+        stack.extend([(where, prev, None if dirs is None else list(dirs))] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            return None if skipping else where
+            return skipped if skipping else where
         if skipping:
             skipping = end in ("&&", "|")
             for _ in range(marks.count(")")):
                 if stack:
-                    where, prev = stack.pop()
+                    where, prev, dirs = stack.pop()
                     skipping = False
             continue
         tokens = segment_tokens(segment)
@@ -1093,26 +1099,42 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             where = None
         elif move is not None:
             old = where
+            word = basename(tokens[resolve_command(tokens)]).lower()
+            pushes = word in ("pushd", "push-location")
             if move is CD_UNKNOWN:
-                where = None
+                if word in POP_WORDS and dirs and len(_operands(tokens)) == 0:
+                    where = dirs.pop()   # popd: back to the folder the matching pushd left
+                else:
+                    where, dirs = None, None
             elif move == "-":
                 where = prev
+                dirs = None if pushes else dirs
             elif any(mark in move for mark in "$%`"):
                 where = None
+                dirs = None if pushes else dirs
             else:
                 target = shell_abs(move or "~", where)
                 if target and os.path.isdir(target):
                     where = target
+                    if pushes and dirs is not None:
+                        dirs.append(old)
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
+                    dirs = None if pushes else dirs
             prev = old
         for _ in range(marks.count(")")):
             if stack:
-                where, prev = stack.pop()
+                where, prev, dirs = stack.pop()
     return where
+
+
+def _operands(tokens):
+    """The words after a segment's command word that are not redirections."""
+    index = resolve_command(tokens)
+    return [t for t in tokens[index + 1:] if not (t[:1] in "<>" or REDIRECTION.match(t))] if index is not None else []
 
 
 def _segment_git_c_target(tokens):
