@@ -69,7 +69,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
   it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
-  verdict heartbeat, plus one per ci-job step start, so the total follows the job's step count. The watcher reads it on each 0.2 s loop pass.
+  verdict heartbeat, plus one per ci-job step that runs (never under `--plan`). The watcher reads it on each 0.2 s loop pass.
 - The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
   until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
   kept). The wrapper creates both files and opens both before the job starts. The watcher inherits those
