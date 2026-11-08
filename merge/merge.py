@@ -145,7 +145,13 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
+def lists_refs(args):
+    """True for `git -C <dir> ls-remote ...`, the one git call whose stdout is the answer: a stderr line on its success (a trace, a warning) is no ref. Keyed on the
+    args, so each caller and each stand-in for `sh` that passes the args on gets it."""
+    return args[:2] == ["git", "-C"] and args[3:4] == ["ls-remote"]
+
 def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
+    stdout_only = lists_refs(args)
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
@@ -153,6 +159,8 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
         r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         return r.returncode, r.stdout.strip()
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if stdout_only and r.returncode == 0:  # a failure keeps both streams, for the network-error read
+        return r.returncode, r.stdout.strip()
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -548,7 +556,13 @@ class GitLock(Lock):
         c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
         if c:
             raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
-        return out.split()[0] if out else None
+        if not out:
+            return None
+        # Only stdout lists refs. A first token that is no sha is a listing this run cannot read: a Stop, never a lock sha and never no lock.
+        sha = out.split()[0]
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise Stop("cannot read the merge lock " + LOCK_CITE + ": ls-remote listed no sha: " + out)
+        return sha
 
     def commit_text(self, ref, sha):
         """-> (code, text): the message of the listed `sha`, or a non-zero code when it cannot be read. NetStop on a network error."""
