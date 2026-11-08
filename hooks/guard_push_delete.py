@@ -656,6 +656,8 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # always was. A bare `rm node_modules` removes only the link, so it stays allowed.
 # `--prefix` and its short form `-C` are read (npm_prefix_flag): their folder is the one judged. A
 # workspace flag is read for `npm version` only (NPM_WORKSPACE_FLAGS).
+# The two spellings of `npm version`. The read-only list holds them, and a workspace flag turns them into a change.
+NPM_VERSION_WORDS = {"version", "verison"}
 # THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
 # list in lib/utils/cmd-list.js. A subcommand off this list is refused in a linked folder, so a new npm
 # command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
@@ -667,24 +669,29 @@ NPM_READ_ONLY = {
     "help-search", "hook", "ll", "la", "ls", "list", "org", "ogr", "outdated", "owner", "author",
     "pack", "ping", "pkg", "prefix", "profile", "publish", "query", "repo", "root", "run-script",
     "run", "rum", "urn", "sbom", "search", "s", "se", "find", "star", "stars", "unstar", "start",
-    "stop", "restart", "test", "t", "tst", "team", "token", "unpublish", "version", "verison", "view",
+    "stop", "restart", "test", "t", "tst", "team", "token", "unpublish", "view",
     "v", "info", "show", "whoami", "shrinkwrap",
-}
+} | NPM_VERSION_WORDS
+# The short forms npm reads as a long option. npm_option_words rewrites them, so each option has one name.
+NPM_SHORT_FLAGS = {"-C": "--prefix", "-L": "--location"}
+# The options npm types as a plain String (nopt-lib.js, the String branch of parse). Such an option does not
+# take a word that starts with a dash as its value, so that word is its own option.
+NPM_STRING_FLAGS = {"--tag", "--scope", "-c", "--call", "-m", "--message"}
 # Global options that take the next word as their value, so that word is not the subcommand.
 NPM_VALUE_FLAGS = {
     "--loglevel", "--prefix", "--cache", "--registry", "--userconfig", "--globalconfig",
-    "--workspace", "-w", "--tag", "--otp", "--scope", "--before", "--omit", "--include",
-    "--install-strategy", "--logs-dir", "-C", "-L", "--location", "-c", "--call", "-m", "--message",
+    "--workspace", "-w", "--otp", "--before", "--omit", "--include",
+    "--install-strategy", "--logs-dir", "--location",
     "--reg", "--depth", "--package",
-}
-# The short forms npm reads as a long option. npm_option_words rewrites them, so each option has one name.
-NPM_SHORT_FLAGS = {"-C": "--prefix", "-L": "--location"}
+} | NPM_STRING_FLAGS | set(NPM_SHORT_FLAGS)
 # Options after which the command changes nothing in the working folder's install. A value option is
 # read as one `name=value` word (npm_option_words), so `-L global` is `--location=global`.
 NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
 # Subcommands that run install scripts even with --dry-run, so a dry run is no exemption for them. npm
-# resolves a unique abbreviation to its command, so a word that starts one of these is read as it.
+# resolves a unique abbreviation to its command, so a word that starts one of these is read as it. An alias
+# is read before any abbreviation: `r` is uninstall, and so is no abbreviation of rebuild (NPM_ALIAS_WORDS).
 NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}
+NPM_ALIAS_WORDS = {"r"}
 # With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
 # only rewrites package.json.
 NPM_WORKSPACE_FLAGS = {"-w", "-ws"}
@@ -749,6 +756,8 @@ def npm_option_words(words):
         name, equals, value = words[at].partition("=")
         if equals:
             joined.append(NPM_SHORT_FLAGS.get(name, name) + equals + value)
+        elif name in NPM_STRING_FLAGS and at + 1 < len(words) and re.match(r"-{1,2}[^-]", words[at + 1]):
+            joined.append(name)
         elif name in NPM_VALUE_FLAGS and at + 1 < len(words):
             at += 1
             joined.append(NPM_SHORT_FLAGS.get(name, name) + "=" + words[at])
@@ -797,9 +806,13 @@ def linked_nm_hit(segment: str, where: str) -> str:
                 if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]) or (
                         version_in_workspace):
                     subcommand = word
-                if any(writer.startswith(word) for writer in NPM_DRY_RUN_WRITERS):
+                if word not in NPM_ALIAS_WORDS and any(
+                        writer.startswith(word) for writer in NPM_DRY_RUN_WRITERS):
                     words = [flag for flag in words if flag != "--dry-run"]
                 break
+        # npm reads the last value of a repeated option, so only the last `--location` counts.
+        last_location = max((n for n, flag in enumerate(words) if flag.startswith("--location=")), default=-1)
+        words = [flag for n, flag in enumerate(words) if n == last_location or not flag.startswith("--location=")]
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
                 os.path.join(npm_prefix_flag(words, where) or npm_prefix(where), "node_modules")):
             return "npm " + subcommand + " in a folder whose node_modules is a link"
