@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL232Ko7dmr4v3fmrvF",
   "why": "The draft-pr guard (record draft-until-reviewed) refused a Write of a test fixture whose text held the PR-create command words (coordinator, 16:50 CST Nov 7). A guard that cries wolf is spent.",
-  "note": "Same guard as step draft-pr-guard-heredoc (the heredoc false alarm). Done check: a red test on the Write, then green, with a real create still refused.",
-  "updatedAt": "2026-11-07T16:51:00-06:00"
+  "note": "Same guard as step draft-pr-guard-heredoc (the heredoc false alarm). Done check: a red test on the Write, then green, with a real create still refused. Sighting (triage 13:59 CST Nov 8): draft-pr refused a Bash call whose python heredoc only wrote step text naming the PR-create command; no PR was created. The same text run from a script file passed.",
+  "updatedAt": "2026-11-08T13:58:00-06:00"
 }
