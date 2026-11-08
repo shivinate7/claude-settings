@@ -67,7 +67,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
-from shared_names import REVIEW_GRANT, grant_valid  # noqa: E402  the one home of the Grant form, shared with the model guard (hooks/shared_names.py)
+from shared_names import grant_valid  # noqa: E402  the one home of the Grant form, shared with the model guard (hooks/shared_names.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""

@@ -65,7 +65,7 @@ GRANT_LINE = r"Grant: (.*)"
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past the review cap of three
 
 
-def grant_valid(text):
+def grant_valid(text: str) -> bool:
     """True when `text` is a whole Grant text whose date and time are a real time; the pattern alone lets a month 99 or an hour 25 through."""
     if not re.fullmatch(REVIEW_GRANT, text, re.ASCII):
         return False
