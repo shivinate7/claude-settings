@@ -577,6 +577,7 @@ def _copy_reads(raw, predicate, cwd, keywords=False):
 _CP_GLUED_TARGET = re.compile(r"-[RrfiaHLPpnvuxTS]*t(.+)")
 _WALK_SKIP = frozenset((".git", "node_modules", ".venv", "venv", "__pycache__"))
 _WALK_LIMIT = 5000
+_LIST_LIMIT = 10 * _WALK_LIMIT   # entries listed, judged or not: a filtered walk of a whole disk stops here
 
 
 def _glued_cp_target(word):
@@ -597,20 +598,38 @@ _TOO_LARGE_NOTE = " (the folder is too large to check for a test; name a narrowe
 
 
 def _name_matches(names, base: str) -> bool:
-    """True when a `find` name filter, a tuple of (ignore case, pattern), accepts the file name `base`."""
-    return any(fnmatch.fnmatchcase(base.lower(), pattern.lower()) if fold else fnmatch.fnmatchcase(base, pattern)
-               for fold, pattern in names)
+    """True when a `find` name filter (`_find_name_filter`) accepts the file name `base`: some branch
+    has an include that matches it and no exclude that matches it."""
+    def hit(patterns):
+        return any(fnmatch.fnmatchcase(base.lower(), pattern.lower()) if fold else fnmatch.fnmatchcase(base, pattern)
+                   for fold, pattern in patterns)
+    return any(hit(includes) and not hit(excludes) for includes, excludes in names)
+
+
+def _may_hold_a_test(top: str, cwd: str, predicate) -> bool:
+    """True when a test could sit under the folder `top`: `predicate` accepts a test-folder path in it,
+    or `top` holds the working folder, and so its checkout. A tree outside every checkout gives False."""
+    if predicate(os.path.join(top, "tests", "_"), cwd):
+        return True
+    try:
+        here, root = os.path.realpath(_expanded(".", cwd)), os.path.realpath(top)
+        return os.path.commonpath([here, root]) == root
+    except (OSError, ValueError):
+        return True
 
 
 def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
     """The first path under the folder `path`, at any depth, that `predicate` accepts, else ''. A
     folder that `predicate` accepts as `DIR/_` counts. `.git`, `node_modules` and the virtualenv and
-    bytecode folders are not entered. An empty path names no folder. Past `_WALK_LIMIT` entries with
-    folders left to enter, the answer is `_TOO_LARGE`: a walk that stops there would let a test past it
-    through.
+    bytecode folders are not entered. An empty path names no folder.
     `names` is the name filter of the `find` that feeds the path (`_find_name_filter`): only a file whose
     name it accepts is judged, and a folder whose name it accepts is walked whole, as the writer takes
     it whole. A root the filter accepts is walked whole too.
+    The cap counts the entries judged and the folders entered: past `_WALK_LIMIT` of them, or past
+    `_LIST_LIMIT` entries listed, with folders left to enter, the answer is `_TOO_LARGE`, as a walk that
+    stops there would let a test past it through. A tree where no test can sit (`_may_hold_a_test`) gives
+    '' there instead: nothing past the cap is a test.
+    ponytail: a checkout nested in a tree outside every checkout, past the cap, is not read.
     ponytail: the walk costs one pass over the tree, once per fed writer word that is a folder."""
     if not _unquoted(path).strip():
         return ""
@@ -623,7 +642,7 @@ def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
     if names and _name_matches(names, os.path.basename(os.path.normpath(_unquoted(path)))
                                or _unquoted(path)):
         names = None
-    seen = 0
+    judged = listed = 0
     walk = os.walk(top)
     for folder, folders, files in walk:
         folders[:] = [name for name in folders if name not in _WALK_SKIP]
@@ -639,9 +658,10 @@ def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
         for found in found_in:
             if predicate(found, cwd):
                 return found
-        seen += len(folders) + len(files)
-        if seen > _WALK_LIMIT and next(walk, None) is not None:
-            return _TOO_LARGE
+        judged += len(folders) + len(found_in)
+        listed += len(folders) + len(files)
+        if (judged > _WALK_LIMIT or listed > _LIST_LIMIT) and next(walk, None) is not None:
+            return _TOO_LARGE if _may_hold_a_test(top, cwd, predicate) else ""
     return ""
 
 
@@ -792,16 +812,29 @@ def _roots(words, search_cwd=False) -> list:
     return roots or (["."] if search_cwd and grep and _recursive_search(name, args) else [])
 
 
-_FIND_PLAIN = ("-print", "-print0", "-depth", "-xdev", "-mount", "-a", "-and", "-noleaf")
-_FIND_VALUED = ("-type", "-maxdepth", "-mindepth")
+# The primaries that only narrow what a find lists, by arity. Each is skipped when the name filter is read: the
+# names alone then give a superset of the list. An action that prints other text (`-printf`, `-ls`), writes a file
+# (`-fprint`), deletes (`-delete`), or a test by path (`-path`, `-regex`) is not here, so it leaves the walk plain.
+_FIND_PLAIN = ("-print", "-print0", "-depth", "-xdev", "-mount", "-a", "-and", "-noleaf", "-prune", "-empty",
+               "-executable", "-readable", "-writable", "-nouser", "-nogroup", "-true", "-false", "-daystart",
+               "-ignore_readdir_race", "-noignore_readdir_race")
+_FIND_VALUED = ("-type", "-xtype", "-maxdepth", "-mindepth", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin",
+                "-used", "-size", "-newer", "-anewer", "-cnewer", "-perm", "-user", "-group", "-uid", "-gid", "-links",
+                "-inum", "-samefile", "-fstype")
+_FIND_NOT = ("!", "\\!", "-not")
+_FIND_OR = ("-o", "-or")
+# fnmatch reads `[^x]` as a set that holds `^`, and has no `[:class:]`, `[=e=]` or `[.c.]`, where find's glob negates
+# or names a class. A pattern that holds one of them is not read: the walk stays plain.
+_FNMATCH_UNLIKE_FIND = re.compile(r"[$`\\/]|\[\^|\[[:=.]")
 
 
 def _find_name_filter(words):
-    """The name filter of a `find` segment as a tuple of (ignore case, pattern), else None. Only a
-    plain expression is read: `-name`, `-iname`, an implied and, `-type`, the depth limits, `-print` and
-    an `-exec` command. Any other word (`-o`, `!`, `(`, `-regex`, `-path`, `-delete`, a pattern that
-    holds a `$`, a backtick, a backslash or a `/`) leaves the walk plain, which fails closed. Several
-    names are read as any of them, a superset of the files the find lists."""
+    """The name filter of a `find` segment as a tuple of OR branches, each (includes, excludes), every
+    pattern an (ignore case, pattern) pair, else None. A name in a branch is `-name` or `-iname`; one
+    after `!` or `-not` is an exclude. Several includes in one branch are read as any of them, a superset
+    of the files the find lists. A narrowing primary (`_FIND_PLAIN`, `_FIND_VALUED`, an `-exec` command)
+    is skipped, negated or not. Any other word (`(`, `,`, `-regex`, `-path`, `-delete`, a pattern that
+    `_FNMATCH_UNLIKE_FIND` matches), or a branch with no include, leaves the walk plain, which fails closed."""
     index = resolve_command(tuple(words))
     if index is None or _name(words[index]) != "find":
         return None
@@ -811,15 +844,23 @@ def _find_name_filter(words):
     at = 0
     while at < len(args) and not (args[at].startswith("-") or args[at] in _FIND_TEST_STARTS):
         at += 1
-    names = []
+    branches, includes, excludes, negated = [], [], [], False
     while at < len(args):
         word = _unquoted(args[at])
+        if word in _FIND_NOT:
+            negated = not negated
+            at += 1
+            continue
         if word in ("-name", "-iname"):
             pattern = _unquoted(args[at + 1]) if at + 1 < len(args) else ""
-            if not pattern or re.search(r"[$`\\/]", pattern):
+            if not pattern or _FNMATCH_UNLIKE_FIND.search(pattern):
                 return None
-            names.append((word == "-iname", pattern))
+            (excludes if negated else includes).append((word == "-iname", pattern))
             at += 2
+        elif word in _FIND_OR and not negated:
+            branches.append((tuple(includes), tuple(excludes)))
+            includes, excludes = [], []
+            at += 1
         elif word in _FIND_VALUED:
             at += 2
         elif word in _FIND_PLAIN:
@@ -833,7 +874,13 @@ def _find_name_filter(words):
             at += 1
         else:
             return None
-    return tuple(names) or None
+        negated = False
+    if negated:
+        return None
+    branches.append((tuple(includes), tuple(excludes)))
+    if not all(branch_includes for branch_includes, _excludes in branches):
+        return None
+    return tuple(branches)
 
 
 def _walk_filters(texts) -> dict:

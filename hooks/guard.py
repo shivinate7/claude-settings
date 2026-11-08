@@ -402,7 +402,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            FROZEN_REASON, MUTATING_COMMAND, _TOO_LARGE_NOTE, _shell_write_hit, frozen_shell_hit, interpreter_write_hit,
+            is_frozen,
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -1589,6 +1590,13 @@ BUILDER_TEST_REASON = (
     "A builder does not change tests or test config. Report the needed test change in your "
     "report. The orchestrator assigns it to a test-author."
     " A merge conflict in a test file takes the same route."
+    " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
+)
+# The builder's refusal when a fed folder is past the walk cap (`_TOO_LARGE_NOTE` on the hit): no test was found,
+# so the reason says the folder is too large to check, not that the command writes a test.
+BUILDER_TOO_LARGE_REASON = (
+    "A builder's write through a folder this large cannot be checked for a test. Name a narrower path, or a find "
+    "-name filter. If the write does change a test, report it: the orchestrator assigns it to a test-author."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
@@ -3881,7 +3889,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if role == BUILDER_ROLE:
         matched = builder_shell_test_hit(raw, stripped, cwd)
         if matched:
-            refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
+            refuse(tool, "deny", "builder-test-edit",
+                   BUILDER_TOO_LARGE_REASON if matched.endswith(_TOO_LARGE_NOTE) else BUILDER_TEST_REASON, matched)
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
