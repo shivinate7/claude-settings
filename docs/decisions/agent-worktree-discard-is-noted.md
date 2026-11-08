@@ -6,7 +6,8 @@ Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-fil
 link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands).
 
 The shared-tree rule refuses a discarding git command in the shared checkout, and asks in a
-hand-made worktree: `git reset --hard`, `git checkout -- <path>`, `git restore`.
+hand-made worktree: `git reset --hard`, and `git checkout -- <path>` or `git restore`, except a
+named file.
 
 ### Agent-owned worktree
 
@@ -74,15 +75,19 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
 ## Path reset and work-tree discards
 
 Verdicts by tree: shared | hand-made | agent-owned. Pinned by the path reset ruling block in
-`hooks/test_guard.py` (title: THE PATH RESET AND DISCARD RULING).
+`hooks/test_guard.py` (title: THE PATH RESET AND DISCARD RULING). A `deny | ask | allow, noted` row
+holds only over uncommitted work: a clean tree allows (`hooks/test_guard.py:2411` and `:2610`).
 
 - `git reset [-q] [HEAD] [--] [<path>]`, no discard flag: allow | allow | allow. It only unstages and
-  keeps the work tree. In the shared checkout it can drop another agent's staged choice, though not
-  its content. That case is under review (coordinator, 2026-11-08 07:50 CST).
+  keeps the work tree. In the shared checkout it can drop another agent's staged choice. The allow
+  stays. The coordinator (2026-11-08 07:50 CST) asked for an explicit judgement of this case.
   - Unstage caveat: an unstage never touches the work tree. If the work tree still holds the staged
     lines, nothing is lost. If the work tree changed a line after it was staged, the staged version
     is in no ref, index or file after the unstage. It survives only as an unreachable blob until gc.
-    The allow stays: normal work does not stage partial hunks.
+    The allow stays. Round 2 measured it: after add, edit and unstage, the work tree keeps the newer
+    bytes, and `git fsck --lost-found` recovers the staged bytes. Asking on every unstage would be a
+    false alarm, since any agent's `git add` or `git commit` already changes the shared index. The
+    `MM` state also comes from add-then-edit.
 - `git restore --staged <path>` and `git restore --staged .`: allow | allow | allow. Each is an
   unstage, so the caveat above applies.
 - `git restore -- <path>`: deny | allow (named-file allow) | allow.
