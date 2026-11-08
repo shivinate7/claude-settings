@@ -1,0 +1,11 @@
+{
+  "title": "bin/shoot's touch stitch keeps sticky and fixed elements where the page puts them",
+  "phase": "guards",
+  "status": "doing",
+  "order": 696,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3cfg1yrBuezf45D4i",
+  "why": "In bin/shoot's touch stitch (#2075), setting a sticky element to static moves its absolute children: a sticky header's dropdown lands at y 900. Fixed pseudo-elements and `background-attachment: fixed` repeat on each tile (coordinator 09:14 CST Nov 8).",
+  "note": "Fix 1: use position relative with insets auto, then restore. Fix 2: hide fixed pseudo-elements with a marker attribute, and use background-attachment scroll after tile 1. Follow-up on #2075, which cites this step; lane shoot-touch-per-size. Done check: a red test where a stitched shot keeps a sticky header's dropdown in place and shows a fixed background once. Filed by triage 09:15 CST Nov 8.",
+  "updatedAt": "2026-11-08T09:15:00-06:00"
+}
