@@ -1975,6 +1975,18 @@ def _open_mode(call, mode_at: int) -> str:
     return "unknown"
 
 
+def _spelled_path_call(expr, parents):
+    """The call `expr.expanduser()` (or another PY_PATH_SPELLINGS method, no arguments) when `expr`
+    is the object it is called on, else None. It returns the same path in another spelling."""
+    method = parents.get(expr)
+    outer = parents.get(method)
+    if (isinstance(method, ast.Attribute) and method.value is expr and method.attr in PY_PATH_SPELLINGS
+            and isinstance(outer, ast.Call) and outer.func is method and not outer.args
+            and not outer.keywords):
+        return outer
+    return None
+
+
 def _path_method_mode(call, parents) -> str:
     """The mode a `Path(...)` call gives its path, from the method called on it."""
     method = parents.get(call)
@@ -1994,9 +2006,18 @@ def _python_mode(node, parents) -> str:
     """The mode a python string constant gives its path, from the call that holds it. A join
     (`os.path.join(a, p)`) passes the mode of its result on; a list, a dict, an f-string or a sum
     carries the string to the call around it, where only a text call reads it (`direct` is then off)."""
-    value, direct = node, True
+    value, direct, path_object = node, True, False
     while True:
         parent = parents.get(value)
+        spelled = None
+        if direct and isinstance(parent, ast.Call) and _call_name(parent).endswith("Path") \
+                and value in parent.args:
+            spelled = _spelled_path_call(parent, parents)
+        elif path_object:
+            spelled = _spelled_path_call(value, parents)
+        if spelled is not None:
+            value, path_object = spelled, True
+            continue
         if isinstance(parent, ast.Compare):
             return "text" if all(isinstance(op, PY_TEXT_COMPARES) for op in parent.ops) else "unknown"
         if (direct and isinstance(parent, ast.Call) and _stdlib_call(parent) and value in parent.args
@@ -2008,6 +2029,8 @@ def _python_mode(node, parents) -> str:
         else:
             break
     call = parent
+    if path_object and isinstance(call, ast.Attribute):
+        return _path_method_mode(value, parents)    # `Path(p).expanduser().exists()` checks p
     if not isinstance(call, ast.Call):
         return "unknown"
     name = _call_name(call)
