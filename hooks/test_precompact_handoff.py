@@ -2332,7 +2332,7 @@ def case_prompt_names_audit_agent():
 
 
 # --------------------------------------------------------------------------- owner waits
-# Decision precompact-handoff, the owner-waits section. A coordinator's handoff keeps every item
+# Decision precompact-handoff, item 14. A coordinator's handoff keeps every item
 # waiting on the owner in this session under OWNER_HEADING. The Stop nudge blocks once when that
 # heading is missing, or when a refused act has no later success and the section does not name
 # it. Each case runs the hook as a subprocess, the way the Stop hook runs it.
@@ -2875,8 +2875,8 @@ def case_owner_waits_fenced_comment_keeps_section():
 
 
 # --- owner waits: act names, odd transcript lines, tag spelling -----------------------------------
-# The handoff check names a refused act by its first 60 characters. Two commands that share those
-# characters need their whole text named, or one name covers both.
+# The handoff check names a refused act by the whole first line of its command. Two commands that
+# share their first 60 characters must each be named, or one name would cover both.
 SAME_HEAD = "cd /home/user/claude-settings/.claude/worktrees/agent-release-candidate && npm publish"
 PUBLISH_A = SAME_HEAD + " a"
 PUBLISH_B = SAME_HEAD + " b --force"
