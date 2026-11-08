@@ -22980,6 +22980,96 @@ spo_register("scratchpad-owner: extra, a run on the second line of a double-quot
              spo_extra_multiline)
 
 
+# Rule scratchpad-owner, the overwrite form: an agent with a valid agent_id that writes over a file under
+# this session's scratchpad whose record names a different agent is asked. The writes are the ones the
+# record covers: Write, and a shell write target (a redirect, a heredoc `cat > f`, or an append). The
+# first write of a file, a rewrite by its own writer, a call with no agent_id and a read pass. Each case
+# builds its own session, as the cases above do.
+
+
+def ovw_case_1():
+    """Agent A writes msg.txt with Write; agent B writes the same file with Write: asked."""
+    fx = spo_fixture("o1")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o1", msg)] + spo_wrote(fx, "o1", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_asked("o1", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's Write over agent A's file is asked")
+
+
+def ovw_case_2():
+    """Agent A writes msg.txt with Write; agent B redirects echo over it: asked."""
+    fx = spo_fixture("o2")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o2", msg)] + spo_wrote(fx, "o2", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_run(fx, SPO_OTHER, "echo x > %s" % msg)
+    problems.append(spo_asked("o2", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's shell redirect over agent A's file is asked")
+
+
+def ovw_case_3():
+    """Agent A writes msg.txt with Write; agent B cds into the scratchpad and heredocs over it: asked."""
+    fx = spo_fixture("o3")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o3", msg)] + spo_wrote(fx, "o3", SPO_WRITER, msg, "from A\n")
+    heredoc = "cd %s && cat > msg.txt <<'EOF'\nfrom B\nEOF" % fx["scratch"]
+    got, reason = spo_run(fx, SPO_OTHER, heredoc)
+    problems.append(spo_asked("o3", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's heredoc after a cd over agent A's file is asked")
+
+
+def ovw_case_4():
+    """Agent A writes msg.txt, then rewrites it with Write: allowed."""
+    fx = spo_fixture("o4")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o4", msg)] + spo_wrote(fx, "o4", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", SPO_WRITER, file_path=msg, content="from A again\n")
+    problems.append(spo_allowed("o4", got, reason))
+    return spo_result(problems, "agent A's rewrite of its own file is allowed")
+
+
+def ovw_case_5():
+    """Agent B writes msg.txt, a file no agent wrote before: allowed."""
+    fx = spo_fixture("o5")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o5", msg)]
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_allowed("o5", got, reason))
+    return spo_result(problems, "agent B's first write of a file nobody wrote is allowed")
+
+
+def ovw_case_6():
+    """Agent A writes msg.txt; a top-level call with no agent_id overwrites it: allowed."""
+    fx = spo_fixture("o6")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o6", msg)] + spo_wrote(fx, "o6", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", None, file_path=msg, content="from the top session\n")
+    problems.append(spo_allowed("o6", got, reason))
+    return spo_result(problems, "a top-level call with no agent_id overwrites agent A's file and is allowed")
+
+
+def ovw_case_7():
+    """Agent A writes msg.txt; agent B appends to it with >>: asked."""
+    fx = spo_fixture("o7")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o7", msg)] + spo_wrote(fx, "o7", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_run(fx, SPO_OTHER, "echo x >> %s" % msg)
+    problems.append(spo_asked("o7", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's append to agent A's file is asked")
+
+
+spo_register("scratchpad-owner: overwrite 1 agent B's Write over agent A's file: asked", ovw_case_1)
+spo_register("scratchpad-owner: overwrite 2 agent B's shell redirect over agent A's file: asked", ovw_case_2)
+spo_register("scratchpad-owner: overwrite 3 agent B's heredoc after a cd over agent A's file: asked",
+             ovw_case_3)
+spo_register("scratchpad-owner: overwrite 4 agent A rewrites its own file: allowed", ovw_case_4)
+spo_register("scratchpad-owner: overwrite 5 agent B's first write of a file nobody wrote: allowed",
+             ovw_case_5)
+spo_register("scratchpad-owner: overwrite 6 a top-level call overwrites agent A's file: allowed",
+             ovw_case_6)
+spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: asked", ovw_case_7)
+
+
 # =========================================================================== mask_script lexemes
 FAMILY = "mask-script"
 
