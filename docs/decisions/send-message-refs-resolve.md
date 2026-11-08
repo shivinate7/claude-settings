@@ -35,8 +35,8 @@ With no origin, only shas are judged.
 ## Fail open
 
 - No git repo, or git fails: allowed.
-- Every fail-open below names each ref it could not check, as the next line says: a sha in a shallow clone or when git fails, and a PR or comment when there is no origin.
-- `ls-remote` or `gh` fails, times out (5 s each), or is missing: allowed. The guard's answer carries `additionalContext` that names each ref it could not check, so the sender reads it in the tool result. The answer holds no `permissionDecision`, since an explicit allow would skip a permission prompt that main shows. No log is written.
+- Every fail-open below names each ref it could not check, as the next line says: a sha in a shallow clone or when git fails, and a PR or comment when there is no origin. With no origin, every pull and comment URL is named, since none can be matched to this repo.
+- `ls-remote` or `gh` fails, times out (5 s each), or is missing: allowed. The guard's answer carries `additionalContext` that names each ref it could not check, so the sender reads it in the tool result. The answer holds no `permissionDecision`, since an explicit allow would skip a permission prompt that main shows. No log is written, except `report-sha-shallow` from the shared sha function.
 - Only a clear answer refuses: no `refs/pull/N/head` in a good `ls-remote`, or `gh api` exiting non-zero with `HTTP 404` on stderr. Any other gh failure leaves the link unchecked.
 - At most 5 comment links are read per send, and at most 20 PRs and 20 shas. The rest are named as unchecked.
 - A shallow clone with a missing sha: allowed, and the sha is named as unchecked.
