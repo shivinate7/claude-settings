@@ -1,0 +1,11 @@
+{
+  "title": "A write or restore meant for a test-author's -red checkout cannot land in its own worktree through a relative path",
+  "why": "Lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 13:00 CST Nov 8: the #2211 test-author (haiku) keeps a second \"-red\" checkout for its red run. It ran a restore meant for that checkout with a relative path, and the restore overwrote the edit in its own worktree instead. It noticed, restored the edit from the red copy, byte-matched it and committed; nothing was lost. Guard ideas: refuse a write or restore whose relative target resolves inside the agent's own worktree when the command names a `-red` checkout path; or the test-author brief requires absolute paths for every write into a red checkout. Related: relative-write-absolute-cd (the opposite direction, a write that escapes its home).",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 798,
+  "updatedAt": "2026-11-08T13:02:00-06:00"
+}
