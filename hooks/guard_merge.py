@@ -1096,10 +1096,39 @@ BRIEF_STEP_REASON = (
     "(decision session-tiers, a lane holds one topic)"
 )
 
+# Rule lane-brief-roles: a brief that passes lane-one-topic names a session id for each of these roles.
+ROLE_LABELS = ("Coordinator", "Triage", "Batch runner")
+_ROLE_MD = r"[\s*_`]*"  # markdown or whitespace between the parts of `**Triage**: session_x`
+_ROLE_ID_AFTER = _ROLE_MD + r"(?:\d+)?" + _ROLE_MD + r":?" + _ROLE_MD + r"session_[A-Za-z0-9]+"
+BRIEF_ROLES_REASON = (
+    "this brief does not name a session id for {missing}. A lane brief names the coordinator, triage and batch "
+    "runner session ids, such as `Roles: Coordinator <id>; Triage <id>; Batch runner <id>.` on its second line, so "
+    "the lane can reach triage (list_sessions has no tag filter in cloud). The ids are in the Standing sessions "
+    "roster on the roadmap branch. (decision session-tiers, a lane brief names its roles)"
+)
+BRIEF_KIND_TOPIC, BRIEF_KIND_ROLES = "topic", "roles"  # the third item brief_hit returns: which rule refused
+
+
+def _missing_roles(message: str):
+    """The ROLE_LABELS the message gives no session id for. A role is named when its label (any case) is followed
+    by optional markdown, an optional number, an optional colon, then `session_<id>`. Reads the whole message."""
+    return [label for label in ROLE_LABELS
+            if not re.search(re.escape(label) + _ROLE_ID_AFTER, message, re.IGNORECASE)]
+
+
+def _roles_verdict(message: str):
+    missing = _missing_roles(message)
+    if not missing:
+        return None
+    return ("lane brief naming no session id for " + ", ".join(missing),
+            BRIEF_ROLES_REASON.format(missing=", ".join(missing)), BRIEF_KIND_ROLES)
+
 
 def brief_hit(tool: str, tool_input, transcript: str):
-    """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
-    hold, else None. Only a message whose first non-blank line starts with LANE_BRIEF_MARKER is read; the
+    """Return (matched, reason, kind) when this send_message is a lane brief for a topic the target lane does not
+    hold (kind BRIEF_KIND_TOPIC, rule lane-one-topic), or one that passes that and names no session id for a role
+    in ROLE_LABELS (kind BRIEF_KIND_ROLES, rule lane-brief-roles), else None. The roles check reads the message
+    only: cost: no second transcript read. Only a message whose first non-blank line starts with LANE_BRIEF_MARKER is read; the
     transcript is read for that message alone. A target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
     brief's Topic, an older lane without one by the brief's step against its cs-step tags. Fails closed: any
@@ -1117,23 +1146,24 @@ def brief_hit(tool: str, tool_input, transcript: str):
     except Exception:
         tags, tagged_after = None, False
     if tags is None:
-        return "lane brief to a target with no record", BRIEF_NO_RECORD_REASON
+        return "lane brief to a target with no record", BRIEF_NO_RECORD_REASON, BRIEF_KIND_TOPIC
     if ARCHIVE_LANE_TAG not in tags:
         return None
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
-        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
+        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON, BRIEF_KIND_TOPIC
     found = _BRIEF_LINE.match(first)
     step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
     topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
     topics = [t for t in topics if t]
     if topics:
         if (topic or "").lower() not in [t.lower() for t in topics]:
-            return "lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), BRIEF_TOPIC_REASON
-        return None
+            return ("lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), BRIEF_TOPIC_REASON,
+                    BRIEF_KIND_TOPIC)
+        return _roles_verdict(message)
     steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
     if step not in steps:
-        return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
-    return None
+        return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON, BRIEF_KIND_TOPIC
+    return _roles_verdict(message)
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

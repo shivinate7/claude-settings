@@ -1,9 +1,11 @@
 Lane brief: <step-slug>. Topic: <topic-slug>. <Plain name of the step>.
+Roles: Coordinator <coordinator session id>; Triage <triage session id>; Batch runner <batch runner session id>.
 
 <Who runs it: a cloud lane session, or a lane session on a named local machine.> The coordinator
 starts it with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
 The coordinator also tags the lane `cs-topic:<topic slug>`, its one topic. The step slug is the step id.
 The guard reads the Topic on the first line and refuses a brief whose Topic differs from that tag (rule `lane-one-topic`), so keep this line first.
+The coordinator fills the Roles line from the Standing sessions roster on the record branch's CLAUDE.md, so the lane can reach triage. The guard refuses a brief without the three ids (rule `lane-brief-roles`).
 The start prompt is `/effort medium` alone. This brief follows with `send_message` (`agent-model-cap`, the lane effort pin).
 Never rebase onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
 Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before the first Opus spawn and after triage writes a step grant. The guard reads only that local ref. A plain fetch does not write it in a shallow clone.

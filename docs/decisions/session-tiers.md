@@ -135,6 +135,13 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Cost: one guard process start per `send_message`, from the PreToolUse matcher; one transcript read per `send_message` that carries the marker, none otherwise. No new file or timer.
   - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
   - Landed at merge.
+- **Lane brief roles** (rule `lane-brief-roles`, guard rule that denies a lane brief that names no coordinator, triage and batch runner session ids). Risk kind: incident. Lanes could not find triage, because `list_sessions` has no tag filter in cloud sessions. Three sightings on 2026-11-08: lane `verdict-instruction-false-alarm`, the lane on pull request 1593, and lane `reviewer-model-hook-latest` (coordinator, 04:55 CST).
+  - Form: a brief carries a `Roles:` line after its first line, `Roles: Coordinator <id>; Triage <id>; Batch runner <id>.`, filled from the Standing sessions roster on the roadmap branch. The guard reads the whole message for each label (`Coordinator`, `Triage`, `Batch runner`; any case), then optional markdown, an optional number, an optional colon, then `session_<id>`.
+  - Verdict: it runs after `lane-one-topic` passes a brief to a `cs-build:lane` target, on the topic path and the older step path. A brief with no id for a role is denied, and the reason names the missing roles. A brief `lane-one-topic` refuses keeps that reason. Passes: a non-lane target, a message without the marker. An override lifts it.
+  - Known miss: ids are checked for form only, not against the roster, so a stale id passes (debt note `lane-brief-roles-no-roster-match`).
+  - Cost: none beyond `lane-one-topic`. It reuses the tags that rule already read and adds no transcript read, file or timer.
+  - Tests: family `lane-brief-roles` in `hooks/test_guard.py`.
+  - Landed at merge.
 
 ## How it works
 

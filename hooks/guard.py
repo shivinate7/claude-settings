@@ -120,6 +120,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  lane-brief-roles    deny. A lane brief (the lane-one-topic marker) sent to a target that passes lane-one-topic, on
+                       the topic path or the older step path, unless its whole text names a session id for each of
+                       Coordinator, Triage and Batch runner (guard_merge.ROLE_LABELS): the label, any case, then optional
+                       markdown (`*`, `_`, backtick), an optional number, an optional colon, then `session_<id>`. Form
+                       only: no id is matched to a roster. A brief lane-one-topic refuses keeps that reason. A non-lane
+                       target and a message without the marker pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -383,7 +389,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, BRIEF_KIND_ROLES, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -4889,9 +4895,11 @@ def judge(payload) -> None:
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
 
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+    # A lane brief for a topic the target lane does not hold (rule lane-one-topic), or naming no role ids (rule lane-brief-roles).
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
+        if briefed[2] == BRIEF_KIND_ROLES:
+            refuse(tool, "deny", "lane-brief-roles", briefed[1], briefed[0])
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     if tool == "Skill":
