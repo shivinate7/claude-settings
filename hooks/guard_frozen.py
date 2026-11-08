@@ -247,6 +247,7 @@ def _mutates_as_command(command: str, words) -> bool:
 # suffix. `e`, `f` and `l` take a value, so `-ei` is a script, not `-i`. `_SED_IN_PLACE_FLAG` is the one
 # home of the flag; a `sed` word and a `sed` segment are both read by it.
 _SED_NAMES = ("sed", "gsed")
+_UNREAD_RUNNERS = ("busybox", "eval")   # run a command no list here names, so `_commands_run` reads none
 _SED_IN_PLACE_FLAG = r"(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)"
 _SED_IN_PLACE = r"\b(?:g?sed)\b[^\n;|&]*" + _SED_IN_PLACE_FLAG + r"[^\n;|&]*"
 # `writes_to` reads one segment, whose quoted words the shell scan has already unquoted, so a `;`, `|` or `&`
@@ -1646,12 +1647,36 @@ def _sed_script_targets(script):
 
 
 def _commands_run(raw):
-    """The command name that runs in one segment's `raw` words, after any `sudo`, `env` or `xargs`
-    (`_segment_command`), as a set. None when a quoted word holds a space: it may be a script the shell runs
-    (`sh -c 'sed -i s/a/b/ P'`, or JSON piped to an interpreter), so no command name is read from the segment."""
+    """The command names that run in one segment's `raw` words, as a set: the command word after any `sudo`,
+    `env` or `xargs` and after a glued `(` (`command_indexes`), plus each command a runner starts
+    (`wrapped_commands`: `find -exec`, `flock`, `stdbuf`), read the same way. None when no name is certain, so the
+    caller reads the segment as text that may hold any command: a quoted word holding a space may be a script the
+    shell runs (`sh -c 'sed -i s/a/b/ P'`, or JSON piped to an interpreter), and so may the text of `eval`, a
+    nested shell or `busybox`."""
     if any(word[:1] in ("'", '"') and re.search(r"\s", _unquoted(word)) for word in raw):
         return None
-    return {_segment_command([_unquoted(word) for word in raw])[0]}
+    return _names_run([_unquoted(word) for word in raw])
+
+
+def _names_run(tokens):
+    """`_commands_run` over plain tokens; recurses into each command text a runner starts."""
+    found = set()
+    indexes = guard_core.command_indexes(tokens)
+    if not indexes:
+        return {_segment_command(tokens)[0]}
+    if guard_core.nested_script(tokens):
+        return None
+    for at in indexes:
+        name = guard_core.basename(tokens[at])
+        if name in _UNREAD_RUNNERS:
+            return None
+        found.add(_name(name))
+        for text in guard_core.wrapped_commands(tokens, at):
+            inner = _names_run(guard_core.segment_tokens(text) or [])
+            if inner is None:
+                return None
+            found |= inner
+    return found
 
 
 def _perl_script_words(raw):
