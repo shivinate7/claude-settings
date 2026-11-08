@@ -1354,8 +1354,8 @@ def module_as(name, module):
             sys.modules.pop(name, None)
 
 class StaleGitReads(unittest.TestCase):
-    """merge.py imports hooks/git_reads.py by name. A copy-mode install can leave an older git_reads in sys.modules, with no lists_refs
-    or listing_text. merge.py must still load over it, and its sh must read a successful ls-remote from stdout alone (decision merge-lock).
+    """merge.py loads its own private copy of hooks/git_reads.py by path. A copy-mode install can leave an older git_reads in sys.modules,
+    with no lists_refs or listing_text. merge.py must still load over it, and its sh must read a successful ls-remote from stdout alone (decision merge-lock).
     The control loads merge.py over the real git_reads and must pass, so the stale case goes red only on the stale module."""
 
     def load_fresh(self, git_reads_module):
@@ -2546,23 +2546,27 @@ class CutLanes(Env):
         self.assertEqual(len(hits), 1, f"{b}: {len(hits)} delete pushes")
         return hits[0]
 
+    @contextlib.contextmanager
     def proof_fails_for(self, tip):
-        """-> a patch under which the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real.
-        c110: read_lanes asks merge-base against origin/main before the claim, and a failure there refuses; that read stays real."""
-        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
-        real = git_reads._git
+        """Under the context, the ancestry proof of one lane tip cannot run (merge-base exits 128). Every other git call is real.
+        -> the list that receives each simulated failure. c110: read_lanes asks merge-base against origin/main before the claim, and
+        a failure there refuses; that read stays real. The patch sits on merge's private git_reads copy, the one merge reads through."""
+        real, hits = merge._git_reads_home._git, []
         def broken(where, *args, **k):
             if "merge-base" in args and tip in args and "origin/main" not in args:
+                hits.append(args)
                 return subprocess.CompletedProcess(args, 128, "", "fatal: simulated: the ancestry proof cannot run")
             return real(where, *args, **k)
-        return unittest.mock.patch.object(git_reads, "_git", broken)
+        with unittest.mock.patch.object(merge._git_reads_home, "_git", broken):
+            yield hits
 
     def test_a_stack_whose_middle_lane_has_an_unproven_tip_keeps_the_base_below_it(self):
         # Fixpoint: lane2's tip cannot be proven, so lane2 is kept. Its open PR still needs lane1, so lane1 is kept too.
         # lane3 gets one line that matches its state. The proof is made to fail for lane2 only.
         tips = self.stack_of_three()
-        with self.proof_fails_for(tips["lane2"]):
+        with self.proof_fails_for(tips["lane2"]) as hits:
             rc, out = self.go()
+        self.assertTrue(hits, "scope: no ancestry proof of lane2 reached the simulated failure, so the case proves nothing")
         self.assertEqual(rc, 0, out)
         self.assertIn(LANE_PROOF_NOT_RUN, kept_line(self, out, "lane2"))
         self.assertNotEqual(self.head("lane2"), "", "lane2 was deleted")
@@ -2776,14 +2780,15 @@ class CutLanes(Env):
     def test_a_failed_ancestry_read_in_the_dropped_lane_check_refuses(self):
         # c110: a merge-base failure is a failed read, never "not an ancestor".
         tips = lane_batch(self, "lane1", "lane2")
-        import git_reads  # hooks/git_reads.py: the ancestry read merge.py makes goes through its _git
-        real = git_reads._git
+        real, hits = merge._git_reads_home._git, []  # merge's private git_reads copy: the ancestry read merge makes goes through its _git
         def broken(where, *args, **k):
             if "merge-base" in args and tips["lane1"] in args and "origin/main" in args:
+                hits.append(args)
                 return subprocess.CompletedProcess(args, 128, "", "fatal: simulated")
             return real(where, *args, **k)
-        with unittest.mock.patch.object(git_reads, "_git", broken):
+        with unittest.mock.patch.object(merge._git_reads_home, "_git", broken):
             rc, out = self.go()
+        self.assertTrue(hits, "scope: no merge-base read of lane1 reached the simulated failure, so the case proves nothing")
         self.assertEqual(rc, 1, out)
         self.assertIn("git merge-base failed", out)
         self.assertEqual(self.claims("feat"), 0)

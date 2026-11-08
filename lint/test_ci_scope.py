@@ -210,6 +210,76 @@ def join_all(parts, rel, scopes, depth):
     return [posixpath.join(*combo) for combo in itertools.product(*options)]
 
 
+class UnresolvedLoad(Exception):
+    """A load the closure reader cannot follow. It is raised, never dropped: a dropped load leaves its file out of the closure, and a
+    change to that file then gets no merge flag."""
+
+
+# A by-path load whose path the reader cannot read, allowed by naming the module constant that holds the path. The reader reads the
+# value from the file that holds the constant, so a constant it cannot read is still a failure. A constant is named here, not copied.
+ALLOWED_CONSTANT_LOADS = {
+    "hooks/guard_merge.py": ("MERGE_TOOL_REL",),  # the merge tool under a settings root; the constant names merge/merge.py
+    "hooks/decision_watch.py": ("_GUARD_PATH",),  # GUARD_UNDER_TEST, an environment override; the default branch imports guard by name
+}
+PACKAGE_WHY = "a package-qualified load; the reader follows a load only by the name of a file in the closure"
+COMPUTED_WHY = "a by-path load whose path it cannot read; name the file, or allow-list the constant the path names"
+
+
+def unresolved(rel, node, why):
+    return UnresolvedLoad(f"{rel}: cannot follow the load {ast.unparse(node)}: {why}")
+
+
+def package_qualified(dotted, by_name):
+    """-> True when `dotted` starts with a folder the loads live in, and no file of that name is in the closure."""
+    top = dotted.split(".")[0]
+    return top in LOAD_ROOTS and top not in by_name
+
+
+def is_parameter(name_node, parents):
+    """-> True when the name is a parameter of a function that holds it."""
+    cur = parents.get(name_node)
+    while cur is not None:
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                isinstance(a, ast.arg) and a.arg == name_node.id for a in ast.walk(cur.args)):
+            return True
+        cur = parents.get(cur)
+    return False
+
+
+def reached_names(node, scopes, depth=0):
+    """-> the Name nodes `node` reads, and the Name nodes of the values its local names are assigned from, to depth 8. A path such as
+    `path` reads the names its own assignment reads, so a constant named in that assignment is reached from the path."""
+    parents, values = scopes
+    out = []
+    if depth > 8:
+        return out
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Name):
+            continue
+        out.append(n)
+        cur = parents.get(n)
+        while cur is not None:
+            if isinstance(cur, SCOPES) and n.id in values.get(cur, {}):
+                for v in values[cur][n.id]:
+                    out.extend(reached_names(v, scopes, depth + 1))
+                break
+            cur = parents.get(cur)
+    return out
+
+
+def mentions_parameter(node, scopes):
+    """-> True when `node` reads a parameter, directly or through a local name. A path built from a parameter is the caller's value.
+    The caller's load is read where the caller passes it, so the reader takes that path as no load."""
+    parents, _ = scopes
+    return any(is_parameter(n, parents) for n in reached_names(node, scopes))
+
+
+def allowed_constant(rel, node, scopes):
+    """-> the name node of a constant ALLOWED_CONSTANT_LOADS names for the file `rel`, which `node` reads, or None."""
+    names = ALLOWED_CONSTANT_LOADS.get(rel, ())
+    return next((n for n in reached_names(node, scopes) if n.id in names), None)
+
+
 # A subprocess target (bin/ci-job, run as a child process) is no load and stays out of the closure (decision ci-scope-merge-closure).
 def file_loads(rel, source, files):
     """-> the files in `files` that the file `rel`, with this `source`, loads when it runs. A load is: an import at any depth
@@ -217,7 +287,9 @@ def file_loads(rel, source, files):
     hooks/<name>.py; `__import__("x")` and `importlib.import_module("x")` with a literal name; and a by-path load,
     `spec_from_file_location(name, path)` or `SourceFileLoader(name, path)`, whose path names a file in `files`, by a string
     constant in the call, or by a path read from this file (read_values). module_from_spec takes no path: its load is read where
-    its spec or loader is made. A name in a comment or a string is no load, and a path that cannot be read is no load."""
+    its spec or loader is made. A name in a comment or a string is no load. A load the reader cannot follow raises UnresolvedLoad:
+    a package-qualified load, or a by-path load whose path it cannot read, unless the path is built from a parameter or allow-listed
+    by the constant it names (ALLOWED_CONSTANT_LOADS)."""
     tree = ast.parse(source)
     by_name = {}
     for p in files:
@@ -235,9 +307,13 @@ def file_loads(rel, source, files):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
+                if package_qualified(a.name, by_name):
+                    raise unresolved(rel, node, PACKAGE_WHY)
                 out |= by_name.get(a.name.split(".")[0], set())
         elif isinstance(node, ast.ImportFrom):
             if node.level == 0 and node.module:
+                if package_qualified(node.module, by_name):
+                    raise unresolved(rel, node, PACKAGE_WHY)
                 out |= by_name.get(node.module.split(".")[0], set())
             elif node.level:  # a sibling of this file
                 for name in ([node.module] if node.module else [a.name for a in node.names]):
@@ -250,6 +326,8 @@ def file_loads(rel, source, files):
             if fn == LOADER and literal:
                 out.add(f"hooks/{literal}.py")
             elif fn in ("__import__", "import_module") and literal:
+                if package_qualified(literal, by_name):
+                    raise unresolved(rel, node, PACKAGE_WHY)
                 out |= by_name.get(literal.split(".")[0], set())
             elif fn in ("spec_from_file_location", "SourceFileLoader"):
                 strings = []
@@ -264,7 +342,14 @@ def file_loads(rel, source, files):
                 path_arg = node.args[1] if len(node.args) > 1 else next(
                     (k.value for k in node.keywords if k.arg in ("location", "path")), None)
                 if path_arg is not None:
-                    out |= {posixpath.normpath(s) for s in read_values(path_arg, rel, scopes)}
+                    got = read_values(path_arg, rel, scopes)
+                    named = allowed_constant(rel, path_arg, scopes)
+                    if got:
+                        out |= {posixpath.normpath(s) for s in got}
+                    elif named is not None:
+                        out |= {posixpath.normpath(s) for s in read_values(named, rel, scopes)}
+                    elif not mentions_parameter(path_arg, scopes):
+                        raise unresolved(rel, node, COMPUTED_WHY)
     return out & files
 
 
