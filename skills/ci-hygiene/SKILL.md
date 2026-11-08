@@ -69,6 +69,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
    each lane PR closes as replaced.
+   The integration PR body names each handed lane. Its `Lanes:` line lists the batch's lanes.
+   A left-out lane gets a reason after its number or in the label: `Dropped (macOS CI red): #n`.
+   A late lane goes on a `Next batch (late): #n` line.
+   The draft step refuses a handed PR the body does not name (decision `batch-body-names-handed`, the body names each handed lane).
    When the integration run is red, read the failing job. Find the lane whose files it touches. Drop
    that lane and any lane that depends on it. Rebuild the branch from main without them. Never
    revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
