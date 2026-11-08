@@ -85,6 +85,18 @@ class Job(unittest.TestCase):
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
+    def written_after(self, name, *steps, args=(), env=None):
+        """(verdicts, the text the steps wrote to `name` in the throwaway repo, output) of one run of the job. The text is
+        read with no newline translation, so a CRLF stays as written. A step that wrote no file gives a note in its place."""
+        path = os.path.join(self.root, name)
+        if os.path.exists(path):
+            os.remove(path)
+        rc, lines, out = self.run_job(*steps, args=args, env=env)
+        if not os.path.exists(path):
+            return self.verdicts(lines), "(no %s: the step did not run)" % name, out
+        with open(path, encoding="utf-8", newline="") as f:
+            return self.verdicts(lines), f.read(), out
+
     def verdicts(self, lines):
         return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines
                 if not NOT_RUN.match(ln) and not SUMMARY.match(ln)]  # a --lint run's not-run and summary lines are no verdict
@@ -434,14 +446,7 @@ class GithubBaseRef(Job):
 
     def seen_after(self, *steps, args=(), env=None):
         """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job."""
-        path = os.path.join(self.root, "seen.txt")
-        if os.path.exists(path):
-            os.remove(path)
-        rc, lines, out = self.run_job(*steps, args=args, env=env)
-        if not os.path.exists(path):
-            return self.verdicts(lines), "(no seen.txt: the step did not run)", out
-        with open(path, encoding="utf-8") as f:
-            return self.verdicts(lines), f.read(), out
+        return self.written_after("seen.txt", *steps, args=args, env=env)
 
     def test_a_pull_request_run_sets_github_base_ref_to_the_base_without_its_remote(self):
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN), args=("--base", "origin/main"))
