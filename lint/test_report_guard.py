@@ -5032,6 +5032,40 @@ class MistakeNamesGuardTests(unittest.TestCase):
         self.assertIsNotNone(out, "no block: a guard line with no ref passed")
         self.assertIn("Deviations", out.get("reason", ""), "the refusal does not name the section: %s" % out)
 
+    # Round 3 (review findings). A guard label may sit inside **...**, *...* or _..._, with the colon inside or outside.
+    # Red: a label in any of those forms, with no ref, blocks.
+    def test_mg_red_guard_r3_bold_label_colon_inside_blocks(self):
+        self.assert_blocked(mg_report("**Guard:** future briefs run the check."))
+
+    def test_mg_red_guard_r3_bold_bullet_label_colon_outside_blocks(self):
+        self.assert_blocked("%s\n> **Deviations**\n> - **Guard**: future briefs run the check.\n> **Next** none" % MG_DONE)
+
+    def test_mg_red_guard_r3_italic_label_blocks(self):
+        self.assert_blocked(mg_report("*Guard:* future briefs run the check."))
+
+    def test_mg_red_guard_r3_underscore_label_blocks(self):
+        self.assert_blocked(mg_report("_Guard:_ future briefs run the check."))
+
+    # Green: a debt word that a negator does not reach (3 words before, 2 after) still counts. A PR #N or a /pull/N
+    # ref counts with any digits. Each case follows the admission, so only its debt or ref clears it.
+    def test_mg_green_guard_r3_debt_negator_five_after_records_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Debt check-gap records it and nothing else changed."))
+
+    def test_mg_green_guard_r3_debt_negator_three_after_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Debt check-gap filed (not urgent)."))
+
+    def test_mg_green_guard_r3_debt_negator_five_after_not_touched_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Filed debt check-gap and I did not touch the code."))
+
+    def test_mg_green_guard_r3_debt_so_no_session_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Debt check-gap is filed so no session has to remember."))
+
+    def test_mg_green_guard_r3_pr_number_ref_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Guard: built in PR #7."))
+
+    def test_mg_green_guard_r3_pull_url_ref_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Guard: built in https://github.com/o/r/pull/7."))
+
 
 if __name__ == "__main__":
     unittest.main()
