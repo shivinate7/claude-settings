@@ -8,7 +8,7 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 | Push | Outcome | Rule id |
 |---|---|---|
 | A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all`, `--branches`) | ask | `push-main` |
-| An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote | ask | `push-stray-branch` |
+| An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote, and does not yet exist there | ask | `push-stray-branch` |
 | A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | ask | `push-agent-branch` |
 | Any other plain push | allow | |
 
@@ -20,6 +20,12 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.
+- Item 432 a, `push-stray-branch` narrowed: owner, 2026-11-08 11:49 CST, pick a, "skip existing
+  branches". A destination that already exists on the pushed remote (read from the local
+  `refs/remotes/<remote>/<name>`) is silent: that push lands on a branch that is already there,
+  such as the lane's own PR branch, and makes no stray one. A failed read keeps the ask. The
+  owner's note, "shouldn't it stay quiet regardless?", is not this ruling: quiet regardless would
+  drop the ask for a push that makes a new branch. The ask's remedy names `HEAD:<branch>`.
 - `push-agent-branch`: a push that writes an agent-worktree name puts a stray branch on the remote. Bare
   and `-u` count, and so does a bare push under `push.autoSetupRemote`. Source: coordinator, 2026-11-08
   01:10 CST, under item 206 a. A test-author or builder pushing a lane-named branch unasked is
