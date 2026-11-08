@@ -217,10 +217,15 @@ class UnresolvedLoad(Exception):
 
 
 # A by-path load whose path the reader cannot read, allowed by naming the module constant that holds the path. The reader reads the
-# value from the file that holds the constant, so a constant it cannot read is still a failure. A constant is named here, not copied.
+# value from the file that holds the constant. A constant that reads to no file the repo loads still fails, naming the file and the
+# constant. A constant is named here, not copied.
 ALLOWED_CONSTANT_LOADS = {
     "hooks/guard_merge.py": ("MERGE_TOOL_REL",),  # the merge tool under a settings root; the constant names merge/merge.py
-    "hooks/decision_watch.py": ("_GUARD_PATH",),  # GUARD_UNDER_TEST, an environment override; the default branch imports guard by name
+}
+# An environment override: a module constant set by os.environ.get, which names no file, so the reader does not follow its path.
+# hooks/decision_watch.py's default branch imports guard by name, so hooks/guard.py is in the closure through that import.
+ENV_OVERRIDE_CONSTANTS = {
+    "hooks/decision_watch.py": ("_GUARD_PATH",),  # GUARD_UNDER_TEST, an environment override that names a throwaway copy of guard.py
 }
 PACKAGE_WHY = "a package-qualified load; the reader follows a load only by the name of a file in the closure"
 COMPUTED_WHY = "a by-path load whose path it cannot read; name the file, or allow-list the constant the path names"
@@ -275,10 +280,28 @@ def mentions_parameter(node, scopes):
     return any(is_parameter(n, parents) for n in reached_names(node, scopes))
 
 
-def allowed_constant(rel, node, scopes):
-    """-> the name node of a constant ALLOWED_CONSTANT_LOADS names for the file `rel`, which `node` reads, or None."""
-    names = ALLOWED_CONSTANT_LOADS.get(rel, ())
+def named_constant(table, rel, node, scopes):
+    """-> the name node of a constant `table` (ALLOWED_CONSTANT_LOADS or ENV_OVERRIDE_CONSTANTS) names for the file `rel`, which `node`
+    reads, or None."""
+    names = table.get(rel, ())
     return next((n for n in reached_names(node, scopes) if n.id in names), None)
+
+
+def definitions(name_node, scopes):
+    """-> the value nodes the nearest scope that assigns the name gives it, or [] when none does."""
+    parents, values = scopes
+    cur = parents.get(name_node)
+    while cur is not None:
+        if isinstance(cur, SCOPES) and name_node.id in values.get(cur, {}):
+            return values[cur][name_node.id]
+        cur = parents.get(cur)
+    return []
+
+
+def env_read(node):
+    """-> True when `node` is os.environ.get("<name>"): a value the environment sets, which names no file."""
+    return isinstance(node, ast.Call) and dotted(node.func) == "os.environ.get" and len(node.args) == 1 \
+        and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
 
 
 # A subprocess target (bin/ci-job, run as a child process) is no load and stays out of the closure (decision ci-scope-merge-closure).
@@ -290,7 +313,8 @@ def file_loads(rel, source, files):
     constant in the call, or by a path read from this file (read_values). module_from_spec takes no path: its load is read where
     its spec or loader is made. A name in a comment or a string is no load. A load the reader cannot follow raises UnresolvedLoad:
     a package-qualified load, or a by-path load whose path it cannot read, unless the path is built from a parameter or allow-listed
-    by the constant it names (ALLOWED_CONSTANT_LOADS)."""
+    by the constant it names (ALLOWED_CONSTANT_LOADS, which must read to a file the repo loads), or named as an environment override
+    (ENV_OVERRIDE_CONSTANTS, which must be an os.environ.get read and adds no file)."""
     tree = ast.parse(source)
     by_name = {}
     for p in files:
@@ -344,11 +368,18 @@ def file_loads(rel, source, files):
                     (k.value for k in node.keywords if k.arg in ("location", "path")), None)
                 if path_arg is not None:
                     got = read_values(path_arg, rel, scopes)
-                    named = allowed_constant(rel, path_arg, scopes)
-                    if got:
+                    env = named_constant(ENV_OVERRIDE_CONSTANTS, rel, path_arg, scopes)
+                    named = named_constant(ALLOWED_CONSTANT_LOADS, rel, path_arg, scopes)
+                    if env is not None:  # an environment override names no file; its default branch's import names one
+                        if not definitions(env, scopes) or not all(env_read(d) for d in definitions(env, scopes)):
+                            raise unresolved(rel, node, f"the environment override {env.id} is not an os.environ.get read")
+                    elif got:
                         out |= {posixpath.normpath(s) for s in got}
                     elif named is not None:
-                        out |= {posixpath.normpath(s) for s in read_values(named, rel, scopes)}
+                        vals = read_values(named, rel, scopes)
+                        if not vals or any(posixpath.normpath(s) not in files for s in vals):
+                            raise unresolved(rel, node, f"the allow-listed constant {named.id} reads to no file the repo loads")
+                        out |= {posixpath.normpath(s) for s in vals}
                     elif not mentions_parameter(path_arg, scopes):
                         raise unresolved(rel, node, COMPUTED_WHY)
     return out & files
@@ -526,6 +557,13 @@ class UnresolvedLoads(unittest.TestCase):
                                '        path = os.path.join(root, MID_PATH)\n'
                                '        return importlib.util.spec_from_file_location("nope", path)\n',
                                "MID_PATH", allowed=("MID_PATH",))
+
+    # The environment override names no file, so only an environment read may take its name. Named failure: a literal path under
+    # the override's name is read as a path, so an override that is no environment read passes unchecked.
+    def test_the_env_override_constant_must_be_an_environment_read(self):
+        src = 'import importlib.util\n_GUARD_PATH = "hooks/deep.py"\nSPEC = importlib.util.spec_from_file_location("g", _GUARD_PATH)\n'
+        with self.assertRaises(UnresolvedLoad, msg="a literal path under the environment override's name is read, not refused"):
+            file_loads("hooks/decision_watch.py", src, {"hooks/deep.py"})
 
     # Green controls: the same call shapes with a path or a name the reader can read, and loads it must ignore.
 
