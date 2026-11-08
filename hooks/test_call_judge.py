@@ -2549,8 +2549,9 @@ def case_verdict_and_question_failures_give_one_refusal_naming_both():
 # Allowed: each sentence is a false alarm if refused, because its verb acts on a pronoun or is passive, its subject
 # is a CI or a test name, or it asks a question about the verdict. Refused: each sentence is a miss if it passes,
 # because its modal and verb are split by an adverb, the verb is missing from the list, the apostrophe is curly, the
-# verb has no object (a paren group or a bold mark after it is no end), or the subject is a file path. The remedy of
-# a refusal that names the read form also says what a read cite may name.
+# verb has no object (a paren group or a bold mark after it is no end), the subject is a file path, or a relative
+# `which` sits before the actor in a statement. The remedy of a refusal that names the read form also says what a
+# read cite may name.
 # Each allowed sentence carries its own turn: the guard sentence names hooks/guard.py, and its turn ran that file.
 # The no-object controls name their file and run it. On the old code they pass because it reads them as no claim, so
 # they guard the build against over-refusing, not the run path.
@@ -2590,6 +2591,9 @@ ROUND3_REFUSED = (
     ("a paren group after the verb, no run", "The test will fail (the red run is recorded in 112a5fe2f)."),
     ("a file in parens after the verb, no run", "The guard will refuse (hooks/guard.py)."),
     ("bold marks after the verb, no run", "**The guard will refuse**"),
+    ("a relative which before the guard, after a comma", "The change edits hooks/guard.py, which means the guard will refuse it."),
+    ("a statement that opens with Which, CI as the subject", "Which means CI will fail."),
+    ("a relative which before the guard, after a comma and is why", "The test is in place, which is why the guard will refuse it."),
 )
 
 
