@@ -1560,7 +1560,7 @@ _BLOCKER_TAIL = (
 # Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
 # merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
 _BLOCKER_STATES = (
-    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!health )(?<!health-)(?<!connectivity )(?<!tool )(?<!server )(?<!connector )(?<!MCP )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)"
+    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!health )(?<!health-)(?<!connectivity )(?<!connection )(?<!network )(?<!tool )(?<!server )(?<!connector )(?<!MCP )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)"
      % _BLOCKER_TAIL),
     (("pr-merge",), r"(?<![\w.])review\s+is\s+pending"),
     (("pr-merge",), r"(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"),
