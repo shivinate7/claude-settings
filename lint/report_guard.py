@@ -1553,18 +1553,35 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 _BLOCKER_TAIL = (
     r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|failing|running|pending|in\s+progress)"
     r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed")
-_BLOCKER_STATE = (
-    r"(?<![\w.])(?:CI|checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)" % _BLOCKER_TAIL
-    + r"|(?<![\w.])review\s+is\s+pending"
-    r"|(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"
-    r"|(?<![\w.])main\s+is\s+protected|\bno\s+grant\b")
-CANNOT_BLOCKER_STATE_RE = re.compile(r"(?:%s)\b" % _BLOCKER_STATE, re.I)  # a blocker in a state, with no reason word
-CANNOT_BLOCKER_RE = re.compile(
-    r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?(?:%s)\b" % _BLOCKER_STATE, re.I)
-CANNOT_BLOCKER_BEFORE_RE = re.compile(r"(?:%s)\b[\s)*_]*(,|[;:—–]|\s-{1,2}\s)$" % _BLOCKER_STATE, re.I)
+# Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
+# merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
+_BLOCKER_STATES = (
+    (("pr-merge",), r"(?<![\w.])(?:CI|checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)" % _BLOCKER_TAIL),
+    (("pr-merge",), r"(?<![\w.])review\s+is\s+pending"),
+    (("pr-merge",), r"(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"),
+    (("push", "pr-merge"), r"(?<![\w.])main\s+is\s+protected"),
+    (None, r"\bno\s+grant\b"),
+)
 CANNOT_SO_RE = re.compile(r"^\s*so\b", re.I)  # a comma joins a blocker before the claim only with so
-CANNOT_BLOCKER_AFTER_RE = re.compile(r"^(?:[;:—–]|\s-{1,2}\s)\s*(?:%s)\b" % _BLOCKER_STATE, re.I)
-CANNOT_BLOCKER_PAREN_RE = re.compile(r"\(\s*(?:%s)\b" % _BLOCKER_STATE, re.I)
+CANNOT_CONJ_RE = re.compile(r"[,]\s+(?:and|but|or)\b", re.I)  # a comma and a conjunction start another clause
+_BLOCKER_RES = {}
+
+
+def _blocker_res(act):
+    """The compiled blocker readers for a claim of `act`, cached: (state, reason word then state, a state that ends just
+    before the claim, a state that follows it past a semicolon, colon or dash, a state in parentheses). All read the
+    states in _BLOCKER_STATES that gate `act`."""
+    if act not in _BLOCKER_RES:
+        state = "|".join(pattern for acts, pattern in _BLOCKER_STATES if acts is None or act in acts)
+        _BLOCKER_RES[act] = (
+            re.compile(r"(?:%s)\b" % state, re.I),
+            re.compile(r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?(?:%s)\b" % state, re.I),
+            re.compile(r"(?:%s)\b[\s)*_]*(,|[;:—–]|\s-{1,2}\s)$" % state, re.I),
+            re.compile(r"^(?:[;:—–]|\s-{1,2}\s)\s*(?:%s)\b" % state, re.I),
+            re.compile(r"\(\s*(?:%s)\b" % state, re.I))
+    return _BLOCKER_RES[act]
+
+
 # A rule id in parentheses after the act names the rule that stops it. It has two hyphens or more, so "(read-only)" is a
 # capability and stays a claim, and it must be a real rule or decision id (_names_rule_id): "(pre-push-hook)" claims.
 CANNOT_RULE_ID_RE = re.compile(r"\(\s*([a-z][a-z0-9]*(?:-[a-z0-9]+){2,})\s*\)", re.I)
@@ -1586,7 +1603,7 @@ CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
-    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?!%s\b)\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
+    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?!%s(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
     ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
     ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
@@ -1619,14 +1636,19 @@ CANNOT_HTTP_TOOLS = {"curl", "wget", "http", "https"}
 # A command or script whose name holds the act word is a route of that act: the repo's merge tool (`merge`) for pr-merge,
 # open-pr.sh for pr-open, push.sh for push. The word is a whole part of the name (split at - _ .), so pushd is no push.
 CANNOT_SCRIPT_ACTS = (
-    ("pr-open", re.compile(r"(?:^|[-_.])(?:open|create)[-_]?(?:pr|pull[-_]?request)(?:[-_.]|$)")),
+    ("pr-open", re.compile(
+        r"(?:^|[-_.])(?:(?:open|create)[-_]?(?:pr|pull[-_]?request)|(?:pr|pull[-_]?request)[-_]?(?:open|create))(?:[-_.]|$)")),
     ("pr-merge", re.compile(r"(?:^|[-_.])merge(?:[-_.]|$)")),
     ("push", re.compile(r"(?:^|[-_.])push(?:[-_.]|$)")),
 )
 # A script named for a test (test_merge.py, test-push.sh, push_test.sh) tests the act; its failure is no try of it.
 CANNOT_TEST_SCRIPT_RE = re.compile(r"^test[-_]|[-_.]test\b")
-CANNOT_INTERPRETERS = {"bash", "sh", "zsh", "python", "python3", "node"}  # a script runs as the word after these
-CANNOT_RUNNERS = {"make", "gmake", "npm", "yarn", "pnpm"}  # the first plain argument (after run) names the script
+CANNOT_INTERPRETER_RE = re.compile(r"^(?:bash|sh|zsh|node|python[\d.]*)$")  # a script runs as the word after these
+# The runners that name a script or target as an argument, with the flags that take a value, which are skipped.
+CANNOT_RUNNERS = {
+    "make": {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--include-dir", "--old-file", "--what-if"},
+    "gmake": {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--include-dir", "--old-file", "--what-if"},
+    "npm": {"--prefix", "-w", "--workspace"}, "yarn": {"--cwd"}, "pnpm": {"-C", "--dir", "--filter", "-F"}}
 # The input fields that name a GitHub MCP call's target, read in this order.
 CANNOT_TARGET_FIELDS = ("pullNumber", "pull_number", "branch", "head")
 # A failed try: the result's error flag, an exit code above zero as the shell result reports it, or an HTTP 4xx or 5xx.
@@ -1678,9 +1700,9 @@ def _claim(body, mask, hit, floor):
     sentence; `floor` is where the previous phrase of the sentence ended, so words that condition it do not condition this
     one. Not a claim: a conditional or a negator just before the phrase (since the last comma, but or clause break), a
     subject that is not the writer's own (CANNOT_SUBJECT_RE), a verb of telling or waiting after it, a dependency (until,
-    before, without your) in its clause, a blocker (CANNOT_BLOCKER_RE) in its sentence part, a blocker state
-    (CANNOT_BLOCKER_STATE_RE) in the part after the next semicolon or joined to the clause (_joined_blocker), a sentence
-    that names a rule, a verb that names no table act, or a real rule or decision id in parentheses in its clause
+    before, without your) in its clause, a verb that names no table act, a blocker of that act (_blocker_res) in its own
+    clause (a comma and, but or or starts another) or in the part after the next semicolon or joined to the clause
+    (_joined_blocker), a sentence that names a rule, or a real rule or decision id in parentheses in its clause
     (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read)."""
     start = max((m.end() for m in CANNOT_BEFORE_BREAK_RE.finditer(mask, floor, hit.start())), default=floor)
     brk = CANNOT_BREAK_RE.search(mask, hit.end())
@@ -1700,30 +1722,34 @@ def _claim(body, mask, hit, floor):
     right = len(mask) if right < 0 else right
     if CANNOT_RULE_RE.search(body[left:right]):
         return None
-    if CANNOT_BLOCKER_RE.search(body[left:right]):
+    window = " ".join(words[:CANNOT_WINDOW])
+    act = _window_act(window, before + " " + after)
+    if not act:
+        return None
+    state_re, reason_re = _blocker_res(act)[:2]
+    clause_left = max((m.end() for m in CANNOT_CONJ_RE.finditer(mask, left, hit.start())), default=left)
+    conj = CANNOT_CONJ_RE.search(mask, hit.end(), right)
+    if reason_re.search(body[clause_left:conj.start() if conj else right]):
         return None
     if right < len(mask):
         reach = mask.find(";", right + 1)
-        if CANNOT_BLOCKER_STATE_RE.search(body[right + 1:len(mask) if reach < 0 else reach]):
+        if state_re.search(body[right + 1:len(mask) if reach < 0 else reach]):
             return None
-    if _joined_blocker(body[floor:start], before, after, body[end:]):
-        return None
-    window = " ".join(words[:CANNOT_WINDOW])
-    act = _window_act(window, before + " " + after)
-    if not act or _names_rule_id(after):
+    if _joined_blocker(act, body[floor:start], before, after, body[end:]) or _names_rule_id(after):
         return None
     return act, window, bool(CANNOT_PAST_RE.match(hit.group()) or CANNOT_WAS_RE.search(before))
 
 
-def _joined_blocker(lead, before, after, tail):
-    """True when a bare blocker state is joined to the claim clause. `lead` is the sentence up to the clause start,
+def _joined_blocker(act, lead, before, after, tail):
+    """True when a bare blocker state of `act` is joined to the claim clause. `lead` is the sentence up to the clause start,
     `before` the words from there to the phrase, `after` the clause after it, and `tail` the sentence from the clause
     break on. Before: the state ends at a semicolon, colon or dash, or at a comma that so follows. After: a semicolon,
     colon or dash, then the state, or the state in parentheses in the clause."""
-    hit = CANNOT_BLOCKER_BEFORE_RE.search(lead)
+    _, _, before_re, after_re, paren_re = _blocker_res(act)
+    hit = before_re.search(lead)
     if hit and (hit.group(1) != "," or CANNOT_SO_RE.match(before)):
         return True
-    return bool(CANNOT_BLOCKER_AFTER_RE.match(tail) or CANNOT_BLOCKER_PAREN_RE.search(after))
+    return bool(after_re.match(tail) or paren_re.search(after))
 
 
 _RULE_IDS = []  # (roots, anchors), read once per hook run on the first slug that follows a claim
@@ -1813,14 +1839,24 @@ def _script_tries(tokens):
     index = guard.resolve_command(tokens)
     if index is None:
         return set()
-    if os.path.basename(tokens[index]).lower() in CANNOT_INTERPRETERS:
+    if CANNOT_INTERPRETER_RE.match(os.path.basename(tokens[index]).lower()):
         index = next((i for i in range(index + 1, len(tokens)) if not tokens[i].startswith("-")), None)
         if index is None:
             return set()
     name = os.path.basename(tokens[index]).lower()
-    plain = [t for t in tokens[index + 1:] if not t.startswith("-")]
+    plain, skip = [], False
+    for token in tokens[index + 1:]:
+        if skip:
+            skip = False
+        elif token.startswith("-"):
+            skip = token in CANNOT_RUNNERS.get(name, ())
+        else:
+            plain.append(token)
     if name in CANNOT_RUNNERS:
-        plain = plain[1:] if name != "make" and plain[:1] in (["run"], ["run-script"]) else plain
+        scripted = plain[:1] in (["run"], ["run-script"])
+        if name == "npm" and not scripted:  # npm has no push or merge command: only npm run names a script
+            return set()
+        plain = plain[1:] if scripted and name not in ("make", "gmake") else plain
         if not plain:
             return set()
         name, plain = os.path.basename(plain[0]).lower(), plain[1:]
