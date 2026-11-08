@@ -61,7 +61,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
   - `<n>, this PR` passes when the PR adds a file under `docs/debts/`, or adds lines to `docs/debts/notes.md`. Deleting a notes line does not count.
   - `<n>, follow-up #<pr>[, ...]` passes when each named PR is open or merged. A closed PR that was not merged does not pass. This PR does not pass.
   - A check that cannot read its input fails (item 276 a). A follow-up PR that 404s is not done, and the line names it. Any other read failure is unknown, and it holds the record. `--findings-unknown-ok "<reason>"` lifts that hold, and the tool logs the lift.
-  - Owner item 394 a, 2026-11-08 06:08 CST: a fix check may pass a push that only files this PR's findings (record `hold-unsafe-after-round-3`). A `none` record never passes that push.
+  - Owner item 394 a, 2026-11-08 06:08 CST: a fix check may pass a push that only files this PR's findings (record `hold-unsafe-after-round-3`). The fix-check reviewer judges that push; it passes only when the reviewed record's Findings is `<n>, this PR`. The tool does not check it.
 
 ## The cost
 
@@ -70,7 +70,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - `merge --reviewed` reads the open PRs (one call per page) and the repo's issue comments since the oldest open PR (one call per page, every comment, not only review records). It reads one `issues/<n>/events` list per PR that reaches the hold rule. When a batch line exists, it reads one page of the base's `actions/runs`. For a run that did not succeed, it also reads that run's jobs, and the jobs and workflow files of runs that may clear it. `Host.base_state` in merge/merge.py holds that count. It reads no head and no check run. The comment list grows with the repo's comment traffic and with the age of the oldest open PR.
 - Each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads. With no `.github/stamp.json` on main, `load_config` adds one `gh api` repo read.
 - One ready PR with a record (a batch line), each list on one page, on a base with no run that did not succeed: three calls, the open PRs, the comments and the base's runs. With a pinned `merge.requiredChecks` list, four: one branch protection read at the start of the run compares the pin. A held PR adds one events read.
-- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. Its filing test runs one local `git diff` of the reviewed head to the new head. It writes nothing.
+- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened.
 - A Findings line reads only on a record the rules above call done: one paged read of the PR's files for `<n>, this PR` (one call per page), and one read per follow-up PR named. `none` costs what a legacy record costs.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList.test_one_ready_pr_with_a_record_costs_three_gh_calls` in `merge/test_merge.py` pins the three calls. `ReviewedLedger.test_reads_one_comment_list_no_head_and_at_most_one_event_list_per_held_pr` pins the list reads. `ReviewedList.test_findings_this_pr_with_a_debt_file_added_is_done_and_reads_its_files_once`, `ReviewedList.test_findings_follow_up_reads_each_named_pr_once` and `ReviewedList.test_findings_none_reads_no_more_than_a_legacy_record` pin the Findings reads. `ReviewFixFiling` pins the filing diff.
@@ -83,6 +83,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
 - One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
 - The tool cannot see whether a Findings count is true, or whether a debt edit is that finding's own. It cannot see a follow-up PR's topic, or whether a finding got its own roadmap step. Legacy records keep today's verdict.
+- The tool does not see whether a fix-check push is filing-only. The fix-check reviewer reads the diff.
 
 ## Lane picks
 
