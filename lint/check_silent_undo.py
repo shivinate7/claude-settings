@@ -20,7 +20,7 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               first-parent line left main, up, that commit included. Catches
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
-  revived     A union merge (.gitattributes merge=union, read as of the merge's first parent) keeps a
+  revived     A union merge (.gitattributes merge=union, read as of either parent) keeps a
               line one side deleted when the other side adds next to it, with no conflict. For
               every merge in upstream..head, a line of such a file that is in the merge base of
               the two parents, held in fewer copies by one parent, and held in more copies by the
@@ -34,7 +34,9 @@ are the diff of old name to new name, as they would be in place. A file below th
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
-excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
+excuses its path, except for a revived row: there the reason must name the row (its slug, the text after `- ` up to the first
+colon, or the whole line, case-sensitive), or the trailer excuses nothing. A trailer or line with no reason excuses nothing.
+A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
@@ -43,6 +45,7 @@ in the body, and CI's way out is a Drops-lines commit trailer. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
+An octopus merge is UNKNOWN, but every finding of the other merges and reads is kept and raised with it, so the merge tool refuses.
 A read that cannot run prints UNKNOWN. Exit 0 locally, exit 1 when env CI is set or with
 --strict (ruling: unknown in CI is red).
 """
@@ -70,6 +73,10 @@ class Unknown(Exception):
     """A read that could not run. `problems` and `notes` hold what the reads that did run found, so the caller
     can print them beside the UNKNOWN and never lose them (see check)."""
     problems, notes = (), ()
+
+
+class Octopus(Unknown):
+    """A merge of more than two parents. check() keeps reading past it, then raises it with the findings it did make."""
 
 
 def git(cwd, *a, ok=(0,), input=None):
@@ -133,16 +140,24 @@ def last_paragraph(pr_body):
     return paras[-1]
 
 
+class Excuses(dict):
+    """{path: reason}, the last trailer of a path winning. `every` holds {path: [reason, ...]}: all of a path's trailer
+    reasons, which the revival read needs, since it excuses one row and not the path."""
+    every = {}
+
+
 def allowed(cwd, rng, pr_body=""):
-    """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
+    """Excuses ({path: reason}, with .every) from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
     (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing."""
     _, out = git(cwd, "log", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
     body = re.findall(r"^" + TRAILER + r":(.*)$", last_paragraph(pr_body), re.I | re.M | re.ASCII)
-    res = {}
+    res, every = Excuses(), collections.defaultdict(list)
     for line in out.splitlines() + body:
         m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
         if m:
             res[m.group(1)] = m.group(2)
+            every[m.group(1)].append(m.group(2))
+    res.every = dict(every)
     return res
 
 
@@ -161,11 +176,36 @@ def misplaced(cwd, rng):
             if len(key.findall(body)) > len(key.findall(got))]
 
 
-def judge(items, ok):
-    """items: (path, text). -> (texts whose path no trailer excuses, ALLOWED notes for the rest)."""
-    bad = [t for p, t in items if p not in ok]
-    notes = ["ALLOWED %s: %s" % (p, ok[p]) for p in sorted({p for p, _ in items if p in ok})]
-    return bad, notes
+def names_row(reason, row):
+    """True when a trailer's reason names a revived row: it holds the row's slug (the text after `- ` up to the first
+    colon) or the whole row, case-sensitive, white space collapsed. A row with no slug is named only whole."""
+    reason, row = norm(reason), norm(row)
+    slug = row[2:].split(":", 1)[0].strip() if row.startswith("- ") else ""
+    return row in reason or bool(slug) and slug in reason
+
+
+def excuses(item, ok, every=None):
+    """[reason, ...] that excuse one item, empty when it stays open. An item is (path, text), or (path, text, row) for a
+    revived row. A path excuse covers every item of the path. With `every` (the trailer reasons per path), a revived row is
+    excused only by a trailer reason that names it, or by an excuse that is no trailer (the generator's page, a debt retire)."""
+    path = item[0]
+    if path not in ok:
+        return []
+    if len(item) < 3 or every is None or path not in every:
+        return [ok[path]]
+    return [r for r in every[path] if names_row(r, item[2])]
+
+
+def judge(items, ok, every=None):
+    """items: (path, text) or (path, text, row). -> (texts no excuse covers, ALLOWED notes for the rest). `every`: see excuses."""
+    bad, used = [], set()
+    for it in items:
+        why = excuses(it, ok, every)
+        if why:
+            used.update((it[0], r) for r in why)
+        else:
+            bad.append(it[1])
+    return bad, ["ALLOWED %s: %s" % u for u in sorted(used)]
 
 
 def raw_files(cwd, *revs):
@@ -383,7 +423,7 @@ def lost_lines(cwd, m, refs=()):
     if len(parents) < 2:
         return []
     if len(parents) > 2:
-        raise Unknown("%s has %d parents; only two-parent merges are read" % (m[:9], len(parents)))
+        raise Octopus("%s has %d parents; only two-parent merges are read" % (m[:9], len(parents)))
     rc, out = git(cwd, "merge-base", "--all", *parents, ok=(0, 1))
     bases = out.split() if rc == 0 else []
     found = []
@@ -691,14 +731,17 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
-    items, unread = [], None  # unread: the union read that failed. It never drops the other reads' findings.
+    items, unread, union_read = [], None, True  # unread: the first read that failed (an octopus merge, the union read). It never drops the findings of the other reads or merges.
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
-        items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
-        if unread is None:
-            try:
-                items += [(x[0], fmt_revived(m, *x)) for x in revived_lines(cwd, m)]
+        try:
+            items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
+        except Octopus as e:  # any other failed read still raises at once, as before
+            unread = unread or e
+        if union_read:
+            try:  # one finding per row: a trailer excuses a row, not the path
+                items += [(path, fmt_revived(m, path, p, [row]), row) for path, p, back in revived_lines(cwd, m) for row in back]
             except Unknown as e:
-                unread = e
+                unread, union_read = unread or e, False
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]
@@ -713,13 +756,14 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
-    page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok}, upstream, tool)
+    every = ok.every  # the trailer reasons per path, kept before the other excuses join ok
+    page, same = generated_page(cwd, h, {it[0] for it in items if not excuses(it, ok, every)}, upstream, tool)
     if same:
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
-    open_paths = {p for p, _ in items if p not in ok}
+    open_paths = {it[0] for it in items if not excuses(it, ok, every)}
     if open_paths:
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
-    bad, notes = judge(items, ok)
+    bad, notes = judge(items, ok, every)
     notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
     if unread is not None:  # raised with what the other reads found; main prints both, the merge tool refuses on the findings
         unread.problems, unread.notes = bad, notes

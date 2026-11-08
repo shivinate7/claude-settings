@@ -22,9 +22,17 @@
   more. A lane fast-forwarded into the batch is read through the merge that follows. A row main re-added
   after the deletion is in no merge base, so it is no finding. It needs git 2.40 or newer only where a
   merge=union rule exists. On an older git, in such a repo, that read alone is UNKNOWN, printed beside any lost-line or reversal finding, never in place of one.
-  A finding with an UNKNOWN is a refusal, and the reason flag does not lift it. Known limits:
+  A finding with an UNKNOWN is a refusal, and the reason flag does not lift it.
+  An octopus merge (three or more parents) is UNKNOWN. The check keeps every finding of the other merges and
+  reads, before and after it, and raises one UNKNOWN with them. With a finding, that UNKNOWN refuses and the
+  reason flag does not lift it. An octopus merge with no finding stays a plain UNKNOWN, which the flag lifts.
+  The revival read alone is row-specific: a `Drops-lines` trailer excuses a revived row only when its reason
+  names the row (its slug, the text after `- ` up to the first colon, or the whole line). A trailer written
+  for one row would otherwise hide every other revived row of the file. About a dozen commits on main since
+  1 October carry a trailer for the notes file. Lost-line and reversal findings keep the path-level excuse.
+  Known limits:
   - A lane rebased, cherry-picked or squashed onto main drops its deletion with no merge commit, so this
-    read cannot see it.
+    read cannot see it. Claude can hit it with `git pull --rebase`. Debt `silent-undo-rebase-no-merge`.
   - A row one lane deletes while another lane rewrites it keeps only the rewrite. Nothing is read.
   - A section-separator line in both a deleted and an appended block can read as restored. A
     `Drops-lines` trailer excuses it.
@@ -42,7 +50,8 @@
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
 nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
-reason. No switch turns the check off.
+reason. The one exception is a revived row: its reason must name the row (see the revived line read above).
+No switch turns the check off.
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
 that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never

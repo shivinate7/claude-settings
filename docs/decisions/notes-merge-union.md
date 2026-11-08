@@ -17,7 +17,7 @@ versions stay. A note that one lane deletes or reverts can come back when anothe
 "revived" read of `lint/check_silent_undo.py` catches the revival at each merge. It reads a file as union when either parent has the rule.
 A line fails when the merge base of the two parents has it,
 one parent holds fewer copies, and the merge holds more. It covers a
-lane's own merges and the batch's merge of each lane. A Drops-lines trailer excuses it. `lint/test_notes_union_merge.py` pins the rewrite case.
+lane's own merges and the batch's merge of each lane. A Drops-lines trailer excuses a revived row only when its reason names the row (its slug or the whole line). `lint/test_notes_union_merge.py` pins the rewrite case.
 
 Scope: this repo only. Another repo with its own notes file adds the same line to its own
 `.gitattributes`.
