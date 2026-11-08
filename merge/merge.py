@@ -115,7 +115,7 @@ FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head. Base t
 FIX_LAYOUT_EXTRAS_REMEDY = "Fix the file the error names, then run the fix check again."
 FIX_PROSE_REMEDY = "Keep prose below the --- line, then post the record again."
 FIX_OWN_RECORD_REMEDY = "Drop --fix-base-record: this pull request's own record takes the fix check."
-FIX_CAP_REMEDY = "Start a fresh chain at round 1: post the review records again from round 1, with no Fix check line."
+FIX_CAP_REMEDY = "Start a fresh chain at round 1: post new review records from round 1 up to the last round this pull request reached, with no Fix check line; fix checks resume once a record reaches that round."
 FIX_CHAIN_CAP = 2  # a chain holds at most this many fix checks; the next change starts a fresh chain from the first round
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
@@ -3318,7 +3318,7 @@ def fix_chain_problem(earlier, rec):
     link that would pass the cap, so only a record posted past it reads open here."""
     count = fix_chain_count([*earlier, rec])
     if count > FIX_CHAIN_CAP:
-        return f"the chain holds {count} fix checks, past the cap of {FIX_CHAIN_CAP}; the next change starts a fresh chain from round 1"
+        return f"the chain holds {count} fix checks, past the cap of {FIX_CHAIN_CAP}; the next change starts a fresh chain from round 1, with records up to the last round reached"
 
 def round_floor(earlier, rec):
     """-> the why of floor_problem, else the why of fix_chain_problem, else the why of uncleared_round, else None."""
