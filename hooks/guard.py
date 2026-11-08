@@ -95,7 +95,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   env-file             deny. Any read or write of an environment file.
   auto-merge           deny, in every repo. `gh pr merge --auto`, a `gh api graphql` call whose `query=` field holds
                        enablePullRequestAutoMerge, and the enable_pr_auto_merge tool. It runs before merge-checks
-                       and bare-merge. (owner, page item 369 a, 2026-11-07 19:03 CST)
+                       and bare-merge. (decision no-merge-during-batch-ci)
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. A `gh api` PUT of a pull
                        request's merge route too, and the MCP merge_pull_request tool.
