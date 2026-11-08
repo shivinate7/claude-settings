@@ -1055,7 +1055,8 @@ def shell_abs(path: str, base):
     return path
 
 
-CdWalk = collections.namedtuple("CdWalk", "where stranded skipped")
+# `errexit_stops`: `set -e` is on and a failure of the segment ends the shell (`_errexit_stops`).
+CdWalk = collections.namedtuple("CdWalk", "where stranded skipped errexit_stops", defaults=(False,))
 
 
 def _head_word(segment: str) -> str:
@@ -1175,6 +1176,13 @@ def _sets_errexit(tokens, sure: bool) -> bool | None:
     return state
 
 
+def _errexit_stops(errexit: bool, prev_end: str, end: str, stack, marks, group_depth: int) -> bool:
+    """True when `set -e` is on and a failure of the segment ends the shell: it stands alone at the top level,
+    not in a group, `if`, loop, function or `( )`, and not in an `&&` or `||` list or a pipe."""
+    return (errexit and prev_end not in ("&&", "||") and end not in ("&&", "||", "|") and not stack and not marks
+            and not group_depth)
+
+
 def _opens_if_body(segments, at: int) -> bool:
     """True when `segments[at]` is `if <cd ...>` alone as the test, and the next segment opens its `then`."""
     tokens = segment_tokens(segments[at]) or []
@@ -1239,15 +1247,16 @@ def _walk_segments(segments, number: int, shell_cwd: str, ends=(), failed_cd_sta
             else:
                 skip_if += (head == "if") - (head == "fi")
                 in_then = True
+        prev_end = ends[at - 1] if 0 < at <= len(ends) else ""
         if at == number:
             if skip_depth is not None or in_then:
                 return CdWalk(None, False, True)
-            return CdWalk(where, stranded and where is not None, False)
+            return CdWalk(where, stranded and where is not None, False,
+                          _errexit_stops(errexit, prev_end, end, stack, marks, group_depth))
         tokens = segment_tokens(segment)
         if tokens:
             # errexit is on only for a `set -e` sure to run: not in a group, `if`, loop, function or `( )`, not after an
             # `&&` or `||`, not piped or in the background, not in a chain a failed cd skipped. A `set +e` anywhere turns it off.
-            prev_end = ends[at - 1] if 0 < at <= len(ends) else ""
             sure = (skip_depth is None and not in_then and not stack and not marks and not group_depth
                     and prev_end not in ("&&", "||") and "|" not in (end, prev_end) and not segment.rstrip().endswith("&"))
             flipped = _sets_errexit(tokens, sure)
@@ -1298,8 +1307,8 @@ def _walk_segments(segments, number: int, shell_cwd: str, ends=(), failed_cd_sta
                     # `|| exit`, an `if ! cd` whose then body starts with `exit`, and a bare cd under `set -e`.
                     negated_if = prev_end not in ("&&", "||") and end in (";", "\n") and tokens[:2] == ["if", "!"] and _exits_on_failure(segments, ends, at)
                     # Inside a group, `if` or loop the exit may not happen: `{ cd X; push; } || true` ignores errexit.
-                    bare_under_errexit = (errexit and prev_end not in ("&&", "||") and end not in ("&&", "||", "|") and not stack and not marks
-                                          and not group_depth and basename(tokens[0]) in CD_WORDS)
+                    bare_under_errexit = (_errexit_stops(errexit, prev_end, end, stack, marks, group_depth)
+                                          and basename(tokens[0]) in CD_WORDS)
                     if end == "||" and _exits_on_failure(segments, ends, at):
                         where, stranded = None, False
                     elif negated_if or bare_under_errexit:

@@ -356,6 +356,7 @@ while True:
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             CD_WORDS, _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
+            _compound_delta, _exits_on_failure,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -4803,13 +4804,13 @@ GIT_PUSH_INERT_WORDS = ("for", "select", "case", "in", "esac", "fi", "done", "{"
 
 def _push_segment_inert(segment: str):
     """True when SEGMENT holds no command that can fail a check: empty, a compound word, a cd, `exit`,
-    `set`, `true`, `:`. None when a quote is cut in it (unknown). A group's open and close words are
-    read on the segment's first word, so `(pytest -q)` is a command and `(cd X; true)` is not."""
+    `set`, `true`, `:`. None when a quote is cut in it (unknown). A group opener at the head is walked
+    into, so `{ pytest -q`, `( pytest -q` and `(pytest -q)` are commands and `(cd X; true)` is not."""
     tokens = segment_tokens(segment)
     if tokens is None:
         return None
     words = list(tokens)
-    while words and words[0] in GIT_PUSH_LEADING_WORDS:
+    while words and (words[0] in GIT_PUSH_LEADING_WORDS or not words[0].strip("({")):
         words.pop(0)
     if not words or words[0].startswith("}"):
         return True
@@ -4820,20 +4821,28 @@ def _push_segment_inert(segment: str):
 def git_push_after_check_hit(command: str) -> str:
     """'push' when COMMAND holds a `git push` that runs after a `;`- or newline-joined command whose failure
     it cannot see, else '' (decision git-after-cd-joins-with-and). It reads the segments and ends that
-    `git_after_cd_hit` reads. From the push it walks back over its `&&` chain to the chain's start. Before
+    `git_after_cd_hit` reads, less the empty line after a trailing `&&`, `||` or `|`, which joins the two
+    lines by that operator. From the push it walks back over its `&&` chain to the chain's start. Before
     that start, a `;` or newline joins the command before it. A cd, `exit`, `set` or `true` (or a group
     of them) is skipped and the walk goes on over that command's own `&&` chain, which must be inert too.
-    A `|| exit` before the `;` ends the walk and passes. Any other command refuses, a subshell included.
-    A `||` or `|` before the start of the push's chain is no `;` join and passes. A push that opens a
-    compound body (`then`, `do`), a dry run (`git_write_verb`) and an unreadable segment pass."""
+    So is a lone command whose failure ends the shell under `set -e` (`_push_stops_under_errexit`). A group
+    opener is walked into, so a check inside `{ }` or `( )` refuses. The walk ends and passes at a `|| exit`,
+    at the tail of `|| { ...; exit N; }` or `if ! X; then exit N; fi` (`_push_exit_tails`), and at the
+    compound body that holds the push (`_opens_push_body`). Any other command refuses, a subshell included.
+    A `||` or `|` before the start of the push's chain is no `;` join and passes. A dry run
+    (`git_write_verb`) and an unreadable segment pass."""
     ends = []
     segments = split_segments(command, ends)
+    if len(ends) < len(segments):
+        return ""
+    kept = [at for at, segment in enumerate(segments) if segment_tokens(segment) != []]
+    segments, ends = [segments[at] for at in kept], [ends[at] for at in kept]
+    tails = _push_exit_tails(segments, ends)
     for number, segment in enumerate(segments):
         calls = [(verb.rstrip(")}"), args) for verb, args in git_calls(segment)]
         if not any(verb == "push" and git_write_verb(verb, args) for verb, args in calls):
             continue
-        tokens = segment_tokens(segment)
-        if not tokens or tokens[0] in GIT_PUSH_BODY_WORDS or len(ends) < len(segments):
+        if not segment_tokens(segment):
             continue
         position, first = number, True
         while True:
@@ -4841,7 +4850,10 @@ def git_push_after_check_hit(command: str) -> str:
             while start > 0 and ends[start - 1] == "&&":
                 start -= 1
             if not first and not all(_push_segment_inert(part) for part in segments[start:position + 1]):
-                return "push"
+                if start < position or not _push_stops_under_errexit(segments, ends, start):
+                    return "push"
+            if _opens_push_body(segments, start, number):
+                break
             if start == 0:
                 break
             if ends[start - 1] not in (";", "\n"):
@@ -4851,10 +4863,50 @@ def git_push_after_check_hit(command: str) -> str:
             before = segment_tokens(segments[start - 1])
             if before is None or (before[:1] == ["exit"] and start > 1 and ends[start - 2] == "||"):
                 break
-            if not _push_segment_inert(segments[start - 1]):
-                return "push"
+            if start - 1 in tails:
+                break
             position, first = start - 1, False
     return ""
+
+
+def _push_exit_tails(segments, ends):
+    """The segments that close an exit on a check's failure, past a bare `|| exit`: the `}` of
+    `X || { ...; exit N; }` and the `fi` of `if ! X; then exit N; fi` (`_exits_on_failure`). The shell
+    stops when X fails, so a push after the tail runs only when X passed."""
+    tails = set()
+    for at, segment in enumerate(segments[:-1]):
+        tokens = segment_tokens(segment) or []
+        grouped = ends[at] == "||" and (segment_tokens(segments[at + 1]) or [])[:1] == ["{"]
+        negated_if = (ends[at] in (";", "\n") and tokens[:2] == ["if", "!"]
+                      and (at == 0 or ends[at - 1] in (";", "\n")))
+        if not (grouped or negated_if) or not _exits_on_failure(segments, ends, at):
+            continue
+        depth = 0
+        for close in range(at + grouped, len(segments)):
+            depth += _compound_delta(segments[close], wide=True)
+            if depth <= 0:
+                tails.add(close)
+                break
+    return tails
+
+
+def _opens_push_body(segments, start: int, number: int) -> bool:
+    """True when `segments[start]` opens the compound body (`then`, `do`, `else`, `elif`) that holds the push
+    at `segments[number]`: no closer between them ends that body. The body's own test guards the push."""
+    tokens = segment_tokens(segments[start])
+    if not tokens or tokens[0] not in GIT_PUSH_BODY_WORDS:
+        return False
+    return sum(_compound_delta(part, wide=True) for part in segments[start:number]) >= 0
+
+
+def _push_stops_under_errexit(segments, ends, at: int) -> bool:
+    """True when a failure of the lone command `segments[at]` ends the shell under `set -e`: no `!`, compound
+    word or `&` on it, and the cd walk reads `errexit_stops` there (a `set -e` sure to run, at the top level)."""
+    segment = segments[at]
+    tokens = segment_tokens(segment)
+    if not tokens or tokens[0] == "!" or _compound_delta(segment, wide=True) or segment.rstrip().endswith("&"):
+        return False
+    return cd_walk(segments, at, "", ends).errexit_stops
 
 
 def session_home_git_hit(command: str, where: str, in_primary) -> str:

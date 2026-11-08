@@ -22,16 +22,20 @@ The rule also refuses a `git push` that runs after a `;`- or newline-joined comm
 
 The push check walks back from the push:
 
-1. It goes back over the push's `&&` chain to the chain's start. A `||` or `|` before that start is no `;` join, so the push passes.
+1. It goes back over the push's `&&` chain to the chain's start. A `||` or `|` before that start is no `;` join, so the push passes. A line that ends in `&&`, `||` or `|` joins the next line by that operator, not by the newline.
 2. If a `;` or a newline stands before that start, it looks at the command before it.
 3. A cd, `exit`, `set` or `true` (or a group or `if` made only of them) is skipped, and the walk goes on from it over its own `&&` chain. That chain must be inert too, so `pytest -q && cd X; git push` is refused.
-4. A command that ends `|| exit` ends the walk, and the push passes. Only a bare `exit` counts: `|| return` and `|| (exit 1)` do not stop the shell.
-5. Any other command refuses, a subshell `( ... )` included: `cd X; (pytest -q); git push` is refused.
+4. A lone command after a `set -e` sure to run is skipped too, since its failure ends the shell. The lone command stands at the top level, outside any group, `if`, loop or `( )`, and outside any `&&` or `||` list, pipe, `!` or `&`. So `set -e; pytest -q; git push` passes, and `set -e; pytest -q && true; git push` is refused.
+5. A command that exits on failure ends the walk, and the push passes: `pytest || exit 1`, `pytest || { echo bad; exit 1; }` and `if ! pytest; then exit 1; fi`. Only a bare `exit` counts: `|| return` and `|| (exit 1)` do not stop the shell.
+6. The compound body that holds the push ends the walk, and the push passes. The body opener (`then`, `do`) may stand on the push's line or on the line before it. A `fi` or `done` between them closes that body, so `if pytest; then :; fi; git push` is refused.
+7. A group opener `{` or `(` is walked into. So `{ pytest -q; git push; }`, `( pytest -q; git push )` and `cd X && { pytest -q; git push; }` are refused.
+8. Any other command refuses, a subshell `( ... )` included: `cd X; (pytest -q); git push` is refused.
 
 Forms the push check passes:
 
 - A push with nothing before it, or with only skipped commands before it: `cd X; git push`, `set -e; cd X; git push`, `cd X || exit 1; git push`, `if ! cd X; then exit 1; fi; git push`.
-- A push that opens a compound body (`then git push`, `do git push`).
+- A push that starts a compound body, on the opener's line or on the next one: `if pytest; then git push; fi`, `while pytest; do\n  git push\ndone`.
+- A chain joined by `&&` over lines: `pytest -q &&\ngit push`.
 - A `--dry-run` push, a read.
 - A check joined to the push by `&&` alone.
 
