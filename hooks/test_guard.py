@@ -3211,10 +3211,12 @@ sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.
 #   B. A reset with --hard, --merge or --keep keeps today's verdict, path form included: deny in the
 #      shared checkout, ask in a linked worktree, allow and noted in an agent-owned worktree.
 #   C. A work-tree discard (checkout -- ., checkout -q -- .) takes the same three verdicts. The restore
-#      form of C is above, with its own rows for the shared checkout and the hand-made worktree.
-# The forms name f.txt, which _build_gitmain leaves tracked and dirty in all four trees. A path the
-# fixture lacks would read as an empty subject and pass for the wrong reason.
-RULING_RESET_FORMS = ["reset HEAD -- f.txt", "reset -- f.txt", "reset -q HEAD f.txt", "reset f.txt"]
+#      and checkout HEAD forms of C are in RULING_TREE_FORMS, below the agent-owned log rows.
+# The discard and path forms name f.txt, which _build_gitmain leaves tracked and dirty in all four trees.
+# A path the fixture lacks would read as an empty subject and pass for the wrong reason. reset -q and
+# reset -- . name no file: ruling A allows them whatever the subject, so they pin the flag-free verdict.
+RULING_RESET_FORMS = ["reset HEAD -- f.txt", "reset -- f.txt", "reset -q HEAD f.txt", "reset f.txt",
+                      "reset -q", "reset -- ."]
 RULING_DISCARD_FORMS = ["reset --hard HEAD -- f.txt", "reset --merge HEAD -- f.txt",
                         "reset --keep HEAD -- f.txt", "checkout -- .", "checkout -q -- ."]
 for _form in RULING_RESET_FORMS:
@@ -3241,7 +3243,26 @@ AGENT_NOTED_RULING = [
     ("log: checkout -- . is allowed and noted in an agent-owned worktree", VCS + " checkout -- ."),
     ("log: checkout -q -- . is allowed and noted in an agent-owned worktree", VCS + " checkout -q -- ."),
     ("log: restore . is allowed and noted in an agent-owned worktree", VCS + " restore ."),
+    ("log: checkout HEAD -- . is allowed and noted in an agent-owned worktree",
+     VCS + " checkout HEAD -- ."),
 ]
+
+# THE RESTORE AND CHECKOUT FORMS, one verdict per tree. The path is hooks/guard.py: _build_gitmain
+# leaves it tracked and dirty in every tree. None means the agent-owned log row above pins that cell.
+RULING_TREE_FORMS = [
+    ("restore -- hooks/guard.py", ("deny", "shared-tree"), ("allow", None), ("allow", None)),
+    ("restore --staged hooks/guard.py", ("allow", None), ("allow", None), ("allow", None)),
+    ("restore --staged .", ("allow", None), ("allow", None), ("allow", None)),
+    ("checkout HEAD -- .", ("deny", "shared-tree"), ("ask", "shared-tree"), None),
+]
+for _form, _shared, _hand, _agent in RULING_TREE_FORMS:
+    for _tree, _cwd, _verdict in (("shared", GITMAIN, _shared), ("hand-made", GITWT, _hand),
+                                  ("agent-owned", AGENTWT, _agent)):
+        if _verdict is None:
+            continue
+        _decision, _rule = _verdict
+        sh("reset ruling D: %s in the %s tree" % (_form, _tree), VCS + " " + _form, _decision, _rule,
+           cwd=_cwd)
 
 # THE OWNER'S EXACT COMMAND, carrying a redirect and a pipe into `tail`. `tail -10` is not a
 # follow, so it must not trip the live-stream rule either. Both stacks are empty, so the allow
