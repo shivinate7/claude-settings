@@ -2533,12 +2533,17 @@ def lint_slots():
     runs with no slowdown, 2 x CPUs doubles each lint's wall time and makes a load-sensitive test FAIL."""
     return os.cpu_count() or 1
 
+def lint_slot_folder():
+    """The folder of the slot locks and the running markers: <config>/state/lane-lint-slots."""
+    import shared_names  # hooks/, on sys.path from the top of this file
+    return os.path.join(shared_names.config_dir(), "state", "lane-lint-slots")
+
 def take_lint_slot():
     """One free slot of lint_slots(), taken: an exclusive non-blocking OS lock on <config>/state/lane-lint-slots/slot-<i>.lock, which the
     process's death frees. Polls until one is free, and prints one stderr line before the first wait. -> the open fd, or None when
     the lock folder cannot be made or read (the lint then runs ungated, and says so on stderr). Cost: one lock file per slot, no process, no timer."""
-    import guard_core, shared_names  # hooks/, on sys.path from the top of this file
-    folder = os.path.join(shared_names.config_dir(), "state", "lane-lint-slots")
+    import guard_core  # hooks/, on sys.path from the top of this file
+    folder = lint_slot_folder()
     told = False
     try:
         os.makedirs(folder, exist_ok=True)
@@ -2572,10 +2577,100 @@ def lint_slot():
         if fd is not None:
             os.close(fd)  # closing the fd frees the lock
 
+# The wait for a high load (step lane-lint-load-timeout). Incident 2026-11-08 08:29 and 09:10 CST: a lint ended "unknown, ci-job did not finish in
+# 1200 s" twice, with a load of 10 to 22 on 4 CPUs from other processes. A lint that holds a slot now waits, before ci_job_run, while the 1-minute load
+# less the lints that run ci-job is at or above the CPU count, so LINT_SECONDS counts the run alone.
+# LOAD_WAIT_SECONDS 1800: 1.5 x LINT_SECONDS, so a load that clears within the window the incident's lints ran in still gets its verdict, and a load that
+# never clears ends in a line, not an open wait. How long a load of 10 to 22 lasts is unmeasured; 1800 is a guess to revise from the first unknown it prints.
+# LOAD_POLL 5 s: the 1-minute load average moves over tens of seconds, so a finer look reads the same number; a look costs the reads below.
+LOAD_WAIT_SECONDS = 1800
+LOAD_POLL = 5
+
+def read_cpu_load():
+    """-> (the 1-minute load average, the CPU count), or None where there is no reading (no os.getloadavg, as on Windows, or it raises)."""
+    try:
+        return os.getloadavg()[0], os.cpu_count() or 1
+    except (AttributeError, OSError):
+        return None
+
+def run_marker_paths(create=False):
+    """The running markers: <config>/state/lane-lint-slots/run-<i>.lock for i below lint_slots(). A marker is an empty file; a lint holds an OS lock on one
+    while its ci-job runs, and the process's death frees it. With `create`, each is made; else only the ones that exist are listed."""
+    folder = lint_slot_folder()
+    paths = [os.path.join(folder, f"run-{i}.lock") for i in range(lint_slots())]
+    return paths if create else [p for p in paths if os.path.exists(p)]
+
+def lints_running():
+    """The lane lints whose ci-job runs now: the markers some other holder has locked. The caller is not counted (it takes its marker after its wait), and
+    nor is a lint that waits for a slot or for the load. 0 where the folder cannot be read, which holds a lint back more, never less.
+    Cost per call: one open, one non-blocking lock try and one close per existing marker (at most lint_slots()). No process, no file written, no timer."""
+    import guard_core
+    running = 0
+    try:
+        for path in run_marker_paths():
+            fd = os.open(path, os.O_RDWR)
+            try:
+                if guard_core.try_lock_fd(fd):
+                    guard_core.unlock_fd(fd)
+                else:
+                    running += 1
+            finally:
+                os.close(fd)
+    except OSError:
+        return 0
+    return running
+
+@contextlib.contextmanager
+def lint_running():
+    """Mark this lint as running its ci-job for the body: a lock on the first free run marker, freed on every exit. A lint that finds no free marker, or cannot
+    make one, runs unmarked, so the others subtract one lint fewer and wait the longer. Cost: at most lint_slots() empty marker files, made once and never written."""
+    import guard_core
+    fd = None
+    try:
+        os.makedirs(lint_slot_folder(), exist_ok=True)
+        for path in run_marker_paths(create=True):
+            candidate = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
+            try:
+                if guard_core.try_lock_fd(candidate):
+                    fd = candidate
+                    break
+            except BaseException:
+                os.close(candidate)
+                raise
+            os.close(candidate)
+    except OSError:
+        pass
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+def wait_for_load():
+    """Wait, holding the lint's slot, while read_cpu_load() less lints_running() is at or above its CPU count; each look is a fresh reading, taken on demand
+    inside this wait. -> None when the load allows the run or there is no reading, else one line for an unknown: the wait ran out at LOAD_WAIT_SECONDS.
+    Prints one stderr line before the first sleep."""
+    start = time.monotonic()
+    told = False
+    while True:
+        reading = read_cpu_load()
+        if reading is None:
+            return None
+        load, cpus = reading
+        if load - lints_running() < cpus:
+            return None
+        waited = time.monotonic() - start
+        if waited >= LOAD_WAIT_SECONDS:
+            return f"ci-job not started: the load was {load:g} on {cpus} CPUs after {int(waited)} s of waiting"
+        if not told:
+            told = True
+            print(f"merge: waiting for the load to fall (load {load:g} on {cpus} CPUs, up to {LOAD_WAIT_SECONDS} s)", file=sys.stderr, flush=True)
+        time.sleep(min(LOAD_POLL, LOAD_WAIT_SECONDS - waited))
+
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no merge lock, only a lane-lint slot (lint_slot), which it
-    waits for while it holds the worktree; merges and pushes nothing. -> 0 on a pass, else raises Stop.
+    waits for while it holds the worktree, and then waits for a high load to fall (wait_for_load; an unknown if it does not); merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
@@ -2588,8 +2683,13 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        with lint_slot():  # the bound of ci_job_run counts from here: the wait for a slot is outside it
-            state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+        with lint_slot():  # the bound of ci_job_run counts from its start: the waits for a slot and for the load are outside it
+            load_line = wait_for_load()
+            if load_line:  # no ci-job ran, so no flag lifts it: it reads unknown, never a pass
+                state, lines, log, liftable = "unknown", [load_line], [], False
+            else:
+                with lint_running():
+                    state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
