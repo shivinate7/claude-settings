@@ -86,6 +86,12 @@ class SettleTests(unittest.TestCase):
         os.environ["CLAUDE_CONFIG_DIR"] = self.cfg
         self.addCleanup(restore_config_dir, prev)
 
+    def fresh_config(self):
+        """A config folder of its own for the next subtest. The raised-refusals file lives in the config folder, so
+        an earlier subtest's raised row would drop this subtest's identical row."""
+        self.cfg = tempfile.mkdtemp(dir=self.scratch)
+        os.environ["CLAUDE_CONFIG_DIR"] = self.cfg
+
     def refusals_file(self):
         return os.path.join(self.cfg, "state", "refusals", SID + ".jsonl")
 
@@ -201,11 +207,13 @@ class SettleTests(unittest.TestCase):
 
     def test_b7_a_built_in_tool_needs_its_backticked_name(self):
         with self.subTest("backticked"):
+            self.fresh_config()
             self.check_scope([BASH])
             left = self.settle(reply("Done", "`Bash` refusal was right; the call stays refused."))
             self.assertEqual(left, [], "the backticked name of Bash with the phrase, outside Input Needed, "
                                        "did not clear the row")
         with self.subTest("bare word"):
+            self.fresh_config()
             self.check_scope([BASH])
             left = self.settle(reply("Done", "Bash output was empty; the refusal was right."))
             self.assertEqual(left, [BASH], "a bare Bash, an English word, cleared the row")
@@ -225,6 +233,7 @@ class SettleTests(unittest.TestCase):
         )
         for label, tools, line, expect in cases:
             with self.subTest(label):
+                self.fresh_config()
                 self.check_scope(tools)
                 left = self.settle(reply("Done", line))
                 self.assertEqual(left, expect, "%s cleared a row the direct form does not clear" % label)

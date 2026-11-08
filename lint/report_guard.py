@@ -1366,6 +1366,20 @@ def refusal_rows(path, skipped=None):
     return rows
 
 
+def _read_raised(path):
+    """The (tool_name, reason) pairs recorded in the raised-refusals file at `path`; [] when it is missing or bad."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    pairs = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, list) and len(item) == 2 and all(isinstance(x, str) for x in item):
+            pairs.append((item[0], item[1]))
+    return pairs
+
+
 def pending_refusals(hook, text):
     """Settle the session's refusals file against the reply and return the tool names still unnamed.
 
@@ -1374,8 +1388,13 @@ def pending_refusals(hook, text):
     agent's: the row has agent_id, or its tool_use_id is a tool_use in an agent record. A row whose
     tool_use_id is in an orchestrator record stays, even with agent_id. A row with no tool_use_id, a
     tool_use_id found nowhere (not yet flushed) or an unreadable transcript stays, unless it has agent_id.
-    The file goes when none is left. One stat per Stop when the session had no refusal. Fails open: [] on
-    any error. Spec: docs/decisions/refusals-reach-the-owner.md."""
+    A row cleared by name is also recorded as (tool_name, reason) in the session's raised-refusals file, and a
+    later row with the same tool_name and the same reason, not blank after strip, is dropped without blocking: the owner
+    already heard of it. A different reason or tool, or a blank reason, still blocks. The refusals file goes
+    when none is left. One stat per Stop when the session had no refusal; the raised file is read only when
+    the refusals file has rows, and written only when a row is cleared by name. Fails open: [] on any error;
+    a raised file that cannot be written only means the repeat blocks once more.
+    Spec: docs/decisions/refusals-reach-the-owner.md."""
     try:
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
         import shared_names
@@ -1383,19 +1402,39 @@ def pending_refusals(hook, text):
         if path is None or not os.path.exists(path):
             return []
         rows = refusal_rows(path)
+        if not rows:
+            return []
         section = input_needed_section(text)
         agent_ids, orchestrator_ids = set(), set()
         transcript = hook.get("transcript_path")
         if transcript and any(r.get("tool_use_id") for _, r in rows):
             agent_ids, orchestrator_ids = tool_use_sources(transcript) or (set(), set())
+        raised_path = shared_names.raised_refusals_path(hook.get("session_id"))
+        raised = _read_raised(raised_path) if raised_path else []
+        newly_raised = []
         kept = []
         for line, row in rows:
             tool = row["tool_name"]
             use_id = row.get("tool_use_id")
+            reason = row.get("reason")
+            has_reason = isinstance(reason, str) and bool(reason.strip())
             from_agent = (row.get("agent_id") or use_id in agent_ids) and use_id not in orchestrator_ids
-            if from_agent or names_tool(section, tool) or says_refusal_right(text, tool):
+            if from_agent:
+                continue
+            if names_tool(section, tool) or says_refusal_right(text, tool):
+                if has_reason and (tool, reason) not in raised + newly_raised:
+                    newly_raised.append((tool, reason))
+                continue
+            if has_reason and (tool, reason) in raised:
                 continue
             kept.append((line, tool))
+        if newly_raised and raised_path:
+            try:
+                os.makedirs(os.path.dirname(raised_path), exist_ok=True)
+                with open(raised_path, "w", encoding="utf-8") as f:
+                    json.dump([list(pair) for pair in raised + newly_raised], f)
+            except OSError:
+                pass
         if len(kept) != len(rows):
             if kept:
                 with open(path, "w", encoding="utf-8") as f:
