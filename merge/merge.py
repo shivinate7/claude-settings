@@ -65,6 +65,7 @@ try:
 except ImportError:  # a hook loads this file; a missing helper never stops that hook
     _nowindow = subprocess
 
+MERGE_DIR = os.path.dirname(os.path.abspath(__file__))  # read at load: a caller may point __file__ at the tool checkout later
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
 ALARM_EVENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "ci-alarm", "events.json")  # the events the red-main check judges and their groups; one home, the CI alarm reads it too
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
@@ -3299,6 +3300,8 @@ _tool_stamp_since = {}
 def tool_source_note(tool):
     """-> a sentence naming the checkout launch.py started from (its TOOL_SOURCE_ENV) when the tool runs from another folder, else "". launch.py
     runs the tool from a temporary worktree and removes it when the run ends, so a Stop that names only that worktree names no folder left to repair."""
+    if MERGE_DIR not in sys.path:  # PYTHONSAFEPATH keeps this folder off sys.path, so a bare import of launch fails
+        sys.path.insert(0, MERGE_DIR)
     from launch import TOOL_SOURCE_ENV  # here, not at the top: hooks/guard_merge.py loads this file by path, with no merge folder on sys.path
     source = os.environ.get(TOOL_SOURCE_ENV)
     if not source or os.path.realpath(source) == os.path.realpath(tool):
