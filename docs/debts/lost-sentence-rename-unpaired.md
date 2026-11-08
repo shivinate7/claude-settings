@@ -4,6 +4,6 @@
 
 **Where.** `lint/check_silent_undo.py`, `dropped_clauses` (the pairing rule) and `clauses` (the fragment join).
 
-**Decision.** `notes-merge-union` (debt notes merge by union), which this check's notes path rests on. Roadmap step `note-rewrite-keeps-claims` (a rewritten note keeps its claims) carries the fix.
+**Decision.** `notes-merge-union` (debt notes merge by union), which this check's notes path rests on. Roadmap step `note-rewrite-keeps-claims` (a rewritten note keeps its claims) cites the incident; the gap stays open.
 
 **Retire.** Closed when `lint/test_check_silent_undo.py` has a case where a note renamed to one that never names the old slug loses a sentence and is refused. A plain retire that loses no sentence must still pass. Red on the current code, green after the fix.
