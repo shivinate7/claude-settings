@@ -66,6 +66,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "coordinator-scope",
+        "reason": "Scope: the guard binds a cloud coordinator only. It refuses that session's own writes to a repository path outside the record homes, through an Edit tool, a shell write or the GitHub MCP file tools, and its build and review spawns. A solo session, a lane session, a local session, or an orchestrator that is not a cloud coordinator is not stopped.",
         "test": "hooks/test_guard.py::coordinator-scope: product_code_denied, Edit of src/app.py; hooks/test_guard.py::coordinator-scope: coordinator_builder_spawn_denied"
       }
     },

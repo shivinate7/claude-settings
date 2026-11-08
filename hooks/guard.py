@@ -4807,6 +4807,10 @@ COORDINATOR_MERGE_REASON = (
 # The host's tools that merge for a coordinator: the merge tool, and the one that arms a merge to land later. The arming
 # tool stays out of MERGE_TOOLS, so merge-checks does not judge it.
 COORDINATOR_MERGE_TOOLS = MERGE_TOOLS + ("mcp__github__enable_pr_auto_merge",)
+# The host's file-write tools. Each writes a repository path through the GitHub API, so coordinator-scope judges its
+# repo-relative path as it judges an Edit. Not in guard_core WRITE_TOOLS: other rules read that set as local-file writes.
+COORDINATOR_MCP_WRITE_TOOLS = ("mcp__github__create_or_update_file", "mcp__github__push_files",
+                               "mcp__github__delete_file")
 _COORDINATOR_ROLE = {}
 # The record branch of skill project-ops (SKILL.md, "The record branch"): an orphan branch, `roadmap` by default,
 # laid out by its scaffold.py. skills/roadmap/build.py (record_source, DATA) tells the checkout apart the same
@@ -4887,6 +4891,24 @@ def coordinator_rel_ok(rel: str, root: str) -> bool:
            for path, is_file in coordinator_paths(root)):
         return True
     return len(parts) > 1 and parts[0] in RECORD_FOLDERS and coordinator_record_checkout(root)
+
+
+def coordinator_cwd_root(cwd: str) -> str:
+    """The root of the repository the call runs in: the nearest parent of `cwd` that holds `.git`, else `cwd`. The
+    record homes of an MCP write are read against it, because the call names only a path inside its own repo."""
+    probe = norm(os.path.normpath(_expanded(os.path.join(cwd or ".", "x"), cwd or "")))
+    rel = repo_rel(probe, cwd or "", outside=False)
+    return probe[:len(probe) - len(rel)] if rel else norm(cwd or "")
+
+
+def coordinator_mcp_paths(tool_input: dict) -> list:
+    """The repo-relative paths a GitHub MCP file-write call names: its `path`, and each `files[].path` of push_files.
+    An entry that is no string is skipped: such a call fails at the host."""
+    paths = [tool_input.get("path")]
+    files = tool_input.get("files")
+    if isinstance(files, list):
+        paths += [f.get("path") for f in files if isinstance(f, dict)]
+    return [p for p in paths if isinstance(p, str) and p]
 
 
 def coordinator_path_outside(target: str, where: str, session_id: str) -> bool:
@@ -5241,7 +5263,7 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
     The detail is a log field, so a path in it is shortened from its head (guard_core.log_path) after its
     label. A raw path would be cut from the tail by `record`, and a long macOS temporary root would take
     the file name with it."""
-    if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS:
+    if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS and tool not in COORDINATOR_MCP_WRITE_TOOLS:
         return ""
     if tool in SHELL_TOOLS:   # the tier is read only once the command could write or commit
         if not _cloud_own_call(payload) or not _shell_could_write(tool_input, cwd):
@@ -5257,6 +5279,12 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
         for target in write_targets(tool_input):
             if coordinator_path_outside(target, cwd, session_id):
                 return detail("", target)
+        return ""
+    if tool in COORDINATOR_MCP_WRITE_TOOLS:
+        root = coordinator_cwd_root(cwd)
+        for rel in coordinator_mcp_paths(tool_input):
+            if not coordinator_rel_ok(rel, root):
+                return detail("mcp write: ", rel)
         return ""
     raw = str(tool_input.get("command", "") or "")
     stripped = strip_heredoc_bodies(raw)
