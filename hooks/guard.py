@@ -2013,8 +2013,9 @@ ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_AMEND = re.compile(r"^commit \(amend\):")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
-# A HEAD move that writes a commit: the commit it lands may be the agent's own change under a new sha. A
-# fast-forward writes none, and a reset, checkout, clone or branch creation only moves HEAD.
+# A HEAD move that writes a commit: the commit it lands is the agent's own change, or a copy of one under a
+# new sha. A fast-forward writes none, and a reset, checkout, clone or branch creation only moves HEAD, so a
+# commit only those reached is someone else's.
 ENTRY_WRITES = re.compile(r"^(?:commit|cherry-pick|revert|am|merge|pull|rebase)\b(?!.*: Fast-forward$)")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
 # A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
@@ -2115,7 +2116,7 @@ def own_changes(root: str):
         if kind in (OWN, NOTED):
             kinds.setdefault(sha, kind)
             if index and ENTRY_AMEND.match(subject):
-                replaced.setdefault(sha, entries[index - 1])
+                replaced.setdefault(sha, entries[index - 1][0])
     lost = set()
     if kinds:
         # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
@@ -2123,23 +2124,26 @@ def own_changes(root: str):
         if answer is None or answer.returncode != 0:
             return None
         lost = set(answer.stdout.split())
+    # Every sha a writing entry of this reflog landed: the agent's own commits and its replays of them.
+    written = {sha for sha, subject in entries if ENTRY_WRITES.match(subject)}
     changes = []
     inherited = set()
     for sha, kind in kinds.items():
-        if sha in lost:
-            continue
-        before, how = replaced.get(sha, ("", ""))
-        if before and (before in inherited or not ENTRY_WRITES.match(how)):
-            # An amend of a commit HEAD reached by a move that writes none (checkout, reset, clone). With
-            # the same tree it is a message-only amend, and the test lines in it are the other author's.
-            # An amend of a commit the agent made, or one a replay (rebase, cherry-pick, pull) copied
-            # from it, is read in full.
+        before = replaced.get(sha, "")
+        if before and (before in inherited or before not in written):
+            # An amend of a commit no writing entry landed: someone else wrote it, however HEAD reached it.
+            # With the same tree it is a message-only amend, and the test lines in it are the other author's.
+            # An amend of a commit the agent wrote, or one a replay (rebase, cherry-pick, pull) copied, is
+            # read in full, even when a checkout, reset or fast-forward reached it again. A message-only amend
+            # is marked before the lost check, so a later amend of it is judged the same way.
             trees = [guard_core._git(root, "rev-parse", c + "^{tree}") for c in (sha, before)]
             if any(t is None or t.returncode != 0 for t in trees):
                 return None
             if trees[0].stdout == trees[1].stdout:
                 inherited.add(sha)
                 continue
+        if sha in lost:
+            continue
         parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
         if parents is None or parents.returncode != 0:
             return None
