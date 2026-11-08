@@ -7138,6 +7138,16 @@ sh("ask-step-hidden: control, a commit whose heredoc body names a bash -c force 
    VCS + " commit -F - <<'EOF'\nbash -c '" + FORCE + "'\nEOF", "allow", cwd=PUSHFEAT)
 sh("ask-step-hidden: control, an echo that quotes a bash -c force push allows",
    'echo "use bash -c \'' + FORCE + '\' never"', "allow", cwd=PUSHFEAT)
+# ASK-STEP-HIDDEN, inside a wrapper (debt ask-step-hidden-in-script). A `bash -c` or `sh -c` script runs its
+# own `$( )` and backticks, so a force push there still runs and denies. A heredoc body in a wrapper is data.
+sh("ask-step-hidden: a force push in a bash -c substitution denies",
+   "bash -c 'x=$(" + HIDDEN_PUSH + ")'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in bash -c glued backticks denies",
+   "bash -c 'x=`" + HIDDEN_PUSH + "`'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in a sh -c double-quoted substitution denies",
+   "sh -c 'echo \"$(" + HIDDEN_PUSH + ")\"'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: control, a heredoc body naming a force push inside bash -c allows",
+   "bash -c 'cat <<EOF\n" + HIDDEN_PUSH + "\nEOF'", "allow", cwd=PUSHFEAT)
 
 # ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
 # colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
@@ -11870,6 +11880,8 @@ sh("ask-step-hidden: a redirect in a subshell onto the config settings denies",
    "(echo x > " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
 sh("ask-step-hidden: a redirect in a glued command substitution onto the config settings denies",
    "x=$(echo x > " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("ask-step-hidden: a redirect in glued backticks inside bash -c onto the config settings denies",
+   "bash -c 'x=`echo x > " + CFG_SETTINGS + "`'", "deny", "frozen-path", cwd=NOGIT)
 
 # VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
 # target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
