@@ -4134,33 +4134,40 @@ guardset3() {
   rm -rf "$h"
 }
 
-# guardset4: the guard set's lists. A flat module that a guard file imports at load must be in each list
-# that copies the guard set, or the shipped guard cannot import. guard_merge.py imports own_session.py at
-# load, guard_stream.py imports merge_options.py. The modules come from the guard files' module-level
-# imports, read with the Python parser, so a new load-time import needs no edit here. A try block or a
-# def body is optional or lazy, so it is not named: guard_kill's _nowindow falls back, and is flat only.
-# A guard file ships by the guard_*.py glob, so it is not named either.
+# guardset4: the guard set's lists. A flat module that a guard file imports must be in each list that
+# copies the guard set, or the shipped guard cannot import. guard_merge.py imports own_session.py at load,
+# guard_stream.py imports merge_options.py. The modules come from the imports of guard.py and of each
+# guard_*.py outside a try block, at module level or in a def body (a def body runs on each call), read
+# with the Python parser, so a new import needs no edit here. A try block is optional or has a fallback,
+# so its import is not named: guard_kill's _nowindow falls back in one.
 # The check reads the list line only (the loop or the case line), never the comments above it.
-guard_set_modules() {  # prints each flat module a guard file imports at load, one per line
+guard_set_modules() {  # prints each flat module a guard file imports outside a try block, one per line
   python3 -I - "$REPO_ROOT" <<'PY'
 import ast, glob, os, sys
 hooks = os.path.join(sys.argv[1], "hooks")
 flat = set(os.listdir(hooks))
 found = set()
-for path in glob.glob(os.path.join(hooks, "guard_*.py")):
+def visit(stmts, out):
+    for node in stmts:
+        if isinstance(node, ast.Try):
+            continue
+        if isinstance(node, ast.Import):
+            out.extend(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            out.append(node.module)
+        for field in ("body", "orelse", "finalbody"):
+            sub = getattr(node, field, None)
+            if isinstance(sub, list):
+                visit(sub, out)
+for path in glob.glob(os.path.join(hooks, "guard_*.py")) + [os.path.join(hooks, "guard.py")]:
     with open(path, encoding="utf-8") as fh:
         tree = ast.parse(fh.read(), path)
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            names = [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names = [node.module]
-        else:
-            continue
-        for name in names:
-            mod = name.split(".")[0] + ".py"
-            if mod in flat and mod != "guard.py" and not mod.startswith("guard_"):
-                found.add(mod)
+    names = []
+    visit(tree.body, names)
+    for name in names:
+        mod = name.split(".")[0] + ".py"
+        if mod in flat and mod != "guard.py" and not mod.startswith("guard_"):
+            found.add(mod)
 print("\n".join(sorted(found)))
 PY
 }
@@ -4168,10 +4175,11 @@ PY
 listed_in() {  # $1 file, $2 sed address of the one list line, $3 label, $4 module
   lines=$(sed -n "$2" "$1")
   if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then bad "$name" "$4: $3 is not one list line"; nmiss=$((nmiss + 1)); return; fi
-  case "$lines" in
-    *"$4"*) ;;
-    *) bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1)) ;;
-  esac
+  # A name counts only as a whole name. Splitting the line at each character a file name cannot hold
+  # leaves the names as tokens, so shared_names.py does not list names.py.
+  if ! printf '%s\n' "$lines" | tr -c '[:alnum:]_.-' '\n' | grep -Fx -- "$4" >/dev/null; then
+    bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1))
+  fi
 }
 
 guardset4() {
