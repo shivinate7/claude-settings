@@ -882,38 +882,75 @@ def _bound_names(target):
     return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
 
 
-def _locals(fdef):
-    """name -> [(value, slot)] for each binding in a function. A value of None is a binding made at
+def _branch_chain(node, mod):
+    """The `if` arms that hold `node`, outermost first: (id of the `if`, "body" or "orelse") for each `if` whose
+    body or else holds it. An `if`'s test runs before either arm, so the test adds none."""
+    chain, cur = [], node
+    parent = mod.parents.get(id(cur))
+    while parent is not None:
+        if isinstance(parent, ast.If) and cur in parent.body:
+            chain.append((id(parent), "body"))
+        elif isinstance(parent, ast.If) and cur in parent.orelse:
+            chain.append((id(parent), "orelse"))
+        cur, parent = parent, mod.parents.get(id(parent))
+    return tuple(reversed(chain))
+
+
+def _sibling(binding, read):
+    """True when two arm chains first split at one `if`, one in its body and the other in its else (an elif is one)."""
+    for (b_if, b_arm), (r_if, r_arm) in zip(binding, read):
+        if b_if != r_if:
+            return False  # two `if` statements in a row: the earlier one runs first
+        if b_arm != r_arm:
+            return True
+    return False
+
+
+def _reaching(entries, read, mod):
+    """The bindings a read sees. A binding in the other arm of the read's `if` never runs before the read, so its
+    text must not pool into the read. A binding in an arm of an earlier `if` does reach a read after that `if`, so
+    both arms binding one name reach it. A run-time binding that does reach the read still leaves it unresolved."""
+    chain = _branch_chain(read, mod)
+    return [entry for entry in entries if not _sibling(entry[2], chain)]
+
+
+def _locals(fdef, mod):
+    """name -> [(value, slot, chain)] for each binding in a function. A value of None is a binding made at
     run time (an argument, a loop target), so the name has no static text. A slot is the position
-    in a tuple value that the name unpacks."""
+    in a tuple value that the name unpacks. A chain is the `if` arms that hold the binding (_branch_chain).
+    An argument binds on entry, so its chain is empty."""
     locs = {}
+
+    def bind(name, value, slot, at):
+        locs.setdefault(name, []).append((value, slot, _branch_chain(at, mod)))
+
     args = fdef.args
     for arg in args.posonlyargs + args.args + args.kwonlyargs + [a for a in (args.vararg, args.kwarg) if a]:
-        locs.setdefault(arg.arg, []).append((None, None))
+        locs.setdefault(arg.arg, []).append((None, None, ()))
     for node in _own(fdef):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    locs.setdefault(target.id, []).append((node.value, None))
+                    bind(target.id, node.value, None, node)
                 elif isinstance(target, ast.Tuple) and all(isinstance(e, ast.Name) for e in target.elts):
                     for i, e in enumerate(target.elts):
-                        locs.setdefault(e.id, []).append((node.value, i))
+                        bind(e.id, node.value, i, node)
                 else:
                     for name in _bound_names(target):
-                        locs.setdefault(name, []).append((None, None))
+                        bind(name, None, None, node)
         elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension, ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
             for name in _bound_names(node.target):
-                locs.setdefault(name, []).append((None, None))
+                bind(name, None, None, node)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 for name in _bound_names(item.optional_vars) if item.optional_vars else []:
-                    locs.setdefault(name, []).append((None, None))
+                    bind(name, None, None, node)
         elif isinstance(node, ast.Lambda):
             # A lambda's parameters bind at run time. Its body is read in this scope, so they read as unknown.
             for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs + [a for a in (node.args.vararg, node.args.kwarg) if a]:
-                locs.setdefault(arg.arg, []).append((None, None))
+                bind(arg.arg, None, None, node)
         elif isinstance(node, ast.ExceptHandler) and node.name:
-            locs.setdefault(node.name, []).append((None, None))  # the caught exception is bound at run time
+            bind(node.name, None, None, node)  # the caught exception is bound at run time
     return locs
 
 
@@ -1025,7 +1062,7 @@ class _Reasons:
 
     def locals_of(self, fdef, mod):
         if id(fdef) not in self._locals:
-            self._locals[id(fdef)] = _locals(fdef)
+            self._locals[id(fdef)] = _locals(fdef, mod)
         return self._locals[id(fdef)]
 
     def alts(self, expr, mod, locs, depth=0):
@@ -1072,7 +1109,7 @@ class _Reasons:
         if isinstance(expr, ast.IfExp):
             return _union([self.alts(expr.body, mod, locs, d), self.alts(expr.orelse, mod, locs, d)])
         if isinstance(expr, ast.Name):
-            return self._name(expr.id, mod, locs, d, None)
+            return self._name(expr, mod, locs, d, None)
         if isinstance(expr, ast.Subscript):
             if isinstance(expr.slice, ast.Constant) and isinstance(expr.slice.value, int) and expr.slice.value >= 0:
                 return self._elt(expr.value, expr.slice.value, mod, locs, d)  # `reason[0]` of a tuple-valued name
@@ -1111,7 +1148,7 @@ class _Reasons:
         """The static text of a local name's branches, skipping the run-time ones. `x = x or "text"` adds
         "text": its `x` is the run-time branch that another binding holds."""
         found = []
-        for value, slot in locs.get(name, []):
+        for value, slot, _ in locs.get(name, []):
             if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or) \
                     and isinstance(value.values[0], ast.Name) and value.values[0].id == name:
                 parts = [self.alts(v, mod, locs, depth) for v in value.values[1:]]
@@ -1164,13 +1201,17 @@ class _Reasons:
                 return self._call(expr, mod, locs, d, i)
             return None
         if isinstance(expr, ast.Name):
-            return self._name(expr.id, mod, locs, d, i)
+            return self._name(expr, mod, locs, d, i)
         return None
 
-    def _name(self, name, mod, locs, depth, index):
+    def _name(self, read, mod, locs, depth, index):
+        name = read.id
         if name in locs:
+            seen = _reaching(locs[name], read, mod)
+            if not seen:  # bound in this def, but no binding reaches this read: its text is unknown
+                return None
             return _union([self._value(v, slot, index, mod, locs, depth) if v is not None else None
-                           for v, slot in locs[name]])
+                           for v, slot, _ in seen])
         home = self._home(mod, name)
         if home is None:
             return None
@@ -1207,7 +1248,7 @@ class _Reasons:
         if not any(isinstance(a, ast.Starred) for a in call.args) and not any(k.arg is None for k in call.keywords):
             for name, arg in _call_args(call, fdef):
                 if name in flocs:
-                    flocs[name] = [(_Fixed(self.alts(arg, mod, locs, depth + 1)), None)]
+                    flocs[name] = [(_Fixed(self.alts(arg, mod, locs, depth + 1)), None, ())]
         returns = [n.value for n in _own(fdef) if isinstance(n, ast.Return) and n.value is not None]
         return _union([self._value(v, None, index, fmod, flocs, depth + 1) for v in returns])
 
@@ -1307,9 +1348,9 @@ def _refusals_of(call, locs, where, unattributed, mod, reasons):
     if name == "refuse" and isinstance(rule, ast.Name):
         bound = locs.get(rule.id, [])
         if any(isinstance(v, ast.Subscript) and isinstance(v.value, ast.Name) and v.value.id == PENDING_ASK
-               for v, _ in bound):
+               for v, _, _ in bound):
             return []  # the ask_command() call sites carry these ids
-        for value, slot in bound:
+        for value, slot, _ in bound:
             options = _tuple_options(value) if slot == 0 else None
             if options and all(len(t.elts) == 2 and isinstance(t.elts[0], ast.Constant) for t in options):
                 return [(t.elts[0].value, t.elts[1]) for t in options]
@@ -1524,7 +1565,7 @@ def _params_reaching(expr, params, locs, seen=frozenset()):
         if name in params:
             found.add(name)
         elif name in locs and name not in seen:
-            for value, _ in locs[name]:
+            for value, _, _ in locs[name]:
                 if value is not None:
                     found |= _params_reaching(value, params, locs, seen | {name})
     return found
@@ -1696,7 +1737,7 @@ class _Helpers:
             flocs, unknown = dict(hlocs), []
             for name, arg in pairs:
                 texts = self.reasons.alts(arg, self.mod, locs)
-                flocs[name] = [(_Fixed(texts), None)]
+                flocs[name] = [(_Fixed(texts), None, ())]
                 if texts is None and name in reach:
                     unknown.append(arg)
             fallback = ", ".join(_unparse(a) for a in unknown) or _unparse(msg)
