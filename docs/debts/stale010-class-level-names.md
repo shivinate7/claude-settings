@@ -6,4 +6,4 @@
 
 **Decision.** claims-carry-backing (the claim-backing record).
 
-**Retire.** `names_in` binds class attributes and nested classes, and a case in `lint/test_stale_cites.py` shows a cite to each passes.
+**Retire.** `names_in` binds or skips each name form in What (class attribute, nested class, nested def, local, method on an object, string id, star import), and a case in `lint/test_stale_cites.py` shows a cite to each gives no STALE010.
