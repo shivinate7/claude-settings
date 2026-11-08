@@ -1,0 +1,11 @@
+{
+  "title": "The waiting-page skill merges a second account's page copy into a live page",
+  "why": "Owner note on item 398, 12:00 CST Nov 8: two Claude accounts on his Mac both worked degen, banchi and other repos, and each wrote its own waiting page; he asks how to aggregate them so each page is full. The skill has \"Before you switch Claude accounts\" (export into git) and \"Rebuild a page from the repo\" (into an EMPTY page only); it has no step that adds a git copy's missing items to a LIVE page. Fix: a written step plus an export_page.py mode that emits set writes only for ids the live page lacks, renumbering an n that is taken. Triage gave the owner two interim prompts in item 398's reply (12:02 CST).",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 773,
+  "updatedAt": "2026-11-08T12:01:00-06:00"
+}
