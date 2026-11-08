@@ -138,6 +138,8 @@ def collision_on(ref):
 
 COLLISION = collision_on("main")  # git's text when another fetch moved the ref
 MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"  # the fetch of main that a lane lint makes (fetch_branch of the base)
+NAMED_FEAT_REFSPEC = "+refs/heads/feat:refs/remotes/origin/feat"  # the fetch of a bare branch name that lane_head_and_base makes
+ALL_REFS_REFSPEC = "+refs/heads/*:refs/remotes/origin/*"  # the fetch of every branch that lane_head_and_base makes when a sha is not in the clone
 
 
 def pass_lines(text):
@@ -488,6 +490,9 @@ class LaneLint(CiJobStub, tm.CloudSession):
 
     def has_local_branch(self, name):
         return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", f"refs/heads/{name}"], capture_output=True).returncode == 0
+
+    def has_commit(self, sha):
+        return subprocess.run(["git", "-C", self.co, "rev-parse", "-q", "--verify", f"{sha}^{{commit}}"], capture_output=True).returncode == 0
 
     def local_feat_one_past_origin(self):
         """Make the lane checkout's local feat one commit past origin/feat. -> (local sha, origin sha)."""
@@ -1034,6 +1039,47 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotEqual(rc, 0, out)
         self.assertIn("fetch origin main", out)
         self.assertEqual(self.lint_calls(), [], "ci-job ran after the fetch failed")
+
+    def test_a_fetch_of_a_named_target_that_collides_with_another_lints_fetch_is_retried_and_the_lint_goes_on(self):
+        self.use_ci_job(PASSING, 0)
+        self.assertFalse(self.has_local_branch("feat"), "the case needs no local feat, so the lane lint fetches the named target")
+        head = self.head("feat")
+        rc, out, fetches, _ = self.run_with_fetch_failing("feat", 1, (1, collision_on("feat")), refspec=NAMED_FEAT_REFSPEC)
+        self.assertGreaterEqual(fetches, 2, "the fetch of the named target that collided with another lint's fetch was not retried: " + out)
+        self.assertEqual(rc, 0, "a fetch of the named target that collided with another lint's read as a failed lint: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assert_lint_calls(out, head)
+
+    def test_control_a_named_target_fetch_that_fails_for_another_reason_is_not_retried_and_the_lint_ends_as_today(self):
+        """Today's read, pinned: the fetch of a bare branch name ignores its exit code, and the lint runs at origin/feat as this clone
+        holds it. Only a ref-lock collision is retried; any other failure is one fetch and that outcome."""
+        self.use_ci_job(PASSING, 0)
+        self.assertFalse(self.has_local_branch("feat"), "the case needs no local feat, so the lane lint fetches the named target")
+        head = self.head("feat")
+        rc, out, fetches, _ = self.run_with_fetch_failing("feat", 99, (128, "fatal: couldn't find remote ref feat"), refspec=NAMED_FEAT_REFSPEC)
+        self.assertEqual(fetches, 1, "a fetch of the named target that failed for another reason was retried: " + out)
+        self.assertEqual(rc, 0, "a named target whose fetch failed for another reason ended other than it does today: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assert_lint_calls(out, head)
+
+    def test_a_fetch_of_all_refs_that_collides_with_another_lints_fetch_is_retried_and_the_lint_goes_on(self):
+        self.use_ci_job(PASSING, 0)
+        sha = self.competitor_push()  # origin/feat moves to a commit that this clone does not have
+        self.assertFalse(self.has_commit(sha), "the case needs a head this clone lacks, so the lane lint fetches every branch")
+        rc, out, fetches, _ = self.run_with_fetch_failing(sha, 1, (1, collision_on("feat")), refspec=ALL_REFS_REFSPEC)
+        self.assertGreaterEqual(fetches, 2, "the fetch of every branch that collided with another lint's fetch was not retried: " + out)
+        self.assertEqual(rc, 0, "a fetch of every branch that collided with another lint's read as a failed lint: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assert_lint_calls(out, sha)
+
+    def test_control_a_fetch_of_all_refs_that_fails_for_another_reason_stops_after_one_fetch(self):
+        sha = self.competitor_push()
+        self.assertFalse(self.has_commit(sha), "the case needs a head this clone lacks, so the lane lint fetches every branch")
+        rc, out, fetches, _ = self.run_with_fetch_failing(sha, 99, (128, "fatal: unable to access origin"), refspec=ALL_REFS_REFSPEC)
+        self.assertEqual(fetches, 1, "a fetch of every branch that failed for another reason was retried: " + out)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("cannot find", out)
+        self.assertEqual(self.lint_calls(), [], "ci-job ran with no head to lint")
 
     def test_control_a_lint_run_past_its_bound_reads_unknown_and_prints_no_fail_line(self):
         """The bound: ci-job runs past LINT_SECONDS, set to 1 s here. The fake ends the run at once, at the bound it was given, so nothing waits."""
