@@ -3407,6 +3407,30 @@ def floor_problem(earlier, rec):
         if e["fix"] and e["fix"][3] == "FAIL" and n < REVIEW_LAST_ROUND and not any(i == n + 1 and v == "FAIL" for i, _, _, v in rec["rounds"]):
             return f"a failed fix check on head {e['head'][:9]} counts as round {n + 1}, and only a FAIL line fills it, but this record's round {n + 1} has none", f"Round {n + 1} needs a FAIL line: pass it with --round."
 
+def is_plain_copy(r, prev):
+    """-> True when the parsed record `r` has no Fix check line and its Round lines equal those of the record `prev` just before it. A copy adds no
+    review, so the write step and the listing look through it to the record it repeats."""
+    return bool(prev and not r["fix"] and r["rounds"] == prev["rounds"])
+
+def copy_source(records):
+    """-> the record the newest of `records` (parsed, oldest first) repeats: the first one back from the end that is not a plain copy of the one before it."""
+    i = len(records) - 1
+    while i > 0 and is_plain_copy(records[i], records[i - 1]):
+        i -= 1
+    return records[i]
+
+def fix_follow_problem(src, copied):
+    """-> (why, remedy) for a new fix check refused because the parsed record `src` has a Fix check FAIL or WIDE. `copied` is True when `src` is not
+    the newest record but the one the newest copies."""
+    who = f"the review record on head {src['head'][:9]}, which the newest record copies, has a" if copied else "the newest earlier review record's"
+    why = f"{who} Fix check {'' if copied else 'is '}{src['fix'][3]}, so a new fix check may not follow it"
+    reached = max((i for i, *_ in src["rounds"]), default=0)
+    if src["fix"][3] == "WIDE":
+        return why, FIX_WIDE_REMEDY
+    if reached >= REVIEW_LAST_ROUND:  # a FAIL after the final round holds the change, and its finding starts a new lane
+        return why, FIX_FINAL_FAIL_REMEDY
+    return why, f"Post round {reached + 1}'s review record: a FAIL line for round {reached + 1} and no Fix check line."
+
 def uncleared_round(earlier, rec):
     """-> why, when a failed round stays failed; else None. A failed round stays failed: an earlier record's last round N is uncleared when it has a
     FAIL or PARTIAL line, or the record's fix check is FAIL or WIDE. That record, or one after it (up to `rec`), clears it by reaching a round above N
@@ -3421,7 +3445,9 @@ def uncleared_round(earlier, rec):
         if not failing and not (e["fix"] and e["fix"][3] in REVIEW_FIX_VERDICTS[1:]):
             continue
         design = REVIEW_ROLES[1] in failing  # a fix check reviews the code reviewer's finding, so its PASS never clears a design reviewer's line
-        if any(max((i for i, *_ in r["rounds"]), default=0) > n or (r["fix"] and r["fix"][3] == "PASS" and not design) for r in later[k:]):
+        wide = bool(e["fix"] and e["fix"][3] == "WIDE")  # a WIDE fix is a new lane, so only a fresh review clears it, never a fix check PASS
+        fresh = wide and any(not r["fix"] and not is_plain_copy(r, later[j]) for j, r in enumerate(later[k + 1:], k + 1))
+        if fresh or any(max((i for i, *_ in r["rounds"]), default=0) > n or (r["fix"] and r["fix"][3] == "PASS" and not design and not wide) for r in later[k:]):
             continue
         if stuck is None or n > stuck[0]:
             stuck = (n, design, e)
@@ -3439,7 +3465,7 @@ def fix_chain_count(records):
     for r in records:
         if r["fix"] and r["fix"][3] == "PASS":
             count += 1
-        elif not (prev and not r["fix"] and r["rounds"] == prev["rounds"]):
+        elif not is_plain_copy(r, prev):
             count = 0
         prev = r
     return count
@@ -3891,14 +3917,7 @@ def main(argv, host=None, lock=None, hosts=None):
                     elif not last:
                         problem, remedy = "the newest earlier review record on this pull request must exist", FIX_MISSING_REMEDY
                     elif last["fix"] and last["fix"][3] != "PASS":  # a FAIL is the next round and a WIDE is a new lane; only a passed fix check chains
-                        problem = f"the newest earlier review record's Fix check is {last['fix'][3]}, so a new fix check may not follow it"
-                        reached = max((i for i, *_ in last["rounds"]), default=0)
-                        if last["fix"][3] == "WIDE":
-                            remedy = FIX_WIDE_REMEDY
-                        elif reached >= REVIEW_LAST_ROUND:  # a FAIL after the final round holds the change, and its finding starts a new lane
-                            remedy = FIX_FINAL_FAIL_REMEDY
-                        else:
-                            remedy = f"Post round {reached + 1}'s review record: a FAIL line for round {reached + 1} and no Fix check line."
+                        problem, remedy = fix_follow_problem(last, False)
                     else:  # the record's rounds may not fall below the floor the earlier records set, or a later record could copy them and relabel the final round's net value
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
                         chain = fix_chain_count(earlier)
@@ -3906,7 +3925,10 @@ def main(argv, host=None, lock=None, hosts=None):
                             problem, remedy = f"the chain on this pull request already holds {chain} fix checks", FIX_CAP_REMEDY
                         else:
                             problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
-                held = next((r for r in reversed([r for r in map(parse_review, recs) if r and r["n"] == a.pr]) if r["fix"] and r["fix"][3] != "PASS" and max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # a plain record posted after a held record copies its rounds without the fix line, so the newest record alone does not show the hold
+                        src = copy_source(earlier or [last])  # a plain copy carries no fix line, so the record it repeats still holds the FAIL or WIDE
+                        if not problem and src["fix"] and src["fix"][3] != "PASS":
+                            problem, remedy = fix_follow_problem(src, True)
+                held =next((r for r in reversed([r for r in map(parse_review, recs) if r and r["n"] == a.pr]) if r["fix"] and r["fix"][3] != "PASS" and max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # a plain record posted after a held record copies its rounds without the fix line, so the newest record alone does not show the hold
                 if not problem and held:
                     problem = f"the review record on head {held['head'][:9]} has a Fix check {held['fix'][3]} after round {REVIEW_LAST_ROUND}, so a new fix check may not follow it"
                     remedy = FIX_WIDE_REMEDY if held["fix"][3] == "WIDE" else FIX_FINAL_FAIL_REMEDY
