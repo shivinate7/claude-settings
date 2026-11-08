@@ -2892,16 +2892,17 @@ def step_up_reason(prompt: str, role, model) -> str:
 
 # REVIEW ROUNDS IN ORDER (rule review-rounds-in-order, decision review-rounds-in-order). A reviewer spawn whose brief
 # carries `Round N of 3` with N 2 or 3 is refused while an earlier round's reviewer on the same pull request still runs
-# in this session. The pull request is each `#<n>` the brief names, matched as a whole number; a brief with no marker is
-# round 1. The marker is read by brief_markers, the one scanner. Cost: one read of the session transcript per round-2 or
-# round-3 reviewer spawn, and no read on any other call. An unreadable transcript, or a failed import, allows the spawn.
+# in this session. The pull request is each `#<n>`, `PR <n>` or `PR#<n>` the brief names, matched as a whole number; a
+# brief with no marker is the first round. The marker is read by brief_markers, the one scanner. Cost: one read of the
+# session transcript per later-round reviewer spawn, and no read on any other call. An unreadable transcript, or a failed import, allows the spawn.
 # A reviewer runs while its call has no result, or while its background launch has no terminal task notice for its
 # agentId; a foreground result and an error result (a refused spawn) mean it does not run.
 ROUND_ORDER_REASON = (
     "Rule (review rounds in order): the round %s reviewer on PR #%s still runs in this session. "
-    "Remedy: wait for its completion notification, then spawn the round %s reviewer."
+    "Remedy: wait for its completion notification, then spawn this reviewer again. "
+    "(decision review-rounds-in-order, a later review round waits for the earlier round's reviewer on the same PR)"
 )
-_PR_NUMBER = re.compile(r"(?<![\w&#])#(\d+)(?!\d)")
+_PR_NUMBER = re.compile(r"(?<![\w&#])(?:#|PR[ \t]*#?[ \t]*)(\d+)(?!\d)")
 
 
 def _brief_round(prompt):
@@ -2911,7 +2912,7 @@ def _brief_round(prompt):
 
 
 def round_order_hit(tool: str, tool_input, payload) -> tuple:
-    """(earlier round, pull request) of a reviewer still running on a pull request that a round 2 or 3 reviewer spawn
+    """(earlier round, pull request) of a reviewer still running on a pull request that a later-round reviewer spawn
     names, or (0, ""). Fails open."""
     if tool not in SPAWN_TOOLS or not isinstance(tool_input, dict) or not isinstance(payload, dict):
         return 0, ""
@@ -5204,11 +5205,11 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9b1. Review rounds in order: a round 2 or 3 reviewer waits for an earlier round's reviewer on the same pull request.
+    # 9b1. Review rounds in order: a later-round reviewer waits for an earlier round's reviewer on the same pull request.
     earlier_round, round_pr = round_order_hit(tool, tool_input, payload)
     if earlier_round:
         refuse(tool, "deny", "review-rounds-in-order",
-               ROUND_ORDER_REASON % (earlier_round, round_pr, earlier_round + 1), "round %d on #%s" % (earlier_round, round_pr))
+               ROUND_ORDER_REASON % (earlier_round, round_pr), "round %d on #%s" % (earlier_round, round_pr))
 
     # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
     # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
