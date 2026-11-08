@@ -46,7 +46,8 @@
                           run (about 550 s, measured once on one PR head), one worktree, and with --integration one POST to issues/N/labels.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
-                          skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
+                          skills/roadmap/build.py (the upkeep row `lanes to archive`), then one more line: `finished lanes not archived`, the
+                          count of finished lanes (the Backlog check's third count), or unknown with its reason. Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
@@ -80,7 +81,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
-from shared_names import BATCH_LABEL, idle_lanes_summary, reviewed_summary  # noqa: E402  the one home of the integration pull request's label and of the two summary lines (hooks/shared_names.py)
+from shared_names import BATCH_LABEL, finished_lanes_line, idle_lanes_summary, reviewed_summary  # noqa: E402  the one home of the integration pull request's label and of the summary lines (hooks/shared_names.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -3416,7 +3417,7 @@ def write_merge_role(tier):
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
 def idle_lanes(live):
-    """merge --idle-lanes: print one line per lane to archive, then the summary line. Exit 1 with no summary when the
+    """merge --idle-lanes: print one line per lane to archive, then the summary line, then the finished-lanes count line. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
@@ -3434,7 +3435,7 @@ def idle_lanes(live):
         print("merge: not in a git checkout. No list was made.", file=sys.stderr)
         return 1
     try:
-        entries = build.idle_lanes_report(root, live)
+        entries, finished = build.idle_and_finished_report(root, live)
     except (Exception, SystemExit) as e:
         print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
         return 1
@@ -3442,7 +3443,7 @@ def idle_lanes(live):
     # An unknown entry with no lane beside it is the whole list unread: no summary, so it never reads as an empty list.
     unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
-        entries = [*entries, idle_lanes_summary(len(lanes)) + " Run get_session on each alone, then archive it."]
+        entries = [*entries, idle_lanes_summary(len(lanes)) + " Run get_session on each alone, then archive it.", finished_lanes_line(finished)]
     say(*entries)
     return 1 if unread else 0
 

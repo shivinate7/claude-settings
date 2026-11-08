@@ -48,7 +48,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   batches each PR whose review record is done, as `merge --reviewed` lists it at its wake. It merges the
   integration PR on green. It asks the owner for no merge. It prints the merge output on the
   terminal, never to a log only. It dispatches no deferred step. At each wake it runs `merge --reviewed`
-  and reports three counts on a `Backlog:` line: the PRs reviewed and waiting past one batch cycle, the PRs with no next act, and the lanes to archive (`merge --idle-lanes`). A count it did not read says `unknown`.
+  and reports three counts on a `Backlog:` line: the PRs reviewed and waiting past one batch cycle, the PRs with no next act, and the finished lanes not archived (the last line of `merge --idle-lanes`). A count it did not read says `unknown`.
   Each RED line (past its age limit in `merge/merge.py` `PR_STATE_AGE_HOURS`, or with no next act) gets a next act or a hold in the same wake. A hold is a label (`held`, `parked` or `replaced`)
   and a `Waits on: debt:<slug>` or `Waits on: page:<item-id>` comment on the PR.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.

@@ -49,7 +49,8 @@ its title holds the id as a whole token (names_step), used by the pair line belo
 unlaned's: the branch equals a live session step exactly.
 
 The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
-that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list.
+that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list, then the
+count `finished lanes not archived` (finished_lanes), which is a separate reading.
 
 This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
 "todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable readAt and pulls read (sessions are not
@@ -143,6 +144,9 @@ SESSION_BUCKETS = ("SESSION_STATUS_BUCKET_WORKING", "SESSION_STATUS_BUCKET_BLOCK
                    "SESSION_STATUS_BUCKET_COMPLETED", "SESSION_STATUS_BUCKET_FAILED")
 # The buckets that mark a lane as done working: only these two can list a lane to archive.
 IDLE_BUCKETS = SESSION_BUCKETS[2:4]
+# The finished-lanes count: completed and failed always count; review ready counts when no open pull holds it.
+FINISHED_BUCKETS = SESSION_BUCKETS[3:5]
+REVIEW_READY_BUCKET = SESSION_BUCKETS[2]
 # A waiting-page item in one of these statuses no longer holds its lane. The page writes open and closed only
 # (skill waiting-page, the database), so any other status holds.
 ITEM_DONE_STATUSES = ("closed",)
@@ -1287,6 +1291,65 @@ def unfiled(steps, work):
     return out
 
 
+def lane_rows(work, slug):
+    """The kept session rows (live_work's laneSessions) that carry cs-build:lane and this repo's cs-repo tag, archived
+    ones too. The caller has checked live_why(work) first."""
+    # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
+    return [row for row in work.get("laneSessions") or []
+            if LANE_TAG in [t.strip() for t in row["tags"] if isinstance(t, str)]
+            and any(repo_tag_names(t, slug) for t in row["tags"])]
+
+
+def draft_head_landed(repo, main_branch="main"):
+    """A test of one pull row: True when it is a draft whose head sha is already in the default branch. Only a draft
+    releases a lane (the archive guard's rule); a ready pull always holds it. A failed or absent git read is not
+    landed. Each head is read once."""
+    ref = main_ref(repo, main_branch) if repo is not None else None
+    landed_heads = {}
+
+    def head_landed(pull):
+        head = pull.get("head")
+        if pull.get("draft") is not True or not isinstance(head, str) or not re.fullmatch(r"[0-9a-fA-F]{7,64}", head) or not ref:
+            return False
+        if head not in landed_heads:
+            landed_heads[head] = git(repo, "merge-base", "--is-ancestor", head, ref) is not None
+        return landed_heads[head]
+    return head_landed
+
+
+def pull_holds_lane(work, steps_of_lane, head_landed):
+    """True when an open pull on a head ref of one of the lane's steps (lane_head_refs) holds it, unless `head_landed`
+    says the pull's head is already on main."""
+    heads = {name for k in steps_of_lane for name in lane_head_refs(k)}
+    return any(p.get("branch") in heads and not head_landed(p) for p in work["pulls"])
+
+
+def finished_lanes(work, slug, repo=None, main_branch="main"):
+    """The count of lanes finished and not archived (`finished lanes not archived`), or an `unknown (<why>)` string.
+
+    A lane session row of this repo (lane_rows) counts when it is not archived and its status bucket is completed or
+    failed, or review ready with no open pull holding one of its steps (pull_holds_lane, as idle_lanes reads it).
+    Working and blocked never count. No step, page item or age is read. `repo` lets a draft pull whose head is on
+    main release a review-ready lane; with no `repo` no draft does. A missing sessions list, a stale readAt, skipped
+    rows, or a live lane row with no status bucket enum name reads unknown, never 0."""
+    why = live_why(work)
+    if why:
+        return why
+    live = [row for row in lane_rows(work, slug) if row["session_status"] != ARCHIVED_SESSION]
+    if any(row.get("status_bucket") not in SESSION_BUCKETS for row in live):
+        return "unknown (a live lane session row has no status_bucket enum name)"
+    head_landed = draft_head_landed(repo, main_branch)
+    count = 0
+    for row in live:
+        if row["status_bucket"] in FINISHED_BUCKETS:
+            count += 1
+        elif row["status_bucket"] == REVIEW_READY_BUCKET:
+            mine = {t[len(STEP_TAG):].strip() for t in row["tags"] if isinstance(t, str) and t.strip().startswith(STEP_TAG)} - {""}
+            if not pull_holds_lane(work, mine, head_landed):
+                count += 1
+    return count
+
+
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None):
     """Entries for each lane of this repo that can be archived, or one `unknown (<why>)` entry, never an empty list
     when a read could not run. Each entry reads `<session id> (<steps>; topic <topic or ->)`, sorted.
@@ -1308,23 +1371,10 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         return ["unknown (%s)" % marks_why]
     if work.get("pageItems") is None:
         return [work.get("itemsWhy") or "unknown (the page items could not be read)"]
-    ref = main_ref(repo, main_branch)
-    landed_heads = {}
-
-    def head_landed(pull):
-        # Only a draft releases a lane (the archive guard's rule); a ready pull always holds it. A failed git read is not landed.
-        head = pull.get("head")
-        if pull.get("draft") is not True or not isinstance(head, str) or not re.fullmatch(r"[0-9a-fA-F]{7,64}", head) or not ref:
-            return False
-        if head not in landed_heads:
-            landed_heads[head] = git(repo, "merge-base", "--is-ancestor", head, ref) is not None
-        return landed_heads[head]
+    head_landed = draft_head_landed(repo, main_branch)
 
     open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
-    # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
-    ours = [row for row in work.get("laneSessions") or []
-            if LANE_TAG in [t.strip() for t in row["tags"] if isinstance(t, str)]
-            and any(repo_tag_names(t, slug) for t in row["tags"])]
+    ours = lane_rows(work, slug)
     live = [row for row in ours if row["session_status"] != ARCHIVED_SESSION]
     if live and not any(row.get("status_bucket") in SESSION_BUCKETS for row in live):
         return ["unknown (no live lane session row carries a status_bucket enum name)"]
@@ -1342,8 +1392,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
             continue
         if any(steps[k].get("status") != "done" and k not in marks for k in mine):
             continue
-        heads = {name for k in mine for name in lane_head_refs(k)}
-        if any(p.get("branch") in heads and not head_landed(p) for p in work["pulls"]):
+        if pull_holds_lane(work, mine, head_landed):
             continue
         if any(r.get("lane") in mine or r.get("owner") == row["id"] for r in open_items):
             continue
@@ -1354,17 +1403,25 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
 
 def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     """The idle_lanes entries for the checkout `repo`, read as the build reads them (record branch, Step trailers on
-    main, the repo's GitHub name, the live file). `merge --idle-lanes` calls this. A read that could not run is one
-    `unknown (<why>)` entry, never an empty list."""
+    main, the repo's GitHub name, the live file). A read that could not run is one `unknown (<why>)` entry, never an
+    empty list."""
+    return idle_and_finished_report(repo, live, record_branch, main_branch)[0]
+
+
+def idle_and_finished_report(repo, live, record_branch=None, main_branch="main"):
+    """(idle_lanes entries, finished_lanes count) for the checkout `repo`, from one read of the record branch, main
+    and the live file. `merge --idle-lanes` calls this. The count is an int or an `unknown (<why>)` string."""
     repo = pathlib.Path(repo).resolve()
     source, why = record_source(repo, record_branch or default_record_branch(repo))
     if source is None:
-        return ["unknown (%s)" % why]
+        return ["unknown (%s)" % why], "unknown (%s)" % why
     steps = load(source)["steps"]
     marks, _strays, unread = landed_marks(repo, main_ref(repo, main_branch), main_branch, steps)
     extra, _where = extras(repo, source)
     slug = github_slug(repo, extra)
-    return idle_lanes(live_work(live, steps, slug), steps, marks, slug, repo, main_branch, unread)
+    work = live_work(live, steps, slug)
+    return (idle_lanes(work, steps, marks, slug, repo, main_branch, unread),
+            finished_lanes(work, slug, repo, main_branch))
 
 
 def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None):

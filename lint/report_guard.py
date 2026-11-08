@@ -112,12 +112,13 @@ short keys, so it stays as the refusals and reply-judge counter files do.
 
 Backlog counts (rule `reports-backlog-counts`): a session whose own newest get_session record carries cs-build:coordinator
 or cs-build:batch-runner (hooks/guard_merge.py _own_tier_proved) owes a `Backlog:` item in the report blockquote with three
-fields, each a whole number or `unknown`: `Backlog: reviewed past one batch cycle <N>; no next act <N>; lanes to archive <N>`
+fields, each a whole number or `unknown`: `Backlog: reviewed past one batch cycle <N>; no next act <N>; finished lanes not archived <N>`
 (labels: hooks/shared_names.py BACKLOG_FIELDS). An item starts where a carry label may: at line start, after a report label,
 or after "; " or ". ". It holds on every Stop whose reply has the report shape, landed or not, and in the rewrite after a
 missing-report block. A lane, a triage session, an untagged session and a session with no own record owe nothing. Each number
 must equal the newest read in the transcript after the newest `compact_boundary`: counts one and two from the newest
-`merge --reviewed` summary line, count three from the newest `merge --idle-lanes` summary line (shared_names holds both
+`merge --reviewed` summary line, count three from the finished-lanes line of the newest `merge --idle-lanes` run (the line after its archive
+summary; a run with the summary and no such line, or an unknown one, gives no number; shared_names holds both
 writers and patterns). A read is a Bash run whose own program is merge, past the wrappers verdict, `timeout N`, env and
 `python3 [-I]` (the guard's shell reader splits it, so quoted text, a heredoc or a grep that names the flag is no read). A run
 through verdict is read from the log its FAIL line names; a PASS verdict line that names `merge --reviewed` as the command it ran has no RED line, so both its
@@ -1984,7 +1985,7 @@ def backlog_reads(records):
         elif not VERDICT_LOG_RE.search(shown) and any("reviewed" in _ledger_kinds(ran) for ran in VERDICT_PASS_RE.findall(shown)):
             reviewed = (0, 0)  # a PASS of the merge command itself: no RED line, so none past a cycle, none without a next act
     if "idle" in newest:
-        lanes = shared_names.IDLE_LANES_SUMMARY_RE.findall(body_of(newest["idle"]))
+        lanes = shared_names.FINISHED_LANES_RE.findall(body_of(newest["idle"]))
         if lanes:
             idle = int(lanes[-1])
     return reviewed, idle

@@ -36,10 +36,13 @@ BATCH_LABEL = "batch"
 # merge/merge.py prints them, lint/report_guard.py reads them back, and skills/roadmap/build.py names the row (rule
 # reports-backlog-counts). The row label of the lanes finished and not archived:
 IDLE_LANES_LINE = "lanes to archive"
+# The label of the third Backlog count: the lane sessions finished and not archived (build.finished_lanes). It is a count,
+# apart from the list above, which holds only the lanes with every step landed and nothing open on them.
+FINISHED_LANES_LINE = "finished lanes not archived"
 # The word that starts the Backlog item of a report: `Backlog: <field> <N>; ...`.
 BACKLOG_ITEM = "Backlog"
-# The three Backlog fields, in report order: PRs reviewed and waiting past one batch cycle, open PRs with no next act, lanes to archive.
-BACKLOG_FIELDS = ("reviewed past one batch cycle", "no next act", IDLE_LANES_LINE)
+# The three Backlog fields, in report order: PRs reviewed and waiting past one batch cycle, open PRs with no next act, finished lanes not archived.
+BACKLOG_FIELDS = ("reviewed past one batch cycle", "no next act", FINISHED_LANES_LINE)
 REVIEWED_WAIT_LABEL = "longest wait since a done record"
 # The python scripts, in the folder `merge/`, that run the merge tool. hooks/guard_merge.py role_call_of and lint/report_guard.py
 # MERGE_PROGRAM_RE both read this tuple, so a new entry point is named once.
@@ -56,10 +59,17 @@ def idle_lanes_summary(count: int) -> str:
     return f"merge: {count} {IDLE_LANES_LINE}."
 
 
+def finished_lanes_line(count) -> str:
+    """The line `merge --idle-lanes` prints after its summary: the count, or `unknown (<why>)` for a count that could not be read."""
+    if isinstance(count, int):
+        return f"merge: {count} {FINISHED_LANES_LINE}."
+    return f"merge: {FINISHED_LANES_LINE} unknown ({count[len('unknown ('):-1] if count.startswith('unknown (') else count})."
+
+
 # Each reads back the line its writer above prints, built from the same labels, so the pattern follows the writer and never copies it.
 REVIEWED_SUMMARY_RE = re.compile(
     "^%s: (\\d+)h; %s: (\\d+); %s: (\\d+)\\s*$" % tuple(re.escape(x) for x in (REVIEWED_WAIT_LABEL, BACKLOG_FIELDS[1], BACKLOG_FIELDS[0])), re.M)
-IDLE_LANES_SUMMARY_RE = re.compile("^merge: (\\d+) %s\\.(?:\\s|$)" % re.escape(IDLE_LANES_LINE), re.M)
+FINISHED_LANES_RE = re.compile("^merge: (\\d+) %s\\.\\s*$" % re.escape(FINISHED_LANES_LINE), re.M)
 
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
