@@ -10813,8 +10813,10 @@ class CapReviewRound1(Env):
 
 
 def merge_stamp_text(deadline):
-    """A base stamp.json as this suite's CONFIG, with the given merge.deadlineMinutes, so a merge can run through it."""
+    """A base stamp.json as this suite's CONFIG, with the given merge.deadlineMinutes, so a merge can run through it. None leaves the key out."""
     merge_block = {"method": "merge", "deadlineMinutes": deadline, "afterMerge": [], "deleteBranch": True}
+    if deadline is None:
+        del merge_block["deadlineMinutes"]
     return json.dumps({**CONFIG, "merge": merge_block}) + "\n"
 
 
@@ -10870,6 +10872,7 @@ class CapReviewFloor(Env):
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {5}, out)
         self.assertNotIn("raise merge.deadlineMinutes", out)
+        self.assertNotIn("merge.deadlineMinutes", out, "the deadline is set, so no line may name merge.deadlineMinutes")
 
     def test_f5_the_literal_cap_sets_the_floor_beside_an_expression_cap(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/checks.yml": MIXED_WORKFLOW})
@@ -10877,6 +10880,166 @@ class CapReviewFloor(Env):
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
         self.assertEqual(out.count(fix_line(55)), 1, out)
+
+
+# ------------------------------------------------------------------ CI time caps: a cap read from the job's own matrix
+# `timeout-minutes: ${{ matrix.<key> }}` reads the literal numbers the job's own strategy.matrix gives <key>: a flow list, a block list,
+# or an include entry. Every other expression is unknown, so the job gets no cap.
+EXPR_ONLY_WORKFLOW = "\n".join([
+    "name: checks", "on: push", "jobs:",
+    "  slow-probe:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ inputs.cap }}", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+
+def build_beside_literal(timeout, *strategy):
+    """Job `build` with `timeout-minutes: <timeout>` and the `strategy:` lines as the file holds them, beside a literal-40 job `checks`.
+    job_caps reads `checks` in every case, so a `build` missing from the result is a read that found no cap for `build`."""
+    return "\n".join(["name: checks", "on: push", "jobs:",
+                      "  build:", "    runs-on: ubuntu-latest", f"    timeout-minutes: {timeout}", *strategy, "    steps:", "      - run: echo ok",
+                      "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 40", "    steps:", "      - run: echo ok"]) + "\n"
+
+
+class CapMatrixFloor(Env):
+    """The merge-lock floor reads a matrix-driven job's cap: the largest value its own matrix gives sets the floor.
+    Beside a literal 40 the floor is 47 when the matrix's largest value is 42, and 45 when the matrix is read as no cap."""
+    def floor_waits(self, workflow):
+        push_base(self, {".github/stamp.json": merge_stamp_text(40), ".github/workflows/checks.yml": workflow})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        return waits, out
+
+    def test_a_matrix_flow_list_sets_the_floor_from_its_largest_value(self):
+        waits, out = self.floor_waits(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]"))
+        self.assertEqual(set(waits), {47}, "the largest flow-list value, 42, must set the floor at 47\n" + out)
+        self.assertEqual(out.count(fix_line(47)), 1, out)
+
+    def test_a_matrix_block_list_sets_the_floor_from_its_largest_value(self):
+        waits, out = self.floor_waits(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap:", "          - 30", "          - 42"))
+        self.assertEqual(set(waits), {47}, "the largest block-list value, 42, must set the floor at 47\n" + out)
+        self.assertEqual(out.count(fix_line(47)), 1, out)
+
+    def test_a_matrix_include_entry_sets_the_floor_from_its_largest_value(self):
+        waits, out = self.floor_waits(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        os: [linux]",
+                                                           "        include:", "          - cap: 30", "          - os: linux", "            cap: 42"))
+        self.assertEqual(set(waits), {47}, "the largest include value, 42 under an include item, must set the floor at 47\n" + out)
+        self.assertEqual(out.count(fix_line(47)), 1, out)
+
+
+class CapUnknownDeadline(Env):
+    """An unknown cap sets no floor. With no merge.deadlineMinutes in the config, the merge tool prints one line naming the job and the key.
+    With the deadline set, no line names the key."""
+    def test_an_unknown_cap_with_no_deadline_set_prints_a_line_naming_the_job_and_the_key(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(None), ".github/workflows/checks.yml": EXPR_ONLY_WORKFLOW})
+        rc, out, _ = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        hits = [line for line in out.splitlines() if "slow-probe" in line and "merge.deadlineMinutes" in line]
+        self.assertTrue(hits, "no printed line names job slow-probe and merge.deadlineMinutes\n" + out)
+
+    def test_an_unknown_cap_with_the_deadline_set_prints_no_line_naming_the_key(self):
+        push_base(self, {".github/stamp.json": merge_stamp_text(5), ".github/workflows/checks.yml": EXPR_ONLY_WORKFLOW})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(set(waits), {5}, "scope: the deadline 5 is set, and an unknown cap sets no floor\n" + out)
+        self.assertNotIn("merge.deadlineMinutes", out, "the deadline is set, so no line may name merge.deadlineMinutes\n" + out)
+
+
+class CapMatrixValues(unittest.TestCase):
+    """job_caps reads a `${{ matrix.<key> }}` cap from the job's own strategy.matrix: the largest literal value counts, in a flow list,
+    a block list or an include entry. A quoted number counts. Exclude entries count for nothing. Each case also reads the literal job `checks`."""
+    def test_a_bare_expression_with_no_inner_spaces_reads_the_matrix(self):
+        text = build_beside_literal("${{matrix.cap}}", "    strategy:", "      matrix:", "        cap: [30, 42]")
+        self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
+
+    def test_a_flow_list_of_quoted_numbers_counts(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [\"30\", '42']")
+        self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
+
+    def test_a_block_list_cap_reads_its_largest_value(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap:", "          - 30", "          - 42")
+        self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
+
+    def test_a_block_list_of_quoted_numbers_counts(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap:", "          - \"30\"", "          - '42'")
+        self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
+
+    def test_an_include_dash_entry_cap_counts(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        os: [linux]", "        include:", "          - cap: 42")
+        self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
+
+    def test_an_include_cap_under_an_include_item_counts(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        os: [linux]",
+                                    "        include:", "          - os: linux", "            cap: 42")
+        self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
+
+    def test_the_largest_of_base_and_include_values_is_the_cap(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]",
+                                    "        include:", "          - cap: 45", "          - os: linux", "            cap: 50")
+        self.assertEqual(merge.job_caps([text]), {"build": 50, "checks": 40})
+
+    def test_exclude_entries_do_not_count(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30]",
+                                    "        exclude:", "          - cap: 99")
+        self.assertEqual(merge.job_caps([text]), {"build": 30, "checks": 40})
+
+    def test_a_full_size_list_reads_its_largest_value_at_the_end(self):
+        values = ", ".join(str(n) for n in [*range(1, 40), 61])
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", f"        cap: [{values}]")
+        self.assertEqual(merge.job_caps([text]), {"build": 61, "checks": 40})
+
+    def test_a_comment_after_a_flow_list_is_not_a_value(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]  # 99")
+        self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
+
+
+class CapMatrixControls(unittest.TestCase):
+    """Controls, green today and after: a plain literal cap reads as it does now, and each form the matrix rule leaves unknown
+    gives its job no cap. The literal job `checks` is read in every case, so the missing cap for `build` is a live read."""
+    def assertNoBuildCap(self, text):
+        caps = merge.job_caps([text])
+        self.assertEqual(caps.get("checks"), 40, "scope: the literal job must read, so the read of build is live\n" + repr(caps))
+        self.assertNotIn("build", caps, "an unknown cap must give its job no cap\n" + repr(caps))
+
+    def test_a_plain_literal_cap_reads_as_today_beside_a_matrix(self):
+        text = build_beside_literal("50", "    strategy:", "      matrix:", "        cap: [30, 42]")
+        self.assertEqual(merge.job_caps([text]), {"build": 50, "checks": 40})
+
+    def test_an_empty_matrix_list_gives_no_cap(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: []"))
+
+    def test_a_multiplied_matrix_value_gives_no_cap(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap * 2 }}", "    strategy:", "      matrix:", "        cap: [30, 42]"))
+
+    def test_an_or_default_gives_no_cap(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap || 30 }}", "    strategy:", "      matrix:", "        cap: [30, 42]"))
+
+    def test_a_non_numeric_matrix_value_gives_no_cap(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, big]"))
+
+    def test_a_key_the_matrix_lacks_gives_no_cap(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        size: [small]"))
+
+    def test_a_matrix_from_fromjson_gives_no_cap(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}"))
+
+    def test_an_include_from_fromjson_gives_no_cap_even_beside_base_values(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]",
+                                                   "        include: ${{ fromJSON(needs.plan.outputs.include) }}"))
+
+    def test_a_comment_opener_inside_a_quoted_value_is_not_a_number(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [\"30 # 99\"]"))
+
+    def test_a_lone_quote_in_a_matrix_value_gives_no_cap(self):
+        self.assertNoBuildCap(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, don't]"))
+
+    def test_a_run_block_holding_matrix_lines_is_text_not_the_matrix(self):
+        text = "\n".join([
+            "name: checks", "on: push", "jobs:",
+            "  build:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ matrix.cap }}",
+            "    strategy:", "      matrix:", "        size: [small]",
+            "    steps:", "      - run: |", "          cap:", "          - 99",
+            "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 40", "    steps:", "      - run: echo ok",
+        ]) + "\n"
+        self.assertNoBuildCap(text)
 
 
 class DuplicateJobIds(Env):
