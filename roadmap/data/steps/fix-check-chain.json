@@ -1,0 +1,11 @@
+{
+  "title": "A second fix check may start from the previous fix check's head",
+  "order": 103.64,
+  "why": "`merge --review-record` allows one Fix check line per record chain, so a second small fix (most often a main merge plus a form fix during lane lint) forces a fresh full round. On Nov 7 it hit #1679, #1670, #1439 and q_max #1106, each costing a full reviewer round for a delta with no behaviour change (coordinator, 23:29 CST). Rule roles-review-cap-three: a small fix to a round's finding gets a fix check and merges on green.",
+  "note": "Fix: allow a later fix check whose base is the previous fix check's head. Not covered by open PRs: #1780 makes a failed fix check count as the next round; #1575 allows a fix base across a notes-only commit or from another PR's record (triage read both PR bodies, 23:33 CST). Stack on #1575. A queue fix under the item 384 hold. Slug from the coordinator; title by triage.",
+  "phase": "now",
+  "status": "todo",
+  "owner": "coordinator",
+  "lane": null,
+  "updatedAt": "2026-11-07T23:30:00-06:00"
+}

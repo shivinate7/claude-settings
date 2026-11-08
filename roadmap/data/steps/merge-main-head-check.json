@@ -1,0 +1,11 @@
+{
+  "title": "A \"merged main\" hand-off proves the head contains origin/main",
+  "order": 265,
+  "why": "Lane guard-pr-runs-windows-shards told runner 8 that #1543 \"holds main\" while its base 394ad4863 was 14 commits behind main d70ebd14d. A fix check caught missing 22-minute caps on #1627 (coordinator, 23:28 CST Nov 7).",
+  "note": "Fix: before a \"merged main\" hand-off, the merge tool's hand-off or lane lint fetches and checks `git merge-base --is-ancestor origin/main HEAD`. Done check: a red test where a head behind origin/main is refused with the missing count. Related: step measure-reads-fresh-clone. Not a queue fix; waits under the item 384 hold. Slug from the coordinator; title by triage.",
+  "phase": "next",
+  "status": "todo",
+  "owner": "coordinator",
+  "lane": null,
+  "updatedAt": "2026-11-07T23:30:00-06:00"
+}
