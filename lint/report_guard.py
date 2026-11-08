@@ -2083,7 +2083,7 @@ def _checked_out(segment):
 
 def _segment_tries(segment, branch=""):
     """{(act, key)} for the routes one shell segment is a try of: gh (every gh call reaches GitHub; gh pr and gh api
-    name table acts), git push, merge, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
+    name table acts), git push, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
     whose name holds an act word (_script_tries). The key is the
     program, its verb and the target the call names (a PR number, a branch or a URL), so a later success cancels only
     a failure of the same call. A gh pr call that names no target is keyed by its own arguments (_gh_target);
