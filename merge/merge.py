@@ -3300,9 +3300,29 @@ def uncleared_round(earlier, rec):
         why = f"round {n} on head {e['head'][:9]} is not passed" + (", and no later record " + " or ".join(ways) if ways else "")
         return why + (("; " if ways else ", and ") + f"a fix check PASS does not clear the {REVIEW_ROLES[1].replace('-', ' ')}" if design else "")
 
+def fix_chain_count(records):
+    """-> how many passed fix checks the chain at the end of `records` (parsed, oldest first) holds. A record with a passed fix check adds one. A plain
+    record whose Round lines equal the record just before it is a copy and keeps the count. Any other record, a failed or WIDE fix check or changed Round
+    lines, starts the count again, so a fresh chain begins from its round. Both the write step and the listing count here."""
+    count, prev = 0, None
+    for r in records:
+        if r["fix"] and r["fix"][3] == "PASS":
+            count += 1
+        elif not (prev and not r["fix"] and r["rounds"] == prev["rounds"]):
+            count = 0
+        prev = r
+    return count
+
+def fix_chain_problem(earlier, rec):
+    """-> why, when the chain through the newest parsed record `rec` holds more fix checks than FIX_CHAIN_CAP; else None. The write step refuses the
+    link that would pass the cap, so only a record posted past it reads open here."""
+    count = fix_chain_count([*earlier, rec])
+    if count > FIX_CHAIN_CAP:
+        return f"the chain holds {count} fix checks, past the cap of {FIX_CHAIN_CAP}; the next change starts a fresh chain from round 1"
+
 def round_floor(earlier, rec):
-    """-> the why of floor_problem, else the why of uncleared_round, else None."""
-    return (floor_problem(earlier, rec) or (None,))[0] or uncleared_round(earlier, rec)
+    """-> the why of floor_problem, else the why of fix_chain_problem, else the why of uncleared_round, else None."""
+    return (floor_problem(earlier, rec) or (None,))[0] or fix_chain_problem(earlier, rec) or uncleared_round(earlier, rec)
 
 def dropped_round_lines(last, rec):
     """-> (why, remedy), when the parsed record `rec` lacks a Round line of the parsed record `last` it follows, or holds those lines in another order; else
@@ -3650,11 +3670,7 @@ def main(argv, host=None, lock=None):
                             remedy = f"Post round {reached + 1}'s review record: a FAIL line for round {reached + 1} and no Fix check line."
                     else:  # the record's rounds may not fall below the floor the earlier records set, or a later record could copy them and relabel the final round's net value
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
-                        chain = 0  # the records at the end that each carry a passed fix check, back to the last record with none
-                        for r in reversed(earlier):
-                            if not (r["fix"] and r["fix"][3] == "PASS"):
-                                break
-                            chain += 1
+                        chain = fix_chain_count(earlier)
                         if chain >= FIX_CHAIN_CAP:
                             problem, remedy = f"the chain on this pull request already holds {chain} fix checks", FIX_CAP_REMEDY
                         else:
