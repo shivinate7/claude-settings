@@ -1448,9 +1448,11 @@ class CompactionCarryTests(unittest.TestCase):
     def test_cc_red_pull_without_a_hash_is_no_source(self):
         # Catches: the one "#" optional across PR, pull and issue passes "pull <n>" and "pull request <n>" as a source.
         # The records list "pull #<n>" and "pull request #<n>" only. A source word beside a bare pull does not rescue
-        # it: "pull 978 (git)", "pull request 978 (git)" and "pull requests 978 (page)" are no source either.
+        # it: "pull 978 (git)", "pull request 978 (git)", "pull requests 978 (page)" and "pull request 978 (page)" are
+        # no source either.
         items = ["ruling X from pull 978", "ruling X from pull request 978", "ruling X from pull 978 (git)",
-                 "ruling X from pull request 978 (git)", "ruling X from pull requests 978 (page)"]
+                 "ruling X from pull request 978 (git)", "ruling X from pull requests 978 (page)",
+                 "pull request 978 (page)"]
         for item in items:
             with self.subTest(item=item):
                 out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
@@ -1460,12 +1462,14 @@ class CompactionCarryTests(unittest.TestCase):
     def test_cc_red_pr_source_without_a_hash_is_no_source(self):
         # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   3" (spaces), "PR 978", "GitHub PR 978",
         # "pr 2 of the plan", "the PR 3 times", and a bare PR beside a page or git word, which that word does not
-        # rescue: "PR 978 on the page", "PRs 978 (page)", "PR no. 978 (page)", "PR-978 on the page", "PR: 978 (git)",
-        # "PR number 978 (git)". The "#" form is the source (test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes).
+        # rescue: "PR 978 on the page", "PR 978 (page)", "PRs 978 (page)", "PR no. 978 (page)", "PR-978 on the page",
+        # "PR: 978 (git)", "PR number 978 (git)". The "#" form is the source
+        # (test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes).
         items = ["ruling X from PR2", "ruling X from PR3", "ruling X from PR   3", "ruling X from PR 978",
                  "ruling X from GitHub PR 978", "ruling X from pr 2 of the plan", "ruling X from the PR 3 times",
                  "ruling X from PR 978 on the page", "ruling X from PRs 978 (page)", "ruling X from PR no. 978 (page)",
-                 "ruling X from PR-978 on the page", "ruling X from PR: 978 (git)", "ruling X from PR number 978 (git)"]
+                 "ruling X from PR-978 on the page", "ruling X from PR: 978 (git)", "ruling X from PR number 978 (git)",
+                 "PR 978 (page)"]
         for item in items:
             with self.subTest(item=item):
                 out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
@@ -1525,6 +1529,27 @@ class CompactionCarryTests(unittest.TestCase):
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "'%s' is refused as a source" % item)
+
+    def test_cc_green_pr_hash_after_plural_or_in_parens_is_a_source(self):
+        # Catches: a PR whose "#" follows "PRs" or sits in parentheses is refused as sourceless: "PRs #978 and #979"
+        # and "PR (#978)". The "#" makes it a PR, so it is a source with or without a source word. The "(page)" twins
+        # pass on base and are the controls.
+        items = ["PRs #978 and #979 (page)", "PRs #978 and #979", "PR (#978) (page)", "PR (#978)"]
+        for item in items:
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
+    def test_cc_green_git_pull_with_a_number_is_no_bare_pr(self):
+        # Catches: a git pull with a number after it is refused as a bare PR: "pull 2" in "git pull 2 rebases (git)"
+        # and "pull 3" in "pull 3 files from git". Each names git, so it is a source. The control "git pull rebases
+        # (git)" has no number and passes on base. The bare "pull 978 (git)" stays refused
+        # (test_cc_red_pull_without_a_hash_is_no_source).
+        items = ["git pull rebases (git)", "git pull 2 rebases (git)", "pull 3 files from git"]
+        for item in items:
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
 
     def test_cc_red_bare_hash_number_is_no_source(self):
         # Catches: a bare "#<n>" passes as a source. "#3 of my notes" names no PR, commit or page.
