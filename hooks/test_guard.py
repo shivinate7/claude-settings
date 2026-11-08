@@ -11580,6 +11580,24 @@ sh("frozen: a MUTATE_ONLY value naming a copy, then the verdict wrapper and a te
    'MUTATE_ONLY="worktree-home: a copy" ' + CFG_VERDICT + " python3 hooks/test_guard.py", "allow", cwd=NOGIT)
 sh("frozen: the verdict wrapper, cp onto the config settings, is refused",
    CFG_VERDICT + " cp x " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A quoted leading assignment is data, but a shell that runs its value expands the variable and writes: `sh -c '$X'`,
+# `env X=...` and `eval '$X'` each run the copy into a frozen path, so each stays denied. The three MUTATE_ONLY values
+# hold a `#`, a `//` with `/*`, and a lone quote. A scanner that cuts a line at a comment opener or a quote must still
+# read the verdict wrapper's run of the test file as a read.
+sh("frozen: quoted-value copy, sh -c expands a variable that copies onto the frozen settings, is denied",
+   "X='cp a " + CFG_SETTINGS + "' sh -c '$X'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: quoted-value copy, a variable set then sh -c copies onto the frozen settings, is denied",
+   "X='cp a " + CFG_SETTINGS + "'; sh -c '$X'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: quoted-value copy, env sets a variable that sh -c copies onto the frozen settings, is denied",
+   "env X='cp a " + CFG_SETTINGS + "' sh -c '$X'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: quoted-value copy, eval runs a variable that copies onto the frozen settings, is denied",
+   "X='cp a " + CFG_SETTINGS + "' eval '$X'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: quoted-value copy, a MUTATE_ONLY value holding a # is allowed",
+   'MUTATE_ONLY="a # b" ' + CFG_VERDICT + " python3 hooks/test_guard.py", "allow", cwd=NOGIT)
+sh("frozen: quoted-value copy, a MUTATE_ONLY value holding // and /* is allowed",
+   'MUTATE_ONLY="a // b /* c" ' + CFG_VERDICT + " python3 hooks/test_guard.py", "allow", cwd=NOGIT)
+sh("frozen: quoted-value copy, a MUTATE_ONLY value holding a lone quote is allowed",
+   "MUTATE_ONLY=\"don't\" " + CFG_VERDICT + " python3 hooks/test_guard.py", "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
