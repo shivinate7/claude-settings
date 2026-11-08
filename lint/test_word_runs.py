@@ -217,6 +217,11 @@ class MaskCodeSpansTests(unittest.TestCase):
         self.assertEqual(masked("`foo` (see `reviewer opus`)"), "\0" * 5 + " (see " + "\0" * 15 + ")",
                          "a span inside the gloss of another span was not masked when no only pattern is given")
 
+    def test_a_gloss_span_that_fails_only_stays_readable(self):
+        # `sonnet` fails the only pattern, so it stays readable, as the leading `foo` does.
+        self.assertEqual(masked("`foo` (see `sonnet`)", only=re.compile("reviewer")), "`foo` (see `sonnet`)",
+                         "a span in a gloss that fails the only pattern was masked")
+
 
 class FenceCallersTests(unittest.TestCase):
     def test_each_fence_caller_reads_its_rows_through_code_mask(self):
