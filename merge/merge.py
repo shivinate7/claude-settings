@@ -26,8 +26,8 @@
                           live CI; then the PRs with no record.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
-                          then at most one batch line naming its done PRs on the base or stacked on an open PR, in chain order: ascending,
-                          each stacked PR after its base PR: `open batch now: OWNER/NAME #a #b`, or `build next batch on the running head: ...`
+                          then at most one batch line naming its done PRs on the base or stacked on an open PR, ascending, each stacked
+                          PR right after its base PR: `open batch now: OWNER/NAME #a #b`, or `build next batch on the running head: ...`
                           when a ready PR on that base has CI running. The base is the root's default branch, and its config is read from it.
                           A done PR that another open PR holds (its own stack descendants do not), that the base already holds, or that is
                           itself ready with CI running, is left off the batch line; so is a stacked PR whose base PR is left off, unless the
@@ -35,8 +35,8 @@
                           `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines and prints
                           `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; when a done PR is in reach of the base, plus the CI reads of each
-                          ready PR on the base, one git fetch of the open heads (objects written into the root's object store) and one git
-                          rev-list; no compare read. On the live set at 2026-11-08 10:39 CST (647 open PRs, 438 on main) the old logic made
+                          ready PR on the base, one git fetch of the open heads (objects written into the root's object store, and the ref
+                          refs/remotes/origin/<base> updated) and one git rev-list; no compare read. A shallow root reads unknown. On the live set at 2026-11-08 10:39 CST (647 open PRs, 438 on main) the old logic made
                           68,315 compare reads per run, counted with the compares answered locally; the fetch of 645 heads took 18.8 s. No
                           new file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -972,11 +972,15 @@ class Host:
     def ancestry(self, base, shas):
         """-> holds(head, other): True when `other` contains `head` (ahead or identical, the meaning of holds_head). `other` is the base branch name
         or one of `shas`; `head` is one of `shas`. One git fetch of `shas` and one `git rev-list --parents` over them, minus the base, give the
-        commit graph; containment is worked out here from it. A head the listing lacks is held by the base. A head the base holds is answered
-        for `base` only, so ask the base first. The pairwise home is `ancestor()`; this read is separate because a start per pair is up to
-        ~98,000 processes on the live set. Any failed read, or a head or `other` outside `shas`, raises Stop: a wrong False names a pull request twice."""
+        commit graph; containment is worked out here from it. A head the listing lacks is held by the base: it answers True for `base` and for
+        itself, and False for any other sha, since the graph holds no path from that sha to it. The pairwise home is `ancestor()`; this read is
+        separate because a start per pair is up to ~98,000 processes on the live set. A shallow root, any failed read, or a head or `other`
+        outside `shas` raises Stop: a wrong False names a pull request twice."""
+        import git_reads  # hooks/git_reads.py, on sys.path from the top of this file; the one home of the shallow probe
         known, cwd, tip = set(shas), self.cwd or ".", f"refs/remotes/origin/{base}"
         shas = sorted(known)
+        if git_reads.is_shallow(cwd) is not False:  # a shallow clone cuts the graph, so a head the base holds could read as not held
+            raise Stop(f"cannot tell whether the root {cwd} is a full clone, or it is shallow, so its history is cut {READ_CITE}")
         c, out = git(cwd, "fetch", "--no-tags", "--no-write-fetch-head", "origin", f"+refs/heads/{base}:{tip}", *shas)
         if c:
             raise Stop(f"cannot fetch the open heads of {base} {READ_CITE}: {out}")
@@ -3391,11 +3395,12 @@ def reviewed_block(h):
     pull request in it is named when it is not ready with CI running (Host.ready_busy, pull requests on the base only), no other open pull request
     holds its head (Host.ancestry, drafts included: the batch would merge it twice; a stack descendant, whose base chain passes through it, is not a
     holder), the base does not hold its head, and, when stacked, its base pull request is named or the base holds that pull request's head. The
-    order is ascending, each named pull request followed by the named ones stacked on it. `open batch now` when no ready pull request on the base
+    order is ascending, each stacked pull request right after its base pull request. `open batch now` when no ready pull request on the base
     has CI running, else `build next batch on the running head`. No pull request named, no batch line. A Stop in a read for the batch line keeps the
     reviewed lines, prints `batch line unknown (reason)` in place of the batch line, and ok is False; a Stop in reviewed_read raises. Extra cost over
     reviewed_read: only when a done pull request is in the open set, the branch protection read and each ready pull request's check runs, statuses
-    and workflow runs, then one git fetch of the open heads and one git rev-list (Host.ancestry); no compare read."""
+    and workflow runs, then one git fetch of the open heads (it writes their objects and refs/remotes/origin/<base>) and one git rev-list
+    (Host.ancestry); no compare read. A stacked pull request's base pull request is the open one of this repo whose head branch is its base."""
     lines, done, pulls = reviewed_read(h)
     out = [f"repo {h.repo}:", *lines]
     parent = {}  # number -> the open pull request it is stacked on, or None on the base. A pull request whose base is no open head is absent
@@ -3403,7 +3408,8 @@ def reviewed_block(h):
         if d["base"]["ref"] == h.base:
             parent[d["number"]] = None
             continue
-        owners = [p["number"] for p in pulls if p["head"]["ref"] == d["base"]["ref"] and p["number"] != d["number"]]
+        owners = [p["number"] for p in pulls if p["head"]["ref"] == d["base"]["ref"] and p["number"] != d["number"]
+                  and ((p["head"].get("repo") or {}).get("full_name") or "").lower() == (h.repo or "-").lower()]  # a fork's branch of that name is no base
         if len(owners) == 1:
             parent[d["number"]] = owners[0]
 
@@ -3491,8 +3497,8 @@ def reviewed_roots(roots, hosts, config):
     is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
-    --reviewed, plus, when a done pull request is in reach of the base, the CI reads of each ready pull request on the base, one git fetch and
-    one git rev-list; no compare read, no new file or timer."""
+    --reviewed, plus, when a done pull request is in reach of the base, the CI reads of each ready pull request on the base, one git fetch (it
+    writes objects and refs/remotes/origin/<base>) and one git rev-list; no compare read, no new file or timer."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
