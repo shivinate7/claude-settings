@@ -234,6 +234,7 @@ PACKAGE_WHY = "a package-qualified load the reader cannot place: its folder name
 DYNAMIC_WHY = "a module name that is not a literal; the reader reads a module name only as a literal"
 PARAM_WHY = "a path built from a parameter, outside a named loader helper; the reader does not follow the caller"
 COMPUTED_WHY = "a by-path load whose path it cannot read; name the file, or allow-list the constant the path names"
+MISSING_WHY = "a by-path load to a path that names no file the repo loads: a typo, or a folder outside LOAD_ROOTS"
 
 
 def unresolved(rel, node, why):
@@ -402,7 +403,10 @@ def file_loads(rel, source, files):
                         if not definitions(env, scopes) or not all(env_read(d) for d in definitions(env, scopes)):
                             raise unresolved(rel, node, f"the environment path {env.id} is not an os.environ.get read")
                     elif got:
-                        out |= {posixpath.normpath(s) for s in got}
+                        names = {posixpath.normpath(s) for s in got}
+                        if not names & files:
+                            raise unresolved(rel, node, MISSING_WHY)
+                        out |= names
                     elif named is not None:
                         vals = read_values(named, rel, scopes)
                         if not vals or any(posixpath.normpath(s) not in files for s in vals):
