@@ -8,7 +8,8 @@ Stop: when this turn ran `git commit`, `git push`, `git merge`, `git revert` or 
 (not with --abort, --quit, -n, --no-commit, -h or --help; --skip and --continue commit), `gh pr merge`,
 `gh pr create` or `gh pr update-branch` (not with --help or -h, nor `--disable-auto` on merge or `--web` on create),
 or a landing GitHub MCP tool (LANDING_TOOLS, which includes delete_file, update_pull_request_branch
-and enable_pr_auto_merge) after the last human message, block once unless the reply ends with one blockquote holding
+and enable_pr_auto_merge) after the last human message, or after a later peer message that arrives once a
+reply has ended its turn (a peer message mid-turn keeps the window), block once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
 order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report.
 When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with one
@@ -729,12 +730,12 @@ CARRY_FORMS = {
 # colon may follow the word, and one backtick may sit before the hex), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
 # `issue #<n>` (`issue` needs the `#`), a github.com link. Any run of spaces, or none, may sit before `#` (`pull#1`). A bare `#<n>` is no source.
 # The hex has 7 to 40 characters and holds a digit, so a word such as "commit defaced" names no source.
-# A PR with no `#` ("PR 978") is no source, and the word beside it (git, page, digest) does not rescue it:
-# see item_names_source.
+# A PR with no `#` is no source, and the word beside it (git, page, digest) does not rescue it (see
+# item_names_source): "PR 978", "PR978", "PR-978", "PR: 978", "PR number 978", "pull 978", "pull request 978".
 SOURCE_WORD_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
 SOURCE_FORM_RE = re.compile(r"\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
                             r"|\bPR\s*#\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
-BARE_PR_RE = re.compile(r"\bPR\s*\d", re.I)
+BARE_PR_RE = re.compile(r"\b(?:PR|pull(?:\s+request)?)(?:\s*[-:]?\s*|\s+number\s+)\d", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
@@ -815,11 +816,11 @@ def item_names_source(item):
 
 
 def unsourced_recovered_item(block):
-    """The first item of a Recovered line in `block` that names no source (see item_names_source), else ''.
+    """The first item of a Recovered line in `block` that names no source (see item_names_source), whole, else ''.
     An item that starts with "none" or "nothing" needs no source."""
     for item in recovered_items(block) or []:
         if not NONE_ITEM_RE.match(item) and not item_names_source(item):
-            return item[:60]
+            return item
     return ""
 
 
@@ -858,9 +859,12 @@ def recovered_problem(records, text):
                        "Under Deviations, add %s, inside the report blockquote." %
                        (" or ".join(missing), " and ".join(CARRY_FORMS[n] for n in missing)))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
-    if bad:
+    if bad and BARE_PR_RE.search(bad):  # the whole item: a PR past the 60 quoted characters still names the fix
+        reasons.append("the Recovered item %r names a PR with no #, which is no source. Write it as PR #<n>."
+                       % bad[:60])
+    elif bad:
         reasons.append("the Recovered item %r names no source. End each item with git, page or "
-                       "digest; items split on \";\" outside parentheses." % bad)
+                       "digest; items split on \";\" outside parentheses." % bad[:60])
     return "Recovered guard: " + " ".join(reasons) if reasons else ""
 
 
@@ -1976,9 +1980,10 @@ def main():
     if incoming is not None and last_human_idx is not None and incoming > last_human_idx:
         # A peer message after a reply that ended its turn starts a new turn: its landing window holds
         # no commit from before it. One that arrives mid-turn (a tool result came last) leaves the window whole.
-        # Skip records that end no turn and start none: the stop summary and the queue records.
+        # The prior record is the last user or assistant message: an allow list, so a harness record of any other
+        # type (stop summary, queue, last-prompt, attachment, or one not yet seen) never hides the reset.
         prior = [r for r in records[:incoming]
-                 if not r.get("isSidechain") and r.get("type") not in ("system", "queue-operation")]
+                 if not r.get("isSidechain") and r.get("type") in ("user", "assistant")]
         if prior and prior[-1].get("type") == "assistant" and not list(tool_uses(prior[-1])):
             landing = records[incoming + 1:]
     route += success_route_flags(hook, after)
