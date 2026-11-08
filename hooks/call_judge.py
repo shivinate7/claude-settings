@@ -163,10 +163,10 @@ QUESTION_PROMPT = (
 PAGE_PROMPT = (
     "Review these writes of a waiting-page item, each as {op, doc_id, data}: %s\nThe item is a question to "
     "the owner. Its `context` holds the Goal, Problem and Based on lines. Each entry of `options` has a "
-    "label, a `gain` and a `lose`. `pick` is the recommendation. Code has already checked the form lines "
+    "label, a `gain` and a `lose`. `recommended` (old name `pick`) is the recommendation. Code has already checked the form lines "
     "and the marks on each option, so judge only the items below, and only the fields a write carries: a "
     "write with no `options` is not flagged for options, one with no `context` is not flagged for the "
-    "Goal, Problem or premises, and one with no `pick` is not flagged for item 7, because the stored item "
+    "Goal, Problem or premises, and one with no `recommended` or `pick` is not flagged for item 7, because the stored item "
     "is unseen. A write with op str_replace carries only `field` and `new_str`, a fragment of that field. "
     "Judge a fragment only for plain words, unexplained ids, and pointers outside the item (items 3 to 6), "
     "and never flag a missing line or option, because the rest of the item is unseen. A task item has "

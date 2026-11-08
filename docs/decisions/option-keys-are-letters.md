@@ -37,7 +37,21 @@ The waiting page shows an option by its position, as a letter: the first option 
   - Known limit: an update that carries `options` but no `status` is judged even if the stored item is closed. The guard cannot see the stored status.
   - Known limit: unusual forms pass: `*B*:`, `` `B`: ``, `B:x` and `- B: x`.
 
+A letter also means the same option in the chat and on the page. Guard rule `option-labels-match-chat` (`hooks/question_form.py`, functions `chat_page_label_hit` and `page_label_hit`, run by `hooks/guard.py` `data_tool_label_hit`) refuses a set or update of an open decision on this repo's waiting page. The refusal holds when an option label differs from the chat's text for the same letter.
+
+  - A chat question cites its item in a line `Page item: <id>` and writes one line per option, `a) <text>`, the letters in the page's order. The check reads the newest assistant text in the last 1 MiB of the session's transcript that cites the item's id.
+  - A letter is a position, as above. A label's own opening letter tag is dropped before the compare. Texts are compared folded (case, spacing and markdown marks), and equal when either starts with the other, so the chat may shorten a label.
+  - It passes when no chat text cites the item, or the chat cites another item. It passes when the chat writes no line for a letter, or the write carries no `options`. A task, a note and a closed item pass.
+  - The reason says: the chat and the page carry the same option text in the same order. It names no target.
+  - Cost: no new process. It reads the transcript's tail once per call, only for a write that carries `options`, and writes nothing unless it refuses. An unreadable transcript allows and logs one `noted` line.
+  - Known limit: only an assistant text block counts. A question asked in the chat box (`AskUserQuestion`) is not read.
+  - Known limit: a chat label that is a prefix of the page's label passes, so a chat "Allow" matches a page "Allow merge --role".
+  - Known limit: a chat question that cites no item is not compared, and a write with no later chat to compare passes. The rule judges two copies only when the chat names the item.
+  - Known limit: a chat question written after the page item is not checked until the item is written again.
+
 Incident:
+
+- 2026-11-08, owner ask: the option letters on the waiting page must mean the same as in the chat question, both being static copies. The same ask found that the item field `pick` held the recommended option, not the owner's answer (`choice` in the answers collection). The page now stars and names `recommended` (it reads `pick` on an old item), and a saved answer carries `label` ("A: Red") beside `choice`.
 
 - 2026-11-02 12:15 and 12:25 CST, Home waiting page: decisions `duo-search-top` and `climate-purifier-preset` were written with an option keyed `none`. The write went through, because the guard judged only a call whose url was the cwd repo's own page, and the page then blocked each item. The none-key rule above closes the gap. Known limit: a `str_replace` carries no `options`, so one that adds a key-named option to another page's item passes.
 - 2026-11-01 16:12 CST, a waiting-page decision keyed a-d carried the labels "B: a bottom strip", "D: drag sideways", "A: a rail" and "C: a grab line". It had two letter sets, so the owner's answer letter was ambiguous. The label clause above refuses a write with these four labels, since each tag differs from its key's letter. Forms it does not match are known limits of the ruling.
