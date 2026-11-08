@@ -9,7 +9,7 @@ One file per debt, named by a slug of 32 characters or fewer. Each file has four
 - **What.** The finding, in one or two sentences.
 - **Where.** The file, rule, or check the finding sits in.
 - **Decision.** The decision that names the finding, by slug plus a short gloss. Use the slug now. If the repo numbers decisions, add the number at merge. Never cite it by path. If no decision exists, write `none`.
-- **Retire.** What closes the finding, and the check that shows it closed.
+- **Retire.** What closes the finding, and a runnable test file, in backticks, that shows it closed. Name it like a test file (`test_*.py`, `*_test.py`, `*.test.mjs`, `test_*.mjs`, `test_*.sh`). Decision `debt-close-runs-retire` (the merge tool runs that file at close).
 
 A feel-fix debt also has two optional lines. A line counts when it starts with its marker at column one, or
 after an optional leading `- `:
@@ -25,7 +25,7 @@ A finding becomes a debt only when Claude is likely to hit it in normal work. An
 
 ## Closing a debt
 
-In the PR that closes the finding, delete the debt file. If a decision names the finding, rewrite that decision in place, so it no longer lists the finding. Git keeps the history.
+In the PR that closes the finding, delete the debt file. A rename inside this folder that changes the Retire part counts as a close too. The merge tool runs the Retire check first and refuses the close if it is red or cannot run. A PR with no runnable check, or one that cannot run, adds `Retire-run: <slug> -- <run URL>` to its body, for a run that succeeded on the PR head or a descendant of it. A cite never clears a red check. If a decision names the finding, rewrite that decision in place, so it no longer lists the finding. Git keeps the history.
 
 A feel-fix debt closes in three steps. A device trial comes first (decision `feel-fix-waits-device-check`):
 
@@ -39,4 +39,4 @@ A feel-fix debt closes in three steps. A device trial comes first (decision `fee
 
 `lint/check_record_slugs.py` checks each debt file's slug length. It also fails a feel-fix debt that is
 deleted, renamed out of this folder, or edited to drop its `**Feel.**` line, unless origin/main's text holds
-a valid device-trial line. No check reads the four parts yet.
+a valid device-trial line. `lint/check_debt_retire.py` reads the Retire part at close. No check reads the What, Where or Decision part yet.

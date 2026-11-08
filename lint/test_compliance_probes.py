@@ -882,6 +882,7 @@ def dropping(word):
     return rows
 
 
+CHILD_ROW = 9  # the line of the first term row that child_glossary writes
 CHILD_MARK = "<!-- child glossary -->"  # a patched rows() tells the child's file from this repo's by it
 
 
@@ -1021,7 +1022,10 @@ class Words(unittest.TestCase):
                 with self.subTest(word=word, term=term):
                     repo = child_glossary(Repo(self), term).write("src/%s_list.py" % term)
                     code, out = repo.run("words")
-                    self.assertEqual((code, hits(out)), (1, [(word, "src/%s_list.py" % term, "-")]), out)
+                    # A tagged word retires one sense, so only the untagged one is a glossary clash. Neither spans.
+                    clashes = [] if prose else [(term, "GLOSSARY.md", str(CHILD_ROW))]
+                    self.assertEqual((code, sorted(hits(out))), (1, sorted(
+                        clashes + [(word, "src/%s_list.py" % term, "-")])), out)
 
     def test_a_child_term_that_repeats_a_claude_settings_term_is_not_honoured(self):
         # This repo's glossary never lets a repo define a term again that it defines. Here it defines `ad <word>` too.
@@ -1035,9 +1039,45 @@ class Words(unittest.TestCase):
             return found if CHILD_MARK in text else found + [(term, ["README.md"], [])]
         with mock.patch.object(check_glossary, "rows", repeated):
             code, out = in_process(repo.root)
-        self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+        self.assertEqual((code, sorted(hits(out))), (1, sorted([(term, "GLOSSARY.md", str(CHILD_ROW)), (word, path, "-")])), out)
         code, out = in_process(repo.root)  # the same child file, with the term this repo's own: honoured
         self.assertEqual((code, hits(out)), (0, []), out)
+
+    def test_a_child_term_that_defines_a_claude_settings_term_again_is_red(self):
+        # Plan c146 section 6 item 2: a child glossary adds terms and never defines a claude-settings term again.
+        table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+        term = next(t for t, _homes, _names in table if ":" not in t)
+        for child in (term, term + "s", term.upper()):  # the term, its plural and another case all read as the term
+            with self.subTest(child=child):
+                code, out = child_glossary(Repo(self), "ad lane", child).run("words")
+                self.assertEqual((code, head(out), hits(out)), (1, "words: out", [(child, "GLOSSARY.md", str(CHILD_ROW + 1))]), out)
+                self.assertIn("defines the claude-settings term '%s' again" % term, out)
+
+    def test_a_tagged_or_camel_child_term_that_defines_a_claude_settings_term_again_is_red(self):
+        table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+        term = next(t for t, _homes, _names in table if ":" not in t)
+        pair = next(t for t, _homes, _names in table if re.fullmatch(r"[a-z]+ [a-z]+", t))
+        camel = pair.split()[0] + pair.split()[1].capitalize()
+        for child, shared in ((term + " (this sense)", term), ("`%s` (This Sense)" % term, term), (camel, pair)):
+            with self.subTest(child=child):
+                code, out = child_glossary(Repo(self), "ad lane", child).run("words")
+                self.assertEqual((code, [h[1:] for h in hits(out)]), (1, [("GLOSSARY.md", str(CHILD_ROW + 1))]), out)
+                self.assertIn("defines the claude-settings term '%s' again" % shared, out)
+
+    def test_a_child_term_may_name_its_own_sense_of_a_tagged_word(self):
+        # GLOSSARY.md: a "not" name tagged (this sense) retires one sense of an everyday word, so `block` in an ad
+        # blocker's glossary names its own sense.
+        word = planted(prose=True, one_word=True)
+        code, out = child_glossary(Repo(self), word).run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_an_unreadable_child_glossary_is_unknown(self):
+        repo = child_glossary(Repo(self), "ad lane").write("README.md")  # one readable file, so the read is not empty
+        with open(os.path.join(repo.root, "GLOSSARY.md"), "w", encoding="utf-16") as handle:
+            handle.write("# Glossary\n")
+        code, out = repo.run("words")
+        self.assertEqual(code, 2, out)
+        self.assertTrue(head(out).startswith("words: unknown"), out)
 
     def test_no_child_glossary_at_the_root_changes_nothing(self):
         word = planted(one_word=True)
@@ -2188,6 +2228,35 @@ class RestatesFixtures(unittest.TestCase):
 
     def test_another_record_holds_a_time_the_grant_record_lacks(self):
         self.assertNotIn(other_time(), record(GRANT))
+
+
+class XcodebuildRuns(unittest.TestCase):
+    """The argument list of each xcodebuild run, read by xcodebuild_runs. A command substitution or a backtick in an
+    argument ends the run group there, so the action that follows it is lost from the run."""
+
+    @staticmethod
+    def runs(text):
+        import compliance_probes
+        return compliance_probes.xcodebuild_runs(text)
+
+    def test_a_plain_run_keeps_its_action(self):  # green control: no substitution, so the action is kept
+        runs = self.runs("xcodebuild -scheme App -derivedDataPath /tmp/derived test")
+        self.assertEqual(len(runs), 1, runs)
+        self.assertIn("test", runs[0], runs)
+
+    def test_an_action_after_a_substitution_or_backticks_in_an_argument_stays_in_the_run(self):
+        for line in ('xcodebuild -scheme App -derivedDataPath "$(mktemp -d)" test',
+                     "xcodebuild -scheme App -derivedDataPath $(mktemp -d) test",
+                     'xcodebuild -scheme App -derivedDataPath "`mktemp -d`" test'):
+            with self.subTest(line=line):
+                runs = self.runs(line)
+                self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
+                self.assertIn("test", runs[0], runs)  # then its action: the run keeps `test` after the substitution
+
+    def test_a_lone_double_quote_in_an_argument_keeps_the_action_in_the_run(self):  # green control: passes on the old code too
+        runs = self.runs('xcodebuild -scheme App -derivedDataPath "x test')
+        self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
+        self.assertIn("test", runs[0], runs)  # then its action: an unclosed quote is text, and `test` stays in the run
 
 
 def tearDownModule():

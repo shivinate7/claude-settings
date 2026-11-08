@@ -73,6 +73,7 @@ query and keep the token as its name in the docs.
 
 ## ux-control-beside-area
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 A control sits next to the area it changes. Anything between them belongs to every state of that
 control.
 Outcome: the person sees the result of a press where they look, and nothing that does not change

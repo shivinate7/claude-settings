@@ -50,7 +50,7 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close". A new branch for
 
 ## 6. After Send
 
-- Sent (`#s=sent`): the card keeps its place (`ux-order-holds-still`). It shows the receipt "Parked." with Change, and the note line under it. The Sent panel lists "No. 3", as today. Undo is as today.
+- Sent (`#s=sent`): the card keeps its place. It shows the receipt "Parked." with Change, and the note line under it. The Sent panel lists "No. 3", as today. Undo is as today.
 - Next visit (`#s=answered`): the card is in Answered. It shows "Parked." with Change, and "Show your note" folds the note.
 - Change stages Park again with the saved note, as `{act: "park", note}`.
 

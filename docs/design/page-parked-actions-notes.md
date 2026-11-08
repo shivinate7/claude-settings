@@ -21,8 +21,8 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close" — a new branch 
 
 ## 2. Drop's confirm
 
-- 2A (pick): the staged state is the confirm. Drop struck the line (a shape, not a colour) and shows "✓ Drop". Nothing is written until Send, and Undo covers 8 seconds after it. Gain: meets `ux-ask-or-undo` (Undo, not both). Loss: no "are you sure" step for a person who expects one.
-- 2B (`#s=ask-2b`): the row asks "Drop this line for good?" with Cancel focused. Loss: with Send and Undo it does both, so it fails `ux-ask-or-undo`. On a phone the ask wraps and moves the line below it (`ux-press-moves-nothing`).
+- 2A (pick): the staged state is the confirm. Drop struck the line (a shape, not a colour) and shows "✓ Drop". Nothing is written until Send, and Undo covers 8 seconds after it. Gain: one step, with Undo after it. Loss: no "are you sure" step for a person who expects one.
+- 2B (`#s=ask-2b`): the row asks "Drop this line for good?" with Cancel focused. Loss: with Send and Undo it asks and undoes, one step more than 2A. On a phone the ask wraps and moves the line below it (`ux-press-moves-nothing`).
 - Drop uses no `--holds` red. On this page red means Blocking.
 
 ## 3. Button look and wording

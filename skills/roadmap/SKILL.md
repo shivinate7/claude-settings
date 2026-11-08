@@ -74,22 +74,28 @@ GitHub, so the publisher reads them just before the build and passes one file:
 
     {"readAt": "<ISO time of the reads>",
      "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}],
+     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
-     "sessions": [{"id", "session_status", "tags"}],
-     "items": [{"n", "status", "home"}]}
+     "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
+     "items": [{"n", "status", "home", "lane"?}]}
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
 - `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
-  unknown. `branches`: lane branches with no open pull request.
-- `sessions`: `list_sessions`, every page, each row copied as it comes with only these three fields.
-  The upkeep list reads it for steps in progress. A live file with no `sessions` list still renders
+  unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
+  release a lane whose draft pull is already in the default branch. `branches`: lane branches with no open pull request.
+- `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
+  `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
+  it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
+  in progress and for lanes to archive. A live file with no `sessions` list still renders
   Live work.
 - `items`: `ArtifactData list items` of the repo's waiting page, every page, each row copied with only
-  `n`, `status` and `home`. The upkeep list reads it for page rulings. A live file with no `items` list
-  still renders Live work.
+  `n`, `status`, `home`, `lane` and `owner`. `lane` is where the item's answer went: the lane's slug, a tier name
+  such as `batch-runner`, or `null` for none. Copy it when the item has one; leave the key out when the
+  page row has none. `owner` is the session that reads the answer, also optional. The build keeps each
+  exactly when its key is present. The upkeep list reads the items for page rulings and for lanes to archive,
+  and the red line reads `lane` for stalled items. A live file with no `items` list still renders Live work.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
 - With no `--live`, no `threads` or `pulls` list, or a `readAt` that is not an ISO time, the
@@ -112,13 +118,58 @@ closes it, from the upkeep list. A trailer that names no step is listed there to
 
 ## The red line
 
-build.py exits 1 when a `todo` step is named by an open pull request. It prints
+build.py exits 1 when a `todo` step is named by an open pull request. A `ready` step reads as `todo`
+here and in the ready todo steps row. It prints
 `todo step with an open PR: <id> (#N)` for each pair, writes the page, then exits 1. A pull names a
 step when its branch is exactly the step id, or its title holds the id as a whole word, in any case. The
 fix is to set the step to `doing`, or to close the pull. With no usable `--live` read of `readAt` and
 `pulls` (the `sessions` list is not needed), the line reads
 `todo step with an open PR: unknown (<why>)` and build.py exits 0. The conflict-marker refusal also
 exits 1. The printed line tells the two apart.
+
+build.py also exits 1 on a stalled step. A `doing` or `active` step with no live lane and no open PR is
+stalled until it has a disposition (the same test as the in-progress upkeep row, so the two never
+disagree). It prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in
+#N)` when a `Step:` trailer is on main, writes the page, then exits 1. A landed feel-fix with no valid
+device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` on
+a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A session whose status
+bucket is completed or failed has ended and holds no step; an idle or review ready one still does. The tag value is
+read stripped, as idle_lanes reads it. A `cs-topic:` tag never keeps a step live. The page's stalled block lists the ids.
+
+An open waiting-page item whose `lane` is a non-empty text and has no live work is stalled too. It
+prints `stalled step: item <n> (lane <slug>: re-route, close or resume)` and exits 1. The lane is live
+by the same `cs-step:` tag and pulls, and also by `cs-topic:<slug>`, or `cs-build:<tier>` for a tier lane such as `batch-runner`. A closed item is
+never stalled, and a `null` lane names no lane.
+
+With no usable live read the lines read `stalled step: unknown (<why>)` and `stalled step: items
+unknown (<why>)`, and build.py exits 0; the page's stalled block then reads not read, never zero. An
+open item row with no `lane` key reads the items unknown, so a publisher that does not send `lane` never
+passes for zero stalled items.
+
+build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready` and
+phase `now`. The step needs no live lane (the same test as above), no open pull that names it (the pair line
+names the two), and no valid `paused` field. No open item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
+is missing or has no zone. The same list rides in the build info (`window.ROADMAP_BUILD.ready`). No page draws it yet.
+One function, `next_act`, gives each ready step and each stalled step `id`, `act`, `owner` and `age`. A ready
+step's act is `start lane`. The owner is the step's `owner` field, else `coordinator`.
+A ready step more than `READY_AGE_LIMIT_HOURS` (24, unmeasured) old prints
+`ready over limit: <id> (start lane; owner <owner>; age <N>h)`, and build.py exits 1, as on a stalled step. A step
+with no age is never over. A `todo` or `ready` step that has landed on main (a `Step:` trailer) is not listed: it has
+no lane to start, and the landed upkeep rows name it. A `todo` or `ready` step with a missing or wrongly cased phase
+prints `ready not started: unknown (<id> has no usable phase)` and is not listed. Every build prints
+`ready not started count: <N>`, zero included, or `ready not started count: unknown (<why>)` when a phase is unusable.
+With no usable live read, or main unread (no step can be shown landed), the list and the count each read
+`unknown (<why>)`, never zero, and there is no red line. A ready step inside the limit never changes the exit code.
+Unmeasured limits: age counts from the step's `updatedAt`, so a weekend or a note edit moves it; a landed doing step
+goes red, but a landed todo step is excluded.
+
+Triage disposes each stalled step by writing, on the record branch, one of three things. It sets the step
+`todo` (the lane is gone and the work is not done) or `done` (it landed). Or it adds `paused`:
+`{"why": "<text>", "decides": "owner" | "coordinator" | "triage", "at": "<ISO time with a zone>", "by":
+"triage"}`.
+A valid `paused` field moves the step off the stalled list and into the page's Paused list. A wrong-shaped `paused` field keeps the
+step stalled and lists it as a bad pause. That means a missing or empty `why`, a `decides` outside the set, an `at`
+with no zone, or a `by` other than `triage`. Resume is not stored: a live lane makes the step not stalled.
 
 ## Mockups
 
@@ -153,12 +204,14 @@ After each build the roadmap build script prints the upkeep list for the triage 
 - steps marked `doing` or `active` with no live lane or open PR, except a landed feel-fix with no valid
   device trial, which the row above lists. A step is live when a session that is
   not archived has the tag `cs-step:<step id>`, or an open pull request's branch equals the step
-  id. Both match the id exactly. The session also needs the tag `cs-repo:<owner>/<repo>` for this
+  id or `lane/<step id>`. Both match the id exactly. A `cs-topic:` or `cs-build:` tag never keeps a step live.
+  The session also needs the tag `cs-repo:<owner>/<repo>` for this
   repo's GitHub name, in any case, because `list_sessions` is account-wide and step ids repeat across
   repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
-  whose status is none of `todo`, `doing`, `active` or `done` is listed as `<id> (unknown status
+  whose status is none of `todo`, `ready`, `doing`, `active` or `done` is listed as `<id> (unknown status
   "<status>")`. Each other entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)` when
-  a `Step:` trailer is on main. Triage sets each step back. The row reads one `unknown (<why>)` entry,
+  a `Step:` trailer is on main. Triage sets each step back. The red line prints a `stalled step:` line
+  for each entry except an unknown-status one, built from the same test. The row reads one `unknown (<why>)` entry,
   never an empty list, in these cases:
   - `--live` is missing or unreadable, or has no `sessions` list;
   - a session row or a pull row has the wrong shape;
@@ -169,7 +222,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
   needed. Each entry is the step id;
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
   lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
-  live session step equals its branch exactly (the same rule as the in-progress row). Each entry is `#N (<branch or
+  live session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
+  session holds no draft. Each entry is `#N (<branch or
   title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
   live file the row reads one `unknown (<why>)` entry;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
@@ -197,6 +251,33 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `<id> (<date as written>)`. Triage asks for a
   re-check of that claim on main before a lane starts. The row reads the notes only, so it needs no
   `--live` file;
+- lanes to archive, in the row `lanes to archive`. A session is listed when all of these hold:
+  - its tags hold `cs-build:lane` and this repo's `cs-repo:` tag, and its status is not archived;
+  - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
+    has no bucket is never listed;
+  - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
+    `Step:` trailer is on main, or its status is `done`;
+  - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
+    draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
+    releases the lane. A ready pull always holds it. A failed git read reads as not landed;
+  - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
+    its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
+    The page writes `open` and `closed` only, so only `closed` releases a lane.
+
+  A step id that is not on the record branch reads the lane `unknown (step <id> not on the record
+  branch; lane <session id>)`. A live file with no `items` list makes the row unknown. An `items` row with the
+  wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
+  sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
+  - `--live` is missing or unreadable;
+  - `readAt` is bad, over 60 minutes old or in the future;
+  - there is no `sessions` list, or a session or pull row has the wrong shape (a pull `branch` that is not text or null counts);
+  - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
+    are not counted, so only archived lanes, or no live lane rows, read an empty row;
+  - main or its git log cannot be read;
+  - the repo's GitHub name cannot be read.
+
+  `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
+  a summary line. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step.
 
 ## Cost
@@ -207,9 +288,9 @@ reads. The stale-step row adds one more `list_sessions` walk inside that publish
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
-The red line and the two stale-ready rows read the live file build.py already reads, and add no
-process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
-list call it already makes.
+The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
+already reads. They add no process, file, timer or log. The publisher adds one field, `createdAt`, per pull row.
+It comes from the GitHub list call the publisher already makes.
 The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
 
