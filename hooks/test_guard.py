@@ -108,6 +108,7 @@ FAMILIES = {
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
+    "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
     "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
@@ -528,6 +529,14 @@ MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a recor
 MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
 MSG_LANE = os.path.join(ROOT, "msg_lane.txt")  # a message file that names a lane by session number
 MSG_FENCE = os.path.join(ROOT, "msg_fence.txt")  # a message file that names a lane only in a fence
+# Message files in a session's scratchpad (scratchpad-message). The scratchpad is shared by the agents of
+# one session, so a file there may hold another agent's message. Each path names its own folder.
+MSG_NOGIT = os.path.join(NOGIT, "msg_nogit.txt")  # a clean message file outside every scratchpad
+SCRATCH_MSG = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "probe", "commit_msg.txt")  # a clean one, this session's
+SCRATCH_EMPTY = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "probe", "empty_msg.txt")  # an empty one, this session's
+SCRATCH_OTHER_MSG = os.path.join(ROOT, OTHER_SESSION, "scratchpad", "probe", "commit_msg.txt")  # a clean one, another session's
+SCRATCH_LINK_IN = os.path.join(NOGIT, "link_into_scratch.txt")  # a link outside every scratchpad, to SCRATCH_MSG
+SCRATCH_LINK_OUT = os.path.join(ROOT, FAKE_SESSION, "scratchpad", "probe", "link_out.txt")  # a link in the scratchpad, to MSG_NOGIT
 PATHSPEC_LIST = os.path.join(ROOT, "pathspec_list.txt")  # a pathspec file naming f.txt, for --pathspec-from-file
 MERGECFG = os.path.join(ROOT, "mergecfg")  # a config directory whose rules file points at this repo
 GHNONE = os.path.join(ROOT, "ghnone")      # an empty directory, so the tool is missing
@@ -1331,6 +1340,10 @@ def build_fixtures():
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
     write(MSG_LANE, "title\n\nLane N20 lands the guard.\n")
     write(MSG_FENCE, "title\n\n```\nLane N20 lands the guard.\n```\n")
+    write(MSG_NOGIT, "title\n\nclean body\n")
+    write(SCRATCH_MSG, "title\n\nthe message another agent wrote\n")
+    write(SCRATCH_EMPTY, "")
+    write(SCRATCH_OTHER_MSG, "title\n\nthe message of another session\n")
     write(PATHSPEC_LIST, "f.txt\n")
     make_fake_gh(GHPEND, "main", checks=[{"name": "checks", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "checks", "bucket": "fail", "link": ""}])
@@ -1439,6 +1452,9 @@ def build_fixtures():
         LINKS_MADE = SYMWT_MADE = True
     except Exception:  # no symlink privilege: the link cases skip, as they did before
         LINKS_MADE = SYMWT_MADE = False
+    if LINKS_MADE:   # the scratchpad links (scratchpad-message), made only where the probe above made one
+        os.symlink(SCRATCH_MSG, SCRATCH_LINK_IN)
+        os.symlink(MSG_NOGIT, SCRATCH_LINK_OUT)
 
 
 def _build_currepo():
@@ -11075,6 +11091,90 @@ for _name, _command in (
 sh("guard-command-position: lane in the third of three plain heredoc bodies denies",
    "cat <<'A'\nfirst body\nA\ncat <<'B'\nsecond body\nB\n" + VCS + " commit -F - <<'C'\nLane N20 lands\nC",
    "deny", "lane-by-slug", cwd=NOGIT, config=MERGECFG)
+
+# =========================================================================== 5c-1. a message file in a scratchpad
+FAMILY = "scratchpad-message"
+#
+# `scratchpad-commit-msg-owner`. An agent's `git commit -F <file>` is refused when the file sits in ANY
+# session's scratchpad. The agents of a session share that folder, so the file may hold another agent's
+# message, and the commit would carry it. The rule reads the path only. The session id does not decide
+# it, and a link is judged by the file it resolves to. An orchestrator's call (no agent_id) and the other
+# ways to pass a message stay allowed.
+
+SCRATCH_RULE = "scratchpad-commit-msg-owner"  # the rule id the refusal prints: the lane slug
+SCRATCH_REMEDY = ("-F -",)                    # the refusal names the heredoc form as a way to pass a message
+SCRATCH_AGENT = "9f3c1a7e5b2d4c8f6"           # an agent's id on its payload
+NO_LINK_HERE = "this host gives no symlink, so the link case does not run here"
+
+
+def scratch_deny(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT):
+    """One case: an agent's commit of a scratchpad message file is refused, and the remedy names `-F -`."""
+    sh(name, command, "deny", SCRATCH_RULE, carries=SCRATCH_REMEDY, cwd=cwd, session=session,
+       agent_id=agent_id)
+
+
+def scratch_allow(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT):
+    """One case: the call is allowed. Its only difference from a deny case is the one variable named."""
+    sh(name, command, "allow", cwd=cwd, session=session, agent_id=agent_id)
+
+
+SCRATCH_CMD = VCS + " commit -F " + slash(SCRATCH_MSG)
+# Each flag form reaches its own branch of message_sources: the long form, the value after the flag,
+# the glued value, a cluster of short flags, and the amend act.
+scratch_deny("scratchpad-message: an agent's commit -F of a scratchpad file is refused", SCRATCH_CMD)
+scratch_deny("scratchpad-message: an agent's commit --file= of a scratchpad file is refused",
+             VCS + " commit --file=" + slash(SCRATCH_MSG))
+scratch_deny("scratchpad-message: an agent's commit --file of a scratchpad file is refused",
+             VCS + " commit --file " + slash(SCRATCH_MSG))
+scratch_deny("scratchpad-message: an agent's commit -F<file> glued of a scratchpad file is refused",
+             VCS + " commit -F" + slash(SCRATCH_MSG))
+scratch_deny("scratchpad-message: an agent's commit -aF <file> cluster of a scratchpad file is refused",
+             VCS + " commit -aF " + slash(SCRATCH_MSG))
+scratch_deny("scratchpad-message: an agent's commit --amend -F of a scratchpad file is refused",
+             VCS + " commit --amend -F " + slash(SCRATCH_MSG))
+# A relative path resolves against the call's cwd, which here is the scratchpad folder itself.
+scratch_deny("scratchpad-message: an agent's relative -F from inside its scratchpad is refused",
+             VCS + " commit -F commit_msg.txt", cwd=os.path.dirname(SCRATCH_MSG))
+# The file is judged by its path, so an empty file, another session's file and a call with no
+# session id are all refused alike.
+scratch_deny("scratchpad-message: an agent's commit -F of an empty scratchpad file is refused",
+             VCS + " commit -F " + slash(SCRATCH_EMPTY))
+scratch_deny("scratchpad-message: an agent's commit -F of another session's scratchpad file is refused",
+             VCS + " commit -F " + slash(SCRATCH_OTHER_MSG))
+scratch_deny("scratchpad-message: an agent's commit -F of a scratchpad file with no session id is refused",
+             SCRATCH_CMD, session=None)
+# A scanner reads the commit after a comment opener in a string, a multi-line string, or a lone quote.
+scratch_deny("scratchpad-message: a comment opener in a string does not hide the -F scratchpad commit",
+             'echo "# not a comment" && ' + SCRATCH_CMD)
+scratch_deny("scratchpad-message: a comment opener in a multi-line string does not hide the -F scratchpad commit",
+             'echo "first\n# second"\n' + SCRATCH_CMD)
+scratch_deny("scratchpad-message: a lone quote in text does not hide the -F scratchpad commit",
+             LONE_PAIR + SCRATCH_CMD)
+if LINKS_MADE:
+    scratch_deny("scratchpad-message: an agent's commit -F of a link outside its scratchpad, into it, is refused",
+                 VCS + " commit -F " + slash(SCRATCH_LINK_IN))
+else:
+    skip_case("scratchpad-message: an agent's commit -F of a link into its scratchpad is refused", NO_LINK_HERE)
+
+# The controls. Each differs from a deny above by the one variable its name gives.
+scratch_allow("scratchpad-message: an orchestrator's commit -F of the same scratchpad file is allowed",
+              SCRATCH_CMD, agent_id=None)
+scratch_allow("scratchpad-message: an agent's commit -F - with a heredoc is allowed",
+              VCS + " commit -F - <<'EOF'\ntitle\n\nclean body\nEOF")
+scratch_allow("scratchpad-message: an agent's heredoc body that names a scratchpad path is allowed",
+              VCS + " commit -F - <<'EOF'\ntitle\n\nsee " + slash(SCRATCH_MSG) + "\nEOF")
+scratch_allow("scratchpad-message: an agent's commit -m is allowed", VCS + ' commit -m "title"')
+scratch_allow("scratchpad-message: an agent's commit -F of a file outside every scratchpad is allowed",
+              VCS + " commit -F " + slash(MSG_NOGIT))
+scratch_allow("scratchpad-message: a commit named in a shell comment runs no commit and is allowed",
+              "echo x # " + SCRATCH_CMD)
+scratch_allow("scratchpad-message: an agent's gh pr create --body-file of a scratchpad file is not this rule",
+              "gh pr create --draft --title t --body-file " + slash(SCRATCH_MSG))
+if LINKS_MADE:
+    scratch_allow("scratchpad-message: an agent's commit -F of a link in its scratchpad, out to a file, is allowed",
+                  VCS + " commit -F " + slash(SCRATCH_LINK_OUT))
+else:
+    skip_case("scratchpad-message: an agent's commit -F of a link out of its scratchpad is allowed", NO_LINK_HERE)
 
 # =========================================================================== 5c. the records page
 FAMILY = "records-page"
