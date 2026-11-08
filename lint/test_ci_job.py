@@ -581,7 +581,7 @@ class StepMaps(unittest.TestCase):
 class SettingsPins(unittest.TestCase):
     """settings_pins, the one pin reader (lint/workflow_steps.py), read as text. A `#` inside quotes is text, so the pin
     after it is read. A lone quote in text opens no quote. A `#` after a space and outside quotes starts a comment. A
-    run: block's lines are script, never a pin, whatever quotes or comment openers they hold."""
+    run: block is script, never a pin, whatever its quotes, comment openers or header comment."""
 
     HEAD = "name: t\non: push\njobs:\n  lane:\n    runs-on: ubuntu-latest\n    steps:\n"  # the step after it is line 7
     SHA = "a" * 40
@@ -606,6 +606,24 @@ class SettingsPins(unittest.TestCase):
         found = settings_pins(self.HEAD + body)
         self.assertEqual(found, [("ste-lint", self.SHA, 11)],
                          "a run: block's text was read as a pin, or the pin after the block was lost")
+
+    def test_a_run_block_with_a_comment_after_its_literal_header_is_script_and_no_pin(self):
+        step = "      - run: | # note\n          echo %s\n" % self.USES
+        self.assertEqual(run_body(step), "echo %s\n" % self.USES,
+                         "precondition: run_body did not read run: | # note as a block")
+        self.assertEqual(settings_pins(self.HEAD + step), [],
+                         "run: | # note: the header comment hid the block, so its script line was read as a pin")
+
+    def test_a_run_block_with_a_comment_after_its_folded_header_is_script_and_no_pin(self):
+        step = "      - run: > # note\n          echo %s\n" % self.USES
+        self.assertEqual(run_body(step), "echo %s\n" % self.USES,
+                         "precondition: run_body did not read run: > # note as a block")
+        self.assertEqual(settings_pins(self.HEAD + step), [],
+                         "run: > # note: the header comment hid the block, so its script line was read as a pin")
+
+    def test_a_plain_literal_run_block_with_the_same_script_line_is_no_pin(self):  # P2 green control
+        step = "      - run: |\n          echo %s\n" % self.USES
+        self.assertEqual(settings_pins(self.HEAD + step), [], "a run: | block's script line was read as a pin")
 
 
 def run_as_yaml_reads_it(step):
