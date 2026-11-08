@@ -750,14 +750,21 @@ def emit(text):
     sys.stdout.buffer.flush()
 
 
-def main(argv):
-    global ROOT
+def build_parser():
+    """The command line of this script. The one home of its options: hooks/guard_merge.py parses a
+    command with it to tell a run that writes a page from -h, --check, --print or a run at another root."""
     parser = argparse.ArgumentParser(description="Write docs/catalog.md and docs/records.md.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--print", action="store_true", dest="show", help="write the catalog page to stdout, exit 1 on a problem")
     mode.add_argument("--check", action="store_true", help="exit 1 when a page is stale or a source is empty or keeps overruled text")
     parser.add_argument("--records-only", action="store_true", help="write or check docs/records.md alone: no catalog, no settings.json read. The merge tool runs this mode")
     parser.add_argument("--root", help="the repo root. The default is the environment variable HOOK_CATALOG_ROOT, else the repo this script is in")
+    return parser
+
+
+def main(argv):
+    global ROOT
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.records_only and args.show:
         parser.error("--records-only and --print cannot go together: --print writes the catalog")
