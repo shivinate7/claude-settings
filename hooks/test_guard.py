@@ -28359,6 +28359,11 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS, FA
           "Check the floor fix.\nDone: PASS, FAIL or PARTIAL, then list the findings.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Target: PASS line, no report label",
           "Check the floor fix.\nTarget: PASS, with no new allow.\nFiles: hooks/guard.py.")
+# A comma, then `or` or `and`, before a second verdict word makes a choice list, so the first word is no bare verdict.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS, or FAIL, then list the findings line",
+          "Check the floor fix.\nDone: PASS, or FAIL, then list the findings.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS, and FAIL if a check is red line",
+          "Check the floor fix.\nDone: PASS, and FAIL if a check is red.\nFiles: hooks/guard.py.")
 
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
