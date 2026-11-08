@@ -532,20 +532,29 @@ def _cp_start(raw, keywords=False, command="cp"):
     return start if _name(raw[start] if start < len(raw) else "") == command else None
 
 
-# The `rsync` flags that take their value as the next word, so it is no source or destination.
-_RSYNC_VALUE_FLAGS = {"-e", "-f", "-B", "-T", "-M", "--rsh", "--exclude", "--include", "--filter",
-                      "--exclude-from", "--include-from", "--files-from", "--rsync-path", "--temp-dir",
-                      "--partial-dir", "--backup-dir", "--suffix", "--compare-dest", "--copy-dest",
-                      "--link-dest", "--log-file", "--port", "--bwlimit", "--chmod", "--chown"}
+def _null_redirect_end(words, index):
+    """The index past the redirect to the null device or onto another descriptor that starts at
+    `words[index]` (`2>/dev/null`, `2>&1`, `2> /dev/null`), else None. It writes no file, so a `cp` or
+    `rsync` reader skips it (`_copy_reads`, `_rsync_reads`)."""
+    word = words[index]
+    if _NULL_REDIRECT.fullmatch(word):
+        return index + 1
+    after = words[index + 1:index + 2]
+    if _OPEN_REDIRECT.fullmatch(word) and after and (after[0].lower() in _NULL_TARGETS
+                                                     or re.fullmatch(_DESCRIPTOR, after[0])):
+        return index + 2
+    return None
 
 
 def _rsync_reads(raw, predicate, cwd, keywords=False):
     """The indexes of the sources of an `rsync` segment when its destination (the last operand) is no
     path `predicate` accepts, else an empty set: a source is only read, so `rsync tests/ /tmp/t/` stays
     a read, while a destination that `predicate` accepts leaves every word judged. A destination that
-    holds a `$` or a backtick, a redirect, `--remove-source-files` (it deletes the sources) and a segment
-    with one operand leave every word judged too, which fails closed. A glob destination is the
-    predicate's to read (`builder_shell_path`)."""
+    holds a `$` or a backtick, a redirect to a file, `--remove-source-files` (it deletes the sources), a
+    flag after the first operand (`--timeout 30` makes `30` the last word, so the destination is not
+    told) and a segment with one operand leave every word judged too, which fails closed. A redirect to
+    the null device is skipped (`_null_redirect_end`). A glob destination is the predicate's to read
+    (`builder_shell_path`)."""
     start = _cp_start(raw, keywords, "rsync")
     if start is None:
         return set()
@@ -553,12 +562,17 @@ def _rsync_reads(raw, predicate, cwd, keywords=False):
     operands, index, flags_over = [], start + 1, False
     while index < len(words):
         word = words[index]
+        skipped = _null_redirect_end(words, index)
+        if skipped is not None:
+            index = skipped
+            continue
         if not flags_over and word == "--":
             flags_over = True
         elif word == "--remove-source-files" or ">" in word or "<" in word:
             return set()
         elif not flags_over and word.startswith("-") and word != "-":
-            index += 1 if word in _RSYNC_VALUE_FLAGS else 0
+            if operands:
+                return set()
         else:
             operands.append(index)
         index += 1
@@ -580,12 +594,9 @@ def _copy_reads(raw, predicate, cwd, keywords=False, prefix=False):
     operands, target, index = [], None, start + 1
     while index < len(words):
         word = words[index]
-        if _NULL_REDIRECT.fullmatch(word):
-            index += 1
-            continue
-        if _OPEN_REDIRECT.fullmatch(word) and words[index + 1:index + 2] and \
-                (words[index + 1].lower() in _NULL_TARGETS or re.fullmatch(_DESCRIPTOR, words[index + 1])):
-            index += 2
+        skipped = _null_redirect_end(words, index)
+        if skipped is not None:
+            index = skipped
             continue
         if word != "--" and word.startswith("--") and any(
                 name.startswith(word[2:].split("=")[0]) for name in _CP_LINK_LONG):
@@ -1069,7 +1080,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         scripts = {}
         if command_position and not closed:
             scripts = _sed_script_words(raw)   # the builder test check only: a script names no file but w, W, e
-            data = data | set(scripts) | _rsync_reads(raw, predicate, cwd, bool(fed))
+            data = data | set(scripts) | _rsync_reads(raw, predicate, cwd, bool(fed)) | _yq_expression_words(raw)
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -1235,6 +1246,43 @@ def _sed_script_words(raw):
         skip.add(operands[0])
         scripts[operands[0]] = _unquoted(raw[operands[0]])
     return {where: _sed_script_targets(scripts.get(where, "")) for where in skip}
+
+
+# `yq` flags that take their value as the next word (a script file, an indent, a format).
+_YQ_VALUE_FLAGS = {"-f", "--from-file", "-I", "--indent", "-o", "--output-format", "-p", "--input-format"}
+_YQ_SUBCOMMANDS = {"eval", "e", "eval-all", "ea"}
+
+
+def _yq_expression_words(raw):
+    """The set of indexes of the word of an in-place `yq` segment that is its expression, else empty. The
+    expression is text (`.on |= "push" | .x = 1`, `.a = 1; .b = 2`): read as data, its `|` or `;` ends no
+    command in `writes_to`'s text search, so the file operand after it is judged. It is the first operand
+    after an `eval` subcommand, and only when a file follows it; with `-f` the script is in a file and the
+    first operand is the target. Empty when the segment is no `yq -i` or `--inplace`."""
+    index = resolve_command(tuple(raw))
+    if index is None or _name(raw[index]) != "yq":
+        return set()
+    in_place = from_file = flags_over = False
+    operands, at = [], index + 1
+    while at < len(raw):
+        word = _unquoted(raw[at])
+        if flags_over or not word.startswith("-") or word == "-":
+            operands.append(at)
+        elif word == "--":
+            flags_over = True
+        elif word.startswith("--"):
+            flag = word.split("=")[0]
+            in_place = in_place or flag == "--inplace"
+            from_file = from_file or flag == "--from-file"
+            at += 1 if flag in _YQ_VALUE_FLAGS and "=" not in word else 0
+        else:
+            in_place = in_place or bool(re.fullmatch(r"-[A-Za-z]*i[A-Za-z]*", word))
+            from_file = from_file or word == "-f"
+            at += 1 if word in _YQ_VALUE_FLAGS else 0
+        at += 1
+    if operands and _unquoted(raw[operands[0]]) in _YQ_SUBCOMMANDS:
+        operands = operands[1:]
+    return {operands[0]} if in_place and not from_file and len(operands) >= 2 else set()
 
 
 def _segment_command(words):
