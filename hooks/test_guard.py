@@ -11115,6 +11115,23 @@ records_allow("a commit of a staged page edit where the base page is hand-writte
 records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
               GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
 
+# The folder a commit is judged in is its own segment's folder. A `cd` after `false &&` never runs, so the shell
+# stays in the lane: the generator run (--root this lane) and the commit both write the lane's page, and the guard
+# must refuse. other-checkout refuses a `cd` only from a cwd inside a checkout, so these chains start in NOGIT: the
+# first `cd` moves the shell into the lane, and a `cd` into another checkout after it is not refused there.
+# The control has no skipped `cd`.
+records_refusal("judged folder: a skipped cd into the main checkout, then a generator run for this lane, then commit -am",
+                "cd " + LANE + " && false && cd " + RECMAIN + "; " + GEN + " --root " + LANE + "; " + COMMIT_AM, NOGIT)
+records_refusal("judged folder control: a generator run for this lane, then commit -am, with no skipped cd",
+                "cd " + LANE + "; " + GEN + " --root " + LANE + "; " + COMMIT_AM, NOGIT)
+# A commit is judged in the folder its own segment reads, not the folder the chain's last `cd` names. The commit
+# runs in the lane; a `cd` after it moves the shell into the main checkout. A reading of the last `cd` judges the
+# commit in the main checkout, whose page is HEAD's, and it passes. The control has no `cd` after the commit.
+records_refusal("judged folder: a generator run for this lane, then commit -am, then a cd into the main checkout",
+                "cd " + LANE + " && " + GEN + " --root . && " + COMMIT_AM + " && cd " + RECMAIN, NOGIT)
+records_refusal("judged folder control: a generator run for this lane, then commit -am, with no cd after",
+                "cd " + LANE + " && " + GEN + " --root . && " + COMMIT_AM, NOGIT)
+
 # =========================================================================== 5d. conflict markers
 #
 # `conflict-markers`. A Bash `git commit` is refused when the commit would hold a git conflict marker:
