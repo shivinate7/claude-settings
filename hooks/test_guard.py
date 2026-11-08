@@ -11639,6 +11639,14 @@ sh("frozen word: grep -rn mkdir naming a hook piped to cut is allowed",
    "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | cut -c1-80", "allow", cwd=NOGIT)
 sh("frozen word: grep -rn mkdir naming a hook piped to tee /tmp/out is allowed",
    "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | tee /tmp/out", "allow", cwd=NOGIT)
+# The line-number and field readers that a grep feeds: sed -n prints lines, awk prints a field, and git grep
+# with -C reads a folder. None runs the text it reads, so each READ below is allowed beside a frozen path.
+sh("frozen word: grep -n mkdir naming a hook piped to sed -n is allowed",
+   "grep -n mkdir " + CFG_HOOK + " | sed -n '1,5p'", "allow", cwd=NOGIT)
+sh("frozen word: grep -n mkdir naming a hook piped to awk that prints a field is allowed",
+   "grep -n mkdir " + CFG_HOOK + " | awk '{print $1}'", "allow", cwd=NOGIT)
+sh("frozen word: git -C /tmp grep -n mkdir naming a hook is allowed",
+   VCS + " -C /tmp grep -n mkdir " + CFG_HOOK, "allow", cwd=NOGIT)
 # A mutating word that a program runs as its text (a trap body, an interpreter's inline program, a
 # PowerShell argument, an awk system() call) is a write as well. Each DENIES.
 FROZEN_DIR_X = slash(os.path.join(LIVE_PIN, "x"))
@@ -11680,6 +11688,19 @@ sh("frozen word: sed with an e command that names a frozen file is refused",
    "sed '1e rm " + CFG_HOOK + "' notes.txt", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen word: a printer piped to xargs rm of a frozen file is refused",
    "printf 'x\\n' | xargs rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# A SCRIPT WRITTEN IN THE SAME CALL, THEN RUN BY A SHELL. The text the call writes to the script is the text
+# the shell runs, so a frozen write in that text is a write. Each DENIES, whichever way the script is written
+# (a redirect, a redirect ended by `;`, a tee). The CONTROL writes the same text and runs no script.
+sh("frozen word: an echo of an rm of a frozen file, redirected to a script that sh then runs, is refused",
+   "echo 'rm " + CFG_HOOK + "' > /tmp/s.sh && sh /tmp/s.sh", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: a printf of an rm of a frozen file, redirected to a script that sh then runs, is refused",
+   "printf 'rm " + CFG_HOOK + "\\n' > /tmp/s.sh && sh /tmp/s.sh", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: an echo of an rm of a frozen file, redirected to a script that sh runs after a semicolon, is refused",
+   "echo 'rm " + CFG_HOOK + "' > /tmp/s.sh; sh /tmp/s.sh", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: an echo of an rm of a frozen file, teed to a script that sh then runs, is refused",
+   "echo 'rm " + CFG_HOOK + "' | tee /tmp/s.sh && sh /tmp/s.sh", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: an echo of an rm of a frozen file, with no script run, is allowed",
+   "echo 'rm " + CFG_HOOK + "'", "allow", cwd=NOGIT)
 # CONTROL, ALLOWED. An interpreter run on a file with no inline program reads its path words, so a
 # frozen path after `-k copy` is an argument, as the builder's own test run is.
 sh("frozen word: python3 -m pytest -k copy naming a frozen file is allowed",
@@ -11707,6 +11728,12 @@ sh("frozen word: an echo whose segment holds a group and a mkdir into a frozen f
    "echo hi (mkdir " + FROZEN_DIR_X + "/q)", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen word: grep -rn mkdir naming a hook piped to tee onto a frozen settings file is refused",
    "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | tee " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# CONTROLS, REFUSED. The same grep piped on to a program that writes its input, or runs it, stays refused. The
+# reader's pipe does not make the program a reader: sed -i edits in place, and sh runs the lines it reads.
+sh("frozen word: grep mkdir naming a hook piped to sed -i is refused",
+   "grep mkdir " + CFG_HOOK + " | sed -i 's/a/b/'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: grep mkdir naming a hook piped to sh, which runs the lines it reads, is refused",
+   "grep mkdir " + CFG_HOOK + " | sh", "deny", "frozen-path", cwd=NOGIT)
 # READS, ALLOWED. `git grep` and PowerShell `Select-String` read the files they name, so a mutating word
 # after them is an argument, as it is after `grep`.
 sh("frozen word: git grep naming mkdir and a hook in the live pin is allowed",
