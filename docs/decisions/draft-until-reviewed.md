@@ -34,6 +34,9 @@ Limits:
 - A PowerShell here-string is read as shell lines when `iex` or `Invoke-Expression` takes it after a space.
 - It is also read when `[scriptblock]::Create(` builds a block from it, or when `pwsh` or `powershell` takes it after `-Command` or `-c`.
 - It is also read when it is piped into `iex`, `Invoke-Expression`, or a pwsh that reads stdin (`| & pwsh -`), with any `Out-String` stages between.
+- A here-string in parentheses is read too: `pwsh -Command (@"…"@)`, `$(@"…"@ | iex)` and `(@"…"@ | Out-String) | iex`.
+- A closing paren on the stage word after a pipe is dropped before the word is judged.
+- An unclosed quote ahead of a here-string leaves the before side unread. The pipe after the here-string still decides, so the call is judged and not allowed by a crash.
 - Not read: `iex(@"`, `Create (@"`, a pwsh switch the guard does not know before the stdin dash, and `ForEach-Object { iex $_ }`. Main reads none of them.
 - Not read: a pipe split across lines before `iex`, `iex ("" + @"…"@)`, and a here-string written with `Set-Content` and run later.
 - A here-string given to `Set-Content` is allowed.
