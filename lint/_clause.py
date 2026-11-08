@@ -1,7 +1,7 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANNOT_FORMS). The module reads text and
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANNOT_FORMS, OUTAGE_NOUNS, OUTAGE_VERBS). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
 in step with the text.
 
@@ -22,6 +22,9 @@ from typing import NamedTuple, Optional
 NEGATORS = ("not", "n't", "never", "no")
 ADVERBS = ("even", "yet", "currently", "actually", "really", "still", "also", "just", "now", "directly", "simply",
            "unfortunately")
+# Any other adverb in -ly ("temporarily", "honestly") is read as an adverb where the grammar allows one: between a subject
+# and its verb, after not, and before the act.
+ADVERB_PATTERN = "(?:%s|[a-z]{3,}ly)" % "|".join(ADVERBS)
 CONDITIONALS = ("if", "unless", "whether", "would")
 REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")
@@ -33,7 +36,14 @@ VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", 
 CANNOT_FORMS = ("can't", "cannot", "can not", "unable to", "could not", "couldn't", "no way to", "no way I can",
                 "no way we can", "not able to", "wasn't able to", "won't be able to", "will not be able to",
                 "haven't been able to", "hasn't been able to", "have not been able to", "has not been able to",
-                "not allowed to", "not permitted to", "not going to be able to")
+                "not allowed to", "not permitted to", "not going to be able to", "not authorized to", "not authorised to",
+                "don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
+                "lack permission to", "lacks permission to", "blocked from", "forbidden from")
+# The nouns that make a checks noun an outage, not a CI check ("the network checks are failing"), and the verbs that make
+# "failing to <verb>" an outage, not a red check. The cannot-claim check reads each blocker state through them.
+OUTAGE_NOUNS = ("connection", "network", "connectivity", "api", "auth", "authentication", "proxy", "health")
+OUTAGE_VERBS = ("start", "connect", "run", "load", "reach", "respond", "authenticate", "fetch", "launch", "initialize",
+                "initialise", "clone")
 WINDOW = 6  # words after a phrase, in its clause, that may name the act
 NEGATOR_GAP = 3  # words before a phrase that a negator may sit in and still negate it
 
@@ -122,7 +132,7 @@ def sentences(text, mask):
     return [(a, b) for a, b in zip(bounds, bounds[1:]) if b > a]
 
 
-_ADV = "(?:%s)" % "|".join(ADVERBS)
+_ADV = ADVERB_PATTERN
 _COND_RE = re.compile(r"\b(?:%s)\b" % "|".join(CONDITIONALS), re.I)
 _NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS if w.isalpha()), re.I)
 _LEAD_RE = re.compile(r"^\W*(?:(?:and|but|so|then)\b\W*)?", re.I)
@@ -224,7 +234,7 @@ def form_pattern(form):
     out = re.escape(parts[0]).replace("'", "['’]")
     for k in range(1, len(parts)):
         gapped = (parts[k - 1] == "not" or parts[k - 1].endswith("n't")) and parts[k] in (
-            "able", "allowed", "permitted", "been")
+            "able", "allowed", "permitted", "been", "authorized", "authorised")
         out += (r"\s+(?:%s\s+)*" % _ADV if gapped else r"\s+") + re.escape(parts[k]).replace("'", "['’]")
     return out
 

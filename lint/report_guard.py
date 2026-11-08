@@ -1546,16 +1546,18 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 # the phrase's sentence part, before or after it. A bare blocker state skips the claim when a join ties it to the claim
 # clause: before it, ending at a semicolon, a colon, a dash, or a comma with so ("CI is red, so I can't merge."); after
 # it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
-# A failing word followed by to and a verb of starting, connecting, running, loading or reaching names an outage
-# ("failing to start"), not a red check ("failing to go green").
-_FAIL_END = r"(?!\s+to\s+(?:start|connect|run|load|reach)\b)"
+# A failing word followed by to and a verb of _clause.OUTAGE_VERBS (start, connect, respond, authenticate, clone ...) names an
+# outage ("failing to start"), not a red check ("failing to go green"). A checks noun after a noun of _clause.OUTAGE_NOUNS
+# (connection, network, auth, proxy, health ...) is an outage too.
+_FAIL_END = r"(?!\s+to\s+(?:%s)\b)" % "|".join(_clause.OUTAGE_VERBS)  # the verbs have one home, lint/_clause.py
+_CI_CHECKS = "".join("(?<!%s )" % noun for noun in _clause.OUTAGE_NOUNS) + "checks?"
 _BLOCKER_TAIL = (
     r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|running|pending|in\s+progress|failing%s)" % _FAIL_END
     + r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed")
 # Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
 # merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
 _BLOCKER_STATES = (
-    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!connection )(?<!network )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)" % _BLOCKER_TAIL),
+    (("pr-merge",), r"(?<![\w.])(?:CI|%s|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)" % (_CI_CHECKS, _BLOCKER_TAIL)),
     (("pr-merge",), r"(?<![\w.])review\s+is\s+pending"),
     (("pr-merge",), r"(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"),
     (("push", "pr-merge"), r"(?<![\w.])main\s+is\s+protected"),
@@ -1601,12 +1603,12 @@ CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
-    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?!(?:%s)(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
-    ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
-    ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
-    ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
+    ("pr-open", re.compile(r"^(?:open(?:ing)?|creat(?:e|ing)|mak(?:e|ing)|rais(?:e|ing)|fil(?:e|ing)|submit(?:ting)?)\b(?:\s+(?!(?:%s)(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
+    ("pr-merge", re.compile(r"^(?:be\s+)?merg(?:e|ed|ing)\b", re.I)),
+    ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed|ing)?\b", re.I)),
+    ("pr-edit", re.compile(r"^(?:clos(?:e|ing)|comment(?:ing)?|mark(?:ing)?|edit(?:ing)?|updat(?:e|ing))\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
     ("github-reach", re.compile(
-        r"^(?:reach|use|access|connect\s+to)\s+(?:the\s+)?`?(?:mcp__github__\w*|github\b|gh(?![\w-])|api\.github\.com)",
+        r"^(?:reach(?:ing)?|us(?:e|ing)|access(?:ing)?|connect(?:ing)?\s+to)\s+(?:the\s+)?`?(?:mcp__github__\w*|github\b|gh(?![\w-])|api\.github\.com)",
         re.I)),
 )
 # A passive form that names the PR elsewhere in its clause: "the PR can't be opened".
@@ -1969,7 +1971,8 @@ def _gh_target(verb, args):
         return named.get("head") or named.get("title") or ""
     for token in args:
         if re.fullmatch(r"#?\d+", token) or "/pull/" in token:
-            return token.lstrip("#")
+            url = re.search(r"/pull/(\d+)", token)
+            return url.group(1) if url else token.lstrip("#")  # a PR's URL and its number are one target
     return next((t for t in args if not t.startswith("-")), "")
 
 
