@@ -13632,6 +13632,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         # history of feat. A record on the pull request's own number is its own whatever its history, and it owes the third round. No record names the live head
         reviewed = cut_branch(self.other, "agent/amended")[-1]
         host = self.batch_host({}, [round_check_comment(1, 7, reviewed, guard="yes", rounds=REVIEW_PASS)])
+        host.records_default = False  # no record names the live head: the defaults would give it a done one
         self.assertEqual(self.history_exit(reviewed, self.head("feat")), 1, "the reviewed head is in the history of feat, so it is not outside it")
         self.assertEqual(self.history_exit(reviewed, "origin/main"), 1, "the reviewed head is on origin/main")
         self.assertNotEqual(reviewed, self.head("feat"), "the reviewed head is the live head of feat")
