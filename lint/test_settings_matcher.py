@@ -521,5 +521,38 @@ class JudgeModelRows(unittest.TestCase):
         self.assertTrue(any(g.startswith("Agent: table model") for g in table_gaps(self.text, wrong)))
 
 
+# The coordinator's tools (rule coordinator-scope, decision session-tiers): guard.py's COORDINATOR_MERGE_TOOLS (the merge tool
+# and the auto-merge arming tool) and COORDINATOR_MCP_WRITE_TOOLS (the GitHub file-write tools). The guard refuses a
+# coordinator's call through one of them only when the first guard matcher names it. GUARD_UNDER_TEST points the names at
+# another copy of the guard, such as an older one in a red run.
+GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks", "guard.py")
+COORDINATOR_CONSTANTS = ("COORDINATOR_MERGE_TOOLS", "COORDINATOR_MCP_WRITE_TOOLS")
+
+
+def coordinator_tools():
+    """{constant: names} of the coordinator's tools, read from the guard under test. A constant the guard lacks reads as None."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_under_matcher_test", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {name: getattr(module, name, None) for name in COORDINATOR_CONSTANTS}
+
+
+class CoordinatorToolMatcher(unittest.TestCase):
+    def test_first_guard_matcher_names_every_coordinator_tool(self):
+        # A name left out of the matcher turns off its coordinator refusal, and no other check fails. Each name is checked alone.
+        matchers = guard_matchers()
+        self.assertTrue(matchers, "no guard matcher in settings.json")
+        for name, tools in sorted(coordinator_tools().items()):
+            with self.subTest(constant=name):
+                self.assertIsInstance(tools, tuple, "the guard has no %s tuple" % name)
+                self.assertTrue(tools, "%s is empty" % name)
+                for tool in tools:
+                    with self.subTest(tool=tool):
+                        self.assertTrue(re.fullmatch(matchers[0], tool),
+                                        "%s (%s) is not in the first guard matcher, so its coordinator refusal never runs"
+                                        % (tool, name))
+
+
 if __name__ == "__main__":
     unittest.main()
