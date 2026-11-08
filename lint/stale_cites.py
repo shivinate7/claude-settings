@@ -140,7 +140,7 @@ at head through the one `cat-file` the run opens, once per range, plus head's ro
 added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a folder .py cite and
 removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
 (NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it.
-One more start, a `git log`, runs when an added cite's top folder is absent at head. It runs once per range. A cite led
+One more start, a `git log`, runs when an added cite's top folder is absent at head and is no near-miss with its corrected file at head. It runs once per range. A cite led
 by `..`, `~` or `/` (`outside_repo`) names a path outside the repo and reads nothing: it opens no `cat-file`.
 A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
