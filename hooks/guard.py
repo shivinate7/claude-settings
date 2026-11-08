@@ -5064,9 +5064,11 @@ def scratchpad_run_files(text: str, cwd: str, depth: int = 0):
         if depth < SCRATCHPAD_NESTING:
             for inner in inner_commands(tokens):
                 yield from scratchpad_run_files(inner, where or cwd, depth + 1)
-            # A substitution in double quotes runs too (`out="$(python3 F)"`), and its token is quoted, so
-            # `scratchpad_command_words` skips it. `_substitutions` cuts each one out, outside single quotes.
-            if "$(" in segment or "`" in segment:
+            # A substitution in double quotes runs too (`out="$(python3 F)"`), but shlex keeps it as one token,
+            # so `scratchpad_command_words` cannot read its command. `_substitutions` cuts each one out. A segment
+            # with no substitution in double quotes is left to `scratchpad_command_words` alone.
+            if '"' in segment and any(quote == '"' and (char == "`" or segment.startswith("$(", at))
+                                      for at, char, quote in walk_quotes(segment)):
                 for inner, _in_message in _substitutions(segment)[0][:-1]:
                     yield from scratchpad_run_files(inner, where or cwd, depth + 1)
 
