@@ -169,7 +169,8 @@ Other tools, in `judge` order:
                        A write or `cd` into a separate clone of the same repo (same origin, read
                        from the config files) is refused too, as is a write from a cwd stranded
                        in one while `CLAUDE_PROJECT_DIR` names the home clone; a git verb that
-                       changes files (OTHER_CHECKOUT_GIT_VERBS: SESSION_HOME_GIT_VERBS and `add`)
+                       changes files (OTHER_CHECKOUT_GIT_VERBS: SESSION_HOME_GIT_VERBS, `add`, `rm`, `mv`,
+                       `update-index`, `read-tree`, `checkout-index`)
                        is refused from that stranded cwd and as `git -C <separate clone>`, and as
                        `git -C <another checkout of this clone>` by the same exemptions as the
                        `cd` form, while `git log`, `git show` and `git status` pass; the
@@ -4867,10 +4868,13 @@ SESSION_HOME_DIR = "session-homes"
 # and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
                           "stash", "cherry-pick", "revert", "am", "apply", "clean")
-# The verbs other-checkout refuses in another checkout or clone: the session-home verbs and `add`,
-# which stages into that checkout's index. session-home leaves `add` out, so this set extends the
+# The verbs other-checkout refuses in another checkout or clone: the session-home verbs plus the verbs
+# that change that checkout's files or index without moving a branch (`add`, `rm`, `mv`, `update-index`,
+# `read-tree`, `checkout-index`). Every form of these counts as a write, `rm --cached` and `rm -n`
+# included, since each touches the index. session-home leaves them out, so this set extends the
 # tuple rather than copying it.
-OTHER_CHECKOUT_GIT_VERBS = SESSION_HOME_GIT_VERBS + ("add",)
+OTHER_CHECKOUT_GIT_VERBS = SESSION_HOME_GIT_VERBS + (
+    "add", "rm", "mv", "update-index", "read-tree", "checkout-index")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
