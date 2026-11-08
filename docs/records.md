@@ -306,6 +306,12 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stale-cites-whole-tree` | `lint/stale_cites.py --tree [REV]` reads every tracked Markdown file at REV. | [`docs/decisions/stale-cites-whole-tree.md`](../docs/decisions/stale-cites-whole-tree.md) |
 | `stalled-steps` | `doing` is derived from live work, not typed. | [`docs/decisions/stalled-steps.md`](../docs/decisions/stalled-steps.md) |
 
+## Unsorted decisions
+
+| Slug | Gist | Link |
+|---|---|---|
+| `map-lists-record-named` | Owner, Cockpit item 268 (`banchi-map-binary-hints`), choice a, 2026-11-06 13:08 CST: "Yes: list every file a decision or debt names." Not picked: "banchi only: map its 8 files", and "Accept the loss". | [`docs/decisions/map-lists-record-named.md`](../docs/decisions/map-lists-record-named.md) |
+
 ## Debts
 
 | Slug | Gist | Link |
@@ -345,6 +351,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `inbox-send-window-unbounded` | The feedback Stop guard accepts any matching send after the owner's message, in any later turn. | [`docs/debts/inbox-send-window-unbounded.md`](../docs/debts/inbox-send-window-unbounded.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`docs/debts/inplace-edit-under-0-9-flagged.md`](../docs/debts/inplace-edit-under-0-9-flagged.md) |
 | `jobs-over-80pct-of-cap` | In the window of 2026-11-05 (decision `ci-job-caps`, each job's cap leaves its slowest run under 80%), nine jobs had a green run past 80% of the cap. | [`docs/debts/jobs-over-80pct-of-cap.md`](../docs/debts/jobs-over-80pct-of-cap.md) |
+| `js-layout-reader` | The map skill reads the debts folder from `lint/layout.json` in JS. | [`docs/debts/js-layout-reader.md`](../docs/debts/js-layout-reader.md) |
 | `kept-claim-goes-stale` | A merge keeps its claim after a read that could not run. | [`docs/debts/kept-claim-goes-stale.md`](../docs/debts/kept-claim-goes-stale.md) |
 | `lane-ack-skips-every-reply` | In `last_incoming_index`, a send's first reply from its target is its ack, so a new question in that reply passes with no send. | [`docs/debts/lane-ack-skips-every-reply.md`](../docs/debts/lane-ack-skips-every-reply.md) |
 | `lane-cycle-delete-order` | `cut_lanes` deletes dependents first. | [`docs/debts/lane-cycle-delete-order.md`](../docs/debts/lane-cycle-delete-order.md) |
