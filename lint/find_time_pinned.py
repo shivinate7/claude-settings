@@ -17,6 +17,7 @@ date read counted as a real clock. The tool fixes none, and it writes nothing. E
 - calendar: a read of the real date or the machine's zone (`datetime.now()`, `date.today()`,
   `time.localtime(<any>)`, `time.ctime(<any>)`, `time.gmtime()`, `time.asctime()`, `time.strftime(fmt)`,
   `datetime.fromtimestamp(<x>)` and `<x>.astimezone()` with no zone argument, Swift `Date()`,
+  `Date.now`, `Date(timeIntervalSinceNow: <x>)`,
   `Calendar.current` and `TimeZone.current`, `time.tzname`, `time.timezone`, the date libraries `pendulum.now()`, `arrow.now()`, `arrow.utcnow()`,
   `pendulum.today()`, `pd.Timestamp.now()`, `pd.Timestamp.today()`, `pd.Timestamp.utcnow()` and Django
   `timezone.now()`, plus, with no argument or only a zone keyword (`tzinfo=` or `timezone=`),
@@ -27,7 +28,7 @@ date read counted as a real clock. The tool fixes none, and it writes nothing. E
   `new Date(0)`, `new Date(EPOCH_MS)` with a declared constant, `dayjs(0)`, `moment.utc(EPOCH)`,
   `arrow.get(0)`, `timezone.localtime(fixed_dt)`, `pendulum.datetime(...)`, `time.gmtime(EPOCH)`, a
   `tz` argument on `fromtimestamp` or `astimezone`, and Swift `Date(timeIntervalSince1970: 0)` read no
-  clock or local zone and are not listed. A Swift `Date()` that an assert subtracts is that assert's
+  clock or local zone and are not listed. A Swift `Date()`, `Date.now` or `Date(timeIntervalSinceNow:)` that an assert subtracts is that assert's
   elapsed-assert row only. A fake clock hides every calendar row in its scope, even a read it does not fake: in Python a
   `@freeze_time(...)` def or class, or the body of a `with freeze_time(...)`; in JS a file that calls
   `jest.useFakeTimers()` or `vi.useFakeTimers()`. Its elapsed-assert rows stay. `time.tzname` and
@@ -1072,7 +1073,9 @@ SWIFT_CLOCK = re.compile(
     r"|\b(?:Continuous|Suspending)Clock\b|\.timeIntervalSince(?:Now)?\b|\.duration\s*\(\s*to\s*:"
     r"|\bclock\s*\.\s*measure\b")
 # A read of the real date or the machine's calendar or zone.
-SWIFT_CALENDAR = re.compile(r"(?<![\w$])Date\s*\(\s*\)|(?<![\w$])(?:Calendar|TimeZone)\s*\.\s*current\b")
+SWIFT_CALENDAR = re.compile(r"(?<![\w$])Date\s*\(\s*\)|(?<![\w$])Date\.now\b"
+                            r"|(?<![\w$])Date\s*\((?=\s*timeIntervalSinceNow\b)"
+                            r"|(?<![\w$])(?:Calendar|TimeZone)\s*\.\s*current\b")
 SWIFT_PASS_THROUGH = {"abs", "max", "min", "round", "floor", "ceil", "trunc", "Double", "Int", "Float", "CGFloat",
                       "timeIntervalSince", "distance", "duration", "advanced"}
 SWIFT_DECL = re.compile(r"(?<![\w$.])(?:let|var)\s+(?=[A-Za-z_])")

@@ -367,12 +367,15 @@ def calendar_judge(case, path, text, listed=(), clean=(), root=None):
     return out
 
 
-def fake_clock_judge(case, root, categories):
-    """Scope first (P7): the fixture was read. Then no row of each named category. Each failure names one category."""
-    proc = run(root, "--json")
+def fake_clock_judge(case, path, text, proof, categories):
+    """Scope first (P7): the fixture was read. The proof row is an elapsed-assert, which a fake clock keeps, so a
+    file the finder skips has no row there and fails. Then no row of each named category. Each failure names one cause."""
+    proc = run(case.root, "--json")
     case.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
     out = json.loads(proc.stdout)
     case.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+    case.assertIn((path, lineno(text, proof), "elapsed-assert"), case.rows(out),
+                  "scope: the fixture was not read, so its elapsed-assert row is not listed")
     for cat in categories:
         rows = sorted(r for r in case.rows(out) if r[2] == cat)
         case.assertFalse(rows, "%s listed under a fake clock: %s" % (cat, rows))
@@ -384,6 +387,12 @@ JS_DATE_READ = [
     "  const f_now = new Date();",
     "  expect(f_now.getUTCFullYear()).toBe(2024);",
     "});",
+]
+# A JS clock difference. A fake clock keeps its elapsed-assert row, so a fake-clock case lists it as the proof
+# that the finder read its file (fake_clock_judge).
+JS_ELAPSED = [
+    "const t0 = Date.now();",
+    "expect(Date.now() - t0).toBeLessThan(100);",
 ]
 
 
@@ -904,6 +913,8 @@ class PythonCalendarTest(FinderCase):
             "    t_ft_stamp = datetime.fromtimestamp(stamp)",
             "    t_ft_utc_kw = datetime.fromtimestamp(stamp, tz=timezone.utc)",
             "    t_ft_utc_pos = datetime.fromtimestamp(stamp, timezone.utc)",
+            "    t_ft_none_pos = datetime.fromtimestamp(stamp, None)",
+            "    t_ft_none_kw = datetime.fromtimestamp(stamp, tz=None)",
             "    t_ft_utc = datetime.utcfromtimestamp(stamp)",
             "    t_gm = time.gmtime(EPOCH)",
             "    # t_comment = datetime.fromtimestamp(EPOCH)",
@@ -912,7 +923,9 @@ class PythonCalendarTest(FinderCase):
         self.put("tests/test_fromtimestamp.py", text)
         calendar_judge(self, "tests/test_fromtimestamp.py", text,
                        listed=["t_ft_fixed = datetime.fromtimestamp(EPOCH)",
-                               "t_ft_stamp = datetime.fromtimestamp(stamp)"],
+                               "t_ft_stamp = datetime.fromtimestamp(stamp)",
+                               "t_ft_none_pos = datetime.fromtimestamp(stamp, None)",
+                               "t_ft_none_kw = datetime.fromtimestamp(stamp, tz=None)"],
                        clean=["t_ft_utc_kw = datetime.fromtimestamp(stamp, tz=timezone.utc)",
                               "t_ft_utc_pos = datetime.fromtimestamp(stamp, timezone.utc)",
                               "t_ft_utc = datetime.utcfromtimestamp(stamp)", "t_gm = time.gmtime(EPOCH)",
@@ -925,10 +938,14 @@ class PythonCalendarTest(FinderCase):
             "def test_astimezone(fixed_dt):",
             "    t_as_local = fixed_dt.astimezone()",
             "    t_as_utc = fixed_dt.astimezone(timezone.utc)",
+            "    t_as_none_pos = fixed_dt.astimezone(None)",
+            "    t_as_none_kw = fixed_dt.astimezone(tz=None)",
         )
         self.put("tests/test_astimezone.py", text)
         calendar_judge(self, "tests/test_astimezone.py", text,
-                       listed=["t_as_local = fixed_dt.astimezone()"],
+                       listed=["t_as_local = fixed_dt.astimezone()",
+                               "t_as_none_pos = fixed_dt.astimezone(None)",
+                               "t_as_none_kw = fixed_dt.astimezone(tz=None)"],
                        clean=["t_as_utc = fixed_dt.astimezone(timezone.utc)"])
 
 
@@ -981,14 +998,14 @@ class JsCategoriesTest(FinderCase):
             "tests/fake.test.js", text, ("expect(Date.now() - t0)", "elapsed-assert")))
 
     def test_jest_fake_clock_skips_new_date_calendar(self):
-        text = src("jest.useFakeTimers();", "jest.setSystemTime(new Date(0));", *JS_DATE_READ)
+        text = src("jest.useFakeTimers();", "jest.setSystemTime(new Date(0));", *JS_DATE_READ, *JS_ELAPSED)
         self.put("tests/jest_clock.test.js", text)
-        fake_clock_judge(self, self.root, ("calendar",))
+        fake_clock_judge(self, "tests/jest_clock.test.js", text, "expect(Date.now() - t0)", ("calendar",))
 
     def test_vi_fake_clock_skips_new_date_calendar(self):
-        text = src("vi.useFakeTimers();", "vi.setSystemTime(new Date(0));", *JS_DATE_READ)
+        text = src("vi.useFakeTimers();", "vi.setSystemTime(new Date(0));", *JS_DATE_READ, *JS_ELAPSED)
         self.put("tests/vi_clock.test.js", text)
-        fake_clock_judge(self, self.root, ("calendar",))
+        fake_clock_judge(self, "tests/vi_clock.test.js", text, "expect(Date.now() - t0)", ("calendar",))
 
     def test_new_date_without_a_fake_clock_still_lists_calendar(self):
         text = src(*JS_DATE_READ)
@@ -1546,15 +1563,18 @@ class SwiftCategoriesTest(FinderCase):
         ]
         text = src(*lines)
         self.put("Tests/TimingTests.swift", text)
-        code, out = self.report()
-        self.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
-        # Only the elapsed-assert rows. Calendar rows are SwiftCalendarTest's claim.
+        out = calendar_judge(self, "Tests/TimingTests.swift", text, listed=[
+            "let t0 = Date()", "let start = Date()", "let elapsed = Date().timeIntervalSince(start)",
+            "print(Date())",
+        ])
         self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, pinned(
             "Tests/TimingTests.swift", text,
             *[(f"XCTAssertLessThan(t{i}, 9)", "elapsed-assert") for i in range(len(SWIFT_CLOCKS))],
             ("XCTAssertLessThan(elapsed, 1.0)", "elapsed-assert"),
             ("#expect(elapsed < 2)", "elapsed-assert"),
-        ))
+        ), "the elapsed-assert rows are not the pinned set")
+        other = sorted(row for row in self.rows(out) if row[2] not in ("calendar", "elapsed-assert"))
+        self.assertFalse(other, "a row of another category is listed: %s" % other)
 
     def test_test_cap_forms(self):
         text = src(
@@ -1679,22 +1699,83 @@ class SwiftCalendarTest(FinderCase):
         self.assertIn(("Tests/SpanTests.swift", lineno(text, "XCTAssertLessThan(Date()"), "elapsed-assert"),
                       self.rows(out), "the elapsed subtraction in the assert is no longer elapsed-assert")
 
+    def test_date_now_and_date_since_now_outside_an_assert_are_listed(self):
+        text = src(
+            "import XCTest",
+            "final class StampReadTests: XCTestCase {",
+            "    func testStamps() {",
+            "        let n_now = Date.now",
+            "        let n_soon = Date(timeIntervalSinceNow: 60)",
+            "        let n_fixed = Date(timeIntervalSince1970: 0)",
+            "        let n_ref = Date(timeIntervalSinceReferenceDate: 0)",
+            "        let m_prefix = MyDate.now",
+            "        let m_suffix = Date.nowish",
+            "        let m_since = Date(timeIntervalSinceNowish: 1)",
+            "        print(n_now, n_soon, n_fixed, n_ref)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/StampReadTests.swift", text)
+        calendar_judge(self, "Tests/StampReadTests.swift", text,
+                       listed=["let n_now = Date.now", "let n_soon = Date(timeIntervalSinceNow: 60)"],
+                       clean=["let n_fixed = Date(timeIntervalSince1970: 0)",
+                              "let n_ref = Date(timeIntervalSinceReferenceDate: 0)",
+                              "let m_prefix = MyDate.now", "let m_suffix = Date.nowish",
+                              "let m_since = Date(timeIntervalSinceNowish: 1)"])
+
+    def test_date_now_inside_an_elapsed_assert_is_that_assert_only(self):
+        text = src(
+            "import XCTest",
+            "final class StampSpanTests: XCTestCase {",
+            "    func testSpan() {",
+            "        let s_begin = Date(timeIntervalSince1970: 0)",
+            "        XCTAssertLessThan(Date.now.timeIntervalSince(s_begin), 1)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/StampSpanTests.swift", text)
+        out = calendar_judge(self, "Tests/StampSpanTests.swift", text,
+                             clean=["XCTAssertLessThan(Date.now.timeIntervalSince(s_begin), 1)"])
+        self.assertIn(("Tests/StampSpanTests.swift", lineno(text, "XCTAssertLessThan(Date.now"), "elapsed-assert"),
+                      self.rows(out), "the elapsed subtraction of Date.now is no longer elapsed-assert")
+
+    def test_since_now_inside_an_elapsed_assert_is_that_assert_only(self):
+        text = src(
+            "import XCTest",
+            "final class SinceNowSpanTests: XCTestCase {",
+            "    func testSpan() {",
+            "        let s_since = Date(timeIntervalSince1970: 0)",
+            "        XCTAssertLessThan(Date(timeIntervalSinceNow: 0).timeIntervalSince(s_since), 1)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/SinceNowSpanTests.swift", text)
+        out = calendar_judge(self, "Tests/SinceNowSpanTests.swift", text,
+                             clean=["XCTAssertLessThan(Date(timeIntervalSinceNow: 0).timeIntervalSince(s_since), 1)"])
+        proof = lineno(text, "XCTAssertLessThan(Date(timeIntervalSinceNow")
+        self.assertIn(("Tests/SinceNowSpanTests.swift", proof, "elapsed-assert"), self.rows(out),
+                      "the elapsed subtraction of Date(timeIntervalSinceNow:) is no longer elapsed-assert")
+
     def test_calendar_forms_after_comment_openers_quotes_and_multi_line_strings(self):
         text = src(
             'let u = "http://a.test/"; let z_zone = TimeZone.current',
+            'let v = "http://b.test/"; let n_after_url = Date.now',
             'let s = "/* not a comment"',
             "let c_after = Calendar.current",
             "// Don't use Calendar.current here",
+            "// Don't read Date.now here",
             "let c_last = Calendar.current",
             'let block = """',
             "let t_block = Calendar.current",
+            "let t_block_now = Date.now",
             '"""',
         )
         self.put("Tests/CalendarTrapTests.swift", text)
         calendar_judge(self, "Tests/CalendarTrapTests.swift", text,
-                       listed=["let z_zone = TimeZone.current", "let c_after = Calendar.current",
-                               "let c_last = Calendar.current"],
-                       clean=["// Don't use Calendar.current here", "let t_block = Calendar.current"])
+                       listed=["let z_zone = TimeZone.current", "let n_after_url = Date.now",
+                               "let c_after = Calendar.current", "let c_last = Calendar.current"],
+                       clean=["// Don't use Calendar.current here", "// Don't read Date.now here",
+                              "let t_block = Calendar.current", "let t_block_now = Date.now"])
 
 
 class SwiftTrapsTest(FinderCase):
@@ -2182,12 +2263,14 @@ class DurationThroughCallTest(FinderCase):
             "}",
         )
         self.put("Tests/TraceTests.swift", text)
-        code, out = self.report()
-        self.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
-        # Only the elapsed-assert rows. Calendar rows are SwiftCalendarTest's claim.
+        out = calendar_judge(self, "Tests/TraceTests.swift", text,
+                             listed=["let start = Date()", "let end = Date()"])
         self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, pinned(
             "Tests/TraceTests.swift", text,
-            ('XCTAssertGreaterThanOrEqual(LaunchTrace.ms(end - start)', "elapsed-assert")))
+            ('XCTAssertGreaterThanOrEqual(LaunchTrace.ms(end - start)', "elapsed-assert")),
+            "the elapsed-assert rows are not the pinned set")
+        other = sorted(row for row in self.rows(out) if row[2] not in ("calendar", "elapsed-assert"))
+        self.assertFalse(other, "a row of another category is listed: %s" % other)
 
     def test_swift_interval_and_duration_inside_a_call_are_flagged(self):
         text = src(
