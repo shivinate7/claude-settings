@@ -848,7 +848,7 @@ class BatchLintFlags(tm.Env):
         if not self.linted:
             return
         under_home = self.slot_files(os.path.join(self.home, ".claude"))
-        self.assertTrue(self.slot_files(self.cfg) or under_home, "no lane-lint slot was taken: the lint never reached lint_slot()")
+        self.assertTrue(self.slot_files(self.cfg) or under_home, "no lane-lint slot file under this case's config dir or its scratch HOME")
         self.assertEqual(under_home, [], "a lane lint took its slot under HOME, not under this case's config dir: %s" % under_home)
 
     def call_log(self, script):
