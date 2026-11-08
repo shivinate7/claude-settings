@@ -1107,8 +1107,8 @@ class ForeignFileTests(StaleCase):
         self.assertEqual(unknown_lines(out), [self.NOTE], out)
 
     def test_a_touched_mjs_cite_under_ci_is_a_limit_and_stays_exit_zero(self):
-        """Ruling R3 (process-only, 2026-11-06 13:24 CST): a name the tool does not build is a limit, not an unread
-        input, so CI does not make it red. Green on main and on the builder head."""
+        """A name the tool does not build is a limit, not an unread input, so CI keeps exit 0.
+        Decision `stale-cites-at-merge` lists the unknowns that are limits of the check."""
         rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
         rc, out = self.run_check(rng, extra_env={"CI": "1"})
         self.assertEqual(rc, 0, out)

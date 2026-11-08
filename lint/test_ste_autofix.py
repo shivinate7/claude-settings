@@ -599,7 +599,7 @@ class UnreadConfigTests(unittest.TestCase):
         self.assertDocRead(out)
         self.assertNotEqual(rc, 0, "a .ste.toml that does not parse passed in CI:\n" + out)
 
-    # Owner item 276 a (12:39 CST 2026-11-06, via the coordinator 13:31 CST): an unread input is red in CI. `--fail-on never`
+    # An unread input is red in CI (decision `ci-unknown-is-red`). `--fail-on never`
     # opts out of the findings only, so the UNKNOWN line and the summary still print and the CI exit is non-zero.
 
     @unittest.skipUnless(sys.version_info >= (3, 11), "tomllib, which reads .ste.toml, needs Python 3.11 or later")
