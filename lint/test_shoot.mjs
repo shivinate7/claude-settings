@@ -121,6 +121,17 @@ Object.assign(PAGES, {
     #c{height:2500px}</style><div id="c"></div>`,
   // A fixed background gradient on a 2500 px page, over a green canvas: the gradient is drawn once, from the top.
   "/bg-fixed.html": `<!doctype html><style>body{margin:0;background:linear-gradient(#f00,#00f) fixed,#0f0}#c{height:2500px}</style><div id="c"></div>`,
+  // A sticky header holds an absolute child that overlaps a later relative block. A sticky element is a stacking
+  // context, so the block (z-index 1) paints over the child's bottom 10 px in a plain capture.
+  "/stack.html": `<!doctype html><style>body{margin:0;background:#00f}#sp{height:100px}#hdr{position:sticky;top:0;height:100px;background:#0f0}
+    #pop{position:absolute;top:50px;left:0;width:200px;height:60px;background:#ff0;z-index:5}#below{position:relative;z-index:1;height:300px;background:#f00}
+    #rest{height:500px}</style><div id="sp"></div><div id="hdr"><div id="pop"></div></div><div id="below"></div><div id="rest"></div>`,
+  // A fixed background on a pseudo-element: the gradient is drawn once, from the top of a 2500 px page.
+  "/pseudo-bg.html": `<!doctype html><style>body{margin:0;background:#0f0;position:relative;height:2500px}
+    body::before{content:"";position:absolute;top:0;left:0;right:0;height:2500px;background:linear-gradient(#f00,#00f) fixed}</style>`,
+  // A fixed ::before strip in an external same-origin sheet, on a route whose policy forbids inline styles.
+  "/csp.html": `<!doctype html><link rel="stylesheet" href="/csp.css"><div id="c"></div>`,
+  "/csp.css": `body{margin:0;background:#00f}body::before{content:"";position:fixed;top:0;left:0;right:0;height:300px;background:#0f0}#c{height:2500px}`,
 });
 let server, base, tmp, browser, tls;
 
@@ -149,10 +160,13 @@ function runFolder(root = TEMP_ROOT) {
   return own;
 }
 
+// Extra headers per route. The CSP route forbids inline styles, so an injected <style> element is blocked.
+const HEADERS = { "/csp.html": { "content-security-policy": "style-src 'self'" } };
 function serve(req, res) {
   if (req.url === "/slow.html") return; // never answers: the route must time out
   const body = PAGES[req.url];
-  res.writeHead(body ? 200 : 404, { "content-type": "text/html", connection: "close" });
+  const type = req.url.endsWith(".css") ? "text/css" : "text/html";
+  res.writeHead(body ? 200 : 404, { "content-type": type, connection: "close", ...HEADERS[req.url] });
   res.end(body || "not found");
 }
 
@@ -745,6 +759,53 @@ test("a fixed background gradient is drawn once, from the top, in the full-page 
   assert.equal(px.width, 390, "scope: the shot is at 390");
   assert.equal(px.height, 2500, "scope: the PNG is the full page");
   assert.equal(px.column, "R@0 B@447 G@900", `the fixed gradient repeats in the full-page PNG, once per viewport tile (runs ${px.column})`);
+});
+
+// ---- Pinned stacking, pseudo-element backgrounds, and a page policy in a touch stitch ----
+// Each case reads its own shot from one shared run at 390 with touch, asserts the page height before the column, and
+// expects what a plain capture of the same page shows (the 1440 no-touch capture, measured for each fixture).
+const PSEUDO_SHOTS = {
+  routes: [
+    { name: "stack", path: "/stack.html" },
+    { name: "pseudo-bg", path: "/pseudo-bg.html" },
+    { name: "csp", path: "/csp.html" },
+  ],
+  sizes: [390], themes: ["light"],
+};
+let pseudoShots;
+const shotsForPseudo = () => (pseudoShots ??= run(PSEUDO_SHOTS));
+
+test("a child of a sticky header that overlaps a later block: the block covers it, as in a plain capture", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForPseudo();
+  assert.ok(r.pngs.includes("stack-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "stack-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 1000, "scope: the PNG is the full page (100 + 100 + 300 + 500)");
+  assert.equal(px.column, "B@0 G@100 Y@150 R@200 B@500", `the touch stitch lifts the child over the later block (runs ${px.column})`);
+});
+
+test("a fixed background on a pseudo-element is drawn once, from the top, in the full-page PNG", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForPseudo();
+  assert.ok(r.pngs.includes("pseudo-bg-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "pseudo-bg-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2500, "scope: the PNG is the full page");
+  assert.equal(px.column, "R@0 B@447 G@900", `the pseudo-element's fixed gradient repeats in the full-page PNG (runs ${px.column})`);
+});
+
+test("a fixed ::before strip from an external sheet, under a policy that forbids inline styles: it shows once", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForPseudo();
+  assert.ok(r.pngs.includes("csp-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "csp-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2500, "scope: the PNG is the full page");
+  assert.equal(px.column, "G@0 B@300", `the fixed strip repeats: the hide did not apply under the page's policy (runs ${px.column})`);
 });
 
 // A self-signed https fixture. The certificate is built here, into the run folder, and never committed.
