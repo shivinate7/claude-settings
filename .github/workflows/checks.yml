@@ -494,6 +494,12 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
 
+      - name: Env constant in literal fixture suite
+        run: python3 lint/test_check_env_const_in_literal.py
+
+      - name: Env constant in literal check
+        run: python3 lint/check_env_const_in_literal.py
+
       - name: Unknown-read contract fixture suite
         run: python3 lint/test_check_unknown_reads_contract.py
 
