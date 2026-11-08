@@ -1,0 +1,11 @@
+{
+  "title": "The Windows stamp fixture suite ends at its step cap and kills its own process tree",
+  "why": "On batch 63 (#1824), Windows job checks-windows-rest ran step \"Record stamp engine fixture suite\" (node actions/stamp/test_stamp.mjs) for more than 30 min, past its 5-min step cap; the job was cancelled at its own cap and no step failed. The job log returned 404, so the cause is unread; an orphan grandchild process is the suspect. Runner 8, 02:00 CST Nov 8, via coordinator 01:58 CST. Regression of done step c158 (same suite, orphan sweep, PR #735, Oct 28).",
+  "note": "Fix: the step ends at its cap, and the suite kills its own process tree. Red case first: a fixture that hangs, which today runs past the cap. First read why c158's orphan sweep no longer holds. Runner 8 re-ran the failed jobs once and dropped no lane. Queue fix (owner 13:20 CST Nov 7). Slug from runner 8. Filed 02:22 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 569,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T01:59:00-06:00"
+}
