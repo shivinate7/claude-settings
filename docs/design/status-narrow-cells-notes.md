@@ -73,7 +73,15 @@ With `barsBlockedPage`, at 390 and 1280, light and dark, for the three bars in `
 
 ## Critique (impeccable, single context)
 
-See the lane report.
+Degraded: single context, no sub-agent tool in a designer, and the context launcher is refused here. The detector found
+nothing; it reads the harness, not the screen in the frames.
+- Open: one screen can show one phase two ways. At 1280 the Now card and rail chip draw 30 cells while the phase head
+  draws runs. The same question as the roadmap notes: is that acceptable, or should all of a phase's bars go to runs
+  together (JS, one layout read per render)?
+- Open: in dark the done block and the paused low cell share one colour (1.02:1). Height alone tells them apart; the
+  in-progress and stalled blocks sit between them in the fixture, but a phase with neither puts them side by side.
+- Open: at the 4px floor a 1-step run reads larger than its share. The d/n count is exact.
+- Fixed: none needed in the bars. The harness labels sit below the bars, so they cover no cell.
 
 ## Seen, outside this lane
 

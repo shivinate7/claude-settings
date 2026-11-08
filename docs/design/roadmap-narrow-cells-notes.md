@@ -78,7 +78,15 @@ and the phase head bar:
 
 ## Critique (impeccable, single context)
 
-See the lane report. Findings fixed in the mockup: none needed on the bars; the harness labels sit below the bar.
+Degraded: single context, no sub-agent tool in a designer, and the context launcher is refused here. The detector found
+nothing in either mockup; it reads the harness, not the screen in the frames.
+- Open: one screen can show one phase two ways. At 390 the Now card draws 30 cells while the rail chip draws runs. CSS
+  cannot make one bar follow another's width. A question for the owner, not blocking: is that acceptable, or should a
+  phase that goes to runs in any bar go to runs in all of them (JS, one layout read per render)?
+- Open: nothing on the screen teaches that a low cell means paused, as nothing taught the ring. The bar's `title` and
+  the Now card words carry it.
+- Open: at the 4px floor a 1-step run reads larger than its share (4px of 58px for 1 of 30). The d/n count is exact.
+- Fixed: none needed in the bars. The harness labels sit below the bars, so they cover no cell.
 
 ## Seen, outside this lane
 
