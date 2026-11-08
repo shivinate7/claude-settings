@@ -64,11 +64,10 @@ Deep links: `#s=mixed|dense`, `&o=hatch|tint`, `&c=on|off`, `&w=all|390|1280`, `
   `renderRail` and `renderPhase` (the `.ph-head .prog` bar).
 - JS: the bar names and rail labels of item 6, and the Now card words of item 4.
 
-## Input Needed
+## Blocked cells
 
-- Departs from: `renderNow` and `renderPhase` pass 0 for blocked to `segs`, so the Now card and phase
-  head bars draw a blocked step as to do. Only the rail draws it red. The mockup keeps that. Passing
-  the blocked count in both would match the rail. Not blocking.
+- `renderNow`, `renderRail` and `renderPhase` each pass the blocked count to `segs`, so every bar draws
+  a blocked step red. The mockup draws it as to do in the Now card and phase head bars.
 
 ## Critique (impeccable, single context: no agent tool in a designer)
 

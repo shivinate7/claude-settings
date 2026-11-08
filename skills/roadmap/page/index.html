@@ -77,6 +77,8 @@ a{color:var(--accent-ink)}
 .now h2 .plain{text-transform:none;letter-spacing:0;font-weight:400}
 .now .big{font-size:18px;font-weight:600;line-height:1.2}
 .now .sub{font-size:12px;color:var(--ink-2)}
+/* The count line breaks only between groups ("1 in progress ·"): a group never splits, and no line starts with its dot. */
+.now .sub .grp{white-space:nowrap}
 .now ol,.now ul{margin:0;padding:0;list-style:none}
 .now li{display:flex;gap:8px;align-items:baseline;padding:2px 0;font-size:13px;min-width:0}
 .now li .id{flex:none}
@@ -569,7 +571,7 @@ function renderNow(){
   $('#now').innerHTML = `
   <div><h2>Phase <span class="num">${PH.indexOf(cur)+1}/${PH.length}</span></h2>
     <div class="big">${esc(cur.n)}</div>
-    <div class="sub"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act?` · <span class="num">${act}</span> in progress`:''}${c.stl?` · <span class="num">${c.stl}</span> stalled`:''}${c.pzd?` · <span class="num">${c.pzd}</span> paused`:''}${c.blk?` · <span class="num">${c.blk}</span> blocked`:''}</div>
+    <div class="sub">${[`<span class="num">${done}</span> of <span class="num">${ss.length}</span> done`,...[[act,'in progress'],[c.stl,'stalled'],[c.pzd,'paused'],[c.blk,'blocked']].filter(x=>x[0]).map(x=>`<span class="num">${x[0]}</span> ${x[1]}`)].map(g=>`<span class="grp">${g}</span>`).join('&nbsp;· ')}</div>
     <div class="bar" style="margin-top:7px"${barAttrs(c,ss.length)}>${segs(c,ss.length)}</div>
     <div class="sub" style="margin-top:6px;color:var(--muted)">Whole plan <span class="num">${tdone}/${tot}</span> done</div>
   </div>
@@ -994,8 +996,7 @@ function unavailable(){
       if(meta && !meta.querySelector('.tag.' + (k === 'stalled' ? 'stl' : 'pzd')))
         meta.insertAdjacentHTML('beforeend', `<span class="tag ${k === 'stalled' ? 'stl' : 'pzd'} ic" role="img" aria-label="${label(k)}" title="${label(k)}${k === 'stalled' ? ': no live lane and no open pull request' : ''}">${G[k]}</span>`);
     };
-    stalledIds.forEach(id => put(id, 'stalled'));
-    pausedIds.forEach(id => put(id, 'paused'));
+    steps.forEach(s => { const k = shownState(s); if(k === 'stalled' || k === 'paused') put(s.id, k); });
   };
   const inner = renderPlan;
   renderPlan = function(){ inner(); draw(); marks(); };

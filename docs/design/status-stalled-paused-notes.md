@@ -49,22 +49,24 @@ stalled mark is already red.
 
 - CSS: `.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }`.
 - CSS: `.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }`.
+- CSS: a paused cell under 3px wide paints solid, with 1px of each gap: `--ink` in light, `--ground` in
+  dark. The ring fills such a cell and paints near a done cell (1.15:1); the solid paint is at least 3:1.
 - JS: `segs(counts, n)` over `tally` emits `<i class="stl">` and `<i class="pzd">` in the order of item 4.
   Count `t` and `p` with `shownState(s)`. Change all three calls: `renderNow`, `renderRail` and the
   phase head in the phase view.
 - JS: the Now card words of item 3, and the labels of item 5.
 
-## Input Needed
+## Blocked cells
 
-- Departs from: `renderNow` passes 0 for blocked to `segs`, so the Now card bar draws a blocked step
-  as to do. The rail and phase head draw it red. The mockup keeps that. Not blocking.
+- `renderNow`, `renderRail` and the phase head each pass the blocked count to `segs`, so every bar draws
+  a blocked step red. The mockup draws it as to do in the Now card bar.
 
 ## Critique (impeccable, single context: no agent tool in a designer)
 
 The detector found nothing. It reads the harness, not the screen in the frames.
 - Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's foot.
-- Open: in a rail chip at 390 with 30 steps, the paused ring reads as a grey line. The phase head
-  keeps both shapes (measured at 3x).
+- Fixed: a paused cell under 3px wide (a rail chip at 390, the phase head at 1280, with 30 steps) read
+  as a grey line beside a done cell. It now paints solid, as in the builder changes above.
 - Open: Tint (item 2) fails in dark. It stays only so the owner can cull it.
 
 ## Seen, outside this lane
