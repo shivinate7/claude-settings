@@ -731,6 +731,10 @@ class GhLock(Lock):
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
 
+def short_ref(ref):
+    """A commit or branch for a message: a 40-hex sha cut to 9, anything else (a branch name) whole, so the reader can tell which branch was read."""
+    return ref[:9] if re.fullmatch(REVIEW_SHA, ref, re.ASCII) else ref
+
 class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
     Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
@@ -959,7 +963,7 @@ class Host:
                 raise ValueError("a file entry has no filename")
             return found
         except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"cannot read the compare of {base[:9]} and {head[:9]} {READ_CITE}: {e}")
+            raise Stop(f"cannot read the compare of {short_ref(base)} and {short_ref(head)} {READ_CITE}: {e}")
 
     def protection_names(self):
         """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
@@ -3705,7 +3709,7 @@ def main(argv, host=None, lock=None):
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             if info["head"] != a.head:
-                print(f"merge: past round: head {a.head[:9]} is one of the PR's commits, not the live head {info['head'][:9]}; merge --reviewed reads this record stale.", file=sys.stderr)
+                print(f"merge: stale record: head {a.head[:9]} is one of the PR's commits, not the live head {info['head'][:9]}; merge --reviewed reads this record stale.", file=sys.stderr)
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
         if not a.reviewed:
