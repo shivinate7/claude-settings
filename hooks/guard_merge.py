@@ -17,7 +17,7 @@ from guard_core import (
     segment_tokens, shell_abs, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -862,7 +862,9 @@ def conflict_markers_hit(stripped: str, cwd: str):
     whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         call = git_call_of(segment)
@@ -879,8 +881,13 @@ def conflict_markers_hit(stripped: str, cwd: str):
             conflict_step = conflict_step or (call is not None and _makes_conflict(call))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        root = command_root(stripped, cwd)
-        where = _absolute(c_target, root) if c_target is not None else root
+        where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
+        if c_target is not None:
+            where = _absolute(c_target, where or "")
+            where = where if os.path.isabs(where) else None
+        tree = GIT_WORK_TREE_RE.search(segment)
+        if tree and where:
+            where = _absolute(tree.group(2), where)
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
             continue
@@ -927,7 +934,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 # ---- merge --role: the tier is read from this session's own get_session record
 ROLE_TIERS = ("batch-runner",)
-ROLE_TAG_PREFIX = "cs-build:"
+ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
     "If this session is the batch runner: run get_session (no argument) alone in its own "
