@@ -85,6 +85,14 @@ ENV_INLINE_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)(?:=.*)?$")
 # Commands that ask whether the file is THERE. They read no contents.
 ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 
+# `find` tests that take a name pattern, and the actions that act on a match. A pattern after one of
+# those tests lists the path and reads no contents, as `ls` does, unless the segment also holds an
+# action that runs a command, deletes, or writes the match list to a file.
+ENV_FIND_NAME_TESTS = (
+    "-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex")
+ENV_FIND_ACTIONS = (
+    "-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls")
+
 # Commands that only print their own arguments. An env name among the arguments is TEXT, printed to
 # stdout or written to a file that is NOT an environment file (`echo <name> > .worktreeinclude`),
 # and no environment file is read or written. A redirect onto an environment file is refused first. `cat <name> > x` is not on the list, so it stays held.
@@ -426,7 +434,8 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
 # ACCEPTED LIMITS, each named so nobody trusts this layer past them:
 #   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
 #   - a dot glob such as `cat .*` or `tar .*` refuses, on purpose, as it sweeps in `.env`;
-#   - `find -name '.env*'` refuses, and `ls` or `git ls-files` is the way to list;
+#   - `find -name '.env*'` lists paths and is allowed, as `ls` is; `find .env -print` is judged
+#     as a name word and refuses;
 #   - a relay split across two separate tool calls (write the name to a file in one, read the file
 #     in the next) cannot be seen by a per-command guard;
 #   - the relay check matches the literal path, so another spelling of the same file (`./f`, or
@@ -1286,6 +1295,9 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     continue  # the name is data, and no contents are read or written
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
+                if (command == "find" and previous in ENV_FIND_NAME_TESTS
+                        and not any(w in ENV_FIND_ACTIONS for w in words)):
+                    continue  # a name test lists the path, as ls does
                 actor = "'%s'" % command if command else "this command"
                 return (ENV_CONTENTS_REASON,
                         "%s would read, write or commit the contents of '%s'" % (actor, named))
