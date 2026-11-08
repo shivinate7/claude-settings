@@ -795,7 +795,8 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel):
 # A step that takes the head sha runs on the pushed commit against origin's default branch (CI's base, never
 # the destination's tracking ref). When origin holds the destination, it runs again on the remote tip, and
 # the push is refused only for finding lines the first run prints and the second lacks, compared by text.
-# A step that takes only the base ref reads the checked-out HEAD, so it runs once with the destination as
+# A step that takes only the base ref reads the working tree (a diff against the base with no second rev,
+# so an uncommitted line counts too), so it runs once with the destination as
 # its base when origin holds it (the lines the push adds), else origin's default branch.
 # A finding is a non-indented stdout line; ALLOWED, UNKNOWN and REMEDY lines are not. Unknown means allowed: a
 # shallow clone (a step's own `<name>: UNKNOWN` line; the note adds `git fetch --unshallow origin`), a step
