@@ -275,9 +275,10 @@ for (const scheme of ["light", "dark"]) {
 // button and the phase head. The fixture is a full phase of 30 steps: 1 done, a2 live (in progress), s3 stalled, p4 paused, 26 to do.
 const BARS = [["the Now card's bar", "#now .bar"], ["the rail's cleanup bar", '#rail button[data-phase="cleanup"] .bar'], ["the phase head's bar", "#phases .ph-head .bar"]];
 // c1 is named here: make_repo adds its own to-do c1 to any fixture that does not name one.
-const barFixture = () => ({
+// n is the phase's step count (30 by default): the to-do steps fill the rest.
+const barFixture = (n = 30) => ({
   c1: stepOf("Step c1", "todo", 1), d1: stepOf("Step d1", "done", 1), a2: stepOf("Step a2", "doing", 2), s3: stepOf("Step s3", "doing", 3), p4: stepOf("Step p4", "doing", 4),
-  ...Object.fromEntries(Array.from({ length: 25 }, (_, i) => ["t" + (i + 5), stepOf("Step t" + (i + 5), "todo", i + 5)])),
+  ...Object.fromEntries(Array.from({ length: n - 5 }, (_, i) => ["t" + (i + 5), stepOf("Step t" + (i + 5), "todo", i + 5)])),
 });
 const BAR_LIVE = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a2", branch: "a2" }], branches: [], sessions: [] };
 const STALLED_S3_P4 = { why: "", steps: [{ id: "s3", fix: "todo" }], paused: ["p4"], badPause: [], items: [], ...NO_ITEMS };
@@ -291,7 +292,7 @@ test("the bars draw a stalled and a paused step as their own cells, in the order
   }
 });
 // A blocked step is drawn after the paused cell, so the order holds on all three bars with a blocked step among the others.
-const barFixtureBlocked = () => ({ ...barFixture(), t5: stepOf("Step t5", "blocked", 5) });
+const barFixtureBlocked = (n = 30) => ({ ...barFixture(n), t5: stepOf("Step t5", "blocked", 5) });
 test("the bars draw a blocked step after a stalled and a paused one, in the order done, in progress, stalled, paused, blocked, to do", async (t) => {
   const page = await open(t, builtPage({ steps: barFixtureBlocked(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
   for (const [name, scope] of BARS) {
@@ -364,7 +365,7 @@ for (const width of [390, 1280]) for (const [name, scope] of BARS) test(`the pau
     const muted = await tokenColour(page, "--muted");
     const c = await lowCell(drawn[0]);
     assert.equal(c.size, "100% 50%", `${name} in ${scheme}: the paused cell's background-size is "${c.size}", not "100% 50%"`);
-    assert.match(c.pos, /100%$/, `${name} in ${scheme}: the paused cell's background-position "${c.pos}" is not at the bottom`);
+    assert.equal(c.pos, "0% 100%", `${name} in ${scheme}: the paused cell's background-position is "${c.pos}", not the bottom-left "0% 100%" the page emits`);
     assert.equal(c.repeat.split(" ").pop(), "no-repeat", `${name} in ${scheme}: the paused cell repeats its paint, so it fills the top half too ("${c.repeat}")`);
     assert.ok(c.image.includes(muted), `${name} in ${scheme}: the paused cell's background-image is not --muted (${muted}): "${c.image}"`);
     assert.equal(c.shadow, "none", `${name} in ${scheme}: the paused cell still draws a ring: box-shadow "${c.shadow}"`);
@@ -398,12 +399,28 @@ for (const scheme of ["light", "dark"]) test(`control: --muted and --bad, read f
 const RULE_PX = 30 * 5 - 2;
 // The bar's layers from the layout: its own width, and its cells and runs with their widths (a cell at 0 width is not drawn).
 // A run keeps its 4px minimum past a 0px runs layer, and the layer clips it, so a run counts as drawn only in a drawn layer.
-const barLayers = (loc) => loc.evaluate((bar) => {
-  const w = (e) => e.getBoundingClientRect().width;
-  const parts = (els) => els.map((e) => ({ cls: e.className, w: w(e) }));
+// With px, the bar is set to that width in the same step as the read, so a re-render cannot undo it. A run's vis is its part inside the
+// bar and the runs layer, the two boxes that clip it. cellSpan is the span the drawn cells cover, and runsW the runs layer's width.
+const barLayers = (loc, px) => loc.evaluate((bar, set) => {
+  if (set !== undefined) { bar.style.setProperty("width", set + "px"); bar.style.flex = "0 0 auto"; }
+  const box = (e) => e.getBoundingClientRect();
+  const w = (e) => box(e).width;
+  const b = box(bar);
   const runs = bar.querySelector(":scope > .runs");
-  return { barW: w(bar), cells: parts([...bar.querySelectorAll(":scope > i")]), runs: runs ? parts([...runs.querySelectorAll(":scope > i")]) : [], runsDrawn: !!runs && w(runs) > 0 };
-});
+  const clip = runs ? box(runs) : b;
+  const vis = (e) => { const r = box(e); return Math.max(0, Math.min(r.right, b.right, clip.right) - Math.max(r.left, b.left, clip.left)); };
+  const cells = [...bar.querySelectorAll(":scope > i")];
+  const drawn = cells.filter((e) => w(e) > 0);
+  return {
+    barW: w(bar),
+    n: getComputedStyle(bar).getPropertyValue("--n").trim(),
+    cells: cells.map((e) => ({ cls: e.className, w: w(e) })),
+    cellSpan: drawn.length ? Math.max(...drawn.map((e) => box(e).right)) - Math.min(...drawn.map((e) => box(e).left)) : 0,
+    runs: runs ? [...runs.querySelectorAll(":scope > i")].map((e) => ({ cls: e.className, w: w(e), vis: vis(e) })) : [],
+    runsW: runs ? w(runs) : 0,
+    runsDrawn: !!runs && w(runs) > 0,
+  };
+}, px);
 for (const width of [390, 1280]) for (const scheme of ["light", "dark"]) for (const [name, scope] of BARS) test(`${name} at ${width} wide in ${scheme} draws one layer, cells or runs by the narrow rule, and each drawn part is at least 3px`, async (t) => {
   const page = await open(t, builtPage({ steps: barFixtureBlocked(), live: BAR_LIVE, stalled: STALLED_S3_P4 }), width); if (!page) return;
   await page.emulateMedia({ colorScheme: scheme });
@@ -417,6 +434,49 @@ for (const width of [390, 1280]) for (const scheme of ["light", "dark"]) for (co
   for (const p of [...cellsDrawn, ...runsDrawn]) assert.ok(p.w >= 3, `${name} at ${width} wide draws a ${p.w.toFixed(1)}px part (${p.cls || "to do"}), under 3px`);
   if (narrow) assert.deepEqual(L.runs.map((r) => r.cls), ["done", "act", "stl", "pzd", "blk", ""], `${name} at ${width} wide: its runs are not one each of done, in progress, stalled, paused, blocked, to do, in that order`);
   else assert.equal(cellsDrawn.length, 30, `${name} at ${width} wide draws ${cellsDrawn.length} cells, not one per step (30)`);
+});
+
+// ---------------------------------------------------------------- the edge width (lane nfp-npc-edge)
+// At steps x 5px - 2px the cells' switch and the runs layer's switch are both 0, so the bar draws nothing. One px either side, one layer
+// draws alone and spans the bar. Under the edge the runs layer is (edge - width) x 1000px, so it spans the bar only while that is at least
+// the width: 0.02px under the edge is a case of its own. The width is set on the bar, so no viewport is in the case. Layout units are
+// 1/64px, so a width reads within 0.05px. A drawn run is 4px or more where it shows.
+const LAYOUT_TOL = 0.05, RUN_MIN_PX = 4;
+const edgeWidths = (n) => [[5 * n - 3, "1px under the edge"], [5 * n - 2.02, "0.02px under the edge"], [5 * n - 2, "at the edge"], [5 * n - 1, "1px over the edge"]];
+for (const n of [30, 13]) for (const [px, what] of edgeWidths(n)) test(`edge width: a ${n}-step bar set to ${px}px (${what}) draws exactly one layer, cells or runs, and that layer spans the bar`, async (t) => {
+  const page = await open(t, builtPage({ steps: barFixtureBlocked(n), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  const problems = [];
+  for (const [name, scope] of BARS) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    const L = await barLayers(page.locator(scope), px);
+    assert.equal(L.n, String(n), `${name} reads --n ${L.n}, not ${n}: the fixture did not build a ${n}-step bar`);
+    assert.equal(L.cells.length, n, `${name} has ${L.cells.length} cells, not ${n}`);
+    assert.ok(Math.abs(L.barW - px) < LAYOUT_TOL, `${name} did not take the ${px}px width: it measures ${L.barW}px`);
+    const cellsDrawn = L.cells.some((p) => p.w > 0), runsDrawn = L.runsDrawn;
+    if (cellsDrawn === runsDrawn) { problems.push(`${name} at ${px}px draws ${cellsDrawn ? "cells and runs both" : "no cell and no run"}`); continue; }
+    const layer = cellsDrawn ? L.cellSpan : L.runsW;
+    if (Math.abs(layer - L.barW) > LAYOUT_TOL) problems.push(`${name} at ${px}px: the drawn ${cellsDrawn ? "cells" : "runs layer"} spans ${layer.toFixed(2)}px of a ${L.barW.toFixed(2)}px bar`);
+    if (runsDrawn) for (const r of L.runs) if (r.vis < RUN_MIN_PX - LAYOUT_TOL) problems.push(`${name} at ${px}px: its ${r.cls || "to-do"} run shows ${r.vis.toFixed(2)}px, under ${RUN_MIN_PX}px`);
+  }
+  assert.deepEqual(problems, [], `the ${n}-step bars at ${px}px:\n  ${problems.join("\n  ")}`);
+});
+// Six steps, all five kinds and a to-do, in a 20px bar. Six runs need 34px at a 4px minimum with 2px gaps, so 4px cannot hold at 20px:
+// each run present must show at 1px or more here.
+const SIX_FIXTURE = () => ({ c1: stepOf("Step c1", "todo", 1), d1: stepOf("Step d1", "done", 1), a2: stepOf("Step a2", "doing", 2), s3: stepOf("Step s3", "doing", 3), p4: stepOf("Step p4", "doing", 4), t5: stepOf("Step t5", "blocked", 5) });
+const RUN_VISIBLE_PX = 1;
+test("edge width: a 6-step bar with all five kinds, set to 20px, shows every run present", async (t) => {
+  const page = await open(t, builtPage({ steps: SIX_FIXTURE(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  const problems = [];
+  for (const [name, scope] of BARS) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    const L = await barLayers(page.locator(scope), 20);
+    assert.equal(L.n, "6", `${name} reads --n ${L.n}, not 6: the fixture did not build a 6-step bar`);
+    assert.deepEqual(L.cells.map((c) => c.cls), ["done", "act", "stl", "pzd", "blk", ""], `${name} does not draw the six kinds in order`);
+    assert.ok(Math.abs(L.barW - 20) < LAYOUT_TOL, `${name} did not take the 20px width: it measures ${L.barW}px`);
+    assert.ok(L.runsDrawn, `${name} at 20px draws no runs layer`);
+    for (const r of L.runs) if (r.vis < RUN_VISIBLE_PX) problems.push(`${name} at 20px: its ${r.cls || "to-do"} run shows ${r.vis.toFixed(2)}px, under ${RUN_VISIBLE_PX}px`);
+  }
+  assert.deepEqual(problems, [], `the 6-step bars at 20px:\n  ${problems.join("\n  ")}`);
 });
 
 // The blocked step: a phase bar draws it as blocked. The rail already does; it is the control.
