@@ -23,7 +23,9 @@
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
                           PR's issue comments since the PR opened.
   merge --reviewed        the ledger: one line per open PR, `#n branch act age`, with its one next act read from GitHub alone, first match wins:
-                          `batch` (a done review record for the live head), `lane round n` (an open record, or one for another head),
+                          `lane lint red: <steps>` (a done record for the live head, and a `Lint: red <live head> <steps>` comment that
+                          `merge --build-batch` posted: it comes before `batch`), `batch` (a done review record for the live head),
+                          `lane round n` (an open record, or one for another head),
                           `waits on debt:<slug>|page:<item id>` (a held, parked or replaced label and a `Waits on:` comment line),
                           `batch run` (the `batch` label: an integration PR, aged from its labeled event, the batch limit),
                           `blocked on #N` (its base is the head branch of another PR of this repo; a fork's head never counts),
@@ -61,8 +63,9 @@
                           --push one ls-remote and one push. The lint skip adds one full `git log` of the base, one `ci-job checks --lint --plan`
                           start, a merge-base, a rev-list and a diff per candidate, one `hit_suites` call per candidate whose paths are not empty,
                           and, for the newest lint change, one `hit_suites` call per base commit that changes a path, newest first, until one
-                          hits: the worst case is every such commit of the base's history, when none hits (then every head is linted). No timer, file
-                          or log of its own.
+                          hits: the worst case is every such commit of the base's history, when none hits (then every head is linted). Each merge
+                          that conflicts only on the records page runs the records generator once, and again when the merge is replayed because
+                          a PR was left out. No timer, file or log of its own.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2691,8 +2694,11 @@ class BatchBuild:
         """True when a lint step of the base's workflow reads one of `paths`. Unread (a Stop) is True: the head is linted."""
         try:
             if self._skip is None:  # every checks step but the lint steps: hit_suites skips them, so the hits are the lint steps' alone
-                self._skip = step_names(self.probe) - lint_steps(self.probe, self.base_ref)
-            return bool(hit_suites(self.probe, sorted(paths), self._skip))
+                try:
+                    self._skip = step_names(self.probe) - lint_steps(self.probe, self.base_ref)
+                except Stop:
+                    self._skip = False  # kept, so a failed plan is not started again for the next head
+            return self._skip is False or bool(hit_suites(self.probe, sorted(paths), self._skip))
         except Stop:
             return True
 
@@ -2889,7 +2895,8 @@ def build_batch(root, h, base, push=""):
     skipped, one comment POST per red lint, and with --push one ls-remote and one push. The lint skip (BatchBuild.lint_skip) adds one full `git log`
     of the base (history), one `ci-job checks --lint --plan` start (lint_steps), a merge-base, a rev-list and a diff per candidate, one hit_suites
     call per candidate with paths, and for newest_lint_change one hit_suites call per base commit that changes a path, newest first, until one
-    hits: every such commit of the base's history in the worst case, when none hits (then every head is linted). No timer, file or log of its own."""
+    hits: every such commit of the base's history in the worst case, when none hits (then every head is linted). Each merge that conflicts only on
+    the records page runs the records generator once (heal_records_page), and again when rebuild replays it. No timer, file or log of its own."""
     if push:
         if push == base:
             raise Stop(f"--push names the base {base}: a batch goes to a new branch, never to the base. {BATCH_CITE_BUILD}")
@@ -2918,7 +2925,7 @@ def build_batch(root, h, base, push=""):
     for n in cands:
         d = by_num[n]
         branch, sha = d["head"]["ref"], d["head"]["sha"]
-        held = next((k for k in holds if k in {x["name"] for x in d.get("labels") or []}), None)
+        held = next((k for k in holds if k in label_names(d)), None)
         if held:
             left[n] = f"label {held}"
             continue
@@ -3689,12 +3696,16 @@ def stack_heads(pulls):
         return not base_repo or (d["head"].get("repo") or {}).get("full_name") == base_repo
     return {d["head"]["ref"]: d["number"] for d in pulls if same_repo(d)}
 
+def label_names(d):
+    """-> the label names of an open pull request `d` as `pages("pulls")` lists it: the one read of them, for pr_acts and build_batch."""
+    return {x["name"] for x in d.get("labels") or []}
+
 def pr_acts(h, pulls, holds=True):
     """-> {n: (branch, act text, kind or None for no next act, since, the number it is blocked on)} for the open `pulls`, the one home of the next-act
     rules in `_reviewed_lines` (its docstring lists them). Reads the repo's comments since the oldest pull request (one list read) and, only when
     `holds` and a pull request reaches the hold rule, its issue events. `holds` False skips the hold rule, so a pull request with a hold label and no
-    record reads as blocked or NO NEXT ACT. One with a done record still reads `batch`, because the record rule runs first: a caller that wants no held
-    pull request checks the labels itself (build_batch does)."""
+    record reads as blocked, the first `lane round` (a draft) or NO NEXT ACT. One with a done record still reads `batch`, because the record rule runs first:
+    a caller that wants no held pull request checks the labels itself (build_batch does)."""
     records, plain = {}, {}  # PR number -> [(time, body)], oldest first: its review records, and all its comments
     for c in h.issue_comments(min(d["created_at"] for d in pulls)):
         m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
@@ -3707,7 +3718,7 @@ def pr_acts(h, pulls, holds=True):
     acts = {}  # n -> (branch, act text, kind or None for no next act, since, the number it is blocked on)
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, opened = d["number"], d["head"]["sha"], github_epoch(d["created_at"])
-        labels, act = {x["name"] for x in d.get("labels") or []}, None
+        labels, act = label_names(d), None
         if records.get(n):
             at, body = records[n][-1]
             rec = parse_review(body)
