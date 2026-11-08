@@ -212,5 +212,127 @@ class IdleLanesCli(unittest.TestCase):
         self.assertEqual(out.splitlines(), ["hold (step c3 still doing under this lane; lane session_a)", HELD_ONE], out)
 
 
+# A `gh` for the --sessions and --items cases. It answers `gh api repos/<owner>/<repo>/pulls` from the file named by
+# FAKE_GH_PULLS, the way GitHub's list route does: state (open by default), page and per_page, a Link header with
+# rel="next", and the -i header block that the merge tool's paged read takes. --paginate gets every row. Each argv is
+# logged to FAKE_GH_LOG as one JSON line. Any other call fails here, so a missed shim never reaches the real gh.
+FAKE_GH = r'''#!/usr/bin/env python3
+import json, os, re, sys
+
+args = sys.argv[1:]
+with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(args) + "\n")
+text = " ".join(args)
+route = next((a.split("?", 1)[0] for a in args if re.match(r"repos/[^/?]+/[^/?]+/pulls(\?|$)", a)), None)
+if args[:1] != ["api"] or route is None:
+    sys.stderr.write("fake gh: only `gh api repos/<owner>/<repo>/pulls` is answered; got %r\n" % (args,))
+    sys.exit(1)
+
+
+def param(name, default):
+    found = re.search(r"(?:^|[?& ])%s=([^& ]+)" % name, text)
+    return found.group(1) if found else default
+
+
+state = param("state", "open")
+rows = [r for r in json.load(open(os.environ["FAKE_GH_PULLS"], encoding="utf-8")) if state == "all" or r["state"] == state]
+link = None
+if "--paginate" in args:
+    body = rows
+else:
+    per, page = int(param("per_page", "30")), int(param("page", "1"))
+    start = (page - 1) * per
+    body = rows[start:start + per]
+    if start + per < len(rows):
+        link = '<https://api.github.com/%s?page=%d&per_page=%d>; rel="next"' % (route, page + 1, per)
+if "-i" in args or "--include" in args:
+    head = "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n" + ("Link: %s\r\n" % link if link else "")
+    sys.stdout.write(head + "\r\n" + json.dumps(body))
+else:
+    sys.stdout.write(json.dumps(body))
+'''
+
+
+def rest_pull(number, branch, head, base="main", merged=False, closed=False, draft=False):
+    """A pull as GitHub's list route returns it: state, merged_at (the list has no merged flag), head and base refs, draft."""
+    done = merged or closed
+    return {"number": number, "title": "lane " + branch, "state": "closed" if done else "open", "draft": draft,
+            "merged_at": "2026-11-07T12:00:00Z" if merged else None,
+            "head": {"ref": branch, "sha": head}, "base": {"ref": base}}
+
+
+def raw_page(rows, more):
+    """One page of list_sessions as the tool returns it, with the rows under data and the paging keys. The outer `ccr` key is
+    the shape the tool printed when measured; whether it is the tool's own return key is not yet confirmed."""
+    ids = [row["id"] for row in rows]
+    return {"ccr": {"data": rows, "has_more": more, "first_id": ids[0] if ids else None, "last_id": ids[-1] if ids else None}}
+
+
+class IdleLanesFromRawFiles(unittest.TestCase):
+    """merge --idle-lanes --sessions FILE --items FILE, with no --live file. The pulls come from `gh api`, read once per
+    state, through the fake gh on PATH. The repo has c3 doing, c4 done and c5 done. session_a (c3) is listed only through
+    its merged pull. session_b (c4) waits on an open ready pull on lane/c4. session_c (c5) waits on an open page item."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.repo = roadmap.make_repo(self.tmp.name, steps={"c3": dict(roadmap.STEP, order=3, status="doing"),
+                                                            "c4": dict(roadmap.STEP, order=4, status="done"),
+                                                            "c5": dict(roadmap.STEP, order=5, status="done")})
+        roadmap.git(self.repo, "remote", "add", "origin", "git@github.com:owner/fixture.git")
+        off_main = roadmap.git(self.repo, "rev-parse", "HEAD").strip()  # the record branch: its commits never reach main
+        self.bin = os.path.join(self.tmp.name, "bin")
+        os.makedirs(self.bin)
+        gh = os.path.join(self.bin, "gh")
+        pathlib.Path(gh).write_text(FAKE_GH, encoding="utf-8")
+        os.chmod(gh, 0o755)
+        self.gh_log = os.path.join(self.tmp.name, "gh.log")
+        self.gh_pulls = os.path.join(self.tmp.name, "pulls.json")
+        pathlib.Path(self.gh_pulls).write_text(json.dumps([rest_pull(91, "lane/c3", off_main, merged=True),
+                                                           rest_pull(92, "lane/c4", off_main, draft=False)]), encoding="utf-8")
+        self.items = os.path.join(self.tmp.name, "items.json")
+        pathlib.Path(self.items).write_text(json.dumps([{"id": "item-c5", "data": {
+            "n": 1, "status": "open", "home": "step c5", "lane": "c5"}}]), encoding="utf-8")
+        self.rows = [dict(lane("session_a", "c3"), title="lane: c3", created_at="2026-11-07T00:00:00Z"),
+                     dict(lane("session_b", "c4"), title="lane: c4", created_at="2026-11-07T00:00:00Z"),
+                     dict(lane("session_c", "c5"), title="lane: c5", created_at="2026-11-07T00:00:00Z")]
+        self.sessions = os.path.join(self.tmp.name, "sessions.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write_sessions(self, payload):
+        pathlib.Path(self.sessions).write_text(json.dumps(payload), encoding="utf-8")
+
+    def run_merge(self, *argv):
+        """(exit code, stdout, stderr) of `merge.py <argv>` in the fixture checkout, with the fake gh first on PATH."""
+        path = self.bin + os.pathsep + os.environ.get("PATH", os.defpath)
+        env = _test_git.apply({**os.environ, **roadmap.GIT_ENV, "PATH": path,
+                               "FAKE_GH_LOG": self.gh_log, "FAKE_GH_PULLS": self.gh_pulls})
+        done = subprocess.run([sys.executable, str(MERGE), *argv], cwd=str(self.repo), capture_output=True,
+                              text=True, env=env)
+        return done.returncode, done.stdout, done.stderr
+
+    def gh_calls(self):
+        """The argv of each gh call the run made, one list per call."""
+        p = pathlib.Path(self.gh_log)
+        return [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines()] if p.exists() else []
+
+    def test_sessions_and_items_files_list_the_lane_whose_only_pull_merged_into_main(self):
+        self.write_sessions(raw_page(self.rows, more=False))
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
+                         "not listed from --sessions and --items (exit %d): stderr %r" % (code, err))
+        calls = self.gh_calls()
+        self.assertTrue(calls, "gh was never called, so the pulls did not come from the fetch")
+        self.assertLessEqual(len(calls), 2, "the pull read made %d gh calls: one per state, one page each, is the cost to hold" % len(calls))
+
+    def test_sessions_as_a_list_of_pages_lists_a_lane_found_on_the_later_page(self):
+        first, later = self.rows[1:], self.rows[:1]  # session_a, the listed lane, is on the second page
+        self.write_sessions([raw_page(first, more=True), raw_page(later, more=False)])
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
+                         "a lane on a later page of --sessions is not listed (exit %d): stderr %r" % (code, err))
+
+
 if __name__ == "__main__":
     unittest.main()
