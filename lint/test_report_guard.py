@@ -160,6 +160,37 @@ def fired_wake():
                         "Treat this as the current date.</system-reminder>\nCheck the batch."}}
 
 
+def stop_summary():
+    """The system record the harness writes when a turn's Stop hook runs, subtype stop_hook_summary. Its hook
+    fields are not read here, so the stub holds only the record's type and subtype."""
+    return {"type": "system", "subtype": "stop_hook_summary", "isSidechain": False}
+
+
+def post_stop_peer_wake(task_id="ad2d560f6a8ff8331"):
+    """The two records a peer hand-back wake holds after a Stop, in the shape a real transcript stores: a
+    turnCompanion reminder (isMeta, no origin), then the hand-back. The hand-back's origin says peer and handback,
+    and its turnOrigin is peer. The text is a stub."""
+    reminder = {"type": "user", "isMeta": True, "isSidechain": False, "turnCompanion": True,
+                "message": {"role": "user", "content": "<system-reminder>stub</system-reminder>"}}
+    hand_back = {"type": "user", "isMeta": True, "isSidechain": False, "promptSource": "system",
+                 "turnOrigin": "peer", "turnPosition": {"promptIndex": 0, "turnIndex": 1},
+                 "origin": {"kind": "peer", "from": task_id, "senderTaskId": task_id, "name": "test-author",
+                            "body": "stub", "handback": True, "handbackReportText": "stub"},
+                 "message": {"role": "user", "content": "Another Claude session sent a message:\n"
+                             '<agent-message from="%s">\n[Subagent hand-back] stub\n</agent-message>' % task_id}}
+    return [reminder, hand_back]
+
+
+def mid_turn_hand_back(task_id="a8c18267fa7d7dcb9"):
+    """A peer hand-back that lands while a turn runs, in the shape a real transcript stores: a queued_command
+    attachment whose origin says peer and handback. It has no turnOrigin and no user type. The text is a stub."""
+    return {"type": "attachment", "isSidechain": False,
+            "attachment": {"type": "queued_command", "commandMode": "prompt", "isMeta": True,
+                           "origin": {"kind": "peer", "from": task_id, "senderTaskId": task_id, "name": "reviewer",
+                                      "body": "stub", "handback": True, "handbackReportText": "stub"},
+                           "prompt": '<agent-message from="%s">\n[Subagent hand-back] stub\n</agent-message>' % task_id}}
+
+
 def tool_use_msg(name, input_=None):
     block = {"type": "tool_use", "name": name, "input": input_ or {}}
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [block]}}
@@ -1119,6 +1150,40 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "the report passed: a reviewer spawn in the window went unnamed")
         self.assertEqual(out["decision"], "block")
         self.assertIn("no model named for reviewer", out["reason"])
+
+    @classmethod
+    def turn_one_then_wake(cls, spawn):
+        """Turn 1 ran `spawn`, landed a commit and reported (a reviewer on sonnet). Then the Stop hook wrote its
+        summary and a peer hand-back wake arrived, starting turn 2."""
+        return [human("do the task"), *cls.run_of(spawn), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                tool_result_msg(), assistant_text("> **Done** BUILT x, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none"),
+                stop_summary(), *post_stop_peer_wake()]
+
+    def test_dm_false_alarm_reviewer_before_a_post_stop_peer_wake_is_not_required_passes(self):
+        # Catches: a peer hand-back wake that follows a Stop starts turn 2, but the guard reads it as no turn start
+        # (its origin says peer). The window then reaches into turn 1, so turn 1's reviewer must be named again,
+        # and turn 2's report, which names no agent, blocks.
+        out = self.verdict("> **Done** BUILT x, PR #6\n> **Next** Unstarted: none", [],
+                           lead=self.turn_one_then_wake(self.REVIEWER_R2))
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_builder_after_a_post_stop_peer_wake_unnamed_blocks(self):
+        # Catches: a builder spawned in turn 2, after the wake, must still be required. A window that starts at the
+        # wake keeps it, so a report that names no builder blocks.
+        out = self.verdict("> **Done** BUILT x, PR #6\n> **Next** Unstarted: none", [self.BUILDER],
+                           lead=self.turn_one_then_wake(self.REVIEWER_R2))
+        self.assertIsNotNone(out, "the report passed: a builder spawned after the post-Stop peer wake went unnamed")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_mid_turn_peer_hand_back_starts_no_window_blocks(self):
+        # Catches: a peer hand-back that lands mid-turn, as an attachment with no Stop before it, must start no
+        # window. The builder spawned before it stays in the window, so a report that names no builder blocks.
+        out = self.verdict("> **Done** BUILT x, PR #6\n> **Next** Unstarted: none", [self.BUILDER],
+                           tail=[mid_turn_hand_back()])
+        self.assertIsNotNone(out, "the report passed: a mid-turn peer hand-back started a window past the builder spawn")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
 
     def test_dm_red_origin_peer_frame_starts_no_window_blocks(self):
         # Catches: a peer message that opens with the cross-session tag starts no window when its origin says peer,
