@@ -13465,6 +13465,30 @@ add("builder-test (file-judge): a lint step renamed in a file that already holds
 add("builder-test (file-judge): a test run joined with && echo done is allowed", "allow", tool="Edit", file_path=WF,
     old_string=TEST_LINUX, new_string=TEST_LINUX.replace("test_guard.py\n", "test_guard.py && echo done\n"),
     **dict(B, cwd=FILE_JUDGE_ONE))
+# Pins for the no-op fallback in a test run, judged on the whole file. Each passes on this guard. A block scalar's
+# command lines keep their own line index, so a fallback on an added block line is refused like a plain run line. A
+# fallback on a line that runs no test is allowed. An unchanged test run that already ends in one is not refused again.
+TEST_BLOCK = "      - name: Guard tests\n        run: |\n          python3 hooks/test_guard.py\n"
+FILE_JUDGE_BLOCK = _workflow_file_repo("wf-file-judge-block", LINT + TEST_BLOCK + CLEAN)
+add("builder-test (file-judge): a block-scalar test run joined with || true is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=TEST_BLOCK, new_string=TEST_BLOCK.replace("test_guard.py\n", "test_guard.py || true\n"),
+    carries=("test-author", "Report"), **dict(B, cwd=FILE_JUDGE_BLOCK))
+add("builder-test (file-judge): echo hi || true added on a non-test line of a block that also runs tests is allowed",
+    "allow", tool="Edit", file_path=WF, old_string=TEST_BLOCK, new_string=TEST_BLOCK + "          echo hi || true\n",
+    **dict(B, cwd=FILE_JUDGE_BLOCK))
+add("builder-test (file-judge): a test run joined with || : is refused", "deny", rule=BT, tool="Edit", file_path=WF,
+    old_string=TEST_LINUX, new_string=TEST_LINUX.replace("test_guard.py\n", "test_guard.py || :\n"),
+    carries=("test-author", "Report"), **dict(B, cwd=FILE_JUDGE_ONE))
+TEST_ITEM = "      - run: python3 hooks/test_guard.py\n"
+FILE_JUDGE_ITEM = _workflow_file_repo("wf-file-judge-item", LINT + TEST_ITEM + CLEAN)
+add("builder-test (file-judge): a list-item test run joined with || true is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=TEST_ITEM, new_string=TEST_ITEM.replace("test_guard.py\n", "test_guard.py || true\n"),
+    carries=("test-author", "Report"), **dict(B, cwd=FILE_JUDGE_ITEM))
+TEST_NOOP = "      - name: Guard tests\n        run: python3 hooks/test_guard.py || true\n"
+FILE_JUDGE_NOOP = _workflow_file_repo("wf-file-judge-noop", LINT + TEST_NOOP + CLEAN)
+add("builder-test (file-judge): a lint step renamed in a file whose test step already ends in || true is allowed",
+    "allow", tool="Edit", file_path=WF, old_string="      - name: Lint\n", new_string="      - name: Lint (ste)\n",
+    **dict(B, cwd=FILE_JUDGE_NOOP))
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
