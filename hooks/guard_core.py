@@ -1966,6 +1966,9 @@ JS_PREFIX_CALLS = frozenset({"startsWith", "endsWith"})
 JS_PREFIX_CALLEE = re.compile(r"([\w$]+)\.(?:startsWith|endsWith)")
 JS_FILE_CALLS = JS_READ_CALLS | JS_WRITE_CALLS | JS_COPY_CALLS | JS_MOVE_CALLS
 JS_IF_OPEN = re.compile(r"\bif\s*\(")
+# What may stand next to a negated name test for it to be a conjunct (_js_rules_out_env).
+JS_BEFORE_NEGATED = ("(", "{", ";", "=>", "&&")
+JS_AFTER_NEGATED = ("&&", "??", ")", "]", "}", ";", ",")
 # A word before `(` that opens no call: its parenthesis holds a condition or a parameter list.
 JS_NOT_CALLS = frozenset({"", "if", "while", "for", "switch", "catch", "function", "return", "typeof"})
 JS_EVAL_FLAGS = ("-e", "-p", "--eval", "--print")
@@ -2430,8 +2433,10 @@ def _js_scan(code: str):
     # A prefix test finds names that a later line can open by another name (`.filter(...).forEach(...)`,
     # a `continue` on its negation), and this scan does not follow data flow. So its literal stays text
     # only when no variable reaches a file call. One exception: a bare name read inside the body of
-    # a plain `!name.startsWith('.env')` cannot name an env file. A longer prefix, an endsWith, a test
-    # under `||` or inside `!( ... )` can all be true for an env name, so none of them excuses a read.
+    # `!name.startsWith('.env')` or `!(name.startsWith('.env'))`, alone or `&&`-joined with other tests
+    # (_js_rules_out_env), cannot name an env file. A longer prefix, an endsWith, a test under `||`, a
+    # second negation or a `!(` group around it, or one next to `==`, `|` or `?`, can all be true for an
+    # env name, so none of them excuses a read.
     if prefixes and opened:
         excusers = list(_js_scopes(code, mask, [test for test in prefixes if _js_rules_out_env(code, mask, test)],
                                    True))
@@ -2510,27 +2515,46 @@ def _js_extent(code: str, mask, start: int, stop: str = "") -> int:
 def _js_rules_out_env(code: str, mask, test) -> bool:
     """True when a prefix test `(name, literal, start, end)` is a plain `!name.startsWith('.env')`, or the
     same in redundant parens `!(name.startsWith('.env'))` (nothing else inside them): the env-file base
-    name under exactly one `!`. It must be a conjunct of what holds it: no `||` next to it, and no `||`,
-    `?` or `,` at the level of any group around it up to the `if` condition (`!f.startsWith('.env') || x`
-    and `!f.startsWith('.env') ? a : b` are true for an env name). Such an operator inside a later
-    group, `!f.startsWith('.env') && (a || b)`, does not matter."""
+    name under exactly one `!`, as a conjunct. What may stand before it: the start of the code, `(`, `{`, `;`,
+    `=>`, `return` or `&&`; after it: `&&`, `??`, a closer, `;`, `,` or the end. Any other
+    neighbour (`||`, `==`, `|`, `?`, `:`) can make the whole true for an env name. No `!(` group may
+    surround the test beyond its own (`!(a && !f.startsWith('.env'))` is true for an env name when `a`
+    is false), and no `||`, `?` or `,` may sit at the level of any group around it up to the `if`
+    condition (`!f.startsWith('.env') || x` and `!f.startsWith('.env') ? a : b` are true for an env
+    name). Such an operator inside a later group, `!f.startsWith('.env') && (a || b)`, does not matter."""
     from guard_env import ENV_PREFIX   # imported late: guard_env imports this file
     name, literal, start, end = test
     if not (name and literal == ENV_PREFIX and code[start:].startswith(name + ".startsWith")):
         return False
-    before, tail, negations = code[:start].rstrip(), end, 0
+    before, tail, negations, own = code[:start].rstrip(), end, 0, False
     while True:   # each `!` or `!( ... )` around the test; a `!(` must close right after the test
         after = code[tail:].lstrip()
         if before.endswith("!("):
             if not (after.startswith(")") and mask[len(code) - len(after)] == 1):
                 return False
-            before, tail = before[:-2].rstrip(), len(code) - len(after) + 1
+            before, tail, own = before[:-2].rstrip(), len(code) - len(after) + 1, True
         elif before.endswith("!"):
             before = before[:-1].rstrip()
         else:
             break
         negations += 1
-    if negations != 1 or before.endswith("||") or code[tail:].lstrip().startswith("||"):
+    before = "".join(code[i] for i in range(len(before)) if mask[i] != 2).rstrip()   # comments cut out
+    after = "".join(code[i] for i in range(tail, len(code)) if mask[i] != 2).lstrip()
+    if negations != 1 or not (not before or before.endswith(JS_BEFORE_NEGATED) or re.search(r"\breturn$", before)):
+        return False
+    if after and not after.startswith(JS_AFTER_NEGATED):
+        return False
+    groups = []   # the brackets open at the test, outermost first; the test's own `!(` is not one of them
+    for at in range(start):
+        if mask[at] != 1:
+            continue
+        if code[at] in "([{":
+            groups.append((code[at], code[:at].rstrip().endswith("!")))
+        elif code[at] in ")]}" and groups:
+            groups.pop()
+    if own and groups:
+        groups.pop()
+    if any(bang for _, bang in groups):
         return False
     opened = [m for m in JS_IF_OPEN.finditer(code, 0, start) if mask[m.start()] == 1]
     if opened:
