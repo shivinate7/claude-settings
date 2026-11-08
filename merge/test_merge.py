@@ -12638,10 +12638,10 @@ class ReviewEnv(Env):
             rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
-    def record_host(self, *comments, head=REVIEW_HEAD, **reads):
-        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first. `reads` go to
-        PullsHost: `diffs` for the compare replies, `compare_error` for a failed compare read."""
-        return PullsHost([batch_pull(7, head)], {}, comments=comments, **reads)
+    def record_host(self, *comments, head=REVIEW_HEAD, base="main", **reads):
+        """A host whose pull request 7 is at `head`, on base branch `base`, with the repo's review record comments in the order given, oldest first.
+        `reads` go to PullsHost: `diffs` for the compare replies, `compare_error` for a failed compare read."""
+        return PullsHost([batch_pull(7, head, base=base)], {}, comments=comments, **reads)
 
     def listing(self, pulls, comments=(), check_rows=None, **reads):
         """`merge --reviewed` over the open `pulls` and the repo's `comments`, on a PullsHost: -> (host, rc, out, err). The one home of that read."""
@@ -12805,11 +12805,11 @@ class ReviewRecordAncestorHead(ReviewEnv):
     FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
     PASS_ONE = ("1:reviewer:sonnet:PASS",)
 
-    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal", base_status="ahead", **reads):
+    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal", base_status="ahead", base=BASE_BRANCH, **reads):
         """The record for --head `head` with `rounds` (N:ROLE:MODEL:VERDICT each), `extra` after them. The compare of `head` and the live head
-        answers `status`, and the compare of the base branch and `head` answers `base_status`. `reads` go to record_host, a failed compare read
-        for one. -> (rc, out, err, host)."""
-        host = self.record_host(*comments, diffs={(head, self.LIVE): compare_of(status), (self.BASE_BRANCH, head): compare_of(base_status)}, **reads)
+        answers `status`, and the compare of the pull request's base branch `base` and `head` answers `base_status`. `reads` go to record_host,
+        a failed compare read for one. -> (rc, out, err, host)."""
+        host = self.record_host(*comments, base=base, diffs={(head, self.LIVE): compare_of(status), (base, head): compare_of(base_status)}, **reads)
         argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", head]
         for rnd in rounds:
             argv += ["--round", rnd]
@@ -12998,19 +12998,19 @@ class ReviewRecordAncestorHead(ReviewEnv):
         rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, base_status="ahead")
         self.assertEqual(rc, 0, "control: the same record with its base compare ahead was refused:\n" + out + err)
 
-    def test_the_past_round_label_goes_to_stderr_only_for_an_ancestor_head(self):
+    def test_the_stale_record_label_goes_to_stderr_only_for_an_ancestor_head(self):
         # The label names the head the review read and the live head, on stderr and never on stdout. The control is a record on the live head,
         # which prints no label on either stream.
         rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE)
         self.assertEqual(rc, 0, "a FAIL record on an ancestor head was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.ANC, "the record does not print the head the review read")
-        self.assertRegex(err, rf"merge: past round: head {self.ANC[:9]}\b.*live head {self.LIVE[:9]}",
-                         "the ancestor-head record has no past-round label naming both heads on stderr:\n" + err)
-        self.assertNotIn("past round", out, "the past-round label is on stdout:\n" + out)
+        label = f"merge: stale record: head {self.ANC[:9]} is one of the PR's commits, not the live head {self.LIVE[:9]}; merge --reviewed reads this record stale."
+        self.assertIn(label, err.splitlines(), "the ancestor-head record does not print the stale-record label on stderr:\n" + err)
+        self.assertNotIn("merge: stale record:", out, "the stale-record label is on stdout:\n" + out)
         rc, out, err, _ = self.review_at(self.LIVE, self.FAIL_ONE)
         self.assertEqual(rc, 0, "control: a FAIL record on the live head was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.LIVE, "the control does not print the live head")
-        self.assertNotIn("past round", out + err, "the live-head record prints a past-round label:\n" + out + err)
+        self.assertNotIn("merge: stale record:", out + err, "the live-head record prints a stale-record label:\n" + out + err)
 
     def test_a_failed_base_compare_on_the_ancestor_path_refuses_with_no_record(self):
         # The ancestry read answers ahead, so the base compare is the read that fails. The run stops with exit 1, prints no record, and names
@@ -13022,6 +13022,33 @@ class ReviewRecordAncestorHead(ReviewEnv):
         self.assertIn(f"cannot read the compare of {self.BASE_BRANCH} and {self.ANC[:9]}", err,
                       "the refusal does not name the failed compare read:\n" + err)
         rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE)
+        self.assertEqual(rc, 0, "control: the same record with the base compare answering was refused:\n" + out + err)
+
+    def test_a_stacked_pr_reads_its_lane_base_not_main(self):
+        # The pull request is stacked on lane-a, not main, so the base compare reads lane-a. A head that lane-a holds (identical or behind) is a
+        # commit of the base, not of the pull request, so the FAIL record is refused. The control is the same record with lane-a's compare ahead.
+        for base_status in ("identical", "behind"):
+            with self.subTest(base_status=base_status):
+                rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE, base="lane-a", base_status=base_status)
+                self.assertIn(("lane-a", self.ANC), host.compare_reads, "the base compare was not read as compare(lane-a, head)")
+                self.assertNotIn((self.BASE_BRANCH, self.ANC), host.compare_reads, "the base compare read main, not the pull request's base lane-a")
+                self.assert_head_refused(rc, out, err, f"a FAIL record on an ancestor head that lane-a holds ({base_status})")
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, base="lane-a", base_status="ahead")
+        self.assertEqual(rc, 0, "control: a FAIL record on an ancestor head that lane-a's compare reads ahead was refused:\n" + out + err)
+
+    def test_a_failed_base_compare_names_the_whole_base_branch(self):
+        # A base branch longer than 9 characters is named whole when its compare read fails, so the reader can tell which branch was read. The past
+        # head's sha may still be cut to 9. The short base main is the green control: its refusal already names it whole.
+        base = "fix-chain-fresh-rounds"
+        rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE, base=base, base_compare_error=(1, "gh: Not Found (HTTP 404)"))
+        self.assertIn((base, self.ANC), host.compare_reads, "the base branch was not compared with the past head")
+        self.assert_head_refused(rc, out, err, f"a failed base compare on an ancestor head, base {base}")
+        self.assertIn(f"cannot read the compare of {base} and {self.ANC[:9]}", err,
+                      "the refusal cuts the base branch name, so the reader cannot tell which branch failed:\n" + err)
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, base=self.BASE_BRANCH, base_compare_error=(1, "gh: Not Found (HTTP 404)"))
+        self.assert_head_refused(rc, out, err, "a failed base compare on an ancestor head, base main")
+        self.assertIn(f"cannot read the compare of {self.BASE_BRANCH} and {self.ANC[:9]}", err, "the short base main is not named whole:\n" + err)
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, base=base)
         self.assertEqual(rc, 0, "control: the same record with the base compare answering was refused:\n" + out + err)
 
 class ReviewFixFlag(ReviewEnv):
