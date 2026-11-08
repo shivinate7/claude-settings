@@ -37,6 +37,9 @@ STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
 ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
+BODY_SOURCES = ("GITHUB_EVENT_PATH", "CI_JOB_PR_BODY", "CI_JOB_PR_BODY_FILE", "PR_BODY")  # a CI run sets some of these: no case inherits them
+for _name in BODY_SOURCES:
+    ENV.pop(_name, None)
 
 
 def workflow(*steps):
@@ -499,6 +502,24 @@ class GithubBaseRef(Job):
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
                                               args=("--base", "origin/main"), env={"CI_JOB_PR_BODY_FILE": self.body_file(body)})
         self.assertEqual((verdicts, seen), (["PASS"], body), out)
+
+    def test_a_body_step_with_no_body_source_reads_unknown(self):
+        """With no body file and no event file, the body is unknown: the step that holds the body expression reads unknown, never a pass on an empty body."""
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
+                                              args=("--base", "origin/main"))
+        self.assertEqual(verdicts, ["unknown"], out)
+
+    def test_an_empty_body_file_passes_a_body_step_with_an_empty_body(self):  # control: an empty body is known, so the step runs
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
+                                              args=("--base", "origin/main"), env={"CI_JOB_PR_BODY_FILE": self.body_file("")})
+        self.assertEqual((verdicts, seen), (["PASS"], ""), out)
+
+    def test_the_ci_job_pr_body_env_alone_is_not_read(self):
+        """One transport: ci-job reads the body from the file that CI_JOB_PR_BODY_FILE names, never from env CI_JOB_PR_BODY. With no file,
+        the body is unknown, so the step does not pass on the env value."""
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
+                                              args=("--base", "origin/main"), env={"CI_JOB_PR_BODY": "Drops-lines: a -- b"})
+        self.assertEqual(verdicts, ["unknown"], out)
 
     def test_a_run_line_that_holds_the_pull_request_body_reads_unknown(self):
         """The body is data, never shell text: a run: line with the body expression is unknown, exit 2, and no shell runs it."""
@@ -1458,6 +1479,21 @@ class WindowsShell(unittest.TestCase):
     def test_off_windows_the_shell_is_path_bash(self):
         self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
         self.assertEqual(self.ci_job.shell_argv("python", nt=False), ["python3"])
+
+
+class BodySources(unittest.TestCase):
+    def test_the_cases_env_holds_no_body_source_under_a_ci_run(self):
+        """A CI run sets GITHUB_EVENT_PATH and may set the body variables. ENV copies the process env, so a case would read the live
+        PR body unless ENV drops them. The check runs a child process with those variables set, so the copy is what it sees."""
+        ci = {**os.environ, "GITHUB_EVENT_PATH": "/nonexistent/event.json", "CI_JOB_PR_BODY": "live", "CI_JOB_PR_BODY_FILE": "/nonexistent/body.txt",
+              "PR_BODY": "live"}
+        done = subprocess.run([sys.executable, os.path.abspath(__file__), "BodySources.test_the_cases_env_is_clean"],
+                              env=ci, capture_output=True, text=True, timeout=120)
+        self.assertEqual(done.returncode, 0, "a case would inherit a body source from a CI run:\n" + done.stdout + done.stderr)
+
+    def test_the_cases_env_is_clean(self):  # run by the test above, in a child that holds the CI variables
+        leaked = [name for name in BODY_SOURCES if name in ENV]
+        self.assertEqual(leaked, [], "the cases' env copies %s from the process env" % ", ".join(leaked))
 
 
 if __name__ == "__main__":

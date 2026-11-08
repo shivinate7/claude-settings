@@ -520,6 +520,13 @@ class PrBodyEscape(unittest.TestCase):
         """The CLI on this repo as CI runs it (--strict). -> (rc, printed text). The one home is PrintedFindings.run_main."""
         return PrintedFindings.run_main(self, ["--repo", self.r.dir, "--upstream", "origin/main", "--strict", *argv], "utf-8", env=env)
 
+    def event_file(self, body):
+        """An event file of the kind CI writes for a pull request, holding `body` as its body. Its path is in this run's folder."""
+        fd, path = tempfile.mkstemp(prefix="event-", suffix=".json", dir=RUN)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"pull_request": {"body": body}}, f)
+        return path
+
     def assert_fails_on_app(self, rc, text):
         self.assertEqual(rc, 1, text)
         self.assertIn("FAIL: app.txt", text)
@@ -530,6 +537,14 @@ class PrBodyEscape(unittest.TestCase):
         self.assert_fails_on_app(rc, text)  # premise: with no body the drop is a finding
         rc, text = self.run_cli(["--pr-body", "Summary.\n\n%s\n" % self.LINE])
         self.assertEqual(rc, 0, "the CLI does not accept --pr-body, so the excuse is never read (exit %s):\n%s" % (rc, text))
+        self.assertIn("ALLOWED app.txt: the owner wants Card back", text)
+
+    def test_the_event_file_body_excuses_its_path_on_the_cli(self):
+        """CI gives the check no body env: the CLI reads the pull request body from the event file that GITHUB_EVENT_PATH names."""
+        rc, text = self.run_cli([])
+        self.assert_fails_on_app(rc, text)  # premise: with no body the drop is a finding
+        rc, text = self.run_cli([], env={"GITHUB_EVENT_PATH": self.event_file("Summary.\n\n%s\n" % self.LINE)})
+        self.assertEqual(rc, 0, "the CLI does not read the body from GITHUB_EVENT_PATH (exit %s):\n%s" % (rc, text))
         self.assertIn("ALLOWED app.txt: the owner wants Card back", text)
 
     def test_the_pr_body_env_excuses_its_path_on_the_cli(self):
@@ -2582,8 +2597,8 @@ class RetireCite(unittest.TestCase):
         self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
 
 
-# CheckStepPins: the pull request body reaches the silent-undo check in env PR_BODY, mapped from the body expression, and no run:
-# line inlines the body (zizmor's template injection). Steps are read through lint/workflow_steps.py, the one home of the step parser.
+# CheckStepPins: the silent-undo check takes the pull request body from its event file, so no step env carries the body, and no run:
+# line inlines it (zizmor's template injection). Steps are read through lint/workflow_steps.py, the one home of the step parser.
 ACTION_YML = os.path.join(HERE, "..", "actions", "silent-undo", "action.yml")
 CHECKS_YML = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 BODY_EXPR = "${{ github.event.pull_request.body }}"
@@ -2593,6 +2608,11 @@ INLINE_BODY = re.compile(r"\$\{\{(?:(?!\}\}).)*body", re.S)  # a body expression
 def squash(value):
     """A map value with its whitespace removed, so `${{ x }}` and `${{x}}` read alike. None reads as empty."""
     return re.sub(r"\s+", "", value or "")
+
+
+def body_env(step):
+    """The env names of a step that carry the pull request body: PR_BODY, or a value that names the body expression. [] for none."""
+    return sorted(k for k, v in step_env(step).items() if k == "PR_BODY" or "pull_request.body" in squash(v))
 
 
 def runs_the_check(step):
@@ -2608,8 +2628,8 @@ def action_step_blocks(text):
 
 
 class CheckStepPins(unittest.TestCase):
-    """The silent-undo check gets the pull request body in env PR_BODY, mapped from the body expression, and no run: line inlines it.
-    The composite action maps it already. The checks job must run the check with the body too."""
+    """The silent-undo check reads the pull request body from its event file, so neither the composite action nor the checks job
+    passes the body in a step env. The check gets its body from the event file that CI gives it."""
 
     def setUp(self):
         with open(CHECKS_YML, encoding="utf-8") as f:
@@ -2617,17 +2637,17 @@ class CheckStepPins(unittest.TestCase):
         with open(ACTION_YML, encoding="utf-8") as f:
             self.action = f.read()
 
-    def test_the_action_step_maps_the_pr_body_to_env_PR_BODY(self):
+    def test_the_action_step_passes_the_pr_body_in_no_env(self):
         steps = action_step_blocks(self.action)
         self.assertEqual(len(steps), 1, "action.yml has %d steps, want the one check" % len(steps))
-        self.assertEqual(squash(step_env(steps[0]).get("PR_BODY")), squash(BODY_EXPR),
-                         "action.yml's step does not map env PR_BODY to the pull request body")
+        self.assertEqual(body_env(steps[0]), [], "action.yml's step passes the pull request body in its env (%s): the check reads its event file"
+                         % ", ".join(body_env(steps[0])))
 
-    def test_a_checks_job_step_runs_the_silent_undo_check_with_the_body_in_env_PR_BODY(self):
+    def test_a_checks_job_step_runs_the_silent_undo_check_with_the_pr_body_in_no_env(self):
         steps = [st for st in step_blocks(job_block(self.checks, "checks")) if runs_the_check(st)]
         self.assertEqual(len(steps), 1, "the checks job has %d steps that run the silent-undo check, want 1" % len(steps))
-        self.assertEqual(squash(step_env(steps[0]).get("PR_BODY")), squash(BODY_EXPR),
-                         "the checks job's silent-undo step does not map env PR_BODY to the pull request body")
+        self.assertEqual(body_env(steps[0]), [], "the checks job's silent-undo step passes the pull request body in its env (%s): "
+                         "the check reads its event file" % ", ".join(body_env(steps[0])))
 
     def test_no_run_line_in_either_file_inlines_the_pr_body(self):
         runs = [(step_key(st, "name") or "unnamed step", run_body(st) or "") for st in step_blocks(self.checks)]

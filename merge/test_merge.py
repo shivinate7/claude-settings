@@ -1214,19 +1214,24 @@ sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").
 '''
 
 BODY_EXCUSE = "Summary.\n\nDrops-lines: docs/guide.md -- the guide is rewritten on main\n"  # a PR body whose last paragraph excuses a path
-BODY_LINT = '''import os, sys
-body = os.environ.get("PR_BODY", "")
-with open(os.environ["SEEN_OUT"], "w", encoding="utf-8", newline="") as f:
-    f.write(body)  # what the step was given, written out for the test
-sys.exit(0 if any(line.startswith("Drops-lines:") for line in body.splitlines()) else 1)  # a stand-in for a lint that needs the excuse
-'''
-BODY_CHECKS_YML = CHECKS_YML + ("      - name: Body excuse\n        env:\n          PR_BODY: ${{ github.event.pull_request.body }}\n"
-                                "        run: python3 lint/body_excuse.py\n")
+# A step reads the PR body from the event file that GITHUB_EVENT_PATH names, as CI gives it: no step env carries the body.
+# With no event file the step reads a sentinel, never a body, so a missing source is seen as missing.
+EVENT_BODY = ("import json, os\n"
+              "def event_body():\n"
+              "    path = os.environ.get('GITHUB_EVENT_PATH')\n"
+              "    if path is None:\n"
+              "        return '<no GITHUB_EVENT_PATH>'\n"
+              "    with open(path, encoding='utf-8') as f:\n"
+              "        return (json.load(f).get('pull_request') or {}).get('body') or ''\n")
+BODY_LINT = (EVENT_BODY + "import sys\nbody = event_body()\n"
+             "with open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
+             "    f.write(body)  # what the step was given, written out for the test\n"
+             "sys.exit(0 if any(line.startswith('Drops-lines:') for line in body.splitlines()) else 1)  # a stand-in for a lint that needs the excuse\n")
+BODY_CHECKS_YML = CHECKS_YML + "      - name: Body excuse\n        run: python3 lint/body_excuse.py\n"
 BODY_READ_YML = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
-                 "      - name: Read the body\n        env:\n          PR_BODY: ${{ github.event.pull_request.body }}\n"
-                 "        run: python3 lint/body_read.py\n")
-BODY_READ = ("import os\nwith open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
-             "    f.write(os.environ.get('PR_BODY', ''))\n")
+                 "      - name: Read the body\n        run: python3 lint/body_read.py\n")
+BODY_READ = EVENT_BODY + ("with open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
+                          "    f.write(event_body())\n")
 STUB_CI_JOB = ("import os, sys\nsys.stdout.write(open(os.environ['STUB_TEXT'], encoding='utf-8', newline='').read())\n"
                "sys.exit(int(os.environ['STUB_RC']))\n")
 
@@ -1666,8 +1671,16 @@ class SmallBaseMove(Env):
         return os.path.join(self.t, "seen.txt")
 
     def merge_with_inherited_body(self, seen, inherited=None):
-        """-> run_merge's (rc, out) for PR 7, with the caller's env holding CI_JOB_PR_BODY = `inherited` when one is given."""
-        env = {"SEEN_OUT": seen, **({"CI_JOB_PR_BODY": inherited} if inherited is not None else {})}
+        """-> run_merge's (rc, out) for PR 7, with the caller's env holding a body file and an event file that both hold `inherited`
+        when one is given: what a stale run would hand on."""
+        env = {"SEEN_OUT": seen}
+        if inherited is not None:
+            path, event = os.path.join(self.t, "inherited-body.txt"), os.path.join(self.t, "inherited-event.json")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(inherited)
+            with open(event, "w", encoding="utf-8") as f:
+                json.dump({"pull_request": {"body": inherited}}, f)
+            env.update({"CI_JOB_PR_BODY_FILE": path, "GITHUB_EVENT_PATH": event})
         self.host.merged = False
         with unittest.mock.patch.dict(os.environ, env):
             return self.run_merge("7", "--confirm")
@@ -1688,38 +1701,41 @@ class SmallBaseMove(Env):
         self.assertIn("does not hold origin/main", out)
         self.assertFalse(self.host.merged, out)
 
-    def test_an_inherited_ci_job_pr_body_does_not_excuse_the_small_move_lint(self):
+    def test_an_inherited_pr_body_does_not_excuse_the_small_move_lint(self):
         seen = self.body_scoped("Summary only.\n")
         rc, out = self.merge_with_inherited_body(seen, inherited=BODY_EXCUSE)
-        self.assertEqual(seen_text(seen), "Summary only.\n", "the small-move lint step read the caller's CI_JOB_PR_BODY, not the PR body")
+        self.assertEqual(seen_text(seen), "Summary only.\n", "the small-move lint step did not get the PR's own body, so the inherited files are not tested")
         self.assertEqual(rc, 1, out)
         self.assertFalse(self.host.merged, out)
 
-    def test_the_pr_body_wins_over_an_inherited_ci_job_pr_body(self):
+    def test_the_pr_body_wins_over_an_inherited_pr_body(self):
         seen = self.body_scoped(BODY_EXCUSE)
         rc, out = self.merge_with_inherited_body(seen, inherited="Summary only.\n")
-        self.assertEqual(seen_text(seen), BODY_EXCUSE, "the small-move lint step read the caller's CI_JOB_PR_BODY, not the PR body")
+        self.assertEqual(seen_text(seen), BODY_EXCUSE, "the small-move lint step read the caller's body file or event file, not the PR body")
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
 
-    def test_no_ci_job_run_of_the_small_move_proof_gets_an_inherited_ci_job_pr_body(self):
-        """The lint run and the --plan run both get the PR's body, never the caller's CI_JOB_PR_BODY."""
+    def test_no_ci_job_run_of_the_small_move_proof_gets_an_inherited_pr_body(self):
+        """The lint run and the --plan run both get the PR's body in their own body file, and neither gets the caller's event file."""
         seen = self.body_scoped(BODY_EXCUSE)
         calls = []
         real = merge.sh
         def spy(args, *a, **k):
             if merge.CI_JOB in " ".join(args):
-                calls.append(dict(k.get("env") or {}))
+                env = dict(k.get("env") or {})
+                path = env.get("CI_JOB_PR_BODY_FILE")  # read now: ci_job_env removes its file when the run ends
+                calls.append({"body": seen_text(path) if path else None, "event": "GITHUB_EVENT_PATH" in env})
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", spy):
             self.merge_with_inherited_body(seen, inherited="Summary only.\n")
         self.assertTrue(calls, "no ci-job run was made, so nothing was read")
-        leaked = [e.get("CI_JOB_PR_BODY") for e in calls if e.get("CI_JOB_PR_BODY") == "Summary only.\n"]
-        self.assertEqual(leaked, [], "a ci-job run read the caller's CI_JOB_PR_BODY")
+        leaked = [c for c in calls if c["body"] == "Summary only.\n" or c["event"]]
+        self.assertEqual(leaked, [], "a ci-job run read the caller's body file or event file")
 
 class CiJobRunBody(unittest.TestCase):
-    """ci_job_run gives ci-job the PR body as env CI_JOB_PR_BODY. A lint step must get the body whole at any size: one env string
-    past 128 KB does not exec on Linux. ci_job_run lifts ci-job's exit 2 only for an unknown it can name without the body."""
+    """ci_job_run hands ci-job the PR body in a UTF-8 file, and a lint step reads it from its event file (GITHUB_EVENT_PATH). The body must
+    reach the step whole at any size: one env string past 128 KB does not exec on Linux. ci_job_run lifts ci-job's exit 2 only for an
+    unknown it can name without the body."""
 
     def setUp(self):
         self.repo = tempfile.mkdtemp(dir=run_folder())
