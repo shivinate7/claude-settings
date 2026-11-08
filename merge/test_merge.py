@@ -12698,10 +12698,28 @@ class ReviewRecordAncestorHead(ReviewEnv):
 
     def test_a_round_three_fail_on_an_ancestor_head_is_refused_as_held(self):
         # rounds 1 to 3 all FAIL read held; rounds 1 and 2 all FAIL read open, so round 3 is the disputed factor
-        rc, out, err, _ = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL"), status="ahead")
+        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL"), status="ahead")
         self.assert_head_refused(rc, out, err, "a round-3 all-FAIL record on an ancestor head")
+        self.assertEqual(host.compare_reads, [], "a round-3 all-FAIL record read a compare, so the held rule came after the ancestry read")
         rc, out, err, _ = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL"), status="ahead")
         self.assertEqual(rc, 0, "control: a rounds 1-2 all-FAIL record on the same ancestor was refused:\n" + out + err)
+
+    def test_a_pass_then_fail_round_two_on_an_ancestor_head_prints_that_head(self):
+        # the top round is all FAIL, though round 1 passed: the rule reads the highest round only
+        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:FAIL"), status="ahead")
+        self.assertEqual(rc, 0, "a record whose top round is all FAIL, after a passed round 1, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.ANC, "the record does not print the head the review read")
+        self.assertIn((self.ANC, self.LIVE), host.compare_reads, "the ancestry was not read as compare(head, live)")
+
+    def test_a_record_with_no_round_on_an_ancestor_head_is_refused_with_no_compare(self):
+        # no round is recorded, so the ancestor rule does not apply: refused, and the refusal reads no compare. docs-only is the case the brief
+        # names; the normal kind is the same record with a kind that reads open with no round, so the no-round clause decides it alone
+        for kind in ("docs-only", "normal"):
+            with self.subTest(kind=kind):
+                host = self.record_host(diffs={(self.ANC, self.LIVE): compare_of("ahead")})
+                rc, out, err = self.run_args("7", "--review-record", "--kind", kind, "--guard", "no", "--head", self.ANC, host=host)
+                self.assert_head_refused(rc, out, err, f"a {kind} record with no round on an ancestor head")
+                self.assertEqual(host.compare_reads, [], f"a {kind} record with no round read a compare")
 
     def test_a_fail_record_with_a_fix_check_on_an_ancestor_head_is_refused(self):
         # the fix base is an earlier record's Head, so the fix check is valid on its own. The fix verdict is FAIL: the record then reads open, and
