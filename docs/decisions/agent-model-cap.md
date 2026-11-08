@@ -10,7 +10,6 @@ Opus runs only for these roles:
 - The designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`).
 - The builder's third try, by standing grant.
 - An audit Explore, by its `Audit:` marker (below).
-- The coordinator.
 - The arbiter session.
 
 The owner watches that cost. An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
