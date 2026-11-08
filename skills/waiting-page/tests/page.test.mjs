@@ -8376,6 +8376,31 @@ test("control: the rail's cleanup label and the phase head's text name no blocke
   assert.doesNotMatch(label, /blocked/, `the rail's cleanup label names a blocked step that is not there: "${label}"`);
   assert.doesNotMatch(text, /blocked/, `the phase head's text names a blocked step that is not there: "${text}"`);
 });
+// The rail's label and the phase head's text name the in-progress steps too, as their bars draw them: barsPage has two (a4, d6).
+test("the rail's cleanup button names its in-progress steps in its label, as its bar draws them", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#svRail button[data-phase="cleanup"] .segbar > i.act').count(), 2, "the rail's cleanup bar does not draw the two in-progress steps (i.act)");
+  const label = (await page.locator('#svRail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  assert.match(label, /\b2 in progress\b/, `the rail's cleanup label does not name the in-progress steps: "${label}"`);
+});
+test("the phase head's text names its in-progress steps, as its bar draws them", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svPhases .ph-head .segbar > i.act").count(), 2, "the phase head's bar does not draw the two in-progress steps (i.act)");
+  const text = (await page.locator("#svPhases .ph-head .prog .sr").allTextContents()).join(" ").replace(/\s+/g, " ");
+  assert.match(text, /\b2 in progress\b/, `the phase head's text does not name the in-progress steps: "${text}"`);
+});
+// Control: a phase with no in-progress step names none, in the rail's label or the phase head's text.
+test("control: the rail's cleanup label and the phase head's text name no in-progress step when none is drawn", async (t) => {
+  const page = await open(t, { pageHtml: withStalled(phasePage(blockedSteps()), noStalled) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svPhases .ph-head .segbar > i.act").count(), 0, "the phase head's bar draws an in-progress cell with no in-progress step");
+  const label = (await page.locator('#svRail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  const text = (await page.locator("#svPhases .ph-head .prog .sr").allTextContents()).join(" ");
+  assert.doesNotMatch(label, /in progress/, `the rail's cleanup label names an in-progress step that is not there: "${label}"`);
+  assert.doesNotMatch(text, /in progress/, `the phase head's text names an in-progress step that is not there: "${text}"`);
+});
 // The Now card's bar counts a blocked step as blocked, as the rail's bar and the phase head's bar do.
 const blockedSteps = () => stepsOf([["c1", "cleanup", 1, "todo"], ["d1", "cleanup", 2, "done"], ["b2", "cleanup", 3, "blocked"], ["t3", "cleanup", 4, "todo"]]);
 const noStalled = { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS };
