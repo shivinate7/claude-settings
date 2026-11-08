@@ -9424,6 +9424,8 @@ ROLE_LINES = {
     "tags-only": role_tag_call("t1"),
     "tags-then-removed": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1")
     + role_tag_call("t2", add=(), remove=["cs-build:coordinator"]),
+    # A self-remove drops only a tag the session added since its record: the record's coordinator tag still decides.
+    "coordinator-then-removed": role_call("g1", COORD_TAGS) + role_tag_call("t1", add=(), remove=["cs-build:coordinator"]),
     # A self-tag whose add is one string, not a list: it adds that one tag, as the tool reads it.
     "string-add-only": role_tag_call("t1", add="cs-build:coordinator"),
     "string-add-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", add="cs-build:coordinator"),
@@ -11495,6 +11497,15 @@ sh("frozen: sed -i with a comma-delimited s whose w flag writes the config setti
 CFG_BRACE = slash(os.path.join(CFG, "{settings.json,x}"))
 sh("frozen: sed -i in a for loop over the config settings file, the sed operand a loop variable",
    'for f in ' + CFG_SETTINGS + '; do sed -i "s/a/b/" "$f"; done', "deny", "frozen-path", cwd=NOGIT)
+# A `#` comment after the loop body's sed: each item is rewritten as its own command, and the last item keeps its own word, so
+# the config settings file (the last item) is judged. The first-item control stays denied on its own; the non-frozen control allows.
+sh("frozen: sed -i in a multi-line for loop whose last item is the config settings file, a comment after the sed",
+   "for f in docs/todo.md " + CFG_SETTINGS + "; do\n  sed -i 's/a/b/' \"$f\" # why\ndone", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i in a multi-line for loop with the config settings file first, a comment after the sed",
+   "for f in " + CFG_SETTINGS + " docs/todo.md; do\n  sed -i 's/a/b/' \"$f\" # why\ndone", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i in a multi-line for loop over files outside the config folder, a comment after the sed, is allowed",
+   "for f in docs/todo.md " + slash(os.path.join(NOGIT, "f.txt")) + "; do\n  sed -i 's/a/b/' \"$f\" # why\ndone", "allow",
+   cwd=NOGIT)
 sh("frozen: sed -i on a brace list that names the config settings file", "sed -i 's/a/b/' " + CFG_BRACE, "deny",
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i in a for loop over a file outside the config folder is allowed",
@@ -25871,6 +25882,9 @@ cs_write("no_role_file_same_message_other_tag_write_passes", "allow", CS_CODE, r
          transcript=role_path("same-message-other-tag"))
 cs_write("no_role_file_same_message_other_session_write_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
          transcript=role_path("same-message-other-session"))
+# A self-remove of the coordinator tag the record holds: the record still names the tier, so the write stays denied.
+cs_write("no_role_file_coordinator_then_self_removed_write_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("coordinator-then-removed"))
 
 # ---- what needs more than one verdict runs as a check
 # Each refused input is a row: (what, tool, tool input, cwd, text its refusal must not name).
@@ -28419,6 +28433,19 @@ lb_add("a lane session that tags its own record after it, memory 97.2%: full, al
 lb_add("a lane session whose record is tagged on another session after it, memory 97.2%: full, refused",
        lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
                          own_env=LB_OWN, transcript=LB_LANE + role_tag_call("t1", session=ROLE_OTHER)))
+# A read and a set on the own record in one message: the default read does not count the set as after the read, so the
+# lane is still judged a lane. The same message with the set on another session leaves that verdict as it was.
+LB_SAME_MESSAGE_TAG = role_batch([
+    ("g1", GET_SESSION, {}, role_record(LB_LANE_TAGS)),
+    ("t1", SET_SESSION_TAGS, {"session_ids": [ROLE_OWN], "add": ["cs-topic:icons"]}, "ok")])
+lb_add("a lane session's read and own tag set in one message, memory 97.2%: full, refused",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
+                         own_env=LB_OWN, transcript=LB_SAME_MESSAGE_TAG))
+lb_add("a lane session's read and a set on another session in one message, memory 97.2%: full, refused",
+       lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
+                         own_env=LB_OWN, transcript=role_batch([
+                             ("g1", GET_SESSION, {}, role_record(LB_LANE_TAGS)),
+                             ("t1", SET_SESSION_TAGS, {"session_ids": [ROLE_OTHER], "add": ["cs-topic:icons"]}, "ok")])))
 
 # No own record, or a transcript that cannot be read, is no lane: allowed at full, and the reader still runs once.
 lb_add("a lane record for another session only, memory 97.2%: full, allowed, the reader runs once",
