@@ -12881,8 +12881,8 @@ class ReviewGrantForm(unittest.TestCase):
                                   f"parse_review accepted a Grant line with {cause}")
 
     def test_a_grant_line_naming_another_pr_is_not_a_record(self):
-        # A record copied to PR 9999 keeps a grant for PR 1979, and that is not a record. The PR must equal the record's own PR as a whole
-        # number: a PR 1979 record refuses #19790 and #197, which only start with or contain its number.
+        # A grant cite copied from another pull request does not grant this one, so the record is refused. The cite's number
+        # must equal the record's own as a whole number: a longer number that only starts with or contains it is refused too.
         parse_text(self, record_text(n=9999, rounds=round_four_text(), grant=(f"Grant: {grant_text(9999)}",)))  # the sibling: its own PR parses
         parse_text(self, record_text(n=1979, rounds=round_four_text(), grant=(f"Grant: {grant_text(1979)}",)))
         for n, pr in ((9999, 1979), (1979, 19790), (1979, 197)):
@@ -13468,8 +13468,9 @@ class ReviewGrantFlag(ReviewEnv):
         return (pr, "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), *rounds, *tail)
 
     def test_a_grant_naming_another_pr_is_a_usage_error(self):
-        # `merge 2005` with a grant for PR 1979 is refused. The 2005 control, with its own PR, must exit 0: the same form passes there, so only
-        # the PR differs. A parser that never learned the PR part fails at the control.
+        # A merge run for one pull request, with a grant cite copied from another, is refused. The control, with the grant for its
+        # own pull request, must exit 0: the same form passes there, so only the pull request differs. A parser that never learned
+        # the pull request part fails at the control.
         rc, out, err = self.run_args(*self.granted("--grant", grant_text(2005), pr="2005"))
         self.assertEqual(rc, 0, "merge refused the matching --grant for pull request 2005:\n" + out + err)
         out, _err = self.assert_usage_error(*self.granted("--grant", grant_text(1979), pr="2005"))
