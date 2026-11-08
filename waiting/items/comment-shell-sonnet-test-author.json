@@ -24,7 +24,8 @@
   "owner": "lane comment-check-scans-shell (session_013NEJL37UFXTQuAcox7s8fD)",
   "pick": "a",
   "ref": "decision agent-model-cap (test-author row: haiku; item 59 pick a); guard agent-role-model; coordinator 01:29 CST Nov 8",
+  "reply": "Withdrawn by the coordinator (01:35 and 01:39 CST Nov 8): the resumed Haiku test-author landed real commit cae2ccba6 (31 cases, 29 red), so no Sonnet spawn is needed. No answer needed.",
   "short": "One Sonnet test-author",
-  "status": "open",
+  "status": "closed",
   "title": "May lane comment-check-scans-shell run one Sonnet test-author?"
 }

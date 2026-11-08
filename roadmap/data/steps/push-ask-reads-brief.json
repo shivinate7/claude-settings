@@ -1,0 +1,11 @@
+{
+  "title": "A test-author's or builder's push asks when its brief names no branch to push to",
+  "why": "The test-author of lane comment-check-scans-shell pushed branch shell-tests-2 to origin unasked (01:19 CST Nov 8). The name is not agent-<hex>, so step push-agent-branch-asks, which keys on the name, misses it. An ask on the role alone would false-alarm on every briefed push (lane push-head-upstream-name, 01:37 CST).",
+  "note": "Fix: a push by a test-author or builder asks only when its spawn brief names no destination branch. Red case first: the shell-tests-2 push with a brief that names none; control: a push to the branch the brief names. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:42 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 560,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T01:22:00-06:00"
+}
