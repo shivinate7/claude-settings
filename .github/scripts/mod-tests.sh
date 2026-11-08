@@ -22,9 +22,14 @@ mod_files() {
   printf '%s\n' "$list"
 }
 
+# Bare node --test collects these names recursively and skips node_modules (nodejs.org/api/test.html, "Test runner execution model"), so the phase runs all of them.
 skill_files() {
-  local list
-  list=$(find "$skill_dir" -name node_modules -prune -o -name '*.test.mjs' -print) || { echo "find failed" >&2; return 1; }
+  local list stem ext
+  set -- -path '*/test/*.cjs' -o -path '*/test/*.mjs' -o -path '*/test/*.js'
+  for stem in '*.test' '*-test' '*_test' 'test-*' 'test'; do
+    for ext in cjs mjs js; do set -- "$@" -o -name "$stem.$ext"; done
+  done
+  list=$(find "$skill_dir" -name node_modules -prune -o -type f \( "$@" \) -print) || { echo "find failed" >&2; return 1; }
   [ -n "$list" ] || { echo "no skill test file found" >&2; return 1; }
   printf '%s\n' "$list"
 }
@@ -42,13 +47,13 @@ phase_mods() {
 }
 
 # The skill's tests load typescript from this checkout's node_modules, as an install does.
-# node --test gets the listed files by name, from the tests folder, as the bare run had it.
+# node --test gets the listed files by name, from the tests folder: the files a bare run there would collect.
 phase_skill() {
   local list f
   npm ci --ignore-scripts --no-audit --no-fund || return 1
   list=$(skill_files) || return 1
   set --
-  while IFS= read -r f; do set -- "$@" "${f#"$skill_dir"/}"; done <<< "$list"
+  while IFS= read -r f; do set -- ${1+"$@"} "${f#"$skill_dir"/}"; done <<< "$list"
   (cd "$skill_dir" && node --test "$@")
 }
 
