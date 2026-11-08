@@ -54,9 +54,10 @@ Interface the hook must match:
   copy, and a missing name fails its checks with a named cause, never a crash.
 - The tradeoff rule (call_judge.TRADEOFF_RULE, a plain constant): when every option of a question loses something large, the
   judge blocks and asks the writer for an option that keeps the gains. It is appended exactly once after the question-format
-  prompt: after WIDENING_RULE for a page write that sets options, and after the box prompt when a box has a question with 2+
-  options. It is never appended for a page write without options, an Agent spawn, or a box whose questions each have fewer than
-  2 options. The cases read the constant with load_file_module, never a copy, and a missing name fails its checks with a named cause.
+  prompt: after WIDENING_RULE for a judged page write that is a set or update with 2+ options on a decision (not a task, which
+  is kind task or carries `steps`, and not one with a truthy `multi`), and after the box prompt when a box has a question with
+  2+ options and multiSelect not true. It is never appended for an Agent spawn, a str_replace, or a read. The cases read the
+  constant with load_file_module, never a copy, and a missing name fails its checks with a named cause.
 - settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
   above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
@@ -1245,8 +1246,9 @@ def case_widening_rule_names_the_mark():
 #
 # When every option of a question loses something large, the judge blocks and asks the writer for an option that keeps
 # the gains. call_judge.TRADEOFF_RULE is appended once after the question-format prompt: after WIDENING_RULE for a page
-# write that sets options, and after the box prompt when a box has a question with 2+ options. Each case reads the
-# constant with load_file_module, never a copy. A missing constant fails each check with its name, never a crash.
+# decision that sets 2+ options (not a task, not `multi`), and after the box prompt when a box has a question with 2+
+# options that is not multiSelect. Each case reads the constant with load_file_module, never a copy. A missing constant
+# fails each check with its name, never a crash.
 TRADEOFF_FLAG = ('{"ok": false, "reason": "every option loses something large; add an option that keeps the gains of a and b"}')
 
 
@@ -1332,9 +1334,45 @@ def case_tradeoff_box_holds_rule_once():
     check("tradeoff box: the one prompt holds TRADEOFF_RULE exactly once when one question has 2+ options", ok, cause)
 
 
+def task_with_options():
+    """A task item that sets 2 options. A task is never pushed back for a forced loss, however many options it sets."""
+    return good_task_item(options=good_page_item()["options"])
+
+
+def one_option_decision():
+    """A decision that sets one option only: a single option is no choice, so it carries no tradeoff."""
+    return good_page_item(options=good_page_item()["options"][:1])
+
+
+def multi_decision():
+    """A decision with `multi` and 2 options: the owner may pick both, so no tradeoff is pushed back."""
+    return good_page_item(multi=True)
+
+
+def multiselect_box():
+    """A box whose only question with 2+ options allows several picks."""
+    box = good_box()
+    box["questions"][0]["multiSelect"] = True
+    return box
+
+
+def case_tradeoff_fixtures_pass_the_form():
+    # The absent rows below use these fixtures. Each passes the form, so a refusal in those rows has the judge's cause.
+    import question_form  # the one form check (hooks/question_form.py)
+    for label, item in (("a task with 2 options", task_with_options()),
+                        ("a decision with one option", one_option_decision()),
+                        ("a decision with multi", multi_decision())):
+        got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
+        check("tradeoff fixture: %s passes question_form.item_hit" % label, got == ("", ""), got)
+    got = question_form.chat_hit(multiselect_box())
+    check("tradeoff fixture: the multiSelect box passes question_form.chat_hit", got == ("", ""), got)
+
+
 def case_tradeoff_absent():
-    # Case 4: a context-only update, an update with empty options, a box whose only question has one option, and an Agent
-    # spawn never get TRADEOFF_RULE. Each absence first asserts that its call was made, so an early exit cannot pass it.
+    # A context-only update, an update with empty options, a box whose only question has one option, an Agent spawn, a
+    # task with 2 options, a decision with one option, a decision with `multi`, a box whose only 2+ option question is
+    # multiSelect, and a str_replace on context never get TRADEOFF_RULE. Each absence first asserts that its call was made,
+    # so an early exit cannot pass it.
     context = good_page_item()["context"]
     one = good_box()
     one["questions"][0].update(question="Ship it?", options=[{"label": "Yes", "description": "go"}])
@@ -1343,6 +1381,12 @@ def case_tradeoff_absent():
         ("an update with context and empty options", page_input("update", {"context": context, "options": []})),
         ("a box whose only question has one option", question_input(box=one)),
         ("an Agent spawn", spawn_input("builder", model="sonnet")),
+        ("a task with 2 options", page_input("set", task_with_options())),
+        ("a decision with one option", page_input("set", one_option_decision())),
+        ("a decision with multi and 2 options", page_input("set", multi_decision())),
+        ("a box whose only 2+ option question is multiSelect", question_input(box=multiselect_box())),
+        ("a str_replace on context", page_input("str_replace", None, field="context", old_str=PAGE_OLD,
+                                                new_str="The change lands this week. " + PAGE_NEW)),
     ):
         r = run_hook(inp, answer=ALLOW)
         check("tradeoff absent: %s is judged once, and no deny" % label, len(r.calls) == 1 and r.code == 0
@@ -1402,6 +1446,32 @@ def case_tradeoff_rule_text():
         check("tradeoff text: the rule %s" % label, bool(rule) and phrase in rule,
               "TRADEOFF_RULE is not defined in call_judge.py" if not rule
               else "TRADEOFF_RULE does not contain %r" % phrase)
+
+
+def case_tradeoff_reask_holds_both_once():
+    # A re-ask (an update with 2 options and a "none of these" note) makes one call, and its one prompt holds
+    # NONE_DIRECTION_RULE and TRADEOFF_RULE exactly once each: the re-ask rule does not switch the tradeoff rule off.
+    rule = none_direction_rule()
+    r = run_hook(page_input("update", reask_item(PAGE_MARK)), answer=ALLOW)
+    check("tradeoff re-ask: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
+          and "\tdeny\t" not in r.log, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("tradeoff re-ask: the one prompt holds NONE_DIRECTION_RULE exactly once", bool(rule) and prompt.count(rule) == 1,
+          rule_detail(rule, r))
+    ok, cause = tradeoff_once(prompt, "PAGE_PROMPT", widening=True)
+    check("tradeoff re-ask: the one prompt holds TRADEOFF_RULE exactly once, after WIDENING_RULE", ok, cause)
+
+
+def case_none_direction_rule_keeps_the_tradeoff():
+    # NONE_DIRECTION_RULE says a note that asks for other choices is always allowed by this rule, so a re-ask still meets
+    # the tradeoff rule. A constant that drops the phrase fails here, with its own cause.
+    rule = none_direction_rule()
+    check("none-direction text: call_judge.NONE_DIRECTION_RULE is defined as non-blank text", bool(rule),
+          "NONE_DIRECTION_RULE is not defined in call_judge.py")
+    check("none-direction text: a cheaper-options note is always allowed by this rule", bool(rule)
+          and "always allowed by this rule" in rule,
+          "NONE_DIRECTION_RULE is not defined in call_judge.py" if not rule
+          else "NONE_DIRECTION_RULE does not contain 'always allowed by this rule'")
 
 
 def case_fail_open():
@@ -1751,8 +1821,9 @@ def main():
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
                  case_tradeoff_page_set_holds_rule_once, case_tradeoff_batch_holds_rule_once,
-                 case_tradeoff_box_holds_rule_once, case_tradeoff_absent, case_tradeoff_pushback_denies,
-                 case_tradeoff_balanced_passes, case_tradeoff_rule_text,
+                 case_tradeoff_box_holds_rule_once, case_tradeoff_fixtures_pass_the_form, case_tradeoff_absent,
+                 case_tradeoff_pushback_denies, case_tradeoff_balanced_passes, case_tradeoff_rule_text,
+                 case_tradeoff_reask_holds_both_once, case_none_direction_rule_keeps_the_tradeoff,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
