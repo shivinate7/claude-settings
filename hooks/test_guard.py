@@ -13366,6 +13366,67 @@ add("builder-test: a test step's if: changed to another condition is allowed", "
     file_path=WF, old_string=TEST_IF,
     new_string=TEST_IF.replace("runner.os == 'Linux'", "github.event_name == 'push'"), **B)
 
+# ---- a builder's test step is refused only when the step can no longer fail (decision builders-cannot-edit-tests).
+# A line that is not a test run is judged as main judges it: a lone apostrophe, a quote that closes on a later
+# line, and a `case` arm with `|| true` are allowed. The two bypasses are a backslash continuation that joins
+# `|| true` to a test run, and a `cd` line whose test run ends in `|| true`. The tail cases below pin the `||`
+# reader: its comment strip, its quote fallback, its groups, and its `exit`. The test run itself is pinned by the
+# existing case that adds a test step to checks.yml.
+WFS_ECHO_APOSTROPHE = "      - name: Done\n        run: echo it's done || true\n"
+WFS_CASE_ARM = ("      - name: Clean per OS\n        run: |\n          case \"$RUNNER_OS\" in\n"
+                "          linux) rm x || true ;;\n          esac\n")
+WFS_QUOTE_CLOSES = ("      - name: Notes\n        run: |\n          echo \"start\n"
+                    "          more text\" || echo fail\n")
+WFS_CD_HOOKS = "      - name: Guard tests\n        run: |\n          cd hooks\n          python3 test_guard.py\n"
+WFS_CONTINUED = ("      - name: Guard tests\n        run: |\n          python3 hooks/test_guard.py \\\n"
+                 "            --verbose || true\n")
+WFS_CD_TESTS = "      - name: Guard tests\n        run: |\n          cd tests\n          python3 run_all.py\n"
+WFS_CD_TESTS_OR_TRUE = "      - name: Guard tests\n        run: |\n          cd tests\n          python3 run_all.py || true\n"
+add("builder-test: a non-test run with a lone apostrophe and a || true tail is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + WFS_ECHO_APOSTROPHE, **B)
+add("builder-test: a non-test case arm, linux) rm x || true ;;, is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + WFS_CASE_ARM, **B)
+add("builder-test: the closing line of a multi-line quoted string with || echo fail is allowed", "allow",
+    tool="Edit", file_path=WF, old_string=LINT, new_string=LINT + WFS_QUOTE_CLOSES, **B)
+add("builder-test: a test run respelled as a block with cd hooks, then python3 test_guard.py, is allowed",
+    "allow", tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + WFS_CD_HOOKS, **B)
+add("builder-test: a test run continued by a backslash into || true is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + WFS_CONTINUED,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a cd tests block whose run_all.py ends in || true is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + WFS_CD_TESTS, new_string=LINT + WFS_CD_TESTS_OR_TRUE,
+    carries=("test-author", "Report"), **B)
+WFS_TAIL_COMMENT = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || true  # was: || exit 1\n")
+WFS_TAIL_COMMENT_ONLY = TEST_LINUX.replace("test_guard.py\n", "test_guard.py  # || true\n")
+WFS_TAIL_APOSTROPHE = TEST_LINUX.replace("test_guard.py\n", "test_guard.py --name it's || true\n")
+WFS_TAIL_GROUP_OK = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || { echo x; true; }\n")
+WFS_TAIL_SUBSHELL_EXIT = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || ( exit 1 )\n")
+WFS_TAIL_EXIT_THEN_OK = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || exit 1 || true\n")
+add("builder-test: a || true tail whose # comment holds || exit 1 is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + WFS_TAIL_COMMENT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a || true that sits only in a # comment is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + WFS_TAIL_COMMENT_ONLY, **B)
+add("builder-test: a test run with a lone apostrophe and a || true tail is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + WFS_TAIL_APOSTROPHE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a test run with a || { echo x; true; } tail is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + WFS_TAIL_GROUP_OK,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a test run with a || ( exit 1 ) tail is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + WFS_TAIL_SUBSHELL_EXIT, **B)
+add("builder-test: a test run with || exit 1 || true is allowed, since the exit stops the run first", "allow",
+    tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + WFS_TAIL_EXIT_THEN_OK, **B)
+# The test run is the first element of its chain, and the reader skips it. A subshell exit ends only the subshell,
+# so `|| true` swallows the failure. A brace group's exit ends the step's shell, so the step still fails.
+WFS_SUBSHELL_EXIT_OR_TRUE = "      - name: Unit\n        run: ( pytest; exit 1 ) || true\n"
+WFS_BRACE_EXIT_OR_TRUE = "      - name: Unit\n        run: { pytest; exit 1; } || true\n"
+add("builder-test: a new test run ( pytest; exit 1 ) || true is refused, since its exit is swallowed", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT, new_string=LINT + WFS_SUBSHELL_EXIT_OR_TRUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a new test run { pytest; exit 1; } || true is allowed, since its exit ends the shell", "allow",
+    tool="Edit", file_path=WF, old_string=LINT, new_string=LINT + WFS_BRACE_EXIT_OR_TRUE, **B)
+
 # A test run keeps its test when its interpreter flag (-u, -X utf8), its ./ path or its shell flag (bash -x)
 # changes, and when its step moves to another job. Removing a test run drops its test, and a flag that
 # hides the test path from the run does not change that.
