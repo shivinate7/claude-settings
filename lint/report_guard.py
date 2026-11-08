@@ -941,8 +941,9 @@ def departs_problem(text):
 # passes. A negator clears it only when at most MISTAKE_NEGATOR_GAP words sit between it and the fault word,
 # so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
 # `step:<slug>` is checked for form only. A guard line ("Guard: ..." or "guard — ...", in any section) must hold a
-# ref, a step or a debt between its label and the end of its line, whether or not an admission was found. A debt
-# counts only in a clause with no negator, so "a debt is not needed" names none.
+# ref, a step or a debt between its label and the end of its line, whether or not an admission was found. A negator
+# clears the word debt only within DEBT_NEGATOR_BEFORE words before it or DEBT_NEGATOR_AFTER words after it, in its
+# clause: "a debt is not needed" names none, and "Debt check-gap filed (not urgent)" names one.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
 # "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
 # parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
@@ -956,6 +957,8 @@ MISTAKE_FAULT_RE = re.compile(
     r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
 MISTAKE_NEGATOR_GAP = 3
+DEBT_NEGATOR_BEFORE = 3
+DEBT_NEGATOR_AFTER = 2
 MISTAKE_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n")
 MISTAKE_CLAUSE_SPLIT_RE = re.compile(
     r"[,:;\u2014\u2013]|\s-{1,2}\s|\b(?:because|since|but|while|although)\b", re.I)
@@ -964,15 +967,19 @@ MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
 MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
 MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
 # A guard label opens a sentence: a line start after a bullet, a bold section label (the blockquote mark is already
-# stripped), or a space after . ; ! ?. It is guard or guards, then a colon, a dash, or a spaced - or --. So
-# `guard_merge.py`, `push-guard` and "the push guard - refuses" are no label.
+# stripped), or a space after . ; ! ?. It is guard or guards, then a colon, a dash, or a spaced - or --. Markdown
+# emphasis (**, * or _) may wrap the word, with the colon inside or outside it: **Guard:**, **Guard**:, *Guard:*.
+# The emphasis mark must touch the word, so a "* " bullet is no emphasis. So `guard_merge.py`, `push-guard` and
+# "the push guard - refuses" are no label.
+_EMPHASIS = r"(?:\*\*|\*|_)"
 MISTAKE_GUARD_LABEL_RE = re.compile(
-    r"(?:^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*[^*\n]+\*\*\s*)?|(?<=[.;!?])\s+)"
-    r"guards?(?:\s*:|\s*[\u2014\u2013]|\s+--?\s)", re.I)
-# A guard line's ref is stricter than DONE_REF_RE: #N and PR N need 2+ digits (a list item "#1" is no PR) and a bare
-# sha needs 7-40 hex digits with a digit and a letter a-f, so a plain number is no sha.
+    r"(?:^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*[^*\n]+\*\*:?\s*)?|(?<=[.;!?])\s+)"
+    + _EMPHASIS + r"?guards?" + _EMPHASIS + r"?(?:\s*:|\s*[\u2014\u2013]|\s+--?\s)" + _EMPHASIS + r"?", re.I)
+# A guard line's ref is stricter than DONE_REF_RE. "PR #N" and a /pull/N URL name a PR with any digits. A bare #N and
+# "PR N" need 2+ digits, so a list item "#1" is no PR. A bare sha needs 7-40 hex digits with a digit and a letter
+# a-f, so a plain number is no sha.
 GUARD_REF_RE = re.compile(
-    r"(?:#\d{2,}|\bPRs?\s*#?\d{2,}|/pull/\d{2,}|/commit/[0-9a-f]{7,40}"
+    r"(?:\bPRs?\s*#\d+|/pull/\d+|#\d{2,}|\bPRs?\s*\d{2,}|/commit/[0-9a-f]{7,40}"
     r"|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b)")
 MISTAKE_REASON = owner_line(
     "Mistake guard (rule building-mistake-names-its-guard)",
@@ -1001,9 +1008,16 @@ def _sentences(text):
 
 
 def _debt_named(text):
-    """True when a clause of `text` mentions a debt and holds no negator."""
-    return any(MISTAKE_DEBT_RE.search(clause) and not MISTAKE_NEGATOR_RE.search(clause)
-               for sentence in _sentences(text) for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence))
+    """True when `text` holds the word debt that no negator near it clears. Words split on whitespace only, so a
+    contraction such as isn't stays one word."""
+    for sentence in _sentences(text):
+        for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence):
+            for debt in MISTAKE_DEBT_RE.finditer(clause):
+                near = clause[:debt.start()].split()[-DEBT_NEGATOR_BEFORE:] + \
+                    clause[debt.end():].split()[:DEBT_NEGATOR_AFTER]
+                if not MISTAKE_NEGATOR_RE.search(" ".join(near)):
+                    return True
+    return False
 
 
 def _bare_guard_line(report):
