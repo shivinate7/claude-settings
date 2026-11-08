@@ -10111,10 +10111,15 @@ pr_edit("pr-body-placeholder: PowerShell $body assigned, then gh pr edit --body 
         '$body = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET, tool="PowerShell")
 pr_edit("pr-body-placeholder: PowerShell $Body assigned, then gh pr edit --body $body is not denied, case-blind",
         "allow", '$Body = "%s"; gh pr edit 5 --body $body' % PR_BODY_TEXT, live=GHMAIN, env=PS_UNSET, tool="PowerShell")
-# A PowerShell call with no assignment is out of this rule's scope, so the guard passes it unjudged. Red today: the
-# guard refuses it as a placeholder.
-pr_edit("pr-body-placeholder: PowerShell gh pr edit --body $body with no assignment is not denied", "allow",
-        "gh pr edit 5 --body $body", live=GHMAIN, env=PS_UNSET, tool="PowerShell")
+# A PowerShell `$body` is a session variable, not an environment one, and a fresh call has none, so the body is empty.
+# Control, green today: the guard denies it as a placeholder.
+pr_edit("pr-body-placeholder: PowerShell gh pr edit --body $body with no assignment is denied", "deny",
+        "gh pr edit 5 --body $body", PR_PLACEHOLDER, env=PS_UNSET, tool="PowerShell")
+# Scope, green today: `$env:BODY` names an environment variable of the call's shell, which this rule does not read, so
+# the call passes unjudged.
+pr_edit("pr-body-placeholder: PowerShell gh pr edit --body $env:BODY is not denied, "
+        "an environment variable is out of scope",
+        "allow", "gh pr edit 5 --body $env:BODY", live=GHMAIN, env=PS_UNSET, tool="PowerShell")
 # Control, green today. The literal placeholder is denied in PowerShell too, so the allows above are not green only
 # because PowerShell is out of the rule.
 pr_edit("pr-body-placeholder: PowerShell gh pr edit --body PLACEHOLDER is denied", "deny",
