@@ -98,7 +98,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        record (read from the transcript) does not show in its cs-build tags.
   merge-roots-cover    deny. A batch runner's `merge --reviewed --root` whose OWNER/NAME roots are not exactly
                        the repos its own get_session record (read from the transcript) tags cs-repo; the reason
-                       names each missing and extra repo. No readable own record refuses too.
+                       names each missing and extra repo. No readable own record refuses too, and so does a
+                       record read before the turn's last user or cross-session message. A local session (no
+                       cloud session id) and a non-runner record pass.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
