@@ -1807,13 +1807,14 @@ const GRACE_EXIT = "STAMP_SUITE_GRACE_EXIT"; // the suite child writes "alive" o
 const GRACE_LEFT = "STAMP_SUITE_GRACE_LEFT"; // the grace sleeper writes "gone" here as it exits
 
 // node -e code, by kind. "hold": the child holds the pipe and the command sleeps too. "orphan": the
-// command exits, so the child holds the pipe and its parent pid names a dead process. "escape": the
-// child is detached with no pipe, and the command exits 0, so nothing waits on the child. "grace": as
-// escape, but the child lives on 1 s after the suite child exits, so it is alive at the watchdog's close
-// and gone inside its 3 s grace. "clean": no child at all. Both
-// pids go to pidFile first; a clean run writes its own pid twice. Both command lines carry pidFile raw,
-// in a comment, so a check can tell them from a reused pid. JSON.stringify doubles a Windows backslash,
-// so a quoted copy alone would not match.
+// command exits, so the child holds the pipe and its parent pid names a dead process. On Windows the
+// child is detached, since libuv kills a non-detached child with its parent. "escape": the child is
+// detached with no pipe, and the command exits 0, so nothing waits on the child. "grace": as escape,
+// but the child lives on 1 s after the suite child exits, so it is alive at the watchdog's close and
+// gone inside its 3 s grace. "clean": no child at all. Both pids go to pidFile first; a clean run
+// writes its own pid twice. Both command lines carry pidFile raw, in a comment, so a check can tell
+// them from a reused pid. JSON.stringify doubles a Windows backslash, so a quoted copy alone would not
+// match.
 // The grace sleeper starts its 1 s only once the suite child has recorded its exit, so it cannot end
 // before that exit. It writes GRACE_LEFT in its exit handler, so a marker it never wrote means it did not exit on its own.
 function graceSleeper(pidFile) {
@@ -1824,8 +1825,11 @@ const t = setInterval(() => { if (fs.existsSync(env[${JSON.stringify(GRACE_EXIT)
 
 function hangCommand(pidFile, kind) {
   const escape = kind === "escape" || kind === "grace";
+  const winOrphan = kind === "orphan" && !POSIX;
   const sleeper = kind === "grace" ? graceSleeper(pidFile) : `setInterval(() => {}, 1e9); // ${pidFile}`;
-  const spawnOpts = escape ? `{ detached: true, stdio: "ignore" }` : `{ stdio: "inherit" }`;
+  const spawnOpts = escape ? `{ detached: true, stdio: "ignore" }`
+    : winOrphan ? `{ detached: true, stdio: "inherit", windowsHide: true }`
+    : `{ stdio: "inherit" }`;
   const start = kind === "clean" ? "const c = { pid: process.pid };\n"
     : `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], ${spawnOpts});\n${escape ? "c.unref();\n" : ""}`;
   return `${start}require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
@@ -1918,12 +1922,8 @@ test("a timed-out call names its command, and on Windows leaves no orphan behind
     if (!POSIX) assert.deepEqual(found.left, [], `still running: ${found.left}`);
   }));
 
-// Windows, orphan: spawnSync returns once its direct child exits, even while a grandchild holds the
-// pipe (measured on windows-latest). So nothing hangs: the fixture passes, within the cap, and the
-// orphan sleeps on. The suite then closes with a process it started still running, so the watchdog
-// names it, kills it and fails the suite.
-const orphanEndsOnItsOwn = (kind) => kind === "orphan" && !POSIX;
-
+// On Windows libuv kills a non-detached grandchild with its parent, so the Windows orphan is spawned
+// detached to really outlive it while holding the pipe (see hangCommand).
 for (const kind of ["hold", "orphan"]) {
   test(`watchdog: a command whose child holds its pipe (${kind}) ends within the cap; a hang reads red, named, with no process left`, () =>
     withTempDir((dir) => {
@@ -1945,16 +1945,9 @@ for (const kind of ["hold", "orphan"]) {
       const out = readFileSync(outFile, "utf8");
       assert.ok(secs < 30, `took ${secs} s\n${out}`);
       assert.equal(found.pids.length, 2, out);
-      if (orphanEndsOnItsOwn(kind)) {
-        assert.equal(r.status, 1, out);
-        assert.match(out, /ok - hang fixture \(orphan\)/, out);
-        assert.match(out, new RegExp(`\\b${found.pids[1]}\\b`), `the suite did not name the leftover orphan pid ${found.pids[1]}\n${out}`);
-        assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
-        return;
-      }
+      assert.deepEqual(found.left, [], `still running: ${JSON.stringify(found.left)}; exit ${r.status}; cap line ${/ran past its/.test(out) ? "present" : "absent"}\n${out}`);
       assert.equal(r.status, 1, out);
       assert.match(out, new RegExp(`FAIL - hang fixture \\(${kind}\\)`), out);
-      assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
     }));
 }
 
