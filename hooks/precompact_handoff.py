@@ -1048,7 +1048,6 @@ def _unflagged_missing(session_id, state):
     return missing
 
 
-
 # --- Owner waits (item 14 of decision precompact-handoff) -------------------------------------
 # A coordinator's handoff keeps every item waiting on the owner in this session. The Stop nudge
 # blocks when the section is missing or empty, or when a refused act with no later success is not
@@ -1177,7 +1176,7 @@ def _owner_section(text):
 
 def owner_waits_gap(payload):
     """The block reason when a coordinator's handoff does not keep what waits on the owner, else "".
-    "" for a subagent, a session that is not a coordinator, no handoff, and any read that fails."""
+    "" for an agent's call, a session that is not a coordinator, no handoff, and any read that fails."""
     try:
         if payload.get("agent_id"):
             return ""
@@ -1207,7 +1206,7 @@ def owner_waits_gap(payload):
         if not problems:
             return ""
         return ("Your handoff at %s must keep every item waiting on the owner in this session. %s Fix it "
-                "under step 4 of %s, one line per item, then continue. (decision precompact-handoff)"
+                "under step 4 of %s, one line per item, then continue."
                 % (path, " ".join(problems), prompt_path()))
     except Exception as e:
         sys.stderr.write("precompact_handoff: owner waits error: %s\n" % e)
@@ -1253,11 +1252,11 @@ def run_nudge(payload):
             ensure_handoff_dir(session_id)
             reason = ("Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the "
                       "whole file; never append. Follow step 4 of %s for its sections and their order. "
-                      "Then continue. (decision precompact-handoff)"
+                      "Then continue."
                       % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))
         elif missing:
             reason = ("Your handoff at %s lacks these sections: %s. Rewrite the whole file with each under "
-                      "its own ## heading, per step 4 of %s. (decision precompact-handoff)"
+                      "its own ## heading, per step 4 of %s."
                       % (handoff_path(session_id), ", ".join(missing), prompt_path()))
         else:
             reason = ""
@@ -1266,7 +1265,7 @@ def run_nudge(payload):
         reason = ""
     reasons = [r for r in (reason, owner_waits_gap(payload)) if r]
     if reasons:
-        print(json.dumps({"decision": "block", "reason": " ".join(reasons)}))
+        print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (decision precompact-handoff)"}))
     return 0
 
 
