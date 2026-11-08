@@ -61,7 +61,7 @@ if HERE not in sys.path:
 # building-allow-list-is-the-constant). Cost: importing guard.py for it measured about 120 ms per Agent spawn;
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
-from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
+from shared_names import DATA_TOOL, cloud_twin  # noqa: E402  stdlib only: the one home of the tool name and of the Mac names' cloud twin
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
@@ -354,7 +354,7 @@ def past_ruling_context(payload, units):
 def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
-        tool, args = payload.get("tool_name"), payload.get("tool_input")
+        tool, args = cloud_twin(payload.get("tool_name"), payload.get("tool_input"))  # a Mac call is judged as its cloud twin
         if tool not in JUDGES:
             return 0
         if not isinstance(args, dict):

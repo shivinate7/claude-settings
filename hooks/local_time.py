@@ -266,8 +266,9 @@ def page_note(raw):
     """PostToolUse on ArtifactData: saves the note of each new answer a `get` of `answers` returned.
     Saves nothing for any other call. Prints a PostToolUse additionalContext JSON when a save fails."""
     hook = json.loads(raw.decode("utf-8"))
-    inp = hook.get("tool_input")
-    if (hook.get("tool_name") != "ArtifactData" or not isinstance(inp, dict)
+    from shared_names import cloud_twin  # lazy: only this mode reads it
+    tool, inp = cloud_twin(hook.get("tool_name"), hook.get("tool_input"))  # a Mac call is read as its cloud twin
+    if (tool != "ArtifactData" or not isinstance(inp, dict)
             or inp.get("action") != "get" or inp.get("collection") != "answers"):
         return
     paths = inbox_paths(hook.get("session_id"))

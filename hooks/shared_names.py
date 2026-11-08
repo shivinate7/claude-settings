@@ -87,6 +87,78 @@ def repo_tag_names(tag: object, slug: str) -> bool:
 
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
+# The tool that publishes a page (hooks/guard.py).
+PAGE_TOOL = "Artifact"
+
+# The Mac names of the same tools (owner item 440, 2026-11-08 12:28 CST, from Home transcripts). A Mac call has its own
+# input shape; cloud_twin turns it into the cloud call it stands for, so every guard judges one shape.
+MAC_PREFIX = "mcp__claude-artifacts__"
+MAC_DATA_TOOLS = frozenset(MAC_PREFIX + name for name in ("db_write", "db_str_replace", "db_get", "db_list", "db_query"))
+MAC_PAGE_TOOLS = frozenset((MAC_PREFIX + "publish_files",))
+_PAGE_URL = "https://claude.ai/artifact/"  # a Mac `slug` is the artifact id: the guards compare only the id of a url
+_MAC_ACTION = {"db_str_replace": "str_replace", "db_get": "get", "db_list": "list", "db_query": "query"}
+
+
+def _split_path(path):
+    """(collection, doc_id) of a Mac `<collection>/<id>` path: the collection is the first segment, the id is the rest.
+    A path with no id (`items/`, `items`) has doc_id None."""
+    collection, _, doc_id = path.partition("/")
+    return collection, doc_id or None
+
+
+def _mac_url(tool_input):
+    slug = tool_input.get("slug")
+    return {"url": _PAGE_URL + slug} if isinstance(slug, str) and slug else {}
+
+
+def _mac_write(entry):
+    """The cloud write of one Mac db_write op. Mac `merge` has no cloud action: it changes fields, as an update does."""
+    op = entry.get("op")
+    collection, doc_id = _split_path(entry.get("path") if isinstance(entry.get("path"), str) else "")
+    write = {"op": "update" if op == "merge" else op, "collection": collection}
+    if doc_id is not None:
+        write["doc_id"] = doc_id
+    if "data" in entry:
+        write["data"] = entry["data"]
+    return write
+
+
+def cloud_twin(tool, tool_input):
+    """(tool, tool_input) of the cloud call a Mac artifact call stands for. Any other call, and a Mac call whose input
+    is not the shape item 440 gives, comes back unchanged. One db_write op becomes a single write, several a cloud
+    batch. Assumed, not in item 440: a db_query input carries `collection` or `path` (any other key is kept as is);
+    a publish_files names its page by the `files` entry whose `as` is index.html, else the first entry with a path."""
+    if not isinstance(tool, str) or not isinstance(tool_input, dict):
+        return tool, tool_input
+    twin = _mac_url(tool_input)
+    if tool in MAC_PAGE_TOOLS:
+        files = [f for f in tool_input.get("files") or [] if isinstance(f, dict) and isinstance(f.get("path"), str)]
+        page = next((f for f in files if f.get("as") == "index.html"), files[0] if files else None)
+        twin.update({key: tool_input[key] for key in ("title", "icon") if key in tool_input})
+        if page:
+            twin["file_path"] = page["path"]
+        return PAGE_TOOL, twin
+    if tool not in MAC_DATA_TOOLS:
+        return tool, tool_input
+    name = tool[len(MAC_PREFIX):]
+    if name == "db_write":
+        ops = tool_input.get("ops")
+        if not isinstance(ops, list) or not all(isinstance(o, dict) for o in ops):
+            return tool, tool_input
+        writes = [_mac_write(o) for o in ops]
+        if len(writes) == 1:
+            write = writes[0]
+            twin.update(action=write.pop("op"), **write)
+        else:
+            twin.update(action="batch", writes=writes)
+        return DATA_TOOL, twin
+    path = tool_input.get("path")
+    collection, doc_id = _split_path(path) if isinstance(path, str) else (tool_input.get("collection"), None)
+    twin.update({k: v for k, v in tool_input.items() if k not in ("slug", "path", "collection")})
+    twin.update(action=_MAC_ACTION[name], collection=collection)
+    if doc_id is not None:
+        twin["doc_id"] = doc_id
+    return DATA_TOOL, twin
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
