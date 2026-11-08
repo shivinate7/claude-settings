@@ -795,6 +795,33 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_zone_attr.py", text,
                        listed=["z_name = time.tzname", "z_offset = time.timezone"])
 
+    def test_freezegun_dotted_decorator_hides_calendar_in_its_def(self):
+        text = src(
+            "import datetime",
+            "import freezegun",
+            "",
+            "@freezegun.freeze_time('2024-01-01')",
+            "def test_dotted(stamp):",
+            "    t_dotted = datetime.datetime.now()",
+        )
+        self.put("tests/test_dotted_freeze.py", text)
+        calendar_judge(self, "tests/test_dotted_freeze.py", text,
+                       clean=["t_dotted = datetime.datetime.now()"])
+
+    def test_zone_read_with_a_non_zone_keyword_is_not_listed(self):
+        text = src(
+            "from django.utils import timezone",
+            "",
+            "def test_value_keyword(fixed_dt):",
+            "    t_value_local = timezone.localtime(value=fixed_dt)",
+            "    t_value_date = timezone.localdate(value=fixed_dt)",
+        )
+        self.put("tests/test_value_keyword.py", text)
+        calendar_judge(self, "tests/test_value_keyword.py", text, clean=[
+            "t_value_local = timezone.localtime(value=fixed_dt)",
+            "t_value_date = timezone.localdate(value=fixed_dt)",
+        ])
+
     def test_freeze_time_in_a_comment_or_a_string_does_not_suppress_calendar(self):
         text = src(
             "import datetime",
@@ -1352,6 +1379,18 @@ class JsCalendarTest(FinderCase):
         self.put("tests/utc_fixed.test.js", text)
         calendar_judge(self, "tests/utc_fixed.test.js", text, clean=[
             "const u_day_fixed = dayjs.utc(0);", "const u_moment_fixed = moment.utc(EPOCH);",
+        ])
+
+    def test_function_moment_declaration_is_not_listed(self):
+        text = src(
+            "const EPOCH = 0;",
+            "function moment(x) { return x + EPOCH; }",
+            "function moment() { return EPOCH; }",
+        )
+        self.put("tests/moment_declaration.test.js", text)
+        calendar_judge(self, "tests/moment_declaration.test.js", text, clean=[
+            "function moment(x) { return x + EPOCH; }",
+            "function moment() { return EPOCH; }",
         ])
 
     def test_new_dayjs_with_a_fixed_time_is_not_listed(self):
