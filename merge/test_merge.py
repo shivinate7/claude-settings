@@ -11687,15 +11687,19 @@ class PullsHost(merge.Host):
     `gh` also answers `pulls/<n>` from the open list, and the compare read of two heads: `compares` maps (base sha, head sha) to the status
     GitHub would answer. A pair not listed is "diverged", so unrelated heads never contain each other. The base branch's read,
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
-    `base_compare_error` answers only the base branch's read. `repo` is the OWNER/NAME the host names its repo by (Host.repo): the header
-    of a `--reviewed --root` block reads it."""
+    `base_compare_error` answers only the base branch's read. `diffs` maps (older head, newer head) to compare_of(...), the status and the
+    files GitHub gives the older...newer read. The compare is GitHub's three-dot one: its files are those on the second head's side of the
+    merge base, so the reverse read answers "behind" with no file, and a diverged pair answers "diverged" in either order. `repo` is the
+    OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, repo=None):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, repo=None, diffs=None, comment_error=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
+        self.comment_error = comment_error  # the message of a failed review_comment read; every such read fails with it
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
+        self.diffs = diffs or {}  # (older head, newer head) -> compare_of(status, *files): the reply of the net diff between them
         self.reads = []
         self.list_calls = []
         self.count_gh, self.gh_calls = count_gh, []
@@ -11723,8 +11727,36 @@ class PullsHost(merge.Host):
             is_base = re.fullmatch(r"[0-9a-f]{40}", m.group(1)) is None  # compare/<base branch>...<head>: the base read
             if self.compare_error or (is_base and self.base_compare_error):
                 return self.compare_error or self.base_compare_error
-            return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
+            return 0, json.dumps(self.compare_reply(*m.groups()))
         raise AssertionError("unexpected gh call: " + " ".join(args))
+
+    def compare_reply(self, first, second):
+        """The reply of GitHub's three-dot compare of first...second: status, the commit counts, and the files on second's side of the merge base.
+        A pair listed in `diffs` as (older, newer) answers "ahead" with its files from the older read, and "behind" with none from the newer read,
+        since the older head holds no file the newer one lacks. A diverged pair keeps its files in either order; a pair not listed answers
+        "diverged" with no file."""
+        hit = self.diffs.get((first, second))
+        if hit is not None:
+            status, files = hit["status"], list(hit["files"])
+        elif (second, first) in self.diffs:
+            rev = self.diffs[(second, first)]
+            status = {"ahead": "behind"}.get(rev["status"], rev["status"])  # the read against the older head is behind
+            files = [] if status == "behind" else list(rev["files"])
+        else:
+            status, files = "diverged", []
+        ahead, behind = {"ahead": (1, 0), "behind": (0, 1), "diverged": (1, 1)}[status]
+        return {"status": self.compares.get((first, second), status), "ahead_by": ahead, "behind_by": behind, "files": files}
+
+    def review_comment(self, comment_id):
+        """The Host read of one repo comment: its body, the number of the issue or pull request it is on, and when it was created. Served from the
+        comment list the way pages("issues/comments") serves it. A comment the list does not hold is a Stop, as a failed read is."""
+        if self.comment_error:
+            raise merge.Stop(self.comment_error)
+        for c in self.comments:
+            if c["id"] == comment_id:
+                number = int(re.search(r"/issues/(\d+)$", c["issue_url"]).group(1))
+                return {"body": c["body"], "issue_number": number, "created_at": c["created_at"]}
+        raise merge.Stop(f"comment {comment_id} is not on the repo")
 
     def answer(self, rel, argv):
         """The reply of one REST route for the request's own flags, as the fake gh gives it (REST.listing): the page asked for, or with
@@ -12662,6 +12694,14 @@ def review_comment(cid, number, body, created="2026-10-02T00:00:00Z"):
     """A comment on issue or pull request `number`, as the repo-wide comment list gives it."""
     return {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
+def compare_of(status, *files):
+    """One pair's compare reply for PullsHost's `diffs`: the status GitHub gives the older...newer read, and the files of the net diff."""
+    return {"status": status, "files": list(files)}
+
+def file_entry(name, status="modified", previous=None):
+    """One file of a compare reply, as GitHub names it: its status, and previous_filename for a rename."""
+    return {"filename": name, "status": status, **({"previous_filename": previous} if previous is not None else {})}
+
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
     lines = [l for l in out.splitlines() if l.startswith(f"#{n} ")]
@@ -13267,9 +13307,10 @@ class ReviewEnv(Env):
             rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
-    def record_host(self, *comments, head=REVIEW_HEAD):
-        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
-        return PullsHost([batch_pull(7, head)], {}, comments=comments)
+    def record_host(self, *comments, head=REVIEW_HEAD, **reads):
+        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first. `reads` go to
+        PullsHost: `diffs` for the compare replies, `compare_error` for a failed compare read."""
+        return PullsHost([batch_pull(7, head)], {}, comments=comments, **reads)
 
     def assert_usage_error(self, *argv):
         """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
@@ -13279,6 +13320,24 @@ class ReviewEnv(Env):
             self.assertNotIn(old, err)
         self.assertNotIn("Traceback", err)
         return out, err
+
+    def compared(self, host, a, b):
+        """True when the host read the compare of heads a and b, in either order."""
+        return any(set(pair) == {a, b} for pair in host.compare_reads)
+
+    def assert_refused(self, rc, out, err):
+        """A refused fix check: rc 2, no record printed, no traceback."""
+        self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def set_origin(self, name):
+        """This checkout's origin is GitHub repo `name` (owner/name). The layout reads a repo's GitHub name from its origin."""
+        sh(self.co, "git", "remote", "set-url", "origin", f"https://github.com/{name}.git")
+
+    def roll_out(self):
+        """This checkout's repo has rolled out to the layout: its extras file says so, and it keeps no kind at a legacy place."""
+        put(os.path.join(self.co, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
@@ -13436,20 +13495,26 @@ class ReviewFixFlag(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
 
 class ReviewFixBase(ReviewEnv):
-    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
-    that record has no fix check line. The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
-    earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
+    """`--fix-check BASE:...` with --review-record refuses unless the newest review record already on the pull request has no fix check line,
+    and either BASE is that record's Head, or the compare of BASE and that Head shows one an ancestor of the other with only record or notes
+    files between them. The fix diff then starts from BASE, and a fix never follows a fix. The earlier records come from review_comments, which
+    PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record. A failed compare read exits 1, as every failed read does."""
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
+    NOTES_HEAD = "3e" * 20  # a notes commit after REVIEW_OLD_HEAD, whose files are record or notes files only
+    # lint/layout.json's record and notes kinds, their legacy paths, and the generated page docs/records.md
+    RECORD_PATHS = ("docs/decisions/d-010-slug.md", "docs/debts/slug.md", "docs/plans/slug.md", "docs/debts/notes.md", "docs/todo.md",
+                    "docs/records.md", "decisions/d-010-slug.md", "debts/slug.md", "plans/slug.md", "debts/notes.md")
+    NON_RECORD_PATHS = ("merge/merge.py", "lint/layout.json", "docs/specs/slug.md")  # code, config and a spec: none is a record or notes file
 
     def review_with_base(self, base, host):
         return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
 
-    def assert_refused(self, rc, out, err):
-        self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
-        self.assertNotIn("Traceback", err)
+    def orders(self):
+        """The two orders of a fix base beside the newest record's Head, as (label, record Head, base). The compare reads the files between the two
+        heads in both: the record Head newer than the base (a notes commit after the base, the base an ancestor), then the record Head older."""
+        return (("record head newer", self.NOTES_HEAD, REVIEW_OLD_HEAD), ("record head older", REVIEW_OLD_HEAD, self.NOTES_HEAD))
 
     def test_a_base_equal_to_the_newest_earlier_record_head_prints_the_record(self):
         # control: the fix diff starts from the head the newest earlier record reviewed, and that record has no fix line
@@ -13459,18 +13524,27 @@ class ReviewFixBase(ReviewEnv):
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
 
     def test_a_base_that_is_not_the_head_of_the_newest_earlier_record_is_refused(self):
-        # only the newest record's head counts, so a head that just an older record reviewed is refused as well as a head no record reviewed
+        # a head that an older record reviewed is no base on its record alone: the compare of it and the newest Head decides. Diverged from that
+        # Head, it is refused with notes between them as with none, and so is a head no record reviewed
         older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        diffs = {(self.EARLIER_HEAD, REVIEW_OLD_HEAD): compare_of("diverged", file_entry("docs/debts/notes.md")),
+                 (self.OTHER_HEAD, REVIEW_OLD_HEAD): compare_of("diverged")}
         for base in (self.OTHER_HEAD, self.EARLIER_HEAD):
             with self.subTest(base=base):
-                rc, out, err = self.review_with_base(base, self.record_host(older, newest))
+                host = self.record_host(older, newest, diffs=diffs)
+                rc, out, err = self.review_with_base(base, host)
+                self.assertTrue(self.compared(host, base, REVIEW_OLD_HEAD), f"the fix check did not read the compare of {base[:9]} and the newest Head")
                 self.assert_refused(rc, out, err)
 
     def test_a_newest_earlier_record_with_a_fix_line_refuses_its_head_as_the_base(self):
         # the head already has its fix check, so a second fix check from it would be a fix after a fix
         fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.EARLIER_HEAD),))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, fixed)))
+        self.assert_refused(rc, out, err)
+        # and a base the compare would allow, a notes-only ancestor of that head, is refused for the same reason
+        diffs = {(self.EARLIER_HEAD, REVIEW_OLD_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(review_comment(1, 7, fixed), diffs=diffs))
         self.assert_refused(rc, out, err)
 
     def test_no_earlier_record_on_the_pull_request_refuses_the_fix_check(self):
@@ -13502,6 +13576,305 @@ class ReviewFixBase(ReviewEnv):
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
+
+    def test_a_notes_commit_after_the_fix_base_is_allowed(self):
+        # the newest earlier record names a notes commit, and the fix check reads from the head before that commit
+        newest = review_comment(1, 7, record_text(head=self.NOTES_HEAD, rounds=REVIEW_PASS))
+        diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(newest, diffs=diffs))
+        self.assertEqual(rc, 0, "a fix check whose diff holds only a notes file was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_a_notes_commit_after_the_earlier_record_head_is_allowed_when_the_fix_reads_from_it(self):
+        # the other order: the newest earlier record's Head is REVIEW_OLD_HEAD, a notes commit came after it, and the fix check reads from that commit
+        newest = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
+        rc, out, err = self.review_with_base(self.NOTES_HEAD, self.record_host(newest, diffs=diffs))
+        self.assertEqual(rc, 0, "a fix check that reads from a notes commit was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.NOTES_HEAD, "reviewer", "haiku", "PASS"))
+
+    def test_each_record_or_notes_path_between_the_heads_is_allowed(self):
+        for path in self.RECORD_PATHS:
+            for order, record, base in self.orders():
+                with self.subTest(path=path, order=order):
+                    newest = review_comment(1, 7, record_text(head=record, rounds=REVIEW_PASS))
+                    diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry(path))}
+                    rc, out, err = self.review_with_base(base, self.record_host(newest, diffs=diffs))
+                    self.assertEqual(rc, 0, f"{path} between the heads was refused:\n" + out + err)
+
+    def test_a_rename_between_record_files_is_allowed(self):
+        # GitHub names a rename by its new path and its previous_filename: both are record paths here, so the rename is allowed in both orders
+        moved = file_entry("docs/decisions/d-010-slug.md", "renamed", previous="decisions/d-010-slug.md")
+        for order, record, base in self.orders():
+            with self.subTest(order=order):
+                newest = review_comment(1, 7, record_text(head=record, rounds=REVIEW_PASS))
+                diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", moved)}
+                rc, out, err = self.review_with_base(base, self.record_host(newest, diffs=diffs))
+                self.assertEqual(rc, 0, "a rename between two record paths was refused:\n" + out + err)
+
+    def test_a_code_config_or_spec_file_between_the_heads_is_refused(self):
+        # the files between the heads are read in both orders, so a code file is refused whichever head is newer
+        for path in self.NON_RECORD_PATHS:
+            for order, record, base in self.orders():
+                with self.subTest(path=path, order=order):
+                    newest = review_comment(1, 7, record_text(head=record, rounds=REVIEW_PASS))
+                    diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"), file_entry(path))}
+                    host = self.record_host(newest, diffs=diffs)
+                    rc, out, err = self.review_with_base(base, host)
+                    self.assertTrue(self.compared(host, REVIEW_OLD_HEAD, self.NOTES_HEAD), f"the fix check did not read the diff between the two heads, which holds {path}")
+                    self.assert_refused(rc, out, err)
+
+    def test_a_rename_across_the_code_and_record_folders_is_refused(self):
+        # a rename also lists its old path, so code moved into a record folder still counts as code removed, and a record moved into code as code added
+        moves = (("merge/merge.py moved into docs/decisions", file_entry("docs/decisions/d-010-slug.md", "renamed", previous="merge/merge.py")),
+                 ("a record moved into lint", file_entry("lint/slug.py", "renamed", previous="docs/decisions/d-010-slug.md")))
+        for label, entry in moves:
+            for order, record, base in self.orders():
+                with self.subTest(label=label, order=order):
+                    newest = review_comment(1, 7, record_text(head=record, rounds=REVIEW_PASS))
+                    host = self.record_host(newest, diffs={(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", entry)})
+                    rc, out, err = self.review_with_base(base, host)
+                    self.assertTrue(self.compared(host, REVIEW_OLD_HEAD, self.NOTES_HEAD), f"the fix check did not read the diff of the rename, {label}")
+                    self.assert_refused(rc, out, err)
+
+    def test_a_failed_or_unreadable_compare_stops_the_fix_check(self):
+        # the compare is the read that decides the base, so a read that fails, or a reply that is not JSON, stops the run before any record prints
+        newest = review_comment(1, 7, record_text(head=self.NOTES_HEAD, rounds=REVIEW_PASS))
+        reads = (("a gh error", {"compare_error": (1, "gh: Not Found (HTTP 404)")}),
+                 ("a reply that is not JSON", {"compare_error": (0, "<html>502 Bad Gateway</html>")}))
+        for label, read in reads:
+            with self.subTest(label=label):
+                host = self.record_host(newest, **read)
+                rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+                self.assertTrue(self.compared(host, REVIEW_OLD_HEAD, self.NOTES_HEAD), f"the fix check did not read the compare, so {label} went unseen")
+                self.assertEqual(rc, 1, f"{label} of the compare did not stop the fix check:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out, f"{label} of the compare still printed a record")
+                self.assertNotIn("Traceback", err)
+
+    def test_a_legacy_folder_name_is_code_in_a_rolled_out_repo(self):
+        # a rolled-out repo keeps each kind at its layout path, so Markdown under plans/, decisions/, debts/ and records/ is not a record there;
+        # docs/plans still counts. The names are Markdown, so only the legacy names decide the case, not the file type.
+        self.roll_out()
+        for path in ("plans/engine.md", "decisions/engine.md", "debts/engine.md", "records/engine.md"):
+            with self.subTest(path=path):
+                newest = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+                diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry(path))}
+                rc, out, err = self.review_with_base(self.NOTES_HEAD, self.record_host(newest, diffs=diffs))
+                self.assert_refused(rc, out, err)
+        # control: the layout's own plans folder is a record path in the same rolled-out repo
+        newest = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/plans/engine.md"))}
+        rc, out, err = self.review_with_base(self.NOTES_HEAD, self.record_host(newest, diffs=diffs))
+        self.assertEqual(rc, 0, "the layout's docs/plans record was refused in a rolled-out repo:\n" + out + err)
+
+    def test_a_legacy_repos_name_counts_only_in_its_own_repo(self):
+        # shivinate7/home keeps its todo at records/ and shivinate7/q_max at specs/todo.md: each counts in that repo, and in no other
+        self.roll_out()
+        newest = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        for repo, path, counts in (("shivinate7/home", "records/todo.md", True), ("shivinate7/q_max", "specs/todo.md", True),
+                                   ("o/r", "records/todo.md", False), ("o/r", "specs/todo.md", False)):
+            with self.subTest(repo=repo, path=path):
+                self.set_origin(repo)
+                diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry(path))}
+                rc, out, err = self.review_with_base(self.NOTES_HEAD, self.record_host(newest, diffs=diffs))
+                if counts:
+                    self.assertEqual(rc, 0, f"{path} was refused in {repo}, which keeps that name:\n" + out + err)
+                else:
+                    self.assert_refused(rc, out, err)
+
+    def test_a_non_markdown_file_under_a_record_folder_is_refused(self):
+        # a record folder holds Markdown records, so a code file there is code, and a Markdown file there is a record
+        newest = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        for path in ("docs/decisions/tool.py", "docs/debts/tool.py"):
+            with self.subTest(path=path):
+                diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry(path))}
+                rc, out, err = self.review_with_base(self.NOTES_HEAD, self.record_host(newest, diffs=diffs))
+                self.assert_refused(rc, out, err)
+        # control: a Markdown record in the same folder is allowed
+        diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/decisions/tool.md"))}
+        rc, out, err = self.review_with_base(self.NOTES_HEAD, self.record_host(newest, diffs=diffs))
+        self.assertEqual(rc, 0, "a Markdown record under docs/decisions was refused:\n" + out + err)
+
+class ReviewFixBaseRecord(ReviewEnv):
+    """`--fix-base-record URL` goes with --review-record and --fix-check. URL is a GitHub issue-comment link to an earlier review record, on this
+    pull request or another. That record stands in for the newest earlier record: its Head is the fix base, the same base rules apply (equal
+    heads, or a compare with record and notes files only between), and the round floor counts it. A pull request with its own record refuses the
+    flag, so two bases never compete. A refusal exits 2 and prints no record; a failed read of the comment exits 1. Each case runs a control
+    first, without the flag, that the old code already gets right, so the assert after it is the flag's or the round floor's to pass or refuse."""
+
+    SOURCE_PR, SOURCE_ID = 1541, 5  # the pull request and the comment of the source record in the cases below
+    NOTES_HEAD = ReviewFixBase.NOTES_HEAD  # a notes commit after REVIEW_OLD_HEAD
+    OTHER_HEAD = ReviewFixBase.OTHER_HEAD  # a head no record reviewed
+
+    def setUp(self):
+        super().setUp()
+        self.set_origin("o/r")  # the repo's GitHub name: the URL must name it, and the layout reads it from origin
+
+    def link(self, n=SOURCE_PR, cid=SOURCE_ID, owner="o", repo="r", kind="pull"):
+        return f"https://github.com/{owner}/{repo}/{kind}/{n}#issuecomment-{cid}"
+
+    def source(self, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, cid=SOURCE_ID, n=SOURCE_PR):
+        """The source record: a comment on pull request n, which holds a record of head `head`."""
+        return review_comment(cid, n, record_text(n=n, head=head, rounds=rounds))
+
+    def fix_of(self, head=REVIEW_OLD_HEAD):
+        return f"{head}:reviewer:haiku:PASS"
+
+    def argv(self, fix, url=None, rounds=("1:reviewer:sonnet:PASS",)):
+        """The review flags of pull request 7 at REVIEW_HEAD, with --fix-check `fix` and, when given, --fix-base-record `url`."""
+        argv = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no"]
+        argv += [a for r in rounds for a in ("--round", r)]
+        argv += ["--fix-check", fix]
+        return argv + (["--fix-base-record", url] if url is not None else [])
+
+    def flagged(self, argv, host):
+        """The run of `argv` on `host`. A parser that has never heard of --fix-base-record says so on stderr, which fails here by that name."""
+        rc, out, err = self.run_args(*argv, host=host)
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err, "merge.py takes no --fix-base-record flag:\n" + err)
+        return rc, out, err
+
+    def test_a_source_record_on_another_pull_request_starts_the_fix_check(self):
+        # the #1541 shape: the source record is on pull request 1541 at Head H, and this pull request has no record of its own; the fix check reads from H
+        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        # control, green on the old code: without the flag this pull request has no earlier record, so the same fix check is refused
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
+        self.assertEqual(rc, 0, "a source record on another pull request refused the fix check:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_a_fix_check_from_a_notes_only_neighbour_of_the_source_head_is_allowed(self):
+        for label, head, fix in (("the fix reads from a notes commit after the source Head", REVIEW_OLD_HEAD, self.NOTES_HEAD),
+                                 ("the fix reads from a commit before the source Head", self.NOTES_HEAD, REVIEW_OLD_HEAD)):
+            with self.subTest(label=label):
+                diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
+                host = self.record_host(self.source(head=head), head=REVIEW_HEAD, diffs=diffs)
+                rc, out, err = self.run_args(*self.argv(self.fix_of(fix)), host=host)  # control, green on the old code: no flag, no record here
+                self.assert_refused(rc, out, err)
+                rc, out, err = self.flagged(self.argv(self.fix_of(fix), self.link()), host)
+                self.assertEqual(rc, 0, f"{label} was refused:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (fix, "reviewer", "haiku", "PASS"))
+
+    def test_a_pull_request_with_its_own_record_refuses_the_flag(self):
+        # two bases never compete: with its own record, the flag is refused, and the own record alone takes the same fix check
+        own = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        host = self.record_host(own, self.source(), head=REVIEW_HEAD)
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: the own record takes the fix check
+        self.assertEqual(rc, 0, "the own record refused its own fix check:\n" + out + err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
+        self.assert_refused(rc, out, err)
+
+    def test_the_flag_goes_only_with_fix_check_and_review_record(self):
+        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        url = self.link()
+        plain = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS"]
+        rc, out, err = self.run_args(*plain, host=host)  # control, green on the old code: the record without the flag is written
+        self.assertEqual(rc, 0, out + err)
+        for label, argv in (("no --fix-check", [*plain, "--fix-base-record", url]),
+                            ("no --review-record", ["7", "--fix-base-record", url])):
+            with self.subTest(label=label):
+                rc, out, err = self.flagged(argv, host)
+                self.assertEqual(rc, 2, out + err)
+                self.assertNotIn("Traceback", err)
+
+    def test_a_url_that_is_not_an_issue_comment_link_is_refused(self):
+        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
+        self.assert_refused(rc, out, err)
+        for url in ("https://github.com/o/r/pull/1541", "https://github.com/o/r/pull/1541#discussion_r5",
+                    "https://github.com/o/r/pull/1541#issuecomment-", "https://github.com/o/r/pull/1541#issuecomment-five",
+                    "https://example.com/o/r/pull/1541#issuecomment-5", "1541#issuecomment-5"):
+            with self.subTest(url=url):
+                rc, out, err = self.flagged(self.argv(self.fix_of(), url), host)
+                self.assert_refused(rc, out, err)
+        # control: the comment link is allowed on the /pull/ path and on the /issues/ path, so the refusals above are the URL's
+        for kind in ("pull", "issues"):
+            with self.subTest(kind=kind):
+                rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(kind=kind)), host)
+                self.assertEqual(rc, 0, f"the comment link on /{kind}/ was refused:\n" + out + err)
+
+    def test_a_url_that_names_another_repo_is_refused(self):
+        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
+        self.assert_refused(rc, out, err)
+        for owner, repo in (("x", "r"), ("o", "s")):
+            with self.subTest(owner=owner, repo=repo):
+                rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(owner=owner, repo=repo)), host)
+                self.assert_refused(rc, out, err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
+        self.assertEqual(rc, 0, "the comment link on this repo was refused:\n" + out + err)
+
+    def test_a_comment_that_is_not_a_review_record_for_its_own_pull_request_is_refused(self):
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=self.record_host(self.source(), head=REVIEW_HEAD))  # control, green on the old code
+        self.assert_refused(rc, out, err)
+        for label, comment in (("a comment that is no record", review_comment(self.SOURCE_ID, self.SOURCE_PR, "LGTM")),
+                               ("a record whose PR line names another pull request",
+                                review_comment(self.SOURCE_ID, self.SOURCE_PR, record_text(n=1542, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))):
+            with self.subTest(label=label):
+                host = self.record_host(comment, head=REVIEW_HEAD)
+                rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
+                self.assert_refused(rc, out, err)
+        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
+        self.assertEqual(rc, 0, "the record for its own pull request was refused:\n" + out + err)
+
+    def test_the_source_record_must_be_the_newest_on_its_pull_request(self):
+        later = review_comment(6, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=self.NOTES_HEAD, rounds=REVIEW_PASS))
+        host = self.record_host(self.source(), later, head=REVIEW_HEAD)
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
+        self.assert_refused(rc, out, err)
+        # the later record is the newest, and its own Head is the fix base
+        rc, out, err = self.flagged(self.argv(self.fix_of(self.NOTES_HEAD), self.link(cid=6)), host)
+        self.assertEqual(rc, 0, "the newest record on its pull request was refused:\n" + out + err)
+
+    def test_a_source_record_with_a_fix_check_line_is_refused(self):
+        fixed = review_comment(self.SOURCE_ID, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS,
+                                                                           fix=(fix_check_line(head=self.NOTES_HEAD),)))
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=self.record_host(fixed, head=REVIEW_HEAD))  # control, green on the old code
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), self.record_host(fixed, head=REVIEW_HEAD))
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), self.record_host(self.source(), head=REVIEW_HEAD))
+        self.assertEqual(rc, 0, "a source record without a fix check line was refused:\n" + out + err)
+
+    def test_the_fix_base_rules_hold_for_a_source_record(self):
+        # the flag's base goes through the same compare as --fix-check's base: a code file between the heads, in either order, and diverged heads are refused
+        for order, head, fix in (("source head newer", self.NOTES_HEAD, REVIEW_OLD_HEAD), ("source head older", REVIEW_OLD_HEAD, self.NOTES_HEAD)):
+            with self.subTest(order=order):
+                diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"), file_entry("merge/merge.py"))}
+                host = self.record_host(self.source(head=head), head=REVIEW_HEAD, diffs=diffs)
+                rc, out, err = self.run_args(*self.argv(self.fix_of(fix)), host=host)  # control, green on the old code: no flag, no record here
+                self.assert_refused(rc, out, err)
+                rc, out, err = self.flagged(self.argv(self.fix_of(fix), self.link()), host)
+                self.assertTrue(self.compared(host, REVIEW_OLD_HEAD, self.NOTES_HEAD), "the fix base did not read the diff between the two heads")
+                self.assert_refused(rc, out, err)
+        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        rc, out, err = self.flagged(self.argv(self.fix_of(self.OTHER_HEAD), self.link()), host)
+        self.assert_refused(rc, out, err)
+
+    def test_the_source_record_sets_the_round_floor(self):
+        # the source's last round is the third, so this record may not end below it: a last round of 2 is refused, and the third is allowed
+        host = self.record_host(self.source(rounds=REVIEW_PASSED_THREE), head=REVIEW_HEAD)
+        low = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL")
+        rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no",
+                                     "--round", low[0], "--round", low[1], host=host)  # control, green on the old code: no source, a record ending at 2 is written
+        self.assertEqual(rc, 0, "a record ending at round 2 was refused with no source:\n" + out + err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(), rounds=low), host)
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link(), rounds=(*low, "3:reviewer:opus:PASS")), host)
+        self.assertEqual(rc, 0, "a record that reaches the source's round 3 was refused:\n" + out + err)
+
+    def test_a_failed_read_of_the_source_comment_exits_one(self):
+        host = self.record_host(self.source(), head=REVIEW_HEAD, comment_error="reading the comment from GitHub failed")
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
+        self.assert_refused(rc, out, err)
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
+        self.assertEqual(rc, 1, "a failed read of the source comment did not stop the run:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a failed read of the source comment still printed a record")
+        self.assertNotIn("Traceback", err)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
