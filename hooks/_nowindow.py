@@ -5,7 +5,9 @@ Windows when a hook, mod or tool started a helper program. Every product file th
 process calls the wrappers here, never `subprocess` directly. lint/test_no_window_spawn.py scans for
 a raw call. hooks/test_nowindow.py pins this contract.
 
-Each wrapper is a drop-in for the `subprocess` function of the same name. On Windows it ORs
+Each wrapper (run, Popen, call, check_call, check_output) is a drop-in for the `subprocess` function of the
+same name. kill_tree is not a wrapper and has no `subprocess` twin: it stops a child this process started and
+what that child started. On Windows each wrapper ORs
 CREATE_NO_WINDOW into the caller's `creationflags` and keeps every flag the caller passed. Elsewhere
 it adds nothing. The platform is read at call time, and the wrapper looks up `subprocess.<name>` at
 call time too, so a test patch on `subprocess.<name>` sees the call.

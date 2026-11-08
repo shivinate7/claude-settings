@@ -49,6 +49,8 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
     _nowindow = subprocess
 
 TRAILER = "Drops-lines"
+# The words that open a note line, never a finding. hooks/guard_merge.py reads them to tell a note from a finding.
+ALLOWED, UNKNOWN, REMEDY = "ALLOWED", "UNKNOWN", "REMEDY"
 ZERO = "0" * 40
 WORD = re.compile(r"[A-Za-z0-9]")
 
@@ -149,7 +151,7 @@ def misplaced(cwd, rng):
 def judge(items, ok):
     """items: (path, text). -> (texts whose path no trailer excuses, ALLOWED notes for the rest)."""
     bad = [t for p, t in items if p not in ok]
-    notes = ["ALLOWED %s: %s" % (p, ok[p]) for p in sorted({p for p, _ in items if p in ok})]
+    notes = ["%s %s: %s" % (ALLOWED, p, ok[p]) for p in sorted({p for p, _ in items if p in ok})]
     return bad, notes
 
 
@@ -675,14 +677,15 @@ def main(argv):
             return 0
         problems, notes = check(a.repo, a.upstream, a.head)
     except Unknown as e:
-        say("silent-undo: UNKNOWN: %s" % e)
+        say("silent-undo: %s: %s" % (UNKNOWN, e))
         return 1 if (a.strict or os.environ.get("CI")) else 0
     for n in notes:
         say("silent-undo: " + n)
     for p in problems:
         say("silent-undo: FAIL: " + p)
     if problems:
-        say("silent-undo: REMEDY: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say("silent-undo: %s: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message."
+            % (REMEDY, TRAILER))
     return 1 if problems else 0
 
 

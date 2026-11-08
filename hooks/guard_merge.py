@@ -16,8 +16,14 @@ from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
-import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
-from git_bash import find_git_bash  # the one home of the Git Bash lookup, never the Windows WSL launcher
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # install-hooks-whole: the guard set lands whole, the helper beside it a moment later; the guard still judges
+    _nowindow = subprocess
+try:
+    from git_bash import find_git_bash  # the one home of the Git Bash lookup, never the Windows WSL launcher
+except ImportError:  # same fallback as _nowindow above: with no lookup, the lane lint reads unknown ("bash was not found")
+    find_git_bash = None
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
@@ -777,9 +783,10 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel):
 #
 # The lane lint (bin/ci-job --lint, merge --lane-lint) runs after a push, so a finding costs a replacement
 # pull request. This runs the fast steps of CI's own workflow before the push leaves, on the commits it sends.
-# A step is fast when it takes the pull request's base ref or head sha (`${{ github.base_ref }}`,
-# `${{ github.event.pull_request.head.sha }}`) in its `env:`, read from the checkout's
-# .github/workflows/checks.yml with lint/workflow_steps.py. The red-run step is skipped: _red_run_lines
+# A step is fast when bin/ci-job's own lint chooser (is_lint) picks it and its `env:` takes the pull request's
+# base ref or head sha (`${{ github.base_ref }}`, `${{ github.event.pull_request.head.sha }}`). The steps are
+# read from the checkout's .github/workflows/checks.yml with lint/workflow_steps.py. A step the chooser leaves
+# out is never read further, so its `if:` and `env:` raise no note. The red-run step is skipped: _red_run_lines
 # judges it in this process. The command is the step's own `run:` text and env, never a copy.
 # Each run is one `bash -e -c` child (Git Bash on Windows). A short prefix in that child does the git reads, so
 # the guard starts no git of its own: it resolves origin's default branch (BASE_REF), the pushed ref's
@@ -790,15 +797,17 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel):
 # the push is refused only for finding lines the first run prints and the second lacks, compared by text.
 # A step that takes only the base ref reads the checked-out HEAD, so it runs once with the destination as
 # its base when origin holds it (the lines the push adds), else origin's default branch.
-# A finding is a non-indented stdout line; ALLOWED and UNKNOWN lines are not. Unknown means allowed: a
+# A finding is a non-indented stdout line; ALLOWED, UNKNOWN and REMEDY lines are not. Unknown means allowed: a
 # shallow clone (a step's own `<name>: UNKNOWN` line; the note adds `git fetch --unshallow origin`), a step
 # whose `if:` or `env:` this reader cannot evaluate, a run past LANE_LINT_PUSH_SECONDS (default 40, one
 # deadline for the whole call, under the hook's own 60 s), a missing bash, an odd exit, or a tip run that is
 # unknown when the first run fails. One guard.log line and one stderr line per call say so (guard.py).
 # Not judged, and silent: a dry run, a delete, a tag, a destination `archive/*` or the record branch, a
 # checkout with no .github/workflows/checks.yml, and a workflow with no fast step.
-# A commit, merge, revert, cherry-pick, rebase or am earlier in the same call is not in HEAD yet, so the push
-# it precedes cannot be linted: that push is denied (LANE_LINT_PUSH_CHAIN_REASON) when a fast step exists.
+# A commit, merge, revert, cherry-pick, rebase, am or pull earlier in the same call is not in HEAD yet, so the
+# push it precedes cannot be linted: that push is denied (LANE_LINT_PUSH_CHAIN_REASON) when a fast step exists.
+# The deny is blanket, whatever the segment would commit: the guard cannot read a commit that has not landed,
+# and a retry costs one call.
 # Limit: a push with nothing to send still starts its runs.
 # The measured times and the budget are in decision lane-lint-at-push.
 # Cost: no process for a call with no push, or a push the list above skips. Else per ref, one `bash`
@@ -813,10 +822,10 @@ LANE_LINT_PUSH_REASON = (
 )
 LANE_LINT_PUSH_CHAIN_REASON = (
     "Rule (Git, lane-lint-push; decision lane-lint-at-push, the lane lint before a push): a commit this call makes "
-    "before the push (a commit, merge, revert, cherry-pick, rebase or am) is not in HEAD yet, so this push cannot "
-    "lint what it sends. Remedy: run the push in a call of its own, after the commit lands."
+    "before the push (a commit, merge, revert, cherry-pick, rebase, am or pull) is not in HEAD yet, so this push "
+    "cannot lint what it sends. Remedy: run the push in a call of its own, after the commit lands."
 )
-_LANE_CHAIN_VERBS = ("commit", "merge", "revert", "cherry-pick", "rebase", "am")
+_LANE_CHAIN_VERBS = ("commit", "merge", "revert", "cherry-pick", "rebase", "am", "pull")
 _LANE_CHAIN_DONE = {"--abort", "--quit", "--skip"}   # the step ends a sequence and makes no commit
 LANE_LINT_ENV = "LANE_LINT_PUSH_SECONDS"
 LANE_LINT_SECONDS = 40.0
@@ -826,9 +835,7 @@ _LANE_SOURCES = {"github.base_ref": "base", "github.event.pull_request.head.sha"
 _LANE_EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}\Z")
 _LANE_PULL_REQUEST = "github.event_name == 'pull_request'"
 _LANE_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
-_LANE_UNKNOWN = re.compile(r"^[\w.-]+: UNKNOWN\b")
-# ALLOWED, UNKNOWN and REMEDY lines are a step's notes (lint/check_silent_undo.py), never a finding.
-_LANE_NOT_FINDING = re.compile(r"^[\w.-]+: (?:ALLOWED|UNKNOWN|REMEDY)\b")
+_LANE_LOADED = {}   # bin/ci-job's is_lint and the note-line patterns, each loaded once, on the first judged push
 _LANE_EXITS = {   # the prefix's own exit codes, no lint step's
     95: "the push sends a ref other than the checked-out HEAD, and this step reads HEAD",
     96: "the pushed head's workflow differs from the checkout's",
@@ -860,14 +867,53 @@ def _lane_unquoted(value):
     return value[1:-1] if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"" else value
 
 
+def _lane_is_lint():
+    """bin/ci-job's is_lint, the one home of the lint-step choice. bin/ci-job has no .py name, so it loads by path,
+    as sim_lease_holds loads bin/sim-lease, and writes no bytecode file. Raises ImportError when it will not load."""
+    if "is_lint" not in _LANE_LOADED:
+        import importlib.machinery
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "bin", "ci-job")
+        keep_path, keep_bytecode = list(sys.path), sys.dont_write_bytecode
+        try:
+            sys.dont_write_bytecode = True
+            loader = importlib.machinery.SourceFileLoader("ci_job", path)
+            module = importlib.util.module_from_spec(importlib.util.spec_from_loader("ci_job", loader))
+            loader.exec_module(module)
+            _LANE_LOADED["is_lint"] = module.is_lint
+        except (Exception, SystemExit) as err:   # a script that exits at import is unloadable too
+            raise ImportError("bin/ci-job did not load (%s)" % type(err).__name__) from err
+        finally:
+            # ci-job puts hooks/ and lint/ first on the path; the guard keeps its own import order.
+            sys.path[:] = keep_path
+            sys.dont_write_bytecode = keep_bytecode
+    return _LANE_LOADED["is_lint"]
+
+
+def _lane_notes():
+    """(unknown line, note line) patterns. A note line opens with a word lint/check_silent_undo.py exports for its
+    ALLOWED, UNKNOWN and REMEDY lines, after any step's `<name>: ` prefix; it is never a finding. Raises ImportError
+    with no lint folder beside the hooks."""
+    if "notes" not in _LANE_LOADED:
+        undo = _lint_module("check_silent_undo")
+        words = "|".join(re.escape(word) for word in (undo.ALLOWED, undo.UNKNOWN, undo.REMEDY))
+        _LANE_LOADED["notes"] = (re.compile(r"^[\w.-]+: %s\b" % re.escape(undo.UNKNOWN)),
+                                 re.compile(r"^[\w.-]+: (?:%s)\b" % words))
+    return _LANE_LOADED["notes"]
+
+
 def _lane_steps(text):
     """([step], [why]) from the workflow's text: each fast step as {name, run, env, binds} (`binds` maps an env
-    name to "base" or "head"), and one why for each step that takes a pull request value but whose `if:` or
-    `env:` the guard cannot evaluate. Raises ImportError with no lint folder beside the hooks."""
+    name to "base" or "head"), and one why for each lint step that takes a pull request value but whose `if:` or
+    `env:` the guard cannot evaluate. Raises ImportError when the lint folder or bin/ci-job will not load."""
     reader = _lint_module("workflow_steps")
+    is_lint = _lane_is_lint()
+    _lane_notes()   # loads now, so a missing reader is a note before any run starts
     judged_elsewhere = _red_run_module().__name__
     steps, whys = [], []
     for block in reader.step_blocks(text):
+        if not is_lint(block):
+            continue   # the lint chooser leaves it out, so its if: and env: are never read
         binds, literal, unread = {}, {}, ""
         for key, raw in reader.step_env(block).items():
             value = _lane_unquoted(raw)
@@ -920,7 +966,14 @@ def _lane_start(top, bash, step, extra):
 
 def _lane_stop(proc):
     """Stop a run and what it started (_nowindow.kill_tree), then close its pipes."""
-    _nowindow.kill_tree(proc)
+    kill_tree = getattr(_nowindow, "kill_tree", None)
+    if kill_tree is not None:
+        kill_tree(proc)
+    else:   # the subprocess fallback has no kill_tree: the child dies, a grandchild it started may outlive it
+        try:
+            proc.kill()
+        except Exception:
+            pass
     try:
         proc.communicate(timeout=5)
     except Exception:
@@ -947,16 +1000,17 @@ def _lane_read(result):
     code, out, err = result
     if code in _LANE_EXITS:
         return "unknown", _LANE_EXITS[code]
+    unknown, not_finding = _lane_notes()
     rows = out.splitlines()
     for row in rows:
-        if _LANE_UNKNOWN.match(row):
+        if unknown.match(row):
             shallow = "; remedy: git fetch --unshallow origin" if re.search(r"\bshallow\b", row, re.I) else ""
             return "unknown", row.strip() + shallow
     if code == 0:
         return "pass", []
     if code != 1:
         return "unknown", "the lint exited %s: %s" % (code, cap_safe((err.strip().splitlines() or ["no message"])[-1], 100))
-    found = [row.strip() for row in rows if row.strip() and not row[:1].isspace() and not _LANE_NOT_FINDING.match(row)]
+    found = [row.strip() for row in rows if row.strip() and not row[:1].isspace() and not not_finding.match(row)]
     return ("fail", found) if found else ("unknown", "the lint exited 1 and printed no finding line")
 
 
@@ -1025,16 +1079,16 @@ def _lane_lint_push_hit(stripped, cwd, record_branch_of, read_verb, notes):
             if plan is None:
                 try:
                     plan = _lane_steps(text)
-                except ImportError:
-                    notes.append("lint/workflow_steps.py was not found beside the hooks")
+                except ImportError as err:
+                    notes.append("the step reader did not load beside the hooks (%s)" % cap_safe(str(err), 100))
                     break
             steps, whys = plan
-            notes.extend(whys)
+            notes.extend(whys)   # whys come from lint steps only: _lane_steps reads no other step's if: or env:
             if not steps:
                 continue   # a workflow with no fast step has nothing to run here
             if chained and top in {_lane_segment_top(each, stripped, cwd) for each in chained}:
                 return "git push", LANE_LINT_PUSH_CHAIN_REASON
-            bash = find_git_bash()
+            bash = find_git_bash() if find_git_bash is not None else None
             if not bash:
                 notes.append("bash was not found")
                 continue
