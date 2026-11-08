@@ -12,7 +12,7 @@
 //                An id that names no record: one plain stderr line that names the id and the decisions folder, exit 1.
 //                `--full` with any other arg is ignored.
 // A code map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. A Tables row is none.
-// A non-code map line is read only for a file that a record names (`namedNonCode`). A non-code file that no record names is out of scope.
+// Every non-code map line is parsed, and only a file that a record names (`namedNonCode`) prints. A non-code file that no record names is out of scope.
 // A path may be absolute: under the repository root it is read as its relative form.
 // Nothing found: `no map line for <arg>` on stderr, exit 1. No arg: a usage line, exit 2.
 // A map the skill cannot read (a bad config, or a page that is tracked and not on disk): one plain stderr line, exit 3.

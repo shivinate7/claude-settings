@@ -100,7 +100,13 @@ export const recordNaming = ({ root, read, all, decisionsDir, idPattern }) => {
   const tracked = new Set(all);
   const debts = debtRecords(root);
   const dd = decisionsDir ? decisionsDir.replace(/\/?$/, '/') : null;
-  const skip = (f) => f === 'map.config.json' || f.startsWith('docs/map/') || (dd && f.startsWith(dd)) || (debts.dir && f.startsWith(`${debts.dir}/`));
+  // A record file is directly in its folder. Another tracked file in that folder, or under it, can be named and needs a map line.
+  const recordIn = (dir, f) => {
+    if (!dir || !f.startsWith(dir)) return false;
+    const name = f.slice(dir.length);
+    return !name.includes('/') && (isRecordFile({ isFile: () => true, name }) || NOT_RECORDS.has(name));
+  };
+  const skip = (f) => f === 'map.config.json' || f.startsWith('docs/map/') || recordIn(dd, f) || recordIn(debts.dir && `${debts.dir}/`, f);
   const found = new Map();
   const scan = (file, kind, name) => {
     for (const [, token] of read(file).matchAll(/`([^`\n]+)`/g)) {
