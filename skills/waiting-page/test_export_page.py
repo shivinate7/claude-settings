@@ -99,8 +99,13 @@ CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
 NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
 PROSE_SECRET = "correcthorsebatterystaple"  # letters only, no digit, symbol or hump: only the prose rule can refuse it
-# A digit at index 256 is the last one the credential-name lookahead reads (VALUE_LOOKAHEAD_MAX is 256 characters before it).
+# A digit at index 256 of a credential value: refused, and it must stay refused.
 CAP_LAST_DIGIT = "abcdefgh" * 32 + "1"
+# A digit with letters before it and no other digit: at index 257, and at index 1000. Refused, wherever the digit sits.
+DIGIT_AT_257 = "abcdefgh" * 32 + "a1"
+DIGIT_AT_1000 = "abcdefgh" * 125 + "1"
+assert CAP_LAST_DIGIT.index("1") == 256 and DIGIT_AT_257.index("1") == 257 and DIGIT_AT_1000.index("1") == 1000, \
+    "the digit fixtures must sit at their named indexes"
 # A scan that re-reads a run from each start position takes about 16 times as long over four times the run; a linear
 # scan takes about 4 times. The bound sits between them. RUN_N is the shorter run, the longer run is four times it.
 RUN_N = 20000
@@ -268,9 +273,10 @@ RED = [
     ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
     # A comma does not end the prose: a letters-only secret after a comma, with prose before it, is one.
     ("letters-only secret after prose and a comma", "password: none for the admin account, " + PROSE_SECRET, PROSE_SECRET),
-    # The digit lookahead of the credential-name shape reads VALUE_LOOKAHEAD_MAX characters before a digit. A digit at index
-    # 256 is the last one it reads, so this value is refused.
+    # The digit counts wherever it sits in the value: at 256, and at 257 and 1000 past it.
     ("digit at index 256 of a credential value", "API_KEY=" + CAP_LAST_DIGIT, CAP_LAST_DIGIT),
+    ("digit at index 257 of a credential value", "API_KEY=" + DIGIT_AT_257, DIGIT_AT_257),
+    ("digit at index 1000 of a credential value", "API_KEY=" + DIGIT_AT_1000, DIGIT_AT_1000),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -384,6 +390,8 @@ GREEN = [
     ("API_KEY set to a long variable reference", "API_KEY=${MY_LONG_API_KEY_NAME}"),
     ("MY_TOKEN set to a plain word", "MY_TOKEN=optional"),
     ("MY_TOKEN set to a long placeholder", "MY_TOKEN=<your-long-token-here>"),
+    # The RED value at 1000 with no credential name in front: a fix that refuses any long value with a digit fails here.
+    ("a long run of letters with a digit at index 1000, and no credential name", DIGIT_AT_1000),
     ("prose with the word secret before a name", "the secret santa list"),
     # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
     # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
@@ -613,27 +621,29 @@ class Scan(Base):
                 self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
 
-    def timed_export(self, fetched, folder, timeout):
-        """Seconds for one export of `fetched` into a fresh copy. The exit code is asserted before the time is used."""
+    def timed_export(self, fetched, folder, timeout, want_exit=0):
+        """Seconds for one export of `fetched` into a fresh copy. The exit code is asserted before the time is used:
+        0 for an export, 1 for a refusal (`want_exit`)."""
         start = time.perf_counter()
         r = self.export(fetched, self.out(folder), timeout=timeout)
         took = time.perf_counter() - start
-        self.assertEqual(r.returncode, 0, "%s did not export (exit %d). Output:\n%s" % (folder, r.returncode, shown(r)))
+        cause = "was not refused" if want_exit else "did not export"
+        self.assertEqual(r.returncode, want_exit, "%s %s (exit %d). Output:\n%s" % (folder, cause, r.returncode, shown(r)))
         return took
 
-    def timed_growth(self, folder, make_note):
+    def timed_growth(self, folder, make_note, want_exit=0):
         """(growth, short, long) for the scan of a run of 4 x RUN_N characters over the scan of a run of RUN_N, both timed
         in this process. Each size is the faster of two exports, so one slow export does not set the ratio. The timeout is
         a hang guard only: the scan takes well under a second at RUN_N, and a quadratic scan takes minutes at 4 x RUN_N."""
         timings = {}
         for size in (RUN_N, 4 * RUN_N):
             fetched = self.fetch(items={"ok": {"id": "ok", "title": "Ok", "note": make_note(size)}})
-            timings[size] = min(self.timed_export(fetched, "%s-%d-%d" % (folder, size, run), timeout=900)
+            timings[size] = min(self.timed_export(fetched, "%s-%d-%d" % (folder, size, run), timeout=900, want_exit=want_exit)
                                 for run in (1, 2))
         return timings[4 * RUN_N] / timings[RUN_N], timings[RUN_N], timings[4 * RUN_N]
 
-    def assert_grows_no_faster_than_linear(self, folder, make_note, what):
-        growth, short, long_run = self.timed_growth(folder, make_note)
+    def assert_grows_no_faster_than_linear(self, folder, make_note, what, want_exit=0):
+        growth, short, long_run = self.timed_growth(folder, make_note, want_exit)
         self.assertLess(growth, GROWTH_BOUND,
                         "the scan of %s grew %.1f times, from %.3f s at %d characters to %.3f s at %d; a linear scan "
                         "grows 4 times, and the bound is %d" % (what, growth, short, RUN_N, long_run, 4 * RUN_N, GROWTH_BOUND))
@@ -649,6 +659,13 @@ class Scan(Base):
     def test_a_long_run_of_key_equals_grows_no_faster_than_linear(self):
         # The credential-name value lookaheads scan to the end of a run of `key=`, from each start position.
         self.assert_grows_no_faster_than_linear("key-equals", lambda n: "key=" * (n // 4), "a run of key=")
+
+    def test_a_digit_past_index_256_is_refused_and_grows_no_faster_than_linear(self):
+        # A same-process ratio, as above (test-practices P5): stdlib `re` exposes no step count to pin instead. Each size's only
+        # digit is past index 256, so each export must refuse it. A build that passes it goes red on the refusal, first.
+        self.assert_grows_no_faster_than_linear(
+            "digit-past-256", lambda n: "API_KEY=" + "abcdefgh" * (n // 8) + "1",
+            "a credential value whose only digit is past index 256", want_exit=1)
 
 
 class Mirror(Base):
