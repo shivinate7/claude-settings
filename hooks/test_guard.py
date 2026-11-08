@@ -28261,6 +28261,16 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a line saying th
           "Check the floor fix.\nThe prior round result is in the PR thread.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a bold **Verdict:** line that asks for one word, PASS or FAIL",
           "Check the floor fix.\n**Verdict:** one word, PASS or FAIL.\nFiles: hooks/guard.py.")
+# A round label with `result` before its dash is a verdict line too, and so is `Prior round result` before a dash. The
+# allow row is a dash before FAIL inside a hyphenated word (`FAIL-safe`): that is prose, not a verdict.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 result — FAIL line, em dash",
+           "Check the floor fix.\nRound 1 result — FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 result - FAIL line, hyphen",
+           "Check the floor fix.\nRound 1 result - FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior round result — FAIL line, em dash",
+           "Check the floor fix.\nPrior round result — FAIL\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Round 2 — FAIL-safe paths stay closed. line",
+          "Check the floor fix.\nRound 2 — FAIL-safe paths stay closed.\nFiles: hooks/guard.py.")
 
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
