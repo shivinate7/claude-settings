@@ -2372,7 +2372,8 @@ LANE_REPO_TAG_REASON = (
 # A lane start names the model and the repo it works in. The reason names both fields and says why.
 LANE_START_SETTINGS_REASON = (
     "A lane session's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
-    "model it starts on the coordinator's model, not Sonnet (decision agent-model-cap). Pass both on create_session."
+    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
+    "`model` (the model that row names) and `source_url` (the repo) on create_session."
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
