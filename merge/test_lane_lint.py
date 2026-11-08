@@ -13,6 +13,8 @@ in this process. The slot cases (lint slots: a lane lint waits for one of merge.
 The load cases (a lane lint waits while the load is high) set a fake load reader, a fake clock and the lints running in that
 subprocess (LOAD_SEAMS), so no case reads the real load. HARNESS sets no real reader by default (NO_LOAD); LaneLint and
 BatchLintFlags patch merge.read_cpu_load in process (no_load_reading).
+The marker cases (class LintMarkers) call the real merge.lints_running and merge.lint_running in this process, on a temp config
+folder (CLAUDE_CONFIG_DIR), and a child process holds a marker's lock for the other-process case; no case patches them.
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
@@ -24,6 +26,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint 
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
+import guard_core  # noqa: E402  hooks/, on sys.path from merge's import: the lock a lint's markers and slots take
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 RUN_FOLDER = _test_temp.run_folder()
@@ -901,6 +904,110 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assert_waited_then_started(events, running=0)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
+
+
+HOOKS_DIR = os.path.join(os.path.dirname(HERE), "hooks")  # guard_core, the lock a lint's run marker and slot take
+HOLD_CHILD = '''import os, sys
+sys.path.insert(0, __HOOKS__)
+import guard_core
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o666)
+if not guard_core.try_lock_fd(fd):
+    print("busy", flush=True)
+    sys.exit(3)
+print("held", flush=True)
+sys.stdin.read()  # the lock is held until the parent closes stdin; this process's exit frees it
+'''
+
+
+class LintMarkers(unittest.TestCase):
+    """The running markers the load wait counts: merge.lints_running and merge.lint_running, run for real in this process on a temp
+    config folder. The load cases above patch lints_running to a constant, so these cases read the count and the marker hold.
+    The slot count is 2, so the full state does not depend on the CPU count. Cost per case: one temp folder, at most one child process."""
+
+    def setUp(self):
+        cfg = tempfile.mkdtemp(prefix="lint-markers-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, cfg, True)
+        for patch in (unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}),
+                      unittest.mock.patch.object(merge, "lint_slots", lambda: 2)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.folder = merge.lint_slot_folder()
+
+    def make_markers(self):
+        """The full state: every marker file exists and none is held, as a lint leaves its marker when it exits. -> the marker files."""
+        os.makedirs(self.folder, exist_ok=True)
+        for path in merge.run_marker_paths(create=True):
+            open(path, "a").close()
+        return merge.run_marker_paths()
+
+    def locked(self, path):
+        """True when another holder has the lock on `path`: a fresh fd's try fails while the lock is held."""
+        fd = os.open(path, os.O_RDWR)
+        try:
+            if guard_core.try_lock_fd(fd):
+                guard_core.unlock_fd(fd)
+                return False
+            return True
+        finally:
+            os.close(fd)
+
+    def hold_in_child(self, path):
+        """A child process takes the lock on `path` the way a lint does, and holds it until release_child closes its stdin.
+        -> the child's Popen, once the child reports `held`. A child that cannot take the lock fails the case."""
+        os.makedirs(self.folder, exist_ok=True)
+        code = HOLD_CHILD.replace("__HOOKS__", repr(HOOKS_DIR))
+        proc = subprocess.Popen([sys.executable, "-c", code, path], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.release_child, proc)
+        line = proc.stdout.readline()
+        if line.strip() != "held":
+            proc.wait(timeout=60)
+            self.fail("the child did not hold %s (it said %r): %s" % (path, line.strip(), proc.stderr.read()))
+        return proc
+
+    def release_child(self, proc):
+        """Close the child's stdin, so it exits and frees its lock, then wait for it. Safe to call twice."""
+        if not proc.stdin.closed:
+            proc.stdin.close()
+        proc.wait(timeout=60)
+        proc.stdout.close()
+        proc.stderr.close()
+
+    def test_with_no_marker_held_lints_running_counts_none(self):
+        """The empty state: no lint folder yet, so no marker is counted. The full state: every marker file exists and none is held,
+        so none is counted either."""
+        self.assertFalse(os.path.exists(self.folder), "the case starts with a lint folder already made")
+        empty = merge.lints_running()
+        self.assertEqual(empty, 0, "lints_running counted %d with no lint folder, want 0" % empty)
+        markers = self.make_markers()
+        self.assertEqual(len(markers), 2, "the full state did not get one marker file per slot: %r" % markers)
+        held = merge.lints_running()
+        self.assertEqual(held, 0, "lints_running counted %d unheld marker file(s), want 0" % held)
+
+    def test_inside_lint_running_the_count_is_one_and_zero_after_it_exits(self):
+        """The marker a lint holds counts for the lint's body, and stops counting when lint_running exits."""
+        with merge.lint_running():
+            inside = merge.lints_running()
+            self.assertEqual(inside, 1, "lints_running counted %d inside lint_running, want 1: the marker this lint holds" % inside)
+        after = merge.lints_running()
+        self.assertEqual(after, 0, "lints_running counted %d after lint_running exited, want 0" % after)
+
+    def test_a_marker_another_process_holds_is_counted_until_that_process_exits(self):
+        """A run marker that another process holds counts, and stops counting when that process exits."""
+        holder = self.hold_in_child(merge.run_marker_paths(create=True)[0])
+        held = merge.lints_running()
+        self.assertEqual(held, 1, "lints_running counted %d while another process held a run marker, want 1" % held)
+        self.release_child(holder)
+        released = merge.lints_running()
+        self.assertEqual(released, 0, "lints_running still counted %d after the other process exited, want 0" % released)
+
+    def test_a_lint_that_holds_a_slot_and_no_run_marker_is_not_counted(self):
+        """A waiting lint holds a slot (lint_slot) and no run marker. The slot lock is first shown held, then the count reads 0."""
+        self.make_markers()
+        with merge.lint_slot():
+            self.assertTrue(self.locked(os.path.join(self.folder, "slot-0.lock")), "lint_slot did not hold slot-0, so the case tests no waiting lint")
+            counted = merge.lints_running()
+            self.assertEqual(counted, 0, "lints_running counted %d for a lint that holds a slot and no run marker, want 0" % counted)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
