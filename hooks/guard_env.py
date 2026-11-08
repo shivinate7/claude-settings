@@ -76,11 +76,10 @@ ENV_QUOTED_SPAN = re.compile(r"\"[^\"]*\"|'[^']*'")
 ENV_POWERSHELL_TEXT_COMMANDS = (
     "write-host", "write-output", "write-error", "write-warning", "write-verbose", "write-debug",
     "write-information", "throw")
-# A quoted word that holds a space is text, such as an Add-Content value, unless it is the command's
-# path argument: its first plain word, or the value of a `-Path`, `-LiteralPath` or `-FilePath`
-# flag. So `Get-Content "My Dir\.env"` reads a path, and `Add-Content log "see C:\app\.env"` writes
-# text. A rooted quoted path (`"C:\My Dir\.env"`) stays a path anywhere (ENV_QUOTED_ROOT).
-ENV_PATH_FLAG = re.compile(r"-\w*path", re.IGNORECASE)
+# Every other PowerShell argument is a path. These write text: their value, the word after `-Value`
+# or the second plain word, is text. So `Get-Content sub.txt "My Dir\.env"` reads a path, and
+# `Add-Content log "see C:\app\.env"` writes text. Lower case.
+ENV_POWERSHELL_CONTENT_COMMANDS = ("add-content", "set-content", "ac")
 # A .NET regex call: every word from it to the segment end is a regex argument.
 ENV_REGEX_CALL = re.compile(r"\[(?:system\.text\.regularexpressions\.)?regex\]::", re.IGNORECASE)
 # `-Path` and the like take a value that is never the pattern.
@@ -620,21 +619,21 @@ def _powershell_regex_words(words, position: int, command: str):
     return found
 
 
-def _powershell_text_words(words, position: int, text_command: bool):
-    """The indexes of the quoted words in a PowerShell segment that hold a space and are text, not
-    the command's path argument (ENV_PATH_FLAG). A text command has no path argument. A redirect's
-    target is never text."""
-    slot = set()
-    if not text_command:
-        plain = [i for i in range(position + 1, len(words))
-                 if not words[i].startswith("-") and not REDIRECT.fullmatch(words[i])
-                 and not REDIRECT.fullmatch(words[i - 1])]
-        slot = set(plain[:1]) | {i for i in range(position + 1, len(words))
-                                 if ENV_PATH_FLAG.fullmatch(words[i - 1])}
-    return {i for i in range(position + 1, len(words))
-            if i not in slot and not REDIRECT.fullmatch(words[i - 1]) and " " in words[i]
-            and (words[i][:2] in ('@"', "@'") or len(words[i]) > 1 and words[i][0] in "\"'"
-                 and words[i][-1] == words[i][0])}
+def _powershell_text_words(words, position: int, command: str, text_command: bool):
+    """The indexes of the words in a PowerShell segment that are text, not a path. For a text command
+    that pipes onward, its quoted words that hold a space. For a content writer
+    (ENV_POWERSHELL_CONTENT_COMMANDS), its value. Else none. A redirect's target is never text."""
+    args = [i for i in range(position + 1, len(words))
+            if not REDIRECT.fullmatch(words[i]) and not REDIRECT.fullmatch(words[i - 1])]
+    if text_command:
+        return {i for i in args if " " in words[i] and (
+            words[i][:2] in ('@"', "@'")
+            or len(words[i]) > 1 and words[i][0] in "\"'" and words[i][-1] == words[i][0])}
+    if command.lower() not in ENV_POWERSHELL_CONTENT_COMMANDS:
+        return set()
+    value = {i for i in args if words[i - 1].lower() == "-value"}
+    plain = [i for i in args if not words[i].startswith("-") and i not in value]
+    return value | set(plain[1:2])
 
 
 def _assignment_end(words, position: int) -> int:
@@ -823,7 +822,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
                 not_paths = {i for i in range(len(words)) if not (i and REDIRECT.fullmatch(words[i - 1]))}
             elif powershell:
                 not_paths = (_powershell_regex_words(words, position, command)
-                             | _powershell_text_words(words, position, text_command))
+                             | _powershell_text_words(words, position, command, text_command))
             patterns, glued = (_pattern_words(words, position, command)
                                if command in (ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
                                               + ENV_PROGRAM_COMMANDS)
