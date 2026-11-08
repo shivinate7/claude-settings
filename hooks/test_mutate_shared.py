@@ -257,7 +257,7 @@ def pass_result(*names):
     return 0, [], lines, []
 
 
-GATE_WAIT = 0.5  # a call waits this long for a second call to join it, so overlap shows without a fixed sleep
+JOIN_WAIT = 0.5  # a call waits this long for a second call to join it, so overlap shows without a fixed sleep
 RELEASE_WAIT = 1.0  # a held control waits this long for the mutant it is held on, so no case hangs
 RUN_LIMIT = 4.0  # main must return within this long, or the case reads a stall, not a hang
 
@@ -271,12 +271,12 @@ class _FakeSuite:
     case. A control (`only` None) is green when `control_passes`, red otherwise.
 
     `hooks` maps a key to a zero-argument function that runs in place of that call's answer, so a case can
-    hold a call or raise from it. `gate` holds each call up to GATE_WAIT for a second call to join it.
+    hold a call or raise from it. `join` holds each call up to JOIN_WAIT for a second call to join it.
     `release` maps a key to an Event that is set once that call has ended and been logged. `active` and
     `peak` count the calls in flight, `events` lists each call's end by key in order, and `calls` records
     each call's key, `only`, `tree` and `mutant`. The counts sit under one lock."""
 
-    def __init__(self, entries, control_passes, hooks=None, gate=False, release=None):
+    def __init__(self, entries, control_passes, hooks=None, join=False, release=None):
         self.names = {}  # key -> required case, or None for a target's clean-layout control
         self.required = []
         for entry in entries:
@@ -286,7 +286,7 @@ class _FakeSuite:
             self.required.append(required)
         self.control_passes = control_passes
         self.hooks = hooks or {}
-        self.gate = gate
+        self.join = join
         self.release = release or {}
         self.calls = []
         self.events = []
@@ -308,8 +308,8 @@ class _FakeSuite:
             self.active += 1
             self.peak = max(self.peak, self.active)
             self.cond.notify_all()
-            if self.gate:
-                self.cond.wait_for(lambda: self.active >= 2, timeout=GATE_WAIT)
+            if self.join:
+                self.cond.wait_for(lambda: self.active >= 2, timeout=JOIN_WAIT)
         try:
             if key in self.hooks:
                 return self.hooks[key]()
@@ -420,7 +420,7 @@ class CleanLayoutControlTests(unittest.TestCase):
         entries = self.guard_entries("work-tree: the tree option goes unread")
         label = mutate_guard.mutation_parts(entries[0])[0]
         control = mutate_guard.control_name("guard")
-        suite = _FakeSuite(entries, control_passes=True, gate=True)
+        suite = _FakeSuite(entries, control_passes=True, join=True)
         _code, lines = self.run_main(entries, suite, jobs=1)
         keys = [call["key"] for call in suite.calls]
         self.assertTrue(control in keys and label in keys,
