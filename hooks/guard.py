@@ -393,7 +393,8 @@ while True:
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
-            PR_BODY_PLACEHOLDER_REASON, PR_BODY_SHRINK_REASON, PR_EDIT_VALUE_FLAGS, pr_body_hit, pr_call_of,
+            PR_BODY_PLACEHOLDER_REASON, PR_BODY_SHRINK_REASON, PR_EDIT_VALUE_FLAGS, pr_body_hit, pr_body_is_placeholder,
+            pr_call_of,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1549,19 +1550,69 @@ def _inline_body_literal(segment: str, body: str) -> bool:
     return bool(carriers) and not any(_word_expands(word) for word in carriers)
 
 
-def pr_edit_body(segment: str, raw: str, where: str, before: int):
+BARE_VARIABLE_WORD = re.compile(
+    r"""^(?:--body=|-b)?(?:"\$(\w+)"|\$(\w+)|"\$\{(\w+)\}"|\$\{(\w+)\})$""")
+
+
+def _bare_variable(segment: str, body: str) -> str:
+    """Return the variable name when every word of the segment that carries this inline body is one
+    bare variable (`"$BODY"`, `$BODY`, `"${BODY}"`, also after `--body=` or `-b`), else ''. A
+    single-quoted `'$BODY'` is literal text and is no variable."""
+    try:
+        words = shlex.split(segment, posix=False)
+    except ValueError:
+        return ""
+    names = set()
+    for word in words:
+        try:
+            if not any(body in part for part in shlex.split(word)):
+                continue
+        except ValueError:
+            continue
+        found = BARE_VARIABLE_WORD.match(word)
+        if not found:
+            return ""
+        names.add(next(group for group in found.groups() if group))
+    return names.pop() if len(names) == 1 else ""
+
+
+def _may_assign(earlier: str, name: str) -> bool:
+    """True when the segments ahead of the call might set this variable, so its value is unknown. Quoted
+    text is no assignment (`echo 'BODY=x'`). The test leans to unknown: `name=` at a word start, a
+    declaration or read of the name, `${name:=`, and `eval` or `source` all count."""
+    word = r"(?<![\w'\"$])" + re.escape(name)
+    return bool(
+        re.search(word + r"[=+]?=", earlier)
+        or re.search(r"\b(?:export|declare|typeset|local|readonly|read|mapfile|readarray|getopts|for|unset)\b[^\n;&|]*"
+                     + word + r"\b", earlier)
+        or re.search(r"\bprintf\s+-v\s+" + re.escape(name) + r"\b", earlier)
+        or re.search(r"\$\{" + re.escape(name) + r":?=", earlier)
+        or re.search(r"(?:^|[\s;&|(])(?:eval|source|\.)\s", earlier))
+
+
+def pr_edit_body(segment: str, raw: str, where: str, before: int, earlier: str = ""):
     """Return (selector, repo, body) for a `gh pr edit` segment that sets a body this guard can read,
     else None. The last body text wins, as gh reads it. A body with a `$` or a backtick is judged only
     when the shell sends it as it stands: a message file (gh reads it as it is), a quoted heredoc, or a
-    single-quoted value. A real expansion (`"$BODY"`, `"$(cat f)"`, an unquoted heredoc) is not the text
-    the call will send. An unread message file is cite-by-id's to refuse, and a body piped in with no
-    heredoc is unseen: each is no hit."""
+    single-quoted value. A real expansion (`"$(cat f)"`, an unquoted heredoc, text mixed with a variable)
+    is not the text the call will send. A body that is one bare variable is read from this process's
+    environment, or as empty when unset, because shell state does not carry over between Bash calls. Only
+    a placeholder value is a hit; a real value passes with no live read. A value the command may set in
+    `earlier` (the segments ahead of this one) stays unknown. A prefix
+    `BODY=x gh pr edit ... "$BODY"` sets nothing the word sees, since bash expands the word first. An
+    unread message file is cite-by-id's to refuse, and a body piped in with no heredoc is unseen: each
+    is no hit."""
     call = pr_call_of(segment, "edit", PR_EDIT_VALUE_FLAGS)
     read = message_texts(segment, raw, where, before) if call is not None else None
     if read is None or read[2] or not read[1]:
         return None
     body = read[1][-1]
     if "$" in body or "`" in body:
+        name = _bare_variable(segment, body) if not read[1][:-1] and "<<" not in segment else ""
+        if name and not _may_assign(earlier, name):
+            value = os.environ.get(name, "")
+            # Only the placeholder test reads this value: a real one is passed unjudged, with no live read.
+            return (call[0], call[1], value) if pr_body_is_placeholder(value) else None
         quotes = own_heredoc_quotes(segment, raw, before) if "<<" in segment else {}
         if body in quotes:
             literal = quotes[body]
@@ -3491,7 +3542,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
     # each segment takes its own bodies: heredoc_offsets counts the headers ahead of it (1c's split)
-    for segment, before in zip(segments, heredoc_offsets(segments, ends, stripped == raw)):
+    for number, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
         if not segment.strip():
             continue
         matched = cited_record_path(segment, raw, cite_where, before)
@@ -3504,7 +3555,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
-        edited = pr_edit_body(segment, raw, cite_where, before)
+        edited = pr_edit_body(segment, raw, cite_where, before, "\n".join(segments[:number]))
         if edited:
             judge_pr_body(tool, edited[2], edited[0], edited[1], cite_where, True)
 

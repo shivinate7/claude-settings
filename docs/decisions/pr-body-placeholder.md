@@ -18,7 +18,8 @@ Matcher switch-on: adding `mcp__github__update_pull_request` to the guard's PreT
 Limits:
 
 - `gh api -X PATCH .../pulls/N -f body=` is not judged.
-- A `gh pr edit` body with a `$` or a backtick is judged when the shell sends it as it stands: a message file, a quoted heredoc (`<<'EOF'`, also inside `$(cat <<'EOF' ...)`) or a single-quoted value. A real expansion (`"$BODY"`, `"$(cat f)"`, an unquoted heredoc holding `$`) is not the text the call sends, so it passes unjudged. A piped body passes unjudged too, even a quoted heredoc piped through `cat` into `--body-file -`, because that heredoc belongs to `cat`.
+- A `gh pr edit` body with a `$` or a backtick is judged when the shell sends it as it stands: a message file, a quoted heredoc (`<<'EOF'`, also inside `$(cat <<'EOF' ...)`) or a single-quoted value. A real expansion (`"$(cat f)"`, an unquoted heredoc holding `$`, text mixed with a variable) is not the text the call sends, so it passes unjudged. A piped body passes unjudged too, even a quoted heredoc piped through `cat` into `--body-file -`, because that heredoc belongs to `cat`.
+- A body that is one bare variable (`"$BODY"`, `$BODY`, `"${BODY}"`) is read from the guard's environment, and an unset variable reads as empty, because shell state does not carry over between Bash calls. An empty body is denied. A set value is judged for the placeholder test only, with no live read, so it never asks for a shrink. A variable the same command may assign earlier (`BODY=...;`, `BODY=$(...) &&`, `export BODY=...`, `read BODY`) is unknown and passes unjudged; the test leans to unknown, so `echo BODY=x` before the call also passes. A prefix `BODY=x gh pr edit ... "$BODY"` is no assignment, because bash expands the word before the prefix applies.
 - A `gh pr edit` inside `sh -c` or a command substitution is not read, as cite-by-id does not read it.
 - Unmeasured: how often a lane rewrites a body far shorter on purpose.
 
