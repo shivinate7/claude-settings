@@ -33,7 +33,7 @@ Harm: a pipeline's exit status is its last stage's. `verdict` prints FAIL and ex
 - A pipeline whose first stage is a `verdict` call (any spelling, behind any wrapper or `uv run`) and that has a later stage is refused when `&&` or `||` follows it and another command comes after. The rule id is `verdict-pipe-exit`, in `hooks/guard_stream.py`.
 - It is refused in the foreground and in the background.
 - `set -o pipefail` (or a cluster such as `set -euo pipefail`) earlier in the same command passes. The last `set` that sets or clears pipefail before the pipeline decides, so `set +o pipefail` after `set -o pipefail` does not pass.
-- A `;` after the pipeline is not read, because it gates nothing: the next command runs after a red check with or without the pipe.
+- A `;` after the pipeline is not read. Without `set -e`, the next command runs after a red check with or without the pipe. Under `set -e`, the pipe hides the failure and the next command runs: a known gap, note verdict-pipe-newline.
 - A bare `verdict <cmd>`, `verdict <cmd> && ...` with no pipe, and a verdict pipe that is the command's last pass.
 - The remedy is to run `verdict <cmd>` with no pipe, or to set pipefail first.
 

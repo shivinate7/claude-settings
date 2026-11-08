@@ -291,7 +291,9 @@ CHECK_TAIL_REASON = (
 # A VERDICT CALL PIPED ONWARD, then `&&` or `||` (decision background-check-through-verdict). A
 # pipeline's exit status is its last stage's, so `verdict <cmd> | tail -1 && git commit` runs the commit
 # after a red check: verdict's own exit status is hidden. `set -o pipefail` earlier in the same command
-# keeps it, unless a later `set +o pipefail` clears it. A `;` gates nothing, so it is not read. A pipeline that ends the command is safe, since nothing reads its status, and so is a bare
+# keeps it, unless a later `set +o pipefail` clears it. A `;` is not read: without errexit it gates
+# nothing. Under `set -e` it does, and that form is a known gap (note verdict-pipe-newline). A pipeline
+# that ends the command is safe, since nothing reads its status, and so is a bare
 # `verdict` call.
 CONTINUING_ENDS = ("&&", "||")
 PIPEFAIL_FLAGS = re.compile(r"[-+][A-Za-z]*o$")
