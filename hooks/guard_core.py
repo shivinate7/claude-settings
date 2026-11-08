@@ -527,8 +527,8 @@ def segment_tokens(segment: str):
     # PowerShell's escape is the backtick, so a backslash there is a path separator. Doubling it
     # keeps posix shlex from eating it (`C:\\repo` would read as `C:repo`).
     source = ""
+    segment = fold_call_operator(segment) if is_powershell(segment) else segment
     if is_powershell(segment):
-        segment = fold_call_operator(segment)
         segment = segment.replace("\\", "\\\\")
         # A smart quote is a quote, so read the text with each as its ASCII twin. A text that then
         # fails shlex (a lone `\u2019` in `don\u2019t` that PowerShell would read as a quote too) is read as it stands.
