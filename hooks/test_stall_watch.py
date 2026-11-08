@@ -1096,18 +1096,23 @@ def pid_ended(pid):
     return not state or state.startswith("Z")
 
 
-def stop_own_group(pid):
-    """Kill the process group of a job that run_rewritten started with own_group. The runner's own group is
-    never killed: the job's group is compared with it first."""
+def job_group(pid):
+    """The process group of a live job, read while it runs: a live pid cannot have been reused for another group."""
     try:
-        pgid = os.getpgid(pid)
+        return os.getpgid(pid)
     except ProcessLookupError:
-        return  # the job is gone
-    if pgid != os.getpgid(0):
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        return None
+
+
+def kill_job_group(pgid, pid):
+    """Kill the group job_group read, for a job that run_rewritten started with own_group. Nothing is killed once
+    the job has ended: its pid may then belong to another process. The runner's own group is never killed."""
+    if pgid is None or pid is None or pid_ended(pid) or pgid == os.getpgid(0):
+        return
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def stall_then_end_problems(shell):
@@ -1173,7 +1178,7 @@ def stalled_job_keeps_its_log_when_it_ends():
     exists once the job has ended and holds the last line. The verdict a stalled job prints last is what the
     owner reads, so the wrapper must not lose it"""
     rc, text, _secs, _cmd = run_rewritten("sleep 4; echo FINAL-VERDICT", quiet="1", own_group=True)
-    log = job = None
+    log = job = group = None
     try:
         problems = expect(rc == 3, f"exit {rc}, want 3 (the silence is a stall at 1 s)")
         m_log = re.search(r"^Log: (/\S+\.log) ", text, re.M)
@@ -1181,6 +1186,7 @@ def stalled_job_keeps_its_log_when_it_ends():
         if not m_log or not m_pid:
             return problems + ["the STALL report has no Log: path or no pid="]
         log, job = m_log.group(1), int(m_pid.group(1))
+        group = job_group(job)  # read now, while the job sleeps, so its group is known for the cleanup
         # Scope: the LOG exists while the job runs, so its survival after the job ends proves something.
         problems += expect(os.path.exists(log), f"LOG {log} is gone before the job ends")
         problems += expect(wait_until(lambda: pid_ended(job), 30), f"job pid={job} did not end within 30 s")
@@ -1192,8 +1198,7 @@ def stalled_job_keeps_its_log_when_it_ends():
             problems += expect("FINAL-VERDICT" in body, f"LOG holds {body[:80]!r}, want FINAL-VERDICT")
         return problems
     finally:
-        if job is not None:
-            stop_own_group(job)
+        kill_job_group(group, job)
         reap()
         if log is not None and os.path.exists(log):
             os.remove(log)  # the case keeps the LOG to read it; it is scratch, so the case removes it
