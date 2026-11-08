@@ -661,7 +661,7 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
 # read npm's own at hook time.
 NPM_READ_ONLY = {
-    "access", "adduser", "add-user", "login", "logout", "audit", "bugs", "issues", "cache",
+    "access", "adduser", "add-user", "login", "logout", "audit", "bugs", "issues", "cache",  # glossary-ok: "bugs" is npm's own subcommand name
     "completion", "config", "c", "get", "set", "deprecate", "diff", "dist-tag", "dist-tags", "docs",
     "home", "doctor", "exec", "x", "explain", "why", "find-dupes", "fund", "help", "hlep",
     "help-search", "hook", "ll", "la", "ls", "list", "org", "ogr", "outdated", "owner", "author",
