@@ -9904,6 +9904,19 @@ REVIEW_FULL = review_record(rounds=[(1, "reviewer", "claude-sonnet-5-5", "FAIL")
 REVIEW_NO_HEAD = "\n".join(line for line in review_record().splitlines() if not line.startswith("Head:")) + "\n"
 REVIEW_SHORT_HEAD = review_record().replace("Head: " + REVIEW_LIVE, "Head: " + REVIEW_LIVE[:39])
 REVIEW_SKIPPED_ROUND = review_record(rounds=[(1, "reviewer", "claude-sonnet-5-5", "PASS"), (3, "reviewer", "claude-sonnet-5-5", "PASS")])
+# The shape bodies. A record is its lines up to the CI line; prose after that line, with no `---`, is not a record.
+REVIEW_TRAILING = review_record() + "Lane note after the record.\n"
+REVIEW_FULL_TRAILING = REVIEW_FULL.split("---\n", 1)[0] + "Lane note after the record.\n"   # the full size, with the prose
+REVIEW_FOOTED = review_record(footer=True)                                              # a record, then `---` and the footer
+REVIEW_FENCED = "```\n" + review_record() + "```\n"                                     # a code fence, then the marker
+# The bodies the Bash forms read from a file, one file each in the record folder (build_record_fixtures writes them).
+RECORD_BODY_FILES = {"trailing.md": REVIEW_TRAILING, "full-trailing.md": REVIEW_FULL_TRAILING, "footed.md": REVIEW_FOOTED,
+                     "fenced.md": REVIEW_FENCED, "prose.md": REVIEW_PROSE}
+# A shape refusal's message names the `---` line and the footer. The shape text is pinned on every refusal of a malformed body.
+SHAPE_TEXT = ("a line exactly `---`", "footer")
+UPDATE_TOOL = "mcp__github__update_issue_comment"
+REVIEW_COMMENT_ID = 4417
+API_EDIT_CMD = "gh api -X PATCH repos/y/x/issues/comments/%d" % REVIEW_COMMENT_ID
 
 
 def build_record_fixtures():
@@ -9914,6 +9927,8 @@ def build_record_fixtures():
     write(os.path.join(GHRECORDDIR, "ok.md"), review_record())
     write(os.path.join(GHRECORDDIR, "wrong_tail.md"), review_record(head=REVIEW_TAIL))
     write(os.path.join(GHRECORDDIR, "stale.md"), review_record(head=REVIEW_OLD))
+    for name, text in RECORD_BODY_FILES.items():
+        write(os.path.join(GHRECORDDIR, name), text)
     make_repo(GHRECORDBRANCH, {"lane.txt": "lane\n"})
     switched = run_vcs(GHRECORDBRANCH, "checkout", "-q", "-b", "feat")
     if switched.returncode != 0:
@@ -10016,6 +10031,80 @@ bash_post("review-record: a record with a 39-digit Head is refused, gh api -f bo
           "%s -f 'body=%s'" % (API_CMD, REVIEW_SHORT_HEAD), "deny", rule=REVIEW_RULE)
 
 
+# The shape cases. A record is its lines up to the CI line: prose after that line, with no `---`, is refused. The judge sees
+# every post, and an edit too: the update tool and the PATCH route are the two places a body can be changed in place.
+def update_input(body, comment=REVIEW_COMMENT_ID):
+    """The input of one call of the comment-edit tool. Its input names a comment, not a pull request."""
+    return {"owner": "y", "repo": "x", "comment_id": comment, "body": body}
+
+
+def mcp_update(name, body, expected, rule=None, carries=()):
+    """A case for one call of the comment-edit tool. It names no pull request, so it reads none."""
+    add(name, expected, rule=rule, tool=UPDATE_TOOL, cwd=NOGIT, env_path=GHRECORDREPO + os.pathsep + PY_PATH,
+        carries=carries, **update_input(body))
+
+
+def edit_forms(body, path):
+    """The Bash forms that edit a comment, or post it with --edit-last, one command each."""
+    return [("gh api -X PATCH -f body=", "%s -f 'body=%s'" % (API_EDIT_CMD, body)),
+            ("gh api -X PATCH -F body=@", "%s -F body=@%s" % (API_EDIT_CMD, path)),
+            ("gh pr comment --edit-last --body", "%s --edit-last --body '%s'" % (PR_CMD, body))]
+
+
+def every_form(body, path):
+    """Every Bash form that posts or edits a body: the posts of all_forms, then the edits."""
+    return all_forms(body, path) + edit_forms(body, path)
+
+
+TRAILING_PATH = os.path.join(GHRECORDDIR, "trailing.md")
+# The forms the pins name. A trailing-prose body is refused on each of them, on the decision alone.
+PIN_FORM_LABELS = ("gh pr comment --body", "gh pr comment -b", "gh pr comment --body-file", "gh pr comment -F",
+                   "gh api -f body=", "gh api -F body=@", "gh pr comment --edit-last --body")
+
+# PINS, green on the head this branch starts from: prose after the CI line is refused on each form that posts it.
+mcp_post("review-record: prose after the CI line is refused, MCP add_issue_comment", REVIEW_TRAILING, "deny", rule=REVIEW_RULE)
+for _label, _command in every_form(REVIEW_TRAILING, TRAILING_PATH):
+    if _label in PIN_FORM_LABELS:
+        bash_post("review-record: prose after the CI line is refused, %s" % _label, _command, "deny", rule=REVIEW_RULE)
+
+# RED on the head this branch starts from: the edit tool and the PATCH route are not judged, so a body edited in place with
+# prose after its CI line is allowed. Each refusal also names the shape text: its message carries the `---` line and the footer.
+mcp_update("review-record: prose after the CI line is refused, MCP update_issue_comment", REVIEW_TRAILING, "deny",
+           rule=REVIEW_RULE, carries=SHAPE_TEXT)
+mcp_update("review-record: a full-size record with prose after the CI line is refused, MCP update_issue_comment",
+           REVIEW_FULL_TRAILING, "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+for _label, _command in every_form(REVIEW_TRAILING, TRAILING_PATH):
+    bash_post("review-record: prose after the CI line is refused and names the shape, %s" % _label, _command, "deny",
+              rule=REVIEW_RULE, carries=SHAPE_TEXT)
+mcp_post("review-record: prose after the CI line is refused and names the shape, MCP add_issue_comment", REVIEW_TRAILING,
+         "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+# The four malformed bodies the add and post cases already refuse also name the shape text: the same judge refuses them.
+mcp_post("review-record: a marker with no record is refused and names the shape, MCP add_issue_comment", REVIEW_MARKER_TEXT,
+         "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+mcp_post("review-record: a record with a round skipped is refused and names the shape, MCP add_issue_comment",
+         REVIEW_SKIPPED_ROUND, "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+bash_post("review-record: a record with no Head line is refused and names the shape, gh pr comment -b",
+          "%s -b '%s'" % (PR_CMD, REVIEW_NO_HEAD), "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+bash_post("review-record: a record with a 39-digit Head is refused and names the shape, gh api -f body=",
+          "%s -f 'body=%s'" % (API_CMD, REVIEW_SHORT_HEAD), "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+
+# ALLOW CONTROLS, green on every form. A body that is not a record by shape is allowed: a record with its footer, the marker in
+# prose below line 1, and a code fence then the marker. A bare record at the live head is allowed on the edit forms too.
+mcp_update("review-record: a record at the live head is allowed, MCP update_issue_comment", review_record(), "allow")
+mcp_update("review-record: a record with its footer is allowed, MCP update_issue_comment", REVIEW_FOOTED, "allow")
+mcp_update("review-record: the marker in prose below the first line is allowed, MCP update_issue_comment", REVIEW_PROSE, "allow")
+mcp_update("review-record: a code fence, then the marker, is allowed, MCP update_issue_comment", REVIEW_FENCED, "allow")
+mcp_post("review-record: a record with its footer is allowed, MCP add_issue_comment", REVIEW_FOOTED, "allow")
+mcp_post("review-record: a code fence, then the marker, is allowed, MCP add_issue_comment", REVIEW_FENCED, "allow")
+for _label, _command in edit_forms(review_record(), os.path.join(GHRECORDDIR, "ok.md")):
+    bash_post("review-record: a record at the live head is allowed, %s" % _label, _command, "allow")
+for _body, _file, _what in ((REVIEW_FOOTED, "footed.md", "a record with its footer"),
+                            (REVIEW_PROSE, "prose.md", "the marker in prose below the first line"),
+                            (REVIEW_FENCED, "fenced.md", "a code fence, then the marker")):
+    for _label, _command in every_form(_body, os.path.join(GHRECORDDIR, _file)):
+        bash_post("review-record: %s is allowed, %s" % (_what, _label), _command, "allow")
+
+
 def review_counted_fake():
     """The counted pull request tool, with its log emptied. Each call it answers is logged."""
     make_fake_gh(GHRECORDCOUNT, "main", need=["12"], head_sha=REVIEW_LIVE,
@@ -10096,6 +10185,12 @@ def review_fixtures_check():
     full = form.parse_review(REVIEW_FULL)
     if not full or full["fix"] is None or len(full["rounds"]) != 4:
         return False, "the full-size record does not parse with its rounds and its Fix check"
+    if form.parse_review(REVIEW_TRAILING) is not None or form.parse_review(REVIEW_FULL_TRAILING) is not None:
+        return False, "a body with prose after the CI line parses as a record"
+    if form.parse_review(REVIEW_FENCED) is not None:
+        return False, "a body that opens with a code fence parses as a record"
+    if form.parse_review(REVIEW_FOOTED) is None:
+        return False, "the record with its footer does not parse"
     return True, "the bodies parse as their names say"
 
 
@@ -10126,9 +10221,13 @@ REVIEW_LOG_CHECKS.append(("review-record:an unreadable body file allows the post
                                      GHRECORD + os.pathsep + PY_PATH)))
 REVIEW_LOG_CHECKS.append(("review-record:a plain stdin body the guard cannot read is allowed and noted on stderr, gh pr comment -F -",
                          review_note("Bash", {"command": "some_cmd | %s -F -" % PR_CMD}, GHRECORD + os.pathsep + PY_PATH)))
-# The update tool's input names a comment, not a pull request. Finding the pull request is a second read, and the rule allows one.
-skip_case("review-record: mcp__github__update_issue_comment is not judged",
-          "its input names a comment, not a pull request, and finding the pull request costs a second read per marked update")
+# The edit tool's input names a comment, not a pull request, so the judge makes no read: the shape is judged, the head is not.
+REVIEW_LOG_CHECKS.append(("review-record:a well-formed record in an edit makes no gh read, MCP update_issue_comment",
+                         review_reads(UPDATE_TOOL, update_input(review_record()), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:prose after the CI line in an edit is refused before any gh read, MCP update_issue_comment",
+                         review_reads(UPDATE_TOOL, update_input(REVIEW_TRAILING), "deny", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit's head is not judged, so a record for an old head is allowed with no gh read",
+                         review_reads(UPDATE_TOOL, update_input(review_record(head=REVIEW_OLD)), "allow", 0)))
 
 
 # =========================================================================== 5g. archive of a lane

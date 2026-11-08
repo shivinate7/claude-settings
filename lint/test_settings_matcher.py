@@ -87,6 +87,13 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_guard_matcher_covers_comment_edit(self):
+        # Rule pr-review-record judges a record edited in place, so a guard matcher must see the comment-edit tool.
+        matchers = guard_matchers()
+        tool = "mcp__github__update_issue_comment"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
