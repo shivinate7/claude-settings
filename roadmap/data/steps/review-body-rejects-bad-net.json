@@ -1,0 +1,11 @@
+{
+  "title": "merge.review_body refuses a value outside its tables, so a bad review record cannot be built",
+  "why": "Lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 11:49 CST Nov 8: it posted a round-1 FAIL record on #2138 with \"Net value: n/a\". parse_review rejects it (REVIEW_NETS is \"not owed\", \"zero\", \"positive\", \"negative\"), but merge.review_body built the body without complaint, and the lane did not assert parse_review's result. Corrected to \"not owed\" (comment 6724494135). Fix: review_body refuses a net, kind or guard value outside its tables, or checks its own output with parse_review and raises.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 770,
+  "updatedAt": "2026-11-08T11:52:00-06:00"
+}

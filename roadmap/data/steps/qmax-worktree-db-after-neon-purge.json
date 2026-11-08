@@ -1,0 +1,11 @@
+{
+  "title": "q_max: the 4 old worktrees get a working Neon branch again after the wt- purge",
+  "why": "Owner item 361 done (11:49 CST Nov 8): his local q_max session deleted 113 wt- Neon branches; 0 remain. His Next note: any of that checkout's 4 worktrees that used a deleted branch has no working database, and the worktree hook gives only a new worktree its own branch. Coordinator 11:50 CST: file as a q_max step (lane for qmax-browser-main-red is archived); it starts when a q_max lane is free. Ruling 332 b keeps cloud sessions off Neon, so the fix runs on the Mac or in the hook.",
+  "note": "",
+  "phase": "now",
+  "owner": "q_max",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 771,
+  "updatedAt": "2026-11-08T11:52:00-06:00"
+}

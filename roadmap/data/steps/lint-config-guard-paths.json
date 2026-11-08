@@ -1,11 +1,11 @@
 {
   "title": "The guard path list covers every file that hooks/guard.py imports",
   "why": "Coordinator 11:45 CST Nov 8, from #1353 review round 1 (note guard-imports-outside-guard-paths): hooks/guard.py imports janitor/sweep.py and skills/waiting-page/stale_pages.py, and both are off the guard path list, so a change to them skips the checks a guard change gets. Scope: add both; better, derive the list from guard.py's imports.",
-  "note": "",
+  "note": "Coordinator started its lane 11:49 CST Nov 8.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "status": "todo",
+  "lane": "session_013NEJL1f9CA1PTZPYsRhFQV",
+  "status": "doing",
   "order": 769,
-  "updatedAt": "2026-11-08T11:48:00-06:00"
+  "updatedAt": "2026-11-08T11:52:00-06:00"
 }
