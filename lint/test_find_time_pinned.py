@@ -2618,6 +2618,111 @@ class PollLoopTest(FinderCase):
         )
         self.assert_sleep(text, "time.sleep(1.0)")
 
+    # An if break inside an inner loop leaves that inner loop, so the outer wait has no condition there. An if
+    # return inside an inner loop ends the function, so it is the wait's end and stays a condition (the controls).
+
+    def test_an_if_break_in_an_inner_loop_does_not_end_the_outer_range_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_an_if_break_in_an_inner_loop_does_not_end_the_outer_deadline_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(xs):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_control_an_if_return_in_an_inner_loop_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                return x",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_deadline_while_an_if_return_in_an_inner_loop_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(xs):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        for x in xs:",
+            "            if x.ready:",
+            "                return x",
+            "    return None",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # Known limit: the finder lists this real poll as sleep. In a while True, a deadline that only fails is a
+    # fixed window, not a cap (is_hang_guard_poll). The pin fails if the row moves, so the move is seen.
+
+    def test_known_limit_while_true_with_a_failing_deadline_reads_sleep(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_until_ready(cond, deadline_at):",
+            "    while True:",
+            "        if cond():",
+            "            break",
+            "        if time.monotonic() > deadline_at:",
+            "            fail('the poll timed out')",
+            "        time.sleep(0.05)",
+            "    return True",
+        )
+        _, cats = self.listed(text, "time.sleep(0.05)")
+        self.assertEqual(cats, {"sleep"},
+                         "known limit (a real poll the finder lists as sleep): this while True poll with a failing "
+                         "deadline now reads %s, not sleep; moving it is a decision to record" % sorted(cats))
+
+    def test_heartbeat_spelling_with_the_deadline_in_the_while_test_is_wait_cap(self):
+        # The fixed window above with its deadline moved into the while test. The deadline is a cap, and the
+        # return is the wait's end, so this is a hang guard.
+        text = src(
+            "import time",
+            "",
+            "def assert_heartbeat_stops(case, read_beat, path):",
+            "    last = read_beat(path)",
+            "    deadline = time.time() + 10",
+            "    while time.time() < deadline:",
+            "        time.sleep(1.0)",
+            "        now = read_beat(path)",
+            "        if now == last:",
+            "            return",
+            "        last = now",
+            "    case.fail('the heartbeat still moves')",
+        )
+        code, cats = self.listed(text, "time.sleep(1.0)")
+        self.assertEqual(cats, {"wait-cap"},
+                         "the heartbeat spelling with the deadline in the while test is listed as %s, not wait-cap"
+                         % sorted(cats))
+        self.assertEqual(code, 0, "the heartbeat spelling is wait-cap but is counted as time-pinned (exit %d)" % code)
+
 
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
 
