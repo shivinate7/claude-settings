@@ -9,6 +9,7 @@ when the shape matches.
 import json
 import os
 import re
+import sys
 from datetime import datetime, timedelta
 
 import local_time
@@ -27,6 +28,7 @@ ENCODED_RETRY_REASON = (
 WINDOW = timedelta(minutes=10)
 SKEW = timedelta(minutes=1)        # a row stamped slightly ahead of this hook's clock still counts
 LOG_TAIL_BYTES = 256 * 1024        # guard.log is read from its end, never whole
+LINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 # An escape that builds a byte: hex, octal, or a code point.
 ESCAPE = re.compile(r"\\(?:x[0-9a-fA-F]|[0-7]{1,3}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})")
@@ -323,7 +325,9 @@ def _state_refusal(session_id: str, agent_id: str, now) -> bool:
 
 
 def _log_refusal(session_id: str, now) -> bool:
-    """A guard.log deny row of this session inside the window. A row names no agent, so it counts for the session."""
+    """A guard.log deny row of this session inside the window. A row names no agent, so it counts for the session.
+    Rows are read through lint/guard_log_report.py, the one reader of guard.log lines. An unimportable reader is no
+    refusal: this rule fails open."""
     path = os.path.join(shared_names.config_dir(), "guard.log")
     names = {session_id, session_log_field(session_id)}
     try:
@@ -332,11 +336,17 @@ def _log_refusal(session_id: str, now) -> bool:
             size = handle.tell()
             handle.seek(max(0, size - LOG_TAIL_BYTES))
             tail = handle.read().decode("utf-8", errors="replace")
-    except OSError:
+        if LINT_DIR not in sys.path:
+            sys.path.insert(0, LINT_DIR)
+        import guard_log_report  # lint/guard_log_report.py, the one reader of guard.log lines
+    except Exception:
         return False
     for line in tail.split("\n"):
-        fields = line.split("\t")
-        if len(fields) >= 6 and fields[2] == "deny" and fields[5] in names and _fresh(_stamp(fields[0]), now):
+        row = guard_log_report.parse_line(line)
+        if row is None or row.decision != "deny" or row.session not in names:
+            continue
+        when = row.at or row.when   # an offset time is one instant; a zone-less one reads as local time
+        if _fresh(when if when.tzinfo else when.astimezone(), now):
             return True
     return False
 
