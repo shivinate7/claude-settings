@@ -99,8 +99,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-roots-cover    deny. A batch runner's `merge --reviewed --root` whose OWNER/NAME roots are not exactly
                        the repos its own get_session record (read from the transcript) tags cs-repo; the reason
                        names each missing and extra repo. No readable own record refuses too, and so does a
-                       record read before the turn's last user or cross-session message. A local session (no
-                       cloud session id) and a non-runner record pass.
+                       record read before the turn's last user or cross-session message. A bare `merge
+                       --reviewed` (no `--root`) reads the newest own record, with no turn bound, and is refused
+                       only for a batch runner with two or more cs-repo tags; the reason says to pass one
+                       `--root OWNER/NAME=DIR` per tag and names each. No record, an unreadable one, one tag, a
+                       non-runner and a local session (no cloud session id) pass. The merge tool is read as
+                       `merge`, `bin/merge`, `python3 merge/merge.py` or `launch.py`, `py` and `py -3` too,
+                       python options `-X` and `-W` skipping their value, and inside `bash -c` or `sh -c`.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
