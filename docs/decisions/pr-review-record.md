@@ -34,7 +34,7 @@ CI: read live by merge --reviewed
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
-- `Findings` comes once, after the Fix check line and before Net value. `none` has nothing to file. `<n>, this PR` files `<n>` review findings in the lane's own PR. `<n>, follow-up #<pr>[, ...]` files them in follow-up PRs, one per topic (owner item 386 b, 2026-11-07 22:25 CST: a lane's review findings ride in its own PR, or in one follow-up PR per topic, never one PR or step per finding). `--review-record` needs `--findings`. A record with no Findings line is legacy.
+- `Findings` comes once, after the Fix check line and before Net value. `none` has nothing to file. `<n>, this PR` files `<n>` review findings in the lane's own PR. `<n>, follow-up #<pr>[, ...]` files them in follow-up PRs, one per topic (owner item 386 b, 2026-11-07 22:25 CST: a lane's review findings ride in its own PR, or in one follow-up PR per topic, never one PR or step per finding). `--review-record` needs `--findings`. A record with no Findings line is legacy only if created before the cut-off in the done rules.
 - The comment never stores CI state. `merge --reviewed` reads no CI per PR. It reads the base's latest run once, when a batch line exists. The form's CI line keeps its old wording, because posted records carry it (`REVIEW_CI_LINE` in `merge/merge.py`).
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
@@ -63,6 +63,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
   - A check that cannot read its input fails (owner, 2026-11-06 12:39 CST, page item 276 (unknown-read-one-rule), pick a). A follow-up PR that 404s is not done, and the line names it. Any other read failure is unknown, and it holds the record. `--findings-unknown-ok "<reason>"` lifts that hold, and the tool prints the lift.
   - A layout that cannot be read makes the record `findings unknown`. It holds the record, like other unknowns (owner item 276 a, 2026-11-06 12:39 CST).
   - Owner item 394 a, 2026-11-08 06:08 CST: a fix check may pass a push that only files this PR's findings (record `hold-unsafe-after-round-3`). The fix-check reviewer judges that push; it passes only when the reviewed record's Findings is `<n>, this PR`. The tool does not check it.
+- A record with no Findings line, created at or after the cut-off (2026-11-08 04:25:00Z, owner item 386 b, 2026-11-07 22:25 CST), is not done. `merge --reviewed` reads it as `lane: review record lacks Findings`, at the lane round age limit. A record created before the cut-off keeps its legacy verdict.
 
 ## The cost
 
@@ -83,7 +84,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
 - One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line. Owner page item 418 (fix-checks-chain) is where a second fix check is decided.
-- The tool cannot see whether a Findings count is true, or whether a debt edit is that finding's own. It cannot see a follow-up PR's topic, or whether a finding got its own roadmap step. Legacy records keep today's verdict.
+- The tool cannot see whether a Findings count is true, or whether a debt edit is that finding's own. It cannot see a follow-up PR's topic, or whether a finding got its own roadmap step. Pre-cut-off records with no Findings line keep today's verdict.
 - The tool does not see whether a fix-check push is filing-only. The fix-check reviewer reads the diff.
 
 ## Lane picks
