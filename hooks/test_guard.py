@@ -11982,6 +11982,8 @@ SI_A5P = os.path.join(STALEROOT, "a5")              # ... then a backward reset 
 SI_A6P = os.path.join(STALEROOT, "a6")              # no commit yet, a file staged
 SI_A7P = os.path.join(STALEROOT, "a7")
 SI_A7A = os.path.join(STALEROOT, "a7-wt")           # the R1 move, with this worktree's HEAD log unreadable
+SI_R8P = os.path.join(STALEROOT, "r8")
+SI_R8A = os.path.join(STALEROOT, "r8-wt")           # the R1 move, with this worktree's HEAD log deleted
 SI_COSTP = os.path.join(STALEROOT, "cost")          # no move, one staged change
 NEW_HEAD = {"f.py": "x = 2\n", "h.py": "z = 1\n"}  # what the moved head N changes and adds
 NEW_ADD = {"k.py": "k = 1\n"}                       # a moved head that only adds k.py
@@ -12120,6 +12122,17 @@ def _build_stale_index():
     os.makedirs(log_head)
     _si_proof(SI_A7A, ["f.py", "h.py"])
 
+    # R8: this worktree's HEAD log is gone, so the moved branch shows only in the shared branch log.
+    _si_base(SI_R8P)
+    _cmk_run(SI_R8P, "worktree", "add", "-q", SI_R8A, "topic")
+    n = _si_new_head(SI_R8P, NEW_HEAD)
+    _cmk_run(SI_R8P, "update-ref", "refs/heads/topic", n)
+    os.remove(os.path.join(_cmk_run(SI_R8A, "rev-parse", "--absolute-git-dir"), "logs", "HEAD"))
+    shared = os.path.join(SI_R8A, _cmk_run(SI_R8A, "rev-parse", "--git-common-dir"), "logs", "refs", "heads", "topic")
+    if not os.path.isfile(shared) or n not in open(shared, encoding="utf-8").read():
+        sys.exit("fixture setup failed: the shared log %r does not hold the move to %s" % (shared, n))
+    _si_proof(SI_R8A, ["f.py", "h.py"])
+
     # The cost row: no move, one staged change.
     _si_base(SI_COSTP)
     _cmk_run(SI_COSTP, "checkout", "-q", "topic")
@@ -12128,7 +12141,8 @@ def _build_stale_index():
 
 
 lazy_fixture([SI_R1P, SI_R1A, SI_R3P, SI_R3A, SI_R4P, SI_R4A, SI_R4X, SI_R5P, SI_R5A, SI_R6P, SI_R6A,
-              SI_R7P, SI_R7A, SI_A1P, SI_A1A, SI_A2P, SI_A3P, SI_A4P, SI_A5P, SI_A6P, SI_A7P, SI_A7A, SI_COSTP],
+              SI_R7P, SI_R7A, SI_R8P, SI_R8A, SI_A1P, SI_A1A, SI_A2P, SI_A3P, SI_A4P, SI_A5P, SI_A6P, SI_A7P,
+              SI_A7A, SI_COSTP],
              _build_stale_index)
 
 
@@ -12155,6 +12169,8 @@ stale_refuse("the only stale path is a file the moved head added, staged as dele
              carries=("k.py",))
 stale_refuse("a moved head that changes 200 files, so every path the commit carries is stale", VCS + " commit -m x",
              SI_R7A)
+stale_refuse("the moved branch is in the shared log only, with this worktree's HEAD log gone, then a plain commit",
+             VCS + " commit -m x", SI_R8A)
 
 # 2. The fixed index, the backward squash, and the forms that carry no stale path.
 stale_allow("a read-tree of the old head to the new one, then a plain commit", VCS + " commit -m x", SI_A1A)
