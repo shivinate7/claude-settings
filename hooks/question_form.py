@@ -562,6 +562,22 @@ def _code_spans(text) -> list:
     """Each backtick span and fenced block in `text`, read in one pass, as (start, body, fenced). A
     run of n backticks opens a span that the next run of exactly n closes, as Markdown pairs them; a
     run with no closer is plain text. A fence's first line is its info string and is dropped."""
+    return [(start, body, fenced) for start, _end, body, fenced in _code_ranges(text)]
+
+
+def without_fences(text) -> str:
+    """`text` with each fenced block left out, fence marks included. A lone backtick, an inline span and a run
+    with no closer stay text."""
+    kept, at = [], 0
+    for start, end, _body, fenced in _code_ranges(text):
+        if fenced:
+            kept.append(text[at:start])
+            at = end
+    return "".join(kept) + text[at:]
+
+
+def _code_ranges(text) -> list:
+    """_code_spans with each span's end: (start, end, body, fenced)."""
     spans, i, end = [], 0, len(text)
     while i < end:
         if text[i] != "`":
@@ -589,7 +605,7 @@ def _code_spans(text) -> list:
         fenced = run >= 3 and "\n" in body
         if fenced:
             body = body.split("\n", 1)[1]
-        spans.append((i, body, fenced))
+        spans.append((i, close + run, body, fenced))
         i = close + run
     return spans
 
@@ -1526,11 +1542,22 @@ def _read_steps(root):
                 pass
 
 
+def _top_overlap(units, words, top):
+    """The lines of the `top` (text, line) units whose text shares the most words with `words`, best first, ties in the
+    order given. Overlap 0 never counts. The one ranking of step rulings (_step_rulings) and of pick candidates."""
+    scored = []
+    for text, line in units:
+        overlap = len(_words(text) & words)
+        if overlap:
+            scored.append((-overlap, len(scored), line))
+    return [line for _, _, line in sorted(scored)[:top]]
+
+
 def _step_rulings(steps, words):
     """The top STEP_TOP ruling units of the step notes by word overlap with `words`, as `<step id>: <text>`
     lines. A unit is a sentence holding Ruling, owner or shiv, plus the sentence after it (a ruling's detail
     often sits there). Overlap 0 never counts."""
-    scored = []
+    units = []
     for step_id, fields in sorted(steps.items()):
         sentences = [s for f in fields if isinstance(f, str) for s in SENTENCE_SPLIT.split(f.strip()) if s]
         for i, sentence in enumerate(sentences):
@@ -1538,10 +1565,8 @@ def _step_rulings(steps, words):
                 continue
             tail = sentences[i + 1] if i + 1 < len(sentences) and not RULING_WORDS.search(sentences[i + 1]) else ""
             unit = (sentence + " " + tail).strip()
-            overlap = len(_words(unit) & words)
-            if overlap:
-                scored.append((-overlap, len(scored), "%s: %s" % (step_id, unit)))
-    return [line for _, _, line in sorted(scored)[:STEP_TOP]]
+            units.append((unit, "%s: %s" % (step_id, unit)))
+    return _top_overlap(units, words, STEP_TOP)
 
 
 def past_rulings(question_text, repo_root):
@@ -1598,11 +1623,9 @@ PICK_TOP = 5
 
 
 def pick_candidates(candidates, text, top=PICK_TOP) -> list:
-    """The ids of the `top` candidates whose line shares the most words with `text` (overlap 0 never counts), best
-    first, ties by id. It ranks the one index past_rulings returns and builds none."""
-    words = _words(text)
-    scored = sorted((-len(_words(c) & words), c.split(": ", 1)[0]) for c in candidates)
-    return [record_id for score, record_id in scored if score][:top]
+    """The ids of the `top` candidates whose line shares the most words with `text`, best first (_top_overlap). It
+    ranks the one index past_rulings returns and builds none."""
+    return [line.split(": ", 1)[0] for line in _top_overlap(((c, c) for c in candidates), _words(text), top)]
 
 
 def candidates_block(candidates, unknown) -> str:

@@ -77,7 +77,7 @@ SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
 PICK_SUITE = os.path.join(HERE, "test_pick_ack.py")
 PICK_SUITE_FILES = ("test_pick_ack.py", "test_call_judge.py")  # the suite and the git fixtures it imports
 # Targets that run in a copy of the whole guard family, with the anchor in the one module that holds it.
-GUARD_TREE_TARGETS = ("guard", "simlease", "pick")
+GUARD_TREE_TARGETS = ("guard", "simlease", "pick", "pickpeer")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -92,6 +92,8 @@ TARGETS = {
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
     # hooks/guard_merge.py pick_ack_hit. Its suite runs from the mutant's own hooks folder (run_mutant copies it there).
     "pick": (os.path.join(HERE, "guard_merge.py"), PICK_SUITE, "GUARD_UNDER_TEST", "pick_ack"),
+    # lint/_transcript.py peer_sender, the one home of a peer frame's sender. Its copy sits in the mutant's own lint folder.
+    "pickpeer": (os.path.join(HERE, "..", "lint", "_transcript.py"), PICK_SUITE, "GUARD_UNDER_TEST", "pick_peer"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -2380,7 +2382,7 @@ MUTATIONS = [
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
     # RULE pick-names-rulings (hooks/guard_merge.py pick_ack_hit), judged by hooks/test_pick_ack.py (target "pick").
     ("pick-names-rulings: a Departs from line is no trigger, so a pick with no Checked line passes",
-     '    if departs.search(message):\n        matched = "pick that departs from main"',
+     '    if _has_departs(message):\n        matched = "pick that departs from main"',
      '    if False:\n        matched = "pick that departs from main"',
      "pick", "A: a departs pick with no Checked line asks"),
     ("pick-names-rulings: the Checked line goes unread, so a pick that names a real decision still asks",
@@ -2395,16 +2397,16 @@ MUTATIONS = [
      'if any(word in known or word in stems for word in named):',
      'if any(word in known for word in named):',
      "pick", "A: a Checked line naming a real decision by its bare slug passes"),
-    ("pick-names-rulings: the past-ruling search runs on a send that has no pick",
-     '            if not transcript or not isinstance(target, str) or not target or not _inbound_pick(transcript, target, departs):\n                return None',
-     '            if not transcript or not isinstance(target, str) or not target or not _inbound_pick(transcript, target, departs):\n                question_form.past_rulings(message, os.getcwd())\n                return None',
+    ("pick-names-rulings: the past-ruling check runs on a send that has no pick",
+     '            if not _inbound_pick(records, target, names):\n                return None',
+     '            if not _inbound_pick(records, target, names):\n                question_form.past_rulings(message, os.getcwd())\n                return None',
      "pick", "no pick and no inbound pick: past_rulings is not called"),
     ("pick-names-rulings: the sender is not compared with the target, so a pick from another session triggers",
-     'if module.peer_sender(rec) == target:', 'if module.peer_sender(rec):',
+     'if module.peer_sender(rec) == sender:', 'if module.peer_sender(rec):',
      "pick", "an inbound pick from another session than the target passes"),
     ("pick-names-rulings: an older Departs frame still triggers after a newer plain frame from the target",
-     'newest = [bool(departs.search(_peer_body(rec))), True]',
-     'newest = [bool(departs.search(_peer_body(rec))) or bool(newest and newest[0]), True]',
+     'newest = [_has_departs(_peer_body(rec)), True]',
+     'newest = [_has_departs(_peer_body(rec)) or bool(newest and newest[0]), True]',
      "pick", "B: an older Departs frame then a newer plain frame from the target passes"),
     ("pick-names-rulings: a send to the target does not end the inbound trigger",
      'newest[1] = False', 'newest[1] = True',
@@ -2413,13 +2415,37 @@ MUTATIONS = [
      'return bool(newest and newest[0] and newest[1])', 'return False',
      "pick", "B: a reply agreeing to a departs pick with no Checked line asks"),
     ("pick-names-rulings: an unreadable transcript asks instead of passing",
-     '            print("pick-names-rulings: " + PICK_UNREAD, file=sys.stderr)\n            return None',
-     '            print("pick-names-rulings: " + PICK_UNREAD, file=sys.stderr)\n            return "unread transcript", PICK_REASON % ("", "")',
+     '            _pick_unknown(PICK_UNREAD)\n            return None',
+     '            _pick_unknown(PICK_UNREAD)\n            return "unread transcript", PICK_REASON % ("", "")',
      "pick", "B: an unreadable transcript on trigger B passes"),
-    ("pick-names-rulings: a failed past-ruling search passes instead of asking",
-     '        return matched + " with a failed past-ruling search", PICK_REASON % (',
-     '        return None\n        return matched + " with a failed past-ruling search", PICK_REASON % (',
+    ("pick-names-rulings: a failed past-ruling check passes instead of asking",
+     '        return matched + " with a failed past-ruling check", PICK_REASON % (',
+     '        return None\n        return matched + " with a failed past-ruling check", PICK_REASON % (',
      "pick", "A: past_rulings raising after trigger A fires asks"),
+    ("pick-names-rulings: a frame with no origin key has no sender, so a real reply to a pick is not read",
+     '    elif origin is None and rec.get("type") == "user":',
+     '    elif False:',
+     "pickpeer", "B: a reply to a pick in the real frame shape, with no Checked line, asks"),
+    ("pick-names-rulings: a send to @parent is read as a send to a session named @parent",
+     '            if target in PARENT_TARGETS:',
+     '            if False:',
+     "pick", "@parent: a reply to the parent asks when the parent's newest frame has Departs and no Checked line"),
+    ("pick-names-rulings: a parent that cannot be resolved passes without its stderr line",
+     '                if not target:\n                    _pick_unknown(PICK_NO_PARENT)\n                    return None',
+     '                if not target:\n                    return None',
+     "pick", "@parent: with no parent id resolvable, a reply to @parent passes, with one stderr line"),
+    ("pick-names-rulings: quote markers and list numbers are not cut off a line, so neither form is a pick",
+     'question_form.DEPARTS_LINE.search(_LEAD_MARKS.sub("", question_form.without_fences(text)))',
+     'question_form.DEPARTS_LINE.search(question_form.without_fences(text))',
+     "pick", "A: a `> Departs from:` quoted line is a pick, and asks with no Checked line"),
+    ("pick-names-rulings: list numbers are not cut off a line, so a numbered Departs line is no pick",
+     '(?:(?:>[ \\t]*)|(?:\\d{1,3}[.)][ \\t]+))+',
+     '(?:(?:>[ \\t]*))+',
+     "pick", "A: a `1. Departs from:` numbered line is a pick, and asks with no Checked line"),
+    ("pick-names-rulings: code fences are not cut out, so a quoted Departs line fires trigger A",
+     'question_form.without_fences(text)))',
+     'text))',
+     "pick", "A: a Departs from line inside a code fence does not fire trigger A, and the send passes"),
 ]
 
 
@@ -3071,7 +3097,8 @@ def run_mutant(sources, work: str, entry):
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         else:
-            mutate_shared.apply_mutant(tree, old, new)
+            if target != "pickpeer":  # a pickpeer anchor sits in the lint copy, mutated below
+                mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
@@ -3081,7 +3108,9 @@ def run_mutant(sources, work: str, entry):
         # it the role-model table reads as unread and every role-model arm passes unjudged.
         shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
                         ignore=shutil.ignore_patterns("__pycache__"))
-        if target == "pick":
+        if target == "pickpeer":
+            mutate_shared.apply_mutant(os.path.join(root, "lint"), old, new, files=["_transcript.py"])
+        if target in ("pick", "pickpeer"):
             for name in PICK_SUITE_FILES:
                 shutil.copy(os.path.join(HERE, name), tree)
             suite = os.path.join(tree, os.path.basename(PICK_SUITE))

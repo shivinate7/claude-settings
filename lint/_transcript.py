@@ -264,10 +264,23 @@ def head_moved_since(cwd, base):
         return None
 
 
+PEER_FRAME_SENDER = re.compile(
+    r'\A\s*(?:Another Claude session sent a message[^\n]*:\s*)?<cross-session-message\b[^>]*?\sfrom-session="([^"]+)"')
+
+
 def peer_sender(rec):
-    """The id of the session that sent a peer message record (origin.fromSession), else None."""
+    """The id of the session that sent a peer message record: origin.fromSession, or, when the record has no origin
+    key (the shape a real transcript holds), the `from-session` attribute of the frame its string content opens with.
+    Else None."""
     origin = rec.get("origin")
-    found = origin.get("fromSession") if _is_peer(origin) else None
+    if _is_peer(origin):
+        found = origin.get("fromSession")
+    elif origin is None and rec.get("type") == "user":
+        content = (rec.get("message") or {}).get("content")
+        match = PEER_FRAME_SENDER.match(content) if isinstance(content, str) else None
+        found = match.group(1) if match else None
+    else:
+        found = None
     return found if isinstance(found, str) and found else None
 
 

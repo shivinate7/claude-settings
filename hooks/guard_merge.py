@@ -1140,9 +1140,13 @@ def brief_hit(tool: str, tool_input, transcript: str):
 # ---- send_message: a pick that departs from main names the decisions it checked (rule pick-names-rulings)
 _CHECKED_LINE = re.compile(r"^[ \t>*+-]*(?:\*\*)?Checked(?:\*\*)?:(?:\*\*)?([^\n]*)", re.IGNORECASE | re.MULTILINE)
 _PEER_FRAME = re.compile(r"<cross-session-message[^>]*>(.*)</cross-session-message>", re.DOTALL)
+_LEAD_MARKS = re.compile(r"^[ \t]*(?:(?:>[ \t]*)|(?:\d{1,3}[.)][ \t]+))+", re.MULTILINE)  # quote markers and list numbers
+PARENT_TARGETS = ("@parent", "parent")  # the names a send gives its parent session
 PICK_UNREAD = "the transcript could not be read, so an inbound pick was not looked for"
+PICK_NO_TRANSCRIPT = "the payload names no transcript, so an inbound pick was not looked for"
+PICK_NO_PARENT = "the own get_session record names no parent for this send, so an inbound pick was not looked for"
 PICK_REASON = (
-    "a pick that departs from main, or a reply that agrees to one, names the decisions it checked. %sSearch the "
+    "a pick that departs from main, or a reply that agrees to one, names the decisions it checked. %sRead the "
     "decision records for the ones that bear on this pick, then add a line `Checked: <id>[, <id>...]` to the message "
     "with the id of each decision you read (`decisions/<slug>` or the bare slug). %s(decision pick-names-rulings)"
 )
@@ -1169,50 +1173,90 @@ def _peer_body(rec) -> str:
     return found.group(1) if found else ""
 
 
-def _inbound_pick(transcript: str, target: str, departs) -> bool:
-    """True when the newest peer message from `target` has a Departs from line and no send to `target` came after it."""
+def _has_departs(text) -> bool:
+    """True when `text` has a Departs from line outside a code fence, after quote markers and list numbers are cut off
+    each line. question_form.DEPARTS_LINE is the one matcher of the line itself."""
+    import question_form
+    return bool(question_form.DEPARTS_LINE.search(_LEAD_MARKS.sub("", question_form.without_fences(text))))
+
+
+def _inbound_pick(records, sender: str, names) -> bool:
+    """True when the newest peer message from `sender` has a Departs from line and no send to one of `names` (the
+    sender's id and the aliases a send may use for it) came after it."""
     module = _transcript_module()
-    newest = None  # [the newest frame is a pick, no send to the target since]
-    for rec in module.read_transcript(transcript):
-        if module.peer_sender(rec) == target:
-            newest = [bool(departs.search(_peer_body(rec))), True]
+    newest = None  # [the newest frame is a pick, no send to the sender since]
+    for rec in records:
+        if module.peer_sender(rec) == sender:
+            newest = [_has_departs(_peer_body(rec)), True]
         elif newest and not rec.get("isSidechain"):
-            if any(target in module.send_targets(use) for use in module.tool_uses(rec)):
+            if any(names & module.send_targets(use) for use in module.tool_uses(rec)):
                 newest[1] = False
     return bool(newest and newest[0] and newest[1])
 
 
-def pick_ack_hit(tool: str, tool_input, transcript: str):
-    """Return (matched, reason) when this send_message is a pick that departs from main (a `Departs from:` line), or the
-    first reply to a peer whose newest message carried one, and it has no `Checked:` line naming a decision, debt or
-    step that question_form.past_rulings returns; else None. A transcript that cannot be read passes with one stderr
-    line (the inbound trigger is unknown). A past-ruling search that fails after a trigger fired is an ask. Cost: a
-    message with no Departs line reads the transcript once; the past-ruling search runs only after a trigger fired."""
+def _own_id(records, given: str) -> str:
+    """This session's id: the one the caller gives, else the newest `sessionId` the transcript holds, else the remote env's."""
+    if given:
+        return given
+    found = ""
+    for rec in records:
+        if isinstance(rec.get("sessionId"), str) and rec["sessionId"]:
+            found = rec["sessionId"]
+    if found:
+        return found
+    from override import remote_session_id
+    return remote_session_id() or ""
+
+
+def _pick_unknown(why: str) -> None:
+    print("pick-names-rulings: " + why, file=sys.stderr)
+
+
+def pick_ack_hit(tool: str, tool_input, transcript: str, cwd: str = "", own_id: str = ""):
+    """Return (matched, reason) when this send_message is a pick that departs from main (a `Departs from:` line outside
+    a code fence), or the first reply to a peer whose newest message carried one, and it has no `Checked:` line naming
+    a decision, debt or step that question_form.past_rulings returns, in the repo of `cwd`; else None. A send to
+    `@parent` is read against the parent id of the own get_session record. A send with no transcript path, a
+    transcript that cannot be read, or a parent that cannot be resolved passes with one stderr line (the inbound trigger
+    is unknown). A past-ruling check that fails after a trigger fired is an ask. Cost: a message with no Departs line
+    reads the transcript once; the past-ruling check runs only after a trigger fired."""
     if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
         return None
     message = tool_input.get("message")
     if not isinstance(message, str):
         return None
     import question_form
-    departs = question_form.DEPARTS_LINE  # the one line matcher of a Departs from line (departs_hit reads it)
-    if departs.search(message):
+    if _has_departs(message):
         matched = "pick that departs from main"
     else:
-        target = tool_input.get("session_id")
+        target = tool_input.get("session_id") or tool_input.get("to")
+        if not isinstance(target, str) or not target:
+            return None
+        if not transcript:
+            _pick_unknown(PICK_NO_TRANSCRIPT)
+            return None
         try:
-            if not transcript or not isinstance(target, str) or not target or not _inbound_pick(transcript, target, departs):
+            records = _transcript_module().read_transcript(transcript)
+            names = {target}
+            if target in PARENT_TARGETS:
+                target = own_session.own_session_read(transcript, _own_id(records, own_id))[2]
+                if not target:
+                    _pick_unknown(PICK_NO_PARENT)
+                    return None
+                names |= {target, *PARENT_TARGETS}
+            if not _inbound_pick(records, target, names):
                 return None
         except Exception:
-            print("pick-names-rulings: " + PICK_UNREAD, file=sys.stderr)
+            _pick_unknown(PICK_UNREAD)
             return None
         matched = "reply to a pick that departs from main"
     named = [word.strip("`'\"*.()[]") for line in _CHECKED_LINE.findall(message) for word in re.split(r"[,;\s]+", line)]
     named = [word[:-3] if word.endswith(".md") else word for word in named if word]
     try:
-        candidates, unknown = question_form.past_rulings(message, question_form._git_root_of("") or os.getcwd())
+        candidates, unknown = question_form.past_rulings(message, question_form._git_root_of(cwd) or cwd or os.getcwd())
     except Exception:
-        return matched + " with a failed past-ruling search", PICK_REASON % (
-            "The search of the decision records failed, so the guard cannot tell which ids are real. ", "")
+        return matched + " with a failed past-ruling check", PICK_REASON % (
+            "The check of the decision records failed, so the guard cannot tell which ids are real. ", "")
     known = set(question_form.candidate_ids(candidates))
     stems = {record_id.split("/", 1)[-1] for record_id in known}  # the bare slug of each `<folder>/<slug>` id
     if any(word in known or word in stems for word in named):
@@ -1223,7 +1267,7 @@ def pick_ack_hit(tool: str, tool_input, transcript: str):
     if unread:
         detail += "A source of rulings could not be read: " + ", ".join(unread) + ". "
     return matched + " with no Checked line that names a known decision", PICK_REASON % (
-        "The `Checked:` line is missing or names no decision the search finds. ", detail)
+        "The `Checked:` line is missing or names no decision the check finds. ", detail)
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

@@ -122,8 +122,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        override lifts it.
   pick-names-rulings  ask. A send_message with a `Departs from:` line, or the first send to a session whose newest
                        message to this one carried one, that has no `Checked: <id>[, <id>...]` line naming a decision,
-                       debt or step that question_form.past_rulings returns. The past-ruling search runs only after a
-                       trigger fires. A transcript that cannot be read passes with one stderr line. An override lifts it.
+                       debt or step that question_form.past_rulings returns. The past-ruling check runs only after a
+                       trigger fires, in the payload cwd's repo. A send with no transcript path, an unreadable transcript or an
+                       unresolvable @parent passes with one stderr line. A Departs line in a code fence is no pick. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -4899,7 +4900,8 @@ def judge(payload) -> None:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     # A pick that departs from main, or a reply that agrees to one, with no Checked line naming a known decision (rule pick-names-rulings).
-    picked = pick_ack_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    picked = pick_ack_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", cwd,
+                          payload.get("session_id") if isinstance(payload.get("session_id"), str) else "")
     if picked:
         refuse(tool, "ask", "pick-names-rulings", picked[1], picked[0])
 
