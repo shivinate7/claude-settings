@@ -112,6 +112,7 @@ FIX_FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with
 FIX_FROZEN_REMEDY = "Pass the old values."
 FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head. Base the fix check on a head that sits inside the live head's history."
 FIX_LAYOUT_REMEDY = "Fix or restore lint/layout.json so the record folders can be read."
+FIX_LAYOUT_MODULE_REMEDY = "Fix or restore lint/layout.py so it loads and the record folders can be read."
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
 FIX_DROPPED_REMEDY = "Copy every Round line of that record unchanged and in its order, then add the new lines after them."
@@ -3317,7 +3318,8 @@ def fix_base_problem(host, root, base, last_head):
         import layout
         folders, files = layout.record_places(layout.layout(), root)
     except Exception as e:  # LayoutError, or a module that will not load: the record places are unknown
-        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code", FIX_LAYOUT_REMEDY
+        # the remedy names the file that failed: lint/layout.py when it will not import, else the layout JSON
+        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code", FIX_LAYOUT_MODULE_REMEDY if isinstance(e, ImportError) else FIX_LAYOUT_REMEDY
     files = files | {RECORDS_PAGE}
     found = host.compare_files(last_head, base)
     if found["ahead_by"] and found["behind_by"]:
@@ -3592,8 +3594,8 @@ def main(argv, host=None, lock=None):
                     problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
                     found = h.compare_files(a.fix_check[0], info["head"])
-                    if found["behind_by"]:
-                        problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}"
+                    if found["behind_by"]:  # compare of base...live head: behind_by counts the base's commits the live head lacks, so no ahead_by means the base holds the live head
+                        problem = f"the fix base {a.fix_check[0][:9]} is {'ahead of' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}"
                         remedy = FIX_ANCESTOR_REMEDY
                 final = next((r for r in reversed(earlier) if max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # the newest earlier record that reached the final round: a short record written before the write step floored it does not hide it
                 if not problem and final:  # a passing fix keeps what the final round gave (decision hold-unsafe-after-round-3), first fix check or chained, or from the --fix-base-record source
