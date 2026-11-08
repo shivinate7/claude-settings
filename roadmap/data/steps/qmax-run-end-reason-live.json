@@ -1,0 +1,11 @@
+{
+  "title": "q_max: qmax-run-end-reason-live (follow-up to #1104)",
+  "phase": "now",
+  "status": "doing",
+  "order": 41,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3YdbExdrKFgwkR9kr",
+  "why": "Follow-up to qmax-d369-failed-reason (#1104). The coordinator gave no scope; the lane is asked for it.",
+  "note": "Stacked on q_max #1104. Coordinator 19:00 CST Nov 7.",
+  "updatedAt": "2026-11-07T19:00:00-06:00"
+}

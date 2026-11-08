@@ -1,11 +1,11 @@
 {
   "title": "q_max: the D-369 browser check (a run outlives its browser) goes green on main",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 40,
   "owner": "coordinator",
   "lane": "session_013NEJL3YdbExdrKFgwkR9kr",
   "why": "q_max browser run 42427075186 on main 7f697a9 is red, 209/210: only the D-369 check fails, and it was also red on 58cad3b. q_max #1038, #1037 and #1011 (page item 154 a) wait on a green main browser run.",
-  "note": "Filed from coordinator 18:12 CST Nov 7.",
-  "updatedAt": "2026-11-07T18:12:00-06:00"
+  "note": "Filed from coordinator 18:12 CST Nov 7. Built as q_max #1104, with runner 9 at 52c19de (coordinator 19:00 CST). Follow-up: qmax-run-end-reason-live.",
+  "updatedAt": "2026-11-07T19:00:00-06:00"
 }
