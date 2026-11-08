@@ -16,7 +16,7 @@ and confirms it, so a defect the builder argued past reaches main.
 
 `hooks/guard.py` refuses an Agent or Task spawn, and each Workflow agent() call, whose role is a
 reviewer and whose brief holds a report-shaped block or a verdict line. The rule is
-`reviewer-brief-blind`. It goes through `guard_core.refuse()`, so the owner's override lifts it. The refusal names the brief line by its number and never repeats its text, so it names no forbidden target (rule git-remedy-never-names-target).
+`reviewer-brief-blind`. It goes through `guard_core.refuse()`, so the owner's override lifts it. A report-shape or verdict-line refusal names the refused line by its number, never its text, so it names no forbidden target (rule git-remedy-never-names-target). The unread-prompt refusal names no line.
 
 - A report-shaped block: two or more of the report labels (Done, Deviations, Input Needed, Next) at line
   start, or a BUILT or RECORDED item at line start, with or without a `Done:` label before it.
