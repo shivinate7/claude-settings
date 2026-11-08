@@ -58,6 +58,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        noted. A missing sha in a shallow clone is allowed. A second stop
                        (`stop_hook_active`) with a missing sha is allowed.
                        (agent-report-shas-resolve)
+  message-ref-missing  deny. A send_message, from the main session or an agent, whose text names a
+                       commit sha, a `PR #N` or pull URL, or a PR comment link of this repo (the
+                       cwd's origin, read raw) that does not exist. Shas by one `git cat-file`, pull
+                       requests by one `git ls-remote origin`, each comment by one `gh api` (5 s
+                       limit; only a 404 refuses). A failed read allows, and the answer names each ref
+                       unchecked. A message with no ref starts no process. Runs right after
+                       handoff-unread, before every rule that reads git, and returns after
+                       lane-one-topic: those are the only rules that judge a send_message.
+                       An override lifts it. (send-message-refs-resolve)
   git-env-set         deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
   shared-tree          deny or ask. A command that throws away work, judged against the state of
@@ -2337,12 +2346,14 @@ def stop_diff_block(payload, role: str, where: str):
 # (decision agent-report-shas-resolve). A token is a run of 7 to 12, or exactly 40, lowercase hex characters with a
 # digit and a letter a-f. It is not one when it touches - _ / # @ = or a period (a file name, a URL, an agent id,
 # a colour, key=value), or when it sits inside a double-quoted span that closes on the same line or on a `> ` line.
-# Two forms that touch a period are judged: each side of a range (`a..b`, `a...b`), and a token followed by
-# sentence marks up to a space or the end of the text.
+# Two forms that touch a period are judged: each sha side of a range (`a..b`, `a...b`, and `main..a` or `a..HEAD`
+# with a ref on one side), and a token followed by sentence marks up to a space or the end of the text. A word that
+# holds :// is skipped whole, and so is a line that starts with `index ` (a pasted diff header of blob ids).
 HANDBACK_TOOL = "SubagentHandback"
 REPORT_HEX_RUN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]+(?![0-9A-Za-z])")
-REPORT_RANGE_BEFORE = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]+\.{2,3}$")
-REPORT_RANGE_AFTER = re.compile(r"\.{2,3}[0-9a-f]")
+REPORT_RANGE_BEFORE = re.compile(r"[0-9A-Za-z_/~^]\.{2,3}$")
+REPORT_RANGE_AFTER = re.compile(r"\.{2,3}[0-9A-Za-z_/~^]")
+REPORT_URL_WORD = re.compile(r"\S*://\S*")
 REPORT_MARKS_END = re.compile(r"[.,;:)\]*\"`]*(?:\s|$)")
 REPORT_TOUCH = "-_/#@="
 REPORT_QUOTED = re.compile(r'"[^"\n]*"')
@@ -2376,9 +2387,10 @@ def report_shas(text) -> list:
         return []
     found = []
     for line in text.split("\n"):
-        if REPORT_QUOTE_LINE.match(line):
+        if REPORT_QUOTE_LINE.match(line) or line.startswith("index "):
             continue
         line = REPORT_QUOTED.sub(lambda m: " " * len(m.group()), line)
+        line = REPORT_URL_WORD.sub(lambda m: " " * len(m.group()), line)
         for run in REPORT_HEX_RUN.finditer(line):
             token = run.group()
             if (7 <= len(token) <= 12 or len(token) == 40) and re.search(r"[0-9]", token) \
@@ -2387,15 +2399,10 @@ def report_shas(text) -> list:
     return found[:REPORT_SHA_MAX]
 
 
-def report_sha_missing(tool: str, payload, text, where: str) -> list:
-    """The shas of `text` that are no commit in the repo at `where`, for an agent's report. [] when the
-    payload holds no valid agent_id, the report holds no sha, git fails, `where` is no repo, or the repo is
-    shallow (noted `report-sha-shallow`). One `git cat-file --batch-check` call, and one more on a miss."""
-    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id) or not where or not os.path.isdir(where):
-        return []
-    shas = report_shas(text)
-    if not shas:
+def sha_resolve(tool: str, where: str, shas: list) -> list:
+    """The shas of `shas` that are no commit in the repo at `where`. [] when git fails, `where` is no repo, or the
+    repo is shallow (noted `report-sha-shallow`). One `git cat-file --batch-check` call, and one more on a miss."""
+    if not shas or not where or not os.path.isdir(where):
         return []
     try:
         done = git_reads._nowindow.run(
@@ -2417,6 +2424,150 @@ def report_sha_missing(tool: str, payload, text, where: str) -> list:
         record(tool, "noted", "report-sha-shallow", " ".join(missing))
         return []
     return missing
+
+
+def report_sha_missing(tool: str, payload, text, where: str) -> list:
+    """The shas of an agent's report that are no commit in the repo at `where`. [] when the payload holds no
+    valid agent_id or the report holds no sha."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+        return []
+    return sha_resolve(tool, where, report_shas(text))
+
+
+# Rule message-ref-missing. A send_message names only refs of this repo that exist (decision
+# send-message-refs-resolve): a commit sha (report_shas), a pull request (`PR #N`, `PRs #N and #M`, a pull URL of this
+# repo) and a PR comment link of this repo. This repo is the owner/repo of the cwd checkout's origin, read raw: `git
+# config --get remote.origin.url`, since `remote get-url` applies insteadOf. A bare #N is skipped. A sha on a line that
+# names another owner/repo is skipped. Every PR is read by one `git ls-remote origin`, every comment by one `gh api`,
+# each with a 5 s limit. Only a clear answer refuses (no refs/pull/N/head, or a 404); any other answer leaves the ref
+# unchecked, and the sender is told which.
+MESSAGE_REF_TOOL = "mcp__claude-code-remote__send_message"
+MESSAGE_REF_REASON = (
+    "Your message names refs this repo does not hold: %s. Check each with git or gh before you send it, and "
+    "name only what exists. Then send it again. (decision send-message-refs-resolve)"
+)
+MESSAGE_REF_LIMIT = 5   # seconds, for each ls-remote or gh read
+MESSAGE_REF_MAX = 20    # pull requests, and comments, read in one message
+MESSAGE_PR = re.compile(r"\bPRs?(?:\s*#|\s+)(\d+)((?:\s*(?:,|and|&)\s*#\d+)*)")
+MESSAGE_PR_MORE = re.compile(r"#(\d+)")
+MESSAGE_PULL_URL = re.compile(
+    r"https?://github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/(pull|issues)/(\d+)(?:/[\w/.-]*)?(?:#issuecomment-(\d+))?")
+MESSAGE_ORIGIN_TAIL = re.compile(r"([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
+MESSAGE_REPO_NAME = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)(?![\w/-])")
+MESSAGE_FILE_END = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+
+
+def message_origin(where: str):
+    """(owner, repo) lowercased from the raw `remote.origin.url` of the checkout at `where`, or None."""
+    if not where or not os.path.isdir(where):
+        return None
+    done = guard_core._git(where, "config", "--get", "remote.origin.url")
+    if done is None or done.returncode != 0:
+        return None
+    found = MESSAGE_ORIGIN_TAIL.search(done.stdout.strip())
+    return (found.group(1).lower(), found.group(2).lower()) if found else None
+
+
+def message_names_other_repo(line: str, this) -> bool:
+    """True when `line` names an owner/repo (a github URL or a bare owner/repo word) other than `this`."""
+    names = {(o.lower(), r.lower()) for o, r, *_ in MESSAGE_PULL_URL.findall(line)}
+    bare = REPORT_URL_WORD.sub(" ", line)
+    for owner, repo in MESSAGE_REPO_NAME.findall(bare):
+        if not MESSAGE_FILE_END.search(repo):
+            names.add((owner.lower(), repo.lower()))
+    return any(name != this for name in names)
+
+
+def message_refs(text: str, where: str):
+    """(shas, prs, comments) a message names for this repo. Starts a process only when a PR, a link, or a sha
+    on a line that names an owner/repo needs the origin; a message with no ref starts none."""
+    origin = []
+
+    def this():
+        if not origin:
+            origin.append(message_origin(where))
+        return origin[0]
+
+    shas = []
+    for line in text.split("\n"):
+        found = report_shas(line)
+        if found and re.search(r"\w/\w", line) and this() is not None and message_names_other_repo(line, this()):
+            continue
+        shas += [sha for sha in found if sha not in shas]
+    prs, comments = [], []
+    if "PR" in text or "github.com" in text:
+        for found in MESSAGE_PR.finditer(text):
+            numbers = [found.group(1)] + MESSAGE_PR_MORE.findall(found.group(2))
+            prs += [n for n in numbers if n not in prs]
+        if "github.com" in text:
+            for owner, repo, kind, number, comment in MESSAGE_PULL_URL.findall(text):
+                if (owner.lower(), repo.lower()) != this():
+                    continue
+                if kind == "pull" and number not in prs:
+                    prs.append(number)
+                if comment and comment not in comments:
+                    comments.append(comment)
+        if (prs or comments) and this() is None:
+            prs, comments = [], []
+    return shas[:REPORT_SHA_MAX], prs[:MESSAGE_REF_MAX], comments[:MESSAGE_REF_MAX], (origin[0] if origin else None)
+
+
+def message_pr_missing(where: str, prs: list):
+    """(missing PR numbers, unchecked PR numbers): one `git ls-remote origin` for all of them."""
+    wanted = ["refs/pull/%s/head" % n for n in prs]
+    try:
+        done = git_reads._nowindow.run(
+            ["git", "-C", where, "ls-remote", "origin"] + wanted, capture_output=True, encoding="utf-8",
+            errors="replace", timeout=MESSAGE_REF_LIMIT, env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+    except Exception:
+        return [], prs
+    if done.returncode != 0:
+        return [], prs
+    held = {line.split("\t")[-1].strip() for line in done.stdout.splitlines()}
+    return [n for n in prs if "refs/pull/%s/head" % n not in held], []
+
+
+def message_comment_state(origin, comment: str) -> str:
+    """'found', 'missing' (a 404) or 'unchecked' for one comment link: one `gh api` read."""
+    try:
+        done = git_reads._nowindow.run(
+            ["gh", "api", "repos/%s/%s/issues/comments/%s" % (origin[0], origin[1], comment)],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=MESSAGE_REF_LIMIT)
+    except Exception:
+        return "unchecked"
+    if done.returncode == 0:
+        return "found"
+    return "missing" if "404" in (done.stderr or "") else "unchecked"
+
+
+def message_ref_check(tool: str, tool_input, cwd: str):
+    """(missing, unchecked): the refs of this send_message that do not exist, and the refs no answer was read for."""
+    text = tool_input.get("message")
+    if not isinstance(text, str) or not text or not cwd:
+        return [], []
+    shas, prs, comments, origin = message_refs(text, cwd)
+    missing, unchecked = list(sha_resolve(tool, cwd, shas)), []
+    if prs:
+        gone, unknown = message_pr_missing(cwd, prs)
+        missing += ["PR #" + n for n in gone]
+        unchecked += ["PR #" + n for n in unknown]
+    for comment in comments:
+        state = message_comment_state(origin, comment)
+        if state == "missing":
+            missing.append("comment " + comment)
+        elif state == "unchecked":
+            unchecked.append("comment " + comment)
+    return missing, unchecked
+
+
+def message_unchecked_note(unchecked: list) -> None:
+    """The allow that names each ref no answer was read for. It carries no git or gh error text, and no log is written."""
+    note = ("message-ref-missing: could not check " + ", ".join(unchecked)
+            + " (no clear answer from the remote); the message was sent unchecked.")
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "allow",
+        "permissionDecisionReason": note, "additionalContext": note}}))
 
 
 def judge_stop(payload) -> None:
@@ -4906,6 +5057,20 @@ def judge(payload) -> None:
     unread = unread_handoff(payload) if unread_handoff else ""
     if unread:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
+    # 0, message-ref-missing. A send_message names only refs that exist (decision send-message-refs-resolve). It runs
+    # after handoff-unread and before every rule that reads git. Two rules also judge a send_message and both stay:
+    # handoff-unread above, and lane-one-topic here, which reads the transcript and never git. No other rule judges it.
+    if tool == MESSAGE_REF_TOOL:
+        gone, unchecked = message_ref_check(tool, tool_input, cwd)
+        if gone:
+            refuse(tool, "deny", "message-ref-missing", MESSAGE_REF_REASON % ", ".join(gone), ", ".join(gone))
+        transcript = payload.get("transcript_path")
+        briefed = brief_hit(tool, tool_input, transcript if isinstance(transcript, str) else "")
+        if briefed:
+            refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+        if unchecked:
+            message_unchecked_note(unchecked)
+        return
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     if home_hit:
@@ -5004,11 +5169,6 @@ def judge(payload) -> None:
     archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
-
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
