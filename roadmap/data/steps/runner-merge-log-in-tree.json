@@ -1,0 +1,11 @@
+{
+  "title": "A runner's merge call writes its log inside the working tree, so auto mode does not stop it",
+  "why": "Coordinator 11:47 CST Nov 8, from lane relayed-yes-names-head (session_013NEJKzw6Mmu5eviHC3vobt, 11:43 CST): runner 8 chained its merge call with a redirect to a log in its scratchpad (`> <scratchpad>/m1421.log`). Auto mode's judge likely stopped it because the target is outside the working folders (read from the docs, unmeasured). Harm: a stopped merge call reaches the owner as a prompt. Fix idea: runners redirect into the working tree, or call the merge tool bare; measure first that the redirect target is the trigger.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 765,
+  "updatedAt": "2026-11-08T11:46:00-06:00"
+}

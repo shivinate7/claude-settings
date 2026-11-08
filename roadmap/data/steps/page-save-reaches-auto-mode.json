@@ -1,9 +1,9 @@
 {
- "title": "Auto mode counts a page save as the owner's grant",
- "phase": "now",
- "status": "doing",
- "order": 475,
- "why": "Rule questions-go-to-owner says the owner's save on the waiting page is his grant for the item. Auto mode does not see it: it refused the coordinator's brief for item 149 b as self-modification (Nov 1 23:06 CST), so the owner had to be asked again in chat.",
- "note": "Incident: item 149 b, step runner-merge-allow. Find how the page save can reach auto mode as owner words, for example the routing session quoting the saved answer with its receipt. Ready. Port: yes. Lane session_013NEJKzJNm3bZgR7SadQNrU, started by the coordinator Nov 3 16:57 CST.",
- "updatedAt": "2026-11-03T23:10:00Z"
+  "title": "Auto mode counts a page save as the owner's grant",
+  "phase": "now",
+  "status": "doing",
+  "order": 475,
+  "why": "Rule questions-go-to-owner says the owner's save on the waiting page is his grant for the item. Auto mode does not see it: it refused the coordinator's brief for item 149 b as self-modification (Nov 1 23:06 CST), so the owner had to be asked again in chat.",
+  "note": "Incident: item 149 b, step runner-merge-allow. Find how the page save can reach auto mode as owner words, for example the routing session quoting the saved answer with its receipt. Ready. Port: yes. Lane session_013NEJKzJNm3bZgR7SadQNrU, started by the coordinator Nov 3 16:57 CST. Coordinator 11:47 CST Nov 8: the lane still waits on its a/b/c question on narrowing ruling 2a of questions-go-to-owner (a page save counts as the owner's grant). Not on the page; triage asked the lane for it in page form, 11:49 CST.",
+  "updatedAt": "2026-11-08T11:46:00-06:00"
 }
