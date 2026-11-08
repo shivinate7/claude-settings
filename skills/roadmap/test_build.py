@@ -2743,6 +2743,27 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
 
+    def test_one_draft_head_is_read_once_for_both_lane_counts(self):
+        # The draft on lane/c1 holds a review-ready lane. Both lane counts share one draft-head read, the session-tiers
+        # decision's one merge-base read per matching open pull. Each count reading the head itself would read it twice.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        head = git(self.repo, "rev-parse", "roadmap").strip()  # a commit main never reaches, so the draft holds session_a
+        self.publish(sessions=[self.lane("session_a", "c1", bucket=BUCKET_REVIEW_READY), self.lane("session_b", "c2")],
+                     pulls=[dict(self.draft(41, "lane/c1"), head=head)])
+        merge_base, real = [], build.git
+
+        def read(repo, *args, stdin=None):
+            if args[:1] == ("merge-base",):
+                merge_base.append(args)
+            return real(repo, *args, stdin=stdin)
+        with mock.patch.object(build, "git", read):
+            idle, finished = build.idle_and_finished_report(self.repo, str(self.live), "roadmap")
+        # The scope first: the draft holds session_a, and the completed session_b with no pull is the listed control.
+        self.assertEqual((self.ids(idle), finished), (["session_b"], 1), "the lane counts are not the held-and-control pair")
+        head_reads = [args for args in merge_base if head in args]
+        self.assertEqual(len(head_reads), 1, "merge-base read the draft head %d times, want one read shared by both counts"
+                         % len(head_reads))
+
     def test_blocked_failed_working_and_unbucketed_lanes_are_never_listed(self):
         self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 6)})
         self.publish(sessions=[self.lane("session_blocked", "c1", bucket=BUCKET_BLOCKED),
