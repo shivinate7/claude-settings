@@ -94,6 +94,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import layout  # noqa: E402  the one home of every kind's path
 import rule_audit  # noqa: E402  the one home of the live rule anchors
 import _nowindow  # noqa: E402  the one home of a no-window child start
+from inline_code import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/inline_code.py)
 from ui_suffixes import UI_SUFFIXES  # noqa: E402  the files ste_lint reads as front-end copy
 
 # bin/shoot holds the same default; lint/test_compliance_probes.py pins the two equal.
@@ -532,7 +533,7 @@ HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
 META_LINE = re.compile(r"^\s*(?:Kind|Plan|Home):")
 # One pass, left to right, so a mark inside one span never opens another: a code span (the closer is a run of the same
 # length) or an HTML comment. An opener with no closer is plain text. Quoted text is read: a copy in quotes is a copy.
-STRIPPED = re.compile(r"(?P<tick>`+)(?!`).*?(?<!`)(?P=tick)(?!`)|<!--.*?-->")
+STRIPPED = re.compile(INLINE_CODE_RE.pattern + r"|<!--.*?-->")
 NUMBERED = re.compile(r"\S*\d\S*")
 TIME_ZONES = {"utc", "gmt", "cst", "cdt", "est", "edt", "pst", "pdt", "mst", "mdt"}
 SHARED_RUN = 5  # words in a row that a unit and a record hold

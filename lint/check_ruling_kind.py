@@ -32,7 +32,7 @@ except ImportError:  # actions/ruling-kind runs this file in a tree without hook
     _nowindow = subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
-from ste_lint import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/ste_lint.py)
+from inline_code import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/inline_code.py)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIR = None  # the records folder: the layout's decisions folder under ROOT; --dir replaces it

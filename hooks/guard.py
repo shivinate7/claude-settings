@@ -1489,6 +1489,7 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
 
 # ---- a message that names a lane by its session number
 LANE_NUMBER = re.compile(r"\bN\d{1,3}b?\b")
+# Own copy of the inline half of lint/inline_code.py INLINE_CODE_RE: the installed guard set ships without lint/, so it imports none of it.
 LANE_QUOTED = re.compile(
     r"^[ \t]*(```|~~~).*?^[ \t]*\1|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\2(?!`)", re.MULTILINE | re.DOTALL)
 LANE_REASON = (

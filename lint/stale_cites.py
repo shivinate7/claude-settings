@@ -124,7 +124,7 @@ sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
-from ste_lint import INLINE_CODE_RE, code_span_text  # noqa: E402  the one home of the inline-code mask (lint/ste_lint.py)
+from inline_code import INLINE_CODE_RE, code_span_text  # noqa: E402  the one home of the inline-code mask (lint/inline_code.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds (hooks/precompact_handoff.py)
 import route_match  # noqa: E402  the one home of the route rows file's path (hooks/route_match.py)
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
@@ -1267,9 +1267,12 @@ HOME_LINE = re.compile(r"^Home:[ \t]*`?([^\s`]+)`?[ \t]*$", re.M)
 
 def anchor_sentences(text):
     """{slug: the prose since the previous anchor, or the paragraph start, spaces collapsed}. An anchor inside a
-    code span is a mention of the form, not an anchor."""
+    code span or a fenced block is a mention of the form, not an anchor."""
     found = {}
-    for block in re.split(r"\n[ \t]*\n", text.replace("\r\n", "\n")):
+    rows = text.replace("\r\n", "\n").split("\n")
+    fenced = fenced_lines(rows)
+    prose = "\n".join(row for number, row in enumerate(rows, 1) if number not in fenced)
+    for block in re.split(r"\n[ \t]*\n", prose):
         spans = [m.span() for m in INLINE_CODE_RE.finditer(block)]
         start = 0
         for match in ANCHOR_RE.finditer(block):

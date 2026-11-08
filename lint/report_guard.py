@@ -147,13 +147,7 @@ from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
-from inline_code import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/inline_code.py)
-
-
-
-def _span_text(match):
-    run = len(match.group(1))
-    return match.group()[run:-run]
+from inline_code import INLINE_CODE_RE, code_span_text  # noqa: E402  the one home of the inline-code mask (lint/inline_code.py)
 
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -543,7 +537,7 @@ def answered_problem(text):
         plain = ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body))
         if not _claims_answered(plain):
             continue
-        kept = CODE_SPAN.sub(_span_text, body)
+        kept = CODE_SPAN.sub(code_span_text, body)
         if DONE_REF_RE.search(kept) or ANSWERED_SOURCE_RE.search(kept) or _has_path(kept):
             continue
         bad.append(body)
@@ -1558,7 +1552,7 @@ def review_claims(text):
             continue
         if fence:
             continue
-        plain = CODE_SPAN.sub(_span_text, body)
+        plain = CODE_SPAN.sub(code_span_text, body)
         if not REVIEW_TRIGGER_RE.search(plain):
             continue
         if not any(REVIEW_PASS_RE.search(REVIEW_NEGATED_RE.sub(" ", clause)) and not REVIEW_HISTORY_RE.search(clause)
