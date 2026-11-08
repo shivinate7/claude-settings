@@ -3,23 +3,30 @@
 // under it holds the runner's output pipe, and the timer lives here, in the parent. On expiry the
 // watchdog names the running test, kills the process tree, prints what ran and exits 1. After the
 // child closes, normally or not, it finds each process the suite started that still runs, kills it,
-// names it and exits 1. STAMP_SUITE_CAP_S sets the cap, inside the step's own.
+// names it and exits 1. STAMP_SUITE_CAP_S sets the cap, inside the CI step's own.
 //
-// Budget, against the step's 300 s cap (timeout-minutes 5 in checks.yml): the suite's cap is
-// DEFAULT_CAP_S. Every call after it, or after the child closes, ends by HARD_STOP_AFTER_CAP_S, when
-// the watchdog stops everything and exits 1. Its last act, a 15 s taskkill, ends the run at
-// DEFAULT_CAP_S + 65 s = 245 s at the latest: 55 s of margin.
+// Budget, against the CI step's 300 s cap (timeout-minutes 5 in checks.yml). The suite's cap is
+// DEFAULT_CAP_S = 180 s. A hard stop fires HARD_STOP_AFTER_CAP_S = 30 s after that. A synchronous
+// call cannot be interrupted, so the hard stop waits for the longest blocking stretch that began
+// before it: 35 s (Windows tree-walk fallback: taskkill 10 + walk 15 + taskkill 10; POSIX: one ps at
+// 5 s for the process group, then up to four ps scans at 5 s each). The hard stop's own kills take at
+// most 10 s (Windows taskkill; POSIX two ps scans), and its output drain 2 s. Worst case:
+// 180 + 30 + 35 + 10 + 2 = 257 s, which leaves 43 s of margin. A normal run on the Windows job path
+// ends far inside it: close, a 3 s grace, then one 20 s bounded request to the helper.
 //
 // What the suite leaves running. The watchdog finds each process the suite started that still runs,
 // by a mark that survives a detach or a dead parent, never by image name or parent pid:
 //  - Linux: STAMP_SUITE_RUN=<id> in the child's env. A process inherits it from its parent, and
 //    /proc/<pid>/environ reads it back. macOS: the same mark, read with ps -E.
-//  - Windows has no readable environ, so the child runs in a Job Object with KILL_ON_JOB_CLOSE. A
-//    job holds every descendant, however detached, and nothing can break away from it. A named job
-//    loses its name at the last handle close, so one PowerShell helper holds the job for the suite's
-//    life and lists and kills its members on request. If the watchdog is killed, the helper's pipe
-//    closes, the helper ends, and the job closes with every member in it. The child waits on a
-//    go-file until the helper has put it in the job, so no test runs outside it.
+//  - Windows has no readable environ, so the child runs in an unnamed Job Object with
+//    KILL_ON_JOB_CLOSE. A job holds every descendant, however detached, and nothing can break away
+//    from it. Only a handle can list or end an unnamed job, and a handle lives as long as its process,
+//    so one PowerShell helper holds the job for the suite's life and lists and kills its members on
+//    request. If the watchdog is killed, the helper's pipe closes, the helper ends, and the job closes
+//    with every member in it. The child waits on a go-file until the helper has put it in the job, so
+//    no test runs outside it. On CI a run that cannot get a job fails by name; off CI it falls back to
+//    a walk of the process tree, with a printed note.
+// An unreadable sweep is unknown, never "nothing found": on CI it exits 1 too.
 // Cost: one extra PowerShell process on Windows, for the suite's own run only.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -33,8 +40,9 @@ export const HANG = "STAMP_SUITE_HANG_FIXTURE"; // a pid file: the child runs on
 export const START = "STAMP-START "; // the child prints it before each test, so the parent can name a hung one
 const RUN = "STAMP_SUITE_RUN";
 const GO = "STAMP_SUITE_GO"; // Windows: the child starts its tests when this file exists
-export const DEFAULT_CAP_S = 180; // the slowest normal run took 102 s (run 42456407663); c158 measured 90 s max, n=28
-export const HARD_STOP_AFTER_CAP_S = 50; // every kill and list call after the cap, or after the close, ends inside this
+const NO_JOB = "STAMP_SUITE_NO_JOB"; // "1": Windows: the watchdog makes no job object, as if it could not
+export const DEFAULT_CAP_S = 180; // the slowest normal run took 102 s (run 42456407663); the slowest of 28 earlier runs, 90 s
+export const HARD_STOP_AFTER_CAP_S = 30; // see the budget above
 const LEFTOVER_GRACE_MS = 3000; // a process may still be exiting when the suite closes
 const ASSIGN_WAIT_MS = 25_000;
 const SWEEP_WAIT_MS = 20_000;
@@ -56,6 +64,15 @@ function bounded(cmd, args, timeoutMs, opts = {}) {
 // env mark, a leftover is provably this run's and is always swept.
 export const sweepAllowed = (ci, env) => ci || env.STAMP_SUITE_SWEEP === "1";
 
+// The exit code, once the sweep has run. A leftover the sweep found fails the run whatever the
+// suite's own code was, and whether or not a line named it. lines: one per leftover found. alive:
+// pids still running after the kill. unknown: reads that could not run; the caller passes it on CI
+// only, where a sweep that could not read must not pass. With none of them, the suite's own code.
+export function leftoverExit(code, { lines = [], alive = [], unknown = [] } = {}) {
+  if (lines.length || alive.length || unknown.length) return 1;
+  return code ?? 1;
+}
+
 // The child calls it before its first test. Windows: no test runs until the watchdog has put this
 // process in its job. A bound, not a wait.
 export function waitForGo(env = process.env) {
@@ -63,44 +80,56 @@ export function waitForGo(env = process.env) {
   for (const t0 = Date.now(); !existsSync(env[GO]) && Date.now() - t0 < 40_000;) sleepMs(50);
 }
 
-// Linux and macOS: each live process of the run but this one, as { pid, cmd }.
+// Linux and macOS: each live process of the run but this one, as { found: [{ pid, cmd }], unreadable }.
+// unreadable is a reason, or null: a sweep that could not list processes found nothing out.
 function markedProcesses(runId) {
   const mark = `${RUN}=${runId}`;
   const found = [];
   if (process.platform === "linux") {
-    let names = [];
-    try { names = readdirSync("/proc"); } catch {}
+    let names;
+    try {
+      names = readdirSync("/proc");
+      readFileSync(`/proc/${process.pid}/environ`); // an environ the watchdog cannot read for itself reads for no one
+    } catch (e) { return { found, unreadable: `/proc: ${e.message}` }; }
     for (const name of names) {
       if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
       try {
         if (!readFileSync(`/proc/${name}/environ`, "latin1").split("\0").includes(mark)) continue;
         found.push({ pid: Number(name), cmd: clip(readFileSync(`/proc/${name}/cmdline`, "latin1").replace(/\0/g, " ").trim()) });
-      } catch {} // gone, or not ours to read
+      } catch {} // gone, or another user's, so not the suite's
     }
-    return found;
+    return { found, unreadable: null };
   }
   const re = new RegExp(`(^|\\s)${mark}(\\s|$)`);
   try {
-    const ps = bounded("ps", ["-axEww", "-o", "pid=,command="], 15_000, { maxBuffer: 1 << 26 });
+    const ps = bounded("ps", ["-axEww", "-o", "pid=,command="], 5_000, { maxBuffer: 1 << 26 });
+    if (ps.status !== 0) return { found, unreadable: `ps exited ${ps.status}: ${clip(ps.stderr.trim())}` };
     for (const line of ps.stdout.split("\n")) {
       const m = /^\s*(\d+)\s+(.*)$/.exec(line);
       if (m && Number(m[1]) !== process.pid && re.test(m[2])) found.push({ pid: Number(m[1]), cmd: clip(m[2].replace(re, " ").trim()) });
     }
-  } catch {}
-  return found;
+  } catch (e) { return { found, unreadable: `ps: ${e.message}` }; }
+  return { found, unreadable: null };
 }
 
-// Waits up to graceMs for them to exit on their own, then kills each and returns what it saw.
-function sweepMarked(runId, graceMs) {
+// Waits up to graceMs for them to exit on their own, then kills each, in at most `rounds` passes, and
+// returns what it saw: { lines, alive, unreadable }.
+function sweepMarked(runId, graceMs, rounds = 3) {
   const seen = new Map();
-  let now = markedProcesses(runId);
-  for (const t0 = Date.now(); now.length && Date.now() - t0 < graceMs;) { sleepMs(100); now = markedProcesses(runId); }
-  for (let round = 0; round < 3 && now.length; round++) {
+  let unreadable = null;
+  const scan = () => {
+    const r = markedProcesses(runId);
+    unreadable ??= r.unreadable;
+    return r.found;
+  };
+  let now = scan();
+  for (const t0 = Date.now(); now.length && Date.now() - t0 < graceMs;) { sleepMs(100); now = scan(); }
+  for (let round = 0; round < rounds && now.length; round++) {
     for (const p of now) { seen.set(p.pid, p.cmd); try { process.kill(p.pid, "SIGKILL"); } catch {} }
     sleepMs(100);
-    now = markedProcesses(runId);
+    now = scan();
   }
-  return { lines: [...seen].map(([pid, cmd]) => `${pid} ${cmd}`), alive: now.map((p) => p.pid) };
+  return { lines: [...seen].map(([pid, cmd]) => `${pid} ${cmd}`), alive: now.map((p) => p.pid), unreadable };
 }
 
 // The Windows job helper's script. One request per line on stdin, a reply ended by an END line.
@@ -196,7 +225,10 @@ function jobHelper() {
   ps.stderr.on("data", (d) => { errText += d; });
   ps.stdin.on("error", () => {});
   ps.on("close", () => { dead = true; waiter?.(); });
+  // No powershell on the path, or it cannot start: an event, not a crash, and no reply ever comes.
+  ps.on("error", (e) => { errText += ` ${e.message}`; dead = true; waiter?.(); });
   const ask = (cmd, ms) => new Promise((resolve) => {
+    if (dead) return resolve(null);
     lines.length = 0;
     const timer = setTimeout(() => { waiter = null; resolve(null); }, ms);
     waiter = () => {
@@ -216,14 +248,14 @@ function jobHelper() {
     ps.stderr.destroy();
     ps.unref();
   };
-  return { ask, stop, why: () => clip(errText.trim().replace(/\s+/g, " ")) };
+  return { ask, stop, isDead: () => dead, why: () => clip(errText.trim().replace(/\s+/g, " ")) };
 }
 
 // POSIX: each live process in the child's group, with its command line. The child leads its own
 // group, so the group holds even an orphan. ps is fast, so it lists before the kill.
 function posixTree(root) {
   try {
-    const ps = bounded("ps", ["-eo", "pid=,ppid=,pgid=,args="], 15_000);
+    const ps = bounded("ps", ["-eo", "pid=,ppid=,pgid=,args="], 5_000);
     return ps.stdout.split("\n").filter((l) => l.trim().split(/\s+/)[2] === String(root));
   } catch (e) {
     return [`(process tree unreadable: ${e.message})`];
@@ -243,7 +275,7 @@ if ($${sweep ? "true" : "false"}) { foreach ($p in $all) { if ($p.CreationDate -
 for ($i = 0; $i -lt $ids.Count; $i++) { foreach ($p in $all) { if ($p.ParentProcessId -eq $ids[$i] -and $ids -notcontains $p.ProcessId) { $ids += [int]$p.ProcessId } } }
 foreach ($p in $all) { if ($ids -contains $p.ProcessId) { '{0} {1} {2}' -f $p.ProcessId, $p.ParentProcessId, ($p.CommandLine -replace '\\s+', ' ') } }`;
   try {
-    const ps = bounded("powershell", ["-NoProfile", "-NonInteractive", "-Command", walk], 20_000);
+    const ps = bounded("powershell", ["-NoProfile", "-NonInteractive", "-Command", walk], 15_000);
     return ps.stdout.split(/\r?\n/).filter((l) => l.trim());
   } catch (e) {
     return [`(leftover processes unreadable: ${e.message})`];
@@ -252,7 +284,7 @@ foreach ($p in $all) { if ($ids -contains $p.ProcessId) { '{0} {1} {2}' -f $p.Pr
 
 const taskkill = (pids) => {
   try {
-    return bounded("taskkill", ["/T", "/F", ...pids.flatMap((p) => ["/PID", String(p)])], 15_000).stdout;
+    return bounded("taskkill", ["/T", "/F", ...pids.flatMap((p) => ["/PID", String(p)])], 10_000).stdout;
   } catch (e) {
     return `(taskkill failed: ${e.message})`;
   }
@@ -284,39 +316,43 @@ export async function watchdog({ self, ci, tempPrefix }) {
   child.stderr.on("data", (d) => process.stderr.write(d));
   const flush = () => { if (pending) { forward(pending); pending = ""; } };
 
-  // Windows: put the child in the job before it runs a test. With no job the child still starts,
-  // and leftovers are found by walking the process tree instead.
-  const job = POSIX ? null : jobHelper();
-  let jobOk = false, noJob = null;
-  const jobReady = POSIX ? Promise.resolve() : (async () => {
-    const r = await job.ask(`assign ${child.pid}`, ASSIGN_WAIT_MS);
-    jobOk = r?.[0] === "OK";
-    if (!jobOk) noJob = `(no job object: ${r ? r.join(" ") : `no answer in ${ASSIGN_WAIT_MS / 1000} s`} ${job.why()}; leftovers are found by walking the process tree)`;
-    try { writeFileSync(goFile, "go"); } catch {}
-  })();
+  // Windows: put the child in the job before it runs a test (startJob, below). On CI a run with no
+  // job fails by name. Off CI the child still starts, and leftovers are found by walking the tree.
+  const forceNoJob = !POSIX && process.env[NO_JOB] === "1";
+  const job = POSIX || forceNoJob ? null : jobHelper();
+  let jobOk = false, noJob = null, jobReady = Promise.resolve();
 
-  // Lists and kills what the suite left running: { lines, notes, alive }. Notes are reads that did
-  // not run: they are named, and never read as "nothing left".
+  // Lists and kills what the suite left running: { lines, alive, unknown, notes }. unknown holds the
+  // reads that could not run: they are named, and never read as "nothing left".
   const sweep = async (graceMs) => {
     await jobReady;
-    if (POSIX) { const r = sweepMarked(runId, graceMs); return { lines: r.lines, notes: [], alive: r.alive }; }
+    if (POSIX) {
+      const r = sweepMarked(runId, graceMs);
+      return { lines: r.lines, alive: r.alive, unknown: r.unreadable ? [r.unreadable] : [], notes: [] };
+    }
     if (jobOk) {
       const r = await job.ask(`sweep ${graceMs}`, SWEEP_WAIT_MS);
       if (!r) {
         job.stop(); // closing the job ends every process in it
-        return { lines: [], notes: [`(the job sweep gave no answer in ${SWEEP_WAIT_MS / 1000} s; the job was closed, which ends every process in it)`], alive: [] };
+        return { lines: [], alive: [], notes: [],
+          unknown: [`the job sweep gave no answer in ${SWEEP_WAIT_MS / 1000} s; the job was closed, which ends every process in it`] };
       }
       return {
         lines: r.filter((l) => l.startsWith("LEFT ")).map((l) => l.slice(5)),
-        notes: r.filter((l) => l.startsWith("ERR ")).map((l) => `(${l.slice(4)})`),
         alive: r.filter((l) => l.startsWith("ALIVE ")).flatMap((l) => l.slice(6).split(" ")),
+        unknown: r.filter((l) => l.startsWith("ERR ")).map((l) => l.slice(4)),
+        notes: [],
       };
     }
     taskkill([child.pid]);
     const left = windowsLeftovers(child.pid, startedAt, sweepAllowed(ci, process.env), tempPrefix);
     const pids = left.map((l) => l.split(" ")[0]).filter((p) => /^\d+$/.test(p));
     if (pids.length) taskkill(pids);
-    return { lines: left.filter((l) => !l.startsWith("(")), notes: [noJob, ...left.filter((l) => l.startsWith("("))].filter(Boolean), alive: [] };
+    return {
+      lines: left.filter((l) => !l.startsWith("(")), alive: [],
+      unknown: left.filter((l) => l.startsWith("(")).map((l) => l.slice(1, -1)),
+      notes: noJob ? [`(no job object: ${noJob}; leftovers are found by walking the process tree)`] : [],
+    };
   };
 
   // Ends without process.exit, so the output still queued on a Windows pipe drains first.
@@ -335,6 +371,7 @@ export async function watchdog({ self, ci, tempPrefix }) {
   };
   const report = (r) => {
     for (const n of r.notes) console.error(n);
+    for (const u of r.unknown) console.error(`unknown - leftover sweep could not read: ${u}`);
     if (r.alive.length) console.error(`Still running after the kill: ${r.alive.join(" ")}`);
   };
   const stopTree = async (why) => {
@@ -354,13 +391,35 @@ export async function watchdog({ self, ci, tempPrefix }) {
     report(r);
     finish(1);
   };
+  // On CI the suite needs its job: without one it cannot find what it leaves running. The child has
+  // not been released, so it has run no test. Its tree is killed and the run fails by name.
+  const failNoJob = () => {
+    if (over || stopping) return;
+    stopping = true;
+    flush();
+    console.error(`FAIL - no job object: ${noJob}. On CI the suite must put its tests in one, to find and kill what they leave running.`);
+    const killed = taskkill([child.pid]).trim();
+    if (killed) console.error(killed);
+    finish(1);
+  };
+  // Ends the process once what is queued on stdout and stderr is written, or after 2 s. A pipe on
+  // Windows may write asynchronously, and process.exit would cut the queue.
+  const exitAfterDrain = (code) => {
+    let left = 2;
+    const done = () => { if (--left === 0) process.exit(code); };
+    process.stdout.write("", done);
+    process.stderr.write("", done);
+    setTimeout(() => process.exit(code), 2000);
+  };
   // The last bound: stop everything and exit, whatever a call above is still waiting on.
   const hard = setTimeout(() => {
     if (over) return;
+    over = true;
+    flush();
     console.error(`FAIL - ${current ?? "(before the first test)"}\nThe watchdog passed its own bound (${capS} s cap + ${HARD_STOP_AFTER_CAP_S} s) and stopped the suite.`);
-    if (POSIX) { try { process.kill(-child.pid, "SIGKILL"); } catch {} sweepMarked(runId, 0); }
-    else { job.stop(); taskkill([child.pid]); }
-    process.exit(1);
+    if (POSIX) { try { process.kill(-child.pid, "SIGKILL"); } catch {} sweepMarked(runId, 0, 1); }
+    else { job?.stop(); taskkill([child.pid]); }
+    exitAfterDrain(1);
   }, (capS + HARD_STOP_AFTER_CAP_S + (process.env[HANG] ? 30 : 0)) * 1000);
   hard.unref();
 
@@ -385,9 +444,9 @@ export async function watchdog({ self, ci, tempPrefix }) {
     clearTimeout(timer);
     const r = await sweep(LEFTOVER_GRACE_MS);
     flush();
-    if (r.lines.length) console.error(`FAIL - the suite left processes running:\n${r.lines.join("\n")}`);
+    if (r.lines.length || r.alive.length) console.error(`FAIL - the suite left processes running:${r.lines.length ? "\n" + r.lines.join("\n") : ""}`);
     report(r);
-    finish(r.lines.length ? 1 : (code ?? 1));
+    finish(leftoverExit(code, { lines: r.lines, alive: r.alive, unknown: ci ? r.unknown : [] }));
   });
   // An exit with no close means a process the suite started still holds its output.
   child.on("exit", (code) => {
@@ -395,4 +454,24 @@ export async function watchdog({ self, ci, tempPrefix }) {
     setTimeout(() => { if (!closed) stopTree(`FAIL - the suite exited ${code}, but a process it started still holds its output:`); }, 5000).unref();
   });
   for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => stopTree(`Stopped by ${sig}. Processes under the suite:`));
+
+  // Windows: the child waits on the go-file, so this ends before any test runs. On CI no job means
+  // no release: the run fails, and the child is killed where it waits.
+  if (!POSIX) {
+    jobReady = (async () => {
+      if (forceNoJob) noJob = `${NO_JOB}=1 asked for no job object`;
+      else {
+        const r = await job.ask(`assign ${child.pid}`, ASSIGN_WAIT_MS);
+        jobOk = r?.[0] === "OK";
+        if (!jobOk) {
+          const why = job.why();
+          noJob = r ? `the job helper said: ${r.join(" ")}`
+            : job.isDead() ? `the PowerShell helper did not run${why ? `: ${why}` : ""}`
+            : `the job helper gave no answer in ${ASSIGN_WAIT_MS / 1000} s`;
+        }
+      }
+      if (!jobOk && ci) { failNoJob(); return; }
+      try { writeFileSync(goFile, "go"); } catch {}
+    })();
+  }
 }
