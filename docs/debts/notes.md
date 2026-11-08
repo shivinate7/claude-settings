@@ -1507,3 +1507,5 @@
 - janitor-hook-total-starts: `SessionEndHookStartsOneSweepProcess` asserts one sweep, no `ps` and two git starts, but no total, so a fourth start by the hook would pass. Decision: the-janitor-is-one-machine-wide-sweep.
 - notes-count-percent-forms: percent and noun-between forms ("N% of M", "N files of M") are not read (lint/check_cost_pins.py `NOTE_CLAIM`). Decision: cost-line-pinned.
 - notes-count-fence-skips: an unclosed fence line in a note skips every later note (lint/check_cost_pins.py `note_paragraphs`). Decision: cost-line-pinned.
+- notes-count-lone-tick-pairs: a lone backtick and a later code span in one note sentence pair up, so a count between them reads as code and passes (lint/check_cost_pins.py `read_paragraph`). Decision: cost-line-pinned.
+- notes-count-one-of: a note reads "one of" and a two-digit total as a claim, while the Cost rule skips "one of"; the docstring and the record do not say notes differ (lint/check_cost_pins.py `NOTE_CLAIM`). Decision: cost-line-pinned.
