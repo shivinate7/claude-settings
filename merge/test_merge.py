@@ -13080,9 +13080,34 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
+# The lint marker: one empty file per head that passed `merge --lane-lint` (a PASS, or an unknown with a reason), named by the full
+# head sha, under the config folder. The review record reads it: no marker for --head, no record.
+LANE_LINT_MARKER = os.path.join("state", "lane-lint")
+
+
+def lane_lint_marker(cfg, head):
+    """The marker path of `head` under the config folder `cfg`."""
+    return os.path.join(cfg, LANE_LINT_MARKER, head)
+
+
+def write_lane_lint_marker(cfg, head):
+    """Write the marker of `head` under `cfg`, as a passing lint does."""
+    os.makedirs(os.path.dirname(lane_lint_marker(cfg, head)), exist_ok=True)
+    open(lane_lint_marker(cfg, head), "w", encoding="utf-8").close()
+
+
 class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
     its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
+
+    def setUp(self):
+        super().setUp()
+        self.review_cfg = os.path.join(self.t, "config")  # this case's CLAUDE_CONFIG_DIR: its lint markers, and no real one
+        patch = unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.review_cfg})
+        patch.start()
+        self.addCleanup(patch.stop)
+        for head in (self.head(), REVIEW_HEAD, "f" * 40):  # each head a review case reads has passed its lint
+            write_lane_lint_marker(self.review_cfg, head)
 
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
@@ -13208,6 +13233,33 @@ class ReviewRecordWrite(ReviewEnv):
             with self.subTest(round=rnd):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
+
+
+class LaneLintMarker(ReviewEnv):
+    """`merge <pr> --review-record` prints a record only for a head whose lint marker exists under CLAUDE_CONFIG_DIR. The marker is the one
+    `merge --lane-lint` writes when the head passes. No marker for --head, and a marker for another head alone, both refuse and print no record."""
+
+    def assert_refused(self, *argv):
+        rc, out, err = self.run_args(*argv)
+        with self.subTest("the record is refused"):
+            self.assertNotEqual(rc, 0, out + err)
+        with self.subTest("no record is printed"):
+            self.assertNotIn(REVIEW_MARKER, out, "a record printed with no lint marker for its head")
+
+    def test_no_marker_for_the_head_refuses_and_prints_no_record(self):
+        os.remove(lane_lint_marker(self.review_cfg, self.head()))
+        self.assert_refused("7", "--review-record", *self.flags())
+
+    def test_a_marker_for_another_head_alone_refuses_and_prints_no_record(self):
+        os.remove(lane_lint_marker(self.review_cfg, self.head()))
+        write_lane_lint_marker(self.review_cfg, "e" * 40)
+        self.assert_refused("7", "--review-record", *self.flags())
+
+    def test_the_marker_for_the_head_lets_the_record_print(self):  # the control: green on the old code, and on the new one
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(REVIEW_MARKER, out)
+
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
