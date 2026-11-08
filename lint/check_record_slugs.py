@@ -15,7 +15,7 @@ the one home of this grammar (FIX_BODY, NONE_REASONS, parse_fix); lint/report_gu
     Fix: none -- <reason>   or "none —"; the reason is one of NONE_REASONS
     Fix: already fixed on main <sha>   a hex sha of 7 to 40 digits (with or without the "none --" lead) that is a
                             commit and an ancestor of origin/main (`git merge-base --is-ancestor`)
-Four more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 13:59 CST):
+Four more rules read the notes file (decision notes-name-their-fix):
   Ratchet: when the branch touches the notes file, the bullets with no valid Fix at HEAD may not outnumber those at
     the merge base of origin/main and HEAD. Both counts are read live; the total prints. A HEAD with none to count
     reads no base.
