@@ -124,6 +124,7 @@ RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-ru
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
+STAMP_CFG = ".github/stamp.json"  # where a repo keeps its stamp config, relative to its root: the --config default, and where tool_commit reads the record paths of a claim
 STAMP_CFG_CITE = "(decision one-shared-record-stamp, each repo keeps its config in its own tree, and the tool never guesses a config field)"
 HTTP_DENIED = re.compile(r"\bHTTP 40[13]\b")  # GitHub answered a read with a refusal: gh prints "(HTTP 403)" or "HTTP 403:". A proven refusal; any other failed read is unknown
 REFUSED_CITE = "(decision standing-merge-grant, only a proven refusal reverts the claim: a refusal reply with the pull request still OPEN)"
@@ -1497,15 +1498,40 @@ def head_claim(wt):
 CLAIM_SUBJECT, REBUILD_SUBJECT = "Claim record numbers", "Rebuild the records page"  # the subjects of the tool's own commits (commit_claim)
 REBUILD_DROPS = f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by the generator"  # the rebuild's trailer; the silent-undo check reads the page as generated
 
-def tool_commit(body):
-    """True when commit message `body` is one commit_claim writes: a claim (its subject and a Record-claim trailer) or a records rebuild (its subject
-    and its Drops-lines trailer). Such a commit is the merge tool's own, and no lane work (owner pick a, page item 382)."""
+def claim_paths(wt, base_ref, cfgrel=STAMP_CFG):
+    """-> (folders, files): where a claim writes record files, from the stamp config on `base_ref` (the way stamp.mjs's recordPaths reads it: each kind's folder, file and manifest).
+    No config, or no kinds, writes none. A config that cannot be read or parsed raises, so the caller refuses as unknown."""
+    c, listed = git(wt, "ls-tree", "--name-only", base_ref, "--", cfgrel)
+    if c:
+        raise ValueError(f"git ls-tree {base_ref} failed: " + (listed.splitlines() or ["?"])[-1])
+    if not listed:
+        return (), ()
+    c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
+    if c:
+        raise ValueError(f"git show {base_ref}:{cfgrel} failed: " + (text.splitlines() or ["?"])[-1])
+    kinds = json.loads(text).get("kinds") or []
+    return (tuple(k["folder"].strip("/") + "/" for k in kinds if k.get("folder")),
+            tuple(p for k in kinds for p in (k.get("file"), k.get("manifest")) if p))
+
+def tool_commit(wt, sha, body, base_ref, cfgrel=STAMP_CFG):
+    """True when commit `sha` of checkout `wt`, whose message is `body`, is one commit_claim writes: its message matches and every path it changes is a path the tool writes.
+    A claim (its subject and a Record-claim trailer) writes the records page and the record paths of the stamp config on `base_ref` (claim_paths). A records rebuild (its subject and its
+    Drops-lines trailer) writes the records page alone. Such a commit is the merge tool's own, and no lane work (owner pick a, 21:26 CST 2026-11-07, page item 382). A commit that matches by message
+    and also changes another path, a product file, is lane work. A read that fails raises, so the caller refuses as unknown."""
     lines = body.strip().splitlines()
     if not lines:
         return False
+    folders, files = (), ()
     if lines[0] == CLAIM_SUBJECT:
-        return any(l.startswith("Record-claim: ") for l in lines[1:])
-    return lines[0] == REBUILD_SUBJECT and REBUILD_DROPS in lines[1:]
+        if not any(l.startswith("Record-claim: ") for l in lines[1:]):
+            return False
+        folders, files = claim_paths(wt, base_ref, cfgrel)
+    elif not (lines[0] == REBUILD_SUBJECT and REBUILD_DROPS in lines[1:]):
+        return False
+    c, out = git(wt, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", sha)
+    if c:
+        raise ValueError(f"git diff-tree failed on {sha[:9]}: " + (out.splitlines() or ["?"])[-1])
+    return all(p == RECORDS_PAGE or p in files or p.startswith(folders) for p in out.split("\0") if p)
 
 def claim_under_head(wt, base_ref):
     """The sha of a claim this branch holds below its head (a merge commit sits on it), or None. A claim a later revert undid is not held."""
@@ -2118,7 +2144,7 @@ def cut_local(root, branch, merged):
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
-def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None, chain_out=None):
+def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None, chain_out=None, cfgrel=STAMP_CFG):
     """-> (tips, dropped). tips: the review tips, parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
     (a merge of the base into the branch has a base commit as its second parent) and any on `default_ref`, the default branch (a stacked pull request whose base is a lane branch
     that merged the default branch: the default branch's new commit is on neither the base nor in any lane, and is no review tip). dropped: the tips whose every such
@@ -2128,7 +2154,7 @@ def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None, chain_out=None
     on-default parent of a merge (the lane-tip read already makes one per tip); a default_ref the clone does not hold cuts nothing. A read that fails raises. `own_out`, a list, receives the commits the pull request adds itself: the non-merge commits
     of base_ref..sha that no review tip holds and the default branch lacks, less the merge tool's own commits (tool_commit), which are no lane work. A pull request with
     tips and none of these is an integration pull request. `chain_out`, a list, receives `sha` and each first parent under it while the commit above is the tool's own,
-    within base_ref..sha: its last entry is the head the lane's own work ends at."""
+    within base_ref..sha: its last entry is the head the lane's own work ends at. `cfgrel`: the stamp config path, which tool_commit reads on base_ref for the record paths of a claim."""
     c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
     if c:
         raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
@@ -2139,7 +2165,7 @@ def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None, chain_out=None
             continue
         h, parents, body = parts
         parents_of[h] = parents.split()
-        if len(parents_of[h]) < 2 and tool_commit(body):
+        if len(parents_of[h]) < 2 and tool_commit(wt, h, body, base_ref, cfgrel):
             tool.add(h)
         for r in re.findall(r"This reverts commit ([0-9a-f]{40})", body):
             undone[r] = h
@@ -2180,22 +2206,22 @@ def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None, chain_out=None
             chain_out.append(parents_of[chain_out[-1]][0])
     return tips, {t for t in lanes if all(reverted(h) for h in took[t])}
 
-def lane_tips(wt, base_ref, sha):
+def lane_tips(wt, base_ref, sha, cfgrel=STAMP_CFG):
     """read_lanes, read before the merge. A read that fails prints one line and returns no lanes: the merge goes on and nothing is deleted."""
     try:
-        return read_lanes(wt, base_ref, sha)
+        return read_lanes(wt, base_ref, sha, cfgrel=cfgrel)
     except Exception as e:
         say(f"merge: no lane branch is deleted: the batch's merge commits could not be read ({type(e).__name__}: {e}).")
         return [], set()
 
-def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out=None, default_ref=None, chain_out=None):
+def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out=None, default_ref=None, chain_out=None, cfgrel=STAMP_CFG):
     """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
     the revert silently deletes its files (batch #663: the platform-ask lane lost 11 of 13 files). Refuse it before anything
     is claimed. A read that fails refuses too, unless the run has the reason flag --undo-check-unknown-ok "<reason>", which Claude may type with a reason.
     A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, and `own_out` the pull request's own commits and `chain_out` its head's chain (read_lanes), so the round-3 check reads no second time. `default_ref` (origin/<default branch>) is passed to read_lanes: a commit of the default
     branch is no review tip and no own commit, but the dropped-lane read stays uncut, so a default-branch revert of a lane's merge is seen. The cut adds one local git read (rev-list)."""
     try:
-        tips, dropped = read_lanes(wt, base_ref, sha, own_out, default_ref, chain_out)
+        tips, dropped = read_lanes(wt, base_ref, sha, own_out, default_ref, chain_out, cfgrel)
         if tips_out is not None:
             tips_out.extend(tips)
     except Exception as e:
@@ -2210,20 +2236,36 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out
                       "Instead, rebuild the integration branch from main without the lane, then run again. " + DROP_CITE)
 
 def owed_round(records, sha):
-    """-> (kind, clause, num) when lane tip `sha` owes a done review record, else None (the newest record for the head is done). `records`: {pull request number: [record bodies,
-    oldest first]}. The newest record that names `sha` decides, across every pull request (a RecordBody knows its place in the comment list; a plain body is older than any read
-    one). `num` is the pull request that record was posted on. `clause` finishes the sentence "#N (head ...)". `kind` picks the remedy: "held" (net value negative: the owner decides,
+    """-> (kind, clause, num) when lane tip `sha` owes a done review record, else None. `records`: {pull request number: [record bodies,
+    oldest first]}. A round is owed per pull request: the newest record on each pull request that names `sha` is read on its own, and one that owes a round (kinds "held", "fix", "net" and
+    "round" below) refuses, whatever a record on another pull request says. Only when no pull request owes a round does the newest record
+    that names `sha`, across every pull request (a RecordBody knows its place in the comment list; a plain body is older than any read one), decide: done passes, and a Guard or check no that is not done is "unreviewed".
+    `num` is the pull request the deciding record was posted on. `clause` finishes the sentence "#N (head ...)". `kind` picks the remedy: "held" (net value negative: the owner decides,
     no more rounds), "fix" (the fix check failed: the fix needs a new lane), "net" (the third round is done and its net-value test is owed), "round" (the third round is owed, or the record is bad), "unreviewed" (the newest record for the head
     has Guard or check no and is not done), "unnamed" (no record names `sha`: num is None). Decision pr-review-record, Q1: a lane tip with no done record for its head does not merge,
     whatever its Guard or check value. A record that names `sha` and fails to parse, or whose PR line is not the pull request it was posted on, is bad and refuses: its Guard or
     check value is unknown, never read as no."""
-    newest, key = None, None
+    newest, per_pr = None, {}
     for pos, (posted, body) in enumerate((x, b) for x in sorted(records) for b in records[x]):
-        if re.search(rf"^Head: {sha}$", body.split("\n---\n")[0], re.M) and (key is None or (getattr(body, "seq", -1), pos) >= key):
-            newest, key = (posted, body), (getattr(body, "seq", -1), pos)
+        if not re.search(rf"^Head: {sha}$", body.split("\n---\n")[0], re.M):
+            continue
+        key = (getattr(body, "seq", -1), pos)
+        if newest is None or key >= newest[0]:
+            newest = (key, posted, body)
+        if posted not in per_pr or key >= per_pr[posted][0]:
+            per_pr[posted] = (key, body)
     if not newest:
         return "unnamed", "has no done review record for its head (no record names it)", None
-    num, body = newest
+    for posted in sorted(per_pr):
+        r = judge_record(posted, per_pr[posted][1], sha)
+        if r and r[0] != "unreviewed":
+            return r[0], r[1], posted
+    _, num, body = newest
+    r = judge_record(num, body, sha)
+    return (r[0], r[1], num) if r else None
+
+def judge_record(num, body, sha):
+    """-> (kind, clause) for one record `body` posted on pull request `num`, naming lane tip `sha`: None when it is done, else the kind and clause owed_round describes."""
     parsed = parse_review(body)
     rec = parsed if parsed and parsed["n"] == num else None
     state, why = review_state(rec, sha)
@@ -2231,18 +2273,18 @@ def owed_round(records, sha):
         return None
     if not rec:  # its Guard or check value is unknown, so the clause does not say the change touches a guard or check
         if parsed:
-            return "round", f"has a record for another PR (the newest record says PR #{parsed['n']}, and it was posted on #{num})", num
-        return "round", "has a newest record that does not parse", num
+            return "round", f"has a record for another PR (the newest record says PR #{parsed['n']}, and it was posted on #{num})"
+        return "round", "has a newest record that does not parse"
     if state == "held":
-        return "held", f"changes a guard or check and is held for the owner ({why})", num
-    fix = rec["fix"] if rec else None
+        return "held", f"changes a guard or check and is held for the owner ({why})"
+    fix = rec["fix"]
     if fix and fix[3] != "PASS":  # review_state reads a failed fix check open at any round, and the third round again would not cover the fix (decision hold-unsafe-after-round-3)
-        return "fix", f"changes a guard or check and its fix check failed ({why})", num
-    if rec and rec["guard"] == "no":
-        return "unreviewed", f"has no done review record for its head ({why})", num
-    if rec and state == "open" and max((i for i, *_ in rec["rounds"]), default=0) >= REVIEW_LAST_ROUND:
-        return "net", f"changes a guard or check and has round {REVIEW_LAST_ROUND} done, and the net-value test is owed ({why})", num
-    return "round", f"changes a guard or check and round {REVIEW_LAST_ROUND} is owed ({why})", num
+        return "fix", f"changes a guard or check and its fix check failed ({why})"
+    if rec["guard"] == "no":
+        return "unreviewed", f"has no done review record for its head ({why})"
+    if state == "open" and max((i for i, *_ in rec["rounds"]), default=0) >= REVIEW_LAST_ROUND:
+        return "net", f"changes a guard or check and has round {REVIEW_LAST_ROUND} done, and the net-value test is owed ({why})"
+    return "round", f"changes a guard or check and round {REVIEW_LAST_ROUND} is owed ({why})"
 
 def head_in_history(root, head, tip):
     """True when commit `head` is `tip` or an ancestor of it, False when it is a commit of the clone that is not, and False when the clone does not hold `head`
@@ -3073,7 +3115,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
             debt_check(wt, f"origin/{base}", host, info)
             tips, own, chain = [], [], []
-            lifted = refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}", chain)
+            lifted = refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}", chain, cfgrel)
             refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted), own=own, chain=chain)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
@@ -3222,7 +3264,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         tips, own, chain = [], [], []
-        lifted = refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}", chain)
+        lifted = refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}", chain, cfgrel)
         record_lift(lifts, UNDO_FLAG, lifted)
         record_lift(lifts, UNDO_FLAG, refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted), own=own, chain=chain))  # a lifted lane read leaves no tips: the own head is still checked
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
@@ -3387,7 +3429,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             except (subprocess.TimeoutExpired, OSError):
                 c, names = 1, ""
             rule_files = [x for x in names.split("\0") if x.lower() in RULE_FILES or x.lower().startswith(RULE_PREFIX)] if c == 0 else None
-            lanes, dropped = lane_tips(wt, base_ref, sha) if m.get("deleteBranch") else ([], set())  # read before the merge: after it the lane tips are on the base
+            lanes, dropped = lane_tips(wt, base_ref, sha, cfgrel) if m.get("deleteBranch") else ([], set())  # read before the merge: after it the lane tips are on the base
             try:  # again right before the PUT: a batch that went ready during the waits is refused, and its claim reverted as for a refused PUT
                 busy = batch_refusal(host, n, base, sha)
             except NetStop:  # a network error is not a refusal: the claim stays
@@ -3687,7 +3729,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
-    p.add_argument("--config", default=".github/stamp.json")
+    p.add_argument("--config", default=STAMP_CFG)
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
