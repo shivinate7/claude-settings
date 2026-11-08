@@ -1,0 +1,93 @@
+{
+  "added": "2026-11-08T06:15:00Z",
+  "checked_with": "session_013NEJL3KvrWSBxStMe8hDMw (the q_max lane that owns the fix, relayed by the coordinator 00:07 CST Nov 8); q_max main decisions grepped for a Past Rates pill exception: none",
+  "context": "Goal: Past Rates shows every bar control at 1440 with the sidebar shut, and the tabs stay where they are, so browser check EPI2B-3 goes green on q_max main.\nProblem (rule): the only fit with room to spare pads the Past Rates pills 8px, not 12px. That departs from your ruling that every pill pads the same, so it needs your word.\nBased on (measured): the bar is 77.4px short at 1440 on main's build, and 83.6 to 115.4px short in CI. The lane sizes to CI's worst case. More Filters as an icon saves 81.5px, compact pills save 48px, and a tighter tab gap saves 48px.\nBased on (ruling): decisions/control-primitives-2b (D-684, the control primitives draw one select pill; owner): every pill pads --f2-gap-bar. Asked again because each fit that keeps it either folds a control or merges the tabs.\nBased on (ruling): decisions/worded-controls-become-icons (D-729, worded controls become icon buttons; owner): supports More Filters as an icon.\nDeparts from: D-684, every pill pads --f2-gap-bar \u2014 the Past Rates pills pad 8px.\nEach card shows the bar at 1440x900, sidebar shut, at CI's worst row width, cut into four slices left to right; the Wide picture shows it whole. Triage's copies of the mockup open at the option and CI's row, and add the sliced view. The mockup's own readout differs from the lane's figures by about 2.6px (11.5px spare for a and b, 14px short for c).\nMeanwhile: the lane waits on this answer. #1117 (the D-300 locator fix) is with runner 9.",
+  "designs": [
+    {
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#pick",
+      "label": "Icon More Filters and compact pills: the bar in four slices, CI worst case",
+      "option": "a",
+      "slug": "qmax-pastrates-bar-icon-compact"
+    },
+    {
+      "drawn": 1500,
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#card",
+      "label": "Icon More Filters and compact pills: the whole bar at 1440, CI worst case",
+      "option": "a",
+      "slug": "qmax-pastrates-bar-icon-compact-wide",
+      "width": "Wide"
+    },
+    {
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#pick",
+      "label": "Icon More Filters and tight tabs: the bar in four slices, CI worst case",
+      "option": "b",
+      "slug": "qmax-pastrates-bar-icon-tight"
+    },
+    {
+      "drawn": 1500,
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#card",
+      "label": "Icon More Filters and tight tabs: the whole bar at 1440, CI worst case",
+      "option": "b",
+      "slug": "qmax-pastrates-bar-icon-tight-wide",
+      "width": "Wide"
+    },
+    {
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#pick",
+      "label": "Tight tabs and compact pills: the bar in four slices, CI worst case",
+      "option": "c",
+      "slug": "qmax-pastrates-bar-tight-compact"
+    },
+    {
+      "drawn": 1500,
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#card",
+      "label": "Tight tabs and compact pills: the whole bar at 1440, CI worst case",
+      "option": "c",
+      "slug": "qmax-pastrates-bar-tight-compact-wide",
+      "width": "Wide"
+    }
+  ],
+  "home": "qmax-browser-main-red",
+  "id": "qmax-pastrates-bar-1440",
+  "kind": "decision",
+  "look": true,
+  "n": 403,
+  "options": [
+    {
+      "design": "qmax-pastrates-bar-icon-compact",
+      "gain": "Nothing folds at 1440, and the tab spacing stays.",
+      "how": "More Filters becomes an icon button, and the Past Rates pills pad 8px. Saves 129.5px, with 14.1px spare at CI's worst.",
+      "key": "a",
+      "label": "More Filters as an icon, plus compact pills",
+      "lose": "The Past Rates pills pad differently from the pills on other screens, and More Filters loses its word."
+    },
+    {
+      "design": "qmax-pastrates-bar-icon-tight",
+      "gain": "The pills keep the same padding as every other screen.",
+      "how": "More Filters becomes an icon button, and the gap between the five tabs shrinks by 12px. Saves 129.5px.",
+      "key": "b",
+      "label": "More Filters as an icon, plus tighter tabs",
+      "lose": "The five tabs read as one run, and their press areas overlap by 16px."
+    },
+    {
+      "design": "qmax-pastrates-bar-tight-compact",
+      "gain": "More Filters keeps its word.",
+      "how": "The tab gap shrinks and the pills pad 8px. More Filters keeps its word. Saves 104px, 11.4px short at CI's worst.",
+      "key": "c",
+      "label": "Tighter tabs plus compact pills, no icon",
+      "lose": "Price Date still folds in CI, so browser check EPI2B-3 stays red."
+    }
+  ],
+  "owner": "lane qmax-browser-main-red (session_013NEJL3KvrWSBxStMe8hDMw), q_max branch claude/qmax-pastrates-1440-design",
+  "pick": "a",
+  "ref": "q_max mockup docs/design/mockups/past-rates-bar-1440.html and -notes.md on branch claude/qmax-pastrates-1440-design at 59df19df (designer opus); CI run 42449067365",
+  "repo": "q_max",
+  "short": "Past Rates bar at 1440",
+  "status": "open",
+  "title": "How should the Past Rates bar fit at 1440 with the sidebar shut?"
+}
