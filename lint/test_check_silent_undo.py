@@ -2807,8 +2807,8 @@ class RevivedNote(unittest.TestCase):
         self.assertIn("- <slug>", msg, "the merge tool's refusal for a revival lacks the slug form: %r" % msg)
 
     def start_side_readd(self, readd_date):
-        """The branch deletes retired-note at D, dated 2026-11-02. A side line off D re-adds it at R, dated readd_date, and keeps
-        main's MAIN line, so the head matches main. A --no-ff merge brings R in as the head H, dated 2026-11-05. -> (H, R)."""
+        """The branch deletes retired-note at D, the delete. A side line off D re-adds it at R, a re-add dated readd_date, and keeps
+        main's MAIN line, so the head matches main. A --no-ff merge brings R in as the head H, the merge, dated last. -> (H, R)."""
         self.start(union=True, main=(self.UNTOUCHED, self.RETIRED, self.MAIN), edit_date="2026-11-02T10:00:00")
         self.r.sh("checkout", "-q", "-b", "side", self.retire)
         readd = self.commit_notes("the side line re-adds the note on purpose", [self.UNTOUCHED, self.RETIRED, self.MAIN], date=readd_date)
@@ -2834,8 +2834,8 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(self.r.verdict(), [], "a note the branch deleted and re-added on purpose was refused when the re-add is dated after the delete")
 
     def start_parallel(self, side_first=False):
-        """Two lines off main, which holds retired-note. The branch deletes it on 2026-11-03. The side line deletes it on 2026-10-31
-        and re-adds it on 2026-11-01 beside its own SIDE line, so the re-add is older than the delete and neither line holds the
+        """Two lines off main, which holds retired-note. The branch deletes it, the later delete. The side line deletes it first,
+        then re-adds it beside its own SIDE line, so the re-add is older than the later delete and neither line holds the
         other. A --no-ff merge joins them: the branch is the first parent, or the side line when side_first. The union line keeps
         the side's copy where the two edits meet at the file's end. -> the merge's head."""
         self.open_base(union=True, base=(self.UNTOUCHED, self.RETIRED))
