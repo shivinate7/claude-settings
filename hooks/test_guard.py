@@ -16277,6 +16277,76 @@ add("port question: a copy install with lint/ beside it denies a batch with toda
             {"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": pq_item()}])
 add("port question: a copy install with lint/ beside it allows a plain call (control)", "allow",
     cwd=NOGIT, guard=QF_COPY_GUARD, command="ls")
+# A module that a copy install loads from hooks/guard.d/<id>/ finds the install's lint/ from there (decision
+# install-hooks-whole, item 13). Each module below looks for lint/ beside its own folder, which holds none in the
+# copy. The probe is a child python run with sys.path = [guard.d/<id>, hooks]. Scope first: the module must load
+# from the copy. The control also puts the copy's lint/ on the path, so a red comes only from the module's lookup.
+COPY_LINT_PROBE = r'''
+import json, sys, types
+set_dir, module, trigger, hooks = sys.argv[1:5]
+sys.path[:0] = [set_dir, hooks] + sys.argv[5:]
+sys.modules["guard"] = types.ModuleType("guard")  # decision_watch imports guard; the case is the lookup, not the guard
+error = None
+try:
+    __import__(module)
+    if trigger:
+        exec(trigger, {"mod": sys.modules[module]})
+except Exception as exc:
+    error = "%s: %s" % (type(exc).__name__, exc)
+where = lambda name: getattr(sys.modules.get(name), "__file__", None)
+print(json.dumps({"module": where(module), "helper": where("_transcript"), "error": error}))
+'''
+
+
+def copy_lint_case(module, trigger, control=False):
+    """A (label, check) pair: `module` loaded from the copy's guard.d folder finds the install's lint/ helper
+    (_transcript) once `trigger` runs. The control also puts the copy's lint/ on the path, and it reads the helper."""
+    def check():
+        materialize(QF_COPY)
+        set_dir = os.path.join(QF_COPY, "hooks", "guard.d", STREAM_COPY_ID)
+        lint = os.path.join(QF_COPY, "lint")
+        argv = [sys.executable, "-I", "-B", "-c", COPY_LINT_PROBE, set_dir, module, trigger,
+                os.path.join(QF_COPY, "hooks")] + ([lint] if control else [])
+        env = {k: v for k, v in os.environ.items() if k not in ("GUARD_UNDER_TEST", "PYTHONPATH")}
+        run = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=120)
+        lines = run.stdout.strip().splitlines()
+        if run.returncode != 0 or not lines:
+            return False, "the probe did not run for %s: %s" % (module, run.stderr.strip()[-160:])
+        got = json.loads(lines[-1])
+        if got["module"] is not None and not os.path.realpath(got["module"]).startswith(
+                os.path.realpath(set_dir) + os.sep):
+            return False, "%s did not load from the guard.d copy: %r" % (module, got["module"])
+        if got["error"]:
+            return False, "%s, loaded from the guard.d copy, does not find lint/: %s" % (module, got["error"])
+        if got["module"] is None:
+            return False, "%s did not load at all, and the probe named no error" % module
+        if not os.path.realpath(got["helper"] or "").startswith(os.path.realpath(lint) + os.sep):
+            return False, "%s found its lint/ helper at %r, not the install's lint/" % (module, got["helper"])
+        return True, "%s, loaded from the guard.d copy, finds the install's lint/" % module
+    return check
+
+
+for _module, _trigger in (("override", "mod._text_of({})"), ("feedback_guard", ""),
+                          ("ruling_home", "mod._ensure_transcript_helpers()"), ("decision_watch", "")):
+    LOG_CHECKS_EXTRA.append(("port question: %s, loaded from a guard.d copy, finds the install's lint/" % _module,
+                             copy_lint_case(_module, _trigger)))
+    LOG_CHECKS_EXTRA.append(("port question: %s, loaded from a guard.d copy, finds lint/ when it is on the path (control)"
+                             % _module, copy_lint_case(_module, _trigger, control=True)))
+# A copy whose question_form.py will not import refuses a port item as guard-crash (decision install-hooks-whole):
+# the guard reaches question_form only inside each waiting-page check, which then raises, so the copy must refuse.
+BROKEN_MODULE = 'raise ImportError("this copy of the module was replaced by the case")\n'
+QF_BROKEN = os.path.join(ROOT, "qfbroken")
+
+
+def broken_qf_build():
+    guard_d_copy_build(QF_BROKEN, "qfbroken", with_lint=True)
+    write(os.path.join(QF_BROKEN, "hooks", "guard.d", STREAM_COPY_ID, "question_form.py"), BROKEN_MODULE)
+
+
+lazy_fixture([QF_BROKEN], broken_qf_build)
+add("port question: a copy whose question_form.py will not import refuses a port item as guard-crash",
+    "deny", None, carries=("guard-crash",), tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set",
+    collection="items", doc_id="suspense-cards", data=pq_item(), guard=os.path.join(QF_BROKEN, "hooks", "guard.py"))
 add("port question: an unreadable file_path fails open", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="suspense-cards",
     file_path=os.path.join(ROOT, "pq", "missing.json"))
@@ -16507,6 +16577,22 @@ wp_publish("a read of the waiting page with a behind file is allowed", "allow", 
 wp_publish("a behind file uploaded as an asset is allowed", "allow", WP_BEHIND, asset=True)
 wp_publish("a file that cannot be read fails open", "allow", os.path.join(WP_DIR, "missing.html"))
 wp_publish("a behind page is allowed when main cannot be read", "allow", WP_BEHIND, guard=WP_GUARD_NOMAIN)
+# The same checkout, with question_form.py that will not import: the page check must refuse as guard-crash, not
+# allow (decision install-hooks-whole). The control above, with the intact copy, refuses the behind page.
+WP_BROKEN = os.path.join(ROOT, "wp-broken")
+
+
+def build_wp_broken():
+    materialize(WP_GUARD)
+    shutil.rmtree(WP_BROKEN, ignore_errors=True)
+    shutil.copytree(WP_CHECK, WP_BROKEN, symlinks=True)
+    write(os.path.join(WP_BROKEN, "hooks", "question_form.py"), BROKEN_MODULE)
+
+
+lazy_fixture([WP_BROKEN], build_wp_broken)
+add("page-stale: a behind page is refused as guard-crash when question_form.py will not import", "deny", None,
+    carries=("guard-crash",), tool="Artifact", cwd=PQ_REPO, guard=os.path.join(WP_BROKEN, "hooks", "guard.py"),
+    file_path=WP_BEHIND, url=PQ_URL)
 
 
 def wp_publish_run(file_path, cwd=WP_CHECK, url=PQ_URL):
@@ -26391,6 +26477,40 @@ for _label, _check in (
      hu_contract_check),
     ("handoff-unread: importing reread_check does not end the process when precompact_handoff cannot import",
      hu_import_check),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+def hu_stub_check(module, text):
+    """install-hooks-whole (decision install-hooks-whole, item 10): with `module` replaced by `text`, a flagged
+    session's call is refused as guard-crash, never allowed. The intact copy is the control: it refuses the same
+    call for the unread handoff, so the fixture is shown to bite. `text` imports, so the guard's load check passes
+    and the fault shows only when the call is judged."""
+    cfg = os.path.join(ROOT, "hu-copy")
+    hu_files(cfg, flag=True, handoff=True)
+    control = _hu_copy_run(_guard_copy("hu-stub-intact", None), cfg)
+    why = ov_want(*_decision(control), "deny", HU_RULE)
+    if why:
+        return False, "the intact copy, the control: %s" % why
+    stub = _guard_copy("hu-stub-" + module[:-3], module)
+    write(os.path.join(stub, module), text)
+    run = _hu_copy_run(stub, cfg)
+    decision, reason = _decision(run)
+    if decision != "deny" or GUARD_CRASH not in reason:
+        return False, "with %s replaced, a flagged call is %r as %r (exit %d), want deny as guard-crash" % (
+            module, decision, reason[:70], run.returncode)
+    return True, "%s replaced: a flagged call is refused as guard-crash" % module
+
+
+# A precompact_handoff that imports and names nothing: the guard's load check reads only reread_check.ph, so it
+# passes, and unread_handoff then raises on the missing names. A reread_check that imports but has no unread_handoff
+# raises in the judge (guard.py, the handoff-unread call). Each must refuse, never allow.
+for _label, _check in (
+    ("handoff-unread: install-hooks-whole: a precompact_handoff that imports but names nothing refuses a flagged call as guard-crash",
+     lambda: hu_stub_check("precompact_handoff.py",
+                           '"""precompact_handoff, replaced by the case: it imports and names nothing."""\n')),
+    ("handoff-unread: install-hooks-whole: a reread_check with no unread_handoff refuses a flagged call as guard-crash",
+     lambda: hu_stub_check("reread_check.py", "import precompact_handoff as ph\n")),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
 

@@ -4145,21 +4145,25 @@ guard_set_modules() {  # $1 "try" prints each flat module a guard file imports i
 import ast, glob, os, sys
 hooks = os.path.join(sys.argv[1], "hooks")
 mode = sys.argv[2]
-if mode not in ("outside", "try", "closure"):
-    sys.exit("guard_set_modules: mode %r, want outside, try or closure" % mode)
+if mode not in ("outside", "try", "closure", "lintclosure"):
+    sys.exit("guard_set_modules: mode %r, want outside, try, closure or lintclosure" % mode)
 flat = set(os.listdir(hooks))
 found = set()
-if mode == "closure":
+if mode in ("closure", "lintclosure"):
     # A flat module that a reached module imports lazily, in a def body, an except or an else, loads from the
     # set's folder too, so it is walked as well. Only a flat hooks module counts: a lint/ module is no set member.
-    todo = ["guard.py"] + sorted(f for f in flat if f.startswith("guard_") and f.endswith(".py"))
+    # lintclosure also walks each lint/ module a reached module imports, so a flat module that lint/ imports is
+    # reached too. closure leaves lint/ unwalked, as guardset7 reads it.
+    lint_dir = os.path.join(sys.argv[1], "lint")
+    lint = set(os.listdir(lint_dir)) if mode == "lintclosure" else set()
+    todo = [("hooks", "guard.py")] + [("hooks", f) for f in sorted(flat) if f.startswith("guard_") and f.endswith(".py")]
     seen = set()
     while todo:
-        name = todo.pop()
-        if name in seen:
+        where, name = todo.pop()
+        if (where, name) in seen:
             continue
-        seen.add(name)
-        with open(os.path.join(hooks, name), encoding="utf-8") as fh:
+        seen.add((where, name))
+        with open(os.path.join(hooks if where == "hooks" else lint_dir, name), encoding="utf-8") as fh:
             tree = ast.parse(fh.read(), name)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -4171,9 +4175,11 @@ if mode == "closure":
             for item in dotted:
                 mod = item.split(".")[0] + ".py"
                 if mod in flat:
-                    todo.append(mod)
+                    todo.append(("hooks", mod))
                     if mod != "guard.py" and not mod.startswith("guard_"):
                         found.add(mod)
+                elif mod in lint:
+                    todo.append(("lint", mod))
     print("\n".join(sorted(found)))
     sys.exit(0)
 def visit(stmts, out):
@@ -4283,6 +4289,20 @@ guardset7() {
   mods=$(guard_set_modules closure); mrc=$?
   if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
     bad "$name" "the guard's import closure reads to no module list (exit $mrc)"
+    return
+  fi
+  guard_set_lists_hold "$name" $mods
+}
+
+# guardset8: the closure through lint/. guardset7 stops at lint/, so a flat module that a lint/ module imports is
+# in no list. lint/report_guard.py imports route_match and reply_judge inside functions, and question_form reaches
+# report_guard lazily (question_form._option_keys), so the guard's static graph reaches both. The walk here follows
+# lint/ modules too, and each module it reaches must be in each guard-set list.
+guardset8() {
+  name="guardset8: each flat module that a lint/ module the guard's static graph reaches imports is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  mods=$(guard_set_modules lintclosure); mrc=$?
+  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
+    bad "$name" "the guard's import closure through lint/ reads to no module list (exit $mrc)"
     return
   fi
   guard_set_lists_hold "$name" $mods
@@ -5438,6 +5458,7 @@ run guardset4
 run guardset5
 run guardset6
 run guardset7
+run guardset8
 run win_sh1
 run win_sh2
 run win_sh3

@@ -100,6 +100,11 @@ TARGETS = {
 # label's prose is a statement about which rule breaks, and the required name is the proof that some
 # case actually reads that break, not a different one nearby.
 MUTATIONS = [
+    # THE COPY'S INSTALL FOLDER. guard.py tells question_form its own folder, so a stamped copy in guard.d/<id>/ finds
+    # the install's lint/ and skills/. Without that, the copy reads no layout and allows a waiting-page write it refuses.
+    ("question-form: the copy is not told its install folder, so its waiting-page checks read no lint/",
+     '    question_form.use_hooks_home(_HERE)',
+     '    pass', "guard", "port question: a copy install with lint/ beside it denies a batch with today's item"),
     # THE TWO ROOTS. `--work-tree` names whose FILES a call discards, and `--git-dir` names whose
     # HEAD it moves. Each mutant makes one of them unread, or makes one root answer the other's
     # question.
