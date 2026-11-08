@@ -904,7 +904,8 @@ def case_invoke_model_prompt_bytes_reach_child_exact():
 # --------------------------------------------------------------------------- the no-tools note
 # invoke_model runs `claude -p --tools ""`, and a real call can still answer with tool-call text
 # instead of the JSON (7 of 20 prose judge calls on one PR). The note goes on the claude argv as
-# --append-system-prompt for every call, and the stdin stays the caller's prompt, unchanged.
+# --append-system-prompt for line-verdict calls only; the default shape gets no note, and the stdin
+# stays the caller's prompt, unchanged.
 NO_TOOLS_TEXT = "You have no tools and cannot read files. Never call a tool. Reply with the JSON only."
 
 
@@ -942,10 +943,13 @@ def _check_no_tools_note(label, prompt, argv, stdin, error):
           stdin == prompt.encode("utf-8"), stdin)
 
 
-def case_no_tools_note_rides_the_argv_of_a_default_shape_call():
+def case_no_tools_note_stays_off_a_default_shape_call():
+    # The note rides only the line-verdict shape. On the default shape it shifted two guards toward allow, and that shape had no unread replies.
     prompt = "JUDGE THIS PROMPT"
     argv, stdin, error = _invoke_capture(prompt, dw.VERDICT_SHAPE, json.dumps({"verdict": "ALLOW"}))
-    _check_no_tools_note("default shape", prompt, argv, stdin, error)
+    check("no-tools off (default shape): invoke_model returns no error", error is None, error)
+    check("no-tools off (default shape): argv carries no --append-system-prompt", "--append-system-prompt" not in argv, argv)
+    check("no-tools off (default shape): stdin is the caller's prompt, unchanged", stdin == prompt.encode("utf-8"), stdin)
 
 
 def case_no_tools_note_rides_the_argv_of_a_line_verdicts_call():
@@ -2020,7 +2024,7 @@ def main():
     for case in (
         case_invoke_model_long_prompt_reaches_child_whole,
         case_invoke_model_prompt_bytes_reach_child_exact,
-        case_no_tools_note_rides_the_argv_of_a_default_shape_call,
+        case_no_tools_note_stays_off_a_default_shape_call,
         case_no_tools_note_rides_the_argv_of_a_line_verdicts_call,
         case_invoke_model_return_shape_pinned,
         case_parse_verdict_default_shape,
