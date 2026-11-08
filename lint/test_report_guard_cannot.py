@@ -832,20 +832,20 @@ class CannotClaimTests(unittest.TestCase):
     # words, the api.github.com dot, the missed act words and the semicolon scan. A red line is a claim the check must
     # read. A control is a line its fix must leave as it is, and each control names whether it already passes.
 
-    def test_cc_red_gate_reason_because_ci_is_no_claim(self):
-        # Catches: a claim whose clause carries a gate (because CI) read as a claim with no try. A gate is a true reason,
-        # so the line is no hand-off. The turn holds no try, so only the gate skip can clear it.
+    def test_cc_red_blocker_because_ci_is_no_claim(self):
+        # Catches: a claim whose clause carries a blocker (because CI) read as a claim with no try. A blocker is a true reason,
+        # so the line is no hand-off. The turn holds no try, so only the blocker skip can clear it.
         line = "I can't merge the PR because CI is red."
         out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
         self.assert_passes(out, "a claim whose clause carries a gate (because CI)")
 
-    def test_cc_red_gate_reason_while_the_batch_run_is_no_claim(self):
-        # Catches: a claim whose clause carries a gate (while the batch run) read as a claim with no try.
+    def test_cc_red_blocker_while_the_batch_run_is_no_claim(self):
+        # Catches: a claim whose clause carries a blocker (while the batch run) read as a claim with no try.
         line = "I cannot merge it while the batch run is in progress."
         out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
         self.assert_passes(out, "a claim whose clause carries a gate (while the batch run)")
 
-    def test_cc_red_gate_reason_rule_id_after_the_act_is_no_claim(self):
+    def test_cc_red_blocker_rule_id_after_the_act_is_no_claim(self):
         # Catches: a claim that names its hyphenated rule id in parentheses after the act, read as a claim with no try.
         line = "I can't push to main (git-main-only-by-pr)."
         out = self.stop([trg.human("push to main"), trg.assistant_text(line)])
@@ -1015,15 +1015,15 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
                 self.assert_blocked_for(out, NO_TRY, line)
 
-    def test_cc_red_f3_index_lock_is_no_gate(self):
-        # Catches: "lock" inside the path index.lock read as the lock gate, so a push that git's index lock stops passes.
+    def test_cc_red_f3_index_lock_is_no_blocker(self):
+        # Catches: "lock" inside the path index.lock read as the lock blocker, so a push that git's index lock stops passes.
         line = "I can't push because index.lock is in the way."
         out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
-    def test_cc_red_f4_gate_before_or_after_the_clause_is_no_claim(self):
-        # Catches: a gate read only in the clause the phrase starts, so a gate before it or after a semicolon in the same
-        # sentence does not skip the claim. Both lines are claims with a gate in the sentence, so both pass.
+    def test_cc_red_f4_blocker_before_or_after_the_clause_is_no_claim(self):
+        # Catches: a blocker read only in the clause the phrase starts, so a blocker before it or after a semicolon in the
+        # same sentence does not skip the claim. Both lines are claims with a blocker in the sentence, so both pass.
         for line in ("Because CI is red, I can't merge the PR.", "I can't merge the PR; CI is red."):
             with self.subTest(line=line):
                 out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
