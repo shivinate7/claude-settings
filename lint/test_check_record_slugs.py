@@ -83,7 +83,7 @@ SIX = "a52e7a"  # 6 hex characters: too short to name a commit
 SEVEN = "a52e7a0"  # 7: the shortest hex token that names a commit
 FORTY = "a52e7a0fe" * 4 + "a52e"  # 40: the longest hex token that names a commit
 FORTY_ONE = FORTY + "7"  # 41: too long to name a commit
-# The Fix-none lines of the PR bodies of PR 2021 and PR 2024, as the review wrote them. The body reader reads a free
+# Fix-none lines as a PR body writes them. The body reader reads a free
 # reason, so a commit or a cost in it is refused unless check output follows. The bare lines are refused; the
 # *_CHECKED lines are the same text with check output after the reason, which passes.
 BODY_COMMIT = ("- Review note 14: `Fix: none — the open lane export-page-cookie-linear (a52e7a0fe, not yet on main) "
