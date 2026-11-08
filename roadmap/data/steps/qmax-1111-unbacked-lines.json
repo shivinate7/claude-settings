@@ -1,0 +1,11 @@
+{
+  "title": "q_max lines the #1111 prose judge flagged cite their backing, or go",
+  "phase": "next",
+  "status": "todo",
+  "order": 262.1,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "The merge-time prose judge on q_max #1111 (merged d6f044774) flagged four lines that cite no run or decision: CLAUDE.md line 19 (DOC10 swept the whole corpus and ran locally), docs/api.md line 56 (the put-back door route), docs/api.md line 232 (`/api/corpus/slice` views and refusal fields), docs/commands.md line 36 (ste-lint pinned commit, origin/main handling, CI behaviour).",
+  "note": "Fix: cite the backing or cut the claim. Docs-only, in q_max. Waits under the owner's 21:42 CST hold (item 384). Same shape as step batch62-unbacked-lines. Slug and title by triage; no source gave one. Filed from runner 9, 22:55 CST Nov 7.",
+  "updatedAt": "2026-11-07T22:54:00-06:00"
+}
