@@ -30,7 +30,10 @@
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
-                          live CI; then the PRs with no record.
+                          live CI; then the PRs with no record. A draft open over 12 h whose newest
+                          record is missing, stale (not for the live head), bad or for another PR prints `send back: #N session_ID (REASON)`
+                          instead (`no session` when the body names none); the batch runner sends it back to that lane session.
+                          Cost: no new gh call, process, file or timer; it reads fields the PR list already returns.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
                           then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
@@ -3818,6 +3821,8 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
+REVIEW_SEND_BACK = "send back: "  # the line `merge --reviewed` prints for a draft the runner returns to its lane session
+SEND_BACK_HOURS = 12  # a draft open longer than this with no live record is sent back
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 REVIEW_FIX_GUARD_MODEL = "sonnet"  # every fix check runs on this model, whatever Guard or check says (owner item 444 a; decision pr-review-record)
 
@@ -3846,6 +3851,66 @@ def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
                       *([f"Fix check: {', '.join(fix)}"] if fix else []),
                       f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
+def review_walk(text):
+    """-> (record, None) for a well-formed record, or (None, reason): the one walk behind parse_review and review_parse_error, so the two cannot
+    disagree. The record holds `grant` as parse_review describes it. The reason is one line naming the first rule broken."""
+    lines = text.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines or lines[0] != REVIEW_MARKER:
+        return None, f"the first line must be the marker {REVIEW_MARKER}"
+    if lines[-1] != REVIEW_CI_LINE:
+        return None, f"the CI line `{REVIEW_CI_LINE}` must be the last line"
+    if len(lines) < 7:
+        return None, "the record is short of its fields: PR, Head, Kind, Guard or check, Net value and the CI line"
+    pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
+    names = ("PR: #<number>", "Head: <40-hex head>", "Kind: <kind>", "Guard or check: yes|no")
+    fields = []
+    for pat, name, line in zip(pats, names, lines[1:5]):
+        m = re.fullmatch(pat, line, re.ASCII)
+        if not m:
+            return None, f"the line `{line}` is not the `{name}` field"
+        fields.append(m)
+    net = re.fullmatch(r"Net value: (.+)", lines[-2])
+    if not net:
+        return None, "the line before the CI line must be `Net value: <value>`"
+    n, head, kind, guard = (m.group(1) for m in fields)
+    if kind not in REVIEW_KINDS:
+        return None, f"Kind {kind} is not one of {', '.join(REVIEW_KINDS)}"
+    if guard not in REVIEW_GUARDS:
+        return None, f"Guard or check {guard} is not one of {', '.join(REVIEW_GUARDS)}"
+    if net.group(1) not in REVIEW_NETS:
+        return None, f"Net value {net.group(1)} is not one of {', '.join(REVIEW_NETS)}"
+    if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
+        return None, "Kind docs-only cannot have Guard or check yes"
+    g = re.fullmatch(r"Grant: (.*)", lines[5], re.ASCII)
+    bound = grant_pr(g.group(1)) if g else None
+    grant = g.group(1) if bound and bound[0] == int(n) else None  # a malformed or foreign Grant line falls through to the round loop, which refuses it
+    ceiling = REVIEW_LAST_ROUND + bool(grant)
+    rounds, last, fix = [], 0, None
+    for line in lines[5 + bool(grant):-2]:
+        if fix:  # nothing follows the fix check line
+            return None, f"the line `{line}` follows the Fix check line, and nothing may"
+        f = re.fullmatch(rf"Fix check: ({REVIEW_SHA}), ({REVIEW_ROLES[0]}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_FIX_VERDICTS)})", line, re.ASCII)
+        if f:
+            if f.group(1) == head:  # the fix diff would be empty
+                return None, "the Fix check head equals Head"
+            fix = f.group(1, 2, 3, 4)
+            continue
+        m = re.fullmatch(rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})", line, re.ASCII)
+        if not m:
+            return None, f"the line `{line}` is not a Round or Fix check line"
+        i = int(m.group(1))
+        if i not in (last, last + 1) or i < 1 or i > ceiling:
+            return None, f"Round {i} is out of order or above round {ceiling}"
+        rounds.append((i, *m.group(2, 3, 4)))
+        last = i
+    if grant and last != ceiling:  # a grant that holds no granted round is not a record
+        return None, f"the Grant line needs round {ceiling}, and the last round is {last}"
+    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}, None
+
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix, grant}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
     malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
@@ -3854,48 +3919,11 @@ def parse_review(text):
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. Trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
-    lines = text.splitlines()
-    if "---" in lines:
-        lines = lines[:lines.index("---")]
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if len(lines) < 7 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
-        return None
-    pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
-    fields = [re.fullmatch(pat, line, re.ASCII) for pat, line in zip(pats, lines[1:5])]
-    net = re.fullmatch(r"Net value: (.+)", lines[-2])
-    if not all(fields) or not net:
-        return None
-    n, head, kind, guard = (m.group(1) for m in fields)
-    if kind not in REVIEW_KINDS or guard not in REVIEW_GUARDS or net.group(1) not in REVIEW_NETS:
-        return None
-    if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
-        return None
-    g = re.fullmatch(r"Grant: (.*)", lines[5], re.ASCII)
-    bound = grant_pr(g.group(1)) if g else None
-    grant = g.group(1) if bound and bound[0] == int(n) else None  # a malformed or foreign Grant line falls through to the round loop, which refuses it
-    ceiling = REVIEW_LAST_ROUND + bool(grant)
-    rounds, last, fix = [], 0, None
-    for line in lines[5 + bool(grant):-2]:
-        if fix:  # nothing follows the fix check line
-            return None
-        f = re.fullmatch(rf"Fix check: ({REVIEW_SHA}), ({REVIEW_ROLES[0]}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_FIX_VERDICTS)})", line, re.ASCII)
-        if f:
-            if f.group(1) == head:  # the fix diff would be empty
-                return None
-            fix = f.group(1, 2, 3, 4)
-            continue
-        m = re.fullmatch(rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})", line, re.ASCII)
-        if not m:
-            return None
-        i = int(m.group(1))
-        if i not in (last, last + 1) or i < 1 or i > ceiling:
-            return None
-        rounds.append((i, *m.group(2, 3, 4)))
-        last = i
-    if grant and last != ceiling:  # a grant that holds no granted round is not a record
-        return None
-    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}
+    return review_walk(text)[0]
+
+def review_parse_error(text):
+    """-> None when parse_review reads `text`, else one line naming the first rule the text breaks (the same walk as parse_review)."""
+    return review_walk(text)[1]
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
@@ -4056,37 +4084,55 @@ REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when 
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
-def reviewed_read(h):
+def review_created(d):
+    """-> the created_at of a pull request row, as epoch seconds."""
+    return datetime.datetime.strptime(d["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()
+
+def reviewed_read(h, now=time.time):
     """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
     each pull request whose newest record reads done; and the open pull request rows. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
     names `merge --lane-lint <n>`; no extra call. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
-    request's own base."""
+    request's own base.
+    A draft open more than SEND_BACK_HOURS before `now` (epoch seconds, or a function that returns them) whose newest record is missing, stale, bad
+    or names another pull request prints `send back: #<n> <session> (<reason>)` in place of its `no record:` entry or state line; the session is
+    the last claude.ai/code/session_ link of the pull request body, or `no session`. Stale is as live_review_state reads it: a record kept by clean
+    merges of main is not stale. Cost of the send-back: none of its own. It reads only the created_at, draft and body fields the pull list already
+    returns, and live_review_state's reads run for a record exactly as they do without it: no new gh call, process, file or timer."""
     main = h.base
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."], [], pulls
     rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
     records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
+    clock = now() if callable(now) else now
     lines, bare, done = [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
+        why = "no record"
+        if bodies:
+            rec, err = review_walk(bodies[-1])
+            if rec and rec["n"] != n:
+                rec, err = None, f"the record names pull request #{rec['n']}, not #{n}"
+            state, state_why = live_review_state(h, rec, sha, main)
+            why = f"bad: {err}" if rec is None else f"stale: the record is for head {rec['head'][:9]}" if state == "stale" else None
+        if why and d.get("draft") and clock - review_created(d) > SEND_BACK_HOURS * 3600:
+            ids = re.findall(r"claude\.ai/code/session_([A-Za-z0-9]+)", d.get("body") or "")
+            lines.append(f"{REVIEW_SEND_BACK}#{n} {'session_' + ids[-1] if ids else 'no session'} ({why})")
+            continue
         if not bodies:
             bare.append(f"#{n}")
             continue
-        rec = parse_review(bodies[-1])
-        rec = rec if rec and rec["n"] == n else None
-        state, why = live_review_state(h, rec, sha, main)
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)
             if lint == "pass":
                 done.append((n, d["base"]["ref"]))
             else:  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
-                state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
+                state, state_why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
-        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
+        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {state_why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
 
 def reviewed_lines(h):
