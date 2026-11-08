@@ -102,6 +102,11 @@ def codes(faults):
     return {f[0] for f in faults}
 
 
+def pairs(faults):
+    """The (code, section) pairs of the faults, so a case names the section a fault is in."""
+    return {(f[0], f[1]) for f in faults}
+
+
 class BriefFaults(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -259,6 +264,142 @@ class BriefFaults(unittest.TestCase):
                           ("token-font", "Use font Lato.")):
             with self.subTest(line=line):
                 self.assertIn(key, codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
+    def test_font_word_at_a_line_end_does_not_read_the_next_line_as_a_font(self):
+        # "font" ends a line and "Uses" starts the next. The font pattern reads one line, not a name across the break.
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nHe reads the envelope font\nUses a magnifier.")), [])
+
+    def test_font_name_after_a_line_break_is_still_refused(self):
+        self.assertIn("token-font", codes(self.m.brief_faults(brief(job=JOB + "\nBody text is set in\nRoboto."))))
+
+    def test_font_word_and_name_split_by_a_line_break_are_refused(self):
+        # "font is" and "Fonts:" end a line and the font name starts the next. Main reads the name across the break.
+        for line in ("Body font is\nCooper Black for text.", "Fonts:\nCooper Black for headings."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-font", "Job"), found)
+
+    def test_font_word_then_a_line_break_then_a_font_name_is_refused(self):
+        # A font word, a line break, then a font name still names a font. The break does not hide the name.
+        for line in ("Font\nCooper Black", "use the font\nCooper Black here"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-font", "Job"), found)
+
+    def test_colour_word_before_a_part_number_hash_is_refused(self):
+        # "ink" is a colour word, and "cartridge" is not an id word. Main refuses the 4-digit hash after them as a colour.
+        found = pairs(self.m.brief_faults(brief(job=JOB + "\nReplace ink cartridge #1234.")))
+        self.assertIn(("token-colour", "Job"), found)
+
+    def test_colour_word_with_a_word_or_two_before_a_four_digit_hash_is_refused(self):
+        # A colour word with a word or two before a 4-digit hash names a hex colour: "Brand blue #1234",
+        # "Accent teal #1234", "Surface colour for cards: #1234". The part number above stays an id.
+        for line in ("Brand blue #1234", "Accent teal #1234", "Surface colour for cards: #1234"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
+    def test_order_id_with_a_colon_before_the_hash_is_an_id(self):
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nOrder ID: #123456 arrived.")), [])
+
+    def test_plural_orders_before_the_hash_is_an_id(self):
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nOrders #123456 arrived.")), [])
+
+    def test_colour_hex_with_no_id_word_before_it_is_still_refused(self):
+        for line in ("The ink is #abcd.", "Use #3d5af1 for the header."):
+            with self.subTest(line=line):
+                self.assertIn("token-colour", codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
+    def test_four_digit_hash_right_after_a_colour_word_is_refused(self):
+        found = pairs(self.m.brief_faults(brief(job=JOB + "\nBackground #1234 for the cards.")))
+        self.assertIn(("token-colour", "Job"), found)
+
+    def test_label_with_a_colon_before_a_hex_colour_is_refused(self):
+        # "Item:" and "ID:" name a label, not an id number, so a hash with a hex letter after them is a colour.
+        for line in ("Item: #3d5af1", "ID: #ff8800"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
+    def test_plural_or_colon_id_words_before_a_six_digit_hash_pass(self):
+        # "Orders:", "Lots:" and "Boxes" name an id, as "Order" and "Lot" do. The six digits are a number, not a colour.
+        for line in ("Orders: #123456", "Lots: #123456", "Boxes #123456"):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
+
+    def test_id_word_before_a_colour_hash_is_refused(self):
+        # An id word spares only an all-digit hash. A colour hash after "box", "items", "PR" or "item" is refused.
+        for line in ("background of the box #fff.", "Selected items #3d5af1.", "PR #3d5af1 is the header.",
+                     "Background item #fff."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
+    def test_label_or_plural_id_word_before_an_all_digit_hash_is_refused(self):
+        # Main refuses these. A label ("Item:", "Ref:") or a plural ("Items") does not spare an all-digit hash.
+        for line in ("Item: #333333", "Items #000000", "Show Items: #444444", "Ref: #222222"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
+    def test_colour_word_before_an_id_word_and_an_all_digit_hash_is_refused(self):
+        # Main refuses these. A colour word before an id word makes the all-digit hash after it a colour.
+        for line in ("Brand colour of orders #123456", "Fill: Orders #123456"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
+    def test_pixel_value_written_in_words_is_refused(self):
+        # "12 pixels" is a px value in words. The spacing pattern reads px, rem and dp, so it misses this.
+        self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\nCards have 12 pixels of padding."))))
+
+    def test_pixel_width_written_in_words_is_refused(self):
+        # "1920 pixels" is a px value in words, as "1920px" is. The spacing pattern reads pixels.
+        found = pairs(self.m.brief_faults(brief(job=JOB + "\nA screen is 1920 pixels wide.")))
+        self.assertIn(("token-spacing", "Job"), found)
+
+    def test_ios_app_named_in_a_device_section_is_refused(self):
+        # Main refuses "the iOS app" as `current` in every section, Device included.
+        found = pairs(self.m.brief_faults(brief(device=DEVICE + "\nThe lane draws the iOS app for this phone.")))
+        self.assertIn(("current", "Device"), found)
+
+    def test_ios_app_as_todays_product_in_a_device_section_is_refused(self):
+        # A Device section exempts only the sentence that draws the iOS app. "Match" it, or say what it "now"
+        # shows, names today's product, and main refuses both as `current` in Device.
+        for line in ("Match the iOS app home screen.", "The iOS app now shows three tabs."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(device=DEVICE + "\n" + line)))
+                self.assertIn(("current", "Device"), found)
+
+    def test_this_lane_draws_the_ios_app_in_a_device_section_is_refused(self):
+        found = pairs(self.m.brief_faults(brief(device=DEVICE + "\nThis lane draws the iOS app.")))
+        self.assertIn(("current", "Device"), found)
+
+    def test_ios_app_mirror_or_copy_in_a_device_section_is_refused(self):
+        # Only the first "the iOS app" of a sentence is read, so a second mention after a draw verb, and a mirror
+        # or copy verb, stay refused as `current` in Device. Main refuses each of these.
+        for line in ("Draw the iOS app and mirror the iOS app's tabs.",
+                     "Draw the iOS app, then copy the iOS app home screen.",
+                     "Draw the iOS app and mirror it.", "Copy the iOS app's home screen."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(device=DEVICE + "\n" + line)))
+                self.assertIn(("current", "Device"), found)
+
+    def test_draw_verb_before_the_ios_app_in_a_device_section_is_still_refused(self):
+        # A draw verb earlier in a sentence exempts "the iOS app" from `current`. Each of these sentences uses that
+        # product as the thing to match or copy, so each is refused as `current` in Device.
+        for line in ("Build the screen to match the iOS app.", "Draw a screen that matches the iOS app.",
+                     "Design the screens so they match the iOS app.", "Build it like the iOS app does today."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(device=DEVICE + "\n" + line)))
+                self.assertIn(("current", "Device"), found)
+
+    def test_today_product_named_as_the_web_app_or_as_it_is_now_is_still_refused(self):
+        for where, line in (("job", "The web app has three tabs."), ("device", "The web app has three tabs."),
+                            ("job", "Look at the iOS app as it is now.")):
+            with self.subTest(where=where, line=line):
+                text = brief(**{where: (JOB if where == "job" else DEVICE) + "\n" + line})
+                self.assertIn("current", codes(self.m.brief_faults(text)))
 
     def test_device_gap_inset_and_scale_sizes_pass(self):
         for line in ("8 px gap at the hinge.", "Hinge gap: 8 pt.", "Safe area: 47 pt top inset.",

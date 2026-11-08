@@ -388,6 +388,12 @@ PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|e
 WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|" + _REF +
                         r"|(?-i:(?<![\w-])Settings\b(?!\.\w))|\bsettings\s+page\b", re.I)
 PRESS_REF = re.compile(_REF, re.I)
+# "Press Copy" is a button of the waiting page and of the chat. When the page is the task title, a sentence that
+# presses Copy alone, or then pastes it in the chat, is left out of the press read. Any other word after Copy
+# (an app, "and Submit") may name a web page, so that sentence stays a press.
+TITLE_PAGE_COPY = re.compile(r"(?:^|(?<=[.!?\n]))[ \t]*(?:press|click|tap)\s+(?:the\s+)?[\"'“‘]?copy[\"'”’]?"
+                             r"(?:\s+button)?(?:,?\s+(?:and\s+)?then\s+paste\s+(?:it|this|that|the\s+text)"
+                             r"(?:\s+(?:in|into)\s+(?:the|this)\s+chat)?)?[ \t]*(?:[.!]|$)", re.I | re.M)
 _FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
          r"|\b(?:plans|docs|notes)/[\w./-]+")
 COMMAND_FILE = re.compile(_FILE, re.I)
@@ -515,9 +521,11 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     press verb is read in `press_text`, which is `text` unless the caller leaves out a press the
     session makes (_owner_press_text). The page, and each `#N` that needs a url with /pull/N or
     /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
-    if not PRESS_VERB.search(text if press_text is None else press_text):
+    press = text if press_text is None else press_text
+    from_title = not WEB_MARKER.search(text)
+    if not PRESS_VERB.search(TITLE_PAGE_COPY.sub("", press) if from_title else press):
         return True
-    page = text if WEB_MARKER.search(text) else context
+    page = context if from_title else text
     if not WEB_MARKER.search(page):
         return True
     urls = [l["url"] for l in (links if isinstance(links, list) else []) if isinstance(l, dict) and isinstance(l.get("url"), str)]

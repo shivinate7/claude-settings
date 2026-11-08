@@ -111,11 +111,18 @@ _COLOUR_WORD = r"(?:colou?rs?|accent|ink|background|surface|border|fill|brand|pa
 _ID_WORD = ("order", "lot", "bin", "invoice", "ticket", "id", "item", "box", "parcel", "package", "no.",
             "number", "ref")
 _NOT_ID = "".join(r"(?<!\b%s )" % w for w in _ID_WORD)  # "order #123456" is an id, not a colour
+# An all-digit hash also passes after a listed plural ("Orders #123456", "Lots: #123456") or "<id word> ID:".
+# A label ("Item:", "Ref:") or an unlisted plural ("Items") does not spare it, and a colour word earlier in the
+# sentence cancels these extra spares ("Fill: Orders #123456"). A hash with a hex letter keeps the plain guard above.
+_ID_PLURAL = ("orders", "lots", "bins", "invoices", "tickets", "boxes", "parcels", "packages")
+_NOT_ID_DIGITS = (_NOT_ID + "".join(r"(?<!\b%s%s )" % (w, c) for w in _ID_PLURAL for c in ("", ":"))
+                  + "".join(r"(?<!\b%s id: )" % w for w in _ID_WORD if w.isalpha() and w != "id"))
 SPACING_EXEMPT = ("Device",)
 PATTERNS.update({
     "token-colour": [
         _NOT_ID + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
-        _NOT_ID + r"#(?:\d{6}|\d{8})\b",
+        _NOT_ID_DIGITS + r"#(?:\d{6}|\d{8})\b",
+        r"\b" + _COLOUR_WORD + r"\b[^.!?\n]*" + _NOT_ID + r"#(?:\d{6}|\d{8})\b",
         r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#[0-9a-f]{3,4}\b",
         r"\b(?:rgba?|hsla?|hwb|lch|oklab|oklch)\s?\(", r"\b(?:rgba?|hsla?)\s+\d+[ ,]+\d+[ ,]+\d+",
     ],
@@ -124,7 +131,7 @@ PATTERNS.update({
         r"\bmonospace\b", r"\bsystem-ui\b", r"-apple-system",
     ],
     "token-spacing": [
-        r"--space-\d", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:px|rem|dp)\b",
+        r"--space-\d", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:px|rem|dp|pixels?)\b",
         r"\b" + _SPACE_WORD + r"\b\W+(?:\w+\W+){0,3}(?<![\w.])\d+(?:\.\d+)?\s?(?:pt|em)\b",
         r"\b\d+[- ]?(?:point|pt)\s+(?:grid|baseline)\b", r"\bspacing\s+scale\b",
     ],
@@ -137,8 +144,12 @@ COMPILED["token-font"] += [re.compile(p) for p in (
     r"|Source Sans|IBM Plex|Fira Sans|Fira Code|JetBrains Mono|Playfair|Merriweather|Garamond|Verdana"
     r"|Tahoma|Segoe UI|Times New Roman|Manrope|DM Sans|Space Grotesk|Work Sans|Figtree|Fraunces|Satoshi"
     r"|General Sans)\b",
-    r"\b[Ff]onts?\b(?::|\s+(?:is|are))?\s+(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
-    r"\b[Tt]ypefaces?\b(?::|\s+(?:is|are))?\s+(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)")]
+    r"\b[Ff]onts?\b(?:(?::|\s+(?:is|are))\s+|[ \t]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
+    r"\b[Tt]ypefaces?\b(?:(?::|\s+(?:is|are))\s+|[ \t]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
+    # After the bare word and a line break, a capital word then an article starts a new line ("font" / "Uses a
+    # magnifier."), not a font name.
+    r"\b[Ff]onts?[ \t]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)",
+    r"\b[Tt]ypefaces?[ \t]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)")]
 IOS_SKILL = re.compile(r"(?<![\w-])ios-apps(?![\w-])", re.I)
 DUO_FOLDED, DUO_UNFOLDED = "iphone-duo-folded", "iphone-duo-unfolded"  # device ids in lint/layout.json
 TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|tokens?\b|brand|theme|style|radius", re.I)
