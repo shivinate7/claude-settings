@@ -12398,9 +12398,16 @@ class ReviewEnv(CiJobStub, Env):
             rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
-    def record_host(self, *comments, head=REVIEW_HEAD):
-        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
-        return PullsHost([batch_pull(7, head)], {}, comments=comments)
+    def live_pull(self, head=None):
+        """Pull request 7 at `head` (default: the fixture's real feat head), on branch `feat`, the branch the fixture repo holds. batch_pull's
+        default branch, feat7, is not in the fixture, so the lint would fail to fetch it before any head check."""
+        pull = batch_pull(7, head or self.head())
+        pull["head"]["ref"] = "feat"
+        return pull
+
+    def record_host(self, *comments, head=None):
+        """A host whose pull request 7 is live_pull(head), with the repo's review record comments in the order given, oldest first."""
+        return PullsHost([self.live_pull(head)], {}, comments=comments)
 
     def assert_usage_error(self, *argv):
         """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
@@ -12485,10 +12492,10 @@ class ReviewRecordWrite(ReviewEnv):
         self.assertEqual(self.lock_ref(), locked, "the write took the lock")
 
     def test_the_printed_head_is_the_reviewed_head_when_the_live_head_matches(self):
-        self.host.head_override = "f" * 40
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", "f" * 40)
+        head = self.head()  # the live head and the reviewed head are the fixture's real feat head, which the lint can check out
+        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", head)
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["head"], "f" * 40)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], head)
 
     def test_a_push_after_the_review_stops_with_exit_one(self):
         # The rounds were read on the old head. A push moves the live head, so the old rounds never print as the current record.
@@ -12568,7 +12575,8 @@ class ReviewFixBase(ReviewEnv):
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
 
     def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+        # The reviewed head is the fixture's real feat head, so the lint can check it out. The fix-check base stays a fake head: only the record text reads it.
+        return self.run_args("7", "--review-record", "--head", self.head(), *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
 
     def assert_refused(self, rc, out, err):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
@@ -12615,7 +12623,7 @@ class ReviewFixBase(ReviewEnv):
 
     def test_a_failed_comments_read_refuses_the_fix_check_with_no_record(self):
         # without the earlier records there is no base to check the fix check against, so the read failure stops the run before any record prints
-        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments_error="reading issue comments from GitHub failed")
+        host = PullsHost([self.live_pull()], {}, comments_error="reading issue comments from GitHub failed")
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
         self.assertEqual(rc, 1, "a failed comments read did not stop the run:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a failed comments read still printed a record")
