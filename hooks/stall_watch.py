@@ -617,8 +617,9 @@ def stop():
                     else:  # an open call is busy, unless the oldest timed capped-tool call is past the cap
                         timed = [c for c in foreground if c[0] in CAPPED_TOOLS and c[1] is not None]
                         oldest = min(timed, key=lambda c: c[1]) if timed else None
+                        cross = oldest and max(oldest[1] + OPEN_CALL_CAP, now - idle + quiet)
                         if oldest and now - oldest[1] >= OPEN_CALL_CAP and not (
-                                prev_stop is not None and oldest[1] + OPEN_CALL_CAP <= prev_stop):
+                                prev_stop is not None and cross <= prev_stop):
                             rows.append("%s: background agent, stuck in one tool call (%s) for %ds: %s%s %s" % (
                                 job, oldest[0], now - oldest[1], real, until, AGENT_REMEDY))
                 continue

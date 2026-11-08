@@ -133,13 +133,16 @@ agent in one hung call never showed as quiet. Other tools (Agent, Task, Workflow
 maximum, so an open call of one reads busy. The age is the oldest open foreground Bash or PowerShell call
 with a readable timestamp, from its assistant record. An untimed call or a background call beside it does not
 hide it. An open call whose only candidates have no readable timestamp is not listed, since a false alarm is
-worse. The stuck row also needs the transcript quiet past the quiet age. It is listed once, at the first
-Stop after the call's time plus the cap, against the previous Stop; the quiet row keeps its own crossing.
+worse. The stuck row also needs the transcript quiet past the quiet age. Its crossing is the later of the
+call's time plus the cap and the transcript's mtime plus the quiet age. It is listed once, at the first Stop
+after that crossing, against the previous Stop; the quiet row keeps its own crossing.
 Cost: one `stat` per running agent, and one bounded tail read of every quiet agent at every Stop,
 including one already listed.
 
 Fix: none — no progress signal in the parent transcript to tell hung from busy. Until: 2026-11-21
 (a hung Agent or MCP call).
+Limit: `open_call` reads only the last 64 KB of the transcript. A hung call behind more than 64 KB of later
+records is missed.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
