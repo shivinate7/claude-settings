@@ -1645,7 +1645,7 @@ WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
 # Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
 WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
 WORKFLOW_DISABLE_STEP = re.compile(
-    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))\s*$")
+    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))(?:\s+#.*)?\s*$")  # YAML: a comment needs space before `#`
 
 
 def is_workflow_rel(rel: str) -> bool:

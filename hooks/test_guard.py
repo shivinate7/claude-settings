@@ -13315,8 +13315,40 @@ add("builder-test: continue-on-error added to a step running hooks/mutate_x.py i
     file_path=WF, old_string=LINT + MUTATE_X, new_string=LINT + MUTATE_X_CONTINUE, **B)
 add("builder-test: a timeout change on the mutate_guard step is allowed", "allow", tool="Edit",
     file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_TIMEOUT, **B)
-# A mutation test run through `cd hooks &&` or a `working-directory:` line names its script by the bare name, so the
-# step check must resolve the folder before it counts the run. A disabled step in either form reads green otherwise.
+# A YAML comment after a disable value still disables the step, so the disable line must be read without its comment.
+# A lone apostrophe in that comment must not stop the reader from finding the `#`: a quote-aware reader that throws on
+# it would fall open. The controls keep a comment after a false value, and a quoted `#` on a run line, allowed.
+MUTATE_GUARD_CONTINUE_FLAKY = ("      - name: Guard mutation test\n        continue-on-error: true  # flaky\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_IF_FALSE_FLAKY = ("      - name: Guard mutation test\n        if: false  # flaky\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_CONTINUE_APOSTROPHE = ("      - name: Guard mutation test\n        continue-on-error: true  # don't\n"
+                                    "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+TEST_GUARD_CONTINUE_FLAKY = ("      - name: Guard tests\n        continue-on-error: true  # flaky\n"
+                             "        run: python3 hooks/test_guard.py\n")
+MUTATE_GUARD_CONTINUE_FALSE = ("      - name: Guard mutation test\n        continue-on-error: false  # never\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_QUOTED_HASH = ("      - name: Guard mutation test\n"
+                            "        run: echo \"a # b\" && python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+add("builder-test: continue-on-error: true with a trailing # flaky comment under the mutate_guard step is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD,
+    new_string=LINT + MUTATE_GUARD_CONTINUE_FLAKY, carries=("test-author", "Report"), **B)
+add("builder-test: if: false with a trailing # flaky comment under the mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_IF_FALSE_FLAKY,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: true with a trailing # flaky comment under a test step is refused", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + TEST_GUARD_CONTINUE_FLAKY,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: true with a lone apostrophe in its # comment under the mutate_guard step "
+    "is refused", "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD,
+    new_string=LINT + MUTATE_GUARD_CONTINUE_APOSTROPHE, carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: false with a trailing # comment under the mutate_guard step is allowed", "allow",
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_CONTINUE_FALSE, **B)
+add("builder-test: a quoted # on the mutate_guard run line ahead of the script is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_QUOTED_HASH, **B)
+# A mutation test run through `cd hooks &&` or a `working-directory:` line names its script by the bare file name.
+# The step check counts that run by the name (the basename against MUTATION_TEST_NAMES) and resolves no folder, so
+# a disabled step in either form would read green without that count.
 # The pins hold what a test file already keeps: the same forms on a test file are refused, by basename.
 TEST_GUARD_CD = "      - name: Guard tests\n        run: cd hooks && python3 test_guard.py\n"
 TEST_GUARD_CD_CONTINUE = ("      - name: Guard tests\n        continue-on-error: true\n"
