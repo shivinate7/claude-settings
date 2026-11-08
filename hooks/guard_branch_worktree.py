@@ -122,9 +122,10 @@ WORKTREE_PRUNE_ASK_REASON = (
 # HEAD`: with the worktree's own log missing, git falls back to the clone's logs, and the rule
 # must read that as "no evidence". The git directory comes from the one `rev-parse` call; the log
 # and the HEAD file are read as files, so the reflog and the detached check cost no git call.
-# A commit makes at most five git calls: rev-parse, the ancestor test, what the branch changed
+# This rule makes at most five git calls per commit: rev-parse, the ancestor test, what the branch changed
 # (diff-tree), the staged paths (diff-index, not for named paths), and, for `-a` or named paths,
 # one hash-object of the changed paths' work-tree copies. A dry run makes none.
+# Rule commit-leaves-edit-unstaged adds at most two more (see its section).
 
 # `commit` options that take a value in the next word (or glued to a short flag).
 COMMIT_VALUE_FLAGS = {

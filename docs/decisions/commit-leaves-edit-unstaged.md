@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Coordinator, 2026-11-07 17:31 CST, to lane resumed-agent-stale-tree: warn, not refuse. Orchestrator's call, not an owner grant: the form and the read.
+Coordinator, 2026-11-07 17:31 CST, to lane resumed-agent-stale-tree: warn, not refuse. A lone commit asks; in a chain, rule `ask-alone` refuses (last bullet below). Orchestrator's call, not an owner grant: the form and the read.
 
 The guard rule `commit-leaves-edit-unstaged` asks before a `git commit` when a tracked file is modified in the work tree but left out of the commit. It asks only if a file in the same folder is in the commit.
 
