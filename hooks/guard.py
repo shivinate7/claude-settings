@@ -402,7 +402,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _TOO_LARGE_NOTE, _shell_write_hit, frozen_shell_hit, interpreter_write_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _TOO_LARGE_FILTERED_NOTE, _TOO_LARGE_NOTE, _shell_write_hit, frozen_shell_hit, interpreter_write_hit,
             is_frozen,
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
@@ -1593,10 +1593,14 @@ BUILDER_TEST_REASON = (
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 # The builder's refusal when a fed folder is past the walk cap (`_TOO_LARGE_NOTE` on the hit): no test was found,
-# so the reason says the folder is too large to check, not that the command writes a test.
+# so the reason says the folder is too large to check, not that the command writes a test. A walk that a find's
+# name filter already narrowed (`_TOO_LARGE_FILTERED_NOTE`) gets no advice to add one.
 BUILDER_TOO_LARGE_REASON = (
-    "The folder this builder's write goes through is too large to check for a test. Name a narrower path, or a "
-    "find -name filter. If the write does change a test, report it: the orchestrator assigns it to a test-author."
+    "The folder this builder's write goes through is too large to check for a test. Name a narrower path."
+)
+BUILDER_TOO_LARGE_NAME_FILTER = " Or add a find -name filter."
+BUILDER_TOO_LARGE_REPORT = (
+    " If the write does change a test, report it: the orchestrator assigns it to a test-author."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
@@ -3889,8 +3893,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if role == BUILDER_ROLE:
         matched = builder_shell_test_hit(raw, stripped, cwd)
         if matched:
-            refuse(tool, "deny", "builder-test-edit",
-                   BUILDER_TOO_LARGE_REASON if matched.endswith(_TOO_LARGE_NOTE) else BUILDER_TEST_REASON, matched)
+            if matched.endswith(_TOO_LARGE_FILTERED_NOTE):
+                reason = BUILDER_TOO_LARGE_REASON + BUILDER_TOO_LARGE_REPORT
+            elif matched.endswith(_TOO_LARGE_NOTE):
+                reason = BUILDER_TOO_LARGE_REASON + BUILDER_TOO_LARGE_NAME_FILTER + BUILDER_TOO_LARGE_REPORT
+            else:
+                reason = BUILDER_TEST_REASON
+            refuse(tool, "deny", "builder-test-edit", reason, matched)
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.

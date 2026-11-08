@@ -519,21 +519,23 @@ _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 
 
-def _cp_start(raw, keywords=False):
-    """The index of the `cp` word of a segment, past its `VAR=value` words (and past `do`, `then` and
-    the other loop keywords when `keywords`), else None when the command is not `cp`."""
+def _cp_start(raw, keywords=False, names=("cp",)):
+    """The index of the command word of a segment, past its `VAR=value` words (and past `do`, `then` and
+    the other loop keywords when `keywords`), else None when the command is not one of `names`."""
     start = 0
     while start < len(raw) and (_ASSIGNMENT.match(raw[start]) or keywords and raw[start] in LOOP_KEYWORDS):
         start += 1
-    return start if _name(raw[start] if start < len(raw) else "") == "cp" else None
+    return start if _name(raw[start] if start < len(raw) else "") in names else None
 
 
-def _copy_reads(raw, predicate, cwd, keywords=False):
-    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
+def _copy_parts(raw, keywords=False, names=("cp",)):
+    """(source indexes, target index) of a `cp` segment, or of a command in `names`, as indexes into `raw`: the
+    target is the word `-t` takes (a glued `-tDIR` is its own word), else the last operand. None when the segment
+    is not one, or holds a flag or redirect that is not read."""
     words = [_unquoted(word) for word in raw]
-    start = _cp_start(raw, keywords)
+    start = _cp_start(raw, keywords, names)
     if start is None:
-        return set()
+        return None
     operands, target, index = [], None, start + 1
     while index < len(words):
         word = words[index]
@@ -546,27 +548,41 @@ def _copy_reads(raw, predicate, cwd, keywords=False):
             continue
         if word != "--" and word.startswith("--") and any(
                 name.startswith(word[2:].split("=")[0]) for name in _CP_LINK_LONG):
-            return set()
+            return None
         if _CP_TARGET.fullmatch(word):
-            target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
-            if target is None:
-                return set()
+            if index + 1 >= len(words):
+                return None
+            target, index = index + 1, index + 2
             continue
-        if word.startswith("--target-directory="):
-            target = word.split("=", 1)[1]
-        elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
-            target = word[2:]
+        if word.startswith("--target-directory=") or word.startswith("-t") and len(word) > 2 and word[1] != "-":
+            target = index
         elif _CP_FLAGS.fullmatch(word):
             pass
         elif word.startswith("-") or ">" in word or "<" in word:
-            return set()
+            return None
         else:
             operands.append(index)
         index += 1
     if target is None:
         if len(operands) < 2:
-            return set()
-        target = words[operands.pop()]
+            return None
+        target = operands.pop()
+    return operands, target
+
+
+def _copy_target(word) -> str:
+    """The directory a `_copy_parts` target word names: a glued `-tDIR` or `--target-directory=DIR` gives DIR."""
+    glued = _glued_cp_target(word)
+    return glued[1] if glued else _unquoted(word)
+
+
+def _copy_reads(raw, predicate, cwd, keywords=False):
+    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
+    parts = _copy_parts(raw, keywords)
+    if parts is None:
+        return set()
+    operands, at = parts
+    target = _copy_target(raw[at])
     if not operands or not target or _CP_DEST_UNSAFE.search(target):
         return set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
@@ -574,6 +590,7 @@ def _copy_reads(raw, predicate, cwd, keywords=False):
     return set(operands)
 
 
+_TARGET_COMMANDS = ("cp", "mv", "install")   # the commands that take `-tDIR`, glued, as `cp` does
 _CP_GLUED_TARGET = re.compile(r"-[RrfiaHLPpnvuxTS]*t(.+)")
 _WALK_SKIP = frozenset((".git", "node_modules", ".venv", "venv", "__pycache__"))
 _WALK_LIMIT = 5000
@@ -581,8 +598,8 @@ _LIST_LIMIT = 10 * _WALK_LIMIT   # entries listed, judged or not: a filtered wal
 
 
 def _glued_cp_target(word):
-    """(flag, value) of a `cp` word that glues the target directory to its flag (`-ttests`,
-    `--target-directory=tests`), else None. `_copy_reads` reads the same two forms."""
+    """(flag, value) of a `cp`, `mv` or `install` word that glues the target directory to its flag (`-ttests`,
+    `--target-directory=tests`), else None. `_copy_parts` reads the same two forms."""
     plain = _unquoted(word)
     if plain.startswith("--"):
         name, equals, value = plain[2:].partition("=")
@@ -594,7 +611,10 @@ def _glued_cp_target(word):
 
 
 _TOO_LARGE = "\0too-large"   # `_first_test_under`'s answer for a folder it could not finish
+_TOO_LARGE_FILTERED = "\0too-large-filtered"   # the same, for a walk that a find's name filter already narrows
 _TOO_LARGE_NOTE = " (the folder is too large to check for a test; name a narrower path)"
+# The hit's note when the walk had a name filter: the refusal's remedy then names no `-name` filter.
+_TOO_LARGE_FILTERED_NOTE = " (the folder is too large to check for a test even through the find's name filter; name a narrower path)"
 
 
 def _name_matches(names, base: str) -> bool:
@@ -626,7 +646,8 @@ def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
     name it accepts is judged, and a folder whose name it accepts is walked whole, as the writer takes
     it whole. A root the filter accepts is walked whole too.
     The cap counts the entries judged and the folders entered: past `_WALK_LIMIT` of them, or past
-    `_LIST_LIMIT` entries listed, with folders left to enter, the answer is `_TOO_LARGE`, as a walk that
+    `_LIST_LIMIT` entries listed, with folders left to enter, the answer is `_TOO_LARGE` (`_TOO_LARGE_FILTERED`
+    when a name filter was in effect), as a walk that
     stops there would let a test past it through. A tree where no test can sit (`_may_hold_a_test`) gives
     '' there instead: nothing past the cap is a test.
     ponytail: a checkout nested in a tree outside every checkout, past the cap, is not read.
@@ -654,14 +675,16 @@ def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
                 if _name_matches(names, name):
                     whole = _first_test_under(os.path.join(folder, name), cwd, predicate)
                     if whole:
-                        return whole
+                        return _TOO_LARGE_FILTERED if whole == _TOO_LARGE else whole
         for found in found_in:
             if predicate(found, cwd):
                 return found
         judged += len(folders) + len(found_in)
         listed += len(folders) + len(files)
         if (judged > _WALK_LIMIT or listed > _LIST_LIMIT) and next(walk, None) is not None:
-            return _TOO_LARGE if _may_hold_a_test(top, cwd, predicate) else ""
+            if not _may_hold_a_test(top, cwd, predicate):
+                return ""
+            return _TOO_LARGE_FILTERED if names else _TOO_LARGE
     return ""
 
 
@@ -814,13 +837,14 @@ def _roots(words, search_cwd=False) -> list:
 
 # The primaries that only narrow what a find lists, by arity. Each is skipped when the name filter is read: the
 # names alone then give a superset of the list. An action that prints other text (`-printf`, `-ls`), writes a file
-# (`-fprint`), deletes (`-delete`), or a test by path (`-path`, `-regex`) is not here, so it leaves the walk plain.
+# (`-fprint`) or deletes (`-delete`) is not here, so it leaves the walk plain. `-path` and `-regex` only narrow
+# the names a find lists, as `-mtime` does, so they are here.
 _FIND_PLAIN = ("-print", "-print0", "-depth", "-xdev", "-mount", "-a", "-and", "-noleaf", "-prune", "-empty",
                "-executable", "-readable", "-writable", "-nouser", "-nogroup", "-true", "-false", "-daystart",
                "-ignore_readdir_race", "-noignore_readdir_race")
 _FIND_VALUED = ("-type", "-xtype", "-maxdepth", "-mindepth", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin",
                 "-used", "-size", "-newer", "-anewer", "-cnewer", "-perm", "-user", "-group", "-uid", "-gid", "-links",
-                "-inum", "-samefile", "-fstype")
+                "-inum", "-samefile", "-fstype", "-path", "-ipath", "-regex", "-iregex")
 _FIND_NOT = ("!", "\\!", "-not")
 _FIND_OR = ("-o", "-or")
 # fnmatch reads `[^x]` as a set that holds `^`, and has no `[:class:]`, `[=e=]` or `[.c.]`, where find's glob negates
@@ -833,7 +857,7 @@ def _find_name_filter(words):
     pattern an (ignore case, pattern) pair, else None. A name in a branch is `-name` or `-iname`; one
     after `!` or `-not` is an exclude. Several includes in one branch are read as any of them, a superset
     of the files the find lists. A narrowing primary (`_FIND_PLAIN`, `_FIND_VALUED`, an `-exec` command)
-    is skipped, negated or not. Any other word (`(`, `,`, `-regex`, `-path`, `-delete`, a pattern that
+    is skipped, negated or not. Any other word (`(`, `,`, `-delete`, a pattern that
     `_FNMATCH_UNLIKE_FIND` matches), or a branch with no include, leaves the walk plain, which fails closed."""
     index = resolve_command(tuple(words))
     if index is None or _name(words[index]) != "find":
@@ -1204,8 +1228,16 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], []
-        cp_at = _cp_start(raw, bool(fed))
+        cp_at = _cp_start(raw, bool(fed), _TARGET_COMMANDS)
+        # A fed `cp` or `mv` writes only its destination, so that word is judged as one, as the direct check does,
+        # and is never a walk root. A destination that holds a glob or a variable stays a root, which fails closed.
+        dest_at = None
+        copy = _copy_parts(raw, True, ("cp", "mv")) if fed else None
+        if copy and copy[0] and not _CP_DEST_UNSAFE.search(_copy_target(raw[copy[1]])):
+            dest_at = copy[1]
+        dest_words = set()
         for index, word in enumerate(raw):
+            before = len(words)
             glued = _glued_cp_target(word) if cp_at is not None and index > cp_at else None
             if glued and index not in data:
                 # The glued target judged as the spaced `-t DIR` is, by the same text.
@@ -1232,10 +1264,12 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 shown.extend(pieces)
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
+            if index == dest_at:
+                dest_words.update(range(before, len(words)))
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
-        for word in words:
+        for position, word in enumerate(words):
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
@@ -1247,11 +1281,12 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 hit = predicate(word, at, verb)
             else:
                 hit = predicate(word, at)
-                if not hit and fed and word != '""':
+                if not hit and fed and word != '""' and position not in dest_words:
                     walked = _first_test_under(word, at, predicate, (filters or {}).get(_unquoted(word)))
                     hit = bool(walked)
             if hit and writes_to(word, text, *(_segment_command(script) if command_position else ())):
-                return word + _TOO_LARGE_NOTE if walked == _TOO_LARGE else word
+                notes = {_TOO_LARGE: _TOO_LARGE_NOTE, _TOO_LARGE_FILTERED: _TOO_LARGE_FILTERED_NOTE}
+                return word + notes.get(walked, "")
     return ""
 
 
