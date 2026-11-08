@@ -1184,8 +1184,8 @@ class GuardClosure(unittest.TestCase):
         _, paths, loads, _ = _refs("janitor/zz_probe.py", ast.parse(src), tracked)
         self.assertNotIn("settings.json", paths | loads)
 
-    # A test module's join under REPO with several literals is a repo load: REPO is the real checkout (hooks/test_guard.py
-    # line 57). One case per target: the waiting-page page.html is read at three lines (15632, 17400, 18361).
+    # A test module's join under REPO with several literals is a repo load: REPO is the real checkout (test_guard's REPO).
+    # One case per target: the waiting-page page.html is read by three loads, WP_SOURCE, IF_PAGE and PAGE_HTML.
     def assert_test_module_reads(self, target):
         tracked = set(_repo_files())
         self.assertIn("hooks/test_guard.py", guard_closure()[0], "scope: hooks/test_guard.py is not in the closure")
@@ -1194,15 +1194,15 @@ class GuardClosure(unittest.TestCase):
         self.assertIn(target, paths | loads, f"the test module's join under REPO for {target} is not followed")
 
     def test_a_test_module_join_under_the_repo_reads_the_impeccable_skill(self):
-        # os.path.join(REPO, "skills", "impeccable", "SKILL.md") at hooks/test_guard.py line 15161.
+        # os.path.join(REPO, "skills", "impeccable", "SKILL.md") in test_guard's impeccable_command_verbs().
         self.assert_test_module_reads("skills/impeccable/SKILL.md")
 
     def test_a_test_module_join_under_the_repo_reads_the_waiting_page_html(self):
-        # os.path.join(REPO, "skills", "waiting-page", "page.html") at hooks/test_guard.py lines 15632, 17400, 18361.
+        # os.path.join(REPO, "skills", "waiting-page", "page.html") in test_guard's WP_SOURCE, IF_PAGE and PAGE_HTML.
         self.assert_test_module_reads("skills/waiting-page/page.html")
 
     def test_a_test_module_join_under_the_repo_reads_the_waiting_page_splice(self):
-        # os.path.join(REPO, "skills", "waiting-page", "splice.py") at hooks/test_guard.py line 15843.
+        # os.path.join(REPO, "skills", "waiting-page", "splice.py") in test_guard's page_empty_reason_names_the_page_case().
         self.assert_test_module_reads("skills/waiting-page/splice.py")
 
     def test_a_test_module_join_of_several_literals_under_a_fixture_root_is_not_a_repo_load(self):
@@ -1283,7 +1283,7 @@ class GuardClosure(unittest.TestCase):
     def test_a_home_config_chain_is_neither_read_nor_named(self):
         # Control: a path under the user's home is not a repo file, so the chain reads nothing and names nothing.
         tracked = set(_repo_files())
-        self.assertIn("settings.json", tracked, "scope: settings.json is a repo file, so the probe names a real repo path")
+        self.assertIn(".claude/CLAUDE.md", tracked, "scope: .claude/CLAUDE.md is not a repo file")
         src = 'import pathlib\nUSER_CLAUDE = pathlib.Path.home() / ".claude" / "CLAUDE.md"\n'
         _, paths, loads, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
         self.assertEqual((paths | loads, unfollowed), (set(), []))
