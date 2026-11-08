@@ -437,6 +437,7 @@ while True:
     except Exception as exc:
         if time.monotonic() < _load_deadline:
             time.sleep(_LOAD_STEP_SECONDS)
+            # precompact_handoff has no INSTALL_ID, so an older whole copy loads and would stay cached across the retry.
             for _name in ("git_reads", "guard_core", "reread_check", "precompact_handoff", "proc_env") + _FAMILY_MODULES:
                 sys.modules.pop(_name, None)
             importlib.invalidate_caches()
