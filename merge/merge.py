@@ -559,11 +559,12 @@ class Lock:
             return
         left = f" It expires in {max(0, self.until - self.now()):.0f}s." if self.until else ""
         try:
-            cur = self.read(b)
-            if not cur or (cur[0] != token and not {token, cur[0]} <= self.mine):  # owned: the ref holds the token, or a later commit of this run (an extension) and the token is this run's too
+            # The listing alone names the owner: a commit read can fail without the network (a fetch fault), and release must still remove this run's live lock (verification-recovery-independent-of-state).
+            cur = self.listed(lock_ref(b))
+            if not cur or (cur != token and not {token, cur} <= self.mine):  # owned: the ref holds the token, or a later commit of this run (an extension) and the token is this run's too
                 say(f"merge: the lock on {b} was not this run's any more. Someone removed it during the run. Left as is.")
                 return
-            c, why = self.delete(b, cur[0])
+            c, why = self.delete(b, cur)  # leased on the listed sha: a lock a rival took since the listing stays
             if not c:
                 return
         except Exception as e:
