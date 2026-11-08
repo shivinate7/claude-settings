@@ -137,6 +137,16 @@ ENV_ADVICE = (
     "A listing and a test for existence are allowed."
 )
 
+# Runners that start a child command, and the options of those runners and of their child that take
+# the next word as a value (an option not listed counts as a flag). The list is closed by design.
+ENV_NPM_RUNNERS = ("npm", "npm.cmd", "npm-cli.js", "npx", "npx.cmd", "npx-cli.js", "pnpm", "pnpm.cmd")
+ENV_CHILD_VALUE_FLAGS = ENV_RUNNER_VALUE_FLAGS + (
+    "-e", "--env", "--name", "-v", "--volume", "-p", "--publish", "-w", "--workdir", "--network",
+    "--net", "--entrypoint", "-u", "--user", "-f", "--file", "--project-name", "--profile",
+    "--mount", "--label", "--hostname", "--with", "--python", "--project", "--directory",
+    "--package",
+)
+ENV_PRINT_PROGRAMS = ("env", "env.exe", "printenv", "printenv.exe")
 # THE PRINTED REASONS, AND NONE OF THEM NAMES A FILE. Each one says which shape of access fired,
 # so the reader knows what to change, and the log carries the file name for a person to read.
 ENV_REDIRECT_REASON = "a redirect would overwrite an environment file"
@@ -150,6 +160,10 @@ ENV_RUNNER_REASON = (
 )
 ENV_INLINE_REASON = (
     "a runner given an environment file may run a script file, not inline code"
+)
+ENV_CHILD_REASON = (
+    "a runner given an environment file may run a program, not a command that prints "
+    "its environment"
 )
 ENV_CONTENTS_REASON = (
     "this command would read, write or commit the contents of an environment file"
@@ -670,6 +684,83 @@ def _runner_inline_code(words, position: int, command: str, stdin_fed: bool = Fa
     return fed and not script
 
 
+def _base(word: str) -> str:
+    return re.split(r"[\\/]", word)[-1].lower()
+
+
+def _first_positional(words, i: int) -> int:
+    """The index of the first word from `i` that is no option. An option that takes a value owns
+    the next word."""
+    while i < len(words):
+        if words[i] in ENV_CHILD_VALUE_FLAGS:
+            i += 2
+        elif words[i].startswith("-"):
+            i += 1
+        else:
+            break
+    return min(i, len(words))
+
+
+def _child_prints(words, at: int) -> bool:
+    """True when the child command at words[at] prints its environment (env, printenv), or runs
+    inline code: `python -c`, `sh -c`, or node, bun or deno inline code."""
+    if at >= len(words):
+        return False
+    name = _base(words[at])
+    if name in ENV_PRINT_PROGRAMS:
+        return True
+    if re.fullmatch(r"python[\d.]*(\.exe)?|(ba|z|da)?sh", name):
+        for word in words[at + 1:]:
+            if not word.startswith("-"):
+                return False  # the script word
+            if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
+                return True
+        return False
+    return _runner_inline_code(words, at, name)
+
+
+def _runner_child_prints(words, position: int, command: str) -> bool:
+    """True when a runner given the file starts a child command that prints it: `uv run`,
+    `docker`/`podman` `run`, `compose run` and `exec` (the child follows the image word), and
+    `npm exec -c`, `npx -c` and `pnpm exec`."""
+    name = _base(command)
+    if name in ENV_INLINE_RUNNERS:  # `node --env-file=F npm-cli.js exec -c env`
+        at = _first_positional(words, position + 1)
+        if at >= len(words) or _base(words[at]) not in ENV_NPM_RUNNERS:
+            return False
+        position, name = at, _base(words[at])
+    if name in ENV_NPM_RUNNERS:
+        seen_exec = False
+        i = position + 1
+        while i < len(words):
+            word = words[i]
+            if word in ("-c", "--call"):
+                return i + 1 < len(words) and _child_prints(words[i + 1].split(), 0)
+            if word.startswith("--call="):
+                return _child_prints(word[7:].split(), 0)
+            if word in ENV_CHILD_VALUE_FLAGS:
+                i += 2
+            elif word.startswith("-"):
+                i += 1
+            elif word in ("exec", "x") and not seen_exec:
+                seen_exec = True
+                i += 1
+            else:
+                return name.startswith("pnpm") and seen_exec and _child_prints(words, i)
+        return False
+    at = _first_positional(words, position + 1)
+    if name.startswith("uv"):
+        return at < len(words) and words[at] == "run" and _child_prints(
+            words, _first_positional(words, at + 1))
+    if name.startswith(("docker", "podman")):
+        if words[at:at + 1] == ["compose"]:
+            at = _first_positional(words, at + 1)
+        if words[at:at + 1] in (["run"], ["exec"]):
+            image = _first_positional(words, at + 1)  # the image or container word
+            return _child_prints(words, image + 1)
+    return False
+
+
 def _env_flat(cmd: str, text_ok: bool = False):
     """The segment rules over one text whose substitutions are already cut out."""
     ends = []
@@ -730,6 +821,10 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     if _runner_inline_code(words, position, command, stdin_piped):
                         return (ENV_INLINE_REASON,
                                 "'%s' runs inline code with '%s' loaded" % (command, named))
+                    if _runner_child_prints(words, position, command):
+                        return (ENV_CHILD_REASON,
+                                "'%s' runs a child command that prints its environment with "
+                                "'%s' loaded" % (command, named))
                     continue  # a runner loading it into its own environment prints nothing
                 if loaded:
                     return (ENV_RUNNER_REASON,
