@@ -5411,6 +5411,10 @@ sh("git-after-cd: a check || an echo then && a git push -u, is refused",
    "pytest -q || echo x && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: an if ! check whose then body is an echo of a substitution then ; exit 1, then ; a git push -u, passes",
    'if ! pytest -q; then echo "$(date)"; exit 1; fi; %s push -u origin b' % VCS, "allow", cwd=NOGIT)
+# An fd copy (`>&2`) cannot fail on a missing folder, so the exit after its && runs whenever the check fails, and
+# the push after the if is gated. A file redirect there could fail and skip the exit, so it stays refused.
+sh("git-after-cd: an if ! check whose then body is echo to an fd copy && exit 1, then ; a git push -u, passes",
+   "if ! pytest -q; then echo bad >&2 && exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
