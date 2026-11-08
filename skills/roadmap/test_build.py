@@ -2995,17 +2995,22 @@ class IdleLanes(UpkeepFixture):
         self.assertIn("cs-repo:owner/other", line)
         self.assert_no_unknown_line(entries)
 
-    def test_absent_step_with_a_trailer_and_another_repo_tag_is_still_listed(self):
-        # The other repo's tag holds a lane only when no Step trailer on main names its step. The trailer is the positive
-        # proof here, so the lane is listed. session_a is the listed control.
+    def test_absent_step_with_a_trailer_and_another_repo_tag_is_held_and_names_that_tag(self):
+        # Ruled by coordinator 03:13 CST Nov 8 under owner item 386: a step id can repeat across repos, so a Step trailer
+        # on this repo's main does not prove a lane that also carries another repo's cs-repo tag. The hold names that
+        # tag. session_single (one repo, the same trailer) and session_a are the listed controls.
         self.land({"c1": {"status": "done", "order": 1}})
         self.trailer_on_main("ghost")
         other = session_row("session_orphan", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:ghost", self.REPO,
                             "cs-repo:owner/other", status_bucket=BUCKET_COMPLETED)
-        self.publish(sessions=[other, self.lane("session_a", "c1")])
+        self.publish(sessions=[other, self.lane("session_single", "ghost"), self.lane("session_a", "c1")])
         entries = self.reported()
         self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
-        self.assertEqual(self.line_for(entries, "session_orphan"), "session_orphan (ghost; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_single"), "session_single (ghost; topic -)", entries)
+        line = self.line_for(entries, "session_orphan")
+        self.assert_held(line, "session_orphan")
+        self.assertIn("ghost", line)
+        self.assertIn("cs-repo:owner/other", line)
         self.assert_no_unknown_line(entries)
 
     def test_lanes_to_archive_row_lists_a_trailer_landed_lane_and_holds_an_absent_step_lane(self):
@@ -3033,23 +3038,36 @@ class IdleLanes(UpkeepFixture):
         entries = self.reported()
         self.assertEqual(entries, ["unknown (the record branch has no steps)"], entries)
 
-    def test_failed_second_trailer_read_reads_one_whole_read_unknown_and_no_hold(self):
-        # landed_marks reads the Step trailers once, and that read succeeds. The lane's absent step makes idle_lanes read
-        # them again, and that read fails. The list cannot be judged, so it is one whole-read unknown, not a hold on the lane.
+    def test_off_record_step_reads_the_step_trailers_on_main_once(self):
+        # ghost is off the record branch and a Step trailer on main names it, so both lanes are listed from one read.
+        # landed_marks reads the trailers, and idle_lanes must take that read rather than read main again. The entries
+        # are asserted first: a fix that skips the read holds session_orphan and fails here. session_a is the control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("ghost")
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")])
+        real = build.step_trailers
+        with mock.patch.object(build, "step_trailers", wraps=real) as spy:
+            entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_orphan"), "session_orphan (ghost; topic -)", entries)
+        self.assertEqual(spy.call_count, 1, "the Step trailers on main were read %d times, not once" % spy.call_count)
+
+    def test_failed_trailer_read_reads_one_whole_read_unknown_and_no_hold(self):
+        # The Step trailers on main are read once, and that one read fails. The lane's absent step must not turn the
+        # failed read into a hold: the list cannot be judged, so it is one whole-read unknown.
         self.land({"c1": {"status": "done", "order": 1}})
         self.publish(sessions=[self.lane("session_orphan", "ghost")])
-        real = build.step_trailers
         reads = []
 
-        def second_read_fails(repo, ref):
+        def only_read_fails(repo, ref):
             reads.append(ref)
-            return real(repo, ref) if len(reads) == 1 else None
+            return None
 
-        with mock.patch.object(build, "step_trailers", side_effect=second_read_fails):
+        with mock.patch.object(build, "step_trailers", side_effect=only_read_fails):
             entries = self.reported()
-        self.assertGreaterEqual(len(reads), 2, "the Step trailers were read %d time(s), so no second read ran" % len(reads))
+        self.assertEqual(len(reads), 1, "the Step trailers were read %d time(s), not once" % len(reads))
         self.assertEqual(len(entries), 1, entries)
-        self.assertTrue(entries[0].startswith("unknown (the Step trailers on"), entries)
+        self.assertTrue(entries[0].startswith("unknown ("), entries)
         self.assertEqual([e for e in entries if e.startswith("hold (")], [], entries)
 
     def test_only_a_closed_page_item_releases_its_lane(self):
