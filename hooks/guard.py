@@ -363,6 +363,7 @@ while True:
         import guard_core
         from guard_core import (
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            MONITOR_TOOL, SHELL_COMMAND_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -3295,7 +3296,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
 # so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
 # carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
-RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
+RUNNING_AGENT_TOOLS = SHELL_COMMAND_TOOLS + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
@@ -3524,9 +3525,6 @@ def settle_ask(tool: str, raw: str) -> None:
         if count_commands(text) - harmless_commands(text) > 1:
             refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % command, matched)
     refuse(tool, "ask", rule, reason, matched)
-
-
-MONITOR_TOOL = "Monitor"   # runs a shell command: judged by judge_shell, minus the stream family
 
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
@@ -4503,7 +4501,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
     if home_status != "home":
         return ""
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_COMMAND_TOOLS:
         # The one allowed call is a lone `cd` back into the home (a recovery step).
         if (path_is_inside(home_cwd, home) is False
                 and not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home)):
@@ -4771,7 +4769,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
         writes = bool(targets)
-    elif tool in SHELL_TOOLS:
+    elif tool in SHELL_COMMAND_TOOLS:
         targets = None
         raw = str(tool_input.get("command", "") or "")
         command = strip_heredoc_bodies(raw)
@@ -4983,7 +4981,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         return ""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
-    elif tool in SHELL_TOOLS:
+    elif tool in SHELL_COMMAND_TOOLS:
         targets = None
         command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
@@ -5038,7 +5036,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_COMMAND_TOOLS:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
