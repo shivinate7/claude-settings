@@ -3070,7 +3070,7 @@ const segs = (c, n) => ["done", "act", "stl", "pzd", "blk"].map((k) => `<i class
 // The bar's cell counts for a phase's steps, one per cell kind. shownState decides in progress, stalled and paused; the tallies read status for done and blocked.
 const tally = (ss) => ({ done: ss.filter((s) => s.status === "done").length, act: ss.filter((s) => shownState(s) === "active").length, stl: ss.filter((s) => shownState(s) === "stalled").length, pzd: ss.filter((s) => shownState(s) === "paused").length, blk: ss.filter((s) => s.status === "blocked").length });
 // ", 3 stalled, 1 paused, 1 blocked", with a kind left out when it has no steps.
-const stallWords = (c) => (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "") + (c.blk ? ", " + c.blk + " blocked" : "");
+const stallWords = (c) => (c.act ? ", " + c.act + " in progress" : "") + (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "") + (c.blk ? ", " + c.blk + " blocked" : "");
 
 /* Status marks: shape and colour together, never colour alone. */
 const GLY = {
