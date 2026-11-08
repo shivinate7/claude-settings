@@ -9334,9 +9334,9 @@ for _cmd in ("rg -uuu X .", "rg --hidden X .", "ag --hidden X ."):
     sh("env: walk control, folder has no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
     sh("env: walk control, folder is empty, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_EMPTY)
 
-# grep -r reads dotfiles, so a recursive grep of a folder that holds an env file reads that file. Owner
-# ruling (decision env-file-stays-unread, Queue item 159 a, 2026-11-02 00:56 CST): each form below is
-# refused over a folder that holds an env file. The `dir` form names the held folder by its path.
+# grep -r reads dotfiles, so a recursive grep of a folder that holds an env file reads that file. Each
+# form below is refused over a folder that holds an env file (decision env-file-stays-unread). The `dir`
+# form names the held folder by its path.
 for _cmd, _cwd in (
     ("grep -r X .", ENVWALK_HELD),
     ("grep -rn X", ENVWALK_HELD),
