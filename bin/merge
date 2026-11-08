@@ -24,7 +24,7 @@ def find():
     m = re.search(r"^@(\S.*?)[/\\]CLAUDE\.md\s*$", text, re.M)
     if m: return os.path.expanduser(m.group(1))
     d = tempfile.mkdtemp(prefix="claude-settings-")  # the repo is public: no credential needed
-    # nowindow: the clone prints its errors on the caller's terminal; with no window that output goes to a hidden console
+    # nowindow: the clone prints its errors on the caller's terminal; the wrapper's no-window flag could hide that output
     if subprocess.run(["git", "clone", "-q", "https://github.com/shivinate7/claude-settings", d]).returncode:
         rmtree_retry(d)
         sys.exit("merge: clone of claude-settings failed")
@@ -34,7 +34,7 @@ made = []
 d = find()
 try:
     if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
-    # nowindow: launch.py and merge.py print the merge report on the caller's terminal; with no window that output goes to a hidden console
+    # nowindow: launch.py and merge.py print the merge report on the caller's terminal; the wrapper's no-window flag could hide that output
     rc = subprocess.run([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:]).returncode
 finally:
     for m in made: rmtree_retry(m)  # only a clone this shim made
