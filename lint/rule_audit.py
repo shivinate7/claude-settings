@@ -553,34 +553,62 @@ def _def_emitters(tree):
     defs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     out = {}
 
-    def entry(fn, at):
+    def entry(fn, pname):
         params = _params(fn)
-        pad = len(params) - len(fn.args.defaults)
-        return at, params[at].arg, (fn.args.defaults[at - pad] if at >= pad else None)
+        names = [p.arg for p in params]
+        if pname in names:
+            at = names.index(pname)
+            pad = len(params) - len(fn.args.defaults)
+            return at, pname, (fn.args.defaults[at - pad] if at >= pad else None)
+        for p, default in zip(fn.args.kwonlyargs, fn.args.kw_defaults):  # keyword-only: no position
+            if p.arg == pname:
+                return None, pname, default
+        return None
 
-    for name, fn in defs.items():
-        if name in GUARD_RULE_ARG:
-            names = [p.arg for p in _params(fn)]
-            out[name] = entry(fn, names.index("rule")) if "rule" in names else None
+    def forwards(fn, spot_of):  # the entry of the parameter fn hands to a known sink as the rule, or None
+        params = {p.arg for p in _params(fn) + fn.args.kwonlyargs}
+        for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
+            spot = spot_of(call)
+            if spot is None:
+                continue
+            at, kw = spot
+            got = call.args[at] if at is not None and len(call.args) > at else next(
+                (k.value for k in call.keywords if k.arg == kw), None)
+            if isinstance(got, ast.Name) and got.id in params:
+                return entry(fn, got.id)
+        return None
+
+    def sink_spot(call, skip=None):  # (position or None, keyword) a call to a known rule taker puts the id at
+        if isinstance(call.func, ast.Name):
+            if call.func.id == skip:
+                return None
+            if call.func.id in out:
+                got = out[call.func.id]
+                return None if got is None else (got[0], got[1])
+        callee = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
+        return (GUARD_RULE_ARG[callee], "rule") if callee in GUARD_RULE_ARG else None
+
+    for name, fn in defs.items():  # a def named like a guard call: its `rule` parameter, else the parameter
+        if name in GUARD_RULE_ARG:  # it forwards to a known sink (`def refuse(.., rule_id, ..)`), else none
+            out[name] = entry(fn, "rule") or forwards(fn, lambda c, n=name: sink_spot(c, n))
     changed = True
     while changed:
         changed = False
         for name, fn in defs.items():
             if name in out:
                 continue
-            params = [p.arg for p in _params(fn)]
+            params = [p.arg for p in _params(fn) + fn.args.kwonlyargs]
             for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
                 callee = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
                 if callee == name:
                     continue
-                spot = out[callee] if isinstance(call.func, ast.Name) and callee in out else (
-                    (GUARD_RULE_ARG[callee], "rule", None) if callee in GUARD_RULE_ARG else None)
+                spot = sink_spot(call)
                 if spot is None:
                     continue
-                got = call.args[spot[0]] if len(call.args) > spot[0] else next(
+                got = call.args[spot[0]] if spot[0] is not None and len(call.args) > spot[0] else next(
                     (k.value for k in call.keywords if k.arg == spot[1]), None)
                 if isinstance(got, ast.Name) and got.id in params:
-                    out[name] = entry(fn, params.index(got.id))
+                    out[name] = entry(fn, got.id)
                     changed = True
                     break
     return out
@@ -632,29 +660,34 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
                 imported[name] = _module_bindings(ast.parse(read(src)), base_dir, {src})
         return imported[name]
 
-    def rows_for(src, defs):  # the rows an unpack or a loop reads, or None
+    def rows_of(expr, defs):  # (the rows of a literal collection or a module table it names, the scope their
+        # elements read in): a literal written in the def reads in the def, a module table at module level
+        rows = _rows_of(expr, values)
+        return rows, (defs if isinstance(expr, (ast.Tuple, ast.List, ast.Dict)) else ())
+
+    def rows_for(src, defs):  # the rows an unpack or a loop reads and their scope, or (None, ())
         if isinstance(src, _Each):
-            return _rows_of(src.iter, values)
+            return rows_of(src.iter, defs)
         if isinstance(src, ast.Subscript):
-            return _rows_of(src.value, values)
+            return rows_of(src.value, defs)
         if isinstance(src, ast.Name) and defs:
             own = bindings(defs[0]).get(src.id, [])
             if len(own) == 1 and isinstance(own[0], _Each):
-                return _rows_of(own[0].iter, values)
-        return None
+                return rows_of(own[0].iter, defs)
+        return None, ()
 
     def of_binding(b, defs, depth):  # the ids one binding gives its name, or None when it cannot say
         if b is _PASS:
             return set()
         if isinstance(b, _Each):  # `for r in ("a", "b")`: one string of the literal tuple
-            rows = _rows_of(b.iter, values)
-            found = None if rows is None else [of(r, (), depth + 1) for r in rows]
+            rows, scope = rows_of(b.iter, defs)
+            found = None if rows is None else [of(r, scope, depth + 1) for r in rows]
             return None if found is None or None in found else set().union(*found)
         if isinstance(b, _Unpack):
             src = b.src
             if isinstance(src, (ast.Tuple, ast.List)) and len(src.elts) == b.size:
                 return of(src.elts[b.index], defs, depth + 1)
-            rows = rows_for(src, defs)
+            rows, scope = rows_for(src, defs)
             looped = isinstance(src, _Each) or (  # `for hit in T: a, b = hit` walks T's rows too
                 isinstance(src, ast.Name) and defs and any(isinstance(o, _Each) for o in bindings(defs[0]).get(src.id, [])))
             if looped and (rows is None or any(
@@ -663,7 +696,7 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
             out = set()
             for row in rows or []:  # a table row or an element the reader cannot place names no id
                 if isinstance(row, (ast.Tuple, ast.List)) and len(row.elts) == b.size:
-                    out |= of(row.elts[b.index], (), depth + 1) or set()
+                    out |= of(row.elts[b.index], scope, depth + 1) or set()
             return out
         return of(b, defs, depth + 1) if isinstance(b, ast.expr) else None
 
@@ -719,7 +752,7 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
                 continue
             at, pname, default = spot
             args = [kw.value for kw in node.keywords if kw.arg == pname]
-            if len(node.args) > at:
+            if at is not None and len(node.args) > at:
                 args = [node.args[at]]
             elif not args and default is not None:
                 args = [default]  # the call omits the rule: the parameter's default is the id it writes
