@@ -1,5 +1,6 @@
 """The guard's branch-worktree family: branch delete, worktree remove/prune, and a commit from a
-tree its branch moved under (stale-tree-commit).
+tree its branch moved under (stale-tree-commit), and a plain commit that leaves a tracked edit
+unstaged beside a staged path in the same folder (commit-leaves-edit-unstaged).
 
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
@@ -337,25 +338,32 @@ def _named_by(name, paths, where, top):
     return False
 
 
-def stale_tree_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
-    """The stale path's name when `segments[number]` is a `git commit` that would undo what its
-    branch changed under the tree it runs in, else ''. The tree is the shell's cwd after earlier
-    `cd` steps (`dir_before_segment`), then the call's own `-C`. Only a commit makes a git call."""
+def _commit_site(segments, number: int, cwd: str, ends=()):
+    """(arguments, tree) of `segments[number]` when it is a `git commit` and its tree is a folder, else
+    None. The tree is the shell's cwd after earlier `cd` steps (`dir_before_segment`), then the call's own
+    `-C`. Only a commit makes a git call."""
     segment = segments[number]
     commits = [args for subcommand, args in git_calls(segment) if subcommand == "commit"]
     if not commits:
-        return ""
+        return None
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
-        return ""
+        return None
     where = dir_before_segment(segments, number, cwd, ends)
     named = _segment_git_c_target(tokens)
     if named is not None:
         where = None if any(mark in named for mark in "$%`") else shell_abs(named, where)
     if not where or not os.path.isdir(where):
-        return ""
-    return stale_tree_hit(where, commits[0])
+        return None
+    return commits[0], where
+
+
+def stale_tree_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
+    """The stale path's name when `segments[number]` is a `git commit` that would undo what its
+    branch changed under the tree it runs in, else ''."""
+    site = _commit_site(segments, number, cwd, ends)
+    return stale_tree_hit(site[1], site[0]) if site else ""
 
 
 STALE_TREE_REASON = (
@@ -364,6 +372,59 @@ STALE_TREE_REASON = (
     "and the diff would look like a normal edit. "
     "Remedy: stop and report it to your orchestrator, which starts a fresh agent with your "
     "report. Commit nothing here (decision stale-tree-commit, a commit never runs from a tree its branch moved under)."
+)
+
+# ------------------------------------------------------------------ commit-leaves-edit-unstaged
+#
+# Decision commit-leaves-edit-unstaged, "The ruling". A plain `git commit` asks when a tracked file's
+# work-tree copy differs from the index and a path in the same folder is in the commit. Two git calls
+# (`diff --cached --name-only`, `diff --name-only`), both in the commit's tree; a failed read passes.
+
+UNSTAGED_NAMES_SHOWN = 10
+
+
+def _name_list(where, *args):
+    """The paths one `git diff --name-only` listing prints in `where`, or None when it failed."""
+    answer = _git(where, "-c", "core.quotepath=off", *args)
+    if answer is None or answer.returncode != 0:
+        return None
+    return [line for line in answer.stdout.split("\n") if line]
+
+
+def unstaged_edit_hit(where, args) -> str:
+    """The left-out paths, comma-joined, when a plain `git commit` with these arguments, run in `where`,
+    leaves a tracked edit out beside a staged path in the same folder, else ''. A commit that picks its
+    files (`-a`, `-o`, `-i`, named paths) is not read."""
+    every, include, paths, only, _dry = commit_scope(args)
+    if every or include or only or paths:
+        return ""
+    staged = _name_list(where, "diff", "--cached", "--name-only")
+    if not staged:
+        return ""
+    left = _name_list(where, "diff", "--name-only")
+    if not left:
+        return ""
+    folders = {os.path.dirname(name) for name in staged}
+    beside = [name for name in left if os.path.dirname(name) in folders]
+    if not beside:
+        return ""
+    shown = beside[:UNSTAGED_NAMES_SHOWN]
+    more = len(beside) - len(shown)
+    return ", ".join(shown) + (" and %d more" % more if more else "")
+
+
+def unstaged_edit_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
+    """The left-out paths when `segments[number]` is a plain `git commit` that leaves a tracked edit
+    unstaged beside a staged path in the same folder, else ''."""
+    site = _commit_site(segments, number, cwd, ends)
+    return unstaged_edit_hit(site[1], site[0]) if site else ""
+
+
+UNSTAGED_EDIT_REASON = (
+    "Rule (commit leaves an edit unstaged): this commit leaves a tracked edit out, and a file in the same "
+    "folder is in it. Left out: {paths}. "
+    "Remedy: `git add <path>` for an edit that belongs in this commit, or commit it on its own "
+    "(decision commit-leaves-edit-unstaged)."
 )
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

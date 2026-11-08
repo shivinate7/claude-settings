@@ -60,6 +60,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `-a` or named paths, the file) holds the old copy of a path the move
                        changed. Squash, revert, pull, merge, rebase and a detached HEAD pass.
                        (stale-tree-commit)
+  commit-leaves-edit-unstaged  ask. A plain `git commit` (no `-a`, `-o`, `-i`, no paths) that leaves
+                       a tracked edit unstaged while a path in the same folder is staged. Reads
+                       two lists in the commit's tree; a failed read passes.
+                       (commit-leaves-edit-unstaged)
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -365,6 +369,7 @@ while True:
             worktree_remove_forced,
         )
         from guard_branch_worktree import STALE_TREE_REASON, stale_tree_commit_hit
+        from guard_branch_worktree import UNSTAGED_EDIT_REASON, unstaged_edit_commit_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
@@ -3378,6 +3383,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             matched = stale_tree_commit_hit(segments, number, cwd, ends)
             if matched:
                 refuse(tool, "deny", "stale-tree-commit", STALE_TREE_REASON, matched)
+    for number, segment in enumerate(segments):
+        if segment.strip():
+            matched = unstaged_edit_commit_hit(segments, number, cwd, ends)
+            if matched:
+                refuse(tool, "ask", "commit-leaves-edit-unstaged",
+                       UNSTAGED_EDIT_REASON.format(paths=matched), matched)
 
     # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):
