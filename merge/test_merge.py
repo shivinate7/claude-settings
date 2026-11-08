@@ -651,9 +651,42 @@ class ShallowMain(unittest.TestCase):
         self.assertEqual(shallow_clone.facts(clone, p, f), {"shallow": True, "pin_present": True, "ancestor_rc": 1}, "the clone is not the bug shape")
         return clone
 
+    def records_host(self, *records):
+        """The round-3 check's comment read: one record per (pull request, head) pair in `records`, each with Guard or check yes and first round PASS."""
+        by_pr = {}
+        for n, head in records:
+            by_pr.setdefault(n, []).append(record_text(n=n, head=head, guard="yes"))
+        return types.SimpleNamespace(review_comments=lambda since: by_pr)
+
     def stale_record_host(self, p):
         """The round-3 check's comment read: one record on pull request 20, which is no lane of the batch, for head `p`. Guard or check yes, first round PASS."""
-        return types.SimpleNamespace(review_comments=lambda since: {20: [record_text(n=20, head=p, guard="yes")]})
+        return self.records_host((20, p))
+
+    def own_record_survives_the_lift(self, pin_head):
+        """The round-3 check with the reason flag, on a shallow clone where pull request 20's record is unreadable: its head is absent (`pin_head`), or present with
+        its history cut (exit 1). Pull request 7, the one being merged, holds its own stale record, which owes its third round. The refusal must name #7."""
+        p, f = self.cut_pr_branch()
+        clone = self.shallow_pr_clone(p, f, pin_head=pin_head)
+        try:
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.records_host((20, p), (7, REVIEW_OLD_HEAD)), "octopus read it", root=clone)
+        except merge.RoundOwed as e:
+            self.assertIn("#7 changes a guard or check", str(e), "the refusal does not name pull request #7's own record:\n" + str(e))
+            return
+        self.fail(f"the reason flag lifted the whole stale-record read, so #7's own stale record went unreported (the check returned {got!r}, and the merge passes)")
+
+    def test_the_own_stale_record_alone_is_refused_in_the_same_shallow_clone(self):
+        # the control beside the two cases below: with no unreadable record, the same clone refuses #7's own stale record, so the drop comes from the sibling read
+        p, f = self.cut_pr_branch()
+        clone = self.shallow_pr_clone(p, f, pin_head=True)
+        with self.assertRaises(merge.RoundOwed) as cm:
+            merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.records_host((7, REVIEW_OLD_HEAD)), "octopus read it", root=clone)
+        self.assertIn("#7 changes a guard or check", str(cm.exception), "the refusal does not name pull request #7's own record:\n" + str(cm.exception))
+
+    def test_the_reason_flag_on_an_absent_head_read_keeps_the_own_stale_record_owed(self):
+        self.own_record_survives_the_lift(pin_head=True)
+
+    def test_the_reason_flag_on_a_cut_history_read_keeps_the_own_stale_record_owed(self):
+        self.own_record_survives_the_lift(pin_head=False)
 
     def test_a_record_for_a_head_the_shallow_clone_cuts_off_is_unknown_and_refuses(self):
         p, f = self.cut_pr_branch()
