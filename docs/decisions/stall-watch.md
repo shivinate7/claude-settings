@@ -50,7 +50,11 @@ guard rule, so the watcher does the waiting and the session is told once.
   It also appends the line to the beat file, which the hook names next to its log, exports to the job as
   `STALL_WATCH_BEAT`, and passes to the watcher as `--beat`. The watcher relays the file's new bytes to its
   own output, the harness output file. So a redirect in the command (`2>&1 | grep`, `2>/dev/null`)
-  hides the line from neither the watcher nor the Stop check. `ci-job` appends each `start: <step>` line to the
+  hides the line from neither the watcher nor the Stop check.
+  `hooks/test_guard.py` does the same. It prints a stderr line and appends to `STALL_WATCH_BEAT` at most once
+  per `GUARD_HEARTBEAT` seconds (default 60) of quiet, read at checkpoints between cases. It starts no
+  thread, timer or process. `hooks/test_guard_beat.py` (`BeatCost`) pins the cost.
+  `ci-job` appends each `start: <step>` line to the
   beat file too, once as the step starts (never on a timer). So a lint of short steps with stderr hidden is not cut.
   Every ci-job step runs under `verdict`, whose
   heartbeat feeds the watch every 120 s, so the watch does not cut a hung step: merge stops waiting on a hung lane lint after
@@ -85,11 +89,11 @@ guard rule, so the watcher does the waiting and the session is told once.
 ## The Stop-time check
 
 When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. It reads the session transcript and
-lists each open background shell whose output file has been quiet longer than the age. Each log its
+lists each open background shell and background agent that has been quiet longer than the age.
+For a shell, the signal is its output file, and each log its
 command names must be quiet too. A relative log resolves against the call record's `cwd`. A shell whose
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
-the shell or tell the owner. It repeats at every Stop while a job stays quiet. No dedupe exists yet (open
-debt `stall-message-repeats-every-stop`).
+the shell or tell the owner. A job is listed once per crossing, at the first Stop after its stall crossed (see below).
 
 If the shared names module fails to load, the check prints nothing. A false "still running" alarm is
 worse than a missed stall, and the guard already refuses every call in that state (owner ruling,
@@ -111,11 +115,31 @@ every quiet job is listed. The state is the transcript: no file is written and n
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
 already makes, at each Stop.
 
+A background agent is a job too. Its launch record is a `toolUseResult` with `isAsync` true, status
+`async_launched` and an `agentId`. `scan_jobs` reads it beside the shells, and the same notice and TaskStop
+parsing closes it. Its transcript is `<dir of the session file>/<file stem>/subagents/agent-<id>.jsonl`,
+built with `os.path`. The launch's `outputFile` is the fallback. The age is that file's mtime. A row names
+the agent id and the remedy: stop it, then resume it by name, or send a fresh reviewer the prior report
+(`roles-resume-by-name`). The listing rules are the shell's: once per crossing, against the previous Stop.
+A transcript found in neither place is listed as unknown, once. An agent is not listed while any tool_use in the read window has no tool_result: that is one long call, not a stall. The check reads that from the end of the
+transcript, for a quiet agent only. The read is the last 64 KB. It doubles until it holds a whole last
+record. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be
+read is listed.
+Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, and one read of the
+transcript's end for each agent that is quiet and not yet listed. No new process, timer or file. Case
+`A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
+Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
+notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
+stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
+an agent resumed after it closed). An agent stuck inside one tool call is never listed: an open call has no
+age cap. A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
+(559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
+
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
 one home (`building-one-home-per-capability`).
 
-- Age: the default is 300 seconds, a builder's choice, not measured. `STALL_WATCH_QUIET` sets another
+- Age: the default is 300 seconds, a builder's choice, checked only by the gap measure in the limits above. `STALL_WATCH_QUIET` sets another
   number of seconds.
 - A job counts as finished when the transcript holds a completion notice with status completed, failed,
   killed or stopped (as a user record, or as an attachment record of type queued_command), or a

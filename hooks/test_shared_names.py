@@ -308,6 +308,25 @@ def case_one_home_for_lane_heads():
     return not problems, "; ".join(problems) or "both read the one home"
 
 
+def case_guard_merge_binds_tag_prefixes_to_shared_names():
+    """hooks/guard_merge.py binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to the shared_names tags, by an imported name,
+    not to a copied literal. TOPIC_TAG_PREFIX already reads TOPIC_TAG, so it is the green control beside ROLE_TAG_PREFIX."""
+    with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    imported = {alias.asname or alias.name for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and node.module == "shared_names" for alias in node.names}
+    bound = {node.targets[0].id: node.value for node in tree.body
+             if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)}
+    problems = []
+    for name, tag in (("ROLE_TAG_PREFIX", "BUILD_TAG"), ("TOPIC_TAG_PREFIX", "TOPIC_TAG")):
+        value = bound.get(name)
+        if value is None:
+            problems.append("%s is not bound at module level" % name)
+        elif not (isinstance(value, ast.Name) and value.id == tag and tag in imported):
+            problems.append("%s is not %s from shared_names (line %d)" % (name, tag, value.lineno))
+    return not problems, "; ".join(problems) or "both prefixes read the shared tags"
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -331,6 +350,8 @@ CASES = [
     ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
     ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
      case_one_home_for_lane_heads),
+    ("(l) guard_merge binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to shared_names' tags, not literals",
+     case_guard_merge_binds_tag_prefixes_to_shared_names),
 ]
 
 
