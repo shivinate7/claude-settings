@@ -1008,9 +1008,13 @@ ARCHIVE_BRANCH_READ_REASON = (
     "the lane is stranded. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-_SOURCE_REPO = re.compile(r"github\.com[/:]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?\Z")
-# A URL whose host is github.com, in https, ssh or scp form: it must parse as owner/name, or the repo is unknown.
-_GITHUB_HOST = re.compile(r"(?:[A-Za-z][A-Za-z0-9+.-]*://)?(?:[^@/]+@)?github\.com(?:[/:]|\Z)", re.IGNORECASE)
+# A source URL on github.com (https, ssh or scp form, an optional www., any case): `repo` is its owner/name, and
+# is None when the host is github.com but the rest is no owner/name. A URL on another host does not match.
+_SOURCE_REPO = re.compile(
+    r"(?:[A-Za-z][A-Za-z0-9+.-]*://)?(?:[^@/]+@)?(?:www\.)?github\.com(?=[/:]|\Z)"
+    r"(?:[/:](?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?\Z)?",
+    re.IGNORECASE,
+)
 
 
 def _head_landed(module, repo: str, row) -> bool:
@@ -1042,13 +1046,13 @@ def _branch_repos(ccr, tag_repos):
     for source in sources or []:
         repo = source.get("git_repository") if isinstance(source, dict) else None
         url = repo.get("url") if isinstance(repo, dict) else None
-        if not isinstance(url, str) or not _GITHUB_HOST.match(url):
-            continue
-        named = _SOURCE_REPO.search(url)
+        named = _SOURCE_REPO.match(url) if isinstance(url, str) else None
         if not named:
+            continue
+        if not named.group("repo"):
             raise RuntimeError("a github.com source URL is no owner/name")
-        if named.group(1) not in found:
-            found.append(named.group(1))
+        if named.group("repo") not in found:
+            found.append(named.group("repo"))
     return found
 
 
