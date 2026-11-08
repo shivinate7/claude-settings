@@ -3759,20 +3759,26 @@ HMMAIN = os.path.join(ROOT, "hmmain")                          # a primary check
 HMLANE = os.path.join(HMMAIN, ".claude", "worktrees", "lane1")  # a real linked tree of it, in home
 HMTMPREPO = os.path.join(TEMP_DIR, "hmtmprepo")                # a repo UNDER the guard's temp folder
 HMSCRATCH = slash(os.path.join(TEMP_DIR, "scratch", "lane-a"))  # a scratch target under temp
+HM_AGENT = "hmagentown1"                                        # an agent id, whose home tree is built
+HM_SIBLING = "hmagentsib2"                                      # a second agent id, named in the denies
+HMHOME = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_AGENT)  # that agent's own home
 
 
 def _build_hand_made():
     make_repo(HMMAIN, {"f.txt": "base\n"})
     run_vcs(HMMAIN, "worktree", "add", "-q", HMLANE, "-b", "hmlane1")
+    run_vcs(HMMAIN, "worktree", "add", "-q", HMHOME, "-b", "worktree-agent-" + HM_AGENT)
     make_repo(HMTMPREPO, {"f.txt": "base\n"})
     for where in (HMMAIN, HMTMPREPO):
         if run_vcs(where, "rev-parse", "--git-dir").returncode != 0:
             sys.exit("fixture setup failed in _build_hand_made: %r is no repository" % where)
     if not os.path.isdir(HMLANE):
         sys.exit("fixture setup failed in _build_hand_made: no linked tree at %r" % HMLANE)
+    if not os.path.isdir(HMHOME):
+        sys.exit("fixture setup failed in _build_hand_made: no agent home tree at %r" % HMHOME)
 
 
-lazy_fixture([HMMAIN, HMLANE, HMTMPREPO], _build_hand_made)
+lazy_fixture([HMMAIN, HMLANE, HMHOME, HMTMPREPO], _build_hand_made)
 HM = "hand-made-worktree"
 HMADD = VCS + " worktree add "
 HMIN = slash(HMMAIN)
@@ -3843,6 +3849,35 @@ hm_allow("a heredoc body that holds the words passes",
          "cat <<'EOF'\ngit worktree add ../x\nEOF")
 hm_allow("a folder that is no git tree passes, since unknown is no hit",
          HMADD + "../lane-x", cwd=NOGIT)
+
+# AGENT. A call with a valid agent_id that adds a tree inside the primary's folder is refused, unless
+# the tree is the agent's own recorded home or its own red-run folder. Each call runs from that home,
+# so the call itself records the home, and no case depends on another case having run first.
+HMAG = dict(cwd=HMHOME, agent_id=HM_AGENT)
+HMWT = os.path.join(HMMAIN, ".claude", "worktrees")
+HMAGENT_SIB_RED = slash(os.path.join(HMWT, "agent-" + HM_SIBLING + "-red"))
+HMAGENT_PREFIX_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "b-red"))
+HMAGENT_OWN_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "-red"))
+HMAGENT_LANE9 = slash(os.path.join(HMWT, "lane9"))
+hm_deny("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
+        HMADD + HMAGENT_SIB_RED, **HMAG)
+hm_deny("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
+        HMADD + "../agent-" + HM_SIBLING + "-red", **HMAG)
+hm_deny("an agent adds a folder whose name only starts with its own id is refused",
+        HMADD + HMAGENT_PREFIX_RED, **HMAG)
+hm_deny("an agent adds a non-agent folder, lane9, under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, **HMAG)
+hm_deny("a PowerShell call by an agent, adding a sibling's red-run folder, is refused",
+        HMADD + HMAGENT_SIB_RED, tool="PowerShell", **HMAG)
+hm_deny("an agent adds a tree outside the primary's folder is refused, as before",
+        HMADD + slash(os.path.join(ROOT, "hm-agent-outside")), **HMAG)
+# The agent's own red-run folder, added the way the test-author's red run adds it, and the agent's
+# own home, both pass. The same lane9 add with no agent_id passes too, so the refusal above is the agent's.
+hm_allow("an agent adds its own red-run folder, as the red run does, passes",
+         HMADD + "--detach " + HMAGENT_OWN_RED + " HEAD", **HMAG)
+hm_allow("an agent adds its own recorded home tree passes", HMADD + slash(HMHOME), **HMAG)
+hm_allow("with no agent_id, the lane9 add from the primary passes", HMADD + HMAGENT_LANE9)
+
 add("hand-made worktree: an Agent call with no isolation, whose prompt names a worktree path, passes",
     "allow", tool="Agent", cwd=HMMAIN, subagent_type="general-purpose", description="lane",
     prompt="Work in the worktree at ../lane-x. Run `git worktree add ../lane-x` first.")
