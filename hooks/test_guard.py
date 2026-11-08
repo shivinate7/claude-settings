@@ -11992,6 +11992,9 @@ RR_NEARMISS = os.path.join(RRROOT, "rr-nearmiss")      # the same shape, with on
 RR_SIBLING = os.path.join(RRROOT, "rr-sibling")        # a commit whose tree equals a pushed sibling branch's, not its ancestor
 RR_RAWREF = os.path.join(RRROOT, "rr-rawref")          # an untrailered test commit, named by its raw sha in a push to feat
 RR_RAWOK = os.path.join(RRROOT, "rr-rawok")            # the same commit with a valid trailer
+RR_CHAIN = os.path.join(RRROOT, "rr-chain")            # a fresh branch, no upstream, with an untracked test file
+RR_CHAINDOCS = os.path.join(RRROOT, "rr-chaindocs")    # the same branch, with an untracked docs file
+RR_CHAIN_CARRY = "call of its own"                     # the chain reason's remedy: push in a call of its own
 RR_EDIT_V2 = "def test_x():\n    assert 9 == 9\n"
 RR_FULL = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n    assert 3 == 3\n"
 RR_TRIM1 = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n"
@@ -12095,11 +12098,29 @@ def _rr_lane_restore(where, restored):
              "the lane commit's tree differs from main's")
 
 
+def _rr_fresh(where, untracked):
+    """A checkout as _cmk_pushed leaves it, then a fresh branch cut from topic, which holds main's commit, and
+    never pushed: no upstream and no tracking ref. `untracked` files are written and left unstaged, so a call
+    that adds them and commits is the commit its push sends."""
+    _cmk_pushed(where, {"a.txt": "base\n"})
+    _rr_run(where, "checkout", "-q", "-b", "fresh")
+    for rel, text in untracked.items():
+        write(os.path.join(where, rel), text)
+    _rr_must(where, _rr_read(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "fresh@{upstream}").returncode != 0,
+             "no upstream on fresh")
+    _rr_must(where, _rr_sha(where, "refs/remotes/origin/fresh") == "", "no tracking ref for fresh")
+    _rr_must(where, _rr_subjects(where, "origin/main..fresh") == [], "fresh holds no commit main lacks")
+    status = _rr_read(where, "status", "--porcelain", "--untracked-files=all").stdout.splitlines()
+    _rr_must(where, all("?? " + rel in status for rel in untracked), "the new files are untracked")
+
+
 def _build_red_run():
     run, commit, must = _rr_run, _rr_commit, _rr_must
 
     _cmk_pushed(RR_PLAIN, {"a.txt": "base\n"})
     commit(RR_PLAIN, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT))
+    must(RR_PLAIN, _rr_subjects(RR_PLAIN, "origin/topic..HEAD") == [RR_SUBJECT],
+         "the untrailered test commit at HEAD is unpushed")
 
     _cmk_pushed(RR_RED, {"a.txt": "base\n"})
     commit(RR_RED, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT, RR_RED_LINE))
@@ -12294,16 +12315,20 @@ def _build_red_run():
     _rr_rawpush(RR_RAWREF)
     _rr_rawpush(RR_RAWOK, RR_RED_LINE)
 
+    # A fresh branch holding an untracked test file, and one holding an untracked docs file.
+    _rr_fresh(RR_CHAIN, {RR_TEST: RR_TEST_TEXT})
+    _rr_fresh(RR_CHAINDOCS, {"docs/x.md": "# X\n"})
+
 
 lazy_fixture([RR_PLAIN, RR_RED, RR_NONE, RR_ZERO, RR_NOARROW, RR_DOCS, RR_MERGE, RR_REBASE, RR_LANEMERGE,
               RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW,
               RR_NODEFAULT, RR_TAG, RR_NOLINT, RR_PARENNONE, RR_TREEBACK, RR_LANETREE, RR_NEARMISS, RR_SIBLING,
-              RR_RAWREF, RR_RAWOK],
+              RR_RAWREF, RR_RAWOK, RR_CHAIN, RR_CHAINDOCS],
              _build_red_run)
 
 
-def rr_refuse(name, command, cwd):
-    sh("red-run: %s is refused" % name, command, "deny", RR_RULE, cwd=cwd)
+def rr_refuse(name, command, cwd, carries=()):
+    sh("red-run: %s is refused" % name, command, "deny", RR_RULE, cwd=cwd, carries=carries)
 
 
 def rr_allow(name, command, cwd):
@@ -12409,6 +12434,20 @@ rr_refuse("git push origin <sha>:refs/heads/fresh, a raw sha of an untrailered t
 # Control: the same raw-sha form, with the commit carrying a valid trailer.
 rr_allow("git push origin <sha>:refs/heads/feat, the same commit with a valid Red-run trailer",
          lambda: VCS + " push origin " + _rr_sha(RR_RAWOK, "HEAD") + ":refs/heads/feat", RR_RAWOK)
+
+# A push in the same call as the commit it sends. The range is read before the call's commit lands, so the
+# commit the call adds, or amends, is one the range does not hold. A push after such a commit is refused as a
+# chain: its remedy names a call of its own. The docs commit and the amend with no push are the controls.
+rr_refuse("a commit in this call adds hooks/test_x.py with no trailer, then a push of a fresh branch with no upstream",
+          VCS + " add hooks/test_x.py && " + VCS + " commit -m m && " + VCS + " push origin fresh",
+          RR_CHAIN, carries=RR_CHAIN_CARRY)
+rr_refuse("an amend in this call gives HEAD's untrailered test commit a Red-run line, then a push of topic",
+          VCS + ' commit --amend -m s -m "Red-run: none: x" && ' + VCS + " push origin topic", RR_PLAIN,
+          carries=RR_CHAIN_CARRY)
+rr_allow("a docs commit in this call, then a push of a fresh branch, none of its commits a test path",
+         VCS + " add docs/x.md && " + VCS + " commit -m m && " + VCS + " push origin fresh", RR_CHAINDOCS)
+rr_allow("an amend with a Red-run line and no push in the call",
+         VCS + ' commit --amend -m s -m "Red-run: none: x"', RR_PLAIN)
 
 
 def rr_nolint_probe_case():
@@ -18846,7 +18885,7 @@ def decide(case):
     materialize_for(case)
     for key, value in list(case["tool_input"].items()):
         # A tool input may be a function, built here once its fixture exists: a command that names a
-        # commit's sha, which only the fixture's own git knows (see _rr_head).
+        # commit's sha, which only the fixture's own git knows (see _rr_sha).
         if callable(value):
             case["tool_input"][key] = value()
     if case["raw"] is not None:
