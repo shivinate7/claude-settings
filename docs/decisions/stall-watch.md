@@ -115,7 +115,7 @@ the agent id and the remedy: stop it, then resume it by name, or send a fresh re
 (`roles-resume-by-name`). The listing rules are the shell's: once per crossing, against the previous Stop.
 A transcript found in neither place is listed as unknown, once. An agent is not listed while any tool_use in the read window has no tool_result: that is one long call, not a stall. The check reads that from the end of the
 transcript, for a quiet agent only. The read is the last 64 KB. It doubles until it holds a whole last
-record. An empty transcript, or one that ends in text, is listed when quiet. A transcript that cannot be
+record. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be
 read is listed.
 Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, and one read of the
 transcript's end for each agent that is quiet and not yet listed. No new process, timer or file. Case
