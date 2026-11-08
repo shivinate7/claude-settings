@@ -7,7 +7,7 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 
 | Push | Outcome | Rule id |
 |---|---|---|
-| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all`, `--branches`) | ask | `push-main` |
+| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all`, `--branches`), on a network remote | ask | `push-main` |
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote, and does not yet exist there | ask | `push-stray-branch` |
 | A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | ask | `push-agent-branch` |
 | Any other plain push | allow | |
@@ -15,8 +15,9 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
   literal, `main` and `master`. The remote's HEAD is not read. It asks only for a network remote
   (https, http, ssh, git, or `host:path`). A remote with no URL, or a local path or `file://`
-  URL, is silent: git refuses the first, and the second is a test fixture, not GitHub. Source:
-  coordinator, 2026-11-08 10:03 CST, item 410 a, after a push-main ask on a fixture repo.
+  URL, is silent: git refuses the first, and the second is a test fixture, not GitHub. A remote
+  the shell has not yet expanded, such as `"$REMOTE"` or `$(...)`, counts as a network remote. Source:
+  page item 410 pick a, relayed by the coordinator 2026-11-08 10:03 CST, after a push-main ask on a fixture repo.
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.

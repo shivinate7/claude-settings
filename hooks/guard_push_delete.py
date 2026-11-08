@@ -291,6 +291,8 @@ def _push_branch_config(cwd: str, current: str, with_default: bool, overrides=No
 # (`https://`, `ssh://`, `git://`) or is scp-like (`host:path`, `user@host:path`).
 _PUSH_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 _PUSH_URL_SCP = re.compile(r"[^/:\\]+:")
+# A remote token the shell expands at run time: a variable, a `$( )` or a backtick substitution.
+_PUSH_SHELL_EXPANSION = re.compile(r"[$`]")
 _PUSH_LOCAL_PATH = re.compile(r"(?:/|\.{1,2}(?:[/\\]|$)|~|[A-Za-z]:[/\\]|file://)", re.I)
 _PUSH_REMOTE_KEYS = (r"^(branch\..+\.(remote|pushremote)|remote\.pushdefault"
                      r"|remote\.[^ ]+\.(url|pushurl))$")
@@ -317,7 +319,10 @@ def _push_goes_to_network(remote: str, cwd: str, current, overrides=None) -> boo
     `remote.<name>.pushurl`, else `remote.<name>.url`. A bare push names `branch.<cur>.pushRemote`, else
     `remote.pushDefault`, else `branch.<cur>.remote`, else origin. A name with no URL is no remote at all, and
     git refuses that push itself. Unreadable config is unknown, and unknown is never safe. A `git -c` override wins.
+    A remote the shell has not expanded (`$`, a backtick, `$(`) cannot be resolved, so it is unknown too.
     """
+    if _PUSH_SHELL_EXPANSION.search(remote):
+        return True
     if remote and (_is_local_path(remote) or ":" in remote):
         return _push_url_is_network(remote)
     answer = guard_core._git(cwd, "config", "--get-regexp", _PUSH_REMOTE_KEYS) if cwd else None
@@ -414,18 +419,20 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         for spec in plain:
             source, colon, target = spec.partition(":")
             if colon:
-                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
-                    return main()
+                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():
+                    return "main"
                 agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
             elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
-                return main()
+                # A local origin makes main() empty; the other refspecs are still read for agent and stray.
+                if main():
+                    return "main"
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
                 implied = True
                 agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))
             else:
                 agent = agent or bool(AGENT_BRANCH.fullmatch(source.removeprefix("refs/heads/")))
-        if implied and current() in DEFAULT_BRANCH_FALLBACK:
-            return main()
+        if implied and current() in DEFAULT_BRANCH_FALLBACK and main():
+            return "main"
     if agent:
         return "agent"
     if not implied or current() is None:
