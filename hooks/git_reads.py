@@ -284,6 +284,18 @@ def origin_slug(url):
     return "%s/%s" % (owner, name) if owner and name else None
 
 
+def is_proxy_origin(url):
+    """True for the cloud proxy's origin, `scheme://[user@]127.0.0.1[:port]/git/<owner>/<name>`: the loopback host, a
+    path that starts `git/`, and an `owner/name` that `origin_slug` reads from it. The proxy fronts GitHub, so it
+    counts as a GitHub remote. No subprocess, no network."""
+    if not isinstance(url, str) or "://" not in url:
+        return False
+    host, _, path = url.strip().split("://", 1)[1].partition("/")
+    if host.rpartition("@")[2].partition(":")[0] != "127.0.0.1":
+        return False
+    return path.startswith("git/") and origin_slug(url) is not None
+
+
 def github_repo(root, extras=_READ_EXTRAS):
     """The `owner/name` of the GitHub repo of the checkout at `root`, as written, or None. A string under the extras'
     "github" key wins; else the origin is read and parsed (`origin_slug`). The roadmap build passes the extras it

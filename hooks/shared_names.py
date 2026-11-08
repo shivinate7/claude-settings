@@ -6,7 +6,7 @@ guard or any sibling hook.
 
 import os
 import re
-from typing import Optional
+from typing import Any, Optional
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -34,7 +34,7 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 EXPLORE_AUDIT_MARKER = "Audit:"
 
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
-# marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
+# marker: (kind, regex text, position). marker_hits, below, is the one scanner that reads it. Cost: a pure scan of the
 # brief text, no I/O, no process, no file. Its position decides where the row reads:
 #   "line-start": every line of the brief that starts with the marker, case-insensitive, leading blanks allowed.
 #   "first-line": the brief's first non-blank line only, case-sensitive, with any text ahead of the marker.
@@ -55,6 +55,49 @@ BRIEF_MARKERS = (
      "first-line"),
     ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
 )
+
+# The one marker scanner reads BRIEF_MARKERS; each row is compiled once, at import. guard.py and guard_merge.py import it.
+_MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
+
+
+def brief_first_line(brief: Any) -> str:
+    """A brief's first non-blank line, or "" for a brief that is not text. The one home of the first-line pick."""
+    if not isinstance(brief, str):
+        return ""
+    return next((line for line in brief.split("\n") if line.strip()), "")
+
+
+def marker_scan(brief: Any) -> list[tuple[str, Optional[str]]]:
+    """The [(kind, n)] markers of a brief, read from BRIEF_MARKERS, in the order a reader meets them: each "line-start"
+    match in line order, then each "first-line" row's hit in table order. A "line-start" row reads every line of the
+    brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None for a row with none
+    (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions read
+    different spans of the brief (decision agent-model-cap); BRIEF_MARKERS says which row uses which."""
+    if not isinstance(brief, str):
+        return []
+    first = brief_first_line(brief)
+    starts: list[tuple[int, str, Optional[str]]] = []
+    leads: list[tuple[str, Optional[str]]] = []
+    for kind, rx, position in _MARKER_ROWS:
+        if position == "line-start":
+            found = list(rx.finditer(brief))
+            starts.extend((hit.start(), kind, hit.group(1) if rx.groups else None) for hit in found)
+        else:
+            hit = rx.search(first)
+            found = [hit] if hit else []
+            leads.extend((kind, hit.group(1) if rx.groups else None) for hit in found)
+    return [(kind, n) for _, kind, n in sorted(starts)] + leads
+
+
+def marker_hits(brief: Any) -> set[tuple[str, Optional[str]]]:
+    """The {(kind, n)} markers of a brief: the one marker scanner (marker_scan) as a set."""
+    return set(marker_scan(brief))
+
+
+def brief_markers(brief: Any) -> list[tuple[str, Optional[str]]]:
+    """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
+    without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
+    return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
 
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
 # the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).

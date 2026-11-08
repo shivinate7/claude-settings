@@ -22,11 +22,47 @@ from git_reads import (  # noqa: F401
     PROCESS_START_UNREADABLE, SESSION_LIVE_TOLERANCE_MS, _common_dir, _git, _inside_work_tree,
     _path_identity, _process_start_ms, _process_start_ms_windows, _under_by_identity,
     branch_cherry_empty, branch_is_ancestor, branch_is_empty, branch_on_remote, branch_proof,
-    clone_checkouts, dirty_paths_are_pushed_copies, git_common_dir, is_worktree, porcelain,
+    clone_checkouts, dirty_paths_are_pushed_copies, git_common_dir, is_proxy_origin, is_worktree, porcelain,
     primary_checkout, read_default_base,
     resolve_default_base, session_is_live, session_records, stash_stack, worktree_live_session,
     worktree_locked,
 )
+
+
+def _checkout_root_by_stat(folder: str) -> str:
+    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
+    worktree's file), found by stat alone, else ''. No git is spawned."""
+    while folder:
+        if os.path.exists(os.path.join(folder, ".git")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return ""
+        folder = parent
+    return ""
+
+
+def _git_common_dir(root: str) -> str:
+    """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
+    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
+    one, relative to `<dir>`. No git is spawned."""
+    dot = os.path.join(root, ".git")
+    try:
+        if os.path.isdir(dot):
+            return os.path.realpath(dot)
+        with open(dot, encoding="utf-8") as handle:
+            first = handle.readline(4096).strip()
+        if not first.startswith("gitdir:"):
+            return ""
+        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
+        try:
+            with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
+                git_dir = os.path.join(git_dir, handle.readline(4096).strip())
+        except OSError:
+            pass  # no commondir: a submodule's or a bare-style git dir is its own common dir
+        return os.path.realpath(git_dir)
+    except (OSError, UnicodeDecodeError):
+        return ""
 
 
 def is_cloud() -> bool:

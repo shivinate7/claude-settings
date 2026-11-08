@@ -129,6 +129,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that cannot load allows and is noted as `review-record-unread`. The reason names the
                        merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
                        call, no subprocess, no network. An override lifts it. (pr-review-record)
+  review-needs-pr      deny. A call from any session with no `agent_id`: an Agent or Task spawn of a `reviewer` or
+                       `design-reviewer` whose brief carries a `Round N of 3` marker (a brief with no marker is not
+                       judged) and names no pull request (`PR #<n>`, `PR <n>`, `PR: <n>`, `PR (#<n>)`,
+                       `PR number <n>`, `pull request #<n>`, or a github.com pull URL; an issue URL, a bare `#12` and
+                       `PR review` with no number do not count), when the repo holding the payload's cwd has a remote
+                       naming github.com or the cloud proxy origin. A repo with no github remote, no cwd, and a
+                       config that is missing or unreadable, allow. Config file reads only (a linked worktree reads
+                       the common config): no subprocess, no network. An override lifts it. (pr-review-record)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -379,6 +387,7 @@ while True:
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
+            _checkout_root_by_stat, _git_common_dir,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -406,7 +415,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, review_record_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, review_needs_pr_hit, review_record_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -2608,48 +2617,8 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
-# The one marker scanner reads shared_names.BRIEF_MARKERS; each row is compiled once, at import.
-from shared_names import BRIEF_MARKERS  # noqa: E402  the one home of the marker rows
-_MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
-
-
-def brief_first_line(brief) -> str:
-    """A brief's first non-blank line, or "" for a brief that is not text. The one home of the first-line pick."""
-    if not isinstance(brief, str):
-        return ""
-    return next((line for line in brief.split("\n") if line.strip()), "")
-
-
-def marker_scan(brief) -> list:
-    """The [(kind, n)] markers of a brief, read from BRIEF_MARKERS, in the order a reader meets them: each "line-start"
-    match in line order, then each "first-line" row's hit in table order. A "line-start" row reads every line of the
-    brief; a "first-line" row reads the first non-blank line alone. n is the row's group 1, or None for a row with none
-    (the audit marker). A brief that is not text has none. Pure: no I/O, no process, no file. The two positions read
-    different spans of the brief (decision agent-model-cap); BRIEF_MARKERS says which row uses which."""
-    if not isinstance(brief, str):
-        return []
-    first = brief_first_line(brief)
-    starts, leads = [], []
-    for kind, rx, position in _MARKER_ROWS:
-        if position == "line-start":
-            found = list(rx.finditer(brief))
-            starts.extend((hit.start(), kind, hit.group(1) if rx.groups else None) for hit in found)
-        else:
-            hit = rx.search(first)
-            found = [hit] if hit else []
-            leads.extend((kind, hit.group(1) if rx.groups else None) for hit in found)
-    return [(kind, n) for _, kind, n in sorted(starts)] + leads
-
-
-def marker_hits(brief) -> set:
-    """The {(kind, n)} markers of a brief: the one marker scanner (marker_scan) as a set."""
-    return set(marker_scan(brief))
-
-
-def brief_markers(brief) -> list:
-    """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
-    without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
-    return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
+# The marker scanner lives in shared_names beside BRIEF_MARKERS, so guard_merge reads the same one.
+from shared_names import brief_first_line, brief_markers, marker_hits, marker_scan  # noqa: E402,F401  the one home of the marker reader
 
 
 def builder_third_round(brief) -> bool:
@@ -4603,42 +4572,6 @@ def _owning_checkout(path: str, roots) -> str:
     return max(owners, key=len) if owners else ""
 
 
-def _checkout_root_by_stat(folder: str) -> str:
-    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
-    worktree's file), found by stat alone, else ''. No git is spawned."""
-    while folder:
-        if os.path.exists(os.path.join(folder, ".git")):
-            return folder
-        parent = os.path.dirname(folder)
-        if parent == folder:
-            return ""
-        folder = parent
-    return ""
-
-
-def _git_common_dir(root: str) -> str:
-    """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
-    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
-    one, relative to `<dir>`. No git is spawned."""
-    dot = os.path.join(root, ".git")
-    try:
-        if os.path.isdir(dot):
-            return os.path.realpath(dot)
-        with open(dot, encoding="utf-8") as handle:
-            first = handle.readline(4096).strip()
-        if not first.startswith("gitdir:"):
-            return ""
-        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
-        try:
-            with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
-                git_dir = os.path.join(git_dir, handle.readline(4096).strip())
-        except OSError:
-            pass  # no commondir: a submodule's or a bare-style git dir is its own common dir
-        return os.path.realpath(git_dir)
-    except (OSError, UnicodeDecodeError):
-        return ""
-
-
 def _clone_origin(common: str) -> str:
     """The `[remote "origin"]` url in COMMON's config file, else '' (no file, no origin, no url)."""
     try:
@@ -5264,6 +5197,11 @@ def judge(payload) -> None:
         record(tool, "noted", "review-record-unread", tool)
     if record_reason:
         refuse(tool, "deny", "review-record-after-round", record_reason, record_matched)
+
+    # A reviewer brief that names no pull request, in a repo with a github remote (rule review-needs-pr).
+    needs_reason, needs_matched = review_needs_pr_hit(tool, tool_input, cwd, bool(payload.get("agent_id")))
+    if needs_reason:
+        refuse(tool, "deny", "review-needs-pr", needs_reason, needs_matched)
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
