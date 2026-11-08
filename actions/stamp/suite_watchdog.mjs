@@ -26,6 +26,7 @@
 //    with every member in it. The child waits on a go-file until the helper has put it in the job, so
 //    on CI no test runs outside it: a run that cannot get a job fails by name. Off CI the child is
 //    released anyway, and leftovers are found by a walk of the process tree, with a printed note.
+//    A child whose go-file never appears fails by name and runs no test, so no test runs unwatched.
 // An unreadable sweep is unknown, never "nothing found": on CI it exits 1 too.
 // Cost: one extra PowerShell process on Windows, for the suite's own run only.
 
@@ -41,7 +42,8 @@ export const START = "STAMP-START "; // the child prints it before each test, so
 const RUN = "STAMP_SUITE_RUN";
 const GO = "STAMP_SUITE_GO"; // Windows: the child starts its tests when this file exists
 const NO_JOB = "STAMP_SUITE_NO_JOB"; // "1": Windows: the watchdog makes no job object, as if it could not
-const GO_FAIL = "STAMP_SUITE_GO_FAIL"; // "1": Windows: the go-file write fails, as if the disk refused it
+const GO_WAIT_MS = "STAMP_SUITE_GO_WAIT_MS"; // ms the child waits for the go file before it fails; default 40000
+const GO_FAIL ="STAMP_SUITE_GO_FAIL"; // "1": Windows: the go-file write fails, as if the disk refused it
 // A seam for the wiring test, not a feature. A clean fixture leaves nothing, so no real run reaches
 // the "pid still alive after the kill" or "sweep could not read" results. "alive" or "unknown" makes
 // the sweep report that result on top of what it really found, and the real leftoverExit wiring then
@@ -81,10 +83,19 @@ export function leftoverExit(code, { lines = [], alive = [], unknown = [] } = {}
 
 // The child calls it before its first test. Windows: it waits for the go file, which the watchdog
 // writes once this process is in its job, or, off CI with no job, once it has chosen the fallback.
-// It waits at most 40 s, so a dead watchdog cannot hold it.
+// A go file that never appears means the watchdog is dead or stuck, so no job, cap or sweep covers
+// this process. It waits GO_WAIT_MS (default 40 s), then exits 1 before any test rather than run
+// tests nothing watches.
 export function waitForGo(env = process.env) {
   if (!env[GO]) return;
-  for (const t0 = Date.now(); !existsSync(env[GO]) && Date.now() - t0 < 40_000;) sleepMs(50);
+  const waitMs = Number(env[GO_WAIT_MS]) || 40_000;
+  for (const t0 = Date.now(); !existsSync(env[GO]);) {
+    if (Date.now() - t0 >= waitMs) {
+      console.error(`FAIL - no go file at ${env[GO]} after ${waitMs} ms, so the watchdog is not running and no test ran`);
+      process.exit(1);
+    }
+    sleepMs(50);
+  }
 }
 
 // Linux and macOS: each live process of the run but this one, as { found: [{ pid, cmd }], unreadable }.
