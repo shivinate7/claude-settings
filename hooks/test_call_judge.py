@@ -2535,6 +2535,52 @@ def case_round3_refusal_remedy_says_what_a_read_may_name():
               "defines the named rule" in tail, tail[:200])
 
 
+# ------------------------------------------------------------------ verdict claim, round 4 (red on f84a70aa8)
+#
+# Two false alarms a normal turn hits. A forecast inside quotes or inside a code span is a mention, not a claim. A
+# question about a verdict ("verify", "whether", "find out if", "probe whether", "confirm") is an ask, not a claim. Each
+# allowed send is red today: the gate refuses it. The control is a plain claim with no run, which stays refused. The
+# remedy pin: a refusal says the file must be named in the sentence outside the cite.
+ROUND4_ALLOWED = (
+    ("quoted text", 'She said "the check will refuse it"'),
+    ("inline code", "Quoted from the lane: `the check will refuse it`."),
+    ("a verify ask", "Verify the check will pass it."),
+    ("a whether clause", "I do not know whether the check will refuse it."),
+    ("a find-out-if ask", "Find out if CI will fail it."),
+    ("a probe-whether ask", "Probe whether the guard will refuse it."),
+    ("a confirm ask before a push", "Confirm the guard will refuse it before you push."),
+)
+ROUND4_PLAIN_CLAIM = "The check will refuse it."  # the control: said plainly, no run, no cite
+
+
+def case_round4_quoted_and_asked_forecasts_pass():
+    transcript = write_transcript("r4-allowed")
+    for label, sentence in ROUND4_ALLOWED:
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, sentence, transcript=transcript), answer=ALLOW)
+            check("round 4 allowed (%s), via %s: the send is not refused" % (label, tool),
+                  r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_round4_plain_claim_without_run_is_refused():
+    transcript = write_transcript("r4-plain")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, ROUND4_PLAIN_CLAIM, transcript=transcript), answer=ALLOW)
+        check("round 4 control, a plain claim with no run, via %s: the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_round4_refusal_remedy_names_the_file_outside_the_cite():
+    transcript = write_transcript("r4-remedy")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, ROUND4_PLAIN_CLAIM, transcript=transcript), answer=ALLOW)
+        reason = r.reason()
+        check("round 4 remedy scope (%s): the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check("round 4 remedy (%s): the file must be named in the sentence outside the cite" % tool,
+              "named in the sentence" in reason and "outside the cite" in reason, reason[:240])
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2587,7 +2633,9 @@ def main():
                  case_run_before_a_peer_message_does_not_clear_a_later_claim, case_round2_cite_bar,
                  case_verdict_and_question_failures_give_one_refusal_naming_both,
                  case_round3_allowed_claims_pass, case_round3_refused_claims_are_refused,
-                 case_round3_refusal_remedy_says_what_a_read_may_name):
+                 case_round3_refusal_remedy_says_what_a_read_may_name,
+                 case_round4_quoted_and_asked_forecasts_pass, case_round4_plain_claim_without_run_is_refused,
+                 case_round4_refusal_remedy_names_the_file_outside_the_cite):
         try:
             case()
         except Exception as exc:
