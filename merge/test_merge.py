@@ -15210,6 +15210,67 @@ class BatchRedWindow(Env):
         self.assertIn(merge.BATCH_RED_WORD, out, "the refusal does not name the Batch: red line:\n" + out)
         self.assertFalse(getattr(host, "merged", False), "the fix was merged past the Batch: red line on the head it holds:\n" + out)
 
+    def batch_on_a_red_head(self):
+        """The red integration head X (feat: origin/main with lane1 merged in, its line on INT_PR), and a new batch H that merges lane2, cut from X.
+        H holds X through lane2, not on its first-parent chain. -> (X, H)."""
+        x_head, _ = self.lane_head()
+        lane_batch(self, "lane2", cut=x_head, into="feat2", base="origin/main")
+        return x_head, self.head("feat2")
+
+    def new_batch_host(self, x_head, h, line):
+        """The merge host of the new batch feat2 (pull request 1, head H). The integration pull request INT_PR is open at X, and `line` is the one
+        comment on the repo."""
+        pulls = [batch_pull(INT_PR, x_head, head_ref="feat", created_at=self.LANE_OPENED),
+                 batch_pull(1, h, head_ref="feat2", created_at=self.HEAD_OPENED)]
+        return CommentHost(self.co, self.other, comments=[line], branch="feat2", created=self.HEAD_OPENED, pulls=pulls)
+
+    def test_an_integration_head_line_refuses_a_batch_that_holds_that_head_through_a_lane(self):
+        x_head, h = self.batch_on_a_red_head()
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "merge-base", "--is-ancestor", x_head, h)  # scope: the new batch holds the red integration head
+        self.assertNotIn(x_head, sh(self.co, "git", "rev-list", "--first-parent", h).split(),
+                         "scope: the red integration head is on the new batch's first-parent chain, so the case proves nothing")
+        host = self.new_batch_host(x_head, h, batch_red_line(950, INT_PR, x_head, created=self.LINE, integration=True))
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertNotEqual(rc, 0, "a new batch that holds a red integration head through a lane was merged past that head's line:\n" + out)
+        self.assertIn(x_head[:9], out, "the refusal does not name the red integration head's line:\n" + out)
+        self.assertFalse(getattr(host, "merged", False), "the new batch was merged past the integration line on the head it holds:\n" + out)
+
+    def test_control_a_lane_line_on_that_head_does_not_refuse_the_new_batch(self):
+        """The red case's shape, with a lane's line on X instead of the integration line. Only the form of the line differs."""
+        x_head, h = self.batch_on_a_red_head()
+        host = self.new_batch_host(x_head, h, batch_red_line(950, INT_PR, x_head, created=self.LINE))
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertEqual(rc, 0, "a lane's line on an integration head refused a new batch that holds that head through a lane:\n" + out)
+        self.assertTrue(getattr(host, "merged", False), "the new batch did not merge past a lane's line on a head it holds through a lane:\n" + out)
+
+    def lane_with_a_sibling(self):
+        """lane1 with the lane sib merged in, as a lane that merged its sibling holds it: its head L has a merge whose second parent is not on main,
+        so read_lanes(L) is non-empty. -> L."""
+        lane_batch(self, "sib", into="lane1", base="origin/main")
+        return self.head("lane1")
+
+    def test_a_fix_on_a_lane_head_that_merged_a_sibling_is_not_refused_by_the_lane_line_on_that_head(self):
+        lane = self.lane_with_a_sibling()
+        fix = self.commit("lane1", {"fix.txt": "fix\n"})
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "merge-base", "--is-ancestor", lane, fix)  # scope: the fix sits on the lane head
+        self.assertTrue(merge.read_lanes(self.co, "origin/main", lane)[0], "scope: the lane head merged no lane, so the case proves nothing")
+        host = CommentHost(self.co, self.other, comments=[batch_red_line(950, 7, lane, created=self.LINE)], branch="lane1", created=self.LANE_OPENED,
+                           pulls=[batch_pull(7, fix, head_ref="lane1", created_at=self.LANE_OPENED)])
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 0, "a fix pushed on a lane head that merged a sibling was refused by the lane line on that head:\n" + out)
+        self.assertTrue(getattr(host, "merged", False), "the fix on the lane head did not merge:\n" + out)
+
+    def test_control_a_lane_line_on_a_lane_head_that_merged_a_sibling_refuses_that_head(self):
+        lane = self.lane_with_a_sibling()
+        host = CommentHost(self.co, self.other, comments=[batch_red_line(950, 7, lane, created=self.LINE)], branch="lane1", created=self.LANE_OPENED,
+                           pulls=[batch_pull(7, lane, head_ref="lane1", created_at=self.LANE_OPENED)])
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertNotEqual(rc, 0, "a lane line on a lane head that merged a sibling did not refuse that head's merge:\n" + out)
+        self.assertIn(merge.BATCH_RED_WORD, out, "the refusal does not name the Batch: red line:\n" + out)
+        self.assertFalse(getattr(host, "merged", False), "the lane head was merged past its own Batch: red line:\n" + out)
+
     def read_error_refusal(self, host):
         """-> (rc, out, err) of `merge --confirm` on pull request 1 over `host`. An exception that escapes the run is a failed case."""
         out, err = io.StringIO(), io.StringIO()
