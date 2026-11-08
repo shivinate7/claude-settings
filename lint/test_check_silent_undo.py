@@ -5,7 +5,7 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases: a squash that carries the pre-deletion copy of a file (a revert nobody wrote), and a
 merge that drops a parent's added line.
 """
-import atexit, contextlib, inspect, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, contextlib, inspect, io, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -15,6 +15,7 @@ import check_debt_retire as D  # noqa: E402  the debt-close check: the scope eac
 from test_check_debt_retire import PROSE, RUN_URL, Runs, debt  # noqa: E402  one home of the debt shape and the fake run reader
 sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import check_silent_undo as C  # noqa: E402
+from workflow_steps import job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
@@ -2579,6 +2580,72 @@ class RetireCite(unittest.TestCase):
         flagged = Runs(("success", head))
         self.silent(head, body, flagged, strict=True)
         self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
+
+
+# CheckStepPins: the pull request body reaches the silent-undo check in env PR_BODY, mapped from the body expression, and no run:
+# line inlines the body (zizmor's template injection). Steps are read through lint/workflow_steps.py, the one home of the step parser.
+ACTION_YML = os.path.join(HERE, "..", "actions", "silent-undo", "action.yml")
+CHECKS_YML = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+BODY_EXPR = "${{ github.event.pull_request.body }}"
+INLINE_BODY = re.compile(r"\$\{\{(?:(?!\}\}).)*body", re.S)  # a body expression, across lines and past a `{0}`
+
+
+def squash(value):
+    """A map value with its whitespace removed, so `${{ x }}` and `${{x}}` read alike. None reads as empty."""
+    return re.sub(r"\s+", "", value or "")
+
+
+def runs_the_check(step):
+    """True for a step that runs the silent-undo check itself, by its script or its action; a step that tests the check (`test` in its line) is not one."""
+    lines = (run_body(step) or "").splitlines()
+    return any(re.search(r"silent[_-]undo", ln) and "test" not in ln for ln in lines) or bool(re.search(r"silent[_-]undo", step_key(step, "uses") or ""))
+
+
+def action_step_blocks(text):
+    """action.yml's steps, shifted to a job's columns: the action's steps sit two spaces left of a job's, and the step parser reads a job's."""
+    steps = text.split("\n  steps:\n", 1)[1]
+    return step_blocks("\n".join(("  " + ln) if ln.strip() else ln for ln in steps.split("\n")))
+
+
+class CheckStepPins(unittest.TestCase):
+    """The silent-undo check gets the pull request body in env PR_BODY, mapped from the body expression, and no run: line inlines it.
+    The composite action maps it already. The checks job must run the check with the body too."""
+
+    def setUp(self):
+        with open(CHECKS_YML, encoding="utf-8") as f:
+            self.checks = f.read()
+        with open(ACTION_YML, encoding="utf-8") as f:
+            self.action = f.read()
+
+    def test_the_action_step_maps_the_pr_body_to_env_PR_BODY(self):
+        steps = action_step_blocks(self.action)
+        self.assertEqual(len(steps), 1, "action.yml has %d steps, want the one check" % len(steps))
+        self.assertEqual(squash(step_env(steps[0]).get("PR_BODY")), squash(BODY_EXPR),
+                         "action.yml's step does not map env PR_BODY to the pull request body")
+
+    def test_a_checks_job_step_runs_the_silent_undo_check_with_the_body_in_env_PR_BODY(self):
+        steps = [st for st in step_blocks(job_block(self.checks, "checks")) if runs_the_check(st)]
+        self.assertEqual(len(steps), 1, "the checks job has %d steps that run the silent-undo check, want 1" % len(steps))
+        self.assertEqual(squash(step_env(steps[0]).get("PR_BODY")), squash(BODY_EXPR),
+                         "the checks job's silent-undo step does not map env PR_BODY to the pull request body")
+
+    def test_no_run_line_in_either_file_inlines_the_pr_body(self):
+        runs = [(step_key(st, "name") or "unnamed step", run_body(st) or "") for st in step_blocks(self.checks)]
+        runs += [(step_key(st, "name") or "action step", run_body(st) or "") for st in action_step_blocks(self.action)]
+        self.assertGreater(len(runs), 20, "the scan read %d run: lines, so it covered nothing" % len(runs))
+        for label, run in runs:
+            with self.subTest(step=label):
+                self.assertIsNone(INLINE_BODY.search(run), "%s inlines the PR body in its run: line" % label)
+
+    def test_the_scan_flags_an_inline_body_in_a_run(self):  # control: the pattern is not vacuous
+        self.assertIsNotNone(INLINE_BODY.search('echo "${{ github.event.pull_request.body }}"'))
+        self.assertIsNotNone(INLINE_BODY.search("echo \"${{ format('{0}', github.event.pull_request.body) }}\""), "a format() wrapper hides the body")
+        self.assertIsNotNone(INLINE_BODY.search("echo \"${{ format('{0}',\n  github.event.pull_request.body) }}\""), "a multi-line expression hides the body")
+        self.assertIsNone(INLINE_BODY.search('echo "${{ env.PR_BODY }}"'))
+        self.assertIsNotNone(INLINE_BODY.search('echo ok # ${{ github.event.pull_request.body }}'), "a shell comment still expands the body")
+        self.assertIsNotNone(INLINE_BODY.search('echo "it\'s ${{ github.event.pull_request.body }}"'), "a lone quote hides the body")
+        self.assertIsNotNone(INLINE_BODY.search('echo "# ${{ github.event.pull_request.body }}"'), "a comment opener inside a string hides the body")
+        self.assertIsNotNone(INLINE_BODY.search("echo start\necho \"`${{ github.event.pull_request.body }}`\"\n"), "a template line hides the body")
 
 
 if __name__ == "__main__":

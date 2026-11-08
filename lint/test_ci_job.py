@@ -492,6 +492,13 @@ class GithubBaseRef(Job):
                                               args=("--base", "origin/main"), env={"CI_JOB_PR_BODY": body})
         self.assertEqual((verdicts, seen), (["PASS"], body), out)
 
+    def test_a_run_line_that_holds_the_pull_request_body_reads_unknown(self):
+        """The body is data, never shell text: a run: line with the body expression is unknown, exit 2, and no shell runs it."""
+        rc, lines, out = self.run_job(step("inline", 'echo "${{ github.event.pull_request.body }}"'),
+                                      args=("--base", "origin/main"), env={"CI_JOB_PR_BODY": "Drops-lines: a -- b"})
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertEqual(rc, 2, out)
+
 
 def mapped(parent, body):
     """One `      - ` step whose `parent:` block (`with` or `env`) holds `body`, raw, as YAML writes it."""
