@@ -532,6 +532,7 @@ ARCHINC_PULLS500 = os.path.join(ROOT, "archinc-pulls-500")     # the pull reques
 ARCHINC_PULLSJUNK = os.path.join(ROOT, "archinc-pulls-junk")   # the pull request list of the branch in q_max is not JSON
 ARCHINC_REPO500 = os.path.join(ROOT, "archinc-repo-500")       # q_max's own read, its default branch, is a server error
 ARCHINC_TRUNK = os.path.join(ROOT, "archinc-trunk")            # q_max's default branch is trunk: the branch is ahead of trunk
+ARCHINC_DIVERGED = os.path.join(ROOT, "archinc-diverged")      # the branch diverged from main in q_max, on no pull request
 
 
 def arch_pair(qmax=None, settings=None):
@@ -1072,8 +1073,9 @@ else:
         rows = ([] if state.get("repo_mode") else [dict(state["pr"], number=state["number"])]) + others  # a repo scope holds its own rows only
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
-        if "head" in fields:  # GitHub filters a list read by `head=<owner>:<branch>`, on the branch part
-            rows = [row for row in rows if row["head"]["ref"] == fields["head"].split(":", 1)[-1]]
+        if "head" in fields:  # GitHub filters a list read by `head=<owner>:<branch>`: the owner is the repo's, so a bare branch matches none
+            owner, _, branch = fields["head"].partition(":")
+            rows = [row for row in rows if owner == path.split("/")[1] and row["head"]["ref"] == branch]
         print(listing(rows, None, fields, flags))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
@@ -1447,6 +1449,7 @@ def build_fixtures():
     make_fake_gh(ARCHINC_TRUNK, "main", repos=arch_pair(qmax={"default_branch": "trunk",
                                                              "compares": {"main..." + ARCH_BRANCH: "behind",
                                                                           "trunk..." + ARCH_BRANCH: "ahead"}}))
+    make_fake_gh(ARCHINC_DIVERGED, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "diverged"}}))
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -9551,6 +9554,10 @@ ROLE_LINES = {
         ARCH_INC_TAGS, {}, [ARCH_QMAX_SOURCE]))),
     "archive-inc-nometa": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ARCH_INC_TAGS, None, [ARCH_QMAX_SOURCE]))),
+    # The branch lives only in q_max, which the record names through its sources: no cs-repo tag names q_max.
+    "archive-inc-source-only": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE]))),
 }
 
 
@@ -10156,6 +10163,12 @@ archive_allow("an empty current_branches names no branch: allowed, and reading i
               role_path("archive-inc-empty"), fake_gh_path(ARCHINC_NOPR))
 archive_allow("a record with no external_metadata is judged as before the branch read: allowed",
               role_path("archive-inc-nometa"), fake_gh_path(ARCHINC_NOPR))
+# A repo the record names only through session_context.sources is read too: a branch ahead there, on no pull request, refuses.
+archive_refuse("a lane whose branch lives only in a repo its record names through sources, not a cs-repo tag: refused",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A compare that reads diverged is a branch off main that is not in it: ahead of main for the rule, so no pull request refuses.
+archive_refuse("a branch whose compare in q_max is diverged, on no pull request: refused",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_DIVERGED), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
 
 
 # =========================================================================== 5h. one lane, one topic
