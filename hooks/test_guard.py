@@ -5557,6 +5557,61 @@ sh("check-tail: uv run python -m pytest piped to tail in the foreground is allow
 sh("check-tail: env VAR=x then verdict merge --lane-lint piped to tail in the foreground is allowed",
    "env FOO=1 verdict merge --lane-lint 7 | tail -3", "allow", cwd=NOGIT)
 
+# --- a verdict call piped into a later stage, then && || or ; (rule verdict-pipe-exit)
+#
+# verdict keeps the whole log and prints the verdict, but a pipe after it hides verdict's exit
+# status, so the `&&`, `||` or `;` that follows still runs after a red check. A red lint went in
+# this way once. The rule refuses a `verdict` call (any spelling, behind any wrapper) piped into any
+# later stage when `&&`, `||` or `;` follows the pipeline and pipefail is not set earlier in the same
+# command. A bare verdict call, and a pipeline that ends the command, are allowed. The rule runs in
+# the foreground and in the background. check-tail exempts verdict, so this is its own rule id.
+# The background case names an until note, so background-end decides none of them.
+VERDICT_PIPE = "verdict-pipe-exit"
+
+sh("verdict-pipe-exit: verdict piped to tail, then && commit, is refused",
+   "verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x", "deny", VERDICT_PIPE,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: the absolute bin path piped to tail, then ;, is refused",
+   "~/.claude/bin/verdict python3 hooks/test_guard.py | tail -5; git push", "deny", VERDICT_PIPE,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: the relative bin path piped to head, then &&, is refused",
+   "bin/verdict make check | head -3 && echo ok", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: an env assignment before verdict piped to tail, then &&, is refused",
+   "GUARD_FAMILY=stream verdict python3 hooks/test_guard.py 2>&1 | tail -3 && git push", "deny",
+   VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: the shortened incident line piped to tail, then && add and commit, is refused",
+   "~/.claude/bin/verdict python3 lint/ste_lint.py docs/decisions/x.md 2>&1 | tail -1 && "
+   "git add docs/decisions/x.md && git commit -q -m x", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: verdict piped to tail, then || echo, is refused",
+   "verdict python3 lint/check_x.py | tail -1 || echo failed", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: verdict piped to grep -q, then && push, is refused",
+   "verdict python3 lint/check_x.py 2>&1 | grep -q PASS && git push", "deny", VERDICT_PIPE,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: verdict piped to sed -n, then && push, is refused",
+   "verdict make check | sed -n 1p && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
+add("verdict-pipe-exit: verdict piped to tail, then && commit, backgrounded, is refused", "deny",
+    VERDICT_PIPE, cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x")
+
+sh("verdict-pipe-exit: a bare verdict call is allowed",
+   "verdict python3 lint/check_x.py", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: verdict then && commit, with no pipe, is allowed",
+   "verdict python3 lint/check_x.py && git commit -m x", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: verdict piped to tail as the last pipeline is allowed",
+   "verdict python3 lint/check_x.py | tail -3", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: pipefail set earlier with set -o is allowed",
+   "set -o pipefail; verdict python3 lint/check_x.py | tail -3 && git commit -m x", "allow",
+   cwd=NOGIT)
+sh("verdict-pipe-exit: pipefail set earlier in a combined set -euo is allowed",
+   "set -euo pipefail && verdict python3 lint/check_x.py | tail -3 && git push", "allow",
+   cwd=NOGIT)
+sh("verdict-pipe-exit: a pipe with no verdict in it is allowed",
+   "cat x.log | tail -3 && echo ok", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: verdict inside quotes is not a call",
+   "echo 'verdict a | tail -1 && b'", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: verdict piped to grep as the last command is allowed",
+   "verdict make check | grep FAIL", "allow", cwd=NOGIT)
+
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
    "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
