@@ -63,12 +63,12 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 ## The cost
 
-Counted as real `gh` calls, one call per list read however many pages it pages.
+Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
 
-- `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
+- `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Not a `gh` call: `merge --reviewed` and `--fix-check` each run one `git log` (`review_stamp_since`) to find the cutover. It is cached for the process, reads one file's history on `origin/<base>`, and writes nothing.
-- Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
+- Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing. A render whose record is done also runs `lane_lint` once on the checked head sha: no PR read, one `git fetch origin <base>` (more when the head is not local), one temporary worktree and one `ci-job checks --lint` run, removed on exit. A render whose record is open runs none. The Stamp is one sha256 hash in the process that renders or parses, with no extra call, file or process.
 - No new long-lived process, file or timer. The one cache is the cutover time, kept for the process. The batch runner calls the list at each wake. A lane calls the render at each round, and a render of a done record costs one lint run (above).
