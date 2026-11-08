@@ -12,8 +12,8 @@
 //   unreadable   a map page the command cannot read: one plain stderr line, exit 3, no stack trace.
 //
 // A map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. The fixture names
-// only `ts`, so a `.py` or `.json` line is no map line there. A case that needs one sets `codeExtensions` in its own
-// scratch copy. A Tables row is never a map line.
+// only `ts`, so a `.py` or `.json` line is no code map line there: map-show lists it only with a Decisions or Debts line.
+// A case that needs a code line of another extension sets `codeExtensions` in its own scratch copy. A Tables row is never a map line.
 //
 // Every case calls `needFile` first, so on a checkout with no command each case fails for the missing file.
 // The fixture holds one area (`core`), one Homes page and one trace page, so `src/home.ts` reaches every kind of line.
@@ -145,6 +145,8 @@ test('3. a file path prints its fact line', () => {
   assert.ok(r.stdout.includes(HOME_FACT), `the output must print the fact line of src/home.ts\n${dump(r)}`);
 });
 
+// This case asserts that a non-code file no record names, with no Decisions or Debts line, prints no map line. A non-code map line is
+// listed only through the record that names its file (decision `map-lists-record-named`).
 test('3b. a .py file is no map line while codeExtensions is ts, so its value fact does not print', () => {
   const dir = scratchRepo();
   // The scope first: a ts file must print, so the command reads the map.
