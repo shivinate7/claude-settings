@@ -190,7 +190,7 @@ WIDENING_TEMPLATE = (
 
 # A question whose every option loses something large goes back to its writer for one more option (decision
 # question-form). Appended after NONE_DIRECTION_RULE and widening_rule(), once, only for a pick of one: a page decision
-# with 2+ options and no `multi`, or a box question with 2+ options and no multiSelect. It has no `%`.
+# with 2+ options and no `multi` or `ranked`, or a box question with 2+ options and no multiSelect. It has no `%`.
 TRADEOFF_RULE = (
     "This call sets options. Judge their tradeoff, and push back when every option loses something large, so the "
     "owner gives up a large gain whichever he picks. Read each option's lose on its own text: on the page its `lose` "
