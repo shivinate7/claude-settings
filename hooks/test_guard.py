@@ -13612,6 +13612,30 @@ chained_ask("ask-alone: control, a forced push to main chained after an add deni
 chained_prune("ask-alone: a prune chained after an add, then a push to lane-x, denies",
               VCS + " add -A && " + PRUNE + " && " + VCS + " push origin lane-x")
 
+# (h) SHAPES THAT RUN A QUOTED HEREDOC BODY. Each body holds a forced push to lane-x inside `$( )`, and a shell
+# runs it. Cases 1 and 5 write the body to a file that sh runs: the written-file arm of without_data_bodies. Case 1
+# names the file x.sh, whose name ends in the shell word sh, so the whole-text arm also denies it; case 5 names run.txt,
+# which no shell word ends, and pins the written-file arm alone. Cases 2 to 4 are a body a shell reads from its
+# header or its pipe: bash, a pipe into sh on the next line, and an eval whose backtick opens on the line before the
+# header: the whole-text SHELL_HEREDOC arm. An eval whose `$(` opens there is denied by the judged text, so it pins
+# neither arm. Each denies as a force-push.
+BODY_PUSH = 'x="$(' + FORCE_LANE + ')"'
+sh("ask-alone: a quoted body written to x.sh and run by sh, a forced push in $( ), denies as force-push",
+   "cat > x.sh <<'EOF'\n" + BODY_PUSH + "\nEOF\nsh x.sh", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: a quoted body written to run.txt and run by sh, a forced push in $( ), denies as force-push",
+   "cat > run.txt <<'EOF'\n" + BODY_PUSH + "\nEOF\nsh run.txt", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: a quoted body fed to bash, a forced push in $( ), denies as force-push",
+   "bash <<'EOF'\n" + BODY_PUSH + "\nEOF", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY,
+   lacks=(CHAIN_ASK,))
+sh("ask-alone: a quoted body piped to sh on the next line, a forced push in $( ), denies as force-push",
+   "cat <<'EOF' |\n" + BODY_PUSH + "\nEOF\nsh", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY,
+   lacks=(CHAIN_ASK,))
+sh("ask-alone: a quoted body under an eval whose backtick is on the line before, a forced push in $( ), denies as force-push",
+   'eval `\ncat <<\'EOF\'\n' + BODY_PUSH + '\nEOF\n`', "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+
 
 # =========================================================================== ordinary work
 FAMILY = "paths"
