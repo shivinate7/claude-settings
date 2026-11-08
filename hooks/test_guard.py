@@ -15374,14 +15374,38 @@ def ors_f1c(label):
     return ctx
 
 
-def ors_f2(label):
-    """F2: an entry exists, and the push's destination cannot be read: the command carries a comment with an
-    apostrophe after it."""
+def ors_f2b(label):
+    """F2b: an entry exists, and the push's destination is readable: the command carries a comment with an
+    apostrophe after it. The ask is the ordinary one."""
     ctx = ors_new(label)
     ors_stop_into(ctx)
     ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
     ctx["command"] = ORS_PUSH + "  # don't"
     ctx["scope"] = ors_entries_scope
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_f2(label):
+    """F2: an entry exists, and the push's destination cannot be read. push.default is upstream and the lane branch
+    has no upstream, so a bare push names no destination the guard can read."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    _must(ctx["main"], "config", "push.default", "upstream")
+    ctx["command"] = VCS + " push"
+
+    def unreadable(c):
+        problem = ors_entries_scope(c)
+        if problem:
+            return problem
+        if run_vcs(c["lane"], "config", "--get", "push.default").stdout.strip() != "upstream":
+            return "scope: push.default is not upstream"
+        if run_vcs(c["lane"], "rev-parse", "--abbrev-ref", "@{u}").returncode == 0:
+            return "scope: the lane branch has an upstream, so its destination can be read"
+        return ""
+
+    ctx["scope"] = unreadable
     ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
     return ctx
 
@@ -15466,6 +15490,9 @@ ors_red("push-owes-review-record: F1c the pull request's head moved past H and i
         ors_f1c)
 ors_red("push-owes-review-record: F2 an entry exists and the push's destination cannot be read: asks, noting owed-record-unread",
         ors_f2, unread=True)
+# A control: the old code already asks here, so this row passes on the red base.
+ors_red("push-owes-review-record: F2b an entry exists and the push's destination is readable, a comment after the command: asks as usual",
+        ors_f2b)
 ors_red("push-owes-review-record: F3 an entry exists and the stamp file is malformed: asks", ors_f3, either=True)
 ors_red("push-owes-review-record: F4 push.default matching with a bare push and an entry for the branch, no record: asks",
         ors_f4)
