@@ -401,7 +401,7 @@ def own_pin(step):
     """(sha, why) of the commit a remote claude-settings action step (code-check, zizmor, ste-lint) pins itself, as CI downloads
     each pinned sha separately; (None, None) when the step is no such action, so it takes the job's pin. A ref that is no
     commit sha gives (None, why): that step is unknown."""
-    if LOCAL_ACTION.fullmatch(uses(step)) or not known_action(step):
+    if not known_action(step):
         return None, None
     m = SETTINGS_ACTION.search(uses(step))
     if not m:
@@ -593,6 +593,8 @@ def run(argv, stack):
     if asked:
         plain_sha, plain_why = pin_of(block)  # the pins of this job's steps only
         for n in asked:
+            if LOCAL_ACTION.fullmatch(uses(steps[n])):
+                continue  # a local uses: runs the repo under test's own file: it needs no pin, tree or fetch
             sha, why = own_pin(steps[n])
             need[n] = (sha, why) if sha or why else (plain_sha, plain_why)
         clone = settings_clone() if wanted or not dry else None
@@ -611,7 +613,7 @@ def run(argv, stack):
         for n, (_, why) in need.items():
             if why:
                 blocked[n] = why
-        if all(n in blocked for n in need):
+        if need and all(n in blocked for n in need):
             for n in need:
                 print("%-15s %s: %s" % ("unknown", names[n], blocked[n]))
             return 2
