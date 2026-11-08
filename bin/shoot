@@ -16,7 +16,8 @@
 //   localStorage: {key: "value"}, strings only. Set before the page's own scripts run, in the top frame only.
 //   stub: a path to a .js file, resolved against the config file's folder and read once, when the config loads. Its text runs as an
 //     init script before the page's own scripts, in the top frame only, so a page that needs a stand-in (window.claude) can be shot.
-//     A missing or unreadable file, or a value that is not a string, is a config error naming the route.
+//     A missing or unreadable file, a value that is not a string, or a syntax error in the text (compiled when the config loads)
+//     is a config error naming the route. A throw while the stub runs in the page is not caught: the shot shows what the page then draws.
 //   A route with steps, localStorage or a stub runs in its own browser context, with ignoreHTTPSErrors carried into it. The context is closed
 //     after the shot, so the route starts clean and leaves nothing behind (localStorage, cookies, a stub's globals) for another route.
 // Other keys, on the config or on a route, are ignored.
@@ -40,6 +41,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const vm = require("vm");
 const zlib = require("zlib");
 const { createRequire } = require("module");
 const { execFileSync } = require("child_process");
@@ -119,10 +121,16 @@ function readStub(file, r) {
   const where = `config ${file}: route ${r.path}: stub`;
   if (typeof r.stub !== "string" || !r.stub) die(`${where} is a path to a .js file`);
   const at = path.resolve(path.dirname(path.resolve(file)), r.stub);
-  try { return fs.readFileSync(at, "utf8"); } catch (e) { die(`${where}: cannot read ${at}: ${String(e.message).split("\n")[0]}`); }
+  let text;
+  try { text = fs.readFileSync(at, "utf8"); } catch (e) { die(`${where}: cannot read ${at}: ${String(e.message).split("\n")[0]}`); }
+  // The wrapped text, as the page will run it. lineOffset -1 hides the wrapper's first line, so the line named is the stub's own.
+  try { new vm.Script(stubScript(text).content, { filename: at, lineOffset: -1 }); }
+  catch (e) { die(`${where}: syntax error at ${String(e.stack).split("\n")[0]}: ${e.message}`); }
+  return text;
 }
 
 // The init script for a stub. A block, not a function, so the stub's own var and this behave as in a plain script.
+// A top-level let or const is block-scoped here, not script-level: a stub that sets a global assigns to window.
 // The top frame only: a cross-origin frame (an embed) must not see the stand-in. The newline lets a stub end in a // comment.
 function stubScript(text) {
   return { content: `if (window === window.top) {\n${text}\n}` };
