@@ -3144,26 +3144,47 @@ def salt_cutover(root, ref, where=None):
 
 _tool_stamp_since = {}
 
+def tool_source_note(tool):
+    """-> a sentence naming the checkout launch.py started from (its TOOL_SOURCE_ENV) when the tool runs from another folder, else "". launch.py
+    runs the tool from a temporary worktree and removes it when the run ends, so a Stop that names only that worktree names no folder left to repair."""
+    from launch import TOOL_SOURCE_ENV  # here, not at the top: hooks/guard_merge.py loads this file by path, with no merge folder on sys.path
+    source = os.environ.get(TOOL_SOURCE_ENV)
+    if not source or os.path.realpath(source) == os.path.realpath(tool):
+        return ""
+    return f"The merge tool ran from {tool}, a temporary copy of {source} that is gone once this run ends, so repair {source}."
+
 def tool_stamp_since():
     """-> the cutover read from the merge tool's own source checkout (the parent of the folder holding this file, as the other tool paths are found), HEAD's history.
-    The salt commit is fixed history, and a checkout that runs code reading the salt holds it, so this fetches nothing. One read per tool root in a process."""
+    The salt commit is fixed history, and a checkout that runs code reading the salt holds it, so this fetches nothing. One read per tool root in a process.
+    A read that cannot run, or a HEAD with no salt commit, raises Stop naming the checkout, never None: an unknown cutover must not read every unstamped
+    record as old (coordinator item 386). Each such Stop also names the checkout launch.py started from, when it differs (tool_source_note)."""
     tool = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     if tool not in _tool_stamp_since:
-        stamp, c, out = salt_cutover(tool, "HEAD", where=f"the merge tool's checkout {tool}")
-        if c:
-            raise Stop(f"could not read the merge tool's source checkout {tool} to find the review stamp cutover (git log exited {c}): {out[:300]}. "
-                       "Repair that checkout, then run the command again. " + REVIEW_CITE)
+        where = f"the merge tool's checkout {tool}"
+        try:
+            stamp, c, out = salt_cutover(tool, "HEAD", where=where)
+            if c:
+                raise Stop(f"could not read the merge tool's source checkout {tool} to find the review stamp cutover (git log exited {c}): {out[:300]}. "
+                           "Repair that checkout, then run the command again. " + REVIEW_CITE)
+            if stamp is None:
+                raise Stop(f"{where} lacks the review stamp salt: no commit on its HEAD history adds `REVIEW_STAMP_SALT =` to merge/merge.py, so the "
+                           "review stamp cutover is unknown. Update that checkout to origin/main, then run the command again. " + REVIEW_CITE)
+        except Stop as e:
+            note = tool_source_note(tool)
+            if not note:
+                raise
+            raise Stop(f"{note} {e}") from e
         _tool_stamp_since[tool] = stamp
     return _tool_stamp_since[tool]
 
 def review_stamp_since(root, base):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
-    `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
+    `REVIEW_STAMP_SALT =`. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. When the caller's repo has no
     salt commit, whatever its history touched, the cutover comes from the merge tool's own source checkout (tool_stamp_since): the stamp rule then holds
     in every repo, not only claude-settings (coordinator item 386). A read that cannot run
-    (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, or a shallow file that cannot be read)
-    raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
+    (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, a shallow file that cannot be read, or a
+    tool checkout with no salt commit) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
     created before this time may carry no Stamp line."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.

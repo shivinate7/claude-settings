@@ -10,6 +10,10 @@ import os, shutil, stat, subprocess, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
+# The one home of this name; merge.py imports it. It names the checkout launch.py started from, since the temporary worktree that
+# merge.py runs from is gone by the time its caller reads a Stop that names it.
+TOOL_SOURCE_ENV = "MERGE_TOOL_SOURCE"
+
 def git(co, *a):
     r = _nowindow.run(["git", "-C", co, *a], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode, (r.stdout + r.stderr).strip()
@@ -23,19 +27,20 @@ def rmtree_retry(path):  # own copy: bin/merge is a standalone shim and can't im
     if sys.version_info >= (3, 12): shutil.rmtree(path, onexc=handler)
     else: shutil.rmtree(path, onerror=lambda f, p, ei: handler(f, p, ei[1]))
 
-def run(tree, args):
+def run(tree, args, source):
     # nowindow: merge.py prints its report on the caller's terminal; with no window that output goes to a hidden console
-    return subprocess.run([sys.executable, os.path.join(tree, "merge", "merge.py"), *args]).returncode
+    return subprocess.run([sys.executable, os.path.join(tree, "merge", "merge.py"), *args], env={**os.environ, TOOL_SOURCE_ENV: source}).returncode
 
 def warn(sha, behind, why):
     b = f"{behind} commit(s) behind origin/main as of the last fetch" if behind is not None else "distance behind origin/main unknown"
     print("=" * 60 + f"\nWARNING: merge cannot prove it runs fresh code.\n  Running: claude-settings {sha} ({b})\n  Why: {why}\n" + "=" * 60, file=sys.stderr)
 
 def main(co, args):
+    source = os.path.realpath(co)
     sha = git(co, "rev-parse", "--short=12", "HEAD")[1]
     if "--dev" in args:
         print(f"merge: --dev, running the checkout's own tree at {sha}", file=sys.stderr)
-        return run(co, [a for a in args if a != "--dev"])
+        return run(co, [a for a in args if a != "--dev"], source)
     code, out = git(co, "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
     behind = None
     if git(co, "rev-parse", "-q", "--verify", "origin/main")[0] == 0:
@@ -43,7 +48,7 @@ def main(co, args):
         behind = int(n) if n.isdigit() else None
     if code:  # offline or fetch refused: run the code we have
         warn(sha, behind, "fetch of origin main failed: " + (out.splitlines() or ["no output"])[-1])
-        return run(co, args)
+        return run(co, args, source)
     want = git(co, "rev-parse", "origin/main")[1]
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="merge-fresh-"))  # /var is a symlink on macOS
     wt = os.path.join(tmp, "tree")
@@ -52,7 +57,7 @@ def main(co, args):
         got = git(wt, "rev-parse", "HEAD")[1] if c == 0 else ""
         if got != want:
             warn(sha, behind, "temporary worktree at origin/main failed or did not match: " + (o or got))
-            return run(co, args)
+            return run(co, args, source)
         branch = git(co, "rev-parse", "--abbrev-ref", "HEAD")[1]
         clean = git(co, "status", "--porcelain")[1] == ""
         if behind:
@@ -60,9 +65,9 @@ def main(co, args):
                 if git(co, "merge", "-q", "--ff-only", "origin/main")[0]:
                     print("merge: checkout not fast-forwarded: ff-only merge refused", file=sys.stderr)
             else:
-                print(f"merge: checkout left as is in {os.path.realpath(co)}: {'not on main' if branch != 'main' else 'dirty tree'}", file=sys.stderr)
+                print(f"merge: checkout left as is in {source}: {'not on main' if branch != 'main' else 'dirty tree'}", file=sys.stderr)
         print(f"merge: running claude-settings {want[:12]} (origin/main)", file=sys.stderr)
-        return run(wt, args)
+        return run(wt, args, source)
     finally:
         git(co, "worktree", "remove", "--force", wt)
         rmtree_retry(tmp)  # belt-and-suspenders: Windows can leave read-only pack files behind git's own remove
