@@ -14056,6 +14056,57 @@ sh("builder-test: shell write, find . piped to xargs, sed -i, over a test two fo
 sh("builder-test: shell write, find docs piped to while read, sed -i on \"$f\", is allowed",
    "find docs -name 'DEBTS.md' | while read f; do sed -i s/a/b/ \"$f\"; done", "allow",
    **dict(BR, cwd=FINDTESTS))
+# A fed data word, a `for` item, a `cp` source or a `find -exec` copy names no folder to walk. Each command below
+# writes docs/ and reads a path that holds no test. The GITMAIN twin of each is allowed too: a red here is the
+# walk of the working folder alone.
+FED_DATA_ALLOWS = (
+    ("for loop over docs/x, cp of \"$f\" into docs/out/", 'for f in docs/x; do cp "$f" docs/out/; done'),
+    ("cp of a find substitution over docs, into docs/out/", 'cp $(find docs -name "*.md") docs/out/'),
+    ("find over docs, -exec cp into docs/out/", 'find docs -name "*.md" -exec cp {} docs/out/ \\;'),
+)
+for _name, _command in FED_DATA_ALLOWS:
+    sh("builder-test: shell %s is allowed, in a checkout that holds tests" % _name, _command, "allow",
+       **dict(BR, cwd=FINDTESTS))
+    sh("builder-test: shell %s is allowed, in a checkout with no test" % _name, _command, "allow", **BR)
+# The walk ignores -name, so a find with a name filter is judged on every file under its root. A filter that
+# matches no test path names no test, so the write to what it lists is allowed. The deny twin is the find of
+# 'test_*.py' in FIND_ROOT_WRITES.
+NAME_FILTER_ALLOWS = (
+    ("find . -name *.pyc piped to xargs, rm -f", 'find . -name "*.pyc" | xargs rm -f'),
+    ("find . -name __pycache__, -exec rm -rf", "find . -name __pycache__ -exec rm -rf {} +"),
+    ("find . -name *.md piped to xargs, sed -i", 'find . -name "*.md" | xargs sed -i s/a/b/'),
+)
+for _name, _command in NAME_FILTER_ALLOWS:
+    sh("builder-test: shell write, %s, in a checkout that holds tests, is allowed" % _name, _command, "allow",
+       **dict(BR, cwd=FINDTESTS))
+    sh("builder-test: shell write, %s, in a checkout with no test, is allowed" % _name, _command, "allow", **BR)
+# A walk past its cap fails closed. FINDCAP holds more files at its top than the walk's cap (`_WALK_LIMIT` in
+# hooks/guard_frozen.py, 5000 entries) and a test under tests/. The top folder alone passes the cap, so the walk
+# stops before it reaches tests/, and the write is refused all the same. src/ holds no test: its find is allowed.
+FINDCAP = os.path.join(ROOT, "findcap")
+
+
+def _build_find_cap():
+    files = {"tests/test_app.py": "x\n", "src/app.py": "x\n"}
+    files.update(("filler_%04d.txt" % number, "x\n") for number in range(5001))
+    make_repo(FINDCAP, files)
+
+
+lazy_fixture([FINDCAP], _build_find_cap)
+sh("builder-test: shell write, find . piped to xargs, sed -i, over a test past the walk cap, is refused",
+   "find . | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCAP))
+sh("builder-test: shell write, find src piped to xargs, sed -i, in a checkout with a test past the cap, is allowed",
+   "find src | xargs sed -i s/a/b/", "allow", **dict(BR, cwd=FINDCAP))
+# A grep or rg with no path searches the working folder. A root-less grep feeds the writer no folder, so the
+# write to a test under cwd is missed. The GITMAIN twin holds no test under cwd, so it is allowed.
+for _name, _command in (
+    ("grep -rl PAT piped to xargs, sed -i", "grep -rl PAT | xargs sed -i s/a/b/"),
+    ("rg -l PAT piped to xargs, sed -i", "rg -l PAT | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, with no path, in a checkout that holds tests, is refused" % _name, _command,
+       "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
+    sh("builder-test: shell write, %s, with no path, in a checkout with no test, is allowed" % _name, _command,
+       "allow", **BR)
 # The test-author writes tests, so the same shell writes stay allowed to it. A main session, and a
 # session run with --agent builder and no agent_id, is not judged.
 for _name, _command in (
