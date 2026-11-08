@@ -114,7 +114,7 @@ jobs:
           }
           run_one() {
             case "$1" in
-              mods/*.test.mjs|mods/*.test.js|mods/*/test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              mods/*.test.mjs|mods/*.test.js|mods/*/test_*.mjs|mods/*/check.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
               skills/plain-english-map/tests/*.test.mjs) pick_cmd "$2" && (cd skills/plain-english-map/tests && "${cmd[@]}" "${1##*/}") ;;
               *.test.mjs|*.test.js|*/test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
               test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
