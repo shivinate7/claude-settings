@@ -13270,41 +13270,106 @@ unexpected(method + " " + rel)
         self.assertIn("repo o/bravo:", lines, out)
         self.assertEqual(batch_lines_of(lines[lines.index("repo o/bravo:"):]), ["open batch now: o/bravo #9"], out)
 
-    def gh_cost_per_root(self):
+    # The gh calls of each root in the baseline case, by kind (gh_cost_per_root). A variant case changes one kind and says which read did it.
+    COST_ALPHA = {"repo": 1, "pulls": 1, "comments": 1, "check runs": 3, "statuses": 3, "protection": 2, "run list": 2, "compare": 3}
+    COST_BRAVO = {"repo": 2, "pulls": 1, "comments": 1, "check runs": 1, "statuses": 1, "protection": 1}
+
+    def gh_cost_per_root(self, two_runs=False, no_stamp=False, pinned=False):
         """The gh calls of `merge --reviewed --root alpha --root bravo` on the real Host, by root. alpha has a done pull request, a ready one with
         no record and a draft. bravo has no done pull request, its one ready pull request has a record, and it has no origin/HEAD, so its default
-        branch comes through gh. The fake gh answers for each folder (per_root_gh). -> the two roots' kinds of gh call and the call count."""
+        branch comes through gh. The fake gh answers for each folder (per_root_gh). Each option changes one thing from the baseline: `two_runs`
+        gives head 5's check rows two run ids, `no_stamp` removes .github/stamp.json from each base, and `pinned` pins merge.requiredChecks to
+        ["checks"] in each base. -> the two roots' kinds of gh call and the call count."""
         head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
+        # run 88 (the draft's) and run 89 (the ready one's) both ran on head 5: superseded reads the run list for a head whose rows link two run ids
+        rows5 = ([{**batch_run("checks", "completed", "success"), "details_url": f"https://github.com/o/r/actions/runs/{n}/job/{n}"}
+                  for n in (88, 89)] if two_runs else green())
+        if two_runs:
+            ids = {re.search(r"/actions/runs/(\d+)/", r["details_url"]).group(1) for r in rows5}
+            self.assertEqual(ids, {"88", "89"}, "head 5's check rows must link two run ids, or superseded reads no run list")
         self.per_root_gh({
             self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6), batch_pull(9, head9, draft=True)],
-                                        comments=[record_of(5, head5)], check_rows={head5: green()}),
+                                        comments=[record_of(5, head5)], check_rows={head5: rows5}),
             self.bravo: self.root_state("o/bravo", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5, rounds=OPEN_ROUNDS)],
-                                        check_rows={head5: green()}),
+                                        check_rows={head5: rows5}),
         })
         sh(self.bravo, "git", "remote", "set-head", "origin", "-d")  # no origin/HEAD: the default branch is one gh read
+        for root in (self.alpha, self.bravo):
+            if no_stamp:
+                self.set_base_stamp(root, None)
+            if pinned:
+                self.set_base_stamp(root, {**CONFIG, "merge": {**CONFIG["merge"], "requiredChecks": ["checks"]}})
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
         self.assertEqual(rc, 0, out + err)
         return self.gh_calls()
 
+    def set_base_stamp(self, root, config):
+        """Make origin's base hold `config` as .github/stamp.json, or no such file when None, in one commit pushed from the root's `other` clone
+        (as make_trunk_default does). load_config reads the base from origin, so the root's own checkout does not matter. The base is checked
+        before a case counts anything."""
+        other = os.path.join(os.path.dirname(root), "other")
+        sh(other, "git", "fetch", "-q", "origin")
+        sh(other, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if config is None:
+            sh(other, "git", "rm", "-q", ".github/stamp.json")
+        else:
+            put(os.path.join(other, ".github/stamp.json"), json.dumps(config))
+        sh(other, "git", "commit", "-qam", "stamp for a gh cost case")
+        sh(other, "git", "push", "-q", "origin", "main")
+        sh(root, "git", "fetch", "-q", "origin")
+        listed = sh(root, "git", "ls-tree", "--name-only", "origin/main", "--", ".github/stamp.json")
+        self.assertEqual(bool(listed), config is not None, "origin/main does not hold the stamp file this case names:\n" + listed)
+        if config is not None:
+            self.assertEqual(json.loads(sh(root, "git", "show", "origin/main:.github/stamp.json")), config,
+                             "origin/main holds a stamp other than the one this case names")
+
+    def assert_gh_kinds(self, calls, alpha_want, bravo_want):
+        """Each root's gh calls are exactly the kinds wanted, and no other folder made a call."""
+        alpha, bravo = os.path.realpath(self.alpha), os.path.realpath(self.bravo)
+        self.assertEqual(set(calls), {alpha, bravo}, "a gh call came from a folder that is no root, or a root made none:\n" + repr(calls))
+        for folder, want in ((alpha, alpha_want), (bravo, bravo_want)):
+            self.assertEqual(calls.get(folder), want,
+                             f"the gh calls of {folder} are not the formula's ({sum(want.values())} wanted):\n" + repr(calls))
+
     def test_gh_calls_per_root_match_the_formula_with_and_without_a_done_pr(self):
         """The gh calls per root are exact: the fake gh counts each one (gh_cost_per_root). The formula, per root, with D the done pull requests on
-        the base, R the ready (not draft) ones on it and O the open ones on it:
-          repo reads     1, plus 1 when origin/HEAD is unset (the default branch: the same route as the repo name)
+        the base, R the ready (not draft) ones on it, O the open ones on it, and P 1 when merge.requiredChecks is a list, else 0:
+          repo reads     1, plus 1 when origin/HEAD is unset (the default branch: the same route as the repo name), plus 1 when the base has no
+                         .github/stamp.json (load_config reads the default branch then, even when origin/HEAD is set)
           list reads     1 (pulls), plus 1 (issues/comments) when a pull request is open
-          record reads   3 per ready pull request with a review record: check runs, statuses, branch protection
+          pinned list    P: one branch protection read per root (refuse_pinned_mismatch)
+          record reads   3 per ready pull request with a review record, less P for its branch protection read: check runs, statuses, branch protection
+          run list       +1 for each check read of a head whose check rows link two or more run ids (superseded): the record's read and the batch's
         and, only when D >= 1 (the batch line):
-          batch reads    1 + 3R when R >= 1 (branch protection once, then check runs, statuses and workflow runs of each ready one), else 0
+          batch reads    (1 - P) + 3R when R >= 1 (branch protection, then check runs, statuses and workflow runs of each ready one), else 0
           compare reads  O per done pull request: one against each other open pull request on the base, and one against the base
         The batch and compare terms are exact when no done pull request is CI-busy and no compare reads ahead or identical, because `and` and
         `any` stop at the first hit. alpha: 1 + 2 + 3 + (1 + 3*2) + 1*3 = 16. bravo: 2 + 2 + 3 = 7, with no batch read. o/self, the test's own
-        folder, reads nothing."""
+        folder, reads nothing. The three variant cases below change one term each: two run ids on head 5 (18 and 8), no stamp.json (17 and 8),
+        and a pinned list (15 and 7)."""
         calls = self.gh_cost_per_root()
-        alpha, bravo = os.path.realpath(self.alpha), os.path.realpath(self.bravo)
-        self.assertEqual(set(calls), {alpha, bravo}, "a gh call came from a folder that is no root, or a root made none:\n" + repr(calls))
-        want = {alpha: {"repo": 1, "pulls": 1, "comments": 1, "check runs": 3, "statuses": 3, "protection": 2, "run list": 2, "compare": 3},
-                bravo: {"repo": 2, "pulls": 1, "comments": 1, "check runs": 1, "statuses": 1, "protection": 1}}
-        for folder, kinds in want.items():
-            self.assertEqual(calls.get(folder), kinds, f"the gh calls of {folder} are not the formula's (16 for alpha, 7 for bravo):\n" + repr(calls))
+        self.assert_gh_kinds(calls, self.COST_ALPHA, self.COST_BRAVO)
+
+    def test_gh_calls_add_a_run_list_read_when_a_head_links_two_runs(self):
+        """The formula with two run ids on head 5's check rows: a draft run (88) and a ready run (89) share the head, so each check read of
+        head 5 adds one run list read. Those reads are alpha's record read and its batch read, and bravo's record read. alpha: 16 -> 18.
+        bravo: 7 -> 8. The other kinds are the baseline's."""
+        calls = self.gh_cost_per_root(two_runs=True)
+        self.assert_gh_kinds(calls, {**self.COST_ALPHA, "run list": 4}, {**self.COST_BRAVO, "run list": 1})
+
+    def test_gh_calls_add_a_repo_read_when_the_base_has_no_stamp(self):
+        """The formula with no .github/stamp.json on either base: load_config reads the default branch through gh, one read more per root.
+        alpha keeps its origin/HEAD, so this read is not the origin/HEAD fallback. alpha: 16 -> 17. bravo: 7 -> 8."""
+        self.assertEqual(sh(self.alpha, "git", "rev-parse", "--abbrev-ref", "origin/HEAD"), "origin/main", "the case needs alpha's origin/HEAD set")
+        calls = self.gh_cost_per_root(no_stamp=True)
+        self.assert_gh_kinds(calls, {**self.COST_ALPHA, "repo": 2}, {**self.COST_BRAVO, "repo": 3})
+
+    def test_gh_calls_one_protection_read_when_required_checks_are_pinned(self):
+        """The formula with merge.requiredChecks pinned to ["checks"], which the base's branch protection holds: refuse_pinned_mismatch reads
+        the protection once per root (P = 1), and the record and batch protection reads drop away. alpha: 16 -> 15. bravo: its record's
+        protection read drops and the pinned read comes in, so it stays at 7."""
+        calls = self.gh_cost_per_root(pinned=True)
+        self.assert_gh_kinds(calls, {**self.COST_ALPHA, "protection": 1}, self.COST_BRAVO)
 
     def compare_hosts(self, compare_error=None, base_fails=False):
         """alpha: a done ready #5 with CI green, and a draft #6 with no record, open on the base, so #5 is compared with #6 and with the base.
