@@ -40,8 +40,12 @@
 # it leaves out prints `not run`, which is no verdict.
 # A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
-# its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.event.pull_request.body }} is env CI_JOB_PR_BODY
-# (the pull request body `merge --lane-lint` passes; empty when unset). Any other expression makes the step unknown.
+# its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.event.pull_request.body }} is the pull request body,
+# read by pr_body(): the UTF-8 file named by env CI_JOB_PR_BODY_FILE (the merge tool's way: an env string past 128 KB does not exec on
+# Linux, and a 65536-character body can be 256 KB), else env CI_JOB_PR_BODY, else `.pull_request.body` of the event file at
+# $GITHUB_EVENT_PATH (a CI run: no token, no step env), else empty. An unreadable file reads unknown for each step that holds the
+# expression, never empty. A step env that would pass the body past the exec limit on Linux reads unknown too.
+# Any other expression makes the step unknown.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
@@ -61,7 +65,7 @@
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
 # are one print.
-import os, re, shutil, subprocess, sys, tempfile
+import json, os, re, shutil, subprocess, sys, tempfile
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -148,6 +152,30 @@ def condition(text, pr):
     if not re.fullmatch(r"[\sTF()]*(?:(?:and|or|not)[\sTF()]*)*", expr):
         return None
     return bool(eval(expr.replace("T", "True").replace("F", "False"), {"__builtins__": {}}))  # only T, F, and, or, not, ()
+
+
+BODY_EXPR = "github.event.pull_request.body"
+EXEC_STRING_MAX = 131072  # Linux: one env string, "NAME=value" and its NUL, past this does not exec (MAX_ARG_STRLEN)
+
+
+def pr_body(environ=None):
+    """The pull request body, the one home of that read: the UTF-8 file named by CI_JOB_PR_BODY_FILE, else env CI_JOB_PR_BODY,
+    else the event file at GITHUB_EVENT_PATH (`.pull_request.body`), else "". -> None when a source that is named cannot be read."""
+    environ = os.environ if environ is None else environ
+    path = environ.get("CI_JOB_PR_BODY_FILE")
+    try:
+        if path is not None:
+            with open(path, encoding="utf-8", newline="") as f:  # strict: bytes that are not UTF-8 are unreadable, not a changed body
+                return f.read()
+        if "CI_JOB_PR_BODY" in environ:
+            return environ["CI_JOB_PR_BODY"]
+        event = environ.get("GITHUB_EVENT_PATH")
+        if event:
+            with open(event, encoding="utf-8") as f:
+                return (json.load(f).get("pull_request") or {}).get("body") or ""
+    except (OSError, ValueError, AttributeError):
+        return None
+    return ""
 
 
 def expand(value, values):
@@ -325,9 +353,14 @@ def plan(step, pr, values, top):
         val = expand(raw.strip("'\""), values)
         if val is None:
             return "unknown", "env %s needs an expression this runner cannot read: %s" % (name, raw), None, None, None
+        size = len(val.encode("utf-8", "surrogatepass"))
+        if sys.platform.startswith("linux") and len(name.encode()) + size + 2 > EXEC_STRING_MAX:
+            return "unknown", "env %s holds %d bytes, past the %d a Linux exec takes in one env string: %s" % (
+                name, size, EXEC_STRING_MAX, raw), None, None, None
         env[name] = val
-    if EXPR.search(body):
-        return "unknown", "run: holds an expression this runner cannot read", None, None, None
+    exprs = EXPR.findall(body)
+    if exprs:
+        return "unknown", "run: holds an expression this runner cannot read: %s" % ", ".join(dict.fromkeys(exprs)), None, None, None
     shell = step_key(step, "shell")
     if shell not in SHELLS:
         return "unknown", "shell %s is not one this runner knows" % shell, None, None, None
@@ -403,8 +436,10 @@ def main(argv):
                       "steps are skipped: %s" % ", ".join(unread))
                 no_base = True
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
-              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or "",
-              "github.event.pull_request.body": os.environ.get("CI_JOB_PR_BODY", "")}
+              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
+    read_body = pr_body()
+    if read_body is not None:  # an unreadable body leaves the key out: each step that holds the expression reads unknown
+        values[BODY_EXPR] = read_body
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
