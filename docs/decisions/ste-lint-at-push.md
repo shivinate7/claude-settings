@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Rule `ste-push` in `hooks/guard.py` refuses a `git push` when the CI STE lint would fail on the Markdown it sends. Its home is `ste_push_hit` in `hooks/guard_merge.py`, with the lint runner in `hooks/guard_ste.py`. Pending: the owner's word on waiting-page item 377 (ste-lint-at-push). The rule does not merge before it.
+Rule `ste-push` in `hooks/guard.py` refuses a `git push` when the CI STE lint would fail on the Markdown it sends. Its home is `ste_push_hit` in `hooks/guard_merge.py`, with the lint runner in `hooks/guard_ste.py`. Owner, 2026-11-07 19:03 CST, page item 377, option a: allow the push-time lint.
 
 - The mistake: a lane pushed four notes with sentences over 30 words. Only a later lint caught them (lane replay-profile-parts, PR 1653, 2026-11-07 17:44 CST).
 - The harm: CI fails after the push. The review record then sits on a head that moves, and the fix costs one more fix check.
