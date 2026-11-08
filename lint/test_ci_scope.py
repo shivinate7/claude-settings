@@ -84,6 +84,12 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         return dict(l.split("=", 1) for l in lines)
 
 
+def assert_every_flag_on(test, got, label):
+    """Each job and suite flag, and each derived flag, is on in `got`. A failure names the flag that is off."""
+    for n in ALL + DERIVED_FLAGS:
+        test.assertEqual(got.get(n), "true", f"{label}: {n} is off: {got}")
+
+
 def code_text(text):
     """The shell text with its comments removed. A `#` opens a comment only at the start of a word and outside quotes,
     so `"a # b"`, `$#` and a `#` line inside a multi-line string stay code. Quotes carry across lines."""
@@ -351,9 +357,27 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertSameFlagsAsGuardPy(p, edit=False)
 
-    def test_guard_closure_stale_pages_edit_sets_exactly_guard_py_flags(self):
-        # Only a closure rule gives this file guard.py's flags. Without one, the catch-all turns every flag on.
-        self.assertSameFlagsAsGuardPy("skills/waiting-page/stale_pages.py", edit=True)
+    # The waiting-page scripts keep every flag on, as base does: the catch-all sends each skills/waiting-page/*.py there,
+    # and checks.yml's waiting page suite runs on splice.py through the shoot flag. A narrower rule must keep these flags.
+    WAITING_PAGE_PY = ["skills/waiting-page/stale_pages.py", "skills/waiting-page/splice.py", "skills/waiting-page/export_page.py"]
+
+    def test_guard_closure_waiting_page_edit_sets_every_flag(self):
+        for p in self.WAITING_PAGE_PY:
+            with self.subTest(path=p):
+                assert_every_flag_on(self, run([p], existing=[p]), p)
+
+    def test_guard_closure_splice_edit_keeps_shoot_on(self):
+        p = "skills/waiting-page/splice.py"
+        got = run([p], existing=[p])
+        self.assertEqual(got.get("shoot"), "true", f"{p} edit does not turn on shoot: {got}")
+
+    # Superset: a janitor/sweep.py edit may carry extra flags, but keeps every flag hooks/guard.py sets.
+    def test_guard_closure_janitor_edit_keeps_guard_py_flags_as_a_superset(self):
+        ref = run(["hooks/guard.py"], existing=["hooks/guard.py"])
+        self.assertTrue(set(self.GUARD_FLAGS) <= self.true_set(ref), f"hooks/guard.py lacks {self.GUARD_FLAGS}: {ref}")
+        p = "janitor/sweep.py"
+        missing = sorted(self.true_set(ref) - self.true_set(run([p], existing=[p])))
+        self.assertFalse(missing, f"{p} edit drops guard.py's flags: {missing}")
 
     # Control: a janitor file outside the closure keeps the janitor/* flags, and no guard flag.
     def test_guard_closure_janitor_file_outside_it_keeps_the_janitor_flags(self):
@@ -552,14 +576,10 @@ class GuardClosureFailSafe(unittest.TestCase):
     def tearDownClass(cls):
         tracked_tree.rm_tree(cls.run_dir)
 
-    def assertAllOn(self, got, label):
-        for n in ALL + DERIVED_FLAGS:
-            self.assertEqual(got.get(n), "true", f"{label}: {n} is not on: {got}")
-
     def test_guard_closure_missing_merge_py_turns_every_flag_on(self):
         self.assertFalse(os.path.exists(self.missing))  # scope: the read points at no file
         got = run(["janitor/sweep.py"], existing=["janitor/sweep.py"], extra_env={"CI_SCOPE_MERGE": self.missing})
-        self.assertAllOn(got, "a missing merge.py")
+        assert_every_flag_on(self, got, "a missing merge.py")
 
     def test_guard_closure_empty_or_broken_merge_py_turns_every_flag_on(self):
         self.assertEqual(os.path.getsize(self.empty), 0)  # scope: the empty fixture is empty
@@ -570,7 +590,7 @@ class GuardClosureFailSafe(unittest.TestCase):
         for label, path in (("an empty merge.py", self.empty), ("a merge.py that does not parse", self.broken)):
             with self.subTest(label=label):
                 got = run(["janitor/sweep.py"], existing=["janitor/sweep.py"], extra_env={"CI_SCOPE_MERGE": path})
-                self.assertAllOn(got, label)
+                assert_every_flag_on(self, got, label)
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
