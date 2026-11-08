@@ -13988,6 +13988,7 @@ RPUSH_PUSH = VCS + " push origin HEAD:" + RPUSH_BRANCH
 RPUSH_LIVE, RPUSH_PREFIX, RPUSH_OLD = "a" * 40, "b" * 40, "c" * 40  # the PR's head now, the head its round reviewed, an older head
 RPUSH_N = 21  # the reviewed pull request's number
 RPUSH_OPEN = {"number": RPUSH_N, "head": RPUSH_LIVE, "ref": RPUSH_BRANCH}
+RPUSH_HELD_N, RPUSH_HELD_HEAD = RPUSH_N + 1, "d" * 40  # a second open pull request on the same branch, on its own live head
 RPUSH_PULLS, RPUSH_COMMENTS = "pulls", "issues/comments"  # the two reads, by their route
 RPUSH_BOTH = (RPUSH_PULLS, RPUSH_COMMENTS)
 RPUSH_ROUND = (1, "reviewer", "sonnet", "PASS")
@@ -14026,10 +14027,12 @@ def rpush_comment(body, n=RPUSH_N):
 
 def rpush_record_comments(*specs, before=0):
     """A case's comments, built when its check runs: `before` chatter comments, then one record per spec, each spec
-    the keywords of rpush_record."""
+    the keywords of rpush_record. A spec's `on` names the pull request whose comment list holds the record (RPUSH_N when
+    it has none); the record's own `n` is the pull request it names, so a record posted on another pull request is skipped."""
     def build():
         return ([rpush_comment(RPUSH_CHATTER) for _ in range(before)]
-                + [rpush_comment(rpush_record(**spec)) for spec in specs])
+                + [rpush_comment(rpush_record(**{k: v for k, v in spec.items() if k != "on"}), spec.get("on", RPUSH_N))
+                   for spec in specs])
     return build
 
 
@@ -14158,6 +14161,15 @@ rpush_case("reviewed-head-push: a held record with no fix check asks, after both
 # not on the record's state.
 rpush_case("reviewed-head-push: an open record whose fix check passed but whose design review failed asks, after both reads",
            "ask", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX, "rounds": RPUSH_DESIGN_FAILED}))
+# Two open pull requests on the pushed branch, each on its own live head, the fix-check row listed first. The held row
+# decides: a reader that stops at the first fix check would give the new-branch remedy, and a held change must not be
+# carried on in a new branch.
+rpush_case("reviewed-head-push: a held row listed after a fix-check row asks with the held reason, after both reads",
+           "ask", RPUSH_BOTH,
+           others=[dict(RPUSH_OPEN), dict(RPUSH_OPEN, number=RPUSH_HELD_N, head=RPUSH_HELD_HEAD)],
+           comments=rpush_record_comments({"fix": RPUSH_FIX},
+                                          dict(RPUSH_HELD, head=RPUSH_HELD_HEAD, n=RPUSH_HELD_N, on=RPUSH_HELD_N)),
+           carries=RPUSH_HELD_CARRIES, lacks=RPUSH_HELD_LACKS)
 
 # The allow controls. Each names its two reads, so it cannot pass on a read that never happened.
 rpush_case("reviewed-head-push: a done record with no fix check allows, after both reads",
