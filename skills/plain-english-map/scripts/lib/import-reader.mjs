@@ -46,12 +46,42 @@ export const importEntries = (src, { types = true, file } = {}) => {
 
 export const importSpecifiers = (src, opts) => importEntries(src, opts).map((e) => e.spec);
 
-// The tracked file that the specifier `spec` in the file `from` names, or null. A package specifier names none.
-export const resolveSpecifier = (from, spec, tracked) => {
-  if (!spec.startsWith('.')) return null;
-  const base = path.posix.join(path.posix.dirname(from), spec);
+// The tracked files that the path `base` can name: itself, its NodeNext twin, with an extension, or an index file of that folder.
+const candidates = (base) => {
   const ext = path.posix.extname(base);
-  return [base, ...(TS_FOR[ext] ? [base.slice(0, -ext.length) + TS_FOR[ext]] : []), ...EXTS.map((e) => base + e), ...EXTS.map((e) => `${base}/index${e}`)].find((c) => tracked.has(c)) ?? null;
+  return [base, ...(TS_FOR[ext] ? [base.slice(0, -ext.length) + TS_FOR[ext]] : []), ...EXTS.map((e) => base + e), ...EXTS.map((e) => `${base}/index${e}`)];
+};
+
+// The `paths` pattern that wins for `spec` and what its `*` matched, or null. An exact name wins. Else the longest prefix wins.
+const matchPattern = (spec, paths) => {
+  if (Object.hasOwn(paths, spec)) return { pattern: spec, star: '' };
+  let best = null;
+  for (const pattern of Object.keys(paths)) {
+    const at = pattern.indexOf('*');
+    if (at < 0) continue;
+    const head = pattern.slice(0, at);
+    const tail = pattern.slice(at + 1);
+    if (spec.length >= head.length + tail.length && spec.startsWith(head) && spec.endsWith(tail) && (!best || head.length > best.head.length))
+      best = { pattern, head, star: spec.slice(head.length, spec.length - tail.length) };
+  }
+  return best;
+};
+
+// The tracked file that the specifier `spec` in the file `from` names, or null. A package specifier names none, unless `aliases`
+// (from `tsconfig-paths.mjs`: `{ baseUrl, paths, pathsBase }`, each folder from the repository root) reaches a tracked file.
+// A `paths` pattern that matches and finds no file is null: `baseUrl` is not tried after it.
+export const resolveSpecifier = (from, spec, tracked, aliases = null) => {
+  if (spec.startsWith('.')) return candidates(path.posix.join(path.posix.dirname(from), spec)).find((c) => tracked.has(c)) ?? null;
+  if (!aliases) return null;
+  const hit = aliases.paths ? matchPattern(spec, aliases.paths) : null;
+  if (hit) {
+    for (const target of aliases.paths[hit.pattern]) {
+      const found = candidates(path.posix.join(aliases.pathsBase, target.replace('*', hit.star))).find((c) => tracked.has(c));
+      if (found) return found;
+    }
+    return null;
+  }
+  return aliases.baseUrl === null ? null : candidates(path.posix.join(aliases.baseUrl, spec)).find((c) => tracked.has(c)) ?? null;
 };
 
 // The tracked files that a source file imports. A package import and an untracked target are skipped.
@@ -59,7 +89,7 @@ export const importTargets = (from, src, tracked, opts) => {
   const found = new Set();
   if (!/\.(ts|tsx|mjs|js|cjs)$/.test(from)) return []; // A .py, .sh or .sql file has no JS imports.
   for (const spec of importSpecifiers(src, { file: from, ...opts })) {
-    const hit = resolveSpecifier(from, spec, tracked);
+    const hit = resolveSpecifier(from, spec, tracked, opts?.aliases);
     if (hit) found.add(hit);
   }
   return [...found].sort();
