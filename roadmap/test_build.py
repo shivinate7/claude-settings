@@ -313,6 +313,15 @@ class NoteCapHook(unittest.TestCase):
         self.assert_passed(r)
         self.assertNotIn("Traceback", r.stderr)
 
+    def test_non_utf8_step_over_the_note_cap_is_refused(self):
+        raw = json.dumps(dict(STEP, note=words(build.NOTE_WORDS) + " MARK", gap="key-bytes")).encode("ascii")
+        path = self.repo / "roadmap" / "data" / "steps" / "c1.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw.replace(b"MARK", b"\xff"))
+        self.stage("c1")
+        self.assert_refused(self.commit(), "c1 (251 words)",
+                            why="a raw non-UTF-8 byte in an over-cap note was not counted")
+
     def test_only_top_level_step_files_count(self):
         nested = self.repo / "roadmap" / "data" / "steps" / "old"
         nested.mkdir()
@@ -594,6 +603,19 @@ exit 0
         self.step("c1", 10, "done", gap="shared-key")
         self.step("c2", 10, gap="shared-key")
         self.stage("c1", "c2")
+        self.assert_passed(self.commit())
+
+    def test_gap_holder_deleted_in_the_same_commit_frees_its_key(self):
+        self.seed(("c1", 10, "open", "shared-key"))
+        self.git("rm", "-q", "roadmap/data/steps/c1.json")
+        self.step("c2", 10, gap="shared-key")
+        self.stage("c2")
+        self.assert_passed(self.commit())
+
+    def test_gap_keyed_rename_of_an_open_step_passes(self):
+        self.seed(("c1", 10, "open", "shared-key"))
+        self.git("mv", "roadmap/data/steps/c1.json", "roadmap/data/steps/c3.json")
+        self.stage("c3")
         self.assert_passed(self.commit())
 
     def test_gap_key_compare_ignores_case_and_trailing_space(self):
