@@ -688,8 +688,11 @@ def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
 # through its `each` hook, so it adds no git read: per run and per notes path, the revived check's own reads and no more.
 #
 # A removed note line is paired with each added line under the same slug or under a folding slug: an added line whose text
-# names the removed slug. Shared topic words or a shared `Decision:` tag never pair (unrelated notes share them). A removed
-# line with no pair is a plain retire and is no finding. The line is cut into clauses at a
+# names the removed slug. A removed line with no such pair is paired by text with an added line under a new slug (a rename):
+# one of its clauses, with at least PAIR_WORDS content words and not the `Decision:` tag, is held by the added line at
+# PAIR_HELD, the share of a clause that was reworded and not cut. A note retired in an earlier commit of the branch is paired
+# the same way with a later commit's new notes. Shared topic words, a shared `Decision:` tag or a shared slug prefix never
+# pair (unrelated notes share them). A removed line with no pair is a plain retire and is no finding. The line is cut into clauses at a
 # sentence end, `;`, and `and`, `but`, `which`, `though`, `while`, `so`, so a clause that rides on the end of a sentence is
 # judged on its own. A fragment of fewer than 3 content words joins its neighbour. A clause is held when at least HELD of its
 # content words (stopwords out, a trailing `s` off) are among the content words of the pair, and every number token of it is. A reworded clause keeps most of
@@ -698,6 +701,9 @@ def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
 # passes, and one that lost its point fails. A clause that head's text for the note holds is no finding: a later commit of
 # the branch put it back.
 HELD = 0.5
+PAIR_HELD = 0.75
+PAIR_WORDS = 5
+TAG_CLAUSE = re.compile(r"Decision\b", re.I)
 CLAUSE_END = re.compile(r"(?<=[.!?])\s+|;\s*|,?\s+(?:and|but|though|although|which|while|so)\s+", re.I)
 STOPWORDS = frozenset("a an the and or of to in on for is are was were be been it its this that these those with as at by from "
                       "which who also then so if but though although while when each every any".split())
@@ -726,11 +732,11 @@ def clauses(body):
     return out or ([lead] if lead else [])
 
 
-def held(clause, words):
-    """True when `words` hold at least HELD of the clause's content words and every one of its number tokens."""
+def held(clause, words, share=HELD):
+    """True when `words` hold at least `share` of the clause's content words and every one of its number tokens."""
     mine = content_words(clause)
     numbers = {w for w in mine if w.isdigit()}
-    return not mine or (numbers <= words and len(mine & words) >= HELD * len(mine))
+    return not mine or (numbers <= words and len(mine & words) >= share * len(mine))
 
 
 def names(text, slug):
@@ -738,26 +744,45 @@ def names(text, slug):
     return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(slug), text) is not None
 
 
-def dropped_clauses(before, after, now):
+def renamed_to(body, added, old_slugs):
+    """The added notes (slug, text) under a slug not in `old_slugs` that carry a clause of the removed note's `body`: the clause is
+    no `Decision:` tag, has at least PAIR_WORDS content words, and the added text holds PAIR_HELD of them."""
+    mine = [c for c in clauses(body) if not TAG_CLAUSE.match(c) and len(content_words(c)) >= PAIR_WORDS]
+    return [x for x in added if x[0] not in old_slugs and any(held(c, content_words(x[1]), PAIR_HELD) for c in mine)]
+
+
+def dropped_in_pair(slug, body, pair, now):
+    """[(slug, [fold slugs], clause)] for the clauses of the removed note `body` that its `pair` of added notes and head's text
+    for the same notes both lack."""
+    slugs = {x[0] for x in pair}
+    at_head = [t for s, t in note_bodies(counts(now).elements()) if s in slugs | {slug}]
+    if not at_head:
+        return []  # a later commit retired the note
+    new_words, head_words = (set().union(*map(content_words, ts)) for ts in ([t for _, t in pair], at_head))
+    return [(slug, sorted(slugs - {slug}), c) for c in clauses(body) if not held(c, new_words) and not held(c, head_words)]
+
+
+def dropped_clauses(before, after, now, pending=None):
     """[(slug, [fold slugs], clause)] for one commit's file texts (the parent's, the commit's, and head's): each clause of a
-    removed note line that the commit's added lines for that note (or its fold target) no longer hold, and that head's text
-    for the same notes does not hold either. See HELD above."""
+    removed note line that the commit's added lines for that note (or its fold target, or its rename) no longer hold, and that
+    head's text for the same notes does not hold either. See HELD above. `pending`, a list when given, is the removed notes
+    (slug, text) that earlier commits of the branch left unpaired: a rename that spans commits pairs a later commit's new notes
+    with them, and a note this commit leaves unpaired is added to it."""
     gone = note_bodies((counts(before) - counts(after)).elements())
-    if not gone:
-        return []
     added = note_bodies((counts(after) - counts(before)).elements())
+    old_slugs = set(note_counts(before))
     found = []
+    for slug, body in list(pending or ()):  # earlier commits' unpaired notes, against this commit's new notes
+        pair = renamed_to(body, added, old_slugs)
+        if pair:
+            pending.remove((slug, body))
+            found += dropped_in_pair(slug, body, pair, now)
     for slug, body in gone:
-        mine = clauses(body)
-        pair = [x for x in added if x[0] == slug or names(x[1], slug)]
-        if not pair:
-            continue  # a plain retire
-        slugs = {x[0] for x in pair}
-        at_head = [t for s, t in note_bodies(counts(now).elements()) if s in slugs | {slug}]
-        if not at_head:
-            continue  # a later commit retired the note
-        new_words, head_words = (set().union(*map(content_words, ts)) for ts in ([t for _, t in pair], at_head))
-        found += [(slug, sorted(slugs - {slug}), c) for c in mine if not held(c, new_words) and not held(c, head_words)]
+        pair = [x for x in added if x[0] == slug or names(x[1], slug)] or renamed_to(body, added, old_slugs)
+        if pair:
+            found += dropped_in_pair(slug, body, pair, now)
+        elif pending is not None:
+            pending.append((slug, body))  # a plain retire, unless a later commit adds its rename
     return found
 
 
@@ -855,9 +880,9 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
     # A trailer excuses a notes path's revival only for the slugs it names, so a revival on a trailer's path skips the path judge.
-    kept, lost = [], {}
+    kept, lost, retired = [], {}, collections.defaultdict(list)
     revived = revived_notes(cwd, upstream, h, {p: named_slugs(rs) for p, rs in reasons.items()}, kept,
-                            lambda path, sha, before, after, now: gather_dropped(lost, path, dropped_clauses(before, after, now)))
+                            lambda path, sha, before, after, now: gather_dropped(lost, path, dropped_clauses(before, after, now, retired[path])))
     items += [x for x in revived if x[0] not in ok]
     forced = [x[1] for x in revived if x[0] in ok]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
