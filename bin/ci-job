@@ -5,8 +5,12 @@
 # --lint runs only the job's fast lint and check steps, chosen from the step commands in the workflow, never a
 # list: a step whose whole run: is `python3 lint/<script>.py ...`, `python3 actions/<script>.py ...`,
 # `bin/ste-changed ...` or a pinned `pipx run <tool>==<version> ...` (the pin read from the workflow), one command
-# per line, no `&&`, `|` or `;`. A mutation script (a name with "mutate") and every other command (hooks/ suites,
-# bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
+# per line, no `&&`, `|` or `;`. A step whose whole run: is `python3 hooks/test_<name>.py` or `python3 merge/test_<name>.py`
+# runs only when the one selector, `hooks/mutate_guard.py --lint-suites <base>`, picks that suite for a file of the diff
+# <base>...HEAD (a picked suite that fails is FAIL; a selector that cannot run is unknown on each such step, exit 2; no
+# base or no pick is `not run`). Cost: one selector process per lane lint (one git diff, one git ls-files, one parse of each
+# tracked test_*.py, once for the whole diff), plus one process per picked suite. A mutation script (a name with "mutate")
+# and every other command (bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
 # this repo's own action (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. After the
 # last step, one line counts the steps run out of the job's total (--plan: "would run"). Neither it nor a `not run`
 # line starts with FAIL or unknown or moves the exit code: merge.py's lane lint reads those two words.
@@ -408,12 +412,35 @@ def main(argv):
     tally = {"FAIL": 0, "unknown": int(no_base)}
     unshallow(block, top, dry, tally)
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "" for st in steps] if lint else [""] * len(steps)
+    suite_re = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)")
+    suites = [m.group(1) if lint and not k and len(run_lines(st)) == 1 and (m := suite_re.fullmatch(run_lines(st)[0])) else None
+              for st, k in zip(steps, kind)]
+    picked, why = None, "no base to read a diff"
+    if base and any(suites):  # one selector process for all the job's suite steps
+        why = "the selector did not run"
+        try:
+            done = _nowindow.run([sys.executable, os.path.join(os.path.dirname(BIN), "hooks", "mutate_guard.py"),
+                                  "--lint-suites", base], cwd=top, capture_output=True, text=True, encoding="utf-8",
+                                 stdin=subprocess.DEVNULL)
+            if done.returncode == 0:
+                picked = set(done.stdout.split())
+            else:
+                why = ((done.stdout + done.stderr).strip().splitlines() or ["exit %d with no message" % done.returncode])[-1]
+        except OSError as e:
+            why = str(e)
+    for i, suite in enumerate(suites):  # a picked suite runs as a lint step does
+        if suite and picked is not None and suite in picked:
+            kind[i] = "suite"
     planned = [plan(st, bool(base), values, top) if k else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
     ran, blocker = 0, None  # blocker: the install step that did not finish
     for n, step in enumerate(steps, 1):
         name = names[n - 1]
         if wanted and name not in wanted:
+            continue
+        if suites[n - 1] and base and picked is None:  # the selector could not run: never a pass with no suite run
+            tally["unknown"] += 1
+            print("%-15s %s: --lint could not select suites: %s" % ("unknown", name, why))
             continue
         if lint and not kind[n - 1]:
             if LOCAL_ACTION.fullmatch(uses(step)):

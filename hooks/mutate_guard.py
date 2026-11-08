@@ -46,7 +46,12 @@ plants each listed defect in a checkout of HEAD, installs the profile's packages
 catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
 `Known-defect-removed: <id>` trailer in REF..HEAD, else `MISSING <id>`; an entry that differs from REF's needs a
 `Known-defect-changed: <id>` trailer, else `CHANGED <id>`. Exit 1 when any defect is MISS, UNKNOWN, MISSING or CHANGED.
-`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
+`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile. A suite tests a file
+when it sits beside it, imports or loads its module, or names its basename in a path expression it copies, opens or runs
+(read from the `ast` tree, so a docstring or comment never counts).
+`--lint-suites BASE` prints the suites that test any file of the diff BASE...HEAD: the one selector `bin/ci-job --lint` asks
+for the hooks/ and merge/ suite steps it runs. Cost: once per lane lint, one process, one `git diff`, and (when the diff holds
+a file) one `git ls-files` and one parse of each tracked `test_*.py`, once for the whole diff, never once per touched file.
 """
 
 import contextlib
@@ -2764,23 +2769,27 @@ def known_defects_main(argv) -> int:
     return 1 if missing or changed or any(result["verdict"] != "CAUGHT" for result in results) else 0
 
 
-def _loads_module(source: str, stem: str) -> bool:
-    """True when the Python text imports or loads the module `stem`, read from its `ast` tree (never its text, so a comment,
-    a string or a docstring that names the module is not a load). The forms: `import`, `from ... import`,
-    `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
-    `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
-    directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
-    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is not
-    followed, so a loader fed only by a parameter reads False (debt tests-for-misses-param-loads).
+_PATH_NAMES = frozenset(("Path", "PurePath", "PurePosixPath", "PureWindowsPath", "join", "abspath", "realpath", "normpath"))
+_PATH_METHODS = frozenset(("Path", "PurePath", "joinpath", "abspath", "realpath", "normpath", "with_name"))
+_FILE_CALLS = frozenset(("open", "copy", "copy2", "copyfile", "copytree", "move", "run", "call", "check_call",
+                         "check_output", "Popen", "read_text", "read_bytes"))
 
-    It assumes module stems are unique across the repository, so a name match is a load of this file (only
-    `test_action.py` repeats a stem today). A text that does not parse reads False."""
+
+def _suite_profile(source: str):
+    """(stems, bases) of one suite's text, read from its `ast` tree (never its text, so a comment, a string or a
+    docstring that names a file is not a load); None when the text does not parse. `stems` are the modules it imports or
+    loads by name: `import`, `from ... import`, `importlib.import_module` and `__import__` with a literal name.
+    `bases` are the basenames of every string constant in a path expression it copies, opens or runs: an argument of
+    `open`, `shutil.copy*`, `subprocess.run` and the like (`_FILE_CALLS`), a `os.path.join` / `Path` / `/` expression
+    (`_PATH_NAMES`, `_PATH_METHODS`), and the path argument of `spec_from_file_location`, `SourceFileLoader` and
+    `runpy.run_path` (never the module-name argument). A name in such an expression is followed to the expressions an
+    assignment binds it to, in any scope of the file (module, function or class level; one name bound in two scopes pools
+    both values). A path that arrives as a function parameter is not followed (debt tests-for-misses-param-loads)."""
     import ast
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
-        return False
-    base = stem + ".py"
+        return None
     bound = {}  # a name -> the expressions it is bound to, in any scope
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -2789,82 +2798,156 @@ def _loads_module(source: str, stem: str) -> bool:
                     bound.setdefault(target.id, []).append(node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
+    stems, bases = set(), set()
 
-    def names_base(expr, seen) -> bool:
+    def constants(expr, seen):
         for part in ast.walk(expr):
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                if part.value.replace("\\", "/").rsplit("/", 1)[-1] == base:
-                    return True
+                bases.add(part.value.replace("\\", "/").rsplit("/", 1)[-1])
             elif isinstance(part, ast.Name) and part.id in bound and part.id not in seen:
                 seen.add(part.id)
-                if any(names_base(value, seen) for value in bound[part.id]):
-                    return True
-        return False
+                for value in bound[part.id]:
+                    constants(value, seen)
 
-    def last_part(dotted: str) -> bool:
-        return dotted.rsplit(".", 1)[-1] == stem
+    def is_path_call(func) -> bool:
+        if isinstance(func, ast.Name):
+            return func.id in _PATH_NAMES
+        if not isinstance(func, ast.Attribute):
+            return False
+        if func.attr == "join":  # os.path.join, never `", ".join(...)`
+            owner = func.value
+            return (isinstance(owner, ast.Attribute) and owner.attr == "path") or \
+                   (isinstance(owner, ast.Name) and owner.id in ("path", "posixpath", "ntpath"))
+        return func.attr in _PATH_METHODS
+
+    def last(dotted: str) -> str:
+        return dotted.rsplit(".", 1)[-1]
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            if any(last_part(alias.name) for alias in node.names):
-                return True
+            stems.update(last(alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            if (node.module and last_part(node.module)) or any(alias.name == stem for alias in node.names):
-                return True
+            if node.module:
+                stems.add(last(node.module))
+            stems.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            constants(node, set())
         elif isinstance(node, ast.Call):
             func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
             if func in ("import_module", "__import__"):
                 first = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
-                if isinstance(first, ast.Constant) and isinstance(first.value, str) and last_part(first.value):
-                    return True
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    stems.add(last(first.value))
             elif func in ("spec_from_file_location", "SourceFileLoader", "run_path"):
                 skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
-                parts = list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]
-                if any(names_base(part, set()) for part in parts):
-                    return True
-    return False
+                for part in list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]:
+                    constants(part, set())
+            elif func in _FILE_CALLS:
+                for part in list(node.args) + [kw.value for kw in node.keywords]:
+                    constants(part, set())
+            if is_path_call(node.func):
+                constants(node, set())
+    return stems, bases
+
+
+def _loads_module(source: str, stem: str) -> bool:
+    """True when the Python text imports or loads the module `stem`, or names `<stem>.py` in a path expression it copies,
+    opens or runs (`_suite_profile`). It assumes module stems are unique across the repository, so a name match is a load
+    of this file (only `test_action.py` repeats a stem today). A text that does not parse reads False."""
+    profile = _suite_profile(source)
+    return profile is not None and (stem in profile[0] or stem + ".py" in profile[1])
+
+
+def _tracked_files():
+    """(tracked paths, None), or (None, the reason) when `git ls-files` fails, in the working folder's repository."""
+    done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
+                         encoding="utf-8", stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        return None, "git ls-files failed: %s" % done.stderr.strip()
+    return [item for item in done.stdout.split("\0") if item], None
+
+
+def suites_for_paths(paths, tracked, union: bool) -> set:
+    """The suites that test any of `paths`. Per path: each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus
+    each tracked `test_*.py` whose profile (`_suite_profile`) names it: its stem imported or loaded when it is a `.py`
+    file, its basename in a path expression of any file. A listed file (REPORT_TARGETS) adds its listed suites; with
+    `union` False it gets those only and no scan. Each suite is read and parsed once, whatever the number of paths."""
+    import re
+    listed = dict(REPORT_TARGETS)
+    names = set()
+    scan = [path for path in paths if union or path not in listed]
+    for path in paths:
+        if path in listed:
+            names.update(listed[path])
+    if not scan:
+        return names
+    profiles = {}
+    for item in tracked:
+        base = os.path.basename(item)
+        if base.startswith("test_") and base.endswith(".py"):
+            try:
+                with open(item, encoding="utf-8") as handle:
+                    profile = _suite_profile(handle.read())
+            except (OSError, ValueError):
+                continue
+            if profile is not None:
+                profiles[item] = profile
+    for path in scan:
+        folder, name = os.path.split(path)
+        stem, extension = os.path.splitext(name)
+        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
+        for item, (stems, bases) in profiles.items():
+            if (os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))) \
+                    or name in bases or (extension == ".py" and stem in stems):
+                names.add(item)
+    return names
 
 
 def tests_for_main(argv) -> int:
-    """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
-    suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). Any other file
-    prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
-    `claude_settings` profile. A file with no suite prints nothing."""
+    """Print the suites that test one file, a line each, sorted, once each (`suites_for_paths`, union False). A file listed
+    in REPORT_TARGETS prints exactly its suites. Any other file prints each tracked `test_<stem>.py` and
+    `test_<stem>_*.py` beside it, plus each tracked `test_*.py` of the repository of the working folder that imports or
+    loads its module, or names its basename in a path expression it copies, opens or runs (`_suite_profile`). A suite that
+    cannot be read or parsed is skipped. It is the `select` command of the `claude_settings` profile. A file with no suite
+    prints nothing."""
     import argparse
-    import re
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
     parser.add_argument("--tests-for", required=True, metavar="PATH", help="a repository-relative path")
     args = parser.parse_args(argv)
     path = os.path.normpath(args.tests_for).replace(os.sep, "/")
-    listed = dict(REPORT_TARGETS)
-    if path in listed:
-        names = set(listed[path])
-    else:
-        folder, name = os.path.split(path)
-        stem, extension = os.path.splitext(name)
-        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
-        done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
-                             encoding="utf-8", stdin=subprocess.DEVNULL)
-        if done.returncode != 0:
-            print("ERROR git ls-files failed: %s" % done.stderr.strip())
+    tracked = []
+    if path not in dict(REPORT_TARGETS):
+        tracked, reason = _tracked_files()
+        if tracked is None:
+            print("ERROR %s" % reason)
             return 2
-        tracked = [item for item in done.stdout.split("\0") if item]
-        names = {item for item in tracked
-                 if os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))}
-        if extension == ".py":
-            for item in tracked:
-                base = os.path.basename(item)
-                if item in names or not (base.startswith("test_") and base.endswith(".py")):
-                    continue
-                try:
-                    with open(item, encoding="utf-8") as handle:
-                        source = handle.read()
-                except (OSError, ValueError):
-                    continue
-                if _loads_module(source, stem):
-                    names.add(item)
-    for name in sorted(names):
+    for name in sorted(suites_for_paths([path], tracked, union=False)):
+        print(name)
+    return 0
+
+
+def lint_suites_main(argv) -> int:
+    """`--lint-suites BASE`: print the suites that test any file of `git diff BASE...HEAD`, a line each, sorted. It is the
+    one selector `bin/ci-job --lint` asks for the suite steps it runs. Unlike `--tests-for`, a listed file also gets the
+    suites its scan finds. Exit 2 with one `ERROR` line when the diff or the file list cannot be read. Cost: one `git diff`,
+    then, when the diff holds a file, one `git ls-files` and one parse of each tracked `test_*.py`, once for the whole diff."""
+    import argparse
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --lint-suites")
+    parser.add_argument("--lint-suites", required=True, metavar="BASE", help="a ref the diff BASE...HEAD starts from")
+    args = parser.parse_args(argv)
+    done = _nowindow.run(["git", "diff", "--name-only", "--no-renames", "-z", args.lint_suites + "...HEAD"],
+                         capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+    if done.returncode != 0:
+        print("ERROR git diff %s...HEAD failed: %s" % (args.lint_suites, done.stderr.strip()))
+        return 2
+    changed = sorted({item.replace(os.sep, "/") for item in done.stdout.split("\0") if item})
+    tracked = []
+    if changed:
+        tracked, reason = _tracked_files()
+        if tracked is None:
+            print("ERROR %s" % reason)
+            return 2
+    for name in sorted(suites_for_paths(changed, tracked, union=True)):
         print(name)
     return 0
 
@@ -3021,6 +3104,8 @@ def main() -> int:
         return known_defects_main(sys.argv[1:])
     if "--tests-for" in sys.argv[1:]:
         return tests_for_main(sys.argv[1:])
+    if "--lint-suites" in sys.argv[1:]:
+        return lint_suites_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
