@@ -3877,6 +3877,18 @@ hm_allow("an agent adds its own red-run folder, as the red run does, passes",
          HMADD + "--detach " + HMAGENT_OWN_RED + " HEAD", **HMAG)
 hm_allow("an agent adds its own recorded home tree passes", HMADD + slash(HMHOME), **HMAG)
 hm_allow("with no agent_id, the lane9 add from the primary passes", HMADD + HMAGENT_LANE9)
+# An agent with no home record yet, called from the primary, has no home to match: a tree in the
+# folder is refused, and its own red-run folder still passes. No case records this id's home.
+HM_NOREC = "hmagentnr3"
+HMNOREC = dict(cwd=HMMAIN, agent_id=HM_NOREC)
+hm_deny("an agent with no home record adds lane9 under the primary's folder is refused",
+        HMADD + HMAGENT_LANE9, **HMNOREC)
+hm_allow("an agent with no home record adds its own red-run folder, as the red run does, passes",
+         HMADD + "--detach " + slash(os.path.join(HMWT, "agent-" + HM_NOREC + "-red")) + " HEAD",
+         **HMNOREC)
+# Only the agent's home itself passes. A tree nested inside it is a new tree in the folder.
+hm_deny("an agent adds a tree nested inside its own recorded home is refused",
+        HMADD + slash(os.path.join(HMHOME, "sub")), **HMAG)
 
 add("hand-made worktree: an Agent call with no isolation, whose prompt names a worktree path, passes",
     "allow", tool="Agent", cwd=HMMAIN, subagent_type="general-purpose", description="lane",
