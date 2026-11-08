@@ -103,6 +103,7 @@ FAMILIES = {
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "ste-push": "a git push whose net range changes a file the ste-lint step lints: the lint runs once from the pushed checkout and a FAIL verdict is denied; a push to the record branch or to archive/*, a dry run and a push that changes no linted file start no lint",
+    "push-variable": "a cd or git -C through a variable set in the environment: the folder it names is read as its value, and an unset name stays unknown and asks",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -1242,9 +1243,12 @@ def materialize(path):
 
 
 def materialize_for(case):
-    """Build every lazy fixture that a case's own fields name, before the case runs."""
+    """Build every lazy fixture that a case's own fields name, before the case runs. A value the case sets
+    on the guard's environment counts too: a variable naming a fixture folder reaches that folder through
+    the guard's own read, never through the command text."""
     fields = [case.get(k) for k in ("cwd", "env_path", "config", "transcript", "raw", "guard")]
     fields += list(case.get("tool_input", {}).values())
+    fields += list((case.get("env") or {}).values())
     text = slash(" ".join(str(f) for f in fields if f is not None))
     for key, once in list(LAZY.items()):
         if key in text:
@@ -11552,6 +11556,55 @@ cmk_refuse("a merge that conflicts on a clean tree, then add -A, commit and push
 cmk_allow("two commits, the first adding a triplet and the second removing it, then a push",
           VCS + " push", R2_NET)
 
+
+# =========================================================================== 5g. folders through a variable
+# A `cd` or `git -C` through a variable that is set in the guard's environment is read as the value it holds,
+# so the guard judges the folder that value names (owner ruling of 2026-11-08 06:11 CST, page item 413 a). A
+# name that is not set stays unknown, and an unknown folder asks (coordinator ruling of 06:22 CST, item 410 a).
+# Each case sets its variable through `env` to a real fixture folder, so the guard reads that folder.
+FAMILY = "push-variable"
+sh("var-folder: a force push after cd through a set variable naming a feature checkout is refused",
+   'cd "$PUSH_VAR" && ' + VCS + " push -f", "deny", "force-push", cwd=PUSHFEAT,
+   env={"PUSH_VAR": PUSHSELF}, carries=REMEDY)
+sh("var-folder: a force push with an explicit target after cd through the set variable is refused",
+   'cd "$PUSH_VAR" && ' + VCS + " push --force origin feat", "deny", "force-push", cwd=PUSHFEAT,
+   env={"PUSH_VAR": PUSHSELF}, carries=REMEDY)
+sh("var-folder: a force push after cd through the set variable, unquoted, is refused",
+   "cd $PUSH_VAR && " + VCS + " push -f", "deny", "force-push", cwd=PUSHFEAT,
+   env={"PUSH_VAR": PUSHSELF}, carries=REMEDY)
+sh("var-folder: control, a force push with git -C through the set variable is refused",
+   VCS + ' -C "$PUSH_VAR" push -f', "deny", "force-push", cwd=PUSHFEAT,
+   env={"PUSH_VAR": PUSHSELF}, carries=REMEDY)
+# An unset name is unknown, so the folder is unknown and the push asks.
+sh("var-folder: a force push after cd through an unset variable asks, the folder being unknown",
+   'cd "$UNSET_PUSH_VAR" && ' + VCS + " push -f", "ask", cwd=PUSHFEAT, env={"UNSET_PUSH_VAR": None})
+sh("var-folder: a bare push after cd through an unset variable asks, the folder being unknown",
+   'cd "$UNSET_PUSH_VAR" && ' + VCS + " push", "ask", cwd=PUSHFEAT, env={"UNSET_PUSH_VAR": None})
+# A commit through a set variable is judged in the checkout the variable names: a staged triplet there is
+# refused, and a clean staged change is allowed.
+sh("var-folder: a commit with git -C through a set variable naming a staged triplet is refused",
+   VCS + ' -C "$COMMIT_VAR" commit -m x', "deny", CMK_RULE, cwd=NOGIT, env={"COMMIT_VAR": CMK_STAGED})
+sh("var-folder: control, a commit with git -C through a set variable naming a clean change is allowed",
+   VCS + ' -C "$COMMIT_VAR" commit -m x', "allow", cwd=NOGIT, env={"COMMIT_VAR": CMK_CLEAN})
+# The ste-push check reads the folder a cd names through a set variable, so the lint runs there.
+sh("var-folder: a push after cd through a set variable naming a checkout whose lint fails is refused",
+   'cd "$STE_VAR" && ' + VCS + " push origin feat", "deny", "ste-push", cwd=PUSHFEAT,
+   env={"STE_VAR": PUSHSTE})
+sh("var-folder: control, a push with git -C through the set variable naming that checkout is refused",
+   VCS + ' -C "$STE_VAR" push origin feat', "deny", "ste-push", cwd=PUSHFEAT,
+   env={"STE_VAR": PUSHSTE})
+# The record-writer check reads the folder a cd names through a set variable, so a push from the roadmap
+# checkout is refused there.
+record_refuse("a lane's bare push after cd through a set variable naming the roadmap checkout is refused",
+              'cd "$RECORD_VAR" && ' + VCS + " push", LANE_TRANSCRIPT, cwd=PUSHFEAT,
+              env=dict(ROLE_ENV, RECORD_VAR=RECROADMAP))
+record_refuse("a lane's bare push with git -C through the set variable naming the roadmap checkout is refused",
+              VCS + ' -C "$RECORD_VAR" push', LANE_TRANSCRIPT, cwd=PUSHFEAT,
+              env=dict(ROLE_ENV, RECORD_VAR=RECROADMAP))
+# HOME is a set variable too: a folder under it is read, and a readable feature checkout there allows.
+sh("var-folder: a bare push after cd through HOME, naming a readable feature checkout, allows",
+   'cd "$HOME/' + os.path.basename(PUSHSELF) + '" && ' + VCS + " push", "allow", cwd=PUSHFEAT,
+   env={"HOME": ROOT}, silent=True)
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
