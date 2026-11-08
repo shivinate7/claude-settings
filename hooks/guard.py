@@ -2057,16 +2057,19 @@ def raw_names(fields, modes):
     return paths
 
 
-def changed_paths(root: str, old: str, new=None, modes=None):
+def changed_paths(root: str, old: str, new=None, modes=None, top: str = ""):
     """The paths that differ from `old` (a commit or tree) to `new` (a commit), or to the working tree
     and its untracked files when `new` is None; None when git failed. With a dict `modes`, the same one
     diff is read in raw form, and `modes` gets each tracked path's `(old mode, new mode)`: '000000' is
-    absent and '160000' a gitlink. The working tree's mode is git's own, so `core.fileMode` holds."""
+    absent and '160000' a gitlink. The working tree's mode is git's own, so `core.fileMode` holds.
+    Every path is relative to the checkout's top. `git diff` prints that from any folder, but
+    `git ls-files --others` lists only the folder it runs in, relative to it, so it runs in `top`
+    (the checkout's top, which `diff_violation` already read; it defaults to `root`)."""
     form = ("--name-only",) if modes is None else ("--raw", "--no-abbrev")
     if new is not None:
         return raw_names(git_names(root, "diff", *form, "-z", "--no-renames", old, new), modes)
     tracked = raw_names(git_names(root, "diff", *form, "-z", "--no-renames", old), modes)
-    fresh = git_names(root, "ls-files", "--others", "--exclude-standard", "-z")
+    fresh = git_names(top or root, "ls-files", "--others", "--exclude-standard", "-z")
     if tracked is None or fresh is None:
         return None
     return tracked + sorted(fresh)
@@ -2176,9 +2179,10 @@ def own_changes(root: str, unread=None, top: str = ""):
     the working tree or a commit of its own carries it, and that is refused.
     A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
     people's commits, and are not read.
-    `top` is the checkout's top, where an open merge's working-tree files are read. A caller that already
+    `top` is the checkout's top, where untracked files are listed and an open merge's working-tree files
+    are read. A caller that already
     read it passes it, so no git call is added; it defaults to `root`."""
-    log =guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
+    log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
     gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir")
     merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
     if log is None or gitdir is None or merging is None or log.returncode or gitdir.returncode:
@@ -2224,7 +2228,7 @@ def own_changes(root: str, unread=None, top: str = ""):
         if old is None:
             return None
     modes = {} if merging.returncode == 0 else None
-    paths = changed_paths(root, old, modes=modes)
+    paths = changed_paths(root, old, modes=modes, top=top)
     if paths is None:
         return None
     if modes is not None:
