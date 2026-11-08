@@ -8979,6 +8979,12 @@ sh("git env set: PowerShell, an unclosed ${ in a string, then GIT_DIR set in a b
    "('${'); & {$env:GIT_DIR='x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, an unclosed ${ in a string, a newline, then GIT_DIR set, denies",
    "('${' + $x)\n$env:GIT_DIR='x'", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# A `${` inside a string makes the closer scan keep the `}` after the string, so a set after that `}`
+# must still deny. The second form puts a letter before the `${` and pins the same reading.
+sh("git env set: PowerShell, a set after a } that follows a ${ in a string, denies",
+   "{\"${\"} $env:GIT_DIR='x'", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a set after a } that follows an a${ in a string, denies",
+   "{\"a${\"} $env:GIT_DIR='x'", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # The statement marker after a block's `}` ends a cmdlet's arguments. So `$null` after the block is not
 # the value of the set before it, and that set denies. A scrub whose value is `$null` inside the block
 # stays allowed. Both pins read the marker cut at guard_kill.py, rest = rest[:rest.index(...)].
@@ -8999,6 +9005,8 @@ sh("git env set: PowerShell, a hash literal then a read of GIT_DIR, allowed",
    r'$h = @{a=1}; Write-Output $env:GIT_DIR', "allow", tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a braced read of GIT_DIR, allowed",
    r'Write-Output ${env:GIT_DIR}', "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a braced read of GIT_DIR in a script block, allowed",
+   r"{${env:GIT_DIR}}", "allow", tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a braced read of HOME in a block, allowed",
    r'if($x){ "${env:HOME}" }', "allow", tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, an unclosed ${ in a string with no set, allowed",
