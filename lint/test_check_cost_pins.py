@@ -670,6 +670,61 @@ class CostPinTests(unittest.TestCase):
                            + CONTROL)
         self.assert_found([count_row("pr.md", text, CONTROL_NEEDLE)], counts=True)
 
+    def test_version_number_is_not_a_count(self):
+        # The digits of a version (2.1.316) name a release, not a count of work.
+        text = self.decide("version.md", "- **Cost:** Claude Code 2.1.316 reads the config.\n" + CONTROL)
+        self.assert_found([count_row("version.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_singular_and_long_time_units_are_not_counts(self):
+        text = self.decide("unit-time.md",
+                           "- **Cost:** a 5 minute run.\n"
+                           "- **Cost:** a 1 second read.\n"
+                           "- **Cost:** 2 hours per run.\n"
+                           + CONTROL)
+        self.assert_found([count_row("unit-time.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_size_units_are_not_counts(self):
+        text = self.decide("unit-size.md",
+                           "- **Cost:** 40 KB per file.\n"
+                           "- **Cost:** 3 MB per run.\n"
+                           "- **Cost:** 2 GB per call.\n"
+                           "- **Cost:** 512 B per read.\n"
+                           + CONTROL)
+        self.assert_found([count_row("unit-size.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_capped_at_never_more_than_and_max_are_bounds(self):
+        text = self.decide("bounds.md",
+                           "- **Cost:** capped at 3 calls.\n"
+                           "- **Cost:** never more than 3 reads per call.\n"
+                           "- **Cost:** max 3 reads per call.\n"
+                           + CONTROL)
+        self.assert_found([count_row("bounds.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_check_open_scan_load_and_parse_take_a_trailing_count(self):
+        text = self.decide("trailing-verbs.md",
+                           "- **Cost:** It opens the file once.\n"
+                           "- **Cost:** It checks the layout twice.\n"
+                           "- **Cost:** It scans the tree once.\n"
+                           "- **Cost:** They load the record twice.\n"
+                           "- **Cost:** It parses the record once.\n")
+        self.assert_found([count_row("trailing-verbs.md", text, "It opens the file once."),
+                           count_row("trailing-verbs.md", text, "It checks the layout twice."),
+                           count_row("trailing-verbs.md", text, "It scans the tree once."),
+                           count_row("trailing-verbs.md", text, "They load the record twice."),
+                           count_row("trailing-verbs.md", text, "It parses the record once.")], counts=True)
+
+    def test_zero_and_ten_are_count_words(self):
+        text = self.decide("zero-ten.md",
+                           "- **Cost:** It reads zero lines per run.\n"
+                           "- **Cost:** It makes ten calls per run.\n")
+        self.assert_found([count_row("zero-ten.md", text, "It reads zero lines per run."),
+                           count_row("zero-ten.md", text, "It makes ten calls per run.")], counts=True)
+
+    def test_trailing_verb_three_words_back_reaches_the_count(self):
+        # "reads" stands three words before "once", with "the layout file" between them.
+        text = self.decide("three-back.md", "- **Cost:** The guard reads the layout file once.\n")
+        self.assert_found([count_row("three-back.md", text, "The guard reads the layout file once.")], counts=True)
+
 
 class CorpusTests(unittest.TestCase):
     """The corpus case: this repo's own records, with no --root. It may stay red until the records that name
