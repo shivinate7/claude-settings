@@ -1165,9 +1165,9 @@ STEP_DUP_RECORD_REASON = (
 )
 STEP_DUP_UNKNOWN_REASON = (
     "this session's transcript does not prove that no other live lane carries cs-step:%s in this repo: it holds no "
-    "whole list_sessions result, the newest one has more pages or did not parse, or the subject has no cs-repo tag "
-    "to match by. Run list_sessions (every page) in its own turn, check that the target or the new lane carries a "
-    "cs-repo tag, then retry." + STEP_DUP_TAIL
+    "whole list_sessions result (every page, no cursor), a set_session_tags call followed the newest sight of a "
+    "session, or the subject has no cs-repo tag to match by. Run list_sessions (every page) in its own turn, check "
+    "that the target or the new lane carries a cs-repo tag, then retry." + STEP_DUP_TAIL
 )
 
 
@@ -1179,17 +1179,20 @@ def _tag_values(tags, prefix: str):
 def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
     """Return (decision, matched, reason) when this call would put a second live lane on a step, else None. The
     call is a lane brief (send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.`, parsed as
-    brief_hit parses it) or a create_session tagged cs-step:<step>. It is denied when another live session, not the
-    brief's target, carries that step and shares a cs-repo tag with the subject (the target's record, or the create's
-    own tags); the reason names that session. A session is live unless its newest sight in this transcript is
-    archived (hooks/own_session.py session_rows_read). Any one whole list_sessions read earlier in the transcript
-    counts, however old: a newer page with more pages, or a body that did not parse, is the read that decides.
-    With no carrier found, anything short of a whole read, or a subject with no cs-repo tag, is an ask: unknown, never
-    an allow. After a whole read with no carrier, two more reads can still ask: an open pull request of the cs-repo
-    whose head is lane_head_refs(step), when the target does not carry the step, and the step record on origin/roadmap
-    (`lane` field) naming a session id other than the target. A failed pull request or record read, or an unreadable ref, is an ask; a readable ref with no record of the step, and a lane
-    field with no session id, give no verdict. Fails closed: an error in the reads is an ask, because the guard-wide
-    crash path fails open. Known limit: only this transcript is read, so a session started after the newest list
+    brief_hit parses it) or a create_session tagged cs-step:<step>. Steps and tags match without case. It is denied
+    when another live session, not the brief's target, carries that step and shares a cs-repo tag with the subject
+    (the target's record, or the create's own tags); the reason names that session. A brief to a target that carries
+    the step itself is the remedy, so a second carrier does not deny it. A session is live unless its newest sight in
+    this transcript is archived and not unarchived (hooks/own_session.py session_rows_read). Any one whole
+    list_sessions read earlier in the transcript counts, however old: a later partial read never cancels it.
+    With no carrier found, anything short of a whole read, a subject with no cs-repo tag, or a live session whose
+    tags a set_session_tags call may have changed since its newest sight, is an ask: unknown, never an allow. After a
+    whole read with no carrier, two more reads can still ask: an open pull request of the cs-repo whose head is
+    lane_head_refs(step), when the target does not carry the step, and the step record on origin/roadmap (`lane`
+    field) naming a session id other than the target. A failed pull request or record read, or an unreadable ref, is
+    an ask; a readable ref with no record of the step, a lane field with no session id, and a lane field that
+    begins with `coordinator` (a reference to the router, not a lane), give no verdict. Fails closed: an error in
+    the reads is an ask, because the guard-wide crash path fails open. Known limit: only this transcript is read, so a session started after the newest list
     read is not seen.
     Cost: one transcript read per brief or create with a step, no file written, no process, no extra tool call; the
     coordinator pays about one list_sessions call per session. Only after a whole read found no carrier: one gh read
@@ -1206,28 +1209,32 @@ def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
     else:
         tags = tool_input.get("tags")
         steps = _tag_values(tags, ARCHIVE_STEP_PREFIX) if isinstance(tags, list) else []
+    steps = [s.lower() for s in steps]
     if not steps:
         return None
     unknown = ("lane step with no proof", STEP_DUP_UNKNOWN_REASON % steps[0])
     try:  # cost: one transcript read per brief or create with a step
         if not transcript:
             raise ValueError("no transcript")
-        records, listing = own_session.session_rows_read(transcript)
+        records, listing, retagged = own_session.session_rows_read(transcript)
+        mine = set()  # the steps the brief's target carries itself
         if tool == BRIEF_TOOL:
-            if not isinstance(target, str) or target not in records:
-                raise ValueError("no record of the target")
+            if not isinstance(target, str) or target not in records or target in retagged:
+                raise ValueError("no current record of the target")
             subject = records[target][0]
+            mine = {v.lower() for v in _tag_values(subject, ARCHIVE_STEP_PREFIX)}
         else:
             subject = tool_input["tags"]
         repos = {r.lower() for r in _tag_values(subject, ARCHIVE_REPO_PREFIX)}
         if repos:
             for sid, (tags, archived) in records.items():
-                if sid == target or archived:
+                if sid == target or archived or sid in retagged:
                     continue
+                carried = {v.lower() for v in _tag_values(tags, ARCHIVE_STEP_PREFIX)}
                 for step in steps:
-                    if step in _tag_values(tags, ARCHIVE_STEP_PREFIX) and repos & {r.lower() for r in _tag_values(tags, ARCHIVE_REPO_PREFIX)}:
+                    if step in carried and step not in mine and repos & {r.lower() for r in _tag_values(tags, ARCHIVE_REPO_PREFIX)}:
                         return "deny", "lane step " + step + " carried by " + sid, STEP_DUP_REASON % (sid, step)
-        if not repos or listing != own_session.LIST_FULL:
+        if not repos or listing != own_session.LIST_FULL or any(not records[sid][1] for sid in retagged if sid != target):
             raise ValueError("not proved")
         held = _step_held_hit(steps, subject, records.get(target, ([], False))[0], target, cwd)
         if held:
@@ -1248,12 +1255,12 @@ def _step_held_hit(steps, subject, target_tags, target, cwd: str):
         raise RuntimeError("the merge tool could not be loaded")
     repos = _tag_values(subject, ARCHIVE_REPO_PREFIX)
     for step in steps:
-        if step not in _tag_values(target_tags, ARCHIVE_STEP_PREFIX):
+        if step not in {v.lower() for v in _tag_values(target_tags, ARCHIVE_STEP_PREFIX)}:
             for repo in repos:
                 if not _REPO_NAME.fullmatch(repo):
                     raise ValueError("not an owner/name repo tag")
                 for row in open_pull_rows(module, repo):
-                    if str(row["head"]["ref"]) in lane_head_refs(step):
+                    if str(row["head"]["ref"]).lower() in lane_head_refs(step):
                         return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
                                 STEP_DUP_PR_REASON % (row.get("number", "?"), step))
         record = override.STEP_DIR + step + ".json"
@@ -1266,7 +1273,9 @@ def _step_held_hit(steps, subject, target_tags, target, cwd: str):
         if shown is None or shown.returncode != 0:
             raise ValueError("the step record could not be read")
         lane = json.loads(shown.stdout).get("lane")
-        named = [i for i in re.findall(r"session_[A-Za-z0-9_-]+", lane) if i != target] if isinstance(lane, str) else []
+        # A lane field that begins with `coordinator` names the router the step is sent through, never the lane.
+        named = [i for i in re.findall(r"session_[A-Za-z0-9_-]+", lane) if i != target] \
+            if isinstance(lane, str) and not lane.strip().lower().startswith("coordinator") else []
         if named:
             return ("lane step " + step + " recorded for " + named[0], STEP_DUP_RECORD_REASON % (step, named[0]))
     return None

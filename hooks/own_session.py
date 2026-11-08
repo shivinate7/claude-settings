@@ -4,7 +4,8 @@ hooks/guard_merge.py (merge role, trust card, archive proofs) and lint/report_gu
 owner-facing pick guard) both read it. It is its own small module so the Stop hook can import it
 without loading the whole guard.
 Cost: one transcript read per call, no file written.
-session_rows_read is the second reader: every session this transcript has seen, for rule lane-step-dup.
+session_rows_read is the second reader, for rule lane-step-dup. It stays apart from own_session_read because it reads
+many rows (every session the transcript has seen), where own_session_read follows one id and its set_session_tags calls.
 """
 import json
 import re
@@ -100,9 +101,15 @@ def own_session_read(transcript, own_id, created=False):
     return newest, tagged_after, parent
 
 
-# How the newest list_sessions result in a transcript reads: none was made, its body did not parse, it has more pages,
-# or it is the whole list. Only LIST_FULL proves that no session outside the transcript carries a step.
+# How the list_sessions reads of a transcript add up: none was made, the newest did not parse, it has more pages (or
+# a cursor), or one of them is the whole list. Only LIST_FULL proves that no session outside the transcript carries a step.
 LIST_NONE, LIST_BAD, LIST_MORE, LIST_FULL = "none", "bad", "more", "full"
+
+
+def _is_tool(name, base):
+    """True when `name` is the tool `base`, bare or behind an `mcp__<server>__` prefix. A name that only ends in the
+    same letters (unarchive_session for archive_session) is another tool."""
+    return name == base or name.endswith("__" + base)
 
 
 def _result_text(block):
@@ -130,14 +137,20 @@ def _list_rows(body):
 
 
 def session_rows_read(transcript):
-    """(records, listing): `records` maps each session id this transcript has seen to (tags, archived), the newest
-    sight deciding. A sight is a row of a list_sessions result, a get_session result, or a create_session call whose
-    result names the id (its tags are the call's input.tags). A session is archived when its newest sight has an
-    ARCHIVED session_status, or an archive_session call on it, answered without error, follows that sight.
-    `listing` is the LIST_ state of the newest list_sessions result: a page with has_more set is LIST_MORE, a body
-    that is not a whole list page is LIST_BAD. Cost: one read of the transcript; no file written, no process."""
-    records, listing = {}, LIST_NONE
-    uses = {}  # tool_use id -> ("list" | "get" | "archive", the id archived) of a call whose result is judged
+    """(records, listing, unknown): `records` maps each session id this transcript has seen to (tags, archived), the
+    newest sight deciding. A sight is a row of a list_sessions result, a get_session result, or a create_session call
+    whose result names the id (its tags are the call's input.tags). A session is archived when its newest sight has an
+    ARCHIVED session_status, or an archive_session call on it, answered without error, follows that sight; an
+    unarchive_session call answered without error makes it live again. `unknown` is the ids whose tags a
+    set_session_tags call may have changed after their newest sight (a call with no readable id list may have named
+    any of them), because the call's result does not say what the tags are now.
+    `listing` is LIST_FULL when any one list_sessions read was whole: a later partial read does not cancel it, because
+    every session it missed is a sight in `records`. Otherwise it is the state of the newest read: a page with
+    has_more set, or a read with a cursor (after_id or before_id), is LIST_MORE; a body that is not a whole list page
+    is LIST_BAD; no read is LIST_NONE.
+    Cost: one read of the transcript; no file written, no process."""
+    records, listing, whole, unknown = {}, LIST_NONE, False, set()
+    uses = {}  # tool_use id -> (kind, the id acted on, or whether a list read has a cursor) of a call whose result is judged
     creates = {}  # tool_use id -> the tags a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -151,32 +164,43 @@ def session_rows_read(transcript):
                 if not isinstance(block, dict):
                     continue
                 name, given = str(block.get("name", "")), block.get("input")
-                if block.get("type") == "tool_use" and name.endswith("list_sessions"):
-                    uses[block.get("id")] = ("list", None)
-                elif block.get("type") == "tool_use" and name.endswith("get_session"):
-                    uses[block.get("id")] = ("get", None)
-                elif block.get("type") == "tool_use" and name.endswith("archive_session"):
+                if block.get("type") == "tool_use":
                     target = given.get("session_id") if isinstance(given, dict) else None
-                    uses[block.get("id")] = ("archive", target if isinstance(target, str) else None)
-                elif block.get("type") == "tool_use" and name.endswith("create_session"):
-                    tags = given.get("tags") if isinstance(given, dict) else None
-                    if isinstance(tags, list):
-                        creates[block.get("id")] = [str(t) for t in tags]
+                    target = target if isinstance(target, str) else None
+                    if _is_tool(name, "list_sessions"):
+                        cursor = not isinstance(given, dict) or bool(given.get("after_id") or given.get("before_id"))
+                        uses[block.get("id")] = ("list", cursor)
+                    elif _is_tool(name, "get_session"):
+                        uses[block.get("id")] = ("get", None)
+                    elif _is_tool(name, "archive_session"):
+                        uses[block.get("id")] = ("archive", target)
+                    elif _is_tool(name, "unarchive_session"):
+                        uses[block.get("id")] = ("unarchive", target)
+                    elif _is_tool(name, "create_session"):
+                        tags = given.get("tags") if isinstance(given, dict) else None
+                        if isinstance(tags, list):
+                            creates[block.get("id")] = [str(t) for t in tags]
+                    elif _is_tool(name, "set_session_tags"):
+                        ids = given.get("session_ids") if isinstance(given, dict) else None
+                        unknown.update(r for r in records if not isinstance(ids, list) or r in ids)
                 elif block.get("type") == "tool_result":
                     key, body = block.get("tool_use_id"), _result_text(block)
                     if key in creates:
                         made = _created_session_id(body)
                         if made:
                             records[made] = (creates[key], False)
-                    elif key in uses and uses[key][0] == "archive":
-                        if not block.get("is_error") and uses[key][1] in records:
-                            records[uses[key][1]] = (records[uses[key][1]][0], True)
+                            unknown.discard(made)
+                    elif key in uses and uses[key][0] in ("archive", "unarchive"):
+                        sid = uses[key][1]
+                        if not block.get("is_error") and sid in records:
+                            records[sid] = (records[sid][0], uses[key][0] == "archive")
                     elif key in uses and uses[key][0] == "get" and body is not None:
                         try:
                             ccr = _record_json(body)["ccr"]
                             if isinstance(ccr["id"], str) and isinstance(ccr["tags"], list):
                                 records[ccr["id"]] = ([str(t) for t in ccr["tags"]],
                                                       "ARCHIVED" in str(ccr.get("session_status", "")).upper())
+                                unknown.discard(ccr["id"])
                         except (ValueError, KeyError, TypeError):
                             continue
                     elif key in uses and uses[key][0] == "list":
@@ -187,5 +211,9 @@ def session_rows_read(transcript):
                             continue
                         for sid, tags, archived in rows:
                             records[sid] = (tags, archived)
-                        listing = LIST_MORE if more else LIST_FULL
-    return records, listing
+                            unknown.discard(sid)
+                        if more or uses[key][1]:
+                            listing = LIST_MORE
+                        else:
+                            listing, whole = LIST_FULL, True
+    return records, LIST_FULL if whole else listing, unknown
