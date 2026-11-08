@@ -1,0 +1,11 @@
+{
+  "title": "task-wake-needs-landed-turn (lane model-guard-reads-next, after the peer-wake PR)",
+  "phase": "next",
+  "status": "doing",
+  "order": 655,
+  "owner": "lane model-guard-reads-next",
+  "lane": "session_013NEJL1SsG5NZULw1mG6qgB",
+  "why": "Named by the coordinator (07:37 CST Nov 8) and built in lane model-guard-reads-next.",
+  "note": "Red cases being written; a PR with Merge after: the peer-wake-starts-window PR. Triage asked the lane for the title, why and done check (07:32 CST Nov 8).",
+  "updatedAt": "2026-11-08T07:31:00-06:00"
+}
