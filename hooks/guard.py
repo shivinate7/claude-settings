@@ -60,9 +60,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
   checkout-b-current-branch
-                       deny. A `checkout -B` or `switch -C` of a branch any worktree of the clone
-                       holds, the running one included. The pointer checkout passes, for
-                       pointer-head to judge. (checkout-b-held-branch)
+                       deny. A `checkout -B` or `switch -C` of a branch a worktree other than the
+                       one the command runs in holds. Its own branch passes, and so does the
+                       pointer checkout, for pointer-head to judge. (checkout-b-held-branch)
   hand-made-worktree   deny. A real worktree add whose new tree lands outside
                        `<primary>/.claude/worktrees/`. A repo under the temp folder passes.
                        (lanes-start-in-tool-worktrees)
@@ -3354,7 +3354,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 
-    # 1b2. A `checkout -B` or `switch -C` that resets a branch a worktree of the clone holds. The
+    # 1b2. A `checkout -B` or `switch -C` that resets a branch a worktree beside the command's own holds. The
     # pointer checkout is left to the pointer-head rule above: its reset of main is the recovery
     # act. The text read runs first, so the pointer and worktree reads cost nothing for any other call.
     for segment in split_segments(stripped):

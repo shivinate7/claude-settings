@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import os
 import shlex
 
 import guard_core
@@ -113,15 +114,17 @@ WORKTREE_PRUNE_ASK_REASON = (
 
 # ------------------------------------------------------------------ a held branch, reset in place
 #
-# `git checkout -B <b>` and `git switch -C <b>` move branch <b> to the start point. When a worktree
-# of the clone holds <b> (the running checkout included), git 2.43 moves the ref under that worktree
-# anyway: its files and index keep the old commit, so its next `git status` shows the reverse of the
-# reset as staged work. The ref lives in the COMMON git directory, so the holder may be any worktree
-# of the clone, and one `git worktree list --porcelain` names them all.
+# `git checkout -B <b>` and `git switch -C <b>` move branch <b> to the start point. When ANOTHER
+# worktree of the clone holds <b>, git 2.43 moves the ref under that worktree anyway: its files and
+# index keep the old commit, so its next `git status` shows the reverse of the reset as staged work
+# (lane #1777 incident, Nov 7, reproduced Nov 8). The worktree the command runs in is not that case:
+# on git 2.43.0 its own -B resets cleanly (measured in PR 1889 round 2), so its own branch passes.
+# The ref lives in the COMMON git directory, so the holder may be any worktree of the clone, and one
+# `git worktree list --porcelain` names them all.
 #
 # THE READ RUNS ONLY FOR A -B/-C CALL. The text predicate comes first, so every other git command
-# costs no process. FAIL OPEN: a list that cannot be read judges nothing, this family's stance for an
-# unread subject (see branch_delete_subject above).
+# costs no process. FAIL OPEN: a list or run root that cannot be read judges nothing, this family's
+# stance for an unread subject (see branch_delete_subject above).
 #
 # NOT HERE: the pointer checkout. Its reset of `main` onto `origin/main` is the session-start
 # recovery path, and guard.py leaves that checkout to the pointer-head rule
@@ -169,23 +172,37 @@ def held_branch_names(segment: str):
     return names
 
 
-def worktree_held_branches(where: str):
-    """Return the set of branch names the worktrees of `where`'s clone hold, or None when unread."""
-    answer = guard_core._git(where, "worktree", "list", "--porcelain")
-    if answer is None or answer.returncode != 0:
+def _same_path(left: str, right: str) -> bool:
+    return os.path.normcase(os.path.realpath(left)) == os.path.normcase(os.path.realpath(right))
+
+
+def sibling_held_branches(where: str):
+    """Return the set of branches held by worktrees of `where`'s clone OTHER than the one `where`
+    is in, or None when the list or the run root cannot be read."""
+    root = guard_core._git(where, "rev-parse", "--show-toplevel")
+    listing = guard_core._git(where, "worktree", "list", "--porcelain")
+    if root is None or root.returncode != 0 or listing is None or listing.returncode != 0:
         return None
-    prefix = "branch refs/heads/"
-    return {line[len(prefix):].strip() for line in answer.stdout.splitlines()
-            if line.startswith(prefix)}
+    own = root.stdout.strip()
+    held = set()
+    found_own = False
+    path = ""
+    for line in listing.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):].strip()
+            found_own = found_own or _same_path(path, own)
+        elif line.startswith("branch refs/heads/") and not _same_path(path, own):
+            held.add(line[len("branch refs/heads/"):].strip())
+    return held if found_own else None
 
 
 def held_branch_hit(segment: str, where: str) -> str:
-    """Return the matched text when one segment resets a branch some worktree of the clone holds,
-    else ''. One `worktree list` read, and only for a segment that holds a -B/-C call."""
+    """Return the matched text when one segment resets a branch a sibling worktree holds, else ''.
+    One `rev-parse` and one `worktree list` read, only for a segment that holds a -B/-C call."""
     names = held_branch_names(segment)
     if not names:
         return ""
-    held = worktree_held_branches(where)
+    held = sibling_held_branches(where)
     if not held:
         return ""
     if any(name in held for name in names):
@@ -194,11 +211,10 @@ def held_branch_hit(segment: str, where: str) -> str:
 
 
 HELD_BRANCH_REASON = (
-    "Rule (shared trees): this call resets a branch that a working tree of this clone has checked "
-    "out, this one or a linked one. Git moves the branch under that tree, whose files and index keep "
-    "the old commit, so its next status shows the reset as staged changes and its work is easy to "
-    "lose. "
-    "Remedy: choose a new branch name for the reset, one no working tree holds. Or do the reset "
+    "Rule (shared trees): this call resets a branch that another working tree of this clone has "
+    "checked out. Git moves the branch under that tree, whose files and index keep the old commit, "
+    "so its next status shows the reset as staged changes and its work is easy to lose. "
+    "Remedy: choose a new branch name for the reset, one no other working tree holds. Or do the reset "
     "inside the working tree that holds the branch, where the files move with it "
     "(decision checkout-b-held-branch, a reset must not move a branch under the tree that holds it)."
 )
