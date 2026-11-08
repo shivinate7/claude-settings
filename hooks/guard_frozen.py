@@ -3,14 +3,15 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import fnmatch
 import os
 import re
 
 import guard_core
 from guard_core import (
     LOOP_KEYWORDS, REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
-    _walk_wrappers, basename, dir_before_segment, is_powershell, norm, resolve_command, segment_tokens,
-    split_segments,
+    _walk_wrappers, basename, checkout_root_by_stat, dir_before_segment, is_powershell, norm,
+    path_is_inside, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words, _substitutions
 
@@ -239,11 +240,15 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
-# An in-place editor on the segment. `sed` takes `-i` (alone or with a suffix) or `--in-place`; `perl`
-# takes `-i` as the last letter of a cluster of flags that take no value (`-pi`, `-0777pi.bak`).
-# A flag starts a word (`(?<!\S)`), so `--in-place` inside a quoted pattern is text. A cluster is `-Ei`, `-ni`,
-# `-ibak`: letters that take no value, then `i`. `e`, `f` and `l` take one, so `-ei` is a script, not `-i`.
-_SED_IN_PLACE = r"\bsed\b[^\n;|&]*(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)[^\n;|&]*"
+# An in-place editor on the segment. `sed` (or `gsed`, GNU sed on macOS) takes `-i` (alone or with a
+# suffix) or `--in-place`; `perl` takes `-i` as the last letter of a cluster of flags that take no value
+# (`-pi`, `-0777pi.bak`). A flag starts a word (`(?<!\S)`), so `--in-place` inside a quoted pattern is text.
+# A cluster is `-Ei`, `-ni`, `-ie`: letters that take no value, then `i`, and what follows is the backup
+# suffix. `e`, `f` and `l` take a value, so `-ei` is a script, not `-i`. `_SED_IN_PLACE_FLAG` is the one
+# home of the flag; a `sed` word and a `sed` segment are both read by it.
+_SED_NAMES = ("sed", "gsed")
+_SED_IN_PLACE_FLAG = r"(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)"
+_SED_IN_PLACE = r"\b(?:g?sed)\b[^\n;|&]*" + _SED_IN_PLACE_FLAG + r"[^\n;|&]*"
 _PERL_IN_PLACE = r"\bperl\b[^\n;|&]*\s-[0-9aCcFlnpsStTuUvwW]*i[^\n;|&]*"
 
 
@@ -261,7 +266,7 @@ def _script_mutates(script: str) -> bool:
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
         if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+                command in _SED_NAMES and any(re.match(_SED_IN_PLACE_FLAG, word) for word in rest)):
             return True
     return False
 
@@ -283,11 +288,11 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        in_place = {"sed": _SED_IN_PLACE, "perl": _PERL_IN_PLACE}.get(command)
+        in_place = {"sed": _SED_IN_PLACE, "gsed": _SED_IN_PLACE, "perl": _PERL_IN_PLACE}.get(command)
         return bool(in_place) and bool(re.search(in_place + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
+    if re.search(_SED_IN_PLACE + target, cmd):
         return True
     return False
 
@@ -665,7 +670,7 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 # root fed through a variable that a loop or an xargs itself assigns are not read.
 _MARK = "\0"
 _MARK_AT = re.compile("`\0`|\0")
-_WORD_MARK = "\x02"   # the mark as `_copy_outer` splits words: `_quoted_words` keeps it, not NUL (\x01 is its newline stand-in)
+_WORD_MARK = "\x04"   # the mark as `_copy_outer` splits words: `_quoted_words` keeps it, not NUL; no other mark shares its byte
 _FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
 _FIND_END = (";", "\\;", "+")
 _FIND_TEST_STARTS = ("(", "\\(", "!", "\\!")
@@ -707,6 +712,8 @@ def _roots(words) -> list:
             skip = False
         elif (">" in word or "<" in word) and _is_redirect(word):
             skip = True
+        elif word == "&":
+            continue   # the `&` of `&>`: `_quoted_words` splits it from the `>` that skips the target
         elif not flags_over and word == "--":
             flags_over = True
         elif not flags_over and word.startswith("-") and len(word) > 1:
@@ -725,14 +732,47 @@ def _roots(words) -> list:
     return roots[1:] if grep and not has_pattern else roots
 
 
+_GLOB_MARK = "\x02"   # starts a glob pathspec root: MARK folder MARK glob
+_SEGMENT_GLOB = "\x03"   # first char of a glob that a shell expands: `*` stays inside one path segment
 _GIT_LIST_FLAGS = frozenset(("--files-with-matches", "--name-only", "--files-without-match"))
+_GIT_LIST_PATTERN_FLAGS = frozenset(("-x", "--exclude"))   # `git ls-files` flags whose next word is a pattern
+
+
+def _glob_root(folder: str, word: str, shell: bool = False) -> str:
+    """A pathspec word as a root: the word, or, for a glob (`'*.py'`), a marked root that `_dot_roots`
+    reads as the tests under `folder` that the glob matches. A glob pathspec names tracked paths at
+    any depth, so it cannot be judged as the one path its spelling shows. A leading `./` is dropped.
+    Pathspec magic (`:(glob)`, `:!`, `:^`) and a backslash escape are not read: they give the whole
+    of `folder`, which refuses when it holds any test (conservative). `shell` reads a glob that the
+    shell expands, whose `*` does not cross a `/` (`sed -i ... hooks/*.py`), and has no magic."""
+    text = _unquoted(word)
+    if not shell and (text.startswith(":") or "\\" in text):
+        return _GLOB_MARK + folder + _GLOB_MARK
+    while text.startswith("./"):
+        text = text[2:]
+    if not re.search(r"[*?\[]", text):
+        return word
+    return _GLOB_MARK + folder + _GLOB_MARK + (_SEGMENT_GLOB if shell else "") + text
+
+
+def _pathspec_roots(folder: str, word: str) -> list:
+    """The roots one pathspec word stands for. A glob or magic word is one marked root (`_glob_root`).
+    Any other relative word is itself and, as a folder, `<word>/*`: the tests under it, which
+    `_dot_roots` reads from disk. A word that is a file matches nothing under it."""
+    root = _glob_root(folder, word)
+    text = _unquoted(word)
+    if root != word or text in ("", ".", "./") or text.startswith(("/", "~", "$")):
+        return [root]
+    return [word, _glob_root(folder, text.rstrip("/") + "/*")]
 
 
 def _git_listing_roots(args):
     """The roots of a `git ls-files` or `git grep -l` segment, which print tracked paths: its pathspecs
     (for `grep`, the words after the pattern), else `.`, the whole checkout, read as a `.` root is
-    (`_dot_roots`). A `-C DIR` before the command is its folder. None for any other `git` command, and
-    for a `git grep` that prints matching lines, not paths."""
+    (`_dot_roots`). A redirect and its target are not pathspecs, as in `_roots`, and nor is the value
+    of `-x` or `--exclude`; a glob pathspec is a marked root, and a folder pathspec is read as the
+    tests under it (`_pathspec_roots`). A `-C DIR` before the command is its folder. None for any other
+    `git` command, and for a `git grep` that prints matching lines, not paths."""
     folder, at = ".", 0
     while at < len(args) and args[at].startswith("-"):
         if args[at] in ("-C", "-c") and at + 1 < len(args):
@@ -743,12 +783,26 @@ def _git_listing_roots(args):
         return None
     rest = args[at + 1:]
     if args[at] == "ls-files":
-        roots = [word for word in rest if not word.startswith("-")]
+        roots, skip, flags_over = [], False, False
+        for word in rest:
+            if skip:
+                skip = False
+            elif (">" in word or "<" in word) and _is_redirect(word):
+                skip = True
+            elif word == "&":
+                continue   # the `&` of `&>`, as in `_roots`
+            elif not flags_over and word == "--":
+                flags_over = True
+            elif not flags_over and word in _GIT_LIST_PATTERN_FLAGS:
+                skip = True
+            elif flags_over or not word.startswith("-"):
+                roots.append(word)
     else:
         if not any(word in _GIT_LIST_FLAGS or re.fullmatch(r"-[A-Za-z0-9]*[lL][A-Za-z0-9]*", word)
                    for word in rest):
             return None
         roots = _roots(["grep"] + rest)
+    roots = [root for word in roots for root in _pathspec_roots(folder, word)]
     return roots or [folder]
 
 
@@ -787,9 +841,9 @@ def _text_roots(text: str, cwd: str = "", predicate=None) -> list:
             continue   # empty, not the last of its pipeline, or a count
         chain, stage = [], at
         while stage is not None:
-            chain = _roots(parsed[stage]) + chain
+            chain = _dot_roots(_roots(parsed[stage]), cwd, predicate, _name_filters(parsed[stage])) + chain
             stage = fed_by[stage]
-        roots.extend(word for word in _dot_roots(chain, cwd, predicate) if word not in roots)
+        roots.extend(word for word in chain if word not in roots)
     return roots
 
 
@@ -847,15 +901,29 @@ _TREE_SKIP = frozenset(("node_modules", "__pycache__", "venv"))
 _TREE_LIMIT = 20000   # files read before the walk gives up
 
 
-def _first_test_under(where: str, predicate) -> str:
+def _first_test_under(where: str, predicate, glob: str = "", only=()) -> str:
     """The first path under the folder `where` (relative to it) that `predicate` accepts, else ''.
-    Read from disk, top down, skipping hidden folders, `node_modules`, `venv` and `__pycache__`.
+    With `glob`, only a path whose relative spelling matches it (a pathspec glob: `*` crosses `/`; a
+    glob that starts with `_SEGMENT_GLOB`, one the shell expands: `*` stays in one segment). With
+    `only` (`_name_filters`), only a file whose own name matches one of them, as `find -name` and
+    `grep --include` match. Both are tested before `predicate` runs. Read from disk, top down,
+    skipping hidden folders, `node_modules`, `venv` and `__pycache__`.
     ponytail: a tree of more than `_TREE_LIMIT` files with no test found early reads as holding none."""
+    segmented = glob.startswith(_SEGMENT_GLOB)
+    glob = glob.removeprefix(_SEGMENT_GLOB)
     seen = 0
     for folder, names, files in os.walk(where):
         names[:] = sorted(name for name in names if not name.startswith(".") and name not in _TREE_SKIP)
+        prefix = os.path.relpath(folder, where).replace(os.sep, "/")
+        prefix = "" if prefix == "." else prefix + "/"
         for name in sorted(files):
             seen += 1
+            if only and not any(fnmatch.fnmatchcase(name, wanted) for wanted in only):
+                continue
+            if glob:
+                rel = prefix + name
+                if (segmented and rel.count("/") != glob.count("/")) or not fnmatch.fnmatchcase(rel, glob):
+                    continue
             full = os.path.join(folder, name)
             if predicate(full, where):
                 return os.path.relpath(full, where)
@@ -864,14 +932,115 @@ def _first_test_under(where: str, predicate) -> str:
     return ""
 
 
-def _dot_roots(roots, cwd: str, predicate) -> list:
+def _folder_root(root: str, cwd: str) -> str:
+    """The folder a root names when it is a plain path to a folder that exists on disk and sits inside
+    the checkout that holds `cwd` (`hooks`, `./hooks/`, `../hooks` after a `cd`, an absolute path), else
+    ''. A relative path that stays inside `cwd` needs no checkout. A word with a quote, `$`, `~`, a glob
+    character or a backslash, a leading `-`, and a path outside the checkout are not read."""
+    text = _unquoted(root)
+    if text in ("", ".", "./") or re.search(r"[$`~*?\[\\]", text) or text.startswith(("-", ":")):
+        return ""
+    full = os.path.normpath(os.path.join(cwd, text))
+    if not os.path.isdir(full):
+        return ""
+    if os.path.isabs(text) or path_is_inside(full, cwd) is not True:
+        top = checkout_root_by_stat(os.path.realpath(cwd))
+        if not top or path_is_inside(os.path.realpath(full), top) is not True:
+            return ""
+    return text
+
+
+def _name_filters(words) -> tuple:
+    """The file-name globs that limit what a `find` or `grep` segment reads: the values of `-name`, or of
+    `--include`, so a walk of its folder roots counts only the files it reaches. () when there is none, and
+    for a `find` that holds `-o`, `!`, `-not` or a group, which can widen or invert what `-name` picks, and
+    for a value that holds `$` or a backtick, a brace sequence (`{a..b}`, which `_brace_split` reads as text),
+    a backslash left after one unescape pass (`\\\\`), or a brace list of `_BRACE_LIMIT` words or more. A value's
+    brace list is several filters (`_brace_words`), and a backslash escape reads as its literal character, so a
+    walk counts a file that any of them matches. A `find` stops at its first `-exec`."""
+    index = resolve_command(tuple(words))
+    if index is None:
+        return ()
+    name, args = _name(words[index]), list(words[index + 1:])
+    values = []
+    if name == "find":
+        for at, word in enumerate(args):
+            if word in _FIND_EXEC:
+                break
+            if word in ("-o", "-or", "-not", "!", "\\!", "(", "\\("):
+                return ()
+            if word == "-name" and at + 1 < len(args):
+                values.append(args[at + 1])
+    elif name in _GREP_COMMANDS and name != "rg":
+        for at, word in enumerate(args):
+            if word == "--":
+                break
+            if word.startswith("--include="):
+                values.append(word.partition("=")[2])
+            elif word == "--include" and at + 1 < len(args):
+                values.append(args[at + 1])
+    values = [_unquoted(value) for value in values]
+    if any(re.search(r"[$`]", value) for value in values):
+        return ()
+    filters = []
+    for value in values:
+        variants = _brace_words(value)
+        if len(variants) >= _BRACE_LIMIT:
+            return ()
+        for variant in variants:
+            if re.search(r"\{[^{},]*\.\.[^{},]*\}", variant):
+                return ()
+            unescaped = re.sub(r"\\(.)", r"\1", variant)
+            if "\\" in unescaped:
+                return ()
+            filters.append(unescaped)
+    return tuple(filters)
+
+
+def _dot_roots(roots, cwd: str, predicate, names=()) -> list:
     """`roots` with each `.` or `./` put as the first test path under it, so a writer fed from the whole
     checkout is judged by a test it can reach. A `.` root that holds no test stays as it is, and so
-    does one when `cwd` or `predicate` is not given."""
-    if not cwd or predicate is None or not any(root in (".", "./") for root in roots):
-        return roots
-    found = _first_test_under(cwd, predicate)
-    return ["./" + found if found and root in (".", "./") else root for root in roots]
+    does one when `cwd` or `predicate` is not given. A folder root (`_folder_root`) is read the same
+    way, from disk, under that folder; a brace list of them (`{docs,hooks}`) is read one folder at a
+    time (`_brace_words`). `names` (`_name_filters`) limit the walk to the files the segment reaches. A
+    glob pathspec root (`_glob_root`) is put the same way, as the first test path under its folder
+    that the glob matches. When none matches, or `cwd` or `predicate` is not given, it names nothing
+    that is judged and is dropped."""
+    reading = bool(cwd) and predicate is not None
+    out = []
+    for root in roots:
+        variants = [] if root.startswith(_GLOB_MARK) or not reading else _brace_words(root)
+        if len(variants) > 1:
+            out.extend(_dot_roots(variants, cwd, predicate, names))
+        elif root.startswith(_GLOB_MARK):
+            folder, _mark, glob = root[len(_GLOB_MARK):].partition(_GLOB_MARK)
+            found = _first_test_under(os.path.join(cwd, folder), predicate, glob) if reading else ""
+            if found:
+                out.append(os.path.join(folder, found) if folder != "." else "./" + found)
+        elif reading and root in (".", "./"):
+            found = _first_test_under(cwd, predicate, only=names)
+            out.append("./" + found if found else root)
+        elif reading and _folder_root(root, cwd) and not predicate(root, cwd):
+            # a folder that is itself a test path (`tests`) stays as it is: it is judged as it stands
+            folder = _folder_root(root, cwd)
+            found = _first_test_under(os.path.join(cwd, folder), predicate, only=names)
+            out.append(os.path.join(folder, found) if found else root)
+        else:
+            out.append(_named_test(root, cwd, predicate, names) if reading else root)
+    return out
+
+
+def _named_test(root: str, cwd: str, predicate, names) -> str:
+    """`root`, or the path `root/<name>` when a folder root that is not on disk is searched for a name
+    (`_name_filters`) that is a test file: `find hooks -name 'test_*.py'` writes tests wherever `hooks` is,
+    since its walk cannot be read. A root with a quote, `$`, a backtick, `~` or a brace, and a folder that
+    exists (its walk is read from disk), stay as they are."""
+    text = _unquoted(root)
+    if (not names or re.search(r"[$`~{}\\]", text) or text.startswith(("-", ":", "/"))
+            or os.path.exists(os.path.join(cwd, text))):
+        return root
+    return next((joined for joined in (os.path.join(text, name) for name in names)
+                 if predicate(joined, cwd)), root)
 
 
 def _fed_segments(segments, ends, cwd: str = "", predicate=None):
@@ -896,9 +1065,9 @@ def _fed_segments(segments, ends, cwd: str = "", predicate=None):
         words = _fill_loop_variables(words, loops)
         rewritten = [words]
 
-        def dot_roots(roots):
+        def dot_roots(roots, names=()):
             where = (dir_before_segment(out + [segment], len(out), cwd, out_ends) or cwd) if cwd else ""
-            return _dot_roots(roots, where, predicate)
+            return _dot_roots(roots, where, predicate, names)
 
         index, chain = _walk_wrappers(tuple(words))
         xargs = next((flags for word, flags in chain if word == "xargs"), None)
@@ -907,7 +1076,7 @@ def _fed_segments(segments, ends, cwd: str = "", predicate=None):
             if back is not None and _prints_a_count(out_words[back]):
                 back = None
             while back is not None:
-                roots = _roots(out_words[back]) + roots
+                roots = dot_roots(_roots(out_words[back]), _name_filters(out_words[back])) + roots
                 back = _piped_into(out_ends, out_words, back)
             replace = None
             for flag, value in xargs:
@@ -916,10 +1085,10 @@ def _fed_segments(segments, ends, cwd: str = "", predicate=None):
                 elif flag in ("-i", "--replace"):
                     replace = value or "{}"
             if roots:
-                command, roots = words[index:], dot_roots(roots)
+                command = words[index:]
                 rewritten = [command + roots] if not replace else _put_roots(command, replace, roots)
         elif index is not None and _name(words[index]) == "find":
-            roots, commands, at = dot_roots(_roots(words)), [], index + 1
+            roots, commands, at = dot_roots(_roots(words), _name_filters(words)), [], index + 1
             while at < len(words):
                 if words[at] in _FIND_EXEC:
                     stop = at + 1
@@ -1048,8 +1217,12 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         data = set() if closed else _copy_reads(raw, predicate, cwd, bool(fed), command_position)
         sed_targets = {}
         if command_position and not closed:
-            sed_targets = _sed_script_words(raw)   # the builder test check only: a script names no file but w, W, e
+            sed_targets = _sed_script_words(scripts[number])   # the builder test check only: a script names no file but w, W, e; read with its newlines
             data = data | set(sed_targets)
+        if not closed:
+            # A sed with no in-place option reads its script as text: an in-place flag spelled inside it is no flag.
+            data = data | {at for at in _sed_script_words(parsed[number], False)
+                           if re.search(_SED_IN_PLACE_FLAG, _unquoted(raw[at]))}
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -1094,6 +1267,58 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
     return ""
 
 
+_BRACE_LIMIT = 256   # words one word's brace groups give before the expansion stops
+
+
+def _brace_split(word: str):
+    """(head, parts, tail) for the first unquoted `{a,b}` group of `word` that has a top-level comma,
+    else None. `${...}` is no group, a quoted or escaped brace is text, and a `{x}` with no comma is
+    text, as in bash."""
+    quote, depth, start, cuts, skip = "", 0, -1, [], False
+    for at, char in enumerate(word):
+        if skip:
+            skip = False
+        elif quote:
+            if char == quote:
+                quote = ""
+            elif char == "\\" and quote == '"':
+                skip = True
+        elif char == "\\":
+            skip = True
+        elif char in "'\"":
+            quote = char
+        elif char == "{" and word[at - 1:at] != "$":
+            if depth == 0:
+                start, cuts = at, []
+            depth += 1
+        elif char == "," and depth == 1:
+            cuts.append(at)
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0 and cuts:
+                bounds = [start] + cuts + [at]
+                return (word[:start], [word[bounds[i] + 1:bounds[i + 1]] for i in range(len(bounds) - 1)],
+                        word[at + 1:])
+    return None
+
+
+def _brace_words(word: str) -> list:
+    """The words a shell makes of `word` by brace expansion (`hooks/{a,b}.py` gives `hooks/a.py` and
+    `hooks/b.py`), else `[word]`. Stops at `_BRACE_LIMIT` words.
+    ponytail: a sequence (`{1..3}`) is not expanded, and a word past the limit is cut short."""
+    split = _brace_split(word)
+    if split is None:
+        return [word]
+    head, parts, tail = split
+    out = []
+    for part in parts:
+        for rest in _brace_words(part + tail):
+            out.append(head + rest)
+            if len(out) >= _BRACE_LIMIT:
+                return out
+    return out
+
+
 def _from_cwd(word, at, cwd):
     """`word` as a path from `cwd` when the segment ran in a folder `at` that a `cd` moved to, so the
     matched path a refusal logs names its test folder (`tests/test_a.py`, not `./test_a.py`)."""
@@ -1124,12 +1349,20 @@ def _sed_script_targets(script):
     line after a `w` or `W` command (a file), an `e` command (a command), and the `w` flag of `s` (a
     file). Every other word of a script is text. Walks the script as sed reads it: an address
     (`3`, `$`, `/re/`, a regex in other delimiters) is skipped, so are the regex and replacement of `s` and the sets
-    of `y`, and the text of `a`, `i`, `c`, `r`, `R` and a label runs to the line's end."""
+    of `y`, and the text of `a`, `i`, `c`, `r`, `R` runs to the line's end. A label (`:`, `b`, `t`, `T`) ends at `;` or
+    the line's end."""
     targets, at, size = [], 0, len(script)
 
     def line_end(start):
         end = script.find("\n", start)
         return size if end < 0 else end
+
+    def label_end(start):
+        # a label (`:`, `b`, `t`, `T`) ends at `;` or the line's end, whichever comes first
+        end = start
+        while end < size and script[end] not in ";\n":
+            end += 1
+        return end
 
     while at < size:
         char = script[at]
@@ -1160,22 +1393,25 @@ def _sed_script_targets(script):
                     at = end
                     break
                 at += 1
-        elif char in "aicrR:btT":
+        elif char in "aicrR":
             at = line_end(at)
+        elif char in ":btT":
+            at = label_end(at)
         else:
             at += 1
     return targets
 
 
-def _sed_script_words(raw):
+def _sed_script_words(raw, in_place_only=True):
     """{index: names} for the words of an in-place `sed` segment that are not files it writes: its
     script (the first operand, or the value of each `-e` and `--expression`) and the value of `-f`,
     `--file` and `-l`. A script is text, so `s/N/tests\\/a.py/` names no test. `names` are the files
     and commands the script's `w`, `W`, `e` and `s///w` name (`_sed_script_targets`), judged as words
     of the segment: `sed -i 'w tests/a.py' src/app.py` writes tests/a.py. Empty when the segment is no
-    `sed -i` or `sed --in-place`."""
+    `sed -i` or `sed --in-place`; with `in_place_only` false, a sed with no in-place option gives its
+    script words too, each with no names."""
     index = resolve_command(tuple(raw))
-    if index is None or _name(raw[index]) != "sed":
+    if index is None or _name(raw[index]) not in _SED_NAMES:
         return {}
     skip, scripts, in_place, scripted, operands, flags_over = set(), {}, False, False, [], False
     at = index + 1
@@ -1210,12 +1446,12 @@ def _sed_script_words(raw):
                     at = at if glued else at + 1
                     break
         at += 1
-    if not in_place:
+    if not in_place and in_place_only:
         return {}
     if not scripted and operands:
         skip.add(operands[0])
         scripts[operands[0]] = _unquoted(raw[operands[0]])
-    return {where: _sed_script_targets(scripts.get(where, "")) for where in skip}
+    return {where: _sed_script_targets(scripts.get(where, "")) if in_place else [] for where in skip}
 
 
 def _segment_command(words):
