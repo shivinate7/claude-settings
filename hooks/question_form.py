@@ -25,7 +25,7 @@ chat `Gain:` and `Lose:` in the option's description. Only a line at a line star
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
-`gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
+`gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
 Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
@@ -187,6 +187,9 @@ DEPARTS_REASON = ("A question to the owner says how the work departs from main, 
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+# The hint that departs_hit adds to the placeholder miss. A Stop refusal (lint/report_guard.py) shows the miss
+# without it, since the owner reads that refusal (decision guard-remedy-not-to-owner).
+PLACEHOLDER_HINT = ": write the real text"
 
 
 def departs_sides(rest):
@@ -214,7 +217,7 @@ def departs_hit(text) -> str:
             return "Departs from line with an empty side"
         added = PORT_NEW_THING.fullmatch(change)
         if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
-            return "Departs from line with a side that is only a placeholder: write the real text"
+            return "Departs from line with a side that is only a placeholder" + PLACEHOLDER_HINT
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
@@ -441,24 +444,46 @@ def _flat_text(value) -> str:
     return ""
 
 
-# A clause whose subject is the session ("The session merges it after your pick.") and that names
+# A clause whose subject is the session ("The session merges it after your pick.", "Claude merges it ...") and that names
 # no `you` and no owner who acts ("the owner clicks Approve", "Shivam approves it"): the session makes
 # that press, so the owner presses nothing. Only that clause is excused. A press in another clause
 # stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
 # act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
 # press of the page's own button ("after he hits Send") ask the owner for nothing.
-SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
-_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+SESSION_PRESS = re.compile(r"^\s*(?:(?:the|a|this)\s+session|claude)\b", re.I)
+# A session clause that asks someone for something ("Claude asks the owner for a click on Merge"), or names a
+# press that is not past ("after your click on Merge", "after the owner's press"), hands the press on, so it is
+# never excused. "as he asked" and "after he clicked Approve" are past acts and ask for nothing.
+SESSION_HANDS_ON = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting|tell|tells|telling|remind|reminds"
+                          r"|reminding|click|clicks|clicking|press|presses|pressing|tap|taps|tapping)\b", re.I)
+# SESSION_PRESS_OWN is the session's own press verb right after its subject ("The session clicks Merge"): it is
+# no hand-on, so it is cut before SESSION_HANDS_ON reads the clause. "after your click" still hands on.
+SESSION_PRESS_OWN = re.compile(r"^(\s*(?:(?:the|a|this)\s+session|claude)(?:\s+(?:then|also|\w+ly))*)"
+                               r"\s+(?:clicks|presses|taps)\b", re.I)
+# "and approves" stays in its clause: "the owner reviews and approves it" is one owner act, not two clauses.
+# A bare "and approve" is an order to the owner, so it still starts a clause.
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|but|so|or)\b"
+                           r"|\band\b(?!\s+approv(?:es|ing)\b)", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
 _CLAUSE_JOIN = "; "
 OWNER_YOU = re.compile(r"\byou\b", re.I)
-OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
-# The act is the verb the name is subject of: a modal or an -ly word may come between, so "Shivam will
-# approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
-OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|\w+ly))*\s+"
+OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
+# The act is the verb the name is subject of: a modal, "to", "just", "please" or an -ly word may come
+# between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
+# Approve" (the button's name, after a past act) does not.
+# "the owner's merge" and "the owner's approval" are presses not yet made, as "the owner's click" is, unless the
+# approval is already in ("the owner's approval is in"). "merge" is a press only as the last word of its phrase:
+# a noun after it ("the owner's merge commit", "merge queue", "merge button") names a thing, not his act.
+# "has to", "needs to" and "reviews and" stand before the act as a modal does. A bare "has" does not: "the owner
+# has merge rights" names no act, and "the owner has hit Merge" is a past one.
+OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please"
+                       r"|(?:has|have|needs?)\s+to|\w+ly|\w+s\s+and))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
-                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
+                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)"
+                       r"|['\u2019]s\s+(?:merge(?=\s*(?:[^\w\s]|$)|\s+(?:on|in|at|of|by|for|from|with|before|after"
+                       r"|first|and|or|then|so|but|once|when)\b)"
+                       r"|approval(?!\s+(?:is|was|has|are|came|comes|arrives?)\b)))\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
@@ -476,10 +501,11 @@ def _owner_press_text(label, how) -> tuple:
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
     session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
-               and not _owner_acts(c)]
+               and not SESSION_HANDS_ON.search(SESSION_PRESS_OWN.sub(r"\1", c, count=1)) and not _owner_acts(c)]
     if not session:
         return text, text
-    done = " ".join(session).lower()
+    # The session's own click ("The session clicks Merge") excuses no "Click" in the label: that asks the owner.
+    done = " ".join(SESSION_PRESS_OWN.sub(r"\1", c, count=1) for c in session).lower()
     verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
              for m in PRESS_VERB.finditer(label)]
     label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
@@ -497,7 +523,7 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
         return True
-    urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    urls = [l["url"] for l in (links if isinstance(links, list) else []) if isinstance(l, dict) and isinstance(l.get("url"), str)]
     if not urls:
         return False
     return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
@@ -787,32 +813,88 @@ def gh_login_hit(data) -> str:
 # (incident in the record): a waiting-page task handed the owner a job a session on his computer then
 # did. A task carries a "Why yours:" line naming the check that showed no session could do it.
 WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
+WHY_YOURS_LABEL = re.compile(r"^[ \t]*Why yours\b", re.I | re.M)
 TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
                "act, ask a session on the owner's computer first (list_computer_folders, then "
                "request_computer_folder). Then add a line to context that starts \"Why yours: "
                "<the check that showed no session could do it>\".")
 
 
-def task_check_hit(op: str, data) -> str:
-    """The matched text when this write of a waiting-page task has no Why yours line. An update that
-    carries no `context` cannot change the line and passes, as does one with no `kind`."""
-    if not isinstance(data, dict) or data.get("kind") != "task":
+WHY_RULE = "task-why-cited"
+WHY_CITED_REASON = ("A Why yours line that says a session cannot do the act must cite what shows it. End the line with "
+                    "\"(route <id>)\", an id from the route rows file whose row on this surface says refused or asks, or "
+                    "with \"(measured <YYYY-MM-DD>, <the check and its result>)\". A row that says the act works, an "
+                    "id no row holds, and a measurement with no date do not count. The page reads no refusals file, so "
+                    "a tool name in backticks is no cite. (decision claims-carry-backing, part (v), rule task-why-cited)")
+# lint/report_guard.py why_yours_verdict kinds that refuse on the page, with the cause the refusal's `matched` carries.
+# "unknown" (a file or row that did not read) and "unread" never refuse: a read that could not run is not a finding.
+WHY_CAUSES = {"none": "no cite", "undated": "undated measured", "works": "works row", "dead": "unknown id"}
+
+
+def _report_guard():
+    """lint/report_guard.py, loaded here and not at import, as hooks/reply_judge.py loads it."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import report_guard
+    return report_guard
+
+
+def why_cited_hit(text: str, fragments: bool = False) -> str:
+    """The cause when a Why yours line of `text` gives a capability reason its cite does not back, else "". The page
+    accepts a route cite and a dated measured cite, and reads no refusals file. A line with no route cite never reads
+    the rows file. With `fragments`, each other line of `text` has its cite tokens judged on their own: a str_replace
+    that swaps only a cite carries no Why yours line, and `new_str` must still hold a cite that backs."""
+    lines = text.splitlines()
+    labelled = [line for line in lines if WHY_YOURS_LINE.match(line)]
+    # A plain substring gate, so report_guard (which holds the cite regexes) loads only for a line that may hold a cite.
+    # A Based on line is the form's own premise line: "Based on (measured): ..." names a kind, not a dated cite.
+    loose = [line for line in lines if fragments and not WHY_YOURS_LINE.match(line) and not BASED_LABEL.match(line)
+             and ("(route" in line.casefold() or "(measured" in line.casefold())]
+    if not (labelled or loose):
         return ""
-    if (op == "set" or "context" in data) and not WHY_YOURS_LINE.search(str(data.get("context") or "")):
-        return "task with no Why yours line"
+    guard = _report_guard()
+    for line in labelled:
+        cause = WHY_CAUSES.get(guard.why_yours_verdict(None, line.strip())[0])
+        if cause:
+            return cause
+    for line in loose:
+        cause = WHY_CAUSES.get(guard.cite_tokens_verdict(line.strip())[0])
+        if cause:
+            return cause
     return ""
 
 
-def task_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Why yours line. It carries no
-    `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it
-    judges a context edit that touches the line, whatever the item's kind."""
+def task_check_hit(op: str, data):
+    """(rule, matched) when this write of a waiting-page task has no Why yours line, or a line whose capability reason
+    its cite does not back. An update that carries no `context` cannot change the line and passes, as does one with
+    no `kind`."""
+    if not isinstance(data, dict) or data.get("kind") != "task":
+        return PASS
+    if not (op == "set" or "context" in data):
+        return PASS
+    context = str(data.get("context") or "")
+    if not WHY_YOURS_LINE.search(context):
+        return "task-names-check", "task with no Why yours line"
+    cause = why_cited_hit(context)
+    return (WHY_RULE, cause) if cause else PASS
+
+
+def task_str_replace_hit(entry):
+    """(rule, matched) when a str_replace on `context` removes the Why yours line or its label, or adds one whose
+    capability reason its cite does not back. It carries no `data`, so it is read from old_str and new_str; the
+    guard cannot see the stored kind, so it judges a context edit that touches the line, whatever the item's kind.
+    An edit that removes only the reason after the label passes: the stored line is unseen, so old_str is no
+    different from any prose."""
     if entry.get("field") != "context":
-        return ""
+        return PASS
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
-        return "context edit that removes the Why yours line"
-    return ""
+        return "task-names-check", "context edit that removes the Why yours line"
+    if len(WHY_YOURS_LABEL.findall(old)) > len(WHY_YOURS_LABEL.findall(new)):
+        return "task-names-check", "context edit that removes the Why yours label"
+    cause = why_cited_hit(new, fragments=True)
+    return (WHY_RULE, cause) if cause else PASS
 
 
 # ------------------------------------------------------------------ a page decision states the form
@@ -892,8 +974,8 @@ def item_hit(op, entry, cwd=""):
         return "item-field-rendered", hit
     if op == "str_replace":
         hit = task_str_replace_hit(entry)
-        if hit:
-            return "task-names-check", hit
+        if hit[0]:
+            return hit
         if entry.get("field") == "command":
             # The stored command is unseen: gh_edit_hit judges new_str, less an edit that only changes
             # a gh command old_str held.
@@ -928,8 +1010,8 @@ def item_hit(op, entry, cwd=""):
     if hit:
         return "gh-login-switch", hit
     hit = task_check_hit(op, data)
-    if hit:
-        return "task-names-check", hit
+    if hit[0]:
+        return hit
     hit = decision_form_hit(op, data)
     if hit[0]:
         return hit
@@ -1330,7 +1412,7 @@ def _chat_question_hit(question, options):
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
-                "task-names-check": TASK_REASON,
+                "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
