@@ -9,7 +9,7 @@ import re
 import guard_core
 from guard_core import (
     REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, norm, resolve_command, segment_tokens, split_segments,
+    dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -340,7 +340,9 @@ def _resolve_vars(cmd: str) -> str:
 # `$'`, `$"`, `<(`, `>(`, a backslash before a quote, an unmated quote, a `<#` (a PowerShell block
 # comment, which hides its quotes), or anywhere a smart quote U+2018 to U+201E (PowerShell reads it
 # as a quote, even inside single quotes): the shell may then read its quotes differently from the
-# scanner. A segment with an unquoted `&`, `(`, `)`, `{` or `}`
+# scanner. Bash text is read by bash's own rules: inside double quotes `\"` and `\\` are literal, and
+# a smart quote is an ordinary character. A newline and a `#` inside quotes are text. A backtick and
+# `$(` inside double quotes stay live and stay closed. PowerShell text keeps every mark above. A segment with an unquoted `&`, `(`, `)`, `{` or `}`
 # holds no data: a background job, a call operator, a PowerShell group such as `(iex "...")`.
 # A word in view that holds a quote is read in whole: the text of each quote is its own words, so
 # `system("sh", "-c", "tee P")` shows its `tee P`.
@@ -377,19 +379,29 @@ _DESCRIPTOR = r"&(?:\d+-?|-)"
 
 def _scan(segment: str):
     """(fail closed?, the segment's text outside quotes). Single-quoted text is skipped whole, so a
-    `\\"` in a JSON sample there is plain text."""
+    `\\"` in a JSON sample there is plain text. In bash text, inside double quotes, `\\"` and `\\\\` are
+    one literal character each and a smart quote is an ordinary one; a backtick and `$(` there are
+    live code, so they still fail closed. PowerShell text keeps every smart quote and backslash mark
+    as a fail-closed form."""
     plain, quote = [], ""
-    for index, char in enumerate(segment):
-        if char in _SMART_QUOTES:   # also inside single quotes: PowerShell ends a string at one
+    bash = not is_powershell(segment)
+    index, length = 0, len(segment)
+    while index < length:
+        char = segment[index]
+        if char in _SMART_QUOTES and not bash:   # PowerShell ends a string at one, even in '...'
             return True, ""
         if quote == "'":
             quote = "" if char == "'" else quote
+        elif bash and quote == '"' and char == "\\" and segment[index + 1:index + 2] in ('"', "\\"):
+            index += 2   # an escaped pair is text and neither opens nor closes a quote
+            continue
         elif _UNSAFE_MARK.match(segment, index):
             return True, ""
         elif char in "'\"":
             quote = "" if quote == char else (quote or char)
         elif not quote:
             plain.append(char)
+        index += 1
     return bool(quote), "".join(plain)   # a quote with no mate: fail closed
 
 
