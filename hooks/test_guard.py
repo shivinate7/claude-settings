@@ -3798,7 +3798,7 @@ HMADD = VCS + " worktree add "
 HMIN = slash(HMMAIN)
 
 
-def hm_deny(name, command, **kw):
+def hm_refuse(name, command, **kw):
     kw.setdefault("cwd", HMMAIN)
     sh("hand-made worktree: " + name, command, "deny", HM, **kw)
 
@@ -3809,33 +3809,33 @@ def hm_allow(name, command, **kw):
 
 
 # DENY. The new tree lands outside <primary>/.claude/worktrees/.
-hm_deny("a relative sibling path from the primary is refused", HMADD + "../lane-x")
-hm_deny("-C reaches the primary from elsewhere, and a scratch path is refused",
+hm_refuse("a relative sibling path from the primary is refused", HMADD + "../lane-x")
+hm_refuse("-C reaches the primary from elsewhere, and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, cwd=NOGIT)
-hm_deny("cd into a non-temp primary, then a tree in the temp folder, is the incident",
+hm_refuse("cd into a non-temp primary, then a tree in the temp folder, is the incident",
         "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
-hm_deny("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
-hm_deny("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
-hm_deny("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
-hm_deny("--lock --reason r before the path does not hide it",
+hm_refuse("-b before the path does not hide it", HMADD + "-b hmx ../lane-x")
+hm_refuse("-B before the path does not hide it", HMADD + "-B hmx ../lane-x")
+hm_refuse("--detach before the path does not hide it", HMADD + "--detach ../lane-x")
+hm_refuse("--lock --reason r before the path does not hide it",
         HMADD + "--lock --reason r ../lane-x")
-hm_deny("a double dash ends the options, and the path after it is judged",
+hm_refuse("a double dash ends the options, and the path after it is judged",
         HMADD + "-- ../lane-x")
-hm_deny("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
-hm_deny("a .claude/worktrees-x prefix is outside the home folder",
+hm_refuse("a dash-led name after a double dash is still a path", HMADD + "-- -lane-x")
+hm_refuse("a .claude/worktrees-x prefix is outside the home folder",
         HMADD + ".claude/worktrees-x/foo")
-hm_deny("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
-hm_deny("a dot-dot that climbs out of the home folder is outside",
+hm_refuse("a .claude/worktreesX name is outside the home folder", HMADD + ".claude/worktreesX")
+hm_refuse("a dot-dot that climbs out of the home folder is outside",
         HMADD + ".claude/worktrees/../../lane-x")
-hm_deny("from inside a linked tree, a sibling of the primary is still outside",
+hm_refuse("from inside a linked tree, a sibling of the primary is still outside",
         HMADD + "../../../lane-x", cwd=HMLANE)
-hm_deny("a PowerShell call is judged the same",
+hm_refuse("a PowerShell call is judged the same",
         "Set-Location " + HMIN + "; " + VCS + " worktree add ../lane-x", tool="PowerShell",
         cwd=NOGIT)
-hm_deny("a PowerShell call with -C and a scratch path is refused",
+hm_refuse("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
-hm_deny("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
-hm_deny("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+hm_refuse("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
+hm_refuse("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
 
 # ALLOW. Nothing here is the act, or the act lands in the home folder, or the repo is a throwaway.
 hm_allow("an absolute path under the primary's home folder passes",
@@ -3872,11 +3872,11 @@ add("hand-made worktree: an Explore Agent call with no isolation passes", "allow
 # A LOOP THAT BUILDS THE TREE PATH FROM A VARIABLE. The path is `/tmp/.../wt-$c` and the ref is `$c`,
 # so each pass makes a tree outside the home folder, as the one-line form does. The one-line control
 # is refused on main already. A quoted word with a `#` in it is the same act: a scanner trap.
-hm_deny("the one-line form that makes a tree outside the home folder is refused",
+hm_refuse("the one-line form that makes a tree outside the home folder is refused",
         HMADD + "-q --detach /tmp/claude-0/wt-A A")
-hm_deny("a for loop whose tree path holds a loop variable is refused",
+hm_refuse("a for loop whose tree path holds a loop variable is refused",
         "for c in A B; do " + HMADD + "-q --detach /tmp/claude-0/wt-$c $c; done")
-hm_deny("a for loop whose quoted tree path holds a # and a loop variable is refused",
+hm_refuse("a for loop whose quoted tree path holds a # and a loop variable is refused",
         'for c in A B; do ' + HMADD + '-q --detach "/tmp/claude-0/#wt-$c" $c; done')
 hm_allow("a for loop that builds its trees under the home folder passes",
          "for c in A B; do " + HMADD + "-q --detach " + HMIN + "/.claude/worktrees/wt-$c $c; done")
