@@ -14097,7 +14097,9 @@ class ReviewedList(ReviewEnv):
         return host, rc, out, err
 
     def test_the_newest_record_decides_the_line(self):
-        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
+        # Ruling, roadmap step round-one-reset (triage, 08:17 CST Nov 8, relayed by the coordinator): a later record that ends at round 1 after a no-fix Round 1 FAIL reads open, so the newest record here carries Round 2.
+        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))),
+                    review_comment(2, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
@@ -14202,8 +14204,9 @@ class ReviewedList(ReviewEnv):
 
     def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
         # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
+        # Ruling, roadmap step round-one-reset (triage, 08:17 CST Nov 8, relayed by the coordinator): a later record that ends at round 1 after a no-fix Round 1 FAIL reads open, so the newest record here carries Round 2.
         older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
-        newest = record_text(rounds=REVIEW_PASS).rstrip("\n") + REVIEW_FOOTER
+        newest = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")).rstrip("\n") + REVIEW_FOOTER
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
