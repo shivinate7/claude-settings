@@ -43,6 +43,20 @@
                           or ref refuses) adds the `batch` label to the PR after a PASS, never after a FAIL or an unknown; a failed
                           label POST says the label is unknown and keeps the lint's verdict and exit code. Cost per call: one ci-job
                           run (about 550 s, measured once on one PR head), one worktree, and with --integration one POST to issues/N/labels.
+  merge --build-batch [--base BRANCH] [--push BRANCH]
+                          build an integration branch from PR state alone, with no count limit; stands alone. The candidates are the open PRs whose
+                          ledger act is `batch` (a done review record for the live head, and no `Lint: red <head>` comment for it). They join in PR
+                          order, a base before the PRs stacked on it and a `Merge after #n` PR after #n; a stack joins whole or not at all, and a PR
+                          whose merge-after target is neither merged nor in the batch is left out. Each is merged --no-ff onto the base and onto the
+                          batch so far (a conflict only on the records page is none) and lane-linted at its head, in parallel, at most
+                          os.cpu_count() - 2 at once (at least 1; the cap line says it), unless its merge base holds main's newest lint-step
+                          change. A red lint leaves the PR out and posts one `Lint: red <head> <steps>` comment, which the ledger reads as `lane lint
+                          red: <steps>`. Prints `joins:`, `left out:` and `skipped lint:` lines, then `batch: N PRs`. Only --push moves a ref: it
+                          pushes the batch to a new branch, and refuses the base or a branch that exists. Exit 0 when the build ran, 2 on a failed
+                          read (nothing printed). Cost: the open-pull list and the repo's comments (one read each), one `pulls/<n>` read per
+                          merge-after target outside the open list, one fetch of the base and one per candidate, two worktrees plus one per running
+                          lint, one or two merges per candidate (more only when a PR is left out), one lint run per candidate not skipped, one POST per
+                          red lint, and with --push one ls-remote and one push. No timer, file or log of its own.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -58,7 +72,7 @@ A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT 
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 Its proxy passes a `gh api` POST to issues/N/labels (measured 12:20 CST Nov 7: a POST to a nonexistent issue got GitHub's 404, not a proxy refusal).
 """
-import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, concurrent.futures, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -1516,6 +1530,16 @@ def rebuild_records(wt):
         raise Stop(f"the records page cannot be rebuilt, so nothing was pushed {RECORDS_CITE}: {why}")
     return tree() != before
 
+def heal_records_page(wt):
+    """Clear a conflict on the records page in a merge that stopped with only that page unmerged: delete it and let the generator write it on the
+    merged tree. -> True when the generator wrote the page, so the caller commits; False when it wrote none (a repo with no record folders gets no
+    generated page, so a hand-written one cannot be rebuilt), and the conflict stands. The one home of the heal: records_proof and build_batch call it."""
+    page = os.path.join(wt, *RECORDS_PAGE.split("/"))
+    if os.path.exists(page):
+        os.remove(page)  # the generator is the only thing that clears a conflict on the page: a page it does not write stays a conflict
+    rebuild_records(wt)  # the page is derived: rebuilt on the merged tree, it replaces both sides
+    return os.path.exists(page)
+
 def records_proof(wt, base_ref):
     """Merge base_ref into the worktree without a commit, run the generator, and say what the page needs.
     -> "fresh": the page on the head holds in the merge result. "stale": it would change. "healed": only the page
@@ -1527,11 +1551,7 @@ def records_proof(wt, base_ref):
         if c:
             if git(wt, "diff", "--name-only", "--diff-filter=U")[1].split() != [RECORDS_PAGE]:
                 raise Stop(f"the head does not merge cleanly with {base_ref}, so the records page cannot be proved fresh {RECORDS_CITE}: {out}")
-            page = os.path.join(wt, *RECORDS_PAGE.split("/"))
-            if os.path.exists(page):
-                os.remove(page)  # the generator is the only thing that clears a conflict on the page: a page it does not write stays a conflict
-            rebuild_records(wt)  # the page is derived: rebuilt on the merged tree, it replaces both sides
-            if not os.path.exists(page):  # a repo with no record folders gets no generated page, so a hand-written one cannot be rebuilt
+            if not heal_records_page(wt):
                 raise Stop(f"the records page {RECORDS_PAGE} conflicts with {base_ref} and the generator writes no page for this repo, so nothing was merged. Resolve the page by hand on the branch. {RECORDS_CITE}")
             # the rebuilt page drops lines a side added; the silent-undo check after the next wait must read that as generated
             c, out = git(wt, *identity(wt), "commit", "-q", "-m", f"Merge {base_ref} and rebuild the records page",
@@ -1737,6 +1757,18 @@ def lint_steps(root, base_ref, env=None):
     if c:
         raise Stop(f"the lint steps cannot be listed (exit {c}) {BASE_CITE}")
     return {l[len("would run"):].strip() for l in out.splitlines() if l.startswith("would run ")}
+
+def step_names(root):
+    """-> the names of every step of the CHECKS_SUITE_JOBS jobs in root's workflow, the steps hit_suites reads. Empty when the workflow cannot be
+    read: a caller that subtracts the lint steps then skips none, so every suite counts, which fails safe."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    from workflow_steps import CHECKS_SUITE_JOBS, job_block, step_blocks, step_key
+    try:
+        with open(os.path.join(root, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeError):
+        return set()
+    return {step_key(step, "name") for name in CHECKS_SUITE_JOBS for block in [job_block(text, name)] if block is not None for step in step_blocks(block)}
 
 def hit_suites(root, paths, skip):
     """-> [(file, line)]: each suite line of the jobs in CHECKS_SUITE_JOBS (`checks` and its split half) in root's workflow whose
@@ -2540,6 +2572,373 @@ def lane_lint(root, target, host, base="", unknown_ok="", integration=False):
     raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
 
+# ------------------------------------------------------------------ merge --build-batch
+
+MERGE_AFTER = re.compile(r"merge after:? (#\d+(?:, #\d+)*)\.?", re.I | re.ASCII)  # a whole line of a PR body: `Merge after #1742.` or `Merge after: #1676, #1742.`
+BATCH_CITE_BUILD = "(decision merge-builds-batches, the batch runner builds the batch from pull request state alone)"
+
+def merge_after_targets(body):
+    """-> the PR numbers a PR body says it merges after: each line that is wholly a `Merge after #n[, #m]` line, in any case, with an optional
+    trailing period. A line with other words around it (`Please merge after #n once ...`) names none."""
+    return [int(x) for line in (body or "").splitlines() for m in [MERGE_AFTER.fullmatch(line.strip())] if m for x in re.findall(r"#(\d+)", m.group(1))]
+
+def merged_into(h, n, base):
+    """True when pull request n, which is outside the open list, was merged into `base`. One REST read. A 404 is False (no such pull request, so it
+    cannot be on main); any other failed read is a Stop, never a guess."""
+    c, out = h.api(f"pulls/{n}")
+    if c:
+        if "404" in out:
+            return False
+        raise Stop(f"reading #{n} from GitHub failed: {out.strip()[:300]}")
+    d = json.loads(out)
+    return bool((d.get("merged") or d.get("merged_at")) and d["base"]["ref"] == base)
+
+def lint_red_steps(lines):
+    """-> the step names in the FAIL lines ci_job_run read. ci-job prints `FAIL <step>: <first line>`, the word padded to 15 columns."""
+    return [m.group(1) for line in lines for m in [re.match(r"FAIL\s+(.+?): ", line + " ")] if m]
+
+def merge_conflicts(wt, sha, label, commit):
+    """Merge `sha` into the tree at HEAD with --no-ff. -> [] when it merges, else the conflicted paths (a line of git's own text when it names none);
+    a conflict only on the records page is none, because the page is derived. `commit` True commits the merge, healing the page with
+    heal_records_page (the same Drops-lines trailer as records_proof); False leaves the tree at HEAD whatever the result, for a probe. A conflict
+    leaves the tree at HEAD too."""
+    c, out = git(wt, *identity(wt), "merge", "--no-ff", "-q", *([] if commit else ["--no-commit"]), "-m", f"Merge {label}", sha)
+    files = [] if not c else git(wt, "diff", "--name-only", "--diff-filter=U")[1].split()
+    keep = False  # True once a merge is committed; otherwise the tree goes back to HEAD, which also ends a merge in progress
+    try:
+        if not c:
+            keep = commit
+            return []
+        if files == [RECORDS_PAGE] and not commit:
+            return []
+        if files == [RECORDS_PAGE] and heal_records_page(wt):
+            hc, hout = git(wt, *identity(wt), "commit", "-q", "-m", f"Merge {label} and rebuild the records page",
+                           "-m", f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt on the merged tree")
+            if hc:
+                raise Stop(f"cannot commit the merge of {label}: {hout}")
+            keep = True
+            return []
+        return files or [(out.splitlines() or ["the merge failed"])[0]]
+    finally:
+        if not keep:
+            git(wt, "reset", "--hard", "-q", "HEAD")
+            git(wt, "clean", "-fdq")
+
+class BatchBuild:
+    """One `merge --build-batch`: the batch tree, the trial merges and the lint pool. A unit is a stack of pull requests, or a pull request alone; it
+    joins whole or not at all. Units go in one at a time, each merged onto the tree at once, so a conflict shows before any lint; its lints (one at a
+    time inside a unit, `cap` units at once) run in the pool while later units merge. A unit that conflicts with a unit still being linted waits
+    for those lints (settle) and tries again on the units that passed. State: `joined` (the PR numbers, in merge order), `left` (PR number -> why),
+    `lines` (the `skipped lint` lines)."""
+
+    def __init__(self, root, h, base, info, bases, after, on_main, cap):
+        self.root, self.h, self.base, self.base_ref = root, h, base, f"origin/{base}"
+        self.info, self.bases, self.after, self.on_main = info, bases, after, on_main  # info: n -> {branch, sha}; bases: n -> the open PR it is stacked on
+        self.lock = threading.Lock()  # `git worktree add` and `remove` run one at a time, so two lint threads never race on the worktree list
+        self.pool = concurrent.futures.ThreadPoolExecutor(cap)
+        self.queue, self.in_tree, self.touched = [], [], {}  # queue: [{unit, future}] merged and not yet settled; in_tree: PR numbers in the tree; touched: n -> paths its merge changed
+        self.joined, self.units_joined, self.left, self.lines, self.warnings = [], [], {}, [], []
+        self.trees, self.tip = [], ""
+        self._history, self._skip, self._newest = None, None, None
+
+    def open(self):
+        c, out = git(self.root, "fetch", "-q", "origin", f"+refs/heads/{self.base}:refs/remotes/origin/{self.base}")
+        if c:
+            raise Stop(f"git fetch origin {self.base} failed: {out} {BATCH_CITE_BUILD}")
+        self.tip = git(self.root, "rev-parse", self.base_ref)[1]
+        for _ in range(2):  # the batch tree, and the probe tree that holds the base alone
+            self.trees.append(add_worktree(self.root, self.tip))
+        self.wt, self.probe = self.trees[0][1], self.trees[1][1]
+
+    def close(self):
+        self.pool.shutdown(wait=True, cancel_futures=True)
+        for tmp, wt in self.trees:
+            drop_worktree(self.root, tmp, wt)
+
+    def head(self, wt=None):
+        return git(wt or self.wt, "rev-parse", "HEAD")[1]
+
+    def reset(self, sha):
+        git(self.wt, "reset", "--hard", "-q", sha)
+        git(self.wt, "clean", "-fdq")
+
+    def fail(self, unit, culprit, text, own):
+        """Leave `unit` out. `own`: the culprit keeps `text` as its own reason and the others name it; else every member names the group."""
+        names = ", ".join(f"#{m}" for m in sorted(unit))
+        for n in unit:
+            self.left[n] = text if len(unit) == 1 or (own and n == culprit) else f"its group ({names}) fails: #{culprit} {text}"
+
+    # ---- the lint skip: a head whose merge base holds main's newest lint-step change was linted against the lint main has
+    def history(self):
+        """-> [(sha, paths)] of the base, newest first, one git read; None when it cannot be read."""
+        if self._history is None:
+            c, out = git(self.probe, "-c", "core.quotepath=off", "log", "--no-renames", "--name-only", "--format=%x01%H", self.base_ref)
+            self._history = False if c else [(chunk.splitlines()[0], {p for p in chunk.splitlines()[1:] if p}) for chunk in out.split("\x01")[1:]]
+        return self._history or None
+
+    def reads_lint(self, paths):
+        """True when a lint step of the base's workflow reads one of `paths`. Unread (a Stop) is True: the head is linted."""
+        try:
+            if self._skip is None:  # every checks step but the lint steps: hit_suites skips them, so the hits are the lint steps' alone
+                self._skip = step_names(self.probe) - lint_steps(self.probe, self.base_ref)
+            return bool(hit_suites(self.probe, sorted(paths), self._skip))
+        except Stop:
+            return True
+
+    def newest_lint_change(self):
+        """-> the sha of the base's newest commit that changes a path a lint step reads, or '' when none does."""
+        if self._newest is None:
+            self._newest = next((sha for sha, paths in self.history() or [] if paths and self.reads_lint(paths)), "")
+        return self._newest
+
+    def lint_skip(self, n):
+        """-> the sha of main's newest lint change when n's merge base holds it, so its lint is owed no run; else ''. Any read that fails is ''."""
+        hist = self.history()
+        if hist is None:
+            return ""
+        sha = self.info[n]["sha"]
+        c, mb = git(self.probe, "merge-base", sha, self.base_ref)
+        c2, since = git(self.probe, "rev-list", f"{mb}..{self.base_ref}")
+        if c or c2 or not mb:
+            return ""
+        moved = set(since.split())
+        paths = set().union(*(p for s, p in hist if s in moved))
+        return "" if paths and self.reads_lint(paths) else self.newest_lint_change()
+
+    # ---- the merges
+    def merge_all(self, unit):
+        """Merge each member of `unit` in turn onto the tree. -> (None, "", []) when all merge, else (the member that conflicted, "main" or "batch",
+        its conflicted paths). A member is tried on the base alone first when the tree holds more than the base, so a conflict with main is not
+        read as one with the batch; with the tree at the base, the merge is that trial."""
+        for n in unit:
+            sha, label = self.info[n]["sha"], f"#{n} {self.info[n]['branch']}"
+            if self.head() != self.tip:
+                files = merge_conflicts(self.probe, sha, label, commit=False)
+                if files:
+                    return n, "main", files
+            before = self.head()
+            files = merge_conflicts(self.wt, sha, label, commit=True)
+            if files:
+                return n, "main" if before == self.tip else "batch", files
+            self.in_tree.append(n)
+            self.touched[n] = set(git(self.wt, "diff", "--name-only", "--no-renames", before, "HEAD")[1].split())
+        return None, "", []
+
+    def batch_names(self, files):
+        """The PRs in the tree whose merge changed one of `files`; all of them when none did (a conflict between the changes of several)."""
+        hit = [n for n in self.in_tree if self.touched.get(n, set()) & set(files)]
+        return ", ".join(f"#{n}" for n in sorted(hit or self.in_tree))
+
+    def unmerge(self, start, mark):
+        self.reset(start)
+        for n in self.in_tree[mark:]:
+            self.touched.pop(n, None)
+        del self.in_tree[mark:]
+
+    def rebuild(self):
+        """Put the tree at the base with only the joined units merged, once a unit merged in ahead of its lint was left out. A unit that no longer
+        merges (it merged only beside the one left out) is left out too."""
+        self.reset(self.tip)
+        units, self.joined, self.units_joined, self.in_tree = self.units_joined, [], [], []
+        for unit in units:
+            start, mark = self.head(), len(self.in_tree)
+            culprit, kind, files = self.merge_all(unit)
+            if culprit:
+                self.fail(unit, culprit, f"conflicts with the batch ({self.batch_names(files)}) once an earlier PR was left out", own=False)
+                self.unmerge(start, mark)
+            else:
+                self.joined += unit
+                self.units_joined.append(unit)
+
+    # ---- the lints
+    def lint_unit(self, members):
+        """Run in the pool: lane lint of each member in turn, at its own head, stopping at the first that is not a pass. -> {n: ci_job_run's result}."""
+        out = {}
+        for n in members:
+            try:
+                with self.lock:
+                    tmp, wt = add_worktree(self.root, self.info[n]["sha"])
+                try:
+                    out[n] = ci_job_run(wt, "checks", "--lint", "--base", self.base_ref)
+                finally:
+                    with self.lock:
+                        drop_worktree(self.root, tmp, wt)
+            except (Stop, OSError) as e:
+                out[n] = ("unknown", [f"the lint could not run: {e}"], [], False)
+            if out[n][0] != "pass":
+                break
+        return out
+
+    def post_red(self, n, steps, lines):
+        """One comment on pull request n: `Lint: red <head> <steps>`, the line the ledger reads as `lane lint red`. A failed POST is said as unknown."""
+        body = "\n".join([f"{LINT_RED_WORD} {self.info[n]['sha']} {steps}", "",
+                          "`merge --build-batch` left this head out of the batch. Fix the lint on the lane and push: a new head makes this line stale.", *lines]) + "\n"
+        try:
+            c, out = self.h.api(f"issues/{n}/comments", method="POST", body={"body": body})
+        except Stop as e:
+            c, out = 1, str(e)
+        if c:
+            self.warnings.append(f"merge: whether #{n} carries the lint-red comment is unknown: the POST failed: {out.strip()[:300]} The next build lints it again. {BATCH_CITE_BUILD}")
+
+    def settle(self):
+        """Wait for every queued lint, in merge order: a unit whose lints all pass joins, the first that is not a pass leaves it out. A red one gets its
+        comment. When a unit was left out the tree is rebuilt without it."""
+        failed = False
+        for entry in self.queue:
+            results = entry["future"].result() if entry["future"] else {}
+            unit = entry["unit"]
+            bad = next(((n, results[n]) for n in unit if n in results and results[n][0] != "pass"), None)
+            if not bad:
+                self.joined += unit
+                self.units_joined.append(unit)
+                continue
+            failed = True
+            n, (state, lines, _, _) = bad
+            if state == "fail":
+                steps = ", ".join(lint_red_steps(lines) or ["(no failing step named)"])
+                self.post_red(n, steps, lines)
+                self.fail(unit, n, f"lane lint red: {steps}", own=True)
+            else:
+                self.fail(unit, n, "lane lint unknown: " + "; ".join(lines), own=True)
+        self.queue = []
+        if failed:
+            self.rebuild()
+
+    # ---- one unit
+    def process(self, unit):
+        """Decide `unit`: wait on its merge-after targets, merge it, and queue its lints."""
+        queued = {n for entry in self.queue for n in entry["unit"]}
+        if any(t in queued for n in unit for t in self.after[n]):
+            self.settle()  # a target still being linted decides this unit when its lint ends
+        unmet = [(n, t) for n in unit for t in self.after[n] if t not in unit and t not in self.joined and t not in self.on_main]
+        if unmet:
+            culprit = unmet[0][0]
+            return self.fail(unit, culprit, f"waits on {', '.join(f'#{t}' for n, t in unmet if n == culprit)}: not on main or in the batch", own=True)
+        for n in unit:
+            if self.bases.get(n) and self.bases[n] not in self.info:
+                return self.fail(unit, n, f"its base #{self.bases[n]} is not in the batch", own=True)
+        for attempt in (1, 2):
+            start, mark = self.head(), len(self.in_tree)
+            culprit, kind, files = self.merge_all(unit)
+            if not culprit:
+                break
+            where = "main" if kind == "main" else f"the batch ({self.batch_names(files)})"
+            self.unmerge(start, mark)
+            if kind == "batch" and attempt == 1 and self.queue:
+                self.settle()  # the conflict may be with a unit whose lint is red, which the batch will not hold
+                continue
+            return self.fail(unit, culprit, f"conflicts with {where}", own=False)
+        need = []
+        for n in unit:
+            held = self.lint_skip(n)
+            if held:
+                self.lines.append(f"skipped lint: #{n} {self.info[n]['branch']}: its merge base holds {held[:9]}, main's newest lint change")
+            else:
+                need.append(n)
+        self.queue.append({"unit": unit, "future": self.pool.submit(self.lint_unit, need) if need else None})
+
+def units_of(info, bases):
+    """-> the units of the candidates `info`, each a list of PR numbers in merge order (a base before the PRs stacked on it), ordered by the smallest
+    number in the unit. A unit is one stack: the PRs joined by `bases` (n -> the open PR n is stacked on) among the candidates."""
+    parent = {n: n for n in info}
+    def find(n):
+        while parent[n] != n:
+            parent[n] = parent[parent[n]]
+            n = parent[n]
+        return n
+    for n in info:
+        if bases.get(n) in info:
+            parent[find(n)] = find(bases[n])
+    groups = {}
+    for n in sorted(info):
+        groups.setdefault(find(n), []).append(n)
+    def depth(n):
+        d = 0
+        while bases.get(n) in info and d < len(info):
+            n, d = bases[n], d + 1
+        return d
+    return sorted((sorted(g, key=lambda n: (depth(n), n)) for g in groups.values()), key=min)
+
+def build_batch(root, h, base, push=""):
+    """merge --build-batch: build an integration branch from pull request state alone. -> 0 when the build ran (a PR left out is no failure), 2 when a
+    read failed (nothing printed), else raises Stop (a refused --push, a failed fetch or push).
+    The candidates are the open PRs whose ledger act (pr_acts) is `batch`: a done review record for the live head, and no `Lint: red` line for it.
+    They join in PR-number order, a base before the PRs stacked on it, a `Merge after #n` PR after #n; a stack is one unit that joins whole or not
+    at all (BatchBuild). A PR whose merge-after target is neither merged nor in the batch is left out. Each is merged --no-ff onto the base and
+    onto the batch so far, and lane-linted at its head against the base unless its merge base holds main's newest lint-step change; lints run in
+    parallel, at most os.cpu_count() - 2 (at least 1) at once. A lint-red PR gets one `Lint: red <head> <steps>` comment. Only --push moves a ref:
+    it makes the new branch `push`, and refuses the base or a branch that exists.
+    Output, printed at the end: the cap line, `skipped lint:` lines, a `joins: #n branch sha` line per joined PR in merge order, a `left out: #n
+    branch: why` line per PR left out in PR order, and `batch: N PRs`.
+    Cost: the open-pull list and the repo's comments (one read each), one `pulls/<n>` read per merge-after target outside the open list, one fetch
+    of the base and one per candidate branch, two worktrees (the batch tree and a probe tree at the base) and one more per running lint, one or two
+    merges per candidate (onto the base and onto the batch) and a replay of the joined ones when one was left out, one lint run per candidate not
+    skipped, one comment POST per red lint, and with --push one ls-remote and one push. No timer, file or log of its own."""
+    if push:
+        if push == base:
+            raise Stop(f"--push names the base {base}: a batch goes to a new branch, never to the base. {BATCH_CITE_BUILD}")
+        if origin_head(root, push):
+            raise Stop(f"origin already has the branch {push}: --push makes a new branch and never moves one. {BATCH_CITE_BUILD}")
+    try:
+        pulls = h.pages("pulls", fields={"state": "open"})
+        by_num = {d["number"]: d for d in pulls}
+        acts = pr_acts(h, pulls, holds=False) if pulls else {}  # holds off: only the batch act matters, so a held PR costs no events read
+        cands = [n for n in sorted(acts) if acts[n][2] == "batch"]
+        after = {n: merge_after_targets(by_num[n].get("body")) for n in cands}
+        on_main = {t for t in sorted({t for ts in after.values() for t in ts if t not in by_num}) if merged_into(h, t, base)}
+        stacks = stack_heads(pulls)
+        bases = {n: stacks[by_num[n]["base"]["ref"]] for n in cands if stacks.get(by_num[n]["base"]["ref"], n) != n}
+        wrong_base = {n for n in cands if by_num[n]["base"]["ref"] != base and n not in bases}
+    except Stop as e:  # a failed read lists nothing and exits 2: unknown, never an empty batch
+        print(f"merge: {e}", file=sys.stderr)
+        return 2
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError) as e:
+        print(f"merge: a pull request, comment or event read from GitHub is malformed ({type(e).__name__}: {e}), so the batch is unknown. {BATCH_CITE_BUILD}", file=sys.stderr)
+        return 2
+    cap = max(1, (os.cpu_count() or 1) - 2)
+    out, left, joined = [], {}, []
+    info = {}
+    for n in cands:
+        d = by_num[n]
+        branch, sha = d["head"]["ref"], d["head"]["sha"]
+        if n in wrong_base:
+            left[n] = f"its base is {d['base']['ref']}, not {base}"
+            continue
+        c, why = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+        got = "" if c else git(root, "rev-parse", f"refs/remotes/origin/{branch}")[1]
+        if c or got != sha:
+            left[n] = f"cannot fetch {branch}: {why}" if c else f"{branch} moved: GitHub says {sha[:9]}, origin holds {got[:9]}"
+            continue
+        info[n] = {"branch": branch, "sha": sha}
+    warnings = []
+    if info:
+        out.append(f"lint cap: {cap} at once (os.cpu_count() {os.cpu_count()} minus 2, at least 1)")
+        b = BatchBuild(root, h, base, info, bases, after, on_main, cap)
+        try:
+            b.open()
+            todo = units_of(info, bases)
+            while todo:
+                pending = {n for u in todo for n in u}
+                ready = [u for u in todo if not {t for n in u for t in b.after[n]} & (pending - set(u))]  # a unit waits for the units its merge-after targets are in
+                unit = ready[0] if ready else todo[0]  # a cycle of merge-after lines: its first unit waits on what is not joined, and says so
+                todo.remove(unit)
+                b.process(unit)
+            b.settle()
+            joined, left, warnings = b.joined, {**left, **b.left}, b.warnings
+            out += b.lines
+            if push and joined:
+                push_branch(b.wt, push)
+                out.append(f"pushed: {push} at {b.head()[:9]}")
+        finally:
+            b.close()
+    out += [f"joins: #{n} {info[n]['branch']} {info[n]['sha'][:9]}" for n in joined]
+    out += [f"left out: #{n} {by_num[n]['head']['ref']}: {why}" for n, why in sorted(left.items())]
+    out.append(f"batch: {len(joined)} PRs")
+    for w in warnings:
+        print(w, file=sys.stderr)
+    say(*out)
+    return 0
+
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
 PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the one UNKNOWN count line, in print order; the count line carries no raw error text
@@ -3225,10 +3624,12 @@ def review_state(rec, head):
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
 # The age limit of each next act, in hours; one home. A line past its limit is RED, so no wait runs unbounded.
-# Keys: the next acts (batch, lane round) and the hold labels (held, parked, replaced). Every limit is unmeasured: each is a first guess,
-# not read from any run history (ruling of 12:30 CST Nov 7). Move one when a measured wait says otherwise. A pull request with the BATCH_LABEL (a batch run) counts
+# Keys: the next acts (batch, lane round, lane lint red) and the hold labels (held, parked, replaced). Every limit is unmeasured: each is a first guess,
+# not read from any run history (ruling of 12:30 CST Nov 7; the lane lint red limit is the build-batch lane's pick). Move one when a measured wait says otherwise. A pull request with the BATCH_LABEL (a batch run) counts
 # against the batch limit too.
-PR_STATE_AGE_HOURS = {"batch": 24, "lane round": 72, "held": 168, "parked": 720, "replaced": 24}
+PR_STATE_AGE_HOURS = {"batch": 24, "lane round": 72, "lane lint red": 72, "held": 168, "parked": 720, "replaced": 24}
+LINT_RED_WORD = "Lint: red"  # the first line of the comment `merge --build-batch` posts on a lint-red head: `Lint: red <40-hex head> <steps>`. build_batch writes it, pr_acts reads it
+LINT_RED = re.compile(rf"{LINT_RED_WORD} ({REVIEW_SHA}) (\S.*?)\s*", re.ASCII)
 HOLD_LABELS = ("held", "parked", "replaced", BATCH_LABEL)  # the labels that stand in for a review record; all but the BATCH_LABEL also need a Waits on line
 WAITS_ON_LINE = "Waits on:"
 
@@ -3258,9 +3659,74 @@ def reviewed_lines(h, root):
     except (KeyError, TypeError, ValueError, AttributeError, IndexError) as e:
         raise Stop(f"a pull request, comment or event read from GitHub is malformed ({type(e).__name__}: {e}), so the ledger is unknown. " + REVIEW_CITE)
 
+def stack_heads(pulls):
+    """-> {head branch: PR number} of the open pull requests whose head is in the base's own repo: the map that says a pull request's base is
+    another's head (a stack). A fork's head branch may share a name with a base branch, so a fork's head never counts. The one home of the stacking
+    read: pr_acts (`blocked on`) and build_batch (the groups) both call it."""
+    def same_repo(d):
+        base_repo = (d["base"].get("repo") or {}).get("full_name")
+        return not base_repo or (d["head"].get("repo") or {}).get("full_name") == base_repo
+    return {d["head"]["ref"]: d["number"] for d in pulls if same_repo(d)}
+
+def pr_acts(h, pulls, holds=True):
+    """-> {n: (branch, act text, kind or None for no next act, since, the number it is blocked on)} for the open `pulls`, the one home of the next-act
+    rules in `_reviewed_lines` (its docstring lists them). Reads the repo's comments since the oldest pull request (one list read) and, only when
+    `holds` and a pull request reaches the hold rule, its issue events. `holds` False skips the hold rule, for a caller that wants only the pull
+    requests whose act is `batch`: a held pull request then reads as blocked or NO NEXT ACT, never as batch."""
+    records, plain = {}, {}  # PR number -> [(time, body)], oldest first: its review records, and all its comments
+    for c in h.issue_comments(min(d["created_at"] for d in pulls)):
+        m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+        if m:
+            body, row = c.get("body") or "", (github_epoch(c["created_at"]), c.get("body") or "")
+            plain.setdefault(int(m.group(1)), []).append(row)
+            if body.splitlines()[:1] == [REVIEW_MARKER]:
+                records.setdefault(int(m.group(1)), []).append(row)
+    heads = stack_heads(pulls)
+    acts = {}  # n -> (branch, act text, kind or None for no next act, since, the number it is blocked on)
+    for d in sorted(pulls, key=lambda d: d["number"]):
+        n, sha, opened = d["number"], d["head"]["sha"], github_epoch(d["created_at"])
+        labels, act = {x["name"] for x in d.get("labels") or []}, None
+        if records.get(n):
+            at, body = records[n][-1]
+            rec = parse_review(body)
+            rec = rec if rec and rec["n"] == n else None
+            state = review_state(rec, sha)[0]
+            if state == "done":
+                act = ("batch", "batch", at, None)
+                red = next(((t, m) for t, text in reversed(plain.get(n, [])) for m in [LINT_RED.fullmatch((text.splitlines() or [""])[0])]
+                            if m and m.group(1) == sha), None)  # the newest red line for the live head; a line for an older head is stale
+                if red:  # the lint of the head the record passed is red: the pull request is no candidate, whatever its record says
+                    act = (f"lane lint red: {red[1].group(2)}", "lane lint red", red[0], None)
+            elif state in ("open", "stale"):
+                owed = min(max((i for i, *_ in rec["rounds"]), default=0) + 1, REVIEW_LAST_ROUND)
+                if state == "open" and rec["fix"] and rec["fix"][3] != "PASS":  # a failed fix check starts the lane over: the fix needs a new lane, so n is the first round
+                    owed = 1
+                act = (f"lane round {owed}", "lane round", at, None)
+        if act is None:
+            waits = next((line for _, body in reversed(plain.get(n, [])) for line in reversed(body.splitlines()) if line.startswith(WAITS_ON_LINE)), None)
+            wid = waits and waits_on_id(waits.rstrip())
+            for hold in (k for k in HOLD_LABELS if k in labels and holds):
+                if hold == BATCH_LABEL:
+                    act_text, kind = "batch run", "batch run"
+                elif wid:
+                    act_text, kind = f"waits on {wid}", hold
+                else:
+                    continue
+                # the event list is read only here: the age of a hold is the age of its label
+                events = [e for e in h.pages(f"issues/{n}/events") if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == hold]
+                act = (act_text, kind, github_epoch(events[-1]["created_at"]) if events else opened, None)
+                break
+        if act is None and heads.get(d["base"]["ref"], n) != n:
+            act = (f"blocked on #{heads[d['base']['ref']]}", "blocked", opened, heads[d["base"]["ref"]])
+        if act is None and d.get("draft"):  # a draft with no record is a lane at its first round, aged from its opening
+            act = ("lane round 1", "lane round", opened, None)
+        acts[n] = (d["head"]["ref"], *(act or ("NO NEXT ACT", None, opened, None)))
+    return acts
+
 def _reviewed_lines(h, root):
     """-> (lines, red) of `merge --reviewed`, built before any is printed so a failed read prints none (a Stop). Every open pull request gets one next
-    act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch`; the record is open or for another
+    act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch` (`lane lint red: <steps>` instead, when
+    the newest `Lint: red <live head> <steps>` comment of the pull request names the live head); the record is open or for another
     head, `lane round n` (n the next round owed, at most 3; 1 when its fix check failed); a label of held, parked or replaced and a
     `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line, `waits on <id>`; the BATCH_LABEL, `batch run` (the batch limit); its base
     is the head branch of another open pull request of the same repo, `blocked on #N` (a fork's head never counts); a draft, the first `lane round`;
@@ -3279,53 +3745,7 @@ def _reviewed_lines(h, root):
         return ["no open pull requests.", summary(0, 0)], False
     now = epoch_of(h.now())
     hours = lambda since: int(max(0.0, now - since) // 3600)
-    records, plain = {}, {}  # PR number -> [(time, body)], oldest first: its review records, and all its comments
-    for c in h.issue_comments(min(d["created_at"] for d in pulls)):
-        m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-        if m:
-            body, row = c.get("body") or "", (github_epoch(c["created_at"]), c.get("body") or "")
-            plain.setdefault(int(m.group(1)), []).append(row)
-            if body.splitlines()[:1] == [REVIEW_MARKER]:
-                records.setdefault(int(m.group(1)), []).append(row)
-    def same_repo(d):  # a fork's head branch may share a name with a base branch: only a head in the base's own repo can be what another pull request is based on
-        base_repo = (d["base"].get("repo") or {}).get("full_name")
-        return not base_repo or (d["head"].get("repo") or {}).get("full_name") == base_repo
-    heads = {d["head"]["ref"]: d["number"] for d in pulls if same_repo(d)}
-    acts = {}  # n -> (branch, act text, kind or None for no next act, since, the number it is blocked on)
-    for d in sorted(pulls, key=lambda d: d["number"]):
-        n, sha, opened = d["number"], d["head"]["sha"], github_epoch(d["created_at"])
-        labels, act = {x["name"] for x in d.get("labels") or []}, None
-        if records.get(n):
-            at, body = records[n][-1]
-            rec = parse_review(body)
-            rec = rec if rec and rec["n"] == n else None
-            state = review_state(rec, sha)[0]
-            if state == "done":
-                act = ("batch", "batch", at, None)
-            elif state in ("open", "stale"):
-                owed = min(max((i for i, *_ in rec["rounds"]), default=0) + 1, REVIEW_LAST_ROUND)
-                if state == "open" and rec["fix"] and rec["fix"][3] != "PASS":  # a failed fix check starts the lane over: the fix needs a new lane, so n is the first round
-                    owed = 1
-                act = (f"lane round {owed}", "lane round", at, None)
-        if act is None:
-            waits = next((line for _, body in reversed(plain.get(n, [])) for line in reversed(body.splitlines()) if line.startswith(WAITS_ON_LINE)), None)
-            wid = waits and waits_on_id(waits.rstrip())
-            for hold in (k for k in HOLD_LABELS if k in labels):
-                if hold == BATCH_LABEL:
-                    act_text, kind = "batch run", "batch run"
-                elif wid:
-                    act_text, kind = f"waits on {wid}", hold
-                else:
-                    continue
-                # the event list is read only here: the age of a hold is the age of its label
-                events = [e for e in h.pages(f"issues/{n}/events") if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == hold]
-                act = (act_text, kind, github_epoch(events[-1]["created_at"]) if events else opened, None)
-                break
-        if act is None and heads.get(d["base"]["ref"], n) != n:
-            act = (f"blocked on #{heads[d['base']['ref']]}", "blocked", opened, heads[d["base"]["ref"]])
-        if act is None and d.get("draft"):  # a draft with no record is a lane at its first round, aged from its opening
-            act = ("lane round 1", "lane round", opened, None)
-        acts[n] = (d["head"]["ref"], *(act or ("NO NEXT ACT", None, opened, None)))
+    acts = pr_acts(h, pulls)
     held = ""
     if any(a[2] == "batch" for a in acts.values()):  # one read of the base's latest run, for the red-main text of each batch line
         verdict, detail = base_verdict(root, h, h.base)
@@ -3450,7 +3870,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
-    p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
+    p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main); with --build-batch: the base the batch is built on")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--integration", action="store_true", help="with --lane-lint <pr>: after a PASS, add the `batch` label to the integration pull request (one POST)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
@@ -3461,6 +3881,8 @@ def main(argv, host=None, lock=None):
     p.add_argument("--config", default=".github/stamp.json")
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
+    p.add_argument("--build-batch", action="store_true", help="build an integration branch from PR state alone: the PRs whose act is batch, merged in order and linted in parallel; moves no ref without --push")
+    p.add_argument("--push", metavar="BRANCH", help="with --build-batch: push the batch to this new branch of origin (never the base, never a branch that exists)")
     p.add_argument("--reviewed", action="store_true", help="the ledger: each open pull request with its one next act and age; exit 1 when any line is RED")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
@@ -3475,16 +3897,21 @@ def main(argv, host=None, lock=None):
         p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
+    if a.push is not None and not a.build_batch:
+        p.error("--push goes with --build-batch")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
-                         or a.review_record or a.lane_lint):
+                         or a.review_record or a.lane_lint or a.build_batch):
         p.error("--idle-lanes stands alone")
     if not a.lane_lint:
-        if a.base or a.lint_unknown_ok or a.integration:
-            p.error("--base, --lint-unknown-ok and --integration go with --lane-lint")
+        if (a.base and not a.build_batch) or a.lint_unknown_ok or a.integration:
+            p.error("--base (or --build-batch), --lint-unknown-ok and --integration go with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     if a.idle_lanes:
         pass  # stands alone: checked above
+    elif a.build_batch:
+        if a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint:
+            p.error("--build-batch stands alone")
     elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
             p.error("--lane-lint takes a pull request number, commit or ref, and stands alone")
@@ -3514,6 +3941,13 @@ def main(argv, host=None, lock=None):
     try:
         if a.idle_lanes:
             return idle_lanes(a.live)  # before the role check and any lock: it reads, merges and posts nothing
+        if a.build_batch:
+            c, root = sh(["git", "rev-parse", "--show-toplevel"])
+            if c:
+                raise Stop("not in a git checkout " + BATCH_CITE_BUILD)
+            h = host or Host()
+            with release_on_signals():  # a signal ends the run through build_batch's `finally`, which removes the trees
+                return build_batch(root, h, a.base or h.base, a.push or "")  # before the role check and any lock: it reads, and moves a ref only under --push
         if a.lane_lint:
             c, root = sh(["git", "rev-parse", "--show-toplevel"])
             if c:
