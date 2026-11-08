@@ -51,9 +51,13 @@ def is_cloud() -> bool:
 # It never raises. `reconfigure` landed in Python 3.7 and a stream can be something other than a
 # text wrapper, so a failure here leaves the old encoding rather than bricking the hook.
 def _force_utf8_streams() -> None:
-    for stream in (sys.stdout, sys.stderr):
+    # Stdin keeps a byte that is no UTF-8 as a lone surrogate, so the call is still judged. Strict
+    # decoding would raise, and main() fails open on unreadable input. The output streams print
+    # that surrogate as an escape: a strict write would raise inside refuse() and allow the call.
+    for stream, errors in ((sys.stdin, "surrogateescape"), (sys.stdout, "backslashreplace"),
+                           (sys.stderr, "backslashreplace")):
         try:
-            stream.reconfigure(encoding="utf-8")
+            stream.reconfigure(encoding="utf-8", errors=errors)
         except Exception:
             pass
 
@@ -1477,7 +1481,7 @@ def record(tool: str, decision: str, rule: str, matched: str) -> None:
         if session is not None:
             fields.append(session)
         line = "\t".join(fields)
-        with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
+        with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8", errors="backslashreplace") as handle:
             locked = _log_lock(handle)
             try:
                 handle.write(line + "\n")
@@ -1550,6 +1554,26 @@ def set_override_context(session_id, agent_id, cwd=None) -> None:
     _override_cwd = cwd if isinstance(cwd, str) else ""
 
 
+_on_allow = []
+
+
+def on_allow(step) -> None:
+    """Queue STEP to run once the call is allowed: when judge() returns, or when an owner override
+    lifts a refusal. A call that any rule refuses runs nothing."""
+    _on_allow.append(step)
+
+
+def run_on_allow() -> None:
+    """Run each queued step, once. A step that fails is dropped: it never fails the call."""
+    steps = list(_on_allow)
+    del _on_allow[:]
+    for step in steps:
+        try:
+            step()
+        except Exception:
+            pass
+
+
 def set_override_veto(veto) -> None:
     """Register the test judge() builds for this call: veto() is true when the call holds an act no
     override lifts. Until it is set, no refusal is liftable."""
@@ -1584,6 +1608,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         if lifted:
             record(tool, lifted, rule, matched + " step " + step if step else matched)
             if lifted in override.LIFTS:
+                run_on_allow()
                 sys.exit(0)
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason
