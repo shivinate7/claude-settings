@@ -155,8 +155,8 @@ class CheckCase(Fixture):
         self.assertEqual(rc, 0, "exit %d, want 0:\n%s" % (rc, out))
         self.assertNotIn("Traceback", out, out)
 
-    def assertFlags(self, branch, report, missing):
-        rc, out = self.run_check(branch, report)
+    def assertFlags(self, branch, report, missing, args=()):
+        rc, out = self.run_check(branch, report, args)
         self.assertEqual(rc, 1, "exit %d, want 1:\n%s" % (rc, out))
         for path in missing:
             self.assertTrue(any(path in line for line in out.splitlines()),
@@ -278,6 +278,19 @@ class CheckCase(Fixture):
         self.scope(BRANCH, WIDGET)
         self.assertPasses(BRANCH, "Files: %s\n" % WIDGET, args=("--root", self.work, "--base", "origin/main"),
                           cwd=self.root)
+
+    def test_a_non_default_base_changes_the_diff_the_report_is_read_against(self):
+        self.pushed_branch("lane/parent", {OTHER: OTHER_TEXT})
+        self.git("checkout", "-q", "-b", BRANCH, "lane/parent")  # the builder's branch starts from the parent
+        self.commit({WIDGET: WIDGET_TEXT}, "builder work on " + BRANCH)
+        self.git("push", "-q", "origin", "%s:refs/heads/%s" % (BRANCH, BRANCH))
+        self.git("checkout", "-q", "main")
+        self.scope(BRANCH, OTHER, WIDGET)  # against main, the parent's file is in the builder's change too
+        self.assertEqual(self.git("diff", "--name-only", "--no-renames", "origin/lane/parent",
+                                  self.origin_head(BRANCH)).split(), [WIDGET])  # against the parent, it is not
+        report = "Files: %s\n" % OTHER
+        self.assertPasses(BRANCH, report)  # the default base reads OTHER as in the diff
+        self.assertFlags(BRANCH, report, missing=[OTHER], args=("--base", "origin/lane/parent"))
 
 
 class ControlCase(Fixture):
