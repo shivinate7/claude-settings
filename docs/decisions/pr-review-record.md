@@ -37,7 +37,7 @@ CI: read live by merge --reviewed
 - The `Grant` line is optional and comes once, directly after `Guard or check`. It is the owner's grant of round 4, the one round past round 3 (rule `roles-review-cap-three`). `--grant TEXT` writes it, only with `--review-record`. Its text is an item number, one lowercase letter for the pick, `owner`, and a CST or CDT time. With the line the rounds must reach round 4. Without it they stop at round 3. Never round 5.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
-- A body is not a record when the marker is missing, a field is malformed or out of place, round numbers skip, or a round is above 3 with no `Grant` line, above 4 with one, or short of 4 with one.
+- A body is not a record when the marker is missing, a field is malformed or out of place, or round numbers skip. Nor is it one when a round is above 3 with no `Grant` line, above 4 with one, or short of 4 with one.
 - The newest record for a head counts. A record for an old head is stale.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
