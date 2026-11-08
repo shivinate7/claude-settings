@@ -3061,6 +3061,11 @@ sh("per-file ask: two -C targets, lane then a second linked worktree, both per-f
 sh("per-file allow: one -C target repeated, lane restore f.txt then lane restore b.txt",
    VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C " + slash(GITWT)
    + " restore b.txt", "allow", cwd=GITWT)
+# TWO SPELLINGS OF ONE CHECKOUT (one_place, `len(targets) <= 1`). Both -C targets are the lane, once by its
+# path and once by `.` (the cwd), so other-checkout stays quiet. They are two strings, so one_place reads two
+# targets and both restores ask; two asks chained deny as ask-alone. The control above repeats one string.
+chained_ask("per-file ask: two -C targets in one checkout, the lane by path then by ., both per-file restores, chained it denies",
+            VCS + " -C " + slash(GITWT) + " restore f.txt && " + VCS + " -C . restore b.txt", cwd=GITWT)
 
 # FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
 # the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
