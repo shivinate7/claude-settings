@@ -905,9 +905,9 @@ class DoneNamesModelsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)  # test-temp-standard: the run's folder, removed at teardown
 
-    def verdict(self, reply, spawns, denied=(), between=(), lead=None, tail=(), subagent_model="sonnet"):
+    def verdict(self, reply, spawns, denied=(), between=(), lead=None, tail=(), agent_model="sonnet"):
         # `lead` replaces the owner's opening message (a lane's input is a peer brief); `tail` holds the records
-        # after the last spawn, before the landing commit. `subagent_model` None unsets CLAUDE_CODE_SUBAGENT_MODEL,
+        # after the last spawn, before the landing commit. `agent_model` None unsets CLAUDE_CODE_SUBAGENT_MODEL,
         # so a spawn with no model field and no file pin runs an unknown model.
         records = [human("do the task")] if lead is None else list(lead)
         for i, spawn in enumerate(spawns):
@@ -927,8 +927,8 @@ class DoneNamesModelsTests(unittest.TestCase):
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)
-        if subagent_model:
-            env["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent_model
+        if agent_model:
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = agent_model
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
@@ -992,7 +992,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict(
             "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
             [{"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}],
-            lead=[human("do the task"), *self.run_of(self.BUILDER), human("Run round 2.")], subagent_model=None)
+            lead=[human("do the task"), *self.run_of(self.BUILDER), human("Run round 2.")], agent_model=None)
         self.assertIsNotNone(out, "the report passed: an earlier unknown builder spawn turned off the builder model check")
         self.assertEqual(out["decision"], "block")
         self.assertIn("matches no builder spawn", out["reason"])
@@ -1283,8 +1283,8 @@ class DoneNamesModelsTests(unittest.TestCase):
         return [tool_use_msg("Agent", spawn), tool_result_msg()]
 
     def test_dm_false_alarm_done_names_reviewer_spawned_before_the_window_passes(self):
-        # Catches: a Done pair backed only by a spawn before the window (the round 1 haiku reviewer, pinned by
-        # agents/reviewer.md) was refused against the window's round 2 sonnet reviewer, as "'reviewer haiku'
+        # Catches: a Done pair backed only by a spawn before the window (a haiku reviewer, pinned by
+        # agents/reviewer.md) was refused against the window's sonnet reviewer, as "'reviewer haiku'
         # matches no reviewer spawn, which ran sonnet". The session's spawns back the name.
         out = self.verdict(
             "> **Done:**\n> - BUILT: the guard, commits 25179dc7b (test-author haiku) and ecd0838c6 (builder sonnet). "
@@ -1296,15 +1296,15 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(out, (out or {}).get("reason"))
 
     def test_dm_false_alarm_coordinator_done_names_fix_check_haiku_before_the_window_passes(self):
-        # Catches: a Done that names the haiku fix check, which ran before the window, was refused while the
-        # round 2 sonnet reviewer ran inside it.
+        # Catches: a Done that names the haiku fix check, which ran before the window, was refused while a
+        # sonnet reviewer ran inside it.
         out = self.verdict(
             "> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Round 2 review running (reviewer sonnet).",
             [self.REVIEWER_R2],
             lead=[human("do the task"), *self.run_of(self.FIX_CHECK), human("Run round 2.")])
         self.assertIsNone(out, (out or {}).get("reason"))
 
-    def test_dm_false_alarm_no_agent_other_item_with_a_commit_skips_the_next_gate(self):
+    def test_dm_false_alarm_no_agent_other_item_with_a_commit_skips_the_next_excuse_check(self):
         # Catches: an OTHER item that cites a commit and says (no agent) owes no model, so the Next gate skips it
         # and Next's reviewer pair can excuse the reviewer. The same item without the mark blocks (next case).
         out = self.verdict(
