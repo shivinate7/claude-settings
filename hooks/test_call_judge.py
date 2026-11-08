@@ -2546,10 +2546,11 @@ def case_verdict_and_question_failures_give_one_refusal_naming_both():
 
 # ------------------------------------------------------------------ verdict claim: allowed and refused sentences, remedy
 #
-# Allowed: each sentence is a false alarm if refused, because its verb acts on a pronoun or is passive, or its subject
-# is a CI or a test name. Refused: each sentence is a miss if it passes, because its modal and verb are split by an
-# adverb, the verb is missing from the list, the apostrophe is curly, the verb has no object, or the subject is a file
-# path. The remedy of a refusal that names the read form also says what a read cite may name.
+# Allowed: each sentence is a false alarm if refused, because its verb acts on a pronoun or is passive, its subject
+# is a CI or a test name, or it asks a question about the verdict. Refused: each sentence is a miss if it passes,
+# because its modal and verb are split by an adverb, the verb is missing from the list, the apostrophe is curly, the
+# verb has no object (a paren group or a bold mark after it is no end), or the subject is a file path. The remedy of
+# a refusal that names the read form also says what a read cite may name.
 # Each allowed sentence carries its own turn: the guard sentence names hooks/guard.py, and its turn ran that file.
 # The no-object controls name their file and run it. On the old code they pass because it reads them as no claim, so
 # they guard the build against over-refusing, not the run path.
@@ -2569,6 +2570,11 @@ ROUND3_ALLOWED = (
      ("python3 lint/stale_cites.py",)),
     ("the guard, no object, its file in parens and run", "The guard (hooks/guard.py) will refuse.",
      ("python3 hooks/guard.py --check",)),
+    ("the guard, no object, its file after the verb and run", "The guard will refuse (hooks/guard.py).",
+     ("python3 hooks/guard.py --check",)),
+    ("a question, the check as the subject", "Which check will fail?", ()),
+    ("a question, the test as the subject", "Which test will fail?", ()),
+    ("a question, the guard in a clause", "Do you know which guard will refuse?", ()),
 )
 ROUND3_REFUSED = (
     ("an adverb between will and the verb", "the check will probably refuse it."),
@@ -2581,6 +2587,9 @@ ROUND3_REFUSED = (
     ("the test, a verb with no object", "The test will fail."),
     ("the CI, a verb with no object", "The CI will fail."),
     ("the guard, a verb with no object", "The guard will refuse."),
+    ("a paren group after the verb, no run", "The test will fail (the red run is recorded in 112a5fe2f)."),
+    ("a file in parens after the verb, no run", "The guard will refuse (hooks/guard.py)."),
+    ("bold marks after the verb, no run", "**The guard will refuse**"),
 )
 
 
