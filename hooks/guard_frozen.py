@@ -1044,12 +1044,60 @@ _PL_RB_WRITE = (
 )
 
 
+def _pl_rb_code(body: str) -> str:
+    """BODY with each string's contents and each `#` comment blanked to spaces, so offsets stay aligned
+    with BODY. A write call is a hit only where this copy still shows its first character; the path is
+    read from BODY. Strings are '...' and "..." with backslash escapes and may span lines. A quote
+    that finds no closer stays code, so a stray one hides nothing after it. `$#`, `$'` and `$"` are
+    variables, not openers. Known limit: `#{...}` inside a ruby string and `%q()` strings are not
+    read as code."""
+    out = list(body)
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch == "$":
+            i += 2
+        elif ch == "#":
+            end = body.find("\n", i)
+            end = n if end < 0 else end
+            out[i:end] = " " * (end - i)
+            i = end
+        elif ch in "'\"":
+            at = i + 1
+            while at < n and body[at] != ch:
+                at += 2 if body[at] == "\\" else 1
+            if at >= n:
+                i += 1
+                continue
+            for k in range(i + 1, at):
+                if body[k] != "\n":
+                    out[k] = " "
+            i = at + 1
+        else:
+            i += 1
+    return "".join(out)
+
+
 def _pl_rb_hit(body: str, cwd: str, predicate) -> str:
+    code = _pl_rb_code(body)
+
+    def in_code(match):
+        return code[match.start()] == body[match.start()]
+
     env = {}
     for match in _PL_RB_ASSIGN.finditer(body):
-        env.setdefault(match.group(1), []).append(match.group(2) if match.group(2) is not None else match.group(3))
+        if in_code(match):
+            env.setdefault(match.group(1), []).append(
+                match.group(2) if match.group(2) is not None else match.group(3))
     for pattern in _PL_RB_WRITE:
-        for match in pattern.finditer(body):
+        at = 0
+        while True:
+            match = pattern.search(body, at)
+            if not match:
+                break
+            at = match.start() + 1   # a match that starts in a string must not hide one that starts in code
+            if not in_code(match):
+                continue
             single, double, name = match.groups()[-3:]
             for path in [single or double] if single or double else env.get(name, ()):
                 if predicate(path, cwd):
