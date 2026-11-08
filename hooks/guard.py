@@ -3941,15 +3941,12 @@ def impeccable_shell_hit(segment: str) -> str:
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 
 
-_BACKTICK_SPAN = re.compile(r"(`(?:\\.|[^`\\])*`)")
-
-
 def shell_run_texts(raw: str) -> list:
     """The texts a shell reads from a whole command, for a rule that judges shell lines. A body a shell
     reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
-    backticks it runs. A quoted body that an interpreter runs joins as its backtick spans alone, since perl,
-    ruby and node run those as a shell. The limits: such a body is not read as shell lines, a python body's
-    backtick span is read though python runs no shell from it, and a here-string body is allowed."""
+    backticks it runs. A quoted body that only an interpreter keeps in view, and that holds a backtick, joins
+    as its pieces split at every backtick, since perl, ruby and node run a backtick span as a shell. The
+    limits: a body with no backtick is not read, and a body with one is read anywhere, python's too."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
@@ -3966,13 +3963,12 @@ def shell_run_texts(raw: str) -> list:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
             elif "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):
                 # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
-                # backtick span as a shell, `$(` and `<(` inside the span too. Outside a span they stay
-                # text: no interpreter reads them as a shell. Python's own backtick span is read too, a
-                # rare false alarm. The split follows _substitutions' span rule (to the next unescaped backtick).
-                parts = _BACKTICK_SPAN.split(body)
-                inert = "".join(part if at % 2 else re.sub(r"([$<>])\(", r"\1 (", part)
-                                for at, part in enumerate(parts))
-                texts.extend(t for t, _ in _substitutions(inert, heredoc=True)[0][:-1])
+                # backtick span as a shell. Quote rules differ by language, so no pairing of backticks is
+                # trusted: a lone backtick in a string would hide the real span. Each piece between
+                # backticks is read as its own text, with its `$(` and `<(` live.
+                for piece in body.split("`"):
+                    texts.append(piece)
+                    texts.extend(t for t, _ in _substitutions(piece, heredoc=True)[0][:-1])
     return texts
 
 
