@@ -15111,8 +15111,8 @@ def ors_r4(label):
 
 
 def ors_r5(label):
-    """R5, a record that exists only at an older head: round 1 is recorded at H0, the lane moves to H1 and round 2
-    stops there, and the lane commits again. The record at H0 does not hold H1."""
+    """R5, a record that holds only an older head: the record names H0, the reviewer stops at H1 with no record for it,
+    and the lane commits again. A record for H0 does not hold H1, so the push asks."""
     ctx = ors_new(label)
     ors_stop_into(ctx)
     comments = {ORS_PR: [ors_record(ctx["head"], rounds=[(1, ORS_REVIEWER, PFR_MODEL, "FAIL")])]}
