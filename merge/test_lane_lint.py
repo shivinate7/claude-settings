@@ -664,7 +664,9 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), out))
         self.assertFalse(runs[0]["shallow"], "the lint ran on a shallow clone, so its history checks read the cut history")
 
-    def test_git_trace_variables_in_the_environment_leave_the_root_discovery_on_the_real_root_and_the_lint_passes(self):
+    def lint_in_trace_env(self, env, target="7"):
+        """A full lane checkout linted by merge `target`, with `env` set in the environment of the whole run, so every git call and
+        root discovery run with it. -> (the lane's head, what root discovery read back, the lint's rc, its output)."""
         pin = self.head("feat")
         self.assertFalse(self.is_shallow_lane(pin), "precondition: the lane checkout is shallow, so the case proves nothing")
         self.use_ci_job(PASSING, 0)
@@ -679,15 +681,30 @@ class LaneLint(CiJobStub, tm.CloudSession):
                 roots.append(out)
             return c, out
 
-        with unittest.mock.patch.dict(os.environ, {"GIT_TRACE": "1", "GIT_TRACE_SETUP": "1"}), unittest.mock.patch.object(merge, "sh", sh):
-            rc, out = self.run_lane("--lane-lint", "7")
+        with unittest.mock.patch.dict(os.environ, env), unittest.mock.patch.object(merge, "sh", sh):
+            rc, out = self.run_lane("--lane-lint", target)
+        return pin, roots, rc, out
+
+    def assert_lint_passed_on_real_root(self, pin, roots, rc, out):
         self.assertEqual(roots, [os.path.realpath(self.co)], "root discovery did not read back the lane checkout's root: " + out)
-        self.assertEqual(rc, 0, "a lane lint with the git trace variables set did not pass: " + out)
+        self.assertEqual(rc, 0, "a lane lint with the trace variables set did not pass: " + out)
         self.assertEqual(len(pass_lines(out)), 1, out)
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), out))
         self.assertEqual(runs[0]["head"], pin, "the lint ran on a head other than the lane's: " + out)
         self.assertFalse(os.path.exists(runs[0]["cwd"]), "the lint tree is still on disk: " + out)
+
+    def test_git_trace_variables_in_the_environment_leave_the_root_discovery_on_the_real_root_and_the_lint_passes(self):
+        self.assert_lint_passed_on_real_root(*self.lint_in_trace_env({"GIT_TRACE": "1", "GIT_TRACE_SETUP": "1"}))
+
+    def test_git_trace2_variables_in_the_environment_leave_the_git_reads_on_the_real_root_and_the_lint_passes(self):
+        self.assert_lint_passed_on_real_root(*self.lint_in_trace_env({"GIT_TRACE2": "1", "GIT_TRACE2_PERF": "1"}))
+
+    def test_a_git_trace2_event_path_in_the_environment_still_writes_its_file(self):
+        path = os.path.join(self.t, "trace2-event.jsonl")
+        pin, roots, rc, out = self.lint_in_trace_env({"GIT_TRACE2_EVENT": path})
+        self.assert_lint_passed_on_real_root(pin, roots, rc, out)
+        self.assertTrue(os.path.exists(path) and os.path.getsize(path) > 0, "GIT_TRACE2_EVENT named a path, and no trace was written to it: " + out)
 
     def test_lint_unknown_ok_does_not_lift_a_failed_unshallow_fetch(self):
         pin = self.make_shallow_lane()
