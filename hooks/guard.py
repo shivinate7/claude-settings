@@ -242,8 +242,10 @@ Other tools, in `judge` order:
                        findings list passes. A Workflow call is judged with or without a model; one
                        whose agentType the scan cannot read passes. A reviewer call whose prompt the
                        scan cannot read is refused with BRIEF_UNREAD_REASON.
-                       The refusal names the refused line by its number in the brief (`line N`), the
-                       first label or item line of a report or the first verdict line, never its text.
+                       A refusal for a report shape or a verdict line names the refused line by its
+                       number in the brief (`line N`), the first label or item line of a report or
+                       the first verdict line, never its text. The BRIEF_UNREAD_REASON refusal names
+                       no line, because there is no line to name.
                        An override lifts it. (reviewer-brief-blind)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
                        not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
