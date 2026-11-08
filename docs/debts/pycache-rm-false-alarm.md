@@ -2,7 +2,7 @@
 
 **What.** `rm -rf tests/__pycache__` and `rm -rf tests/.pytest_cache` are refused for a builder, because the path sits in a test folder. Cache cleanup is not a test change.
 
-**Where.** `hooks/guard.py`, `builder_test_path` and `is_test_rel` (`TEST_DIRS` holds `tests`). The shell check (rule 7c, `builder-test-edit`) reads the path through `builder_shell_path`, which asks `builder_test_path`.
+**Where.** `hooks/guard.py`, `builder_test_path` and `is_test_rel` (`TEST_DIRS` holds `tests`). The shell check (rule 7c, `builder-test-edit`) reads the path through `builder_shell_path`, which asks `is_test_rel`.
 
 **Decision.** `builders-cannot-edit-tests`, builders cannot edit tests (the shell check).
 
