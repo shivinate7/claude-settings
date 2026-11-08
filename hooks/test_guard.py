@@ -95,6 +95,7 @@ FAMILIES = {
     "write": "the silent write",
     "push-delete": "push and delete",
     "push-needs-review-record": "a shell git push refused when the session's transcript shows a PR known to the session (a create_pull_request or a Bash gh pr create that succeeded) and a reviewer or design-reviewer report (a notice, a hand-back, or a foreground result) with no later posted review record that parses and holds that report's role, verdict and round, or a posted Fix check line for a PR whose head branch is the push's destination (the refusal says to open a new branch and PR); a PR-less session, a dry run, a non-push command, and a missing or unreadable transcript are allowed",
+    "push-owes-review-record": "a shell git push asks when a reviewer's stop wrote an owed-review-record entry for the head it read, the push's destination is that head's branch, the pushed source is another commit, and no posted review record the merge tool accepts holds that head; a read that fails or an entry that cannot be parsed asks; no entry, a recorded head, no open pull request at it, an archive destination, the head itself, a builder stop, no merge config, the owner override and a dry run are allowed",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
@@ -1061,6 +1062,12 @@ else:
         if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
             api_error(500, "compare read broke")
         print(json.dumps({"status": status}))
+    elif re.fullmatch(r"issues/\d+/comments", rel):  # a pull request's issue comments, oldest first: `comments` in make_fake_gh
+        if state["comments_status"] == "server":  # the read fails, as a server error: the guard cannot see the records
+            api_error(500, "comments read broke")
+        number = rel.split("/")[1]
+        rows = [{"id": 9000 + i, "body": body} for i, body in enumerate(state["comments"].get(number, []))]
+        print(listing(rows, None, fields, flags, rel=rel))
     else:
         api_error(404, "Not Found")
 '''
@@ -1068,8 +1075,11 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, comments=None, comments_status=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `comments` maps a pull request number (an int) to the bodies of its issue comments, oldest first; its
+    issue comments route answers them, a page at a time. `comments_status` "server" makes that read fail.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
@@ -1135,6 +1145,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
+        "comments": {str(k): list(v) for k, v in (comments or {}).items()},  # PR number -> its issue comments' bodies
+        "comments_status": comments_status,  # None: the comments read answers; "server": a server error
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -14805,6 +14817,484 @@ def xctestplan_logs_case():
 
 LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line logs nothing, and a "
                          "test-author's plan edit logs no author-diff line", xctestplan_logs_case))
+
+
+# =========================================================================== 5f-3. push owes a review record
+#
+# Rule push-owes-review-record, the state-folder rule. A reviewer's SubagentStop writes one entry,
+# `<config>/state/owed-review-records/<sha>.json` = {"branches", "time", "session"}, for the head it read (`git
+# rev-parse HEAD`) and the remote-tracking branches at that head. The stop never blocks. A non-dry-run `git push`
+# asks when an entry's branch is the destination, that branch's remote-tracking ref is the entry's head H, the pushed
+# source is not H, and no posted review record that merge.parse_review accepts holds Head == H on the open pull
+# request whose head is H. Two gh reads find that pull request and its issue comments. A read that fails, or an
+# entry that cannot be parsed, asks with `owed-record-unread`. A push with no entry makes no gh call.
+#
+# Each case builds its own main checkout with a bare origin, and the lane as a linked worktree: the shape a reviewer
+# stops in. The stop and the push are guard runs that share one config folder, so the entry the stop writes is the
+# one the push reads. Before each decision the case checks its own facts with git (the stops stayed silent, origin's
+# lane ref is the head the case reviews, the push source) and the fixture's files. Only then does the push decide.
+FAMILY = "push-owes-review-record"
+ORS_RULE = "push-owes-review-record"
+ORS_LANE = "rrbap-lane"    # the lane's branch: a refusal never names it (rule git-remedy-never-names-target)
+ORS_PR = 1467              # the pull request the lane opened
+ORS_REVIEWER = "reviewer"
+ORS_BUILDER = "builder"
+ORS_PUSH = VCS + " push origin HEAD:" + ORS_LANE
+ORS_ARCHIVE_PUSH = VCS + " push origin HEAD:archive/" + ORS_LANE
+ORS_DRY_PUSH = VCS + " push --dry-run origin HEAD:" + ORS_LANE
+ORS_OTHER_HEAD = "%040x" % 0xc0ffee   # a head no lane in these cases holds
+ORS_FILLER = ["Routine note %d: nothing changed." % n for n in range(34)]   # 34 comments, so the record is the 35th
+
+
+def ors_lease_push(head):
+    """A forced push that moves the lane only while origin still names `head`."""
+    return VCS + " push --force-with-lease=" + ORS_LANE + ":" + head + " --force-if-includes origin HEAD:" + ORS_LANE
+
+
+def ors_path(gh):
+    return gh + os.pathsep + os.environ.get("PATH", "") if gh else None
+
+
+def ors_head(where):
+    return run_vcs(where, "rev-parse", "HEAD").stdout.strip()
+
+
+def ors_remote(where):
+    return run_vcs(where, "rev-parse", "refs/remotes/origin/" + ORS_LANE).stdout.strip()
+
+
+def ors_commit(where, message, text, rel="src/app.py"):
+    write(os.path.join(where, rel), text)
+    _must(where, "add", "-A")
+    _must(where, *IDENT, "commit", "-q", "-m", message)
+
+
+def ors_lane(label, merge=True):
+    """A main checkout with a bare origin, and the lane as a linked worktree whose one commit is pushed, so the
+    lane's remote-tracking ref names that head. The main checkout carries a merge config when `merge` is set."""
+    main = os.path.join(ROOT, "ors-" + label)
+    bare = main + "-origin"
+    lane = main + "-lane"
+    for path in (main, bare, lane):
+        shutil.rmtree(path, ignore_errors=True)
+    os.makedirs(main)
+    _must(main, "init", "-q")
+    _must(main, "symbolic-ref", "HEAD", "refs/heads/main")
+    _must(main, "init", "-q", "--bare", bare)
+    _must(main, "remote", "add", "origin", bare)
+    if merge:
+        write(os.path.join(main, ".github", "stamp.json"), json.dumps({"merge": {}}))
+    ors_commit(main, "base", "x = 1\n")
+    _must(main, "push", "-q", "origin", "HEAD:refs/heads/main")
+    _must(main, "worktree", "add", "-q", lane, "-b", ORS_LANE)
+    ors_commit(lane, "lane work", "x = 2\n")
+    _must(lane, "push", "-q", "origin", "HEAD:refs/heads/" + ORS_LANE)
+    return main, lane
+
+
+def ors_config(label):
+    folder = os.path.join(ROOT, "ors-" + label + "-cfg")
+    shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder)
+    return folder
+
+
+def ors_entries(config):
+    """The entry files the stops wrote, sorted; [] when the folder is absent."""
+    folder = os.path.join(config, "state", "owed-review-records")
+    return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+
+
+def ors_gh(label, others=(), comments=None, comments_status=None):
+    """The fake gh for one case. Its calls are counted in its own log, which gh_calls_taken reads."""
+    folder = os.path.join(ROOT, "ors-" + label + "-gh")
+    make_fake_gh(folder, "main", others=others, comments=comments, comments_status=comments_status,
+                 count_file=os.path.join(folder, ARCHIVE_CALLS))
+    return folder
+
+
+def ors_pr(head, number=ORS_PR, ref=ORS_LANE):
+    """An open pull request on main whose head is `head`."""
+    return {"number": number, "head": head, "ref": ref, "draft": False, "checks": [], "runs": []}
+
+
+def ors_record(head, rounds=(), fix=None, n=ORS_PR):
+    """A posted review record that names `head` as its reviewed head, written by merge's own form."""
+    body = MERGE.review_body(n, head, "normal", "no", list(rounds), "not owed", fix)
+    if MERGE.parse_review(body) is None:
+        sys.exit("fixture setup failed: merge.parse_review refuses the record body %r" % body[:60])
+    return body
+
+
+def ors_new(label, merge=True):
+    """A case's context: its checkout, config folder and session, and the stops it runs as (role, decision, reason)."""
+    main, lane = ors_lane(label, merge)
+    return {"label": label, "main": main, "lane": lane, "config": ors_config(label), "session": "ors-" + label,
+            "head": ors_head(lane), "gh": None, "stops": [], "command": ORS_PUSH, "scope": None, "after": None,
+            "note": ""}
+
+
+def ors_stop_into(ctx, role=ORS_REVIEWER):
+    """Run the SubagentStop of `role` in the lane, at its head now, and keep the answer."""
+    decision, reason = decide({"raw": None, "tool": "Bash", "tool_input": {}, "event": "SubagentStop",
+                               "cwd": ctx["lane"], "session": ctx["session"], "config": ctx["config"],
+                               "agent_id": PFR_AGENT_ID, "agent_type": role, "env_path": None, "env": None,
+                               "temp": None, "transcript": None, "stop_active": False})
+    ctx["stops"].append((role, decision, reason))
+
+
+def ors_push(ctx):
+    """The lane's push, judged by the guard in the lane's checkout, in the case's session and config."""
+    return ov_call("Bash", {"command": ctx["command"]}, ctx["lane"], ctx["config"], ctx["session"], 0,
+                   env_path=ors_path(ctx["gh"]))
+
+
+def ors_scope_problem(ctx, red):
+    """'' when the case's own facts hold before the push. A red case also needs the push source to differ from
+    the reviewed head, since a push of that head owes nothing."""
+    problem = ""
+    if any(decision != "allow" or reason for _role, decision, reason in ctx["stops"]):
+        problem = "scope: a stop did not stay silent: %r" % (ctx["stops"],)
+    elif ors_remote(ctx["main"]) != ctx["head"]:
+        problem = "scope: origin's lane ref is not the head the case reviews"
+    elif red and ors_head(ctx["lane"]) == ctx["head"]:
+        problem = "scope: the push source is the reviewed head, so the push owes nothing"
+    elif ctx["scope"]:
+        problem = ctx["scope"](ctx)
+    return problem
+
+
+def ors_reason_problem(reason):
+    """'' when the reason holds no lane branch and no forbidden target, else the cause."""
+    if ORS_LANE in reason:
+        return "the ask names the lane's branch, which a refusal never does"
+    target = names_the_target(reason, ORS_RULE)
+    return "the ask names a forbidden target: %r" % target if target else ""
+
+
+def ors_asks(decision, reason, head):
+    """'' when the push asks as the rule owes it: the ask names the rule and the merge command for the head."""
+    if decision != "ask":
+        return "the push was %s (%s), want ask" % (decision, reason[:80])
+    if ORS_RULE not in reason:
+        return "the ask does not name rule %r: %s" % (ORS_RULE, reason[:80])
+    wanted = "merge %d --review-record --head %s" % (ORS_PR, head)
+    if wanted not in reason:
+        return "the ask does not name %r: %s" % (wanted, reason[-120:])
+    return ors_reason_problem(reason)
+
+
+def ors_unreadable(decision, reason):
+    """'' when the push asks on a state it cannot read, and the ask notes owed-record-unread."""
+    if decision != "ask":
+        return "the push was %s (%s), want ask" % (decision, reason[:80])
+    if ORS_RULE not in reason:
+        return "the ask does not name rule %r: %s" % (ORS_RULE, reason[:80])
+    if "owed-record-unread" not in reason:
+        return "the ask does not note owed-record-unread: %s" % reason[:80]
+    return ors_reason_problem(reason)
+
+
+def ors_silent(decision, reason):
+    """'' when the push is allowed and prints nothing."""
+    if decision != "allow" or reason:
+        return "the push was %s (%s), want a silent allow" % (decision, reason[:80])
+    return ""
+
+
+def ors_red(label, build, unread=False):
+    """A red case: `build` makes the scenario, then the push must ask."""
+    def case():
+        ctx = build(label)
+        problem = ors_scope_problem(ctx, red=True)
+        if problem:
+            return False, problem
+        decision, reason = ors_push(ctx)
+        problem = ors_unreadable(decision, reason) if unread else ors_asks(decision, reason, ctx["head"])
+        if problem:
+            return False, problem
+        return True, "asks, and names the rule and the merge command for head %s" % ctx["head"][:12]
+    FIXTURELESS_CHECKS.add(case)
+    LOG_CHECKS_EXTRA.append((label, case))
+
+
+def ors_allow(label, build):
+    """A control: `build` makes the scenario, then the push must be allowed and print nothing."""
+    def case():
+        ctx = build(label)
+        problem = ors_scope_problem(ctx, red=False)
+        if problem:
+            return False, problem
+        decision, reason = ors_push(ctx)
+        problem = ors_silent(decision, reason)
+        if problem:
+            return False, problem
+        if ctx["after"]:
+            problem = ctx["after"](ctx)
+            if problem:
+                return False, problem
+        return True, "allowed silently: " + ctx["note"]
+    FIXTURELESS_CHECKS.add(case)
+    LOG_CHECKS_EXTRA.append((label, case))
+
+
+def ors_r1(label):
+    """R1, a base merge (sighting #1869): the reviewer stopped at H, then the lane merges origin/main and pushes the merge."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["main"], "main moves on", "main moved\n", rel="docs/notes.md")
+    _must(ctx["main"], "push", "-q", "origin", "HEAD:refs/heads/main")
+    _must(ctx["lane"], *IDENT, "merge", "-q", "--no-edit", "origin/main")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_r2(label):
+    """R2, a fix after a FAIL (sightings #1914, #2026): the reviewer stopped at H, the lane commits a fix and pushes it."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_r3(label):
+    """R3, a PASS with its report committed on the lane (sighting builder-report-in-head)."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "review report", "PASS, round 1 of 3\n", rel="reports/review-round-1.md")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_r4(label):
+    """R4, R2's fix pushed with a lease: --force-with-lease names the reviewed head."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["command"] = ors_lease_push(ctx["head"])
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_r5(label):
+    """R5, a record that exists only at an older head: round 1 is recorded at H0, the lane moves to H1 and round 2
+    stops there, and the lane commits again. The record at H0 does not hold H1."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    comments = {ORS_PR: [ors_record(ctx["head"], rounds=[(1, ORS_REVIEWER, PFR_MODEL, "FAIL")])]}
+    ors_commit(ctx["lane"], "round 1 fix", "x = 3\n")
+    _must(ctx["lane"], "push", "-q", "origin", "HEAD:refs/heads/" + ORS_LANE)
+    ctx["head"] = ors_head(ctx["lane"])
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "round 2 fix", "x = 4\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])], comments=comments)
+    return ctx
+
+
+def ors_r6(label):
+    """R6, the issue comments read fails: the pull request is found, and its comments cannot be read."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])], comments_status="server")
+    return ctx
+
+
+def ors_r7(label):
+    """R7, a fix-check reviewer's stop (sighting #2088): the fix head F is pushed and its fix-check reviewer stops
+    there with no record. The lane then pushes another fix."""
+    ctx = ors_new(label)
+    ors_commit(ctx["lane"], "fix one", "x = 3\n")
+    _must(ctx["lane"], "push", "-q", "origin", "HEAD:refs/heads/" + ORS_LANE)
+    ctx["head"] = ors_head(ctx["lane"])
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix two", "x = 4\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_r8(label):
+    """R8, an owed entry that cannot be parsed: the entry for the lane's head is torn, and the lane commits a fix."""
+    ctx = ors_new(label)
+    entries = os.path.join(ctx["config"], "state", "owed-review-records")
+    write(os.path.join(entries, ctx["head"] + ".json"), '{"branches": ["origin/' + ORS_LANE + '"\n')
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    return ctx
+
+
+def ors_c1(label):
+    """C1, the empty state: no stop ran, so no entry exists. The push is allowed and reads no gh."""
+    ctx = ors_new(label)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["scope"] = lambda c: ("" if ors_entries(c["config"]) == [] else
+                              "scope: an entry exists before the push: %r" % ors_entries(c["config"]))
+    ctx["after"] = lambda c: ("" if gh_calls_taken(c["gh"]) == [] else
+                              "the push made gh calls with no entry: %r" % gh_calls_taken(c["gh"]))
+    ctx["note"] = "no entry, and no gh call"
+    return ctx
+
+
+def ors_c2(label):
+    """C2, a PASS record at H is posted: it is the newest of 35 comments, so it sits on a second page."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    comments = {ORS_PR: ORS_FILLER + [ors_record(ctx["head"], rounds=[(1, ORS_REVIEWER, PFR_MODEL, "PASS")])]}
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])], comments=comments)
+    ctx["note"] = "a PASS record at H, the newest of 35 comments"
+    return ctx
+
+
+def ors_c3(label):
+    """C3, a FAIL record at H is posted."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    comments = {ORS_PR: [ors_record(ctx["head"], rounds=[(1, ORS_REVIEWER, PFR_MODEL, "FAIL")])]}
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])], comments=comments)
+    ctx["note"] = "a FAIL record at H"
+    return ctx
+
+
+def ors_c4(label):
+    """C4, no open pull request has head H: the only open pull request is another lane's."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ORS_OTHER_HEAD, number=1500, ref="other-lane")])
+    ctx["note"] = "no open pull request at H"
+    return ctx
+
+
+def ors_c5(label):
+    """C5, the push goes to an archive branch: the destination is not the lane's branch."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["command"] = ORS_ARCHIVE_PUSH
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "a push to archive/<lane>"
+    return ctx
+
+
+def ors_c6(label):
+    """C6, the push sends the reviewed head itself: nothing new is pushed."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ctx["scope"] = lambda c: ("" if ors_head(c["lane"]) == c["head"] else
+                              "scope: the push source is not the reviewed head")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "the reviewed head itself"
+    return ctx
+
+
+def ors_c7(label):
+    """C7, a builder stop writes no entry: the builder's stop is run, then the lane pushes a fix."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx, role=ORS_BUILDER)
+    ctx["scope"] = lambda c: ("" if ors_entries(c["config"]) == [] else
+                              "the builder stop wrote an entry: %r" % ors_entries(c["config"]))
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "a builder stop wrote no entry"
+    return ctx
+
+
+def ors_c8(label):
+    """C8, a repo with no merge config: the reviewer's stop and the push are run where the merge tool is not used."""
+    ctx = ors_new(label, merge=False)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["scope"] = lambda c: ("" if not os.path.exists(os.path.join(c["main"], ".github", "stamp.json"))
+                              else "scope: the repo has a merge config")
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "no merge config"
+    return ctx
+
+
+def ors_c9(label):
+    """C9, the owner's typed override: the owed ask is lifted for this session, once."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["override_note"] = ov_type(ctx["config"], ctx["session"], "override")
+    ctx["scope"] = lambda c: ("" if not c["override_note"] else
+                              "scope: the override was not typed through override.py: %s" % c["override_note"])
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "the owner's once override"
+    return ctx
+
+
+def ors_c10(label):
+    """C10, a dry run: nothing is written, so nothing is owed."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["command"] = ORS_DRY_PUSH
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "a dry run"
+    return ctx
+
+
+def ors_c11(label):
+    """C11, the full state folder: 40 entries for other heads and branches, none for the lane's head. The push is
+    allowed, and no gh call is made for any of them."""
+    ctx = ors_new(label)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    for n in range(40):
+        write(os.path.join(ctx["config"], "state", "owed-review-records", "%040x.json" % (n + 1)),
+              json.dumps({"branches": ["origin/other-%d" % n], "time": "2026-11-08T09:00:00Z", "session": "ors-full"}))
+    ctx["scope"] = lambda c: "" if len(ors_entries(c["config"])) == 40 else "scope: the folder does not hold 40 entries"
+    ctx["after"] = lambda c: ("" if gh_calls_taken(c["gh"]) == [] else
+                              "the push read gh for the other entries: %r" % gh_calls_taken(c["gh"]))
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "40 entries for other heads, and no gh call"
+    return ctx
+
+
+def ors_r7c(label):
+    """R7c, a fix-check record: the fix head F is pushed and its fix-check reviewer stops there. A record with Head F
+    and a Fix check line is posted before the lane pushes another fix, so F is recorded."""
+    ctx = ors_new(label)
+    first = ctx["head"]
+    ors_commit(ctx["lane"], "fix one", "x = 3\n")
+    _must(ctx["lane"], "push", "-q", "origin", "HEAD:refs/heads/" + ORS_LANE)
+    ctx["head"] = ors_head(ctx["lane"])
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix two", "x = 4\n")
+    fix = (first, ORS_REVIEWER, PFR_MODEL, "PASS")
+    comments = {ORS_PR: [ors_record(ctx["head"], fix=fix)]}
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])], comments=comments)
+    ctx["note"] = "a Fix check record with Head F, posted before the push"
+    return ctx
+
+
+ors_red("push-owes-review-record: R1 a base merge of main, pushed after the reviewer stopped at H with no record: asks", ors_r1)
+ors_red("push-owes-review-record: R2 a fix pushed after a FAIL stop at H with no record: asks", ors_r2)
+ors_red("push-owes-review-record: R3 a report commit pushed after a PASS stop at H with no record: asks", ors_r3)
+ors_red("push-owes-review-record: R4 a lease push of a fix after the stop at H with no record: asks", ors_r4)
+ors_red("push-owes-review-record: R5 a record that holds only an older head: asks", ors_r5)
+ors_red("push-owes-review-record: R6 the issue comments read fails: asks, noting owed-record-unread", ors_r6, unread=True)
+ors_red("push-owes-review-record: R7 a fix-check stop at F with no record, then another fix pushed: asks", ors_r7)
+ors_red("push-owes-review-record: R8 an owed entry that cannot be parsed: asks, noting owed-record-unread", ors_r8,
+        unread=True)
+ors_allow("push-owes-review-record: C1 no entry: the push is allowed silently and reads no gh", ors_c1)
+ors_allow("push-owes-review-record: C2 a PASS record at H, the newest of 35 comments: allowed silently", ors_c2)
+ors_allow("push-owes-review-record: C3 a FAIL record at H posted: allowed silently", ors_c3)
+ors_allow("push-owes-review-record: C4 no open pull request has head H: allowed silently", ors_c4)
+ors_allow("push-owes-review-record: C5 a push to an archive branch: allowed silently", ors_c5)
+ors_allow("push-owes-review-record: C6 a push of the reviewed head itself: allowed silently", ors_c6)
+ors_allow("push-owes-review-record: C7 a builder stop writes no entry, and the push is allowed silently", ors_c7)
+ors_allow("push-owes-review-record: C8 a repo with no merge config: allowed silently", ors_c8)
+ors_allow("push-owes-review-record: C9 the owner's override lifts the owed ask: allowed silently", ors_c9)
+ors_allow("push-owes-review-record: C10 a dry run: allowed silently", ors_c10)
+ors_allow("push-owes-review-record: C11 a full folder of 40 entries for other heads: allowed silently, no gh call",
+          ors_c11)
+ors_allow("push-owes-review-record: R7c a Fix check record with Head F posted before the push: allowed silently",
+          ors_r7c)
 
 
 # =========================================================================== builder refusal
