@@ -657,12 +657,13 @@ class Pages:
     def read_pairs(self, text, k, n, stamp):
         """A function from a tool_use to the set of (page url, doc id) of the items whose read-backs (_read_backs)
         returned n == n and came before that use. A write that closes one of them proves a send of item n though it
-        carries no n (_proves). The set is empty unless the page names this session as its writer: only the
-        writer's own close of an item reaches no one else (writer_is)."""
+        carries no n (_proves). A read-back counts only when the meta/page get of its own page names this session as
+        the writer: only the writer's own close of an item reaches no one else (writer_is)."""
         self._load()
-        reads = [] if writer_is(self.records, self.session_id) is not True else [
+        reads = [
             (self._pos.get(id(use)), use["input"].get("url"), doc_id)
             for use, result in self._read_backs(text, k, n, stamp)
+            if writer_is(self.records, self.session_id, _is_page_of(use["input"].get("url"))) is True
             for doc_id, data in local_time._documents(result.get("content"))
             if _is_n(data.get("n"), n) and isinstance(doc_id, str)]
         return lambda use: {(u, d) for q, u, d in reads
@@ -678,10 +679,21 @@ def norm(text):
     return (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-def writer_is(records, session_id):
-    """True when the newest meta/page get names this session (or the id the remote env names) as the page writer,
-    False when it names another, None when it names none."""
-    writer = _transcript.page_writer_id(records)
+def _is_page_of(*urls):
+    """A function from a url to whether it names the same page as one of `urls` (layout.artifact_id compares them;
+    the url text itself when the layout cannot be imported). Strings only: any other value names no page."""
+    try:
+        import layout
+        same = lambda a, b: bool(layout.artifact_id(a)) and layout.artifact_id(a) == layout.artifact_id(b)
+    except ImportError:
+        same = lambda a, b: a.rstrip("/") == b.rstrip("/")
+    return lambda other: isinstance(other, str) and any(isinstance(u, str) and same(u, other) for u in urls)
+
+
+def writer_is(records, session_id, is_page=None):
+    """True when the newest meta/page get of the waiting page (`is_page` accepts its url) names this session (or the
+    id the remote env names) as the page writer, False when it names another, None when it names none."""
+    writer = _transcript.page_writer_id(records, is_page)
     return None if not writer else writer in (session_id, override.remote_session_id())
 
 

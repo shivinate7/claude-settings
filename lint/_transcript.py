@@ -398,9 +398,12 @@ def _finds_writer(node):
     return None
 
 
-def page_writer_id(records):
-    """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None."""
-    pending, writer = set(), None
+def page_writer_id(records, is_page=None):
+    """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None.
+    With `is_page`, a function from a page url to a bool, only a get whose url it accepts counts: the writer
+    is the waiting page's own, never another page's. A get with no url string then counts for no page.
+    `is_page` runs once per distinct url, and only when the transcript holds such a get."""
+    pending, writer, seen = set(), None, {}
     for rec in records:
         if rec.get("isSidechain"):
             continue
@@ -410,6 +413,14 @@ def page_writer_id(records):
                     and inp.get("action") == "get"
                     and (inp.get("path") == "meta/page"
                          or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):
+                url = inp.get("url")
+                if is_page is not None:
+                    if not isinstance(url, str):
+                        continue
+                    if url not in seen:
+                        seen[url] = bool(is_page(url))
+                    if not seen[url]:
+                        continue
                 pending.add(use.get("id"))
         content = (rec.get("message") or {}).get("content")
         for block in content if isinstance(content, list) else ():
