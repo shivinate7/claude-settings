@@ -14190,15 +14190,36 @@ for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml"
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
 # ---- mutation tests are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
-# by, so a test-author edits them. The builder case pins the rule to the test-author: agent_brief.py
-# tells a builder to add mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
-for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py"):
+# by, so a test-author edits them and a builder never does. Owner ruling 2026-11-08 17:19 CST
+# (page item 447 a): mutants are test content; only a test-author writes them.
+for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"):
     add("test-author: Edit of mutation test %s is allowed" % _path, "allow", tool="Edit",
         file_path=_path, **A)
+    add("test-author: Write of mutation test %s is allowed" % _path, "allow", tool="Write",
+        file_path=_path, **A)
+    add("builder-test: Edit of mutation test %s is refused" % _path, "deny", rule=BT, tool="Edit",
+        file_path=_path, carries=("test-author", "Report"), **B)
+    add("builder-test: Write of mutation test %s is refused" % _path, "deny", rule=BT, tool="Write",
+        file_path=_path, carries=("test-author", "Report"), **B)
+    add("builder-test: MultiEdit of mutation test %s is refused" % _path, "deny", rule=BT,
+        tool="MultiEdit", file_path=_path, edits=[{"old_string": "x = 1", "new_string": "x = 2"}],
+        carries=("test-author", "Report"), **B)
 add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool="Edit",
     file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
-add("builder-test: Edit of hooks/mutate_guard.py stays allowed for a builder", "allow", tool="Edit",
-    file_path="hooks/mutate_guard.py", agent_id="bld1", agent_type="builder", cwd=GITMAIN)
+# The same ruling, run in the main checkout: a builder's Edit of a mutation test is refused there too.
+add("builder-test: Edit of hooks/mutate_guard.py is refused", "deny", rule=BT, tool="Edit",
+    file_path="hooks/mutate_guard.py", carries=("test-author", "Report"),
+    agent_id="bld1", agent_type="builder", cwd=GITMAIN)
+# The near misses stay a builder's product code: a later mutate_*.py is not a mutation test. A listed
+# name in another case is the same file on Windows, so it is refused for a builder too.
+add("builder-test: Edit of hooks/mutate_x.py is allowed", "allow", tool="Edit",
+    file_path="hooks/mutate_x.py", **B)
+add("builder-test: Write of hooks/mutate_x.py is allowed", "allow", tool="Write",
+    file_path="hooks/mutate_x.py", **B)
+add("builder-test: Edit of HOOKS/mutate_guard.py is refused (case folds)", "deny", rule=BT, tool="Edit",
+    file_path="HOOKS/mutate_guard.py", carries=("test-author", "Report"), **B)
+add("builder-test: Write of HOOKS/mutate_guard.py is refused (case folds)", "deny", rule=BT, tool="Write",
+    file_path="HOOKS/mutate_guard.py", carries=("test-author", "Report"), **B)
 # The mutation test set is a list of exact names, not a shape: a near miss stays product code, a name with
 # a colon is not a mutation test, and a name that differs only in case is the same file on Windows.
 add("test-author: Edit of hooks/mutate_x.py is refused", "deny", rule=TA, tool="Edit",
@@ -14643,6 +14664,17 @@ SHELL_TEST_WRITES = (
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **BR)
+# Owner ruling 2026-11-08 17:19 CST (page item 447 a): a builder never writes a mutation test, by any shell form.
+MUTATION_TESTS = ("hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py")
+for _path in MUTATION_TESTS:
+    for _form, _command in (
+        ("redirect", "echo 'x = 1' > %s" % _path),
+        ("tee", "printf 'x = 1' | tee %s" % _path),
+        ("sed -i", "sed -i 's/a/b/' %s" % _path),
+        ("cp", "cp src/app.py %s" % _path),
+    ):
+        sh("builder-test: shell %s onto %s is refused" % (_form, _path), _command, "deny", rule=BT,
+           carries=("test-author",), **BR)
 
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
@@ -14664,6 +14696,8 @@ SHELL_TEST_ALLOWS = (
     ("recovery by git checkout of tests/x.py", "git checkout -- tests/x.py"),
     ("recovery by git restore of tests/x.py", "git restore tests/x.py"),
     ("scan tail alone: a heredoc to /tmp, then python3 runs it", SCAN_TAIL),
+    # The near miss stays product code for a builder (see the mutation test block above).
+    ("echo redirect onto hooks/mutate_x.py", "echo 'x = 1' > hooks/mutate_x.py"),
 )
 for _name, _command in SHELL_TEST_ALLOWS:
     sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
@@ -14674,6 +14708,7 @@ for _name, _command in (
     ("python -c open-write", PY_C_WRITE), ("echo redirect", TEST_REDIRECTS[0]),
     ("echo append", TEST_REDIRECTS[1]), ("printf piped to tee", TEST_REDIRECTS[2]),
     ("sed -i", TEST_REDIRECTS[3]), ("cat heredoc", TEST_REDIRECTS[4]),
+    ("echo redirect onto a mutation test", "echo 'x = 1' > hooks/mutate_guard.py"),
 ):
     sh("builder-test: test-author shell write, %s, is allowed" % _name, _command, "allow", **A)
 sh("builder-test: main session shell write of a test is allowed", RULE_AUDIT_EDIT, "allow",
@@ -14832,6 +14867,11 @@ BUILDER_RED = [
     ("jest-setup", _put("jest.setup.js", "global.x = 1\n")),
     ("java-test", _put("src/FooTest.java", "class FooTest {}\n")),
     ("test-support", _put("test_support/helper.py", "pass\n")),
+    # A mutation test is test code (owner ruling 2026-11-08 17:19 CST, page item 447 a); its case fold is the same file on Windows.
+    ("mutate-guard", _put("hooks/mutate_guard.py", "x = 1\n")),
+    ("mutate-shared", _put("hooks/mutate_shared.py", "x = 1\n")),
+    ("mutate-sweep", _put("janitor/mutate_sweep.py", "x = 1\n")),
+    ("mutate-case-fold", _put("HOOKS/mutate_guard.py", "x = 1\n")),
 ]
 BUILDER_GREEN = [
     ("clean-tree", lambda w: None),
@@ -14852,6 +14892,8 @@ BUILDER_GREEN = [
     ("pyproject-non-pytest", _put("pyproject.toml",
                                   "[project]\nname = 'x'\ndependencies = ['y']\n"
                                   "[tool.pytest.ini_options]\nminversion = '7'\n")),
+    # The near miss is a builder's product code (control for the mutation-test rows in BUILDER_RED).
+    ("mutate-x-near-miss", _put("hooks/mutate_x.py", "x = 2\n")),
 ]
 COMMIT, PUSH = VCS + " commit -m x", VCS + " push origin work"
 # A builder's test change is REFUSED at commit and push, and BLOCKED at the first stop. The
@@ -14867,6 +14909,42 @@ for _name, _change in BUILDER_RED:
        cwd=_repo, agent_id="bld1", agent_type="builder")
     add("builder-diff: stop with a %s change is blocked" % _name, "deny", rule=BDIFF,
         event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+# A mutation test the base already holds, changed or only added to, is refused at commit and at stop: a builder
+# never writes one (owner ruling 2026-11-08 17:19 CST, page item 447 a). The base holds each file, so these are
+# modifications, not new files.
+_CHANGED = {}
+for _rel in MUTATION_TESTS:
+    _slug = _rel.replace("/", "-").replace(".py", "")
+    _CHANGED[_rel] = diff_repo("b-mutant-changed-" + _slug, _put(_rel, "x = 2\n"),
+                               files={**BASE_FILES, _rel: "x = 1\n"})
+    sh("builder-diff: commit that changes an existing line of %s is refused" % _rel, COMMIT, "deny",
+       rule=BDIFF, cwd=_CHANGED[_rel], agent_id="bld1", agent_type="builder")
+    add("builder-diff: stop after changing an existing line of %s is blocked" % _rel, "deny", rule=BDIFF,
+        event="SubagentStop", cwd=_CHANGED[_rel], agent_id="bld1", agent_type="builder")
+    _added = diff_repo("b-mutant-added-" + _slug, _put(_rel, "x = 1\ny = 2\n"),
+                       files={**BASE_FILES, _rel: "x = 1\n"})
+    sh("builder-diff: commit that only adds a line to %s is refused" % _rel, COMMIT, "deny",
+       rule=BDIFF, cwd=_added, agent_id="bld1", agent_type="builder")
+    add("builder-diff: stop after only adding a line to %s is blocked" % _rel, "deny", rule=BDIFF,
+        event="SubagentStop", cwd=_added, agent_id="bld1", agent_type="builder")
+# A builder's commit or stop from a subfolder is judged on the same diff as from the root.
+_guard_changed = _CHANGED["hooks/mutate_guard.py"]
+sh("builder-diff: commit from hooks/ with an edit to mutate_guard.py is refused", "cd hooks && " + COMMIT,
+   "deny", rule=BDIFF, cwd=_guard_changed, agent_id="bld1", agent_type="builder")
+sh("builder-diff: git -C hooks commit with an edit to mutate_guard.py is refused",
+   VCS + " -C hooks commit -m x", "deny", rule=BDIFF, cwd=_guard_changed, agent_id="bld1", agent_type="builder")
+add("builder-diff: stop from hooks/ with an edit to mutate_guard.py is blocked", "deny", rule=BDIFF,
+    event="SubagentStop", cwd=os.path.join(_guard_changed, "hooks"), agent_id="bld1", agent_type="builder")
+# The empty state is no exception: HEAD holds an empty MUTATIONS list, and a builder's first entry is refused too.
+_empty_mut = diff_repo("b-mutants-empty", _put("hooks/mutate_guard.py", 'MUTATIONS = [\n    ("x", 1),\n]\n'),
+                       files={**BASE_FILES, "hooks/mutate_guard.py": "MUTATIONS = [\n]\n"})
+sh("builder-diff: commit that adds a first entry to an empty MUTATIONS list is refused", COMMIT, "deny",
+   rule=BDIFF, cwd=_empty_mut, agent_id="bld1", agent_type="builder")
+add("builder-diff: stop after adding a first entry to an empty MUTATIONS list is blocked", "deny", rule=BDIFF,
+    event="SubagentStop", cwd=_empty_mut, agent_id="bld1", agent_type="builder")
+add("builder-test: Edit of hooks/mutate_guard.py that adds a first entry to an empty MUTATIONS list is refused",
+    "deny", rule=BT, tool="Edit", file_path="hooks/mutate_guard.py", old_string="MUTATIONS = [\n",
+    new_string='MUTATIONS = [\n    ("x", 1),\n', carries=("test-author", "Report"), **B)
 _repo = diff_repo("b-committed", _put("tests/test_a.py", "pass\n"), commit=True)
 add("builder-diff: stop after COMMITTING a test change is blocked", "deny", rule=BDIFF,
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
@@ -15449,6 +15527,8 @@ AUTHOR_GREEN = [
     ("jest-setup", _put("jest.setup.js", "global.x = 1\n")),
     ("java-test", _put("src/FooTest.java", "class FooTest {}\n")),
     ("test-support", _put("test_support/helper.py", "pass\n")),
+    # A test-author writes a mutation test, so the same change is allowed to it (control for BUILDER_RED).
+    ("mutation-test", _put("hooks/mutate_guard.py", "x = 2\n")),
     ("pytest-section", _put("pyproject.toml", "[project]\nname = 'x'\n[tool.pytest.ini_options]\n"
                             "minversion = '8'\naddopts = '-q'\n")),
 ]
