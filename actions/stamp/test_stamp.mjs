@@ -1803,18 +1803,28 @@ test("scanner: a near-miss after a fence that holds a multi-line template litera
 // test, kills the process tree, prints what ran and exits 1. After the child closes, it kills and
 // names each process the suite left running, and exits 1.
 const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold", "orphan" or "escape", as hangCommand reads it
+const GRACE_EXIT = "STAMP_SUITE_GRACE_EXIT"; // the suite child writes "alive" or "gone" here as it exits
+const GRACE_LEFT = "STAMP_SUITE_GRACE_LEFT"; // the grace sleeper writes "gone" here as it exits
 
 // node -e code, by kind. "hold": the child holds the pipe and the command sleeps too. "orphan": the
 // command exits, so the child holds the pipe and its parent pid names a dead process. "escape": the
 // child is detached with no pipe, and the command exits 0, so nothing waits on the child. "grace": as
-// escape, but the child exits 1 s after its boot, so it is alive at close. That leaves about 2 s of the
-// watchdog's 3 s grace for a slow boot. "clean": no child at all. Both
+// escape, but the child lives on 1 s after the suite child exits, so it is alive at the watchdog's close
+// and gone inside its 3 s grace. "clean": no child at all. Both
 // pids go to pidFile first; a clean run writes its own pid twice. Both command lines carry pidFile raw,
 // in a comment, so a check can tell them from a reused pid. JSON.stringify doubles a Windows backslash,
 // so a quoted copy alone would not match.
+// The grace sleeper starts its 1 s only once the suite child has recorded its exit, so it cannot end
+// before that exit. It writes GRACE_LEFT in its exit handler, so a marker it never wrote means it did not exit on its own.
+function graceSleeper(pidFile) {
+  return `const fs = require("fs"), env = process.env;
+process.on("exit", () => fs.writeFileSync(env[${JSON.stringify(GRACE_LEFT)}], "gone"));
+const t = setInterval(() => { if (fs.existsSync(env[${JSON.stringify(GRACE_EXIT)}])) { clearInterval(t); setTimeout(() => {}, 1000); } }, 20); // ${pidFile}`;
+}
+
 function hangCommand(pidFile, kind) {
   const escape = kind === "escape" || kind === "grace";
-  const sleeper = kind === "grace" ? `setTimeout(() => {}, 1000); // ${pidFile}` : `setInterval(() => {}, 1e9); // ${pidFile}`;
+  const sleeper = kind === "grace" ? graceSleeper(pidFile) : `setInterval(() => {}, 1e9); // ${pidFile}`;
   const spawnOpts = escape ? `{ detached: true, stdio: "ignore" }` : `{ stdio: "inherit" }`;
   const start = kind === "clean" ? "const c = { pid: process.pid };\n"
     : `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], ${spawnOpts});\n${escape ? "c.unref();\n" : ""}`;
@@ -2036,7 +2046,9 @@ test("watchdog: a command that exits fast and leaves nothing exits 0 and names n
 test("watchdog: a detached child that exits inside the 3 s grace is no leftover, so the run exits 0", () =>
   withTempDir((dir) => {
     const pidFile = join(dir, "pids");
-    const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "grace" };
+    const suiteExit = join(dir, "suite-exit"), sleeperExit = join(dir, "sleeper-exit");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "grace",
+      [GRACE_EXIT]: suiteExit, [GRACE_LEFT]: sleeperExit };
     delete env[CHILD];
     let r, found;
     try {
@@ -2049,6 +2061,11 @@ test("watchdog: a detached child that exits inside the 3 s grace is no leftover,
     assert.equal(r.status, 0, r.out);
     assert.doesNotMatch(r.out, /left processes running|Still running after the kill/, r.out);
     assert.deepEqual(found.left, [], `still running: ${found.left}\n${r.out}`);
+    // The sleeper was alive when the suite child exited. The close follows that exit, so the watchdog
+    // found the sleeper alive and waited for it inside the grace, rather than finding nothing to wait for.
+    assert.equal(existsSync(suiteExit), true, `scope: the suite child recorded no exit\n${r.out}`);
+    assert.equal(existsSync(sleeperExit), true, `the grace sleeper never recorded its own exit: it did not run, or it was killed\n${r.out}`);
+    assert.equal(readFileSync(suiteExit, "utf8"), "alive",`the grace sleeper was already gone when the suite child exited, so at the close it was not alive and the grace wait was not exercised\n${r.out}`);
   }));
 
 // Windows only: the Job Object is the kill guarantee there. On CI a run without one must fail by name,
@@ -2212,6 +2229,8 @@ if (process.env[CHILD] !== "1") {
 }
 else {
   const run = process.env[HANG] ? [hangFixture(process.env[HANG_KIND] ?? "hold")] : tests;
+  // The grace case reads whether the grace sleeper was still alive when this suite child exited.
+  if (process.env[GRACE_EXIT]) process.on("exit", () => writeFileSync(process.env[GRACE_EXIT], existsSync(process.env[GRACE_LEFT]) ? "gone" : "alive"));
   let failed = 0;
   waitForGo();
   for (const { name, fn } of run) {
