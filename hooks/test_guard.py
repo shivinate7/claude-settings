@@ -22072,6 +22072,13 @@ def homeless_config_symlink_case():
     if os.path.commonpath([os.path.normcase(os.path.realpath(through)), home]) != home:
         return False, ("scope: the config folder's link does not resolve into the clone, so the refusal "
                        "proves nothing")
+    # A `..` step after the link. The link's target is the clone's src folder, so `linked/..` is the clone's
+    # root and the file lands there, not in the config folder. Scope first: the climbed folder must be that root.
+    climb = os.path.join(cfg, "linked", "..", "n-climb.py")
+    climb_sh = os.path.join(cfg, "linked", "..", "n-climb-sh.py")
+    if os.path.normcase(os.path.realpath(os.path.dirname(climb))) != home:
+        return False, ("scope: a `..` step after the config folder's link does not land in the clone's root, "
+                       "so the refusal proves nothing")
     session = sh_session()
 
     def judge(tool, tool_input):
@@ -22091,6 +22098,10 @@ def homeless_config_symlink_case():
          {"file_path": direct, "content": "x"}),
         ("a shell redirect by the clone path (control)", "deny", "Bash",
          {"command": "echo x > " + slash(direct_sh)}),
+        ("a Write through the config folder's link and a .. step back into the clone", "deny", "Write",
+         {"file_path": climb, "content": "x"}),
+        ("a shell redirect through the config folder's link and a .. step back into the clone", "deny", "Bash",
+         {"command": "echo x > " + slash(climb_sh)}),
     )
     problems = []
     for label, want, tool, tool_input in rows:
@@ -22103,7 +22114,7 @@ def homeless_config_symlink_case():
     if problems:
         return False, "; ".join(problems)
     return True, ("a write through a config-folder link into the clone passes from a cwd in no checkout; "
-                  "the same file by its clone path is refused")
+                  "the same file by its clone path is refused; a `..` step after the link is refused")
 
 
 LOG_CHECKS_EXTRA.append(("other-checkout: a write through a config-folder symlink into the clone, from a cwd in "
