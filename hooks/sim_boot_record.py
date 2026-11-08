@@ -6,7 +6,8 @@ Modes:
   or a simulator MCP launch, saves the state of each simulator.
 - PostToolUse: After such a call, appends each simulator that the call took from Shutdown to
   Booted to the boot record. After a `simctl boot` or an MCP `launch`, first checks each such
-  device. A device that fails the check is stopped and booted once more.
+  device (bootstatus exits 0, a screenshot exits 0 and is not one colour). A device that fails
+  the check is stopped and booted once more.
 
 PreToolUse saves every device's state. PostToolUse of the same call appends each device that went
 Shutdown -> Booted to <config>/state/sim-boots.jsonl. The boot check runs first, so the record
@@ -23,10 +24,12 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -111,8 +114,90 @@ def named(payload):
     return {x.upper() if UDID_RE.fullmatch(x) else x for x in found if x}
 
 
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+SAMPLES_PER_PIXEL = {2: 3, 6: 4}  # the colour types frame_uniform judges: RGB and RGBA
+MAX_FRAME_BYTES = 1 << 28  # a header that claims more is not a screenshot; it is left unjudged
+
+
+def _filtered(kind, raw, prev, bpp):
+    """One scanline RAW as the PNG encoder filters it with filter KIND, filter byte first. PREV is the row above."""
+    left = bytes(bpp) + raw[:-bpp]
+    if kind == 0:
+        pred = bytes(len(raw))
+    elif kind == 1:
+        pred = left
+    elif kind == 2:
+        pred = prev
+    elif kind == 3:
+        pred = bytes((a + b) >> 1 for a, b in zip(left, prev))
+    else:
+        upleft = bytes(bpp) + prev[:-bpp]
+        pred = bytearray()
+        for a, b, c in zip(left, prev, upleft):
+            pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+            pred.append(a if pa <= pb and pa <= pc else b if pb <= pc else c)
+    return bytes([kind]) + bytes((x - y) & 0xFF for x, y in zip(raw, pred))
+
+
+def frame_uniform(path):
+    """True when every pixel of the PNG at PATH is one colour, False when not, None when it cannot be judged
+    (not 8-bit RGB or RGBA, interlaced, bad structure, truncated, empty or missing). Never raises.
+
+    Exact and stdlib only (Mac system python3 has no PIL). Under every PNG filter, row 0's first pixel
+    is stored as is, so it is the colour C if the frame is uniform. Then each row of a uniform frame has one
+    known filtered form per filter type (the row above is zeros for row 0, else the uniform row), and a
+    row-by-row bytes comparison at C speed replaces a byte unfilter in Python."""
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+        if not data.startswith(PNG_SIGNATURE):
+            return None
+        pos, header, idat = len(PNG_SIGNATURE), None, []
+        while pos + 8 <= len(data):
+            size, kind = struct.unpack(">I4s", data[pos:pos + 8])
+            body = data[pos + 8:pos + 8 + size]
+            if len(body) < size:
+                return None
+            pos += 12 + size
+            if kind == b"IHDR":
+                header = body
+            elif kind == b"IDAT":
+                idat.append(body)
+            elif kind == b"IEND":
+                break
+        else:
+            return None  # no IEND: the file ends inside a chunk or before the image ends
+        if header is None or len(header) != 13 or not idat:
+            return None
+        width, height, depth, colour, method, filtering, interlace = struct.unpack(">IIBBBBB", header)
+        if depth != 8 or colour not in SAMPLES_PER_PIXEL or method or filtering or interlace:
+            return None
+        bpp = SAMPLES_PER_PIXEL[colour]
+        stride = width * bpp + 1
+        if not width or not height or stride * height > MAX_FRAME_BYTES:
+            return None
+        inflater = zlib.decompressobj()
+        raw = inflater.decompress(b"".join(idat), stride * height + 1)
+        if not inflater.eof or len(raw) != stride * height:
+            return None
+        pixel = raw[1:1 + bpp]
+        row = pixel * width
+        first = [_filtered(kind, row, bytes(len(row)), bpp) for kind in range(5)]
+        later = [_filtered(kind, row, row, bpp) for kind in range(5)]
+        for y in range(height):
+            kind = raw[y * stride]
+            if kind > 4:
+                return None
+            if raw[y * stride:(y + 1) * stride] != (first if y == 0 else later)[kind]:
+                return False
+        return True
+    except Exception:
+        return None
+
+
 def sim_ok(udid):
-    """True when bootstatus and a screenshot both exit 0. A timeout or error is a fail."""
+    """True when bootstatus exits 0, the screenshot exits 0, and the screenshot is not one colour
+    (frame_uniform is True: a black or blank display). A frame that cannot be judged passes. A timeout or error is a fail."""
     shot, ok = None, True  # a failed bootstatus still runs the screenshot; a bootstatus timeout skips it
     try:
         for argv, wait in ((["bootstatus", udid], 90), (["io", udid, "screenshot", None], 15)):
@@ -122,7 +207,7 @@ def sim_ok(udid):
                 argv[-1] = shot
             ok = not _nowindow.run(["xcrun", "simctl"] + argv, capture_output=True,
                                     timeout=wait).returncode and ok
-        return ok
+        return ok and frame_uniform(shot) is not True
     except Exception:
         return False
     finally:
