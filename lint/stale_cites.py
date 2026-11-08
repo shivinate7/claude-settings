@@ -590,10 +590,11 @@ def one_edit_apart(a, b):
 def typo_of_tracked_top(cite, tops, exists):
     """True when the first folder of a path cite is no tracked top folder but is one edit from one, or differs from one
     only in case, and the cite with that tracked folder in its place is a file `exists` finds at head. A near folder
-    with no such file is no likely typo of a real file, so it stays silent like a far folder. Only STALE010 calls it,
-    so STALE003 keeps its verdict."""
+    with no such file is no likely typo of a real file, so it stays silent like a far folder. A first part that is itself an
+    entry of the root tree at head, such as a symlink or a file, is no typo. Only STALE010 calls it, so STALE003 keeps
+    its verdict."""
     first, _, rest = cite.partition("/")
-    if first in tops:
+    if first in tops or exists(first):
         return False
     return any((first.lower() == top.lower() or one_edit_apart(first, top)) and exists("%s/%s" % (top, rest))
                for top in sorted(tops))

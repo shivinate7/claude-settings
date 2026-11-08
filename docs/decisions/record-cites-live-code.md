@@ -31,7 +31,7 @@ Claude writes both in normal work: it states what code does from memory, and it 
 - The cite uses the forms the stale-prose check already reads: "`file.py` `name`", "(file.py name)" and a test node id.
 - STALE009 reports, never fails: a sentence on a line a range adds in a decision record that states what code does, with no code cite (lint/stale_cites.py `CodeClaimReader`).
 - STALE010 fails the PR: an added line in governed Markdown cites a Python name in a tracked top folder. The file is absent at head, or the name is not bound there (lint/stale_cites.py `dead_name_cites`).
-- A top folder one edit, or a case change, from a tracked one is a likely typo (lint/stale_cites.py `typo_of_tracked_top`). It is checked only when the cite with the tracked folder in its place is a file at head.
+- A top folder one edit, or a case change, from a tracked one is a likely typo (lint/stale_cites.py `typo_of_tracked_top`). It is checked only when the cite with the tracked folder in its place is a file at head. A first part that is itself an entry of head's root tree, such as a symlink, is no typo.
 - A top folder absent at head that history tracked has moved, so its cite is checked (lint/stale_cites.py `history_tops`). History is one log of deleted paths, started once per range, and only for a folder at neither place.
 - A failed log is unknown, and the folder stays silent. A folder that is none of these, such as `django/`, stays silent.
 - Whether the claim is true stays with the reviewer: `agents/reviewer.md` reads each cited name against its claim.
