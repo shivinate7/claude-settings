@@ -116,9 +116,9 @@ a code-only range pays only for the patch text. An added governed line that hold
 file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
 the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
 for a range with no such line. So a range that adds a `docs/decisions` line holding a code verb (CODE_VERB_WORD,
-STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file). A Markdown range starts 3 with no decision-record
-code claim and no folder .py name cite, and 4 with either (CostTests pins the 3 and the 4 for a code claim,
-NameCiteTests the 4 for a name cite). A range that changes the rows file reads it at base and head through the same `cat-file`;
+STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file). A Markdown range starts 3 when it adds
+none of these: a STALE005 claim line, a decision-record code claim, a folder .py name cite. It starts 4 with any of them
+(CostTests pins the 3 and the 4 for a STALE005 line or a code claim, NameCiteTests the 4 for a name cite). A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
