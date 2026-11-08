@@ -13732,6 +13732,22 @@ class ReviewRoundCheckEnv(Env):
             self.assertIn(tip, lanes, f"{b} is not a lane of the batch")
             self.assertEqual(open_now.get(b), (tip, "main"), f"{b} is not an open pull request at its tip")
 
+    def replaced_own_record(self, **kw):
+        """Pull request 7's own record for the head a push replaced. The live head of feat has no record, and the replaced head is an ancestor of it.
+        `kw` are record_text's keywords; Guard or check is yes unless `kw` says otherwise. -> (host, older, record)."""
+        older = self.push_feat_commit()
+        self.assertNotEqual(older, self.head("feat"), "the replaced head is the live head of feat")
+        self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
+        record = record_text(n=7, head=older, **{"guard": "yes", **kw})
+        host = self.batch_host({}, [review_comment(1, 7, record)])
+        return host, older, record
+
+    def remedy_line(self, out):
+        """-> the refusal's remedy line, the one that carries the cite of the third-round rule. The case fails when the refusal has none."""
+        lines = [l for l in out.splitlines() if "hold-unsafe-after-round-3" in l]
+        self.assertTrue(lines, "the refusal prints no remedy line:\n" + out)
+        return lines[-1]
+
     def run_round_check(self, host, *argv):
         """-> (rc, output, refs before the run) of `merge 7` with the flags in argv."""
         before = self.refs()
@@ -14208,7 +14224,7 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     """The round-3 check's stale-record rule and its comment window, each red case beside a green control. A record for a head already on origin/main
     is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes the third round when its
     record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
-    batch still refuses."""
+    batch still refuses. A stale record of the pull request's own names its remedy by its state: held, a failed fix check, or the third round owed."""
 
     def test_a_guard_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
         _tips, host, _g = self.landed_guard_batch("yes", REVIEW_PASS, "not owed")
@@ -14274,13 +14290,9 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     def test_a_done_record_for_a_replaced_head_of_the_pr_itself_refuses_when_no_record_covers_the_new_head(self):
         # the bypass: pull request 7's own newest record is done, its third round passed with net value positive, but for the head a push replaced.
         # The live head has no record and no fix check, so no review covers it. A done record covers only the head it names
-        older = self.push_feat_commit()
         done = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
-        record = record_text(n=7, head=older, guard="yes", rounds=done, net="positive")
-        self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
-        self.assertNotEqual(older, self.head("feat"), "the replaced head is the live head of feat")
+        host, older, record = self.replaced_own_record(rounds=done, net="positive")
         self.assertEqual(record_state(self, record, head=older), "done", "the record is not done on its own head, so the case does not reach the done rule")
-        host = self.batch_host({}, [review_comment(1, 7, record)])
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("new head", out, "the refusal does not name the new head:\n" + out)
@@ -14296,6 +14308,39 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
                                     review_comment(2, 7, live_record)])
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
+
+    def test_a_held_record_of_the_pr_itself_for_a_replaced_head_says_it_is_held_for_the_owner(self):
+        # Pull request 7's own record is held (net value negative) for a head that a push replaced, and no record covers the live head.
+        # The remedy holds the change for the owner and asks for no more rounds
+        host, older, record = self.replaced_own_record(rounds=REVIEW_FAILED_THREE, net="negative")
+        self.assertEqual(record_state(self, record, head=older), "held", "the record is not held on its own head, so the case does not reach the held rule")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        remedy = self.remedy_line(out)
+        self.assertIn("held for the owner", remedy, "the remedy does not say the change is held for the owner:\n" + out)
+        self.assertIn("no more rounds", remedy, "the remedy does not say to run no more rounds:\n" + out)
+        self.assertNotIn("Get round 3 done", out, "the remedy asks for the third round on a held change:\n" + out)
+
+    def test_a_failed_fix_check_on_a_replaced_head_record_of_the_pr_itself_says_the_fix_needs_a_new_lane(self):
+        # Pull request 7's own record for a head that a push replaced has a failed fix check, after a finished third round with net value positive.
+        # The fix needs a new lane at the first round, so the remedy must not ask for the third round again
+        done = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        host, older, record = self.replaced_own_record(rounds=done, net="positive", fix=(fix_check_line("FAIL"),))
+        self.assertEqual(record_state(self, record, head=older), "open", "the failed fix check does not leave the record open, so the case does not reach the fix rule")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        remedy = self.remedy_line(out)
+        self.assertIn("new lane at round 1", remedy, "the remedy does not say the fix needs a new lane at round 1:\n" + out)
+        self.assertNotIn("Get round 3 done", out, "the remedy asks for the third round again, though the third round is done:\n" + out)
+
+    def test_a_round_one_record_of_the_pr_itself_for_a_replaced_head_still_asks_for_round_three(self):
+        # An open record with no fix check still asks for the third round. The two cases above differ from it only in the record's state
+        host, older, record = self.replaced_own_record(rounds=REVIEW_PASS)
+        self.assertEqual(record_state(self, record, head=older), "open", "the record is not open on its own head, so the control does not reach the round rule")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("Get round 3 done", self.remedy_line(out), "the remedy does not ask for the third round on an open record:\n" + out)
+        self.assertNotIn("held for the owner", out, "the remedy says an open record is held for the owner:\n" + out)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
