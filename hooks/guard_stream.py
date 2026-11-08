@@ -6,6 +6,7 @@ Other files reach these names through `guard`.
 """
 import os
 import re
+import shlex
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
@@ -208,11 +209,12 @@ def watch_flag(args) -> bool:
     return False
 
 
-# A loop ends at a clock time only when its one test orders `date` output against a literal time, in the
-# direction that turns false at that time: `until [ $(date ...) > TIME ]` ends once the clock passes TIME, and
-# `while [ $(date ...) < TIME ]` ends at TIME too. Equality, the other direction, a second test, a poll of a
-# file and a bare date or filename never reach the time, so none of them is a deadline.
-# The literal is a full ISO date-time or an epoch number.
+# A loop ends at a clock time only when its one test orders a `date` read against a literal time of the same
+# kind, in the direction that turns the test at that time. Two shapes do: a `+%s` read ordered with -gt, -ge,
+# -lt or -le against an epoch number, and a read whose format has no `%s` ordered with `>` or `<` against a full
+# ISO date-time. `until` takes the later-than operators and `while` the earlier-than ones. Any other pairing
+# never turns: a numeric order of a text read is an error, and a text order of epoch digits never meets an ISO
+# time.
 CLOCK_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$|\d{9,}$")
 CLOCK_READ = re.compile(r"\$\(date(?:\s[^;&|<>$`()]*)?\)$|`date(?:\s[^;&|<>$`()]*)?`$")
 TEST_CLOSER = {"[": "]", "[[": "]]", "test": None}   # the only commands a clock loop's test may use
@@ -222,7 +224,8 @@ EARLIER_THAN = {"<", "-lt", "-le"}   # ends a `while` loop when the clock reache
 
 def clock_test(head) -> bool:
     """True when the loop header `head` (tokens, `while` or `until` first) is one `[ ]`, `[[ ]]` or `test`
-    whose operands are exactly a `date` read, an ordering that ends the loop, and a literal time."""
+    whose operands are exactly a `date` read, an ordering that ends the loop, and a literal time, with the
+    read's format, the ordering and the literal all of one kind (epoch or ISO date-time)."""
     opener = head[1] if len(head) > 1 else ""
     if opener not in TEST_CLOSER:
         return False
@@ -235,9 +238,27 @@ def clock_test(head) -> bool:
     cut = next((n for n in range(1, len(rest) + 1) if CLOCK_READ.match(" ".join(rest[:n]))), 0)
     if not cut:
         return False
+    form = date_format(" ".join(rest[:cut]))
     rest = rest[cut:]
     ends_loop = LATER_THAN if head[0].lower() == "until" else EARLIER_THAN
-    return len(rest) == 2 and rest[0] in ends_loop and bool(CLOCK_LITERAL.match(rest[1]))
+    if not (len(rest) == 2 and rest[0] in ends_loop and bool(CLOCK_LITERAL.match(rest[1]))):
+        return False
+    # CLOCK_LITERAL has matched, so a `:` marks the ISO form and all digits the epoch form.
+    if rest[0].startswith("-"):
+        return form == "+%s" and ":" not in rest[1]
+    return form is not None and "%s" not in form and not rest[1].isdigit()
+
+
+def date_format(read: str):
+    """The one `+FORMAT` argument of a `$(date ...)` or backtick `date` read, unquoted; None when the read has
+    none, more than one, or cannot be split."""
+    inner = read[2:-1] if read.startswith("$(") else read[1:-1]
+    try:
+        words = shlex.split(inner)
+    except ValueError:
+        return None
+    forms = [word for word in words[1:] if word.startswith("+")]
+    return forms[0] if len(forms) == 1 else None
 
 
 def clock_loop(token_rows) -> bool:
@@ -257,7 +278,7 @@ def waiter_verdict(segments, background: bool) -> str:
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
     `gh pr checks --watch`. Allowed: one short sleep, `gh pr checks --watch` with
     run_in_background, and, with run_in_background, one sleep of any length followed by a command
-    and a loop whose test compares `date` output with a literal time."""
+    and a `clock_loop`: a `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time."""
     sleeps, loop, watcher, run_watch, followed = [], False, "", "", False
     token_rows = []
     for segment in segments:
@@ -286,7 +307,9 @@ def waiter_verdict(segments, background: bool) -> str:
         elif waiter_hit(segment):
             return waiter_hit(segment)
     if background and clock_loop(token_rows):
-        loop = False  # a loop with a clock bound ends at its time, so only its pauses are judged
+        # A `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time, ends the loop at
+        # that time, so only its pauses are judged.
+        loop = False
     if sleeps and loop:
         return sleeps[0][0]
     long_ok = background and followed
@@ -302,8 +325,10 @@ WAITER_REASON = (
     "that has a zone. To wait on one pid, use `wait-pid PID [--timeout SECS]`. "
     "To wait for another condition, run the long command in the background and wait for its completion "
     "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
-    "loop whose test compares the date output with a literal time. "
-    "A single pause under 25 seconds is allowed in the foreground. For a server warm-up, use a "
+    "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
+    "epoch with -gt or -ge, or an ISO date-time read against an ISO time with \\>. "
+    "A single pause under 25 seconds is allowed in the foreground. Avoid gh pr checks --watch in the "
+    "foreground, which serves a cached status. For a server warm-up, use a "
     "readiness check such as `curl --retry 5 --retry-connrefused http://localhost:3000`."
 )
 
