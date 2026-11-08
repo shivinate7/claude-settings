@@ -24,8 +24,8 @@
 //    so one PowerShell helper holds the job for the suite's life and lists and kills its members on
 //    request. If the watchdog is killed, the helper's pipe closes, the helper ends, and the job closes
 //    with every member in it. The child waits on a go-file until the helper has put it in the job, so
-//    no test runs outside it. On CI a run that cannot get a job fails by name; off CI it falls back to
-//    a walk of the process tree, with a printed note.
+//    on CI no test runs outside it: a run that cannot get a job fails by name. Off CI the child is
+//    released anyway, and leftovers are found by a walk of the process tree, with a printed note.
 // An unreadable sweep is unknown, never "nothing found": on CI it exits 1 too.
 // Cost: one extra PowerShell process on Windows, for the suite's own run only.
 
@@ -41,6 +41,12 @@ export const START = "STAMP-START "; // the child prints it before each test, so
 const RUN = "STAMP_SUITE_RUN";
 const GO = "STAMP_SUITE_GO"; // Windows: the child starts its tests when this file exists
 const NO_JOB = "STAMP_SUITE_NO_JOB"; // "1": Windows: the watchdog makes no job object, as if it could not
+const GO_FAIL = "STAMP_SUITE_GO_FAIL"; // "1": Windows: the go-file write fails, as if the disk refused it
+// A seam for the wiring test, not a feature. A clean fixture leaves nothing, so no real run reaches
+// the "pid still alive after the kill" or "sweep could not read" results. "alive" or "unknown" makes
+// the sweep report that result on top of what it really found, and the real leftoverExit wiring then
+// decides the exit. It injects the result only: it kills and lists nothing differently.
+const SWEEP_FAULT = "STAMP_SUITE_SWEEP_FAULT";
 export const DEFAULT_CAP_S = 180; // the slowest normal run took 102 s (run 42456407663); the slowest of 28 earlier runs, 90 s
 export const HARD_STOP_AFTER_CAP_S = 30; // see the budget above
 const LEFTOVER_GRACE_MS = 3000; // a process may still be exiting when the suite closes
@@ -73,8 +79,9 @@ export function leftoverExit(code, { lines = [], alive = [], unknown = [] } = {}
   return code ?? 1;
 }
 
-// The child calls it before its first test. Windows: no test runs until the watchdog has put this
-// process in its job. A bound, not a wait.
+// The child calls it before its first test. Windows: it waits for the go file, which the watchdog
+// writes once this process is in its job, or, off CI with no job, once it has chosen the fallback.
+// It waits at most 40 s, so a dead watchdog cannot hold it.
 export function waitForGo(env = process.env) {
   if (!env[GO]) return;
   for (const t0 = Date.now(); !existsSync(env[GO]) && Date.now() - t0 < 40_000;) sleepMs(50);
@@ -325,6 +332,13 @@ export async function watchdog({ self, ci, tempPrefix }) {
   // Lists and kills what the suite left running: { lines, alive, unknown, notes }. unknown holds the
   // reads that could not run: they are named, and never read as "nothing left".
   const sweep = async (graceMs) => {
+    const r = await sweepFound(graceMs);
+    const fault = process.env[SWEEP_FAULT];
+    if (fault === "alive") return { ...r, alive: [...r.alive, String(child.pid)] };
+    if (fault === "unknown") return { ...r, unknown: [...r.unknown, `${SWEEP_FAULT}=unknown`] };
+    return r;
+  };
+  const sweepFound = async (graceMs) => {
     await jobReady;
     if (POSIX) {
       const r = sweepMarked(runId, graceMs);
@@ -393,15 +407,17 @@ export async function watchdog({ self, ci, tempPrefix }) {
   };
   // On CI the suite needs its job: without one it cannot find what it leaves running. The child has
   // not been released, so it has run no test. Its tree is killed and the run fails by name.
-  const failNoJob = () => {
+  const failBeforeTests = (message) => {
     if (over || stopping) return;
     stopping = true;
     flush();
-    console.error(`FAIL - no job object: ${noJob}. On CI the suite must put its tests in one, to find and kill what they leave running.`);
+    console.error(message);
     const killed = taskkill([child.pid]).trim();
     if (killed) console.error(killed);
     finish(1);
   };
+  const failNoJob = () => failBeforeTests(
+    `FAIL - no job object: ${noJob}. On CI the suite must put its tests in one, to find and kill what they leave running.`);
   // Ends the process once what is queued on stdout and stderr is written, or after 2 s. A pipe on
   // Windows may write asynchronously, and process.exit would cut the queue.
   const exitAfterDrain = (code) => {
@@ -471,7 +487,15 @@ export async function watchdog({ self, ci, tempPrefix }) {
         }
       }
       if (!jobOk && ci) { failNoJob(); return; }
-      try { writeFileSync(goFile, "go"); } catch {}
+      // On CI the child never runs a test outside the job: with no job the run has failed above. Off CI
+      // with no job, the documented fallback releases the child anyway, with a printed note. Either way
+      // a go file that cannot be written is a failure, since the child would wait for it unreleased.
+      try {
+        if (process.env[GO_FAIL] === "1") throw new Error(`${GO_FAIL}=1 asked for a failed write`);
+        writeFileSync(goFile, "go");
+      } catch (e) {
+        failBeforeTests(`FAIL - go file: ${e.message}. The suite's tests start only once it is written, so none ran.`);
+      }
     })();
   }
 }
