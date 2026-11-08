@@ -4,7 +4,7 @@
 
 A builder that cannot pass a test must not delete, skip or rewrite it. A green run must mean the code is right. The guard stops mistakes, not an attacker (`guard-guards-mistakes-only`). The reviewer reads every diff.
 
-Judge the result, not the commands. The act is a test path in a change the builder made (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points. A fourth point reads a builder's shell command, as an early warning:
+Judge the result, not the commands. The act is a builder's test change (`predicate-is-the-act`): a test path, whole-file test config, or an owned part of partly-owned config. The act is not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points. A fourth point reads a builder's shell command, as an early warning:
 
 - A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). A test change refuses with `builder-diff`. The refusal names no path and gives the undo route: restore a changed test file, delete a new one. No override lifts it.
 - A builder's SubagentStop. A test change refuses the first stop with `builder-diff`. A second stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix its tree never loops.
