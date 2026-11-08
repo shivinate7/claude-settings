@@ -13018,15 +13018,13 @@ for _path in ("tests/test_a.py", "src/b_test.go", "pytest.ini", "pyproject.toml"
               "jest.config.js"):
     add("test-author: Edit of %s is allowed" % _path, "allow", tool="Edit", file_path=_path, **A)
 # ---- mutation tests are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
-# by, so a test-author edits them. The builder case pins the rule to the test-author: agent_brief.py
-# tells a builder to add mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
+# by, so a test-author edits them. A builder's edit of hooks/mutate_guard.py is judged by its mutant
+# entries, in the block after `_put` below.
 for _path in ("hooks/mutate_guard.py", "hooks/mutate_shared.py"):
     add("test-author: Edit of mutation test %s is allowed" % _path, "allow", tool="Edit",
         file_path=_path, **A)
 add("test-author: Edit of hooks/guard_core.py is refused", "deny", rule=TA, tool="Edit",
     file_path="hooks/guard_core.py", carries=("builder", "Report"), **A)
-add("builder-test: Edit of hooks/mutate_guard.py stays allowed for a builder", "allow", tool="Edit",
-    file_path="hooks/mutate_guard.py", agent_id="bld1", agent_type="builder", cwd=GITMAIN)
 # The mutation test set is a list of exact names, not a shape: a near miss stays product code, a name with
 # a colon is not a mutation test, and a name that differs only in case is the same file on Windows.
 add("test-author: Edit of hooks/mutate_x.py is refused", "deny", rule=TA, tool="Edit",
@@ -13397,6 +13395,54 @@ def _rm(rel):
 
 def _put(rel, text):
     return lambda w: write(os.path.join(w, rel), text)
+
+
+# ---- a builder's edit of hooks/mutate_guard.py, the mutation test of the guard. A builder may ADD a mutant
+# entry. An edit that removes or changes an existing one is refused, and the remedy names the test-author.
+# A mutant entry is the lines of one tuple in MUTATIONS, from its `    ("` opener to its `),` closer. The tree
+# holds the entries on disk and in HEAD, so a judge that reads either sees the same file. The author fixture
+# above holds "pass\n" for the author's commit log, so these cases build a tree of their own.
+FAMILY = "paths"
+MUTANT_ONE = '''    ("builder-fixture: first mutant",
+     'FIRST_ANCHOR = 1',
+     'FIRST_ANCHOR = 2', "guard", 'builder-fixture: first case'),
+'''
+MUTANT_TWO = '''    ("builder-fixture: second mutant",
+     'SECOND_ANCHOR = 1',
+     'SECOND_ANCHOR = 2', "guard", 'builder-fixture: second case'),
+'''
+MUTANT_NEW = '''    ("builder-fixture: third mutant",
+     'THIRD_ANCHOR = 1',
+     'THIRD_ANCHOR = 2', "guard", 'builder-fixture: third case'),
+'''
+MUTATE_PATH = "hooks/mutate_guard.py"
+MUTANT_FILE = "MUTATIONS = [\n" + MUTANT_ONE + MUTANT_TWO + "]\n"
+_builder_mutants = diff_repo("g-builder-mutants", _put(MUTATE_PATH, MUTANT_FILE), commit=True)
+BM = dict(B, cwd=_builder_mutants)
+ENTRY_ONE_CHANGED = MUTANT_ONE.replace("'FIRST_ANCHOR = 2'", "'FIRST_ANCHOR = 3'")
+ENTRY_LINE = "     'FIRST_ANCHOR = 2', \"guard\", 'builder-fixture: first case'),\n"
+
+add("builder-test: Edit of hooks/mutate_guard.py that inserts a mutant entry is allowed", "allow", tool="Edit",
+    file_path=MUTATE_PATH, old_string=MUTANT_ONE, new_string=MUTANT_ONE + MUTANT_NEW, **BM)
+add("builder-test: Edit of hooks/mutate_guard.py that changes a mutant entry is refused", "deny", rule=BT,
+    tool="Edit", file_path=MUTATE_PATH, old_string=MUTANT_ONE, new_string=ENTRY_ONE_CHANGED,
+    carries=("test-author",), **BM)
+add("builder-test: Edit of hooks/mutate_guard.py that changes one line of a mutant entry is refused", "deny",
+    rule=BT, tool="Edit", file_path=MUTATE_PATH, old_string=ENTRY_LINE,
+    new_string=ENTRY_LINE.replace("'FIRST_ANCHOR = 2'", "'FIRST_ANCHOR = 3'"), carries=("test-author",), **BM)
+add("builder-test: Edit of hooks/mutate_guard.py that deletes a mutant entry is refused", "deny", rule=BT,
+    tool="Edit", file_path=MUTATE_PATH, old_string=MUTANT_ONE, new_string="", carries=("test-author",), **BM)
+add("builder-test: Write of hooks/mutate_guard.py that drops a mutant entry is refused", "deny", rule=BT,
+    tool="Write", file_path=MUTATE_PATH, content="MUTATIONS = [\n" + MUTANT_TWO + "]\n",
+    carries=("test-author",), **BM)
+add("builder-test: Write of hooks/mutate_guard.py that keeps every entry and adds one is allowed", "allow",
+    tool="Write", file_path=MUTATE_PATH, content="MUTATIONS = [\n" + MUTANT_ONE + MUTANT_TWO + MUTANT_NEW + "]\n",
+    **BM)
+sh("builder-test: shell sed -i on hooks/mutate_guard.py is refused, since an add-only edit cannot be proved",
+   "sed -i 's/a/b/' hooks/mutate_guard.py", "deny", rule=BT, carries=("test-author",), **BM)
+add("test-author: Edit of hooks/mutate_guard.py that changes a mutant entry is allowed", "allow", tool="Edit",
+    file_path=MUTATE_PATH, old_string=MUTANT_ONE, new_string=ENTRY_ONE_CHANGED, **dict(A, cwd=_builder_mutants))
+FAMILY = "diff"  # the family the cases below ran in
 
 
 def _mv(src, dst):
