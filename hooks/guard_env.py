@@ -140,9 +140,8 @@ ENV_ADVICE = (
 # Runners that start a child command. Their option words that take the next word as a value, by
 # runner family. DESIGN: the uv, docker and npm scans read an option off the list as a possible
 # value owner (`_child_starts`), so a missing value flag costs a false alarm at most; only the node
-# scan keeps a closed list. Two misses stay: an unlisted flag right after a missing value flag ends
-# the scan (`--pull always --rm img env`), and pnpm's `-r` reads as node's value flag
-# (`pnpm -r exec env`). `-c` of npm is the child, so it is never a value flag.
+# scan keeps a closed list. pnpm's `-r` and `-w` are bools there, so the pnpm walk drops them from
+# the list. `-c` of npm is the child, so it is never a value flag.
 ENV_NPM_RUNNERS = tuple(c for c in ENV_LOADER_COMMANDS if c.startswith(("npm", "npx", "pnpm")))
 _CONTAINER_FLAGS = (
     "-e", "--env", "--name", "-v", "--volume", "-p", "--publish", "-w", "--workdir", "--network",
@@ -789,15 +788,17 @@ def _may_own_value(word: str) -> bool:
 
 def _child_starts(words, i: int, flags):
     """The indexes from `i` where a child command may start, past the runner's options. An option
-    in `flags` owns the next word. The first positional word is a start. When it sits right after
-    an unlisted option it may be that option's value, so the scan goes on past the listed options
-    to the next positional word, which is a start too: `--pull always --env-file F alpine env` starts at
-    `always` and `alpine`. An unlisted option there ends the scan, so a program's own arguments
-    (`docker run myimage serve env`, `uv run -q pytest -k env`) are never starts. FEWEST FALSE
-    ALARMS: a start that is no child costs nothing, since `_child_prints` reads only env, printenv,
-    shells, python and inline runners. The value-flag list is no closed list: an unlisted option
-    is read as a possible value owner. `--` ends the runner's options, so the word after it is
-    the one start."""
+    in `flags` owns the next word. Each positional word is a start. When it sits right after an
+    unlisted option it may be that option's value, so the scan goes on past every option, listed,
+    bool or unlisted, to the next positional word, which is a start too: `--cap-add X --pull always
+    alpine env` starts at `X`, `always` and `alpine`. A positional word that follows no unlisted
+    option ends the scan, so a program's own arguments (`docker run --rm myimage serve env`,
+    `uv run -q pytest -k env`) are never starts. FEWEST FALSE ALARMS: a start that is no child
+    costs nothing, since `_child_prints` reads only env, printenv, shells, python and inline
+    runners. A start is no later word that may be an unlisted option's value, so `uv run --foo
+    pytest -k env` has one start. One false alarm stays: a program's own word after such an option
+    and a value (`uv run --foo pytest -k a env`). `--` ends the runner's options, so the word
+    after it is the one start."""
     value = False
     while i < len(words):
         word = words[i]
@@ -808,12 +809,14 @@ def _child_starts(words, i: int, flags):
         if word in flags:
             i += 2
         elif word.startswith("-"):
-            if value:
-                return
             i += 1
         else:
+            owned = bool(i and _may_own_value(words[i - 1]))
+            if owned and value:
+                i += 1  # a possible value after a possible value is no start
+                continue
             yield i
-            if value or not (i and _may_own_value(words[i - 1])):
+            if not owned:
                 return
             value = True
             i += 1
@@ -839,7 +842,7 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
     """True when a runner given the file starts a child command that prints it: `uv run`,
     `docker`/`podman` `run`, `compose run` and `exec` (the child follows the image word), and
     `npm exec -c`, `npx -c` and `pnpm exec`. The npm walk reads `-c` up to `--` or the child; the
-    `pnpm exec` child is found by `_child_starts`."""
+    child of `exec`, `x`, `dlx` and `npx` is found by `_child_starts`."""
     name = _base(command)
     flags = ENV_CHILD_VALUE_FLAGS["node"]
     if name in ENV_INLINE_RUNNERS:  # `node --env-file=F npm-cli.js exec -c env`
@@ -849,11 +852,14 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
         position, name = at, _base(words[at])
     if name in ENV_NPM_RUNNERS:
         flags = ENV_CHILD_VALUE_FLAGS["npm"]
-        exec_at = -1
+        pnpm = name.startswith("pnpm")
+        if pnpm:  # pnpm's -r and -w are bools, not node's --require or npm's --workspace
+            flags = tuple(f for f in flags if f not in ("-r", "-w"))
+        exec_at = position if name.startswith("npx") else -1  # npx's child is its first word
         i = position + 1
 
-        def pnpm_child_prints() -> bool:
-            return name.startswith("pnpm") and exec_at >= 0 and any(
+        def child_prints() -> bool:
+            return exec_at >= 0 and any(
                 _child_prints(words, c, fed) for c in _child_starts(words, exec_at + 1, flags))
 
         while i < len(words):
@@ -861,22 +867,22 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
             if word == "--" and exec_at >= 0:  # the rest is the child's
                 break
             if word in ("-c", "--call"):  # past `pnpm exec`, `-c` may be the child's own flag
-                return pnpm_child_prints() or (
+                return (pnpm and child_prints()) or (
                     i + 1 < len(words) and _shell_string_prints(words[i + 1]))
             if word.startswith("--call="):
-                return pnpm_child_prints() or _shell_string_prints(word[7:])
+                return (pnpm and child_prints()) or _shell_string_prints(word[7:])
             if word in flags:
                 i += 2
             elif word.startswith("-"):
                 i += 1
-            elif word in ("exec", "x"):  # `x` may be an option value, so it never ends the walk
-                exec_at = i
+            elif name != "npx" and (word in ("exec", "x") or (pnpm and word == "dlx")):
+                exec_at = i  # `x` may be an option value, so it never ends the walk
                 i += 1
             elif _may_own_value(words[i - 1]):  # may be an unlisted option's value
                 i += 1
             else:
                 break
-        return pnpm_child_prints()
+        return child_prints()
     if name.startswith("uv"):
         flags = ENV_CHILD_VALUE_FLAGS["uv"]
         return any(
