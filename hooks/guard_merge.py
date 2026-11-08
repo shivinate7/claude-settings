@@ -427,26 +427,21 @@ def _marked_bodies(bodies):
     return (module, marked) if marked else None
 
 
-def _unparsed(module, marked):
-    """True when some marked body does not parse. Reads nothing."""
-    return any(module.parse_review(body) is None for body in marked)
-
-
-def _form_reason(module, selector):
-    """Return (matched, reason) for a record that does not parse. The refusal sits one call below its two callers, so the
-    rule audit reads its reason within its depth limit."""
+def _form_hit(module, marked, selector):
+    """Return (matched, reason) when some marked body does not parse, else None. It reads nothing.
+    The refusal sits one call below its two callers, so the rule audit reads its reason within its depth limit."""
+    if all(module.parse_review(body) is not None for body in marked):
+        return None
     named = "" if callable(selector) else str(selector).strip()
     return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
         module, named if named.isdigit() else "<pr>", "<live head>")
 
 
 def review_form_hit(bodies, selector=""):
-    """Return (matched, reason) when a body that opens with the record marker does not parse, else None. The one home of the
-    form check: an edit in place is judged by this alone, and review_record_hit calls the same two helpers. It makes no read."""
+    """Return (matched, reason) when a body that opens with the record marker does not parse, else None. An edit in place
+    is judged by this alone, and review_record_hit calls the same _form_hit. It makes no read."""
     found = _marked_bodies(bodies)
-    if found and _unparsed(*found):
-        return _form_reason(found[0], selector)
-    return None
+    return _form_hit(*found, selector) if found else None
 
 
 def review_record_hit(bodies, repo: str, selector, where: str):
@@ -459,8 +454,9 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     if not found:
         return None
     module, marked = found
-    if _unparsed(module, marked):
-        return _form_reason(module, selector)
+    unparsed = _form_hit(module, marked, selector)
+    if unparsed:
+        return unparsed
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)
