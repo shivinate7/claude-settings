@@ -487,14 +487,25 @@ ABS_CMDLET_PATH = re.compile(r"(?:[A-Za-z]:|~|\$HOME|\$\{HOME\})?[\\/](?:[^\s\\/
 # writes in a pipeline (`ForEach-Object { $_ }`). SHELL_CMDLET reads them as a cmdlet verb beside PS_VERBS.
 PS_NONSTANDARD_VERBS = ("ForEach",)
 SHELL_CMDLET = re.compile(r"(?:[A-Z][a-z]+|" + "|".join(PS_VERBS + PS_NONSTANDARD_VERBS) + r")-[A-Z][A-Za-z]+")
-# What may come before a cmdlet path in a segment: `&`, then any `VAR=value` or command-wrapper word. The wrapper
-# words come from guard_core's COMMAND_WRAPPERS, the list its token reader unwraps. This reader matches the wrapper
-# words only, not their flags or values (`sudo -u bob`, `nice -n 5`), so it is narrower than the token reader.
-@functools.lru_cache(maxsize=1)
-def _cmdlet_prefix():
+# What may come before a cmdlet path in a segment: `&`, `VAR=value`, and command wrappers with their flags and values
+# (`sudo -u bob`, `nice -n 5`, `timeout 5`). guard_core's wrapper walk reads them, the one home of which flags take a
+# value. Its token reader strips the backslashes of a raw path, so the walk takes the segment's raw words.
+def _cmdlet_prefix(segment) -> int:
+    """The offset in `segment` where the word behind the wrapper prefix starts."""
     import guard_core
-    words = "|".join(re.escape(w) for w in sorted(guard_core.COMMAND_WRAPPERS - {"&"}))
-    return re.compile(r"\s*(?:&\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|" + words + r")\s+)*")
+    words = [(m.start(), m.group()) for m in re.finditer(r"\S+", segment)]
+    tokens = tuple(word for _, word in words)
+    at = 0
+    while at < len(tokens):
+        found = guard_core._walk_wrappers(tokens[at:])[0]
+        if found is None:
+            break
+        at += found
+        if guard_core.basename(tokens[at]) not in guard_core.COMMAND_WRAPPERS:
+            return words[at][0]
+        # A wrapper the walk leaves in place (`python x`, `timeout` with no duration) still lets a path follow it.
+        at = guard_core._wrapper_flags(guard_core.basename(tokens[at]), tokens, at + 1)[0]
+    return len(segment)
 # What the refusal prints for a Verb-Noun at an absolute path: a folder written with a trailing `/` is text.
 SHELL_LINE_HIT = "step holds a shell line"
 ABS_CMDLET_HIT = SHELL_LINE_HIT + " (a Verb-Noun at a path reads as a cmdlet). If it names a folder, end it with /."
@@ -693,7 +704,7 @@ def _cmdlet_at_path(first, segment) -> bool:
     PS_VERBS verb (see ABS_CMDLET_PATH). A relative path (`docs/Read-Me`, `Microsoft.PowerShell.Management/Get-Item`)
     or a URL names a doc or a module, not a program. The basename keeps its case."""
     return bool(SHELL_CMDLET.fullmatch(first) or ABS_CMDLET_PATH.fullmatch(first)
-                or ABS_CMDLET_PATH.match(segment, _cmdlet_prefix().match(segment).end()))
+                or ABS_CMDLET_PATH.match(segment, _cmdlet_prefix(segment)))
 
 
 def _shell_line(span, run) -> str:
