@@ -266,7 +266,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
   a summary line. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step;
-- `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.`
+- `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
 
 ## Cost
 
