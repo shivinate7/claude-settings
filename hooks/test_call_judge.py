@@ -1744,7 +1744,7 @@ def case_send_owner_question_is_judged_before_it_is_sent():
 
 
 def case_question_box_with_the_same_ruling_is_refused_as_past_ruling():
-    # Control, green today: the same canned refusal on the same repo, through AskUserQuestion, is refused as past-ruling.
+    # Control: the same canned refusal on the same repo, through AskUserQuestion, is refused as past-ruling.
     # So a red send case is the missing send route, and not a fixture or a repo that cannot refuse.
     box = good_box(goal="Goal: a merge frees disk without losing a running agent's work.",
                    problem="Problem (risk): freeing a running agent's worktree loses its uncommitted files.",
@@ -1917,7 +1917,7 @@ def case_page_past_ruling_error_is_unvetted_unless_marked():
 
 
 def case_non_item_and_non_judged_writes_make_no_model_call():
-    # Case D, a control, green today. A read, another collection, a delete, a closed item and a title-only edit make no
+    # Case D, a control. A read, another collection, a delete, a closed item and a title-only edit make no
     # model call, the dedicated call included. The answer would refuse any call, so a call shows as a deny. The cwd holds
     # the rulings, so no call is not an empty repo.
     item = good_page_item()
@@ -2109,7 +2109,7 @@ def case_send_tool_names_come_from_shared_names():
         check("%s: imports SEND_TOOLS from shared_names" % label, imports_send_tools(path), label)
 
 
-# ------------------------------------------------------------------ owner-only rulings (spec past-rulings)
+# ------------------------------------------------------------------ past rulings that name the owner
 #
 # The pool offers each sentence that names ruling, owner or shiv, and item 8 tells the judge which of them is a ruling
 # (case_item8_prompt_names_record_kinds_and_owner_markers). Each stub answer below cites a candidate only when the list
@@ -2119,28 +2119,29 @@ NOTE_OWNER_MARK = "raise the milestone job cap, because"
 NOTE_OWNER = ("Owner, page item 150, pick a, 2026-11-06 12:40 CST: raise the milestone job cap, because the run ended "
               "at its cap twice.")
 OWNER_NOTE_REPO = make_repo("owner-note", steps={"milestone-cap-answered": NOTE_OWNER})
-OWNER_ONLY_GOAL = "Goal: decide whether the milestone job cap rises, and whether the hand-merged release fix stays on main"
-OWNER_ONLY_PROBLEM = "Problem (rule): the milestone job cap decides when a full CI run goes red, so the rule needs your word"
-OWNER_ONLY_BASED = ("Based on (read): the milestone job ran out of time at its cap on the last run",)
+MILESTONE_CAP_GOAL = "Goal: decide whether the milestone job cap rises, and whether the hand-merged release fix stays on main"
+MILESTONE_CAP_PROBLEM = "Problem (rule): the milestone job cap decides when a full CI run goes red, so the rule needs your word"
+MILESTONE_CAP_BASED = ("Based on (read): the milestone job ran out of time at its cap on the last run",)
 
 
-def owner_only_box():
-    return good_box(goal=OWNER_ONLY_GOAL, problem=OWNER_ONLY_PROBLEM, based=OWNER_ONLY_BASED, options=CI_CHAT_OPTIONS)
+def milestone_cap_box():
+    return good_box(goal=MILESTONE_CAP_GOAL, problem=MILESTONE_CAP_PROBLEM, based=MILESTONE_CAP_BASED, options=CI_CHAT_OPTIONS)
 
 
 def case_past_ruling_owner_answered_page_item_stays_refused():
-    # Control, green today: the owner's answer to page item 150 is recorded in a roadmap note with his name as its source.
+    # Control: the owner's answer to page item 150 is recorded in a roadmap note with his name as its source.
     # A question that the answer settles is still refused as past-ruling.
-    r = run_hook(question_input(box=owner_only_box(), cwd=OWNER_NOTE_REPO), answer=ALLOW, cite_shown=NOTE_OWNER_MARK)
-    check("owner-only control: a question that a recorded owner answer to a page item settles is refused as past-ruling",
+    r = run_hook(question_input(box=milestone_cap_box(), cwd=OWNER_NOTE_REPO), answer=ALLOW, cite_shown=NOTE_OWNER_MARK)
+    check("owner-answer control: a question that a recorded owner answer to a page item settles is refused as past-ruling",
           (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
 
 
 def case_past_ruling_owner_decision_stays_refused():
-    # Control: a decision whose ruling line names the owner still refuses a question it settles. The owner-only change does not reach decisions.
+    # Control: a decision whose ruling line names the owner still refuses a question it settles. The page-item
+    # case does not reach decisions, so this refusal must hold without it.
     box = good_box(goal=CAPS_GOAL, problem=CAPS_PROBLEM, based=CAPS_BASED, options=CAPS_OPTIONS)
     r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW, cite_shown="generous on purpose")
-    check("owner-only control: a decision whose ruling line names the owner still refuses a question it settles",
+    check("decision control: a decision whose ruling line names the owner still refuses a question it settles",
           (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
 
 
@@ -2158,7 +2159,7 @@ ITEM8_CLAUSES = (
 def case_item8_prompt_names_record_kinds_and_owner_markers():
     # The item-8 text the judge is sent: the lines from its `8. ` marker up to the candidate list. It must say that a
     # decision or debt record is a ruling by its kind, and carry the four ITEM8_CLAUSES.
-    r = run_hook(question_input(box=owner_only_box()), answer=ALLOW)
+    r = run_hook(question_input(box=milestone_cap_box()), answer=ALLOW)
     calls = form_calls(r)
     check("item 8 prompt: the question box makes one judged call", len(calls) == 1, detail(r))
     if len(calls) != 1:

@@ -1664,9 +1664,10 @@ def case_step_pool_keeps_recall_rows():
               "dropped; the pool gave %r" % (lines,))
 
 
-def case_step_pool_keeps_main_ruling_sentences_but_label_openers():
+def case_step_pool_keeps_unlabeled_main_ruling_sentences():
     """Aggregate over the corpus: every sentence that names ruling, owner or shiv and opens with no label is kept by this
-    pool. The step notes come from the production reader (question_form._read_steps) on this checkout's origin/roadmap.
+    pool. Label openers are kept too: case_step_pool_keeps_sentences_opening_with_a_label checks them.
+    The step notes come from the production reader (question_form._read_steps) on this checkout's origin/roadmap.
     A read that fails fails the row by name; an absent ref prints an unknown line. A sentence whose words are all
     stopwords (an owner ask that names only an id and a time) shares no word with any question, so it is not measured."""
     import question_form  # the one form check (hooks/question_form.py)
@@ -1898,8 +1899,8 @@ def test_step_pool_keeps_recall_rows():
     _judged(case_step_pool_keeps_recall_rows)
 
 
-def test_step_pool_keeps_main_ruling_sentences_but_label_openers():
-    _judged(case_step_pool_keeps_main_ruling_sentences_but_label_openers)
+def test_step_pool_keeps_unlabeled_main_ruling_sentences():
+    _judged(case_step_pool_keeps_unlabeled_main_ruling_sentences)
 
 
 def test_step_pool_keeps_sentences_opening_with_a_label():
@@ -1931,7 +1932,7 @@ def main():
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
                  case_task_str_replace_prose_label_passes, case_step_pool_keeps_each_ruling_word_sentence,
                  case_step_ruling_tail_stops_at_a_ruling_word, case_step_pool_keeps_recall_rows,
-                 case_step_pool_keeps_main_ruling_sentences_but_label_openers,
+                 case_step_pool_keeps_unlabeled_main_ruling_sentences,
                  case_step_pool_keeps_sentences_opening_with_a_label):
         try:
             case()
