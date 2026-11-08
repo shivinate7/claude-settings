@@ -1077,7 +1077,8 @@ _BRIEF_LINE = re.compile(
     re.IGNORECASE)
 ROLE_LABELS = ("Coordinator", "Triage", "Batch runner")  # a lane brief names each role's session id, so the lane can reach it
 ROLE_GAP_MAX = 80  # characters that may sit between a role label and its id, on one line
-ROLE_GAP_WORDS = ("is", "id", "session")  # the only words the text after the gap's last colon may hold outside a span
+ROLE_GAP_WORDS = ("is", "id", "ids", "session", "sessions")  # the only words the gap's text after its last colon (all of it with no colon) may hold outside a span
+_POSSESSIVE = "'s"  # directly after the label it is punctuation: `Coordinator's session_01A`. Single quotes are no span.
 # A label starts and ends at a word boundary, but `_` and markdown around it do not break one (`_Triage_`).
 _ROLE_LABEL = {label: re.compile("(?<![A-Za-z0-9])" + re.escape(label) + "(?![A-Za-z0-9])", re.IGNORECASE)
                for label in ROLE_LABELS}
@@ -1118,7 +1119,10 @@ def _gap_ok(gap: str, label: str) -> bool:
     """True when a label's gap lets its id stand. Closed spans are skipped. Outside them no other role's label may
     sit in the gap. The text before the gap's last colon is free; the text after it, or all of the gap when it holds no
     colon, holds no word but ROLE_GAP_WORDS. An unclosed quote or paren is no span, so its text is judged as plain
-    gap text. Linear: the caller caps the gap at ROLE_GAP_MAX characters."""
+    gap text. A possessive right after the label is dropped first. Linear: the caller caps the gap at ROLE_GAP_MAX
+    characters."""
+    if gap.startswith(_POSSESSIVE):
+        gap = gap[len(_POSSESSIVE):]
     plain = []
     last = 0
     for start, end in _closed_spans(gap):
@@ -1181,12 +1185,14 @@ BRIEF_STEP_REASON = (
 BRIEF_IDS_REASON = (
     "this brief does not name a session id for {missing}, so the lane cannot reach {them}. Add each as "
     "`" + "; ".join(label + ": session_<id>" for label in ROLE_LABELS) + "`, the three ids the coordinator copies from the "
-    "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no "
-    "`session_`. Closed quoted (straight or curly) and parenthetical spans in the gap are skipped, and a role label inside one "
-    "is no label. Outside them no other role's label may sit in the gap. The text before the gap's last colon is free, a "
-    "field name for one; the text after it, or all of the gap when it holds no colon, holds only digits, spaces, punctuation, "
-    "markdown and the words " + ", ".join("`" + word + "`" for word in ROLE_GAP_WORDS) + ", so prose with no colon before an id is no role id; an id holds a digit. "
-    "(lane rulings 2026-11-08 10:03 and 10:15 CST, decision session-tiers, a lane holds one topic)"
+    "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line. "
+    "A span is a closed double quote (straight or curly) or paren span; a single quote is no span, and a role label inside a span is no label. "
+    "Spans are skipped, but `session_` is banned even in a span. Outside spans, the text before the last colon is free, "
+    "except for another role's label, which may sit nowhere in the gap. The text after the last colon, or all of the gap when it holds "
+    "no colon, holds only digits, spaces, punctuation, markdown and the filler words "
+    + ", ".join("`" + word + "`" for word in ROLE_GAP_WORDS)
+    + ", in any case. A possessive `'s` right after the label counts as punctuation. An id holds a digit. "
+    "(lane rulings 2026-11-08 10:03, 10:15 and 11:50 CST, decision session-tiers, a lane holds one topic)"
 )
 
 
