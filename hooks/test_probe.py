@@ -629,5 +629,40 @@ def relative_cwd_is_judged_as_the_absolute_folder():
     return expect(out2 == out, "relative cwd gives %r, want the absolute run's %r" % (out2[:80], out[:80]))
 
 
+@case
+def config_overlap_is_noted():
+    """Probe: a cwd inside the real config dir gets a `probe: note:` line; the verdict does not change."""
+    config = os.path.realpath(new_dir())
+    inside = os.path.join(config, "work")
+    os.makedirs(inside)
+    outside = os.path.join(os.path.realpath(new_dir()), "elsewhere")
+    os.makedirs(outside)
+    refused = ["--tool", "Bash", "--command", REFUSED]
+    # Control: a cwd outside the outer config dir gives no note.
+    rc, out, err = probe(refused + ["--cwd", outside], config_dir=config)
+    bad = scope(rc, out, err)
+    if bad:
+        return ["control, cwd outside the config dir: " + bad[0]]
+    if "probe: note:" in err:
+        return ["control, cwd outside the config dir: stderr has a note"]
+    # Baseline: a cwd inside a config dir that is not the outer one gives no note.
+    rc2, out2, err2 = probe(refused + ["--cwd", inside], config_dir=new_dir())
+    bad = scope(rc2, out2, err2)
+    if bad:
+        return ["baseline, cwd inside another config dir: " + bad[0]]
+    if "probe: note:" in err2:
+        return ["baseline, cwd inside another config dir: stderr has a note"]
+    rc3, out3, err3 = probe(refused + ["--cwd", inside], config_dir=config)
+    bad = scope(rc3, out3, err3)
+    if bad:
+        return ["cwd inside the config dir: " + bad[0]]
+    notes = [line for line in err3.splitlines() if line.startswith("probe: note:")]
+    problems = expect(bool(notes), "stderr has no 'probe: note:' line for a cwd inside the config dir")
+    if notes:
+        problems += expect("frozen-path" in notes[0] and "override" in notes[0],
+                           "the note does not name frozen-path and override")
+    return problems + expect(out3 == out2, "verdict %r, want the baseline's %r" % (out3[:60], out2[:60]))
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))
