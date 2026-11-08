@@ -669,26 +669,28 @@ class ShallowMain(unittest.TestCase):
         self.assertEqual(shallow_clone.facts(clone, p, f), {"shallow": True, "pin_present": True, "ancestor_rc": 1}, "the clone is not the bug shape")
         return clone
 
-    def stale_record_host(self, p):
-        """The round-3 check's comment read: one record on pull request 20, which is no lane of the batch, for head `p`. Guard or check yes, first round PASS."""
-        return types.SimpleNamespace(review_comments=lambda since: {20: [record_text(n=20, head=p, guard="yes")]})
+    def stale_record_host(self, p, f):
+        """The round-3 check's comment read: pull request 7's done record for its own head `f`, and one record on pull request 20, which is no lane of
+        the batch, for head `p`. Guard or check yes, with a first review that passed."""
+        return types.SimpleNamespace(review_comments=lambda since: {7: [record_text(n=7, head=f)], 20: [record_text(n=20, head=p, guard="yes")]})
 
     def test_a_record_for_a_head_the_shallow_clone_cuts_off_is_unknown_and_refuses(self):
         p, f = self.cut_pr_branch()
         clone = self.shallow_pr_clone(p, f)
         try:
-            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), root=clone)
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p, f), root=clone)
         except merge.Liftable as e:
             self.assertIn("--undo-check-unknown-ok", str(e), "the refusal does not name the reason flag:\n" + str(e))
             return
         self.fail(f"the round-3 check read the cut history as not in it, and let the record through (it returned {got!r})")
 
     def test_the_reason_flag_lifts_the_unknown_read_and_logs_its_reason(self):
+        # f's done record leaves the own head nothing owed, so the cut history read is the only unknown read the flag can lift
         p, f = self.cut_pr_branch()
         clone = self.shallow_pr_clone(p, f)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), "octopus read it", root=clone)
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p, f), "octopus read it", root=clone)
         self.assertEqual(got, "octopus read it", "the round-3 check read the cut history as not in it, so there was no unknown read for the reason flag to lift:\n" + out.getvalue())
         self.assertIn("--undo-check-unknown-ok, reason: octopus read it", out.getvalue(), "the lift is not logged with its reason:\n" + out.getvalue())
 
@@ -698,7 +700,7 @@ class ShallowMain(unittest.TestCase):
         self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", p, f], cwd=self.other).returncode, 0, "P is not in the history of F")
         self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", p, "origin/main"], cwd=self.other).returncode, 1, "P is on origin/main")
         with self.assertRaises(merge.RoundOwed) as cm:
-            merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), root=self.other)
+            merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p, f), root=self.other)
         self.assertIn("#20", str(cm.exception), "the refusal does not name pull request #20:\n" + str(cm.exception))
 
 
@@ -13810,6 +13812,7 @@ class ReviewRoundCheckEnv(Env):
         self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
         record = record_text(n=7, head=older, **{"guard": "yes", **kw})
         host = self.batch_host({}, [review_comment(1, 7, record)])
+        host.records_default = False  # the live head has no record: the default would give it a done one
         return host, older, record
 
     def remedy_line(self, out):
@@ -14386,8 +14389,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     Case 15 is green on the old code and kills the `h not in on_default` clause of read_lanes' own_out: a stacked pull request that starts at a main
     commit, merges a reviewed lane tip and main, and adds no commit of its own is an integration head. Case 16 is red on the old code: confirm must
     fetch origin/<default> before the read, or main's newer commit merged into a stacked pull request reads as an unreviewed lane tip.
-    Case 17 is red on f67f637d8 and green on 270ef35bc: an integration head with no commit of its own still owes round 3 for its own Guard or check yes
-    record. Case 5 is its green control.
+    Case 17: an integration head with no commit of its own still owes the third review for its own Guard or check yes record. Case 5 is its green control.
     Cases 18, 19 and 20 are red on the old code: the merge tool's own commits, a records rebuild and a claim, are no lane work, so a head that
     ends on one is read through the commits under it. Case 21 is the green control that keeps the guard: a real commit under a generated one still refuses."""
 
@@ -14644,7 +14646,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
 
     def test_unreviewed_head_integration_pr_own_guard_yes_owes_round_three_is_refused(self):  # case 17
         # the integration head holds only the merges of two done lane tips, so it adds no commit of its own and is read through its tips. Its own record
-        # is Guard or check yes with round 1 PASS, and no lane tip names its head. The own head owes round 3, as on 270ef35bc, which always checks it
+        # is Guard or check yes with a first review that passed, and no lane tip names its head. The own head still owes the third review, since a guard or check change always does
         tips = lane_batch(self, "agent/lane1", "agent/lane2", from_main=True)
         feat = self.head("feat")
         own_text = record_text(n=7, head=feat, guard="yes", rounds=REVIEW_PASS)
@@ -14653,7 +14655,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
                     round_check_comment(2, 9, tips["agent/lane2"], guard="no", rounds=REVIEW_PASS),
                     review_comment(3, 7, own_text)]
         host = self.batch_host(tips, comments)
-        host.records_default = False  # the scripted records are the only ones: the own head's is Guard or check yes, round 1 PASS
+        host.records_default = False  # the scripted records are the only ones: the own head's is Guard or check yes, with a first review that passed
         self.scope(tips, host)
         own = sh(self.co, "git", "rev-list", "--no-merges", feat, "^origin/main", f"^{tips['agent/lane1']}", f"^{tips['agent/lane2']}").split()
         self.assertEqual(own, [], "the integration head adds a commit of its own, so it is not the case:\n" + "\n".join(own))
