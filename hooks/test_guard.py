@@ -19384,6 +19384,16 @@ repo_case("an unquoted reason with a > file and 2>&1 is allowed", "allow",
           f"{MERGE_SHIM} 185 --confirm --base-red-ok fixlane > run.log 2>&1", REPO_A, TX_A)
 repo_case("an unquoted reason with a > file and 2>&1 beside -C another checkout is denied", "deny",
           f"{MERGE_SHIM} -C {REPO_B} 185 --confirm --base-red-ok fixlane > run.log 2>&1", REPO_A, TX_A)
+# Each backslash escape is one step of the quote walk but two characters, and strip_redirections indexes the walk's marks by
+# character. An escape therefore shifts every later mark: a legitimate merge is denied, and a -C naming another checkout beside it is allowed.
+# The raw strings keep each backslash. The quoted-reason cases above, with no escape, are the green controls.
+repo_case("a reason with an escaped quote in double quotes is allowed", "allow",
+          r'merge 185 --confirm --base-red-ok "fix \"x\" red"', REPO_A, TX_A)
+repo_case("a reason with an escaped dollar is allowed", "allow", r"merge 185 --confirm --base-red-ok \$X", REPO_A, TX_A)
+repo_case("a reason with an escaped space is allowed", "allow", r"merge 185 --confirm --base-red-ok a\ b", REPO_A, TX_A)
+repo_case("a > file named with an escaped space is allowed", "allow", r"merge 185 --confirm > a\ b", REPO_A, TX_A)
+repo_case("a reason with an escaped space beside a &> file and -C another checkout is denied", "deny",
+          rf"merge 5 --confirm --base-red-ok a\ b &> o -C {REPO_B} 2>&1", REPO_A, TX_A)
 repo_case("a path with a hash names its checkout whole and is allowed", "allow", f"{MERGE_SHIM} --repo-dir {REPO_HASH} 5 --confirm",
           REPO_B, TX_A)
 repo_case("a runner that names claude-settings is allowed through the proxy's origin", "allow", f"{MERGE_SHIM} 5 --confirm", LANE_PROXY,
@@ -19425,6 +19435,47 @@ repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SH
 repo_case("--lane-lint naming no git checkout is not judged", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {NOGIT} 5", REPO_A, TX_NONE)
 repo_case("outside the cloud a merge is not judged", "allow", f"{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm", REPO_A, TX_A,
           env=ROLE_ENV)
+
+
+# strip_redirections, read directly: each input has one escape, or none as a control. The quoted text must survive whole and the
+# redirect target must be cut, so the strip keeps a reason's text and drops only the unquoted redirect. A raised error fails its
+# check; it does not crash the run.
+STRIP_REDIRECT_CASES = (
+    (r'merge 185 --confirm --base-red-ok "fix \"x\" red" > run.log', r'"fix \"x\" red"', "run.log"),
+    (r"merge 185 --confirm --base-red-ok a\ b > run.log", r"a\ b", "run.log"),
+    (r"merge 185 --confirm --base-red-ok $'it\'s > x' > run.log", r"$'it\'s > x'", "run.log"),
+    (r"merge 185 --confirm --base-red-ok \$X > run.log", r"\$X", "run.log"),
+    (r"merge 5 --confirm --base-red-ok a\ b &> o", r"a\ b", "o"),
+    (r'echo "a # b" > run.log', r'"a # b"', "run.log"),   # control: quoted text with no escape
+    (r"echo don't > run.log", "don't", "run.log"),          # control: a contraction is text, not a quote
+)
+
+
+def strip_redirections_case():
+    """strip_redirections keeps the quoted text of each input and cuts only its unquoted redirect.
+
+    _load_guard_module() reloads guard_core, so sys.modules["guard_core"] is the copy beside the file under test.
+    """
+    _load_guard_module()
+    core = sys.modules["guard_core"]
+    problems = []
+    for command, quoted, target in STRIP_REDIRECT_CASES:
+        try:
+            got = core.strip_redirections(command)
+        except Exception as error:   # a misaligned walk raises here: a named failure of this check
+            problems.append("%r: strip_redirections raised %s" % (command, type(error).__name__))
+            continue
+        if quoted not in got:
+            problems.append("%r: quoted text %r is not kept, got %r" % (command, quoted, got))
+        if target in got.split():
+            problems.append("%r: redirect target %r is not cut, got %r" % (command, target, got))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "strip_redirections keeps quoted text and cuts only the unquoted redirect"
+
+
+LOG_CHECKS_EXTRA.append(("merge-confirm-repo: strip_redirections keeps quoted text and cuts only the unquoted redirect",
+                         strip_redirections_case))
 FAMILY = "rule9"  # the cases after this section keep rule 9's family
 
 # ---- Cost. The rule starts one git process for a lane create_session, to read the origin, and none for any
