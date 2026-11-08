@@ -811,27 +811,28 @@ def cmd_exe_delete_hit(segment: str) -> str:
     return ""
 
 
-# ARCHIVE GATES DELETE. Decision archive-gates-delete (rule shared-trees-archive-then-delete): a remote
+# ARCHIVE THEN DELETE. Decision archive-then-delete (rule shared-trees-archive-then-delete): a remote
 # branch is lossless to delete only once its archive push has succeeded. A delete that follows an archive
 # push of the same branch must run only when that push's failure stops the chain first. Segments and ends
 # come from `split_segments`; each push is read by `_push_parse` alone. `bash -c` bodies, heredocs,
 # script files and PowerShell are not read (`guard-guards-mistakes-only`).
-GATE_EXITS = ("exit", "return", "continue", "break")
-GATE_BRACED = re.compile(r"\$\{(\w+)\}")
-GATE_OPENERS = ("do", "then", "{", "(", "!")
-GATE_ENDS_BRANCH = ("else", "elif", "fi")
+STOP_WORDS = ("exit", "return", "continue", "break")
+BRACED_NAME = re.compile(r"\$\{(\w+)\}")
+BODY_OPENERS = ("do", "then", "{", "(", "!")
+BRANCH_ENDS = ("else", "elif", "fi")
+LOOP_WORDS = ("for", "while", "until")
+FUNCTION_OPEN = re.compile(r"\s*(?:function\s+[\w.-]+(?:\s*\(\s*\))?|[\w.-]+\s*\(\s*\))\s*\{")
 ZSH_MODIFIER = re.compile(r"\$(?:[A-Za-z_]\w*|\d):[A-Za-z]")
 SINGLE_QUOTED = re.compile(r"'[^']*'")
-IF_CONDITION = re.compile(r"\s*if\s+(?!!)")
 
 
-def _gate_name(text: str) -> str:
+def _branch_name(text: str) -> str:
     """A branch name as two spellings of it agree: no quotes, `${x}` as `$x`, no `refs/heads/`."""
-    text = GATE_BRACED.sub(r"$\1", text.replace('"', "").replace("'", "").lstrip("+"))
+    text = BRACED_NAME.sub(r"$\1", text.replace('"', "").replace("'", "").lstrip("+"))
     return text.removeprefix("refs/heads/")
 
 
-def _gate_events(segment: str):
+def _push_events(segment: str):
     """[(kind, names)] for each `git push` in one segment: 'archive' for a refspec whose destination is
     `archive/<name>`, 'delete' for a deleted branch. An archive's names hold its source and its suffix."""
     events = []
@@ -839,7 +840,7 @@ def _gate_events(segment: str):
         if subcommand != "push":
             continue
         _f, _m, _e, _i, _u, _l, delete, _up, _remote, plain = _push_parse(args)
-        deleted = {_gate_name(spec[1:] if spec.startswith(":") else spec)
+        deleted = {_branch_name(spec[1:] if spec.startswith(":") else spec)
                    for spec in plain if spec.startswith(":") or delete}
         if deleted:
             events.append(("delete", deleted))
@@ -847,24 +848,51 @@ def _gate_events(segment: str):
             continue
         for spec in plain:
             source, colon, dest = spec.lstrip("+").partition(":")
-            dest = _gate_name(dest if colon else source)
+            dest = _branch_name(dest if colon else source)
             if dest.startswith("archive/") and source:
-                events.append(("archive", {_gate_name(source), dest[len("archive/"):]}))
+                events.append(("archive", {_branch_name(source), dest[len("archive/"):]}))
     return events
 
 
+def _body_words(segment: str):
+    """The segment's words after the shell keywords that open a body (`do`, `then`, `{`)."""
+    words = segment_tokens(segment)
+    words = list(words) if words else segment.split()
+    while words and words[0] in BODY_OPENERS:
+        words.pop(0)
+    return words
+
+
 def _first_word(segment: str) -> str:
-    """The segment's command word, after the shell keywords that open a body (`do`, `then`, `{`)."""
     words = _body_words(segment)
     return words[0] if words else ""
 
 
-def _body_words(segment: str):
-    words = segment_tokens(segment)
-    words = list(words) if words else segment.split()
-    while words and words[0] in GATE_OPENERS:
-        words.pop(0)
-    return words
+def _blocks(segments):
+    """Per segment, the loops, functions and brace groups open around it, as (kind, opening segment)."""
+    stack, found = [], []
+    for number, segment in enumerate(segments):
+        text = segment.strip()
+        head = text.split(None, 1)[0] if text else ""
+        if head == "done":
+            _close(stack, ("loop",))
+        elif head.startswith("}"):
+            _close(stack, ("brace", "func"))
+        if FUNCTION_OPEN.match(text):
+            stack.append(("func", number))
+        elif head == "{":
+            stack.append(("brace", number))
+        if head in LOOP_WORDS:
+            stack.append(("loop", number))
+        found.append(tuple(stack))
+    return found
+
+
+def _close(stack, kinds):
+    for index in range(len(stack) - 1, -1, -1):
+        if stack[index][0] in kinds:
+            del stack[index]
+            return
 
 
 def _shell_options(segments, upto: int):
@@ -888,39 +916,79 @@ def _shell_options(segments, upto: int):
     return errexit, pipefail
 
 
-def _if_gates(segments, ends, first: int, last: int) -> bool:
-    """True for `if <archive push>; then ... <delete>`: the delete is in the then branch, which runs
-    only when the condition's last command, the push, succeeded."""
-    if not IF_CONDITION.match(segments[first]) or ends[first] not in (";", "\n"):
+def _stops(word: str, blocks, first: int, last: int) -> bool:
+    """True when `word`, run where the archive push in segment `first` runs, ends the chain before the
+    delete in segment `last`. `exit` always does. `continue` and `break` end the push's innermost loop
+    body, `return` its innermost function body, and the delete must sit in that same body."""
+    if word == "exit":
+        return True
+    kind = {"continue": "loop", "break": "loop", "return": "func"}.get(word)
+    around = [block for block in blocks[first] if block[0] == kind]
+    return bool(around) and around[-1] in blocks[last]
+
+
+def _group_end(segments, opening: int):
+    """The segment that closes the brace group opened in segment `opening`, else None."""
+    depth = 1
+    for number in range(opening + 1, len(segments)):
+        text = segments[number].lstrip()
+        if text.startswith("}"):
+            depth -= 1
+            if not depth:
+                return number
+        elif text.startswith("{") or FUNCTION_OPEN.match(text):
+            depth += 1
+    return None
+
+
+def _if_stops(segments, ends, blocks, first: int, last: int) -> bool:
+    """True for `if <archive push>; then ... <delete>`, where the delete is in the then branch, and for
+    `if ! <archive push>; then <stop word>; fi; <delete>`. Either way the delete runs only after a
+    successful push."""
+    words = _body_words(segments[first])
+    if not words or words[0] != "if" or ends[first] not in (";", "\n"):
         return False
     if not segments[first + 1].lstrip().startswith("then"):
         return False
-    return not any(_first_word(text) in GATE_ENDS_BRANCH for text in segments[first + 2:last + 1])
+    if words[1:2] == ["!"]:
+        return (first + 2 < last and ends[first + 1] in (";", "\n") and _first_word(segments[first + 2]) == "fi"
+                and _stops(_first_word(segments[first + 1]), blocks, first, last))
+    return not any(_first_word(text) in BRANCH_ENDS for text in segments[first + 2:last + 1])
 
 
-def _delete_is_gated(segments, ends, first: int, last: int) -> bool:
+def _push_failure_stops(segments, ends, blocks, first: int, last: int) -> bool:
     """True when a failed archive push in segment `first` stops the chain before the delete in segment `last`."""
-    reach = first
+    at = first   # a push that ends its brace group `{ push; }` has the group's own end
+    if ends[at] in (";", "\n") and at + 1 < len(segments) and segments[at + 1].lstrip().startswith("}"):
+        at += 1
+    reach = at
     while reach < len(ends) and ends[reach] == "|":
         reach += 1
     if reach >= last:
         return False   # the delete runs in the archive push's own pipeline
     errexit, pipefail = _shell_options(segments, first)
-    if reach > first and not pipefail:
+    if reach > at and not pipefail:
         return False   # a pipe reports its last command's status, not the push's
-    if all(ends[k] == "&&" or (ends[k] == "|" and (k > first or pipefail)) for k in range(first, last)):
+    if all(ends[k] == "&&" or (ends[k] == "|" and (k > at or pipefail)) for k in range(at, last)):
         return True
-    if ends[first] == "||":
-        return last > first + 1 and _first_word(segments[first + 1]) in GATE_EXITS
+    if ends[at] == "||":
+        after = at + 1
+        if after >= last:
+            return False
+        if not segments[after].lstrip().startswith("{"):
+            return _stops(_first_word(segments[after]), blocks, first, last)
+        close = _group_end(segments, after)   # `|| { echo failed; exit 1; }` ends in its last command
+        return close is not None and close < last and _stops(_first_word(segments[close - 1]), blocks, first, last)
     if errexit and ends[reach] in (";", "\n"):
         return True
-    return _if_gates(segments, ends, first, last)
+    return _if_stops(segments, ends, blocks, first, last)
 
 
-def archive_gate_hits(segments, ends):
+def archive_delete_hits(segments, ends):
     """The deletes that follow an archive push of their branch with nothing to stop the chain, each as
     `<name> deleted after its archive push`. `ends` is what `split_segments` filled in. A second reading
-    of the text (contractions as text) follows the first in both lists, and each is judged alone."""
+    of the text (contractions as text) follows the first in both lists, and each is judged alone. An
+    archive push whose branch word holds a `$` variable pairs with any later delete: its names are unknown."""
     if len(segments) != len(ends):
         return []
     hits = []
@@ -928,39 +996,46 @@ def archive_gate_hits(segments, ends):
     for stop in [number + 1 for number, end in enumerate(ends) if end == ""]:
         reading, closes = segments[start:stop], ends[start:stop]
         start = stop
+        blocks = _blocks(reading)
         archives = []   # (segment number, names), in order
         for number, segment in enumerate(reading):
-            for kind, names in _gate_events(segment):
+            for kind, names in _push_events(segment):
                 if kind == "archive":
                     archives.append((number, names))
                     continue
                 for name in sorted(names):
-                    paired = [at for at, found in archives if at < number and name in found]
-                    if paired and not _delete_is_gated(reading, closes, paired[-1], number):
+                    paired = [at for at, found in archives
+                              if at < number and (name in found or any("$" in each for each in found))]
+                    if paired and not _push_failure_stops(reading, closes, blocks, paired[-1], number):
                         hits.append(name + " deleted after its archive push")
     return hits
 
 
-GATE_REASON = (
-    "Rule (shared-trees-archive-then-delete, decision archive-gates-delete): this delete can run after "
-    "its archive push failed, which loses the branch with no copy. "
+ARCHIVE_DELETE_REASON = (
+    "archive-then-delete: this delete can run after its archive push failed, which loses the branch with "
+    "no copy (rule shared-trees-archive-then-delete, decision archive-then-delete). "
     "Remedy: run the delete only when the archive push has succeeded. Join the two with `&&`, "
     "or put the push in an `if` condition, or add `|| exit` after the push."
 )
 
 
 def zsh_modifier_hits(segments):
-    """Each word of a `git push` that holds an unbraced `$name:` and a letter. Single-quoted text is not read."""
+    """Each word of a `git push` that holds an unbraced `$name:` and a letter. Only git push calls are
+    read, through `git_calls` and `_push_parse`. Single-quoted text is no expansion, so it is not read."""
     hits = []
     for segment in segments:
-        words = SINGLE_QUOTED.sub(" ", push_text(segment)).split()
-        if "push" in words:
-            hits += [word for word in words[words.index("push") + 1:] if ZSH_MODIFIER.search(word)]
+        open_text = SINGLE_QUOTED.sub(" ", segment)
+        for subcommand, args in git_calls(push_text(segment)):
+            if subcommand != "push":
+                continue
+            _f, _m, _e, _i, _u, _l, _d, _up, remote, plain = _push_parse(args)
+            hits += [word for word in [remote] + plain
+                     if ZSH_MODIFIER.search(word) and word in open_text]
     return hits
 
 
 ZSH_REASON = (
-    "Rule (zsh manual, Parameter Expansion, Modifiers; decision archive-gates-delete): zsh reads a letter "
+    "Rule (zsh manual, Parameter Expansion, Modifiers; decision archive-then-delete): zsh reads a letter "
     "after `$name:` as a modifier (`:r`, `:a`, `:e`), so the word sent to git changes. "
     "Remedy: write the name in braces, `${name}:`."
 )

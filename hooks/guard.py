@@ -79,10 +79,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
                        (rm-after-cd-names-absolute-path)
-  archive-gates-delete deny. A remote branch delete after an archive push of the same branch whose
-                       failure does not stop the chain first. (archive-gates-delete)
+  archive-then-delete deny. A remote branch delete after an archive push of the same branch whose
+                       failure does not stop the chain first. (archive-then-delete)
   zsh-var-modifier     deny. An unbraced `$name:` and a letter in a git push word, which zsh reads as
-                       a modifier. (archive-gates-delete)
+                       a modifier. (archive-then-delete)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
@@ -376,8 +376,8 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, GATE_REASON, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, ZSH_REASON, archive_gate_hits, cmd_exe_delete_hit, delete_text,
+            DELETE_REASON, DESTRUCTIVE_DELETE, ARCHIVE_DELETE_REASON, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
+            PUSH_REASON, PUSH_STRAY_REASON, ZSH_REASON, archive_delete_hits, cmd_exe_delete_hit, delete_text,
             linked_nm_hit, parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
             zsh_modifier_hits,
         )
@@ -3490,14 +3490,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
     # 3b2. Before the push asks below, so a pending ask never pre-empts these two denials. POSIX only:
-    # the `$name:` and `&&` forms are bash and zsh syntax (decision archive-gates-delete).
+    # the `$name:` and `&&` forms are bash and zsh syntax (decision archive-then-delete).
     if not POWERSHELL_CALL[0]:
         hits = zsh_modifier_hits(nm_segments)
         if hits:
             refuse(tool, "deny", "zsh-var-modifier", ZSH_REASON, "; ".join(hits))
-        hits = archive_gate_hits(nm_segments, ends)
+        hits = archive_delete_hits(nm_segments, ends)
         if hits:
-            refuse(tool, "deny", "archive-gates-delete", GATE_REASON, "; ".join(hits))
+            refuse(tool, "deny", "archive-then-delete", ARCHIVE_DELETE_REASON, "; ".join(hits))
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
