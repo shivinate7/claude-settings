@@ -119,8 +119,9 @@ WORKTREE_PRUNE_ASK_REASON = (
 # HEAD`: with the worktree's own log missing, git falls back to the clone's logs, and the rule
 # must read that as "no evidence". The git directory comes from the one `rev-parse` call; the log
 # and the HEAD file are read as files, so the reflog and the detached check cost no git call.
-# A commit makes at most five git calls: rev-parse, the ancestor test, the staged paths
-# (diff-index), what the branch changed (diff-tree), and, for `-a` or named paths, hash-object.
+# A commit makes at most five git calls: rev-parse, the ancestor test, what the branch changed
+# (diff-tree), the staged paths (diff-index, not for named paths), and, for `-a` or named paths,
+# one hash-object of the changed paths' work-tree copies.
 
 # `commit` options that take a value in the next word (or glued to a short flag).
 COMMIT_VALUE_FLAGS = {
@@ -142,7 +143,7 @@ def commit_scope(args):
         if skip:
             skip = False
             continue
-        if ended or not arg.startswith("-") or arg == "-":
+        if arg == "-" or ended or not arg.startswith("-"):
             paths.append(arg)
         elif arg == "--":
             ended = True
@@ -247,10 +248,12 @@ def stale_tree_hit(where, args) -> str:
     if ancestor is None or ancestor.returncode != 0:
         return ""                         # a squash or a reset back: not a move forward
     every, include, paths = commit_scope(args)
-    changed = _raw_pairs(top, ["diff-tree", "-r", "-z", "--no-abbrev", moved, head])
+    # Named paths commit only those paths' work-tree copies, so the move is read for them alone.
+    spec = ["--", *paths] if paths else []
+    changed = _raw_pairs(where, ["diff-tree", "-r", "-z", "--no-abbrev", moved, head, *spec])
     if not changed:
         return ""
-    if every or include or not paths:
+    if include or every or not paths:
         staged = _raw_pairs(top, ["diff-index", "--cached", "-r", "-z", "--no-abbrev", head])
         if staged is None:
             return ""
@@ -258,21 +261,20 @@ def stale_tree_hit(where, args) -> str:
             if name in changed and index_sha == changed[name][0]:
                 return name
     if every or paths:
-        spec = ["--", *paths] if paths else []
-        dirty = _raw_pairs(where, ["diff-index", "-r", "-z", "--no-abbrev", head, *spec])
-        names = [name for name in (dirty or {}) if name in changed]
+        # `-a` takes the work-tree copy of every path HEAD still tracks; a path the move added
+        # is judged by the index read above.
+        names = [name for name, (before, after) in changed.items() if after and (before or paths)]
         files = [name for name in names if os.path.isfile(os.path.join(top, name))]
-        if names:
-            shas = []
-            if files:
-                hashed = _git(top, "hash-object", "--", *files)
-                if hashed is None or hashed.returncode != 0:
-                    return ""
-                shas = hashed.stdout.split()
-            present = dict(zip(files, shas))
-            for name in names:
-                if present.get(name, "") == changed[name][0]:
-                    return name
+        shas = []
+        if files:
+            hashed = _git(top, "hash-object", "--", *files)
+            if hashed is None or hashed.returncode != 0:
+                return ""
+            shas = hashed.stdout.split()
+        present = dict(zip(files, shas))
+        for name in names:
+            if present.get(name, "") == changed[name][0]:
+                return name
     return ""
 
 
