@@ -80,7 +80,7 @@ class Dropped(Stop):
     """The silent-undo check found a dropped line."""
 
 class RoundOwed(Stop):
-    """The third-round gate found a lane that owes its third round. Preview prints it as one BLOCKED line, as it does a Dropped."""
+    """The round-3 check found a lane that owes its third round. Preview prints it as one BLOCKED line, as it does a Dropped."""
 
 class Held(Stop):
     pass
@@ -108,7 +108,7 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
-ROUND3_CITE = "(decision hold-unsafe-after-round-3, a change to a guard or check owes its third round before it merges)"
+ROUND3_CITE = "(decision hold-unsafe-after-round-3, a change to a guard or check owes round 3 before it merges)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
@@ -2051,7 +2051,7 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None):
     """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
     the revert silently deletes its files (batch #663: the platform-ask lane lost 11 of 13 files). Refuse it before anything
     is claimed. A read that fails refuses too, unless the run has the reason flag --undo-check-unknown-ok "<reason>", which Claude may type with a reason.
-    A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, so the third-round gate reads no second time."""
+    A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, so the round-3 check reads no second time."""
     try:
         tips, dropped = read_lanes(wt, base_ref, sha)
         if tips_out is not None:
@@ -2068,51 +2068,83 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None):
                       "Instead, rebuild the integration branch from main without the lane, then run again. " + DROP_CITE)
 
 def owed_round(num, bodies, sha):
-    """-> the why when pull request `num` owes its third round for lane tip `sha`, else None. `bodies`: its record bodies, oldest first. The newest one whose Head line
-    is `sha` decides (decision pr-review-record, Q1: no record, or Guard or check no, passes). A record that names `sha` and does not parse, or is for another PR,
-    is bad and refuses: its Guard or check value is unknown, never read as no."""
+    """-> (kind, why) when pull request `num` owes its third round for lane tip `sha`, else None. `kind` picks the remedy: "held" (net value negative: the
+    owner decides, no more rounds), "net" (round 3 is done and its net-value test is owed), "round" (round 3 is owed, or the record is bad). `bodies`: its record bodies,
+    oldest first. The newest one whose Head line is `sha` decides (decision pr-review-record, Q1: no record, or Guard or check no, passes). A record that names `sha`
+    and fails to parse, or whose PR line is not `num`, is bad and refuses: its Guard or check value is unknown, never read as no."""
     mine = [b for b in bodies if re.search(rf"^Head: {sha}$", b.split("\n---\n")[0], re.M)]
     if not mine:
         return None
-    rec = parse_review(mine[-1])
-    rec = rec if rec and rec["n"] == num else None
+    parsed = parse_review(mine[-1])
+    rec = parsed if parsed and parsed["n"] == num else None
     if rec and rec["guard"] == "no":
         return None
     state, why = review_state(rec, sha)
     if rec and state == "done":
         return None
-    return why if state == "held" else f"round {REVIEW_LAST_ROUND} is owed ({why})"
+    if parsed and not rec:
+        why = f"the newest record says PR #{parsed['n']}, and it was posted on #{num}"
+    if state == "held":
+        return "held", f"is held for the owner ({why})"
+    fix = rec["fix"] if rec else None
+    if rec and state == "open" and max((i for i, *_ in rec["rounds"]), default=0) >= REVIEW_LAST_ROUND and not (fix and fix[3] != "PASS"):
+        return "net", f"has round {REVIEW_LAST_ROUND} done, and the net-value test is owed ({why})"
+    return "round", f"round {REVIEW_LAST_ROUND} is owed ({why})"
+
+def stale_guard_round(num, bodies, live):
+    """-> the why when pull request `num` has records that name none of the `live` heads (the lane tips and the pull request's own head) and its newest record has Guard or
+    check yes, else None. A push after the review made that record stale, and a stale yes does not shed the guard or check owing: round 3 is owed on the new head.
+    A stale Guard or check no passes. A newest record that does not parse owes nothing here, as a lane with no record does (decision pr-review-record, Q1)."""
+    if not bodies or any(re.search(rf"^Head: {sha}$", b.split("\n---\n")[0], re.M) for b in bodies for sha in live):
+        return None
+    rec = parse_review(bodies[-1])
+    if rec and rec["n"] == num and rec["guard"] == "yes":
+        return f"round {REVIEW_LAST_ROUND} is owed on the new head (its newest record is for head {rec['head'][:9]})"
 
 def oldest_tip_since(root, tips):
     """-> the `since` for review_comments: the oldest of `tips`' committer dates, from local git, minus one day for clock skew (a record is posted
-    after its tip is committed). A git read that fails or says nothing raises, so the gate refuses."""
+    after its tip is committed). A git read that fails or says nothing raises, so the round-3 check refuses."""
     c, out = git(root, "log", "--no-walk", "--format=%ct", *tips)
     stamps = [int(l) for l in out.split() if l.isdigit()] if not c else []
     if c or not stamps:
         raise RuntimeError(f"git could not date the lane tips: {out.splitlines()[-1] if out else 'no output'}")
     return datetime.datetime.fromtimestamp(min(stamps) - 86400, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None):
-    """The third-round gate (decision hold-unsafe-after-round-3; owner item 359 pick b). A lane is one of `tips`, the batch's lane tips; a pull request with no lane
-    tips is its own lane. Each tip is matched to a record by the record's Head line, and the PR number comes from the comment's issue. Refuse before anything is claimed
-    when a lane's newest record for its tip has Guard or check yes and is not done. Reads one thing: the repo's comments, since the oldest lane tip was committed
-    (less a day, for clock skew), or since this pull request opened when it has no tips. No open pull request is read, so a failed open-PR read cannot refuse a batch.
+ROUND_REMEDY = {"held": "Run no more rounds on a lane held for the owner: bring it to the owner.",
+                "net": "Run the net-value test on each such lane, post its record with the Net value, then run again.",
+                "round": "Get round 3 done on each such lane, post its record, then run again."}  # 3 is REVIEW_LAST_ROUND, defined further down
+
+def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread=False):
+    """The round-3 check (decision hold-unsafe-after-round-3; owner item 359 pick b). A lane is one of `tips`, the batch's lane tips, or the pull request's own head
+    (`info["head"]`, pull request `n`), which is always checked: no record names an integration head, so that adds no false alarm. Each is matched to a record by the
+    record's Head line, and the PR number comes from the comment's issue. Refuse before anything is claimed when a lane's newest record for its head has Guard or check yes
+    and is not done. A pull request whose newest record has Guard or check yes and whose records name no lane tip and not the own head is refused too (stale_guard_round).
+    Reads one thing: the repo's comments, since the oldest lane tip was committed (less a day, for clock skew), or since this pull request opened when `tips` is empty.
+    No open pull request is read, so a failed open-PR read cannot refuse a batch. `tips_unread`: the dropped-lane read failed and its reason flag lifted it, so `tips` is
+    empty because the tips were never read, and the check says so and runs on the own head alone.
     A read that fails refuses (unknown is red, READ_CITE), unless the run has the reason flag --undo-check-unknown-ok "<reason>", as refuse_dropped_lane does:
-    the same flag lifts the dropped-lane check. A lift returns its reason. `root`: a checkout that holds the tips, for their dates."""
+    the same flag lifts the dropped-lane check. A lift returns its reason. `root`: a checkout that holds the tips, for their dates.
+    The refusal's last line is its remedy, by the states found: held, net-value test owed, round 3 owed. It never prints a passing record line."""
     epoch = "1970-01-01T00:00:00Z"  # a host that cannot date the read gets every comment, never a missed record
+    if tips_unread:
+        say(f"merge: round-3 check: the lane tips were unread (the dropped-lane read failed), so it checks only the head of #{n}.")
     try:
         records = host.review_comments(oldest_tip_since(root, tips) if tips else info.get("created") or epoch)
     except Exception as e:
         if unknown_ok.strip():
-            say(f"merge: round-three gate UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
+            say(f"merge: round-3 check UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
             return unknown_ok.strip()
-        raise Liftable(f"the round-three gate could not read the lanes or their records ({type(e).__name__}: {e}).\n"
+        raise Liftable(f"the round-3 check could not read the lanes or their records ({type(e).__name__}: {e}).\n"
                        f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {READ_CITE}")
-    lanes = [(info["head"], n)] if not tips else [(t, num) for t in tips for num in sorted(records)]
-    owed = [f"#{num} (tip {sha[:9]}) changes a guard or check and {why}." for sha, num in lanes
-            for why in [owed_round(num, records.get(num, []), sha)] if why]
-    if owed:
-        raise RoundOwed(" ".join(owed) + f"\nGet round {REVIEW_LAST_ROUND} done on each lane named, post its record, then run again. {ROUND3_CITE}")
+    heads = list(dict.fromkeys([*tips, info["head"]]))
+    lanes = [(info["head"], n)] + [(t, num) for t in tips for num in sorted(records)]
+    found = [(kind, f"#{num} (tip {sha[:9]}) changes a guard or check and {why}.") for sha, num in dict.fromkeys(lanes)
+             for kind, why in [owed_round(num, records.get(num, []), sha) or (None, None)] if kind]
+    found += [("round", f"#{num} changes a guard or check and {why}.") for num in sorted(records)
+              for why in [stale_guard_round(num, records[num], heads)] if why]
+    if found:
+        kinds = [k for k in ROUND_REMEDY if any(k == f[0] for f in found)]
+        raise RoundOwed(" ".join(f[1] for f in found) + "\n" + " ".join(ROUND_REMEDY[k] for k in kinds) + f" {ROUND3_CITE}")
 
 def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropped=()):
     """Delete the lane branches on origin that the batch took in: the heads, read after the merge, that sit at a lane tip.
@@ -2769,8 +2801,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
             debt_check(wt, f"origin/{base}", host, info)
             tips = []
-            if not refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips):
-                refuse_owed_round(tips, info, n, host, unknown_ok, wt)
+            lifted = refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips)
+            refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted))
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
             current = current or stands and stands + ". The green run stands."
@@ -2919,8 +2951,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         tips = []
         lifted = refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok, tips)
         record_lift(lifts, UNDO_FLAG, lifted)
-        if not lifted:  # a lifted lane read left no tips to gate
-            record_lift(lifts, UNDO_FLAG, refuse_owed_round(tips, info, n, host, unknown_ok, wt))
+        record_lift(lifts, UNDO_FLAG, refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted)))  # a lifted lane read leaves no tips: the own head is still checked
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")

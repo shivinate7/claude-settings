@@ -55,26 +55,29 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
 - A guard or check change owes round 3 whatever its earlier verdicts or a fix check say. Round 1 or 2 PASS reads open (owner item 359 pick b, 2026-11-07 14:41 CST: skip round 3 unless the change touches a guard or check, or round 2 failed).
-- A `delete-only` change with Guard or check `yes` is done after a round 1 PASS (or a fix check PASS). With a round 1 FAIL, or a round 2, the normal path applies and round 3 is owed (decision `hold-unsafe-after-round-3`).
+- A `delete-only` change with Guard or check `yes` is done after a round 1 PASS, or after a round 1 FAIL and a fix check PASS. With a round 1 FAIL and no fix check PASS, or with a round 2, the normal path applies and round 3 is owed (decision `hold-unsafe-after-round-3`).
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
 ## The cost
 
 Counted as real `gh` calls, one call per list read however many pages it pages.
 
-- `merge <pr> --confirm`, and the preview, add the third-round gate's one read, however many pages: the repo's issue comments since the oldest lane tip was committed (less a day for clock skew, the date from local git). A PR with no lane tips reads the comments since it opened. The gate reads no open PR and no check run.
+- `merge <pr> --confirm`, and the preview, add the round-3 check's one read, however many pages: the repo's issue comments since the oldest lane tip was committed (less a day for clock skew, the date from local git). A PR with no lane tips, or whose lane tips were unread, reads the comments since it opened. The check reads no open PR and no check run. Checking the PR's own head, the stale-record rule and the remedy text add no read.
 - `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
-- The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR. The test `ReviewGateCost` pins the gate's reads.
+- The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR. The test `ReviewRoundCheckCost` pins the round-3 check's reads.
 
 ## The limits
 
 - Kind, Guard or check, and docs-only are the lane's own claims. The tool does not check paths. It does not tell a record that files an owner ruling from other docs. Kind stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
-- An integration PR has no record of its own. The gate reads its lanes' records: a lane is a tip of the batch that sits at an open PR's head, and a PR with no lane tips is its own lane. A lane with no record passes (Q1).
+- An integration PR usually has no record of its own. The round-3 check reads no open PR. It checks each lane tip of the batch and the PR's own head, and it matches each to a record by the record's Head line. A lane with no record passes (Q1).
+- A push after a review makes the record stale. When a PR's newest record has Guard or check `yes`, and no record of that PR names a lane tip or the PR's own head, the check refuses: round 3 is owed on the new head. A stale record with Guard or check `no` passes. The check ties a record to a PR only by its comment. An unrelated PR's `yes` record, inside the comment window, can therefore refuse a batch that PR is not part of.
+- When the dropped-lane read fails and `--undo-check-unknown-ok` lifts it, the lane tips are unread. The check still runs on the PR's own head, and prints that the lane tips were unread.
+- The refusal's last line is its remedy, by state. A held change (Net value `negative`) is for the owner and gets no more rounds. Round 3 done with Net value `not owed` owes the net-value test. Below round 3, round 3 is owed.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
 - One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
