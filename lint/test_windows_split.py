@@ -34,7 +34,7 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from workflow_steps import CHECKS_SUITE_JOBS, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -1860,7 +1860,7 @@ def collected_files(root):
 class CiCoverage(unittest.TestCase):
     def test_every_test_file_runs_in_a_ci_step(self):
         with open(CHECKS, encoding="utf-8") as handle:
-            commands = run_commands(handle.read())
+            commands = run_commands(gating_text(handle.read()))
         collected = set(collected_files(REPO)) if runs_collector(commands) else set()
         missing = [p for p in find_test_files(REPO) if p not in collected and not names_path(commands, p)]
         # No rename remedy: a `_test_` name is outside the scope, so a rename would hide a real test from this check.
@@ -1981,11 +1981,17 @@ def write_file(root, rel, text):
 
 
 def checks_yml(*jobs):
-    """checks.yml text. Each job is (name, runs-on, run commands)."""
+    """checks.yml text, in the layout lint/workflow_steps.py reads. A job is (name, runs-on, steps), or (name, runs-on,
+    steps, job keys): job keys are lines such as `if: false`, at 4 spaces. A step is a run command, or a list of its
+    lines: the first line is the step's first key, on the `      - ` line, and the rest are keys at 8 spaces."""
     text = "jobs:\n"
-    for name, runs_on, runs in jobs:
-        text += "  %s:\n    runs-on: %s\n    steps:\n" % (name, runs_on)
-        text += "".join("      - run: %s\n" % command for command in runs)
+    for name, runs_on, steps, *rest in jobs:
+        text += "  %s:\n    runs-on: %s\n" % (name, runs_on)
+        text += "".join("    %s\n" % key for key in (rest[0] if rest else ()))
+        text += "    steps:\n"
+        for step in steps:
+            lines = step if isinstance(step, list) else ["run: %s" % step]
+            text += "      - %s\n" % lines[0] + "".join("        %s\n" % line for line in lines[1:])
     return text
 
 
@@ -2123,6 +2129,86 @@ class CiCoverageScope(unittest.TestCase):
             self.assertIn("run step", text, "the gap report does not name the run-step remedy")
         with self.subTest("no rename"):
             self.assertNotIn("rename", text, "the gap report offers a rename for a .test.* file, which stays in scope")
+
+
+# The sentinel is tracked and named by no run step, so every gating fixture reports it. Its report shows the scan read the
+# fixture, and that is checked before any assert on GATING_FILE (P7: assert the scope before the subject).
+GAP_SENTINEL = "lint/test_gap.py"
+GATING_FILE = "lint/test_x.py"
+
+
+class CiCoverageGating(unittest.TestCase):
+    """A step or job that cannot fail a pull request does not count its file as covered. Each row runs the real scan."""
+
+    def assert_gap(self, checks, reported, cause):
+        text = gap_text(make_repo(tracked=[GAP_SENTINEL, GATING_FILE], checks=checks))
+        self.assertIn(GAP_SENTINEL, text, "the scan did not report the unnamed sentinel, so it read no fixture")
+        if reported:
+            self.assertIn(GATING_FILE, text, cause)
+        else:
+            self.assertNotIn(GATING_FILE, text, cause)
+
+    def test_a_gating_step_is_reported(self):
+        # Rows: a step with continue-on-error: true, or a `${{ true }}` form (the spacing varies), or an always-false if:,
+        # with the key below or on the dash line.
+        rows = [
+            ("continue-on-error: true", ["run: python3 lint/test_x.py", "continue-on-error: true"]),
+            ("continue-on-error: ${{ true }}", ["run: python3 lint/test_x.py", "continue-on-error: ${{ true }}"]),
+            ("continue-on-error: ${{true}}", ["run: python3 lint/test_x.py", "continue-on-error: ${{true}}"]),
+            ("if: false", ["run: python3 lint/test_x.py", "if: false"]),
+            ("if: ${{ false }}", ["run: python3 lint/test_x.py", "if: ${{ false }}"]),
+            ("if: false on the dash line", ["if: false", "run: python3 lint/test_x.py"]),
+        ]
+        for label, step in rows:
+            with self.subTest(label):
+                checks = checks_yml(("checks", "ubuntu-latest", [step]))
+                self.assert_gap(checks, True, "the only step naming lint/test_x.py has %s, which cannot fail a pull "
+                                "request, yet the file counts as covered" % label)
+
+    def test_a_gating_job_is_reported(self):
+        # Rows: the job holding the only step that names the file has continue-on-error: true (or a `${{ true }}` form), or if: false.
+        rows = [
+            ("continue-on-error: true", ["continue-on-error: true"]),
+            ("continue-on-error: ${{ true }}", ["continue-on-error: ${{ true }}"]),
+            ("continue-on-error: ${{true}}", ["continue-on-error: ${{true}}"]),
+            ("if: false", ["if: false"]),
+        ]
+        for label, job_keys in rows:
+            with self.subTest(label):
+                checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_x.py"], job_keys))
+                self.assert_gap(checks, True, "the job holding the only step naming lint/test_x.py has %s, which cannot "
+                                "fail a pull request, yet the file counts as covered" % label)
+
+    def test_a_lone_quote_in_a_gating_step_name_is_reported(self):
+        # Named failure: a lone quote in a step name is text, so it must not hide the gating key below it.
+        step = ["name: Don't run it", "run: python3 lint/test_x.py", "continue-on-error: true"]
+        self.assert_gap(checks_yml(("checks", "ubuntu-latest", [step])), True,
+                        "the only step naming lint/test_x.py has continue-on-error: true after a lone quote in its name, "
+                        "which cannot fail a pull request, yet the file counts as covered")
+
+    def test_a_step_that_can_fail_a_pull_request_is_not_reported(self):
+        # Rows: a normal step; a key that is false, or a value that can be false (a matrix expression, an if: that can be
+        # true), on the step or the job; a file named by
+        # a gating and a normal step; gating text that is not a key (a comment, a run block, a quoted run).
+        block = '|\n          echo "continue-on-error: true"\n          python3 lint/test_x.py'
+        scope = "needs.scope.outputs.code == 'true'"
+        rows = [
+            ("a normal step", ["python3 lint/test_x.py"], []),
+            ("continue-on-error: false", [["run: python3 lint/test_x.py", "continue-on-error: false"]], []),
+            ("continue-on-error: a matrix expression", [["run: python3 lint/test_x.py", "continue-on-error: ${{ matrix.experimental }}"]], []),
+            ("an if: that can be true, on the step", [["run: python3 lint/test_x.py", "if: %s" % scope]], []),
+            ("an if: that can be true, on the job", ["python3 lint/test_x.py"], ["needs: scope", "if: %s" % scope]),
+            ("the file in a normal step and a gating step",
+             ["python3 lint/test_x.py", ["run: python3 lint/test_x.py", "continue-on-error: true"]], []),
+            ("a commented-out continue-on-error: true", [["run: python3 lint/test_x.py", "# continue-on-error: true"]], []),
+            ("continue-on-error: true in a run block", [block], []),
+            ("continue-on-error: true in a quoted run", ['echo "# continue-on-error: true" && python3 lint/test_x.py'], []),
+        ]
+        for label, steps, job_keys in rows:
+            with self.subTest(label):
+                checks = checks_yml(("checks", "ubuntu-latest", steps, job_keys))
+                self.assert_gap(checks, False, "%s: the step can fail a pull request, yet the file is reported as a gap"
+                                % label)
 
 
 # Node's default `node --test` patterns (Node 22), matched against a file's name and against its path under the folder
