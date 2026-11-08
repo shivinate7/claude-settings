@@ -10497,6 +10497,18 @@ add("cite-by-id: MCP create with a draft body that holds an id is allowed", "all
     body="per D12, short titles for records", **MCP_DRAFT)
 add("lane-by-slug: MCP create with a lane number in a code span is allowed", "allow",
     body="see `N16` lands", **MCP_DRAFT)
+# A raw MCP body has no shell quoting, so these bodies carry quotes, newlines and fences that a shell-quoted
+# copy of the body would break. A witness first: a draft-false create is refused here, so the payload reaches the guard.
+add("draft-pr: the MCP witness, a draft-false create, reaches the guard here", "deny", rule="draft-pr",
+    **dict(MCP_DRAFT, draft=False))
+add("cite-by-id: MCP create with an apostrophe, a double quote and a newline before a record path denies", "deny",
+    rule="cite-by-id", body='it\'s "fine"\n\ncites ' + CITE, **MCP_DRAFT)
+add("lane-by-slug: MCP create with an apostrophe beside a lane number denies", "deny", rule="lane-by-slug",
+    body="title\n\nDon't land N20", **MCP_DRAFT)
+add("lane-by-slug: MCP create with a lane number after a closed fence denies", "deny", rule="lane-by-slug",
+    body="title\n\n```\nx = 1\n```\nLane N16 lands", **MCP_DRAFT)
+add("lane-by-slug: MCP create with a lane number in a fenced block is allowed", "allow",
+    body="title\n\n```\nLane N20 lands\n```", **MCP_DRAFT)
 
 
 # ---- two readings of a lone quote. Bash

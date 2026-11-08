@@ -9,6 +9,7 @@ name alone. The transcript helpers and the run isolation come from lint/test_rep
 
     python3 lint/test_report_guard_landing.py -v
 """
+import ast
 import json
 import os
 import sys
@@ -225,6 +226,24 @@ class LandingToolHomeTests(unittest.TestCase):
                         "LANDING_TOOLS has no home in hooks/shared_names.py, so report_guard keeps its own set")
         self.assertIs(report_guard.LANDING_TOOLS, shared_names.LANDING_TOOLS,
                       "report_guard.LANDING_TOOLS is a copy, not the shared_names constant")
+
+    def test_lh_red_report_guard_keeps_no_mcp_name_literal(self):
+        # Catches: report_guard.py keeps its own literal MCP tool names, so a name added to shared_names is missed here.
+        # Scope first: the file must still name LANDING_TOOLS, by assignment or by import, or an emptied file would pass.
+        with open(os.path.join(HERE, "report_guard.py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        named = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                named.add(node.id)
+            elif isinstance(node, ast.alias):
+                named.add(node.asname or node.name)
+        self.assertIn("LANDING_TOOLS", named, "scope: report_guard.py no longer names LANDING_TOOLS")
+        hits = sorted({node.value for node in ast.walk(tree)
+                       if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                       and node.value.startswith("mcp__")})
+        self.assertEqual(hits, [], "report_guard.py keeps its own MCP tool names, not the shared_names constant: %s"
+                         % ", ".join(hits))
 
     def test_lh_green_guard_merge_and_create_names_are_landing_tools(self):
         # Allow control: every name the guard merges through, or opens a pull request through, is a landing tool.
