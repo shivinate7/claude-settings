@@ -58,7 +58,9 @@ Stop: stall_watch.py --stop
   Stop (the newest stop_hook_summary record, skipping the run after a blocked Stop). A job with no
   output file is listed once, at the first Stop after its call. With no summary, all are listed. A job closes on a <task-notification> with status completed, failed,
   killed or stopped (a user message, or a queued_command attachment record), or on the result of
-  a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
+  a TaskStop call, 'Successfully stopped task: <id>'. Only an agent reopens: a resume record (a user
+  record whose toolUseResult dict has resumedAgentId) reopens it, and the last event in transcript
+  order wins. A shell never reopens. A job with no output file is listed as
   unknown. A background agent (toolUseResult isAsync, status async_launched, agentId) is a job too: its
   transcript is <session dir>/<session stem>/subagents/agent-<id>.jsonl (else the launch's outputFile),
   and it closes as a shell does. It is not listed while a tool_use in the read window has no tool_result, read from
@@ -452,7 +454,10 @@ def scan_jobs(transcript):
                 done.discard(rid)
                 jobs.setdefault(rid, None)  # no launch in this transcript: its path is found beside the session
                 agents.add(rid)
-                began[rid] = when
+                if when is not None:  # an unreadable time keeps the launch time
+                    began[rid] = when
+                else:
+                    began.setdefault(rid, None)
             if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
                 jid = tur["backgroundTaskId"]
                 m = RESULT_PATH.search(text)
@@ -464,7 +469,6 @@ def scan_jobs(transcript):
                 jobs.setdefault(jid, out if isinstance(out, str) else None)
                 agents.add(jid)
             if jid is not None:
-                done.discard(jid)
                 began.setdefault(jid, when)
                 if isinstance(content, list):
                     job_call.setdefault(jid, next(

@@ -125,7 +125,9 @@ notice (completed, failed, killed or stopped) closes an agent only until a later
 resume is a `user` record whose `toolUseResult` dict holds `resumedAgentId` (a SendMessage result). A
 queued delivery has none, and text quoted in a tool result is never read. Transcript order decides: a
 launch or resume opens, a notice or TaskStop closes, and the last wins. A resumed id with no launch in
-this transcript is running. The resume record's time is the job's start time.
+this transcript is open: it is listed when its transcript beside the session is quiet, and as unknown
+when none is found. Only an agent reopens; a shell stays closed. The resume record's time is the job's
+start time, unless it is unreadable: then the launch time stays.
 An agent stuck inside one tool call is never listed: an open call has no age cap. A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
 (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
 
