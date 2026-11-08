@@ -77,8 +77,10 @@ report label, or after "; " or ". ". A compaction is the newest `compact_boundar
 Each line is tracked alone: any main-session reply after it that holds the line satisfies that
 demand; the current reply counts by its blockquote. A bare `Recovered:` takes the lines below it as
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
-the current Recovered line (split on ";" outside parentheses) names a whole-word source: git, page
-or digest. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
+the current Recovered line (split on ";" outside parentheses) names a source, matched ignoring case: git,
+page or digest as whole words, `commit <hex>`, `commits <hex>` or `sha <hex>` (7-40 hex characters with a digit;
+a colon or a backtick pair may sit between), `PR <n>`, `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
+`issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
 whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
 has the report shape. Cost: a scan of the records main()
 already loaded (the rewrite reads the transcript once, as before); no file, log or process.
@@ -739,7 +741,12 @@ CARRY_FORMS = {
     "Handoff gave": "`Handoff gave: <facts the handoff supplied that the summary did not>`, "
                     "or `Handoff gave: none`",
 }
-SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
+# A source word or form, matched ignoring case: git, page, digest, `commit <hex>`, `commits <hex>` or `sha <hex>` (a
+# colon or a backtick pair may sit between), `PR <n>`, `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
+# `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
+# a digit, so a word such as "commit defaced" names no source.
+SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
+                       r"|\bPR\s*#?\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
@@ -813,7 +820,7 @@ def carry_present(name, text):
 
 
 def unsourced_recovered_item(block):
-    """The first item of a Recovered line in `block` that names no git, page or digest source, else ''.
+    """The first item of a Recovered line in `block` that names no source (see SOURCE_RE), else ''.
     An item that starts with "none" or "nothing" needs no source."""
     for item in recovered_items(block) or []:
         if not NONE_ITEM_RE.match(item) and not SOURCE_RE.search(item):
@@ -1002,13 +1009,13 @@ def question_problem(records, turn, text, hook):
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
-    here = None if page == "unknown" else page.rstrip("/")
+    has_page = page != "unknown"
     for u in uses:
         inp = u.get("input")
         if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
-                and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
+                and (not has_page or layout.is_waiting_page_url(root, inp.get("url")))):
             return "", ""
-    if here is None:
+    if not has_page:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
     route = ("send_message to the writer " + writer if writer else
