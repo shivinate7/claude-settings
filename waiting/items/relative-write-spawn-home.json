@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T16:15:00Z",
+  "answeredAt": "2026-11-08T16:19:30Z",
   "context": "Goal: an agent's relative `../` write never lands outside its own checkout.\nProblem (rule): the guard keeps no home for an agent that shares its caller's checkout, so it lets every write from such an agent through. One of the two incident agents was like that, and your decision allows it.\nBased on (read): the SubagentStart hook payload carries `cwd` and `agent_type` (hooks/agent_brief.py lines 75-80), so a home could be recorded at spawn.\nBased on (assumed): at SubagentStart, an isolated agent's `cwd` may be its parent's folder, not its worktree. Unmeasured.\nBased on (measured): this container's guard.log holds 167 refusals today: 97 other-checkout, 4 an agent's cd into the primary, 1 worktree-home. Its lines carry no working folder or agent id, so no option can be replayed against them (lane, 10:12 CST Nov 8).\nDeparts from: main, where an agent with no recorded home may write anywhere \u2014 each option narrows that in its own way.\nMeanwhile: #1984 holds, and the lane works on the guard-quoted-args-data fix check.",
   "home": "guard-relative-write-escape",
   "id": "relative-write-spawn-home",
@@ -31,7 +32,8 @@
   "owner": "lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn)",
   "pick": "c",
   "ref": "PR #1984; replaces item 416; step guard-relative-write-escape",
+  "reply": "You picked c (10:19 CST Nov 8). #1984 merges without the shared-checkout part; option a becomes a step whose first act measures SubagentStart's cwd. Routed to lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn); home: step guard-relative-write-escape. Closed 10:21 CST Nov 8.",
   "short": "Stray ../ write: agents with no home",
-  "status": "open",
+  "status": "closed",
   "title": "How should the guard stop a stray ../ write by an agent that shares its caller's checkout?"
 }

@@ -1,0 +1,11 @@
+{
+  "title": "Record a home for every agent at spawn, after measuring SubagentStart's working folder",
+  "why": "Owner item 425 c: the reviewer form of the stray ../ write incident stays open until each agent that shares its caller's checkout has a recorded home.",
+  "note": "Filed 10:20 CST Nov 8 from owner item 425 c. First act: measure SubagentStart's cwd for an isolated agent and for a shared-checkout agent. Then design option a from item 425 (hooks/agent_brief.py lines 75-80 read the payload). Watch: a reviewer's cd to a scratchpad or /tmp must not become a false alarm.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 727,
+  "updatedAt": "2026-11-08T10:20:00-06:00"
+}
