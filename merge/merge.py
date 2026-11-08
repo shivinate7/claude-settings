@@ -822,13 +822,13 @@ class Host:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def review_comments(self, since):
-        """-> {PR number: [review record bodies, oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
+        """-> {PR number: [(created_at, review record body), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
         when the review record marker is its whole first line. The number comes from the comment's issue_url. A failed read is a Stop."""
         found = {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
             if m and review_marked(body):
-                found.setdefault(int(m.group(1)), []).append(body)
+                found.setdefault(int(m.group(1)), []).append((c.get("created_at"), body))
         return found
 
     def open_heads(self):
@@ -3078,23 +3078,41 @@ def review_marked(text):
     return [line.rstrip() for line in text.splitlines()[:1]] == [REVIEW_MARKER]
 
 
-def parse_review(text):
+_stamp_since = {}
+
+def review_stamp_since(root, base):
+    """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/`base` whose merge/merge.py holds `REVIEW_STAMP_SALT =`,
+    or None when there is none or the read fails. One call per (root, base) in a process. A record created before this time may carry no Stamp line."""
+    key = (root, base)
+    if key not in _stamp_since:
+        c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%ct", f"origin/{base}", "--", "merge/merge.py")
+        first = out.split()[:1]
+        _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[0]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                             if not c and first and first[0].isdigit() else None)
+    return _stamp_since[key]
+
+def parse_review(text, created=None, cutover=None):
     """-> {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
     malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. The `Stamp: <16 hex>` line between Net value and
-    the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. Trailing whitespace on a line and trailing blank lines are allowed. The
+    the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. A body with no Stamp line still parses when its
+    comment's `created` time is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
+    as for a new post, the Stamp line is required. Trailing whitespace on a line and trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = [line.rstrip() for line in text.splitlines()]  # trailing spaces and CRLF are no part of a line, the marker's included
     if "---" in lines:
         lines = lines[:lines.index("---")]
     while lines and not lines[-1].strip():
         lines.pop()
-    if len(lines) < 8 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
+    if len(lines) < 7 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
         return None
-    if lines[-2] != f"Stamp: {review_stamp(lines[:-2])}":
+    if lines[-2].startswith("Stamp: "):
+        if lines[-2] != f"Stamp: {review_stamp(lines[:-2])}":
+            return None
+        lines = lines[:-2] + lines[-1:]  # the stamp is read; the fields run as before
+    elif created is None or (cutover is not None and created >= cutover):
         return None
-    lines = lines[:-2] + lines[-1:]  # the stamp is read; the fields run as before
     pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
     fields = [re.fullmatch(pat, line, re.ASCII) for pat, line in zip(pats, lines[1:5])]
     net = re.fullmatch(r"Net value: (.+)", lines[-2])
@@ -3174,7 +3192,7 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-def reviewed_lines(h):
+def reviewed_lines(h, cutover=None):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request."""
@@ -3188,7 +3206,8 @@ def reviewed_lines(h):
         if not bodies:
             bare.append(f"#{n}")
             continue
-        rec = parse_review(bodies[-1])
+        created, body = bodies[-1]
+        rec = parse_review(body, created, cutover)
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
@@ -3388,7 +3407,8 @@ def main(argv, host=None, lock=None):
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
-                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
+                cutover = review_stamp_since(root, info["base"])
+                earlier = [parse_review(b, created, cutover) for created, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
@@ -3415,7 +3435,7 @@ def main(argv, host=None, lock=None):
             if not host:
                 h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
                 h.refuse_pinned_mismatch()
-            say(*reviewed_lines(h))
+            say(*reviewed_lines(h, review_stamp_since(root, h.base)))
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
             raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR. " + OFF_CITE)
