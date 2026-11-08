@@ -12982,6 +12982,33 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 8)
         self.assertNotRegex(out, r"#9\b", "the refusal names a lane that owes no round 3:\n" + out)
 
+class ReviewRoundCheckLiftedRead(ReviewRoundCheckEnv):
+    """A failed dropped-lane read, lifted by the reason flag, leaves no lane tips to check. The round-three check still runs on the pull request's
+    own head (decision hold-unsafe-after-round-3): feat's guard record at round 2 PASS owes round 3, and the refusal says the lane tips were unread.
+    The same holds for `merge 7` and for `merge 7 --confirm`."""
+
+    def unread_tips_host(self):
+        tips = lane_batch(self, "agent/lane1")
+        comments = [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))]
+        return tips, self.batch_host(tips, comments)
+
+    def test_confirm_still_refuses_on_the_pr_head_when_the_lane_tips_were_unread(self):
+        tips, host = self.unread_tips_host()
+        with self.first_lane_log_fails():
+            rc, out, before = self.run_round_check(host, "--confirm", "--undo-check-unknown-ok", "octopus read it")
+        self.assertIn("dropped-lane check UNKNOWN", out, "the scope: the lane read failed and the reason flag lifted it")
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
+        self.assertIn("unread", out, "the refusal does not say the lane tips were unread:\n" + out)
+
+    def test_preview_still_refuses_on_the_pr_head_when_the_lane_tips_were_unread(self):
+        tips, host = self.unread_tips_host()
+        with self.first_lane_log_fails():
+            rc, out, before = self.run_round_check(host, "--undo-check-unknown-ok", "octopus read it")
+        self.assertIn("dropped-lane check UNKNOWN", out, "the scope: the lane read failed and the reason flag lifted it")
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("unread", out, "the preview does not say the lane tips were unread:\n" + out)
+
 class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
     """`merge 7` with no --confirm shows the same refusal as one blocker line, and no blocker line for a lane that owes nothing."""
 
