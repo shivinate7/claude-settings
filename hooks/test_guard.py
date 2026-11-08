@@ -13487,6 +13487,8 @@ def _build_dotroot():
                         "main.py": "x = 1\n",
                         # hooks/ holds a test beside product code, as this repo's hooks/ folder does.
                         "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n",
+                        # A .ts and a .tsx beside the test, so a `*.{ts,tsx}` name filter over hooks has files to match.
+                        "hooks/guard.ts": "x = 1\n", "hooks/guard.tsx": "x = 1\n",
                         # docs/ holds no test. Its gen.py is product code, so a walk of docs reads one file.
                         "docs/gen.py": "x = 1\n"})
 
@@ -13598,6 +13600,24 @@ sh("builder-test: shell write, find hooks for *.py piped to xargs, sed -i, is re
 for _name, _command in (
     ("grep -rl over hooks, --include=*.{py,js} unquoted, sed -i", "grep -rl old hooks --include=*.{py,js} | xargs sed -i s/a/b/"),
     ("grep -rl over hooks, --include=\\*.py escaped, sed -i", r"grep -rl old hooks --include=\*.py | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+# A quoted `--include` or `-name` value with `{...}` or a backslash is a name filter too, read as the same
+# globs an unquoted one is. `*.{ts,tsx}` and `guard.{py,sh}` name only guard.ts, guard.tsx and guard.py, none a
+# test, and `guard\*.py` names no file, so each walk of hooks is allowed.
+for _name, _command in (
+    ("grep -rl over hooks, --include=\"*.{ts,tsx}\" quoted, sed -i", "grep -rl old hooks --include=\"*.{ts,tsx}\" | xargs sed -i s/a/b/"),
+    ("grep -rl over hooks, --include='guard.{py,sh}' quoted, sed -i", "grep -rl old hooks --include='guard.{py,sh}' | xargs sed -i s/a/b/"),
+    ("find hooks -name '*.{ts,tsx}', sed -i", "find hooks -name '*.{ts,tsx}' | xargs sed -i s/a/b/"),
+    ("find hooks -name with the star escaped, sed -i", r"find hooks -name 'guard\*.py' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is allowed" % _name, _command, "allow", **DR)
+# The same quoted values with a brace list that names test_a.py, so each walk of hooks is refused.
+for _name, _command in (
+    ("grep -rl over hooks, --include=\"*.{py,js}\" quoted, sed -i", "grep -rl old hooks --include=\"*.{py,js}\" | xargs sed -i s/a/b/"),
+    ("grep -rl over hooks, --include=\"test_{a,b}.py\" quoted, sed -i", "grep -rl old hooks --include=\"test_{a,b}.py\" | xargs sed -i s/a/b/"),
+    ("find hooks -name 'test_{a,b}.py', sed -i", "find hooks -name 'test_{a,b}.py' | xargs sed -i s/a/b/"),
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
