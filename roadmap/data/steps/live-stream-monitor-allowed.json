@@ -1,11 +1,11 @@
 {
   "title": "The live-stream guard allows the Monitor tool and names it in its remedy",
   "why": "Lane draft-pr-guard-text-false-alarm (session_013NEJL232Ko7dmr4v3fmrvF), from the round-2 review of #2226, 13:29 CST Nov 8: the live-stream rule in hooks/guard.py (~line 3729) refuses the Monitor tool's own first example, `tail -f <log> | grep --line-buffered ERROR`, and its remedy never names Monitor. Main does the same. Step waiter-remedy-monitor-refused covers the waiter guard, not this rule.",
-  "note": "",
+  "note": "Coordinator started its lane 13:33 CST Nov 8.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "status": "todo",
+  "status": "doing",
   "order": 809,
-  "updatedAt": "2026-11-08T13:32:00-06:00"
+  "updatedAt": "2026-11-08T13:33:00-06:00"
 }
