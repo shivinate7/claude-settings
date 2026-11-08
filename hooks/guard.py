@@ -72,6 +72,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
+  verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
+                       stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
   playwright-browsers-path, playwright-install
@@ -405,9 +407,9 @@ while True:
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
-            check_tail_hit, live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
-            narrated_tail_hit, waiter_verdict,
+            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_REASON,
+            background_end_hit, check_tail_hit, live_stream_hit, ln_descends_hit,
+            loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
@@ -3453,6 +3455,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+    matched = verdict_pipe_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
     matched = check_tail_hit(stripped, background)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
