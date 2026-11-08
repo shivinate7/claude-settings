@@ -5733,6 +5733,23 @@ sh("check-tail: lint piped to tail, then ; echo commit, is allowed",
 sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
    "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
    cwd=NOGIT)
+# Forms the roster does not yet read: a `uv run` that runs a script by its path, a script run by its
+# path, and an argparse prefix of --lane-lint or --review-record. argparse takes a prefix that matches
+# one option alone, so `merge --lane 7` runs --lane-lint. It refuses an ambiguous prefix and runs no
+# check, so `merge --l 7` (--lane-lint, --lint-unknown-ok, --live) is allowed.
+sh("check-tail: uv run runs the merge script piped to tail in the foreground is refused",
+   "uv run merge/merge.py --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a merge script run by its path piped to tail in the foreground is refused",
+   "./merge/merge.py --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane, a prefix of --lane-lint, piped to tail in the foreground is refused",
+   "merge --lane 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-l, a prefix of --lane-lint, piped to tail in the foreground is refused",
+   "merge --lane-l 7 2>&1 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --review-r, a prefix of --review-record, piped to head is refused",
+   "merge --review-r 12 --head 0123456789abcdef0123456789abcdef01234567 | head -5", "deny",
+   "check-tail", cwd=NOGIT)
+sh("check-tail: merge --l, an ambiguous prefix that argparse refuses, piped to tail is allowed",
+   "merge --l 7 | tail -3", "allow", cwd=NOGIT)
 # `uv run` runs a script operand with no interpreter word, so the script is the command word. The check
 # reads only an interpreter's operand, so these uv spellings must still be refused.
 sh("check-tail: uv run merge/merge.py --lane-lint piped to tail in the foreground is refused",
@@ -5885,6 +5902,38 @@ sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
 sh("check-tail: a verdict call with no pipe in the foreground is allowed",
    "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
+
+# A lint form run through `cd`, `python3 -m`, `-Im`, `-W ignore -m` or the merge module is still a lint run,
+# so a pipe to tail before a commit must be refused. Without that refusal the commit's lint gate is hidden.
+sh("check-tail: cd lint, then a bare lint script, piped to tail, then && commit, is refused",
+   "cd lint && ./ste_lint.py x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -m lint.ste_lint piped to tail, then && commit, is refused",
+   "python3 -m lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -Im lint.ste_lint piped to tail, then && commit, is refused",
+   "python3 -Im lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -W ignore -m lint.ste_lint piped to tail, then && commit, is refused",
+   "python3 -W ignore -m lint.ste_lint x.md | tail -3 && git commit -m x", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: python3 -m merge.merge --lane-lint piped to tail, then && commit, is refused",
+   "python3 -m merge.merge --lane-lint 7 | tail -3 && git commit -m x", "deny", "check-tail",
+   cwd=NOGIT)
+# A test runner piped to tail before a commit is not a lint run, so each control is allowed.
+sh("check-tail: python3 -m pytest piped to tail, then && commit, is allowed",
+   "python3 -m pytest | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: uv run pytest.py piped to tail, then && commit, is allowed",
+   "uv run pytest.py | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+sh("check-tail: python3 -Im pytest piped to tail, then && commit, is allowed",
+   "python3 -Im pytest | tail -3 && git commit -m x", "allow", cwd=NOGIT)
+# A comment opener in quotes, a lone apostrophe and a multi-line quote do not hide a lint pipe before a commit.
+sh("check-tail: a quoted # does not hide a lint pipe before a commit, is refused",
+   'echo "# ok"; python3 lint/ste_lint.py docs/x.md | tail -3 && git commit -m x', "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a lone apostrophe in quotes does not hide a lint pipe before a commit, is refused",
+   "echo \"don't\"; python3 lint/ste_lint.py docs/x.md | tail -3 && git commit -m x", "deny",
+   "check-tail", cwd=NOGIT)
+sh("check-tail: a lint pipe after a multi-line quote, then && commit, is refused",
+   'echo "one\ntwo"\npython3 lint/ste_lint.py docs/x.md | tail -3 && git commit -m x', "deny",
+   "check-tail", cwd=NOGIT)
 
 # =========================================================================== 2c. waiter loops
 #
