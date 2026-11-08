@@ -13410,11 +13410,11 @@ class ReviewFixCountsRound(ReviewEnv):
 
 class ReviewFixRemedies(ReviewChainFixture):
     """A refused fix check names the remedy for its own cause. The head remedy, "The reviewed head must be the Head of the newest earlier review
-    record", fits only a head refusal: a fix base that is not the newest earlier record's Head (fix_base_problem). Every other refusal names its own
-    remedy and prints no head remedy: the round floor, a failed fix slot with no FAIL line, the net value, guard and kind freeze, the ancestor read,
-    the FAIL or WIDE chain, a missing review record, and each refused --fix-base-record. Every case asserts the refusal (assert_refused), then the
-    cause it names, then the subject: the head remedy absent and the remedy's text present. Each remedy's text is written out in its case, so a
-    remedy that is blanked or swapped for another fails the case."""
+    record", fits only a head refusal: a fix base that is not the newest earlier record's Head, refused by its compare (fix_base_problem). Every other
+    refusal names its own remedy and prints no head remedy: the round floor, a failed fix slot with no FAIL line, the net value, guard and kind freeze,
+    the ancestor read, the FAIL or WIDE chain, a missing review record, each refused --fix-base-record, and fix_base_problem's unreadable layout, which
+    names the layout. Every case asserts the refusal (assert_refused), then the cause it names, then the subject: the head remedy absent and the
+    remedy's text present. Each remedy's text is written out in its case, so a remedy that is blanked or swapped for another fails the case."""
 
     HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier review record"
     FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with --round."
@@ -13443,6 +13443,25 @@ class ReviewFixRemedies(ReviewChainFixture):
         self.assert_refused(rc, out, err)
         self.assertIn("are not all record or notes files", err, "scope: the refusal is not the base rule's refusal for a code file:\n" + err)
         self.assertIn(self.HEAD_REMEDY, err, "the head refusal lost the head remedy:\n" + err)
+
+    def test_a_fix_base_whose_layout_cannot_be_read_names_the_layout_as_its_remedy(self):
+        # an unreadable layout refuses the fix base in fix_base_problem before any compare, and its remedy names the layout, not the head. The control
+        # runs the same fix base with the layout readable: the base rule's compare refuses it, and that refusal keeps the head remedy
+        import layout  # lint/layout.py, the module fix_base_problem imports
+        diffs = {(self.NEWEST, self.OTHER): compare_of("ahead", self.CODE)}
+        rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"), diffs=diffs)  # control, green on the old code
+        self.assertTrue(self.compared(host, self.NEWEST, self.OTHER), "control: the base was not compared with the newest record's Head")
+        self.assertIn("are not all record or notes files", err, "control: the readable layout did not reach the base rule:\n" + err)
+        missing = os.path.join(self.t, "no-such-layout.json")  # a path in this run's folder that holds no file
+        with unittest.mock.patch.object(layout, "LAYOUT_PATH", missing):
+            rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"))
+        self.assert_refused(rc, out, err)
+        self.assertIn("cannot be read from the layout", err, "scope: the refusal is not the unreadable layout's:\n" + err)
+        self.assertEqual(host.compare_reads, [], "scope: a compare was read before the layout, so the refusal is not the layout's")
+        self.assertIn("cannot be told from code", err, "scope: the cause sentence is not in the refusal:\n" + err)
+        remedy = err.split("cannot be told from code", 1)[1]
+        self.assertNotIn(self.HEAD_REMEDY, remedy, "the layout refusal prints the head remedy, which does not fix an unreadable layout:\n" + err)
+        self.assertIn("layout", remedy, "the layout refusal does not name the layout as its remedy:\n" + err)
 
     def test_a_record_below_the_round_floor_names_the_round_flag_as_its_remedy(self):
         # the floor is the highest round an earlier record reached, here every round. A record that carries fewer round lines is refused where it
@@ -13530,6 +13549,22 @@ class ReviewFixRemedies(ReviewChainFixture):
                                              "--round", "1:reviewer:sonnet:PASS", "--fix-check", f"{self.NEWEST}:reviewer:haiku:PASS",
                                              "--fix-base-record", url, host=host)
                 self.assert_own_remedy(rc, out, err, cause, remedy)
+
+    def test_a_pull_request_with_its_own_record_refuses_the_flag_without_the_head_remedy(self):
+        # two bases never compete: the own record takes the fix check (control, green on the old code), and the flag is refused with its cause. That
+        # refusal prints no remedy, so the head remedy must stay out of it. This case pins today's behaviour, so it passes on the old code too
+        self.set_origin("o/r")
+        own = review_comment(1, 7, record_text(head=self.NEWEST, rounds=REVIEW_PASS))
+        source = review_comment(5, 9, record_text(n=9, head=self.EARLIER, rounds=REVIEW_PASS))
+        host = self.record_host(own, source, head=self.LIVE)
+        argv = ["7", "--review-record", "--head", self.LIVE, "--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS",
+                "--fix-check", f"{self.NEWEST}:reviewer:haiku:PASS"]
+        rc, out, err = self.run_args(*argv, host=host)
+        self.assertEqual(rc, 0, "control: the own record refused its own fix check:\n" + out + err)
+        rc, out, err = self.run_args(*argv, "--fix-base-record", "https://github.com/o/r/pull/9#issuecomment-5", host=host)
+        self.assert_refused(rc, out, err)
+        self.assertIn("has a review record of its own", err, "scope: the refusal does not name its cause:\n" + err)
+        self.assertNotIn(self.HEAD_REMEDY, err, "the own-records refusal prints the head remedy, which fits only a head refusal:\n" + err)
 
 class ReviewFixBaseRecord(ReviewEnv):
     """`--fix-base-record URL` goes with --review-record and --fix-check. URL is a GitHub issue-comment link to an earlier review record, on this
