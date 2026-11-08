@@ -2031,8 +2031,19 @@ MESSAGE_ROLE_AUTHOR_REASON = (
 )
 # `make` is an edit verb (`make the fix in X`); `make X green` and `make sure` are cleared by MESSAGE_GREEN and the check
 # in _message_edits.
-MESSAGE_EDIT_VERBS = {"edit", "change", "fix", "update", "modify", "replace", "rewrite", "add", "remove", "delete",
-                      "drop", "re-point", "write", "make"}
+MESSAGE_EDIT_VERBS = {"edit", "change", "fix", "update", "modify", "replace", "rewrite", "add", "append", "remove",
+                      "delete", "drop", "re-point", "write", "make"}
+# A verb that is also a noun. After a noun phrase it is the noun (`red cases for the guard fix in X`, `the bug fix`).
+MESSAGE_NOUN_VERBS = {"fix", "update", "change"}
+# A word that opens a verb phrase, so the verb after it stays a verb (`you should fix X`, `and fix X`).
+MESSAGE_VERB_LEADS = {"to", "please", "then", "now", "also", "just", "only", "simply", "first", "next", "finally",
+                      "you", "we", "i", "they", "must", "should", "will", "can", "could", "would", "shall", "may",
+                      "might", "let's", "and", "or", "but", "so", "still", "always", "ever", "even",
+                      "not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
+# A participle right before `at` or `in` makes the path where something was seen, not what is edited
+# (`Fix the failure reported at X:120`).
+MESSAGE_LOCATOR_PARTICIPLES = {"reported", "raised", "shown", "logged", "seen", "printed", "thrown", "flagged",
+                               "listed", "found", "noted", "cited", "returned", "emitted", "named"}
 # A word before a verb that makes it a noun (`the fix`), and a word that makes the verb another agent's act.
 MESSAGE_NOT_VERB_BEFORE = {"the", "a", "an", "this", "that", "these", "those", "your", "my", "its", "their", "our",
                            "one", "no", "any", "each", "every", "some"}
@@ -2072,7 +2083,7 @@ MESSAGE_TEST_SIDE_NOUNS = {"assert", "assertion", "case", "cases", "test", "test
 MESSAGE_PRODUCT_SIDE_NOUNS = {"guard", "bug", "code", "hook", "function", "fix"}  # glossary-ok: bug is a word the messages use
 # `make it pass by changing X` is an edit of X, not a goal.
 MESSAGE_EDIT_GERUNDS = {"editing", "changing", "fixing", "updating", "modifying", "replacing", "rewriting", "adding",
-                        "removing", "deleting", "dropping", "re-pointing", "writing"}
+                        "removing", "deleting", "dropping", "re-pointing", "writing", "appending"}
 # What follows ` and ` inside one clause: another edit, or a thing to edit. Anything else starts a new clause.
 MESSAGE_AND_KEEPS = MESSAGE_EDIT_VERBS | MESSAGE_NOT_VERB_BEFORE
 MESSAGE_GREEN = {"green", "pass", "passes", "passing", "passed", "red", "fails", "failing"}
@@ -2085,6 +2096,8 @@ MESSAGE_CODE_EXT = {"py", "js", "ts", "tsx", "jsx", "mjs", "cjs", "json", "yml",
                     "cfg", "txt", "md", "mdx", "xml", "lock", "snap", "bat", "php", "vue", "svelte"}
 # A command word starts a command that runs to the clause end: a path in it is run, not edited.
 MESSAGE_COMMANDS = {"python", "python3", "node", "bash", "sh", "pwsh", "verdict", "pytest", "npm", "npx", "git"}
+# `verdict` is also a noun (`Fix the verdict in X`), so it starts a command only at the head of a clause.
+MESSAGE_HEAD_COMMANDS = {"verdict"}
 MESSAGE_FENCE = re.compile(r"```.*?```", re.S)
 # A backtick or double-quoted span of several words is a command or a quoted example: data, not an order.
 MESSAGE_SPAN = re.compile(r"`([^`\n]*)`")
@@ -2120,9 +2133,24 @@ def _message_words(clause: str):
     words, in_command = [], False
     for raw in clause.split():
         word = _message_token(raw).lower()
-        in_command = in_command or word in MESSAGE_COMMANDS
+        in_command = in_command or (word in MESSAGE_COMMANDS and (not words or word not in MESSAGE_HEAD_COMMANDS))
         words.append((word, "" if in_command else _message_path(raw), raw.endswith((",", ";", ":"))))
     return words
+
+
+def _message_noun_use(words, at: int) -> bool:
+    """True when the noun-verb at `at` (`fix`, `update`, `change`) ends a noun phrase: walking back through the words
+    before it reaches a determiner or a preposition with no verb lead, edit verb, read verb or comma on the way."""
+    if words[at][0] not in MESSAGE_NOUN_VERBS:
+        return False
+    for back in range(at - 1, -1, -1):
+        word = words[back][0]
+        if (word in MESSAGE_VERB_LEADS or word in MESSAGE_EDIT_VERBS or word in MESSAGE_READ_VERBS
+                or words[back][2] or word in MESSAGE_OTHER_ACTORS):
+            return False
+        if word in MESSAGE_NOT_VERB_BEFORE or word in MESSAGE_PREPOSITIONS:
+            return True
+    return False
 
 
 def _message_edit_verb(words, at: int) -> str:
@@ -2131,7 +2159,7 @@ def _message_edit_verb(words, at: int) -> str:
     word, before = words[at][0], words[at - 1][0] if at else ""
     ahead = words[at + 1][0] if at + 1 < len(words) else ""
     if (word not in MESSAGE_EDIT_VERBS or before in MESSAGE_NOT_VERB_BEFORE
-            or (word == "make" and ahead in ("sure", "certain"))):
+            or (word == "make" and ahead in ("sure", "certain")) or _message_noun_use(words, at)):
         return ""
     negator = words[at - 2][0] if at > 1 else ""
     if before in MESSAGE_NEGATIONS or (before in MESSAGE_NEGATED_ADVERBS and negator in MESSAGE_NEGATIONS):
@@ -2219,6 +2247,9 @@ def _message_edits(words):
                 if side:
                     anaphor.add(side)
             continue
+        if word in MESSAGE_EDIT_GERUNDS and before == "by" and kind == "edit" and not actor_seen:
+            verb_at, slot, head_open, note, test_object = at, True, True, False, False  # `make it pass by fixing X`
+            continue
         if word in MESSAGE_READ_VERBS:
             kind, verb, slot = "read", word, False
         actor_seen = actor_seen or word in MESSAGE_OTHER_ACTORS
@@ -2233,6 +2264,8 @@ def _message_edits(words):
             slot = False
             direct = joined or all(w in MESSAGE_DIRECT for w, _, _ in words[verb_at + 1:at])
             if note or _message_goal(words, at) or not (direct or before in MESSAGE_LOCATIONS):
+                continue
+            if before in ("at", "in") and at > 1 and words[at - 2][0] in MESSAGE_LOCATOR_PARTICIPLES:
                 continue
             ahead = tuple(w for w, _, _ in words[at + 1:at + 5])
             if any(ahead[:len(tail)] == tail for tail in MESSAGE_NOT_YOURS):
