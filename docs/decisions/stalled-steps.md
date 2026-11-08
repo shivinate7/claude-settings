@@ -7,7 +7,7 @@ How does a roadmap step's shown state stay true? Owner, 2026-11-06 11:39 CST: "h
 ## The ruling
 
 - `doing` is derived from live work, not typed.
-- A `doing` or `active` step with no live lane is a **stalled step**. A live lane is a session in this repo tagged `cs-step`, or an open PR on branch `<id>` or `lane/<id>`.
+- A `doing` or `active` step with no live lane is a **stalled step**. A live lane is a session in this repo tagged `cs-step` that is not completed or failed (idle and `review_ready` stay live), or an open PR on branch `<id>` or `lane/<id>`. Rulings: owner 2026-11-07 12:22 CST; coordinator 2026-11-07 12:33 CST and 14:40 CST.
 - An answered waiting-page item whose lane is gone is stalled too.
 - Each stalled step needs a disposition:
   - **resume**: a lane goes live.
