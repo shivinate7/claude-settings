@@ -4,8 +4,8 @@
   "note": "Coordinator 12:36 CST Nov 8: the fix is already on main (d77b57393, 2026-11-04); the lane adds two green tests only. Likely cause: a session ran a stale installed ~/.claude (659 commits behind at session start) or had CLAUDE_CODE_SUBAGENT_MODEL set; the lane measures which. Possible false alarm, same check (lane bg-tail-loses-verdict, session_013NEJL3ZjZdzrS8tBezxY85, 14:26 and 14:37 CST Nov 8): it said no model was named for a reviewer on Done items that named only (test-author haiku, builder sonnet) and had no reviewer; each Done item opened a draft PR whose round 1 had just started, and reviewer appeared only under Next. Guess: the check takes review roles from the whole report or the PR, not from the Done item. Workaround used: add \"reviewer haiku: round 1 is still running\" to the Done item.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "status": "todo",
+  "lane": "session_013NEJL3DwgdW1HVejfR77Se",
+  "status": "doing",
   "order": 787,
-  "updatedAt": "2026-11-08T14:37:00-06:00"
+  "updatedAt": "2026-11-08T14:38:00-06:00"
 }
