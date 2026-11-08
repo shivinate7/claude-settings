@@ -398,6 +398,13 @@ MUTATIONS = [
     ("push-owes-review-record: a branch that no longer descends from the head still counts as holding it",
      'if tip != sha:',
      'if False:', "guard", 'C13 an entry at H, then the remote branch rewritten off H'),
+    ("push-owes-review-record: the default-branch skip is dropped, so a head main holds still owes a record",
+     'if base and base.startswith("origin/"):',
+     'if False:', "guard", 'G1 the reviewer stopped at a head on main'),
+    ("push-owes-review-record: the newest entry per branch is not picked, so every unrecorded entry governs",
+     '                if newest is None or written > newest:\n                    newest, heads = written, [sha]\n'
+     '                elif written == newest:\n                    heads.append(sha)\n                break',
+     '                heads.append(sha)\n                break', "guard", 'G2 an entry at H0 never got a record'),
     ("force-push: quoted text is read as a push",
      'return PUSH_QUOTED.sub(" ", segment)', 'return segment', "guard",
      'false alarm: --force quoted in a commit message'),
