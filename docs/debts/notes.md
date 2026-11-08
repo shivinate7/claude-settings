@@ -1531,4 +1531,3 @@
 - stale-value-cite-ci-untested: no test runs a STALE008 value cite with CI=1, so its unread case (red) and its limit case (exit 0) are untested under CI. Decision: ci-unknown-is-red.
 - stale-unparseable-py-red-on-base: lint/stale_cites.py reads a touched `.py` that does not parse at base or head as an unread input, red in CI. A PR that fixes a syntax-broken `.py`, or a deliberate fixture in older or newer syntax, is red. Decision: ci-unknown-is-red.
 - code-check-before-sha-gone: actions/code-check/code_check.py is red in CI when the base sha was force-pushed away or a large unshallow passes its 120 s fetch limit. Decision: ci-unknown-is-red.
-- narration-quoted-path: lint/check_comment_narration.py may misread an extensionless changed file whose name holds non-ASCII bytes from a quoted diff path, and exit 2. Unproven, from code only. Decision: ci-unknown-is-red.
