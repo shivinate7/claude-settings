@@ -2846,8 +2846,15 @@ def brief_claim_hit(tool: str, tool_input) -> list:
     return brief_claim_gaps(tool_input.get("prompt"))
 
 
-# A done check that holds one of these runs the lint the checks job runs (rule builder-brief-code-check).
-BUILDER_CODE_CHECK_NAMES = ("merge --lane-lint", "ci-job checks --lint", "code_check.py")
+# A done check that holds one of these runs the lint the checks job runs (rule builder-brief-code-check): the merge
+# tool under any launcher, ci-job under either launcher, or the code check script itself.
+BUILDER_CODE_CHECK = re.compile(
+    r"\bmerge(?:\.cmd|\.py)?\s+--lane-lint|\bci-job(?:\.cmd)?\s+checks\s+--lint|\bcode_check\.py")
+# A done-check label opens the section that counts; the section ends at the next blank line or heading.
+BUILDER_DONE_LABEL = re.compile(
+    r"^[ \t]*[-*#]*[ \t]*(?:Done check|Done when|Proof|Check that proves)[ \t]*(?:\*\*)?[ \t]*:", re.I | re.M)
+BUILDER_SECTION_END = re.compile(r"\n[ \t]*\n|\n[ \t]*#{1,6}[ \t]")
+BUILDER_CHECKS_JOB = re.compile(r"""(["']?)checks\1[ \t]*:(?:[ \t]|#|$)""")
 BUILDER_CODE_CHECK_REASON = (
     "This builder brief names no code check, and the repo's checks job lints every head (Code check, comment "
     "narration). Add `merge --lane-lint <head>` to the builder's done check: the lint steps must pass before a "
@@ -2856,10 +2863,44 @@ BUILDER_CODE_CHECK_REASON = (
 )
 
 
+def _builder_done_text(prompt: str) -> str:
+    """The brief's done-check sections joined, or the whole brief when it carries no done-check label."""
+    prompt = prompt.replace("\r\n", "\n")
+    sections = []
+    for label in BUILDER_DONE_LABEL.finditer(prompt):
+        end = BUILDER_SECTION_END.search(prompt, label.end())
+        sections.append(prompt[label.start():end.start() if end else len(prompt)])
+    return " ".join(" ".join(sections).split()) if sections else " ".join(prompt.split())
+
+
+def _workflow_defines_checks_job(path: str) -> bool:
+    """True when the workflow file has a job `checks` directly under a top-level `jobs:`. An unreadable file is False."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return False
+    in_jobs, indent = False, None
+    for line in lines:
+        bare = line.strip()
+        if not bare or bare.startswith("#"):
+            continue
+        width = len(line) - len(line.lstrip(" "))
+        if width == 0:
+            in_jobs = re.match(r"jobs[ \t]*:[ \t]*(?:#.*)?$", line) is not None
+            indent = None
+        elif in_jobs:
+            indent = width if indent is None else indent
+            if width == indent and BUILDER_CHECKS_JOB.match(bare):
+                return True
+    return False
+
+
 def builder_code_check_hit(tool: str, tool_input, cwd) -> bool:
-    """True for an Agent or Task builder brief, spawned in a repo whose top level holds the checks workflow, that names
-    no code check. A payload with no cwd, a cwd git cannot place, or a repo with no workflow passes: unknown is
-    never a hit. A Workflow agent() call is not read."""
+    """True for an Agent or Task builder brief, spawned in a repo whose checks workflow defines a job `checks`, that
+    names no code check in its done-check section (the whole brief when it has no label). A payload with no cwd, a
+    cwd git cannot place, or a missing or unreadable workflow passes: unknown is never a hit. A Workflow agent()
+    call is not read."""
     if tool not in SPAWN_TOOLS or role_key(tool_input.get("subagent_type")) != BUILDER_ROLE:
         return False
     prompt = tool_input.get("prompt")
@@ -2868,10 +2909,9 @@ def builder_code_check_hit(tool: str, tool_input, cwd) -> bool:
     top = guard_core._git(cwd, "rev-parse", "--show-toplevel")
     if top is None or top.returncode != 0 or not top.stdout.strip():
         return False
-    if not os.path.isfile(os.path.join(top.stdout.strip(), ".github", "workflows", "checks.yml")):
+    if not _workflow_defines_checks_job(os.path.join(top.stdout.strip(), ".github", "workflows", "checks.yml")):
         return False
-    text = " ".join(prompt.split())
-    return not any(name in text for name in BUILDER_CODE_CHECK_NAMES)
+    return BUILDER_CODE_CHECK.search(_builder_done_text(prompt)) is None
 
 
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
