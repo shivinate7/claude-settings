@@ -436,6 +436,13 @@ test("control: the rail's cleanup bar draws a blocked step as blocked", async (t
   assert.equal(await page.locator(`${BARS[1][1]} > i.blk`).count(), 1, "the rail's cleanup bar does not draw the blocked step as blocked");
 });
 
+// The rail's label names the in-progress step too, as its bar draws it: barFixture has a2 in progress (the phase head's label already does).
+test("the rail's cleanup button names its in-progress steps in its label, as its bar draws them", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  assert.equal(await barActCells(page, '#rail button[data-phase="cleanup"]'), 1, "the rail's cleanup bar does not draw the in-progress step (i.act)");
+  const label = (await page.locator('#rail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  assert.match(label, /\b1 in progress\b/, `the rail's cleanup label does not name the in-progress step: "${label}"`);
+});
 // The words: the rail's label, the bars' labels and the Now card's count line name the stalled and paused steps.
 test("the rail's cleanup button names its stalled and paused steps in its label", async (t) => {
   const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
