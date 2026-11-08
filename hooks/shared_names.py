@@ -18,11 +18,11 @@ _TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
 _TERMINAL = ("completed", "failed", "killed", "stopped")
 
 
-def closed_by_notice(text: object) -> list:
+def closed_by_notice(text: object) -> list[str]:
     """The ids of the task-notification blocks in text with a terminal status."""
     if not isinstance(text, str):
         return []
-    ids = []
+    ids: list[str] = []
     for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st = _TASK_ID.search(note), _TASK_STATUS.search(note)
         if tid and st and st.group(1).strip().lower() in _TERMINAL:
@@ -30,7 +30,7 @@ def closed_by_notice(text: object) -> list:
     return ids
 
 
-def notice_closes(rec: object) -> list:
+def notice_closes(rec: object) -> list[str]:
     """The job ids a transcript record's terminal task notices close. A notice comes as a queued_command
     attachment's prompt, or in a user message: its text, or the text and string tool_result content of its blocks.
     hooks/stall_watch.py closes a job by it, and lint/report_guard.py a background agent."""
@@ -49,7 +49,7 @@ def notice_closes(rec: object) -> list:
     return closed_by_notice(content)
 
 
-def async_launch(tool_use_result: object) -> Optional[tuple]:
+def async_launch(tool_use_result: object) -> Optional[tuple[str, Optional[str]]]:
     """(agentId, outputFile or None) when a tool result record's toolUseResult is a background agent's launch:
     isAsync true, status async_launched and an agentId. Else None. The agent runs until a notice closes its id."""
     tur = tool_use_result
