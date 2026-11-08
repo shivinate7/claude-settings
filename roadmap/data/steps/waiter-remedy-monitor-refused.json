@@ -1,0 +1,11 @@
+{
+  "title": "The waiter guard allows the Monitor call its own remedy names",
+  "why": "Possible false alarm (lane draft-pr-guard-text-false-alarm, via coordinator 11:25 CST Nov 8): the waiter guard refused a Monitor call that its own remedy recommends. Reproduce first; step waiter-wait-until (ready) touches the same remedy.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "draft-pr-guard-text-false-alarm (session_013NEJL232Ko7dmr4v3fmrvF)",
+  "status": "todo",
+  "order": 754,
+  "updatedAt": "2026-11-08T11:22:00-06:00"
+}

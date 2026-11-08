@@ -1,11 +1,11 @@
 {
   "title": "test_guard's beat() uses stall_beat.beat, the one home of the beat append",
   "why": "Lane stall-watch-quiet-lint, 11:21 CST Nov 8: main's hooks/test_guard.py beat() (commit 6a983cbb7) appends to $STALL_WATCH_BEAT inline. Once #1823 merges, hooks/stall_beat.py is the one home of that append (rule building-one-home-per-capability). Merge after: #1823.",
-  "note": "",
+  "note": "Lane 11:22 CST Nov 8: started.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "stall-watch-quiet-lint (session_013NEJL2LYXQpmabnoQqYgNv)",
-  "status": "todo",
+  "status": "doing",
   "order": 753,
-  "updatedAt": "2026-11-08T11:20:00-06:00"
+  "updatedAt": "2026-11-08T11:22:00-06:00"
 }
