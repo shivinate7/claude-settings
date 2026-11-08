@@ -203,9 +203,10 @@ Other tools, in `judge` order:
                        (agent-model-cap)
   review-rounds-in-order
                        deny. A reviewer spawn whose brief carries `Round N of 3` with N 2 or 3, while a reviewer of
-                       an earlier round on the same pull request (each `#<n>` of the brief, a whole number) still runs
+                       an earlier round on the same pull request (each `#<n>`, `PR <n>` or `PR#<n>` of the brief, a whole number) still runs
                        in this session. A reviewer runs while its call has no result, or its background launch has no
-                       terminal task notice for its agentId; a foreground result and an error result do not run. It
+                       terminal task notice for its agentId and no successful TaskStop result; a foreground result and an error
+                       result do not run. It
                        reads the session transcript once per round-2 or round-3 reviewer spawn, and on no other
                        call. An unreadable transcript allows the spawn. The reason names the running round and
                        says to wait for its notification. (review-rounds-in-order)
@@ -2896,7 +2897,8 @@ def step_up_reason(prompt: str, role, model) -> str:
 # brief with no marker is the first round. The marker is read by brief_markers, the one scanner. Cost: one read of the
 # session transcript per later-round reviewer spawn, and no read on any other call. An unreadable transcript, or a failed import, allows the spawn.
 # A reviewer runs while its call has no result, or while its background launch has no terminal task notice for its
-# agentId; a foreground result and an error result (a refused spawn) mean it does not run.
+# agentId, and no successful TaskStop result for it (stall_watch stopped_ids); a foreground result and an error result
+# (a refused spawn) mean it does not run.
 ROUND_ORDER_REASON = (
     "Rule (review rounds in order): the round %s reviewer on PR #%s still runs in this session. "
     "Remedy: wait for its completion notification, then spawn this reviewer again. "
@@ -2925,18 +2927,18 @@ def round_order_hit(tool: str, tool_input, payload) -> tuple:
     if this_round < 2 or not prs or not isinstance(transcript, str) or not transcript:
         return 0, ""
     try:
-        from stall_watch import closed_by_notice  # the one reader of a completion notice
+        from stall_watch import closed_by_notice, stopped_ids  # the one readers of a completion notice and a TaskStop result
         from shared_names import TASK_NOTIFICATION_TAG
         tag = TASK_NOTIFICATION_TAG.strip("<>").encode()  # the bare name, so a notice in any form passes
-        calls, closed = {}, set()
+        calls, closed, stops = {}, set(), set()
         with open(transcript, "rb") as f:
             for line in f:
                 if tag in line:
                     pass
                 elif b"tool_result" in line:  # a result matters only for a reviewer call already seen
-                    if not any(c.encode() in line for c in calls):
+                    if not any(c.encode() in line for c in (*calls, *stops)):
                         continue
-                elif b'"Agent"' not in line and b'"Task"' not in line:
+                elif b'"Agent"' not in line and b'"Task"' not in line and b'"TaskStop"' not in line:
                     continue
                 try:
                     rec = json.loads(line)
@@ -2962,6 +2964,10 @@ def round_order_hit(tool: str, tool_input, payload) -> tuple:
                         inp = b.get("input")
                         if isinstance(inp, dict) and inp.get("subagent_type") == "reviewer" and isinstance(inp.get("prompt"), str) and isinstance(b.get("id"), str):
                             calls[b["id"]] = [_brief_round(inp["prompt"]), set(_PR_NUMBER.findall(inp["prompt"])), "open", None]
+                    elif kind == "assistant" and b.get("type") == "tool_use" and b.get("name") == "TaskStop" and isinstance(b.get("id"), str):
+                        stops.add(b["id"])
+                    elif kind == "user" and b.get("type") == "tool_result" and b.get("tool_use_id") in stops:
+                        closed.update(stopped_ids(b.get("content")))  # a stop that worked closes its agent
                     elif kind == "user" and b.get("type") == "tool_result" and b.get("tool_use_id") in calls:
                         call, tur = calls[b["tool_use_id"]], rec.get("toolUseResult")
                         if (b.get("is_error") is not True and isinstance(tur, dict) and tur.get("isAsync") is True
