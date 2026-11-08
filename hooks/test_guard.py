@@ -11573,6 +11573,13 @@ sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
    "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
 sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
    "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# The config folder's verdict wrapper (`~/.claude/bin/verdict` in a session) is a frozen path, since bin is a frozen
+# config folder. A quoted MUTATE_ONLY value that holds the word copy is text, so a test-file run under the wrapper is a read.
+CFG_VERDICT = slash(os.path.join(CFG, "bin", "verdict"))
+sh("frozen: a MUTATE_ONLY value naming a copy, then the verdict wrapper and a test-file run, is allowed",
+   'MUTATE_ONLY="worktree-home: a copy" ' + CFG_VERDICT + " python3 hooks/test_guard.py", "allow", cwd=NOGIT)
+sh("frozen: the verdict wrapper, cp onto the config settings, is refused",
+   CFG_VERDICT + " cp x " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -13497,6 +13504,12 @@ sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allow
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
    "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+# A quoted MUTATE_ONLY value that holds the word copy is text, so the run of the test file after it is a read.
+# The control is the plain redirect onto the same guard test, which a builder may never write.
+sh("builder-test: a MUTATE_ONLY value naming a copy, then a run of a test file, is allowed",
+   'MUTATE_ONLY="a copy whose source is in another checkout" python3 hooks/test_guard.py', "allow", **BR)
+sh("builder-test: echo redirect onto hooks/test_guard.py, from a builder, is refused",
+   "echo x > hooks/test_guard.py", "deny", rule=BT, carries=("test-author",), **BR)
 # A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
 # argument of a test run inside it reads as a read. A write to a test inside the script stays refused, whether
 # the write is the script's first command or a later one after `;`.
