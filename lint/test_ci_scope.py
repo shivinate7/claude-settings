@@ -12,6 +12,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
+import ast
 import os
 import shutil
 import subprocess
@@ -73,6 +74,113 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         lines = open(out).read().split()
         os.remove(out)
         return dict(l.split("=", 1) for l in lines)
+
+
+MERGE_PY = os.path.join(HERE, "..", "merge", "merge.py")
+LOADER = "_load_hooks_module"  # merge.py's by-path loader: _load_hooks_module("git_reads") loads hooks/git_reads.py
+# Files that set the merge flag with no module-level import of merge.py, on purpose. The scope script's own comments
+# give the reasons. Each is named, so a new one fails the merge-flag case, and a named one that loses its flag fails it too.
+MERGE_FLAG_OTHER = {
+    "lint/layout.py": "lint/hook_catalog.py imports it at module level, and merge.py imports hook_catalog",
+    "lint/layout.json": "lint/layout.py reads it",
+    "lint/check_silent_undo.py": "merge.py imports it inside a function",
+    "lint/_transcript.py": "hooks/decision_watch.py imports it, and merge.py imports decision_watch inside a function",
+    "lint/guard_log_report.py": "hooks/decision_watch.py imports it inside a function, and merge.py imports decision_watch inside a function",
+    "lint/_test_git.py": "every suite loads the signing helper, so its arm sets every flag",
+    "lint/_test_git.sh": "as lint/_test_git.py",
+    "lint/_test_git.mjs": "as lint/_test_git.py",
+}
+
+
+def repo_files(*dirs):
+    """-> the repo-relative paths of every file under the dirs, spelled as the scope script names them."""
+    root = os.path.join(HERE, "..")
+    out = set()
+    for d in dirs:
+        for dp, dns, fns in os.walk(os.path.join(root, d)):
+            dns[:] = [x for x in dns if x != "__pycache__"]
+            out.update(os.path.relpath(os.path.join(dp, f), root).replace(os.sep, "/") for f in fns)
+    return out
+
+
+def module_loads(source, available):
+    """-> the repo-relative files a module with this `source` loads when it is imported: each import at module level
+    (inside a top-level try or if too) that names a file in `available` under hooks/ or lint/, and each module-level
+    call of the by-path loader, LOADER("<name>"), as hooks/<name>.py. An import inside a function or class is not counted."""
+    tree = ast.parse(source)
+    inner = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            inner.update(id(n) for n in ast.walk(node))
+    names, loads = set(), set()
+    for node in ast.walk(tree):
+        if id(node) in inner:
+            continue
+        if isinstance(node, ast.Import):
+            names.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == LOADER and node.args
+              and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
+            loads.add(f"hooks/{node.args[0].value}.py")
+    loads |= {p for n in names for p in (f"hooks/{n}.py", f"lint/{n}.py") if p in available}
+    return loads
+
+
+def defines_function(source, name):
+    return any(isinstance(n, ast.FunctionDef) and n.name == name for n in ast.parse(source).body)
+
+
+def merge_flag_files(paths):
+    """-> the subset of `paths` whose scope-script run sets the merge flag (checks_windows_merge). One run per path."""
+    return {p for p in paths if run([p]).get("checks_windows_merge") == "true"}
+
+
+class ModuleLoads(unittest.TestCase):
+    """The import reader on fixtures: an empty module, then a module with each kind of import the merge-flag case must sort."""
+
+    AVAILABLE = {"hooks/_nowindow.py", "hooks/required_check.py", "hooks/git_reads.py", "lint/hook_catalog.py",
+                 "lint/check_silent_undo.py", "hooks/in_class.py"}
+
+    def test_empty_module_loads_nothing(self):
+        self.assertEqual(module_loads("", self.AVAILABLE), set())
+
+    def test_module_level_imports_and_the_loader_count_and_nothing_else(self):
+        src = (
+            "import json\n"  # no file of that name in `available`: no load
+            "try:\n    import _nowindow\nexcept ImportError:\n    _nowindow = None\n"  # a top-level try block: counts
+            "from required_check import REQUIRED_CHECK\n"
+            "from hook_catalog import RECORDS_PAGE\n"
+            "_git_reads = _load_hooks_module(\"git_reads\")\n"
+            "def inside_a_function():\n    import check_silent_undo\n    _load_hooks_module(\"in_class\")\n"  # not counted
+            "class Holder:\n    import in_class\n"  # not counted
+        )
+        self.assertEqual(module_loads(src, self.AVAILABLE),
+                         {"hooks/_nowindow.py", "hooks/required_check.py", "hooks/git_reads.py", "lint/hook_catalog.py"})
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class MergeFlagFiles(unittest.TestCase):
+    """The merge flag (checks_windows_merge) against the files merge/merge.py loads when it is imported."""
+
+    # Named failure: a hooks/ or lint/ module that merge.py loads gets no merge flag, so the merge suite does not run on
+    # its change. The scope runs one per candidate file, about 200 runs, about 9 s here.
+    def test_merge_flag_files_match_merge_module_imports(self):
+        with open(MERGE_PY, encoding="utf-8") as f:
+            src = f.read()
+        self.assertTrue(defines_function(src, LOADER), f"merge.py no longer defines {LOADER}, so its by-path loads are not read")
+        candidates = repo_files("hooks", "lint")
+        loads = module_loads(src, candidates)
+        # Scope before subject: the reader found loads, and every one is a file under hooks/ or lint/.
+        self.assertTrue(loads and loads <= candidates, f"merge.py loads {sorted(loads)}: none found, or one outside hooks/ and lint/")
+        flagged = merge_flag_files(sorted(candidates))
+        missing = loads - flagged
+        extra = flagged - loads - set(MERGE_FLAG_OTHER)
+        stale = set(MERGE_FLAG_OTHER) - flagged
+        self.assertFalse(missing, f"merge.py loads {sorted(missing)} at module level, but ci-scope.sh gives them no merge flag")
+        self.assertFalse(extra, f"ci-scope.sh gives the merge flag to {sorted(extra)}: merge.py does not load them at module level, "
+                                "and they are not in MERGE_FLAG_OTHER")
+        self.assertFalse(stale, f"MERGE_FLAG_OTHER names {sorted(stale)}, which no longer set the merge flag: delete the entry")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
