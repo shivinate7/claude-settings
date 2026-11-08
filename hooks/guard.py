@@ -129,8 +129,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        call, no subprocess, no network. An override lifts it. (pr-review-record)
   resume-finished-reviewer
                        deny. A built-in `SendMessage` from a call with no `agent_id` whose `to` names an Agent or Task
-                       spawn that has finished and ran with `isolation: "worktree"` (any role), so its worktree is
-                       gone and a resume runs with no tree. A `reviewer` or `design-reviewer` is refused with no
+                       spawn that has finished and ran in a worktree (any role), so its worktree is gone and a
+                       resume runs with no tree. A spawn ran in a worktree when its `isolation` input is `worktree`
+                       or `remote`, or, with no input, when its role file in agents/ pins one of them
+                       (`role_isolation_pin`). A `reviewer` or `design-reviewer` is refused with no
                        worktree too: a resume runs on the parent's model, which can give a wrong verdict. `to` matches the launch result's `toolUseResult.agentId` or the
                        spawn call's `name`; the latest spawn with that name wins. The state is read by
                        `_transcript.agent_state`: a foreground result, or a background launch closed by a terminal

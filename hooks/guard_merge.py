@@ -1281,17 +1281,14 @@ RESUME_MAIN = "main"
 # The `isolation` values whose tree is gone once the agent finishes. "remote" runs off this machine, so no local tree survives it.
 # The Agent input's isolation wins when it is set (the binary reads input ?? the role file's pin); else the role file's pin.
 RESUME_ISOLATIONS = ("worktree", "remote")
+# One reason for every role: it names the role, so the remedy names a fresh agent of that same role.
 RESUME_REASON = (
-    "resume-finished-reviewer: a reviewer or design-reviewer that has finished has no worktree any more, so a resume "
-    "runs with no tree, and it runs on the parent's model, which can give a wrong verdict. "
-    "Spawn a fresh reviewer and pass it the prior report. "
+    "resume-finished-reviewer: this %(role)s has finished, so it has no worktree any more and a resume runs with no "
+    "tree%(model)s. Spawn a fresh %(role)s and pass it the prior report. "
     "(rule roles-resume-by-name: when a finished agent's worktree is gone, send a fresh agent of the same role the prior report)"
 )
-RESUME_WORKTREE_REASON = (
-    "resume-finished-reviewer: this %(role)s ran in a worktree and has finished, so its worktree is gone and a resume "
-    "runs with no tree. Spawn a fresh %(role)s and pass it the prior report. "
-    "(rule roles-resume-by-name: when a finished agent's worktree is gone, send a fresh agent of the same role the prior report)"
-)
+# A reviewer or design-reviewer is refused even with no worktree: a resume runs on the parent's model.
+RESUME_MODEL_CLAUSE = ", and it runs on the parent's model, which can give a wrong verdict"
 RESUME_ASK_REASON = (
     "resume-finished-reviewer: the guard cannot tell whether this %(role)s has finished. A finished one that ran in a "
     "worktree has no worktree, so a resume runs with no tree; then spawn a fresh %(role)s and pass it the prior report. "
@@ -1368,7 +1365,8 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
     except Exception:
         return "ask", RESUME_UNPARSED_REASON, "%s with a transcript record the read cannot parse" % tool, RESUME_UNPARSED_NOTE
     if state == reader.FINISHED:
-        reason = RESUME_REASON if role in RECORD_REVIEWER_ROLES else RESUME_WORKTREE_REASON % {"role": role}
+        model = RESUME_MODEL_CLAUSE if role in RECORD_REVIEWER_ROLES else ""
+        reason = RESUME_REASON % {"role": role, "model": model}
         return "deny", reason, "%s to a finished %s" % (tool, role), ""
     if state == reader.UNKNOWN:
         return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""
