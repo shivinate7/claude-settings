@@ -5,8 +5,8 @@
 A shell `git push` is refused while a reviewer or design-reviewer report has no posted review record. Coordinator, 2026-11-07 14:38 CST and 14:53 CST. Source: the brief. Process-only.
 
 - The refusal reads the session's own transcript (`transcript_path`), also when `agent_id` is set. It never reads an agent's own file (`subagents/agent-<id>.jsonl`).
-- It needs a PR known to the session: a successful `mcp__github__create_pull_request` call, a successful Bash `gh pr create`, or a posted record.
-- A report is a Done line: `PASS|FAIL|PARTIAL, round N of 3, <model>`, or `PASS|FAIL, fix check, <model>`. Indents and markdown leads are allowed. A finding line never counts, and nor does any line inside a ``` fence.
+- It needs a PR known to the session: a successful `mcp__github__create_pull_request` call, a successful Bash or PowerShell `gh pr create`, or a posted record. A shell call counts only when `gh pr create` is a command it runs. The command is read with the push path's own parsers (heredoc bodies dropped, `split_segments`, `segment_tokens`, `command_indexes`, `inner_commands`). A mention in a `grep` or `echo`, in a `#` comment, or in a data heredoc body opens no PR. A heredoc whose header runs a command first (`python3 -c ... && cat <<'EOF' > f`) still counts: note `push-record-heredoc-header-false-alarm`.
+- A report is a Done line: `PASS|FAIL|PARTIAL, round N of 3, <model>`, or `PASS|FAIL, fix check, <model>`. Indents, markdown leads, a wrapping pair of backticks, and `**` around the verdict word or the whole line are allowed. A finding line never counts, and nor does any line inside a ``` fence.
 - A report arrives as an Agent tool result, as a `<task-notification>` (a user message or a `queued_command` attachment), or as an `<agent-message from="<agentId>">` hand-back. The hand-back maps through the `agentId: <id>` line of the Agent result.
 - A record is a successful `mcp__github__add_issue_comment` whose body `parse_review` accepts, or a successful Bash `gh pr comment` or `gh api .../comments` whose command holds the full record body (from the marker line to the CI line, parsed by `parse_review`). It clears a report when it holds a line with that report's role, verdict and round number: a `Round` line, or the `Fix check` line for a fix check (role and verdict). One record clears every report whose line it holds.
 - A dry run, a commit and a transcript that cannot be read pass.
@@ -37,6 +37,8 @@ The cases are in `hooks/test_guard.py`, section 5f-2 (family `push-needs-review-
 | Done line with a bold lead, 1500 later reads, a push from the PowerShell tool, a builder push whose parent file holds the report | deny |
 | A report whose record holds another role, another verdict, another round number, or a Fix check line for a round report | deny |
 | A PR opened by a Bash `gh pr create`, then an unrecorded report | deny |
+| A command that only names `gh pr create` (grep, echo, `#` comment, heredoc body), then an unrecorded report | allow |
+| A Done line in backticks, or with a bold verdict word, and no record | deny |
 | A record post that returned an error, or a comment that is no record | deny |
 | An unrecorded report, then a later report whose record holds only its own line | deny |
 | The PR known only from a posted record, then a later unrecorded report | deny |
@@ -64,6 +66,8 @@ The cases are in `hooks/test_guard.py`, section 5f-2 (family `push-needs-review-
 - A PR opened by another session reads as no PR, because the session's own transcript shows no call that opened it.
 - A design-reviewer fix check is not read. A record holds a Fix check line for the reviewer only.
 - A fork's `head` of the form `owner:branch` is read as `branch`.
+- A `gh pr create` that a script file runs is not read as a PR opening (a file is never opened).
+- A delete push of a fix-checked PR's head branch is denied too. Filed as a note: rare, and the cloud refuses branch deletes anyway.
 - A Bash record post whose command does not hold the record text (a body read from a file) is not a record.
 - A destination the guard cannot resolve never matches a known head, so that push passes.
 - A transcript that cannot be read, or a merge module that cannot load, passes (fail open).
