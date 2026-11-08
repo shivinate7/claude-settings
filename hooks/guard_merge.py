@@ -4,15 +4,21 @@ guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
 import fnmatch
+import importlib
 import json
 import os
 import re
+import signal
+import subprocess
 import sys
+import time
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
+import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+from git_bash import find_git_bash  # the one home of the Git Bash lookup, never the Windows WSL launcher
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
@@ -680,15 +686,19 @@ def _checked_range(where, source, tracking, memo):
     return None, source, ""
 
 
-def _red_run_module():
-    """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
-    import. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no
-    lint folder beside it. The caller reads that as no hit."""
+def _lint_module(name):
+    """A module of the lint folder beside this file's folder, the one home of that import. It waits for the
+    first push that needs it, and raises ImportError in a copy of the hooks with no lint folder beside it.
+    The caller reads that as no hit."""
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
-    import check_red_run
-    return check_red_run
+    return importlib.import_module(name)
+
+
+def _red_run_module():
+    """lint/check_red_run.py, through _lint_module."""
+    return _lint_module("check_red_run")
 
 
 def _red_run_lines(where, source, base, memo, is_test_rel):
@@ -720,6 +730,14 @@ def _red_run_lines(where, source, base, memo, is_test_rel):
     return lines
 
 
+_PUSH_RANGES = {}   # (directory, refspec) -> (source, base the range used, tracking ref), for the life of one hook process
+
+
+def _tracking_ref(remote, dest):
+    """The remote-tracking ref of a push destination (the named remote, else origin), '' for an unresolved one."""
+    return ("refs/remotes/%s/%s" % (remote or "origin", dest)) if dest else ""
+
+
 def _push_hit(segment, stripped, cwd, args, is_test_rel):
     """Return `("push", file)` for the first file a `git push` would send with all three conflict markers,
     else `("red-run", lines)` for the first ref that sends a test commit with no valid Red-run line (the
@@ -742,8 +760,9 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel):
         if colon and not source:
             continue
         source = _plain_source(source)
-        tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
+        tracking = _tracking_ref(named[0], dest)
         done, source, base = _checked_range(where, source, tracking, memo)
+        _PUSH_RANGES[(where, spec)] = (source, base, tracking)
         if done is None:
             continue
         name = _triplet_file(_kinds_of(done, where, source))
@@ -753,6 +772,308 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel):
         if lines:
             return "red-run", lines
     return "", ""
+
+
+# ---- lane-lint-push: a `git push` whose commits fail a lint step that CI runs on a pull request
+#
+# The lane lint (bin/ci-job --lint, merge --lane-lint) runs after a push, so a finding costs a replacement
+# pull request. This runs the fast steps of CI's own workflow before the push leaves, on the commits it sends.
+# A step is fast when it takes the pull request's base ref or head sha (`${{ github.base_ref }}`,
+# `${{ github.event.pull_request.head.sha }}`) in its `env:`, read from the checkout's
+# .github/workflows/checks.yml with lint/workflow_steps.py. The red-run step is skipped: _red_run_lines
+# judges it in this process. The command is the step's own `run:` text and env, never a copy.
+# Each run is one `bash -e -c` child (Git Bash on Windows). A short prefix in that child does the git reads, so
+# the guard starts no git of its own: it resolves origin's default branch (BASE_REF), the pushed ref's
+# commit (HEAD_SHA), and checks that the checkout's workflow equals the pushed head's. A pushed ref other
+# than the checked-out HEAD still gets its own sha, and its workflow is the checkout's or the run is unknown.
+# A step that takes the head sha runs on the pushed commit against origin's default branch (CI's base, never
+# the destination's tracking ref). When origin holds the destination, it runs again on the remote tip, and
+# the push is refused only for finding lines the first run prints and the second lacks, compared by text.
+# A step that takes only the base ref reads the checked-out HEAD, so it runs once with the destination as
+# its base when origin holds it (the lines the push adds), else origin's default branch.
+# A finding is a non-indented stdout line; ALLOWED and UNKNOWN lines are not. Unknown means allowed: a
+# shallow clone (a step's own `<name>: UNKNOWN` line), a workflow with no fast step, a step whose `if:` or
+# `env:` this reader cannot evaluate, a run past LANE_LINT_PUSH_SECONDS (default 40, one deadline for the
+# whole call, under the hook's own 60 s), a missing bash, an odd exit, or a tip run that is unknown when the
+# first run fails. One guard.log line and one stderr line per call say so (guard.py).
+# Not judged: a dry run, a delete, a tag, a destination `archive/*` or the record branch, and a checkout with
+# no .github/workflows/checks.yml. Limits: a commit made earlier in the same call is not in HEAD yet and is
+# not linted; a push with nothing to send still starts its runs.
+# Measured on 13 lane ranges (0 to 51 commits, 0 to 26 files): silent-undo 0.07 to 2.0 s, ruling-kind
+# 0.04 to 0.08 s, comment-narration 0.12 to 2.1 s. The guard's whole run over 7 lane tips: 0.3 to 2.5 s
+# for a new destination, 0.6 to 2.1 s for an existing one. The runs of one ref start together, so a push
+# waits for the slowest, not the sum. Budget: 10 s of lint time per push. All three steps fit.
+# Cost: no process for a call with no push, or a push the list above skips. Else per ref, one `bash`
+# child per run: one per step that takes only the base ref, and one per step that takes the head sha (two
+# when origin holds the destination); each child's own git and lint reads run inside it. The workflow is
+# read as a file, and the top folder comes from the record-branch check's read (_toplevel).
+LANE_LINT_PUSH_REASON = (
+    "Rule (Git, lane-lint-push; decision lane-lint-at-push, the lane lint before a push): this push sends commits "
+    "that fail the {step} step CI runs on them: {detail}. "
+    "Remedy: fix what each line names and commit the fix, then push again. For a silent undo, put the lines "
+    "back, or add a `Drops-lines: <path> -- <reason>` trailer to a commit message."
+)
+LANE_LINT_ENV = "LANE_LINT_PUSH_SECONDS"
+LANE_LINT_SECONDS = 40.0
+LANE_WORKFLOW = ".github/workflows/checks.yml"
+LANE_SHOWN = 3   # finding lines a refusal lists
+_LANE_SOURCES = {"github.base_ref": "base", "github.event.pull_request.head.sha": "head"}
+_LANE_EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}\Z")
+_LANE_PULL_REQUEST = "github.event_name == 'pull_request'"
+_LANE_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_LANE_UNKNOWN = re.compile(r"^[\w.-]+: UNKNOWN\b")
+_LANE_NOT_FINDING = re.compile(r"^[\w.-]+: (?:ALLOWED|UNKNOWN)\b")
+_LANE_EXITS = {   # the prefix's own exit codes, no lint step's
+    95: "the push sends a ref other than the checked-out HEAD, and this step reads HEAD",
+    96: "the pushed head's workflow differs from the checkout's",
+    97: "the pushed ref did not resolve to a commit",
+    98: "the default branch of origin could not be read",
+}
+# The default branch is origin/HEAD, else origin/main, else origin/master: the order of git_reads.read_default_base.
+# A clone made by `git init` plus `git fetch` has no origin/HEAD.
+_LANE_PREFIX = (
+    'if [ -n "$LANE_LINT_BASE" ]; then BASE_REF=$LANE_LINT_BASE\n'
+    'else\n'
+    '  BASE_REF=$(git symbolic-ref -q refs/remotes/origin/HEAD || true)\n'
+    '  BASE_REF=${BASE_REF#refs/remotes/origin/}\n'
+    '  if [ -z "$BASE_REF" ]; then\n'
+    '    for b in main master; do\n'
+    '      if git rev-parse --verify -q "refs/remotes/origin/$b^{commit}" >/dev/null; then BASE_REF=$b; break; fi\n'
+    '    done\n'
+    '  fi\n'
+    '  [ -n "$BASE_REF" ] || exit 98\n'
+    'fi\n'
+    'HEAD_SHA=$(git rev-parse --verify -q "$LANE_LINT_REF^{commit}") || exit 97\n'
+    'if [ -n "$LANE_LINT_WORKFLOW" ]; then git diff --quiet "$HEAD_SHA" -- "$LANE_LINT_WORKFLOW" || exit 96; fi\n'
+    'if [ -n "$LANE_LINT_HEAD_ONLY" ]; then [ "$(git rev-parse HEAD)" = "$HEAD_SHA" ] || exit 95; fi\n'
+)
+
+
+def _lane_unquoted(value):
+    value = value.strip()
+    return value[1:-1] if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"" else value
+
+
+def _lane_steps(text):
+    """([step], [why]) from the workflow's text: each fast step as {name, run, env, binds} (`binds` maps an env
+    name to "base" or "head"), and one why for each step that takes a pull request value but whose `if:` or
+    `env:` the guard cannot evaluate. Raises ImportError with no lint folder beside the hooks."""
+    reader = _lint_module("workflow_steps")
+    judged_elsewhere = _red_run_module().__name__
+    steps, whys = [], []
+    for block in reader.step_blocks(text):
+        binds, literal, unread = {}, {}, ""
+        for key, raw in reader.step_env(block).items():
+            value = _lane_unquoted(raw)
+            expr = _LANE_EXPR.match(value)
+            if expr:
+                which = _LANE_SOURCES.get(expr.group(1))
+                if which and _LANE_ENV_NAME.match(key):
+                    binds[key] = which
+                else:
+                    unread = unread or "the env value of %s" % key
+            elif "${{" in value:
+                unread = unread or "the env value of %s" % key
+            else:
+                literal[key] = value
+        run = reader.run_body(block)
+        if not binds or run is None or judged_elsewhere in run:
+            continue
+        name = _lane_unquoted(reader.step_key(block, "name") or "") or "unnamed"
+        cond = reader.step_key(block, "if")
+        if cond is not None:
+            held = _LANE_EXPR.match(cond.strip())
+            if (held.group(1) if held else cond.strip()) != _LANE_PULL_REQUEST:
+                unread = unread or "its if:"
+        if unread:
+            whys.append("the step %s has %s, which the guard cannot evaluate" % (name, unread))
+            continue
+        steps.append({"name": name, "run": run, "env": literal, "binds": binds})
+    return steps, whys
+
+
+def _lane_cap():
+    """Seconds the runs of one hook call may take together: LANE_LINT_ENV, else LANE_LINT_SECONDS."""
+    try:
+        value = float(os.environ.get(LANE_LINT_ENV, ""))
+    except ValueError:
+        value = 0.0
+    return value if value > 0 else LANE_LINT_SECONDS
+
+
+def _lane_start(top, bash, step, extra):
+    """The started `bash` child of one run of `step` in `top`. `extra` holds the LANE_LINT_* inputs the prefix reads."""
+    exports = "".join('export %s="$%s"\n' % (key, "BASE_REF" if which == "base" else "HEAD_SHA")
+                      for key, which in step["binds"].items())
+    env = dict(os.environ, **step["env"])
+    env.update(extra)
+    return _nowindow.Popen([bash, "-e", "-c", _LANE_PREFIX + exports + step["run"]], cwd=top,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                           encoding="utf-8", errors="replace", start_new_session=os.name != "nt", env=env)
+
+
+def _lane_stop(proc):
+    """Stop a run and what it started: the child leads its own process group on a POSIX host."""
+    try:
+        if os.name == "nt":
+            _nowindow.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=10)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.communicate(timeout=5)
+    except Exception:
+        pass
+
+
+def _lane_collect(procs, deadline, cap):
+    """([(exit code, stdout, stderr)] in order, '') once every run ended, else (None, why): a run still going at
+    `deadline` stops them all."""
+    done = []
+    for proc in procs:
+        try:
+            out, err = proc.communicate(timeout=max(deadline - time.monotonic(), 0.01))
+        except subprocess.TimeoutExpired:
+            for each in procs:
+                _lane_stop(each)
+            return None, "the lint ran past %g s" % cap
+        done.append((proc.returncode, out or "", err or ""))
+    return done, ""
+
+
+def _lane_read(result):
+    """("pass", []), ("fail", finding lines) or ("unknown", why) for one finished run."""
+    code, out, err = result
+    if code in _LANE_EXITS:
+        return "unknown", _LANE_EXITS[code]
+    rows = out.splitlines()
+    for row in rows:
+        if _LANE_UNKNOWN.match(row):
+            return "unknown", row.strip()
+    if code == 0:
+        return "pass", []
+    if code != 1:
+        return "unknown", "the lint exited %s: %s" % (code, cap_safe((err.strip().splitlines() or ["no message"])[-1], 100))
+    found = [row.strip() for row in rows if row.strip() and not row[:1].isspace() and not _LANE_NOT_FINDING.match(row)]
+    return ("fail", found) if found else ("unknown", "the lint exited 1 and printed no finding line")
+
+
+def lane_lint_push_hit(stripped: str, cwd: str, record_branch_of, read_verb, note):
+    """Return (matched, reason) for the first push whose lint fails, else None. `note(why)` is called once, when
+    a push could not be fully linted: it is allowed. `record_branch_of(root)` reads the record branch
+    (lint/layout.py) and `read_verb("push", args)` is guard.py's own test for a dry run."""
+    notes = []
+    try:
+        hit = _lane_lint_push_hit(stripped, cwd, record_branch_of, read_verb, notes)
+    except Exception as err:   # a bug here is never a reason to block a push
+        notes.append("the guard's lane-lint-push read failed (%s: %s)" % (type(err).__name__, cap_safe(str(err), 100)))
+        hit = None
+    if notes:
+        note("; ".join(dict.fromkeys(notes)))
+    return hit
+
+
+def _lane_lint_push_hit(stripped, cwd, record_branch_of, read_verb, notes):
+    deadline = None
+    cap = _lane_cap()
+    for segment in split_segments(stripped):
+        call = git_call_of(segment) if segment.strip() else None
+        if call is None or call[0] != "push" or read_verb("push", call[1]):
+            continue
+        named = push_refspecs(call[1])
+        where, overrides = push_target(segment, stripped, cwd)
+        if named is None or not where or not os.path.isdir(where):
+            continue
+        found = _toplevel(where)
+        top = os.path.normpath(found.stdout.strip()) if found is not None and found.returncode == 0 and found.stdout.strip() else ""
+        if not top:
+            continue
+        try:
+            with open(os.path.join(top, *LANE_WORKFLOW.split("/")), encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+        except OSError:
+            continue   # a checkout whose CI has no checks.yml has no lint step to run
+        try:
+            record = record_branch_of(top)
+        except Exception:
+            record = DEFAULT_RECORD_BRANCH
+        plan = None
+        for spec, dest in zip(named[1] or [""], push_destinations(call[1], where, overrides)):
+            source, colon, _target = spec.lstrip("+").partition(":")
+            if colon and not source:
+                continue
+            if dest and (dest in (record, DEFAULT_RECORD_BRANCH) or dest.startswith(("archive/", "refs/tags/"))):
+                continue
+            if source.startswith("refs/tags/"):
+                continue
+            if plan is None:
+                try:
+                    plan = _lane_steps(text)
+                except ImportError:
+                    notes.append("lint/workflow_steps.py was not found beside the hooks")
+                    break
+            steps, whys = plan
+            notes.extend(whys)
+            if not steps:
+                if not whys:
+                    notes.append("%s has no step that takes the pull request's base ref or head sha" % LANE_WORKFLOW)
+                continue
+            bash = find_git_bash()
+            if not bash:
+                notes.append("bash was not found")
+                continue
+            kept = _PUSH_RANGES.get((where, spec))
+            tracking = kept[2] if kept else _tracking_ref(named[0], dest)
+            source = kept[0] if kept else _plain_source(source)
+            held = bool(kept and tracking and kept[1] == tracking)   # origin holds the destination
+            base = dest if held and (named[0] or "origin") == "origin" else ""
+            runs = []   # (step, is the remote tip's run, the run's LANE_LINT_* inputs)
+            for step in steps:
+                mine = {"LANE_LINT_REF": source, "LANE_LINT_WORKFLOW": LANE_WORKFLOW}
+                if "head" in step["binds"].values():
+                    runs.append((step, False, mine))
+                    if held:
+                        runs.append((step, True, {"LANE_LINT_REF": tracking}))
+                else:
+                    runs.append((step, False, dict(mine, LANE_LINT_HEAD_ONLY="1", LANE_LINT_BASE=base)))
+            deadline = deadline or time.monotonic() + cap
+            procs = []
+            try:
+                for step, _tip, extra in runs:
+                    procs.append(_lane_start(top, bash, step, extra))
+            except OSError as err:
+                for each in procs:
+                    _lane_stop(each)
+                notes.append("the lint did not start (%s)" % (err.strerror or type(err).__name__))
+                continue
+            done, why = _lane_collect(procs, deadline, cap)
+            if done is None:
+                notes.append(why)
+                continue
+            for step in steps:
+                reads = [_lane_read(result) for (each, tip, _extra), result in zip(runs, done) if each is step]
+                head, tip = reads[0], reads[1] if len(reads) > 1 else None
+                if head[0] == "unknown":
+                    notes.append("%s: %s" % (step["name"], head[1]))
+                    continue
+                if head[0] == "pass":
+                    continue
+                new = head[1]
+                if tip is not None:
+                    if tip[0] == "unknown":
+                        notes.append("%s on the remote tip: %s" % (step["name"], tip[1]))
+                        continue
+                    old = set(tip[1]) if tip[0] == "fail" else set()
+                    new = [row for row in new if row not in old]
+                if new:
+                    detail = cap_safe("; ".join(new[:LANE_SHOWN]), 500) + (
+                        " and %d more" % (len(new) - LANE_SHOWN) if len(new) > LANE_SHOWN else "")
+                    return cap_safe(new[0], 120), LANE_LINT_PUSH_REASON.format(step=step["name"], detail=detail)
+    return None
 
 
 def _untracked_findings(where, top, specs):
@@ -1003,6 +1324,17 @@ def _push_calls(segment: str, script: str, cwd: str):
                 yield from _push_calls(part, text, inner_cwd)
 
 
+_TOPLEVELS = {}   # directory -> the finished `git rev-parse --show-toplevel`, for the life of one hook process
+
+
+def _toplevel(where):
+    """The finished `git rev-parse --show-toplevel` in `where`, read once per hook call: the record-branch
+    check and the lane-lint-push check share it."""
+    if where not in _TOPLEVELS:
+        _TOPLEVELS[where] = _git(where, "rev-parse", "--show-toplevel")
+    return _TOPLEVELS[where]
+
+
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
     name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
@@ -1013,7 +1345,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
                 continue
-            top = _git(where, "rev-parse", "--show-toplevel") if where else None
+            top = _toplevel(where) if where else None
             root = top.stdout.strip() if top is not None and top.returncode == 0 and top.stdout.strip() else where
             try:
                 record = record_branch_of(root)

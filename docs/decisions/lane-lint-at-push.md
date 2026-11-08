@@ -1,0 +1,23 @@
+# The lane lint's fast steps run before a push leaves
+
+## The ruling
+
+Rule `lane-lint-push` in `hooks/guard.py` refuses a `git push` when a fast step of CI's lint would fail on the commits the push sends. Its home is `lane_lint_push_hit` in `hooks/guard_merge.py`. It extends the push check that `red-run` and `conflict-markers` share. It adds no second hook. Coordinator, 2026-11-08 08:12 CST: run the lane lint, or its fast checks, before a lane's push.
+
+- The mistake: the silent-undo step failed pull request 1759 after the lane pushed it (lane lane-finds-triage). The same gap sent a test commit out with no Red-run line. A force push is the owner's act, so each such gap costs a replacement pull request.
+- The command is the step's own. `lint/workflow_steps.py` reads `.github/workflows/checks.yml` of the checkout. The guard runs each fast step's `run:` text and `env:` in a `bash -e -c` child. It copies no script name and no flag.
+- A step is fast when its `env:` takes `${{ github.base_ref }}` or `${{ github.event.pull_request.head.sha }}`. No step is picked by name. The red-run step is left out, because `red-run` judges it in the guard's own process. An `if:` other than the pull-request test, or an `env:` value that is another expression, reads unknown.
+- Scope: the commits the push sends. A step that takes the head sha runs on the pushed commit against origin's default branch, CI's base, never the destination's tracking ref. A pushed ref other than HEAD is linted by its own sha. A step that takes only the base ref reads the checked-out HEAD. It runs once, with the destination as its base when origin holds it, else the default branch. When the pushed ref is not the checked-out HEAD, it reads unknown.
+- When origin holds the destination, a head-sha step runs again on the remote tip. The push is refused only for finding lines the first run prints and the tip run lacks, compared by text. A finding origin already holds never refuses a later push. A finding is a stdout line that is not indented and is not an `ALLOWED` or `UNKNOWN` line.
+- The pushed head's workflow is the checkout's, or the run is unknown: the child compares the two files and exits with a code of its own when they differ.
+- Unknown allows, with one guard.log line and one stderr line that both say unknown. Unknown is a step's own `UNKNOWN` line (a shallow clone), a workflow with no fast step, a step the guard cannot read, a run past `LANE_LINT_PUSH_SECONDS` (default 40 s, one deadline for the call, under the hook's 60 s), no bash, an odd exit, an exit 1 with no finding line, and a tip run that is unknown when the first run fails. Why: CI still carries every step, and a check that blocks on its own fault cries wolf (`guard-that-cries-wolf-is-spent`). Never the exit code alone: `--strict` exits 1 for an `UNKNOWN`.
+- The refusal names the step and the first finding lines. The remedy: fix what each line names, or for a silent undo put the lines back or add a `Drops-lines: <path> -- <reason>` trailer. An override lifts it.
+- Not judged, no process: a dry run, a delete, a tag, a destination `archive/*` or the record branch, and a checkout with no `.github/workflows/checks.yml`.
+- Limits: a commit made earlier in the same call is not in HEAD yet, so it is not linted. A push with nothing to send still starts its runs. A repo whose `checks.yml` has no fast step gets one unknown line per push. A `bash -c` script is not read.
+- Cost: a call with no push, or a push the list above skips, starts no process. Else per pushed ref, one `bash` child per run: one per step that takes only the base ref, and one per step that takes the head sha, two when origin holds the destination. The runs of a ref start together. Each child's git reads (default branch, pushed commit, workflow compare) and the lint's own reads run inside it, so the guard starts no git of its own for them. The top folder comes from the record-branch check's read. No log, file or lasting process. Launch counts: 11 for a clean push to a new destination, 7 to an existing one, 9 for a non-push call (`hooks/test_guard_lane_lint_push.py`, cases 8a to 8c).
+- Measured, steps of this repo's workflow on the guard's full run over 7 lane tips (16 to 51 commits, 0 to 26 files each): a push to a new destination ran 0.31 to 2.47 s (median 1.00 s, n 7). A push to an existing one ran 0.61 to 2.10 s (median 0.90 s, n 7). Each step alone, same lanes: silent-undo 0.07 to 2.02 s, ruling-kind 0.04 to 0.08 s, comment-narration 0.12 to 2.13 s (n 13). Budget: 10 s of lint time per push. All three fit, so none is left out.
+
+Protected by `hooks/test_guard_lane_lint_push.py`, red before the rule landed.
+
+Kind: process
+Home: hooks/guard.py

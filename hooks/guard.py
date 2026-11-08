@@ -135,7 +135,19 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        default base holds) has a non-merge commit that adds lines to a test path and has no
                        valid `Red-run:` line, judged by `gaps` in lint/check_red_run.py. A failed read is no
                        hit. (red-run-trailer-on-test-commits)
-  frozen-path         deny. A write to the settings, hooks or global CLAUDE.md under
+  lane-lint-push       deny. A `git push` whose commits fail a fast step of the checkout's
+                       .github/workflows/checks.yml: a step whose `env:` takes `github.base_ref` or
+                       `github.event.pull_request.head.sha`, other than the red-run step (judged by
+                       red-run). The step's own `run:` text and env run in a `bash` child on the pushed
+                       commit against origin's default branch; a step that takes the head sha runs again
+                       on the remote tip when origin holds the destination, and only a finding line absent
+                       there refuses. Not judged: a dry run, a delete, a tag, a destination `archive/*` or
+                       the record branch, a checkout with no checks.yml. A workflow with no such step, a
+                       step `if:` or `env:` it cannot read, a step's own UNKNOWN line, a run past
+                       LANE_LINT_PUSH_SECONDS (40 s), an odd exit and a missing bash read as unknown:
+                       allowed, with one guard.log line and one stderr line that say unknown. An override
+                       lifts it. (lane-lint-at-push)
+  frozen-path        deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
   agent-model-cap   ask. A write to a settings file that sets or changes
@@ -383,8 +395,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, RED_RUN_PUSH_REASON, ROLE_REASON,
-            conflict_markers_hit, red_run_parts, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DRAFT_PR_REASON, LANE_LINT_PUSH_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, RED_RUN_PUSH_REASON, ROLE_REASON,
+            conflict_markers_hit, lane_lint_push_hit, red_run_parts, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -3584,6 +3596,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
+
+    # 6c3. A push whose commits fail a fast lint step of CI's workflow (rule lane-lint-push). Cost: none for a
+    # call with no push or a push it skips; else one `bash` child per lint run (see guard_merge.py, lane-lint-push).
+    def lane_lint_note(why):
+        record(tool, "noted", "lane-lint-push", "unknown: " + why)
+        print("lane-lint-push: unknown, %s. The push is allowed, not fully linted." % cap_safe(why, 300),
+              file=sys.stderr)
+
+    hit = lane_lint_push_hit(stripped, cwd, record_branch_of, read_verb, lane_lint_note)
+    if hit:
+        refuse(tool, "deny", "lane-lint-push", hit[1], hit[0])
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
