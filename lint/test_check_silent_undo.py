@@ -282,14 +282,21 @@ class PrBodyEscape(unittest.TestCase):
     # Trailer rule for the body: drop fenced blocks and <!-- --> comments first, then only the last paragraph counts.
     LINE = "Drops-lines: app.txt -- the owner wants Card back"
 
+    def verdict_for(self, body):
+        """(problems, notes) of the check on this PR body. A crash in the body reader is one named failure, never a traceback."""
+        try:
+            return C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+        except IndexError as e:
+            self.fail("the body reader raised IndexError on an empty paragraph left by a skipped block or a blank line: %s\n%r" % (e, body))
+
     def excused(self, body):
-        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+        got, notes = self.verdict_for(body)
         return got == [] and notes == ["ALLOWED app.txt: the owner wants Card back"], (got, notes)
 
     def assert_nothing_excused(self, bodies):
         for body in bodies:
             with self.subTest(body=body):
-                got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+                got, notes = self.verdict_for(body)
                 self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
                 self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
 
@@ -432,6 +439,29 @@ class PrBodyEscape(unittest.TestCase):
                                      "Summary.\n\n%s\n\n---\n%s extra\n" % (L, F),
                                      "Summary.\n\n%s\n\nNotes\n---\n%s\n" % (L, F),
                                      "Summary.\n\n%s\n\n%s\n" % (L, F)])  # no rule: not the posting footer
+
+    # A fenced block, a comment or a blank line between the last paragraph and the footer is dropped or read as blank, and
+    # that leaves an empty paragraph last. The reader must skip the empty paragraph and judge the last prose paragraph above it.
+    BLOCKS = ("<!-- reviewer note -->", "```\nlog output\n```", "   ", "\u00a0")
+
+    def test_a_trailer_above_a_skipped_block_or_blank_line_and_the_footer_excuses_its_path(self):
+        L, A, S, F = self.LINE, self.ATTR, self.SESSION, self.FOOT
+        tails = (A, "%s\n\n%s" % (A, S), "---\n%s" % F, "---\n\n%s" % F)
+        for block in self.BLOCKS:
+            for tail in tails:
+                with self.subTest(block=block, tail=tail):
+                    ok, why = self.excused("Summary.\n\n%s\n\n%s\n\n%s\n" % (L, block, tail))
+                    self.assertTrue(ok, why)
+
+    def test_prose_above_a_skipped_block_or_blank_line_and_the_footer_excuses_nothing(self):
+        L, A, S, F = self.LINE, self.ATTR, self.SESSION, self.FOOT
+        tails = (A, "%s\n\n%s" % (A, S), "---\n%s" % F)
+        bodies = []
+        for block in self.BLOCKS:
+            for tail in tails:
+                bodies.append("Summary.\n\n%s\n\n%s\n" % (block, tail))  # the last prose paragraph is "Summary."
+                bodies.append("Summary.\n\n%s\n\nClosing prose.\n\n%s\n\n%s\n" % (L, block, tail))  # and here it is "Closing prose."
+        self.assert_nothing_excused(bodies)
 
     # The CLI reads the PR body from `--pr-body <text>`, or from env PR_BODY, which CI sets from the pull request body
     # the way it sets BASE_REF and HEAD_SHA. Each positive case first shows the drop is a finding with no body.
