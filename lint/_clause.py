@@ -168,20 +168,22 @@ def sentences(text, mask):
 _ADV = ADVERB_PATTERN
 _COND_RE = re.compile(r"\b(?:%s)\b" % "|".join(CONDITIONALS), re.I)
 _NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS if w.isalpha()), re.I)
-# The writer: the one home of its lead-ins and subject words. A joiner or because may open the clause before its subject, and
-# so may a subordinator when own_subject reads it. I and we are the writer wherever they sit just before a phrase; the cloud and this session only as the
-# subject, which starts the clause: "The builder in this session is unable to push." is the builder's line, not the writer's.
+# The writer: the one home of its lead-ins and subject words. A joiner, because or a subordinator may open the clause before
+# its subject. I and we are the writer wherever they sit just before a phrase; the cloud and this session too, unless a
+# preposition (PREPOSITIONS) sits just before them: "The builder in this session is unable to push." is the builder's line.
 _WRITER = r"(?:I|we)"
 _PLACE = r"(?:the\s+cloud(?:\s+session)?|this\s+session)"
-_LEAD = "|".join(JOINERS + REASON_LINKS)
-_LEAD_RE = re.compile(r"^\W*(?:(?:%s|%s)\b\W*)?" % (_LEAD, "|".join(SUBORDINATORS)), re.I)
+_LEAD = "|".join(JOINERS + REASON_LINKS + SUBORDINATORS)
+_LEAD_RE = re.compile(r"^\W*(?:(?:%s)\b\W*)?" % _LEAD, re.I)
 _WRITER_START = re.compile(r"^\W*(?:(?:%s)\b\W*)?%s\b" % (_LEAD, _WRITER), re.I)
 WRITER_BEFORE_RE = re.compile(r"\b%s(?:\s+%s)*\s+$" % (_WRITER, _ADV), re.I)  # the text ends in the writer: "I just "
 FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|%s)\b" % _PLACE, re.I)
 _OWN_RE = re.compile(
     r"(?:^|\b%s(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re"
-    r"|^%s(?:\s+(?:is|was))?|\bhere|\bthere(?:\s+(?:is|was)|['’]s))" % (_WRITER, _PLACE)
+    r"|\bhere|\bthere(?:\s+(?:is|was)|['’]s))" % _WRITER
     + r"(?:\s+" + _ADV + r")*\s*$", re.I)
+_PLACE_END_RE = re.compile(r"\b%s(?:\s+(?:is|was))?(?:\s+%s)*\s*$" % (_PLACE, _ADV), re.I)
+_PREPOSITION_END_RE = re.compile(r"\b(?:%s)\W*$" % "|".join(PREPOSITIONS), re.I)
 _CALL_SUBJECT_RE = re.compile(r"\b(?:%s)s?\s+(?:%s\s+)*$" % ("|".join(CALL_SUBJECTS), _ADV), re.I)
 _PAST_RE = re.compile(r"^(?:could|(?:was|were)n['’]t)", re.I)
 _WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADV, re.I)
@@ -228,11 +230,15 @@ def first_words(text, count=WINDOW):
 
 
 def own_subject(before):
-    """True when the words just before a phrase end in the writer's own subject (I, we, here, there is), with the
-    auxiliary after I or we and an adverb (ADVERBS) allowed, or are the clause's own subject, which starts it (the cloud,
-    this session), or hold no subject: the phrase opens its clause. A joining word (JOINERS) or because before the subject
-    is skipped, and so is a subordinator (SUBORDINATORS). "The builder in this session is" is the builder's subject, so it is not the writer's."""
-    return bool(_OWN_RE.search(_LEAD_RE.sub("", before)))
+    """True when the words just before a phrase end in the writer's own subject (I, we, here, there is, the cloud, this
+    session), with the auxiliary after it and an adverb (ADVERBS) allowed, or hold no subject: the phrase opens its clause.
+    A joining word (JOINERS), because or a subordinator (SUBORDINATORS) before the subject is skipped. The cloud and this
+    session are no subject after a preposition (PREPOSITIONS): "The builder in this session is" is the builder's subject."""
+    text = _LEAD_RE.sub("", before)
+    if _OWN_RE.search(text):
+        return True
+    place = _PLACE_END_RE.search(text)
+    return bool(place) and not _PREPOSITION_END_RE.search(text[:place.start()])
 
 
 def check_word_counts(before, word, writer_counts=False):
