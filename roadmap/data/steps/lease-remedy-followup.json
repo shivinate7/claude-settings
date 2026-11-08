@@ -1,0 +1,11 @@
+{
+  "title": "The lease remedy names the exact command that reads your own last-pushed tip, and #1429's stale entry text is rewritten",
+  "why": "Follow-up to PR #1872 and PR #1429 (lane lease-remedy-form, coordinator-asked, 04:58 CST Nov 8): #1429's entry text \"(its remedy names the first)\" and its decision's Why line are stale; the force-push refusal names no exact command for the own last-pushed tip; a test pins only a substring of the sha sentence.",
+  "note": "Fix: (1) rewrite #1429's stale entry text and its decision's Why line; (2) the force-push refusal names the exact command that reads your own last-pushed tip; (3) the test pins the whole sha sentence. `Merge after: #1872, #1429`. Rides in lane lease-remedy-form (item 386 b). Slug from the lane. Filed 04:59 CST Nov 8.",
+  "phase": "now",
+  "status": "doing",
+  "order": 612,
+  "owner": "triage",
+  "lane": "session_013NEJL43pWHtXmcY4uquu7S",
+  "updatedAt": "2026-11-08T04:57:00-06:00"
+}
