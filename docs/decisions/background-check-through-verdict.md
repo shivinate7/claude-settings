@@ -20,8 +20,8 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 - Four more forms are read. `check-tail` and `verdict-pipe-exit` read them through the same helpers (`_script_run`, `_merge_flag`), so neither copies a roster:
   - `uv run <path>.py`: uv runs a `.py` operand as a script, so after `uv run` a command word that ends `.py` is the script (`uv run merge/merge.py --lane-lint 7 | tail`).
   - A script run straight by its path (`./lint/ste_lint.py`, `./merge/merge.py`): the command word is the script.
-  - The module form (`python3 -m lint.ste_lint`, `python3 -m merge.merge --lane-lint 7`): the module name is mapped to its path and read as a script operand. A cluster such as `-Im` is read too. A bare `-m ste_lint` names no folder, so it is not read.
-  - An argparse prefix: `merge --lane`, `--lane-l` and `--review-r` mean `--lane-lint` and `--review-record`. An ambiguous prefix (`--l` matches `--lane-lint`, `--lint-unknown-ok` and `--live`) is an argparse error and runs no check, so it passes. The option names are `MERGE_OPTIONS` in `hooks/merge_options.py`. The merge parser is checked against it on every run, and the guard reads it, so the guard never imports or runs the merge tool.
+  - The module form (`python3 -m lint.ste_lint`, `python3 -m merge.merge --lane-lint 7`): the module name is mapped to its path and read as a script operand. A cluster such as `-Im` is read too.
+  - An argparse prefix: `merge --lane`, `--lane-l` and `--review-r` mean `--lane-lint` and `--review-record`. An ambiguous prefix (`--l` matches `--lane-lint`, `--lint-unknown-ok` and `--live`) is an argparse error and runs no check, so it passes. The option names are `MERGE_OPTIONS` in `hooks/merge_options.py`. A test compares it with the options of `build_parser()` in `merge/merge.py`, and the guard reads it, so the guard never imports or runs the merge tool. No runtime check sits in the merge tool, because `--help` and `--unlock` must not depend on one.
 
 Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job` forms, at the coordinator's request (2026-11-07 18:09 CST).
 
@@ -40,7 +40,7 @@ Incident, lint forms: a lane ran `ste_lint ... | tail`, then a commit and a push
 Harm: a pipeline's exit status is its last stage's. `verdict` prints FAIL and exits non-zero, `tail` exits 0, so the `&&` after it runs. The check protects nothing.
 
 - A pipeline whose first stage is a `verdict` call (any spelling, behind any wrapper or `uv run`) and that has a later stage is refused when `&&` or `||` follows it and another command comes after. The rule id is `verdict-pipe-exit`, in `hooks/guard_stream.py`.
-- A pipeline whose first stage is a lint command run without `verdict` is refused the same way: it has a later stage, `&&` or `||` follows, and the last `set` left pipefail off. The lint commands are `ste_lint` (a script that ends `lint/ste_lint.py`, run by an interpreter, by its path, by `uv run` or as a `-m` module), `ste-changed` (any path, `.cmd` too), `ci-job` with `--lint`, and `merge --lane-lint`. They are read through the same wrappers as `check-tail`: `uv run <command>` (such as `uv run python`, `uv run ste-changed` or `uv run ci-job --lint`), `env` and the python forms. A `merge --lane-lint` pipe into `tail` or `head` is refused by `check-tail` first. The forms that reach this rule are `merge --lane-lint` piped into another filter, such as `grep`.
+- A pipeline whose first stage is a lint command run without `verdict` is refused the same way: it has a later stage, `&&` or `||` follows, and the last `set` left pipefail off. The lint commands are `ste_lint` (a script whose basename is `ste_lint.py`, so `cd lint && ./ste_lint.py x.md` counts; run by an interpreter, by its path, by `uv run` or as a `-m` module), `ste-changed` (any path, `.cmd` too), `ci-job` with `--lint`, and `merge --lane-lint`. They are read through the same wrappers as `check-tail`: `uv run <command>` (such as `uv run python`, `uv run ste-changed` or `uv run ci-job --lint`), `env` and the python forms. A `merge --lane-lint` pipe into `tail` or `head` is refused by `check-tail` first. The forms that reach this rule are `merge --lane-lint` piped into another filter, such as `grep`.
 - The rule id stays `verdict-pipe-exit`. One id names one harm, a hidden check exit, so the owner's off switch and the guard log keep one name. The reason text says the lint forms are covered.
 - It is refused in the foreground and in the background.
 - `set -o pipefail` (or a cluster such as `set -euo pipefail`) earlier in the same command passes. The last `set` that sets or clears pipefail before the pipeline decides, so `set +o pipefail` after `set -o pipefail` does not pass.
@@ -56,7 +56,7 @@ Lane `notes-fix-other-2`, 2026-11-07, about 15:15 CST. The lane backgrounded `~/
 - `verdict` avoids this: it writes a heartbeat to the beat file, so the watch sees no stall, and it keeps the full log in its own file.
 - The harm holds without that cause. `tail` holds all output until the command ends, then keeps 8 lines. A job that ends early, or is read early, shows nothing.
 
-The coordinator asked for the four forms at 00:34 CST on 2026-11-08. The owner's rule, ruled at 13:20 CST, is "a gap gets a fix, not a note".
+The coordinator asked for the four forms at 00:34 CST on 2026-11-08. The owner's rule, ruled at 13:20 CST on 2026-11-07, is "a gap gets a fix, not a note".
 
 ## Why a named roster
 

@@ -336,7 +336,7 @@ CHECK_TAIL_REASON = (
 # the guard log keep one name.
 CONTINUING_ENDS = ("&&", "||")
 PIPEFAIL_FLAGS = re.compile(r"[-+][A-Za-z]*o$")
-LINT_SCRIPT_TAIL = "lint/ste_lint.py"
+LINT_SCRIPT = "ste_lint.py"  # matched by basename: the name is unique in the repo, so a run from inside lint/ (`cd lint && ./ste_lint.py`) counts
 STE_CHANGED_COMMANDS = ("ste-changed", "ste-changed.cmd")
 
 
@@ -364,7 +364,7 @@ def _lint_stage(tokens) -> str:
     index = _skip_uv_run(tokens, index)
     word = basename(tokens[index])
     script = _script_run(tokens, index).replace("\\", "/")
-    if script.endswith(LINT_SCRIPT_TAIL):
+    if basename(script) == LINT_SCRIPT:
         return "ste_lint"
     if word in STE_CHANGED_COMMANDS:
         return word
