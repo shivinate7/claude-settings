@@ -695,7 +695,6 @@ NPM_ALIAS_WORDS = {"r"}
 # With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
 # only rewrites package.json.
 NPM_WORKSPACE_FLAGS = {"-w", "-ws"}
-NPM_VERSION_WORDS = {"version", "verison"}
 DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
 
 
