@@ -8794,6 +8794,28 @@ sh("env-child form: allow, ls -a lists the env file name, reads no contents",
 sh("env-child form: deny, find -exec cat reads the env file, the control for find -name",
    "find . -name " + ENV + " -exec cat {} \\;", "deny", "env-file", cwd=NOGIT)
 
+# A find that lists the env file and feeds its names to a reader runs the reader on the file: xargs runs cat
+# or grep on each listed name, and a $(), a backtick or a <() hands the list to a reader the same way. Each
+# form is denied. A find that counts its names with wc -l reads none of them, so that pin is allowed.
+sh("env-child form: deny, find -name with -print piped to xargs cat reads each listed env file",
+   "find . -name " + ENV + " -print | xargs cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name piped to xargs grep reads each listed env file",
+   "find . -name " + ENV + " | xargs grep KEY", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -print0 piped to xargs -0 cat reads each listed env file",
+   "find . -name " + ENV + " -print0 | xargs -0 cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a dollar-paren substitution of find -name hands the env file to cat",
+   "cat $(find . -name " + ENV + ")", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a backtick substitution of find -name hands the env file to cat",
+   "cat `find . -name " + ENV + "`", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a double-quoted dollar-paren substitution of find -name hands the env file to cat",
+   'cat "$(find . -name ' + ENV + ')"', "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a dollar-paren substitution of find -name hands the env file to source",
+   "source $(find . -name " + ENV + ")", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a process substitution of find -name feeds the env file to xargs cat",
+   "xargs cat < <(find . -name " + ENV + ")", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: allow, find -name with -print piped to wc -l counts the env file name, reads no contents",
+   "find . -name " + ENV + " -print | wc -l", "allow", cwd=NOGIT)
+
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
     "verdict npm --env-file=" + ENV + " test",
