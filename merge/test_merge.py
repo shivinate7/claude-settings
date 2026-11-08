@@ -15607,14 +15607,14 @@ class ReviewStampSince(unittest.TestCase):
         self.assertNotEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", boundary + "~1^{commit}"], capture_output=True).returncode, 0,
                             f"the clone holds the parent of {boundary}")
 
-    def cutover_read(self, clone, fetch=None, race=False):
+    def cutover_read(self, clone, fetch=None, race=False, boundary=None):
         """review_stamp_since(clone, "fixture") with the default branch answered as "fixture". -> (got, stop, logs, fetches, raced): `got` is the
         cutover or None, `stop` the Stop's text or None, `logs` the git log argvs, `fetches` the deepen fetches as (branch, deepen) pairs, and
         `raced` whether the race ran. `fetch` is a (code, out) answer that stands in for fetch_branch; None keeps the real fetch. `race` runs one
         real `git fetch --unshallow origin` in the clone just after the first git log returns, as another process deepening it would, so the
-        boundary read that follows sees a whole clone."""
+        boundary read that follows sees a whole clone. `boundary` is a callable of the root that stands in for shallow_boundary; None keeps the real read."""
         logs, fetches, raced = [], [], []
-        real_sh, real_fetch = merge.sh, merge.fetch_branch
+        real_sh, real_fetch, real_boundary = merge.sh, merge.fetch_branch, merge.shallow_boundary
 
         def counting(args, *a, **k):  # every git call goes through sh, the one seam
             result = real_sh(args, *a, **k)
@@ -15632,7 +15632,8 @@ class ReviewStampSince(unittest.TestCase):
         got = stop = None
         with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), \
                 unittest.mock.patch.object(merge, "sh", counting), \
-                unittest.mock.patch.object(merge, "fetch_branch", recording):
+                unittest.mock.patch.object(merge, "fetch_branch", recording), \
+                unittest.mock.patch.object(merge, "shallow_boundary", boundary or real_boundary):
             try:
                 got = review_fn(self, "review_stamp_since")(clone, "fixture")
             except merge.Stop as e:
@@ -15681,6 +15682,41 @@ class ReviewStampSince(unittest.TestCase):
         self.assertFalse(raced, "the control ran a race")
         self.assertIsNone(stop, "the read stopped on a clone that git fetch --deepen reaches:\n" + str(stop))
         self.assertEqual(got, "2026-10-21T15:04:05Z", "the control gave %r, not commit 2's committer time" % (got,))
+
+    def test_a_race_one_re_read_resolves_returns_the_true_cutover_in_two_git_log_runs(self):
+        # The boundary changes once. The first git log returns commit 3, the boundary, and another process unshallows the clone just after it, so
+        # the boundary read after the log differs from the one before. One re-read holds: the second log gives commit 2, the first salt commit, and
+        # the read returns its time, with no deepen. The counts are literal, so a mutant that sets REVIEW_RACE_TRIES to 1 fails this case.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=1)
+        self.assert_shallow_boundary(clone, "HEAD")
+        got, stop, logs, fetches, raced = self.cutover_read(clone, race=True)
+        self.assertTrue(raced, "the race did not run, so the re-read this case proves did not happen")
+        self.assertIsNone(stop, "one re-read did not resolve the race, and the read stopped:\n" + str(stop))
+        self.assertEqual(got, "2026-10-21T15:04:05Z", "the race resolved by one re-read gave %r, not commit 2's committer time" % (got,))
+        self.assertEqual(len(logs), 2, "the race resolved by one re-read ran git log %d times, not 2" % len(logs))
+        self.assertEqual(fetches, [], "the read deepened the clone after the race resolved: %r" % (fetches,))
+
+    def test_a_boundary_that_changes_on_every_read_stops_after_three_git_log_runs_and_caches_nothing(self):
+        # Every boundary read differs from the one before it, so no pair of reads agrees. The read runs git log 3 times (REVIEW_RACE_TRIES), then
+        # stops naming the changing boundary. The count is literal: a mutant that sets REVIEW_RACE_TRIES to 1 stops after one log and fails here, and
+        # a mutant with no stop returns a time and fails on the stop. The stop caches nothing: with the boundary holding, the next read runs git
+        # log once and gives commit 2's time.
+        clone = self.repo(salt_at=2, branch="fixture")
+        reads = []
+
+        def changing(root):
+            reads.append(root)
+            return frozenset({"moved-%d" % len(reads)})
+
+        got, stop, logs, _, _ = self.cutover_read(clone, boundary=changing)
+        self.assertTrue(reads, "the boundary stub never ran, so the read did not reach its boundary reads")
+        self.assertIsNotNone(stop, "the read returned %r when the boundary changed on every read, instead of stopping" % (got,))
+        self.assertIn("shallow boundary", stop, "the Stop does not name the changing shallow boundary:\n" + stop)
+        self.assertEqual(len(logs), 3, "the read ran git log %d times, not 3" % len(logs))
+        got2, stop2, logs2, _, _ = self.cutover_read(clone)
+        self.assertIsNone(stop2, "the read after the stop stopped too, so the earlier result was cached or the read is broken:\n" + str(stop2))
+        self.assertEqual(got2, "2026-10-21T15:04:05Z", "the read after the stop gave %r, not commit 2's committer time: the earlier result was cached" % (got2,))
+        self.assertEqual(len(logs2), 1, "the read after the stop ran git log %d times, not 1: the earlier result was cached" % len(logs2))
 
     def git_at(self, root, date, *args):
         """Run git in the temp repo with its author and committer times set to `date`."""
