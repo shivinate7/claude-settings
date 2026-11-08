@@ -2210,6 +2210,69 @@ class PickClaims(UpkeepFixture):
         self.assertIn(str(self.out), with_row["writes"], "the counter saw no page write, so it counts nothing")
         self.assertIn(str(self.live), with_row["reads"], "the build does not read the live file")
 
+    def flagged_ids(self, out):
+        """The sorted step ids of the claim row's entries. Empty when the row is absent or lists nothing."""
+        _, entries = self.flagged(out)
+        return sorted(e.split(" (claim ")[0] for e in entries)
+
+    def test_markup_or_punctuation_around_a_wrong_letter_is_a_claim(self):
+        wrong = [("c153", "Ruling: item 9 **b**."), ("c154", "Ruling: item 9 (b)."), ("c155", "Ruling: item 9: b."),
+                 ("c156", "Ruling: item 9 `b`."), ("c157", "Ruling: the owner picked **b**.")]
+        clean = [("c158", "Ruling: item 9 **a**."), ("c159", "Ruling: item 9 (a)."), ("c160", "Ruling: item 9: a."),
+                 ("c161", "Ruling: item 9 `a`.")]
+        for i, (sid, note) in enumerate(wrong + clean, start=2):
+            self.commit_step(sid, note=note, order=i)
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        ids = self.flagged_ids(self.out_with_live())
+        self.assertEqual([i for i in ids if i in [sid for sid, _ in clean]], [],
+                         "a matching letter behind markup or punctuation reads as a claim")  # control: stays clean
+        self.assertEqual(ids, [sid for sid, _ in wrong],
+                         "a wrong letter behind markup or punctuation does not read as a claim")
+
+    def test_owner_picked_option_letter_is_an_item_less_claim_and_is_flagged(self):
+        self.commit_step("c153", note="Ruling: owner picked option b.")
+        self.commit_step("c154", note="Ruling: Owner picked option B.", order=2)
+        self.commit_step("c155", note="Ruling: owner picked b.", order=3)  # control: the bare letter is already a claim
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged_ids(self.out_with_live()), ["c153", "c154", "c155"],
+                         "an owner pick worded `option <letter>`, with no item number, is not a claim")
+
+    def test_a_for_an_article_is_no_pick_and_a_claim_ends_at_a_terminator(self):
+        self.commit_step("c153", note="Waiting on item 9 a decision.")
+        ends = [("c154", "Ruling: item 9 a."), ("c155", "Ruling: item 9 a, kept."), ("c156", "Ruling: item 9 a; kept."),
+                ("c157", "Ruling: (item 9 a)"), ("c158", "Ruling: item 9 a")]
+        for i, (sid, note) in enumerate(ends, start=2):
+            self.commit_step(sid, note=note, order=i)
+        self.publish(items=[], answers=[self.answer(9, "b")])  # every a below is a wrong pick
+        ids = self.flagged_ids(self.out_with_live())
+        self.assertEqual([i for i in ids if i != "c153"], [sid for sid, _ in ends],
+                         "a wrong item 9 a before its end, period, comma, semicolon or closing bracket is not flagged")
+        self.assertNotIn("c153", ids, "the article a in 'Waiting on item 9 a decision.' reads as a pick")
+
+    def test_a_claim_across_whitespace_reads_as_one_line_with_one_space(self):
+        self.commit_step("c153", note="Ruling: item 9\nb.")
+        self.commit_step("c154", note="Ruling: item 9 \t  b.", order=2)
+        self.commit_step("c155", note="Ruling: item 9 b.", order=3)  # control: a plain space already reads as one line
+        self.publish(items=[], answers=[self.answer(9, "a")])
+        self.assertEqual(self.flagged(self.out_with_live()), (3, sorted(
+            ['c153 (claim "item 9 b")', 'c154 (claim "item 9 b")', 'c155 (claim "item 9 b")'])),
+            "a claim whose whitespace holds a line break or a tab does not read as one line with one space")
+
+    def test_an_answers_row_and_the_last_answer_of_one_item_both_count_as_its_pick(self):
+        # The picks of one item are the union of its answers row and its lastAnswer: a filed ruling whose row is gone
+        # still matches, and a row still matches when the lastAnswer holds another letter.
+        self.commit_step("c153", note="Ruling: item 9 a.")  # matched by the item's lastAnswer
+        self.commit_step("c154", note="Ruling: item 9 b.", order=2)  # matched by the answers row
+        self.commit_step("c155", note="Ruling: item 9 c.", order=3)  # control: neither source holds c, so it is listed
+        self.publish(items=[self.item_answer(9, "a", status="open")], answers=[self.answer(9, "b")])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c155 (claim "item 9 c")']))
+
+    def test_items_with_and_before_a_number_and_letter_is_no_claim(self):
+        self.commit_step("c153", note="Ruling: items 9 and 10 a.")  # plural: the cite needs `item` directly before one number
+        self.commit_step("c154", note="Ruling: item 10 a.", order=2)  # control: the singular is a claim
+        self.publish(items=[], answers=[])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c154 (claim "item 10 a")']))
+
 
 class DatedClaims(UpkeepFixture):
     """The upkeep row for each doing or active step whose note's newest dated claim is STALE_DAYS or more
