@@ -4968,6 +4968,25 @@ sh("git-after-cd: a failed cd, then && a subshell, then && a git push passes, th
 # The ) of the subshell puts the shell back where it was before the failed cd, so the push after ; runs in cwd.
 sh("git-after-cd: a failed cd inside ( ... ), then ; a git push after the ) passes",
    "(cd /tmp/w; true); %s push" % VCS, "allow", cwd=NOGIT)
+# A subshell's cd ends at its `)`, so the shell after `;` is still in the folder the failed cd left. The
+# `&&` after the subshell runs the push there: the subshell's own cd does not carry out of it.
+sh("git-after-cd: a cd into a missing folder, then ; a subshell cd, then && a git push is refused",
+   "cd /tmp/w; (cd /tmp) && %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A `||` after a failed cd runs `exit`, so the push after `;` never runs in the stranded folder.
+sh("git-after-cd: a cd into a missing folder, then || exit 1, then ; a git push passes, the shell exits first",
+   "cd /tmp/w || exit 1; %s push" % VCS, "allow", cwd=NOGIT)
+# A failed `if` test skips the then branch, so the push there never runs in the stranded folder.
+sh("git-after-cd: a cd into a missing folder as an if test, then a git push in the then branch passes",
+   "if cd /tmp/w; then %s push; fi" % VCS, "allow", cwd=NOGIT)
+# The write verbs the rule does not name yet: each runs in the stranded folder after a failed cd and ;.
+sh("git-after-cd: a cd into a missing folder, then ; git add -A is refused",
+   "cd /tmp/w; %s add -A" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then ; git tag v1 is refused",
+   "cd /tmp/w; %s tag v1" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then ; git config user.name x is refused",
+   "cd /tmp/w; %s config user.name x" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then ; git worktree add ../w is refused",
+   "cd /tmp/w; %s worktree add ../w" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
@@ -11359,6 +11378,9 @@ sh("git-after-cd: a cd into a missing folder, then ; add -A and commit, in a cwd
 # the commit still runs in the folder that cd named, the triplet repo.
 cmk_refuse("a cd into a repo with a triplet tracked, then ; an echo the tokenizer cannot read, then add -A and commit",
            "cd " + slash(CMK_CLT) + "; echo $'it\\'s'; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
+# A `>` inside the echo's quotes is text, not a redirect. It must not make the commit after it blind to the triplet.
+cmk_refuse("a cd into a repo with a triplet tracked, then ; an echo with a quoted greater-than, then add -A and commit",
+           "cd " + slash(CMK_CLT) + "; echo \"a > b\"; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
