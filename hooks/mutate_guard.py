@@ -2865,6 +2865,35 @@ def _loads_module(source: str, stem: str) -> bool:
     return profile is not None and (stem in profile[0] or stem + ".py" in profile[1])
 
 
+# Whole-tree scan suites: lane lint picks each for a diff that touches a file it scans (debt lane-lint-tree-scans-unpicked).
+# These three read every tracked file (grep, ls-files, the added lines of any file), so any changed path picks them.
+# They expose no scan scope to read, so this table is the one home of that fact.
+TREE_SCAN_SUITES = ("lint/test_retired_names.py", "lint/test_retired_repos.py", "lint/test_check_glossary.py")
+# This one reads .py and .js under named folders. It exposes its scope as `product_kind`, which is called, never copied.
+SPAWN_SCAN_SUITE = "lint/test_no_window_spawn.py"
+
+
+def _scans_any_file(suite: str, paths) -> bool:
+    """True when the suite `suite` (test_no_window_spawn.py) scans any of `paths`, by its own `product_kind` (PY_DIRS,
+    JS_DIRS, test files apart). It loads the suite once. A suite that cannot be loaded reads True: an over-pick costs a
+    run, a miss costs a batch cycle."""
+    import importlib.util
+    try:
+        spec = importlib.util.spec_from_file_location("_spawn_scan_scope", suite)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def head(rel):
+            try:
+                with open(rel, "rb") as handle:
+                    return handle.read(200)
+            except OSError:
+                return b""
+        return any(module.product_kind(path, head) is not None for path in paths)
+    except Exception:  # noqa: BLE001  a suite that fails to load must not hide itself from lane lint
+        return True
+
+
 def _tracked_files():
     """(tracked paths, None), or (None, the reason) when `git ls-files` fails, in the working folder's repository."""
     done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
@@ -2882,7 +2911,8 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     imports, however deep: from each tracked `.py` the suite names (by stem or by basename), it follows the stems that file
     imports (`import`, `from`, a literal `import_module`) to tracked `.py` files, each file once, so a cycle ends. A stem or
     basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
-    whatever the number of paths or suites."""
+    whatever the number of paths or suites. With `chain` True it also picks each whole-tree scan suite for a diff of a file
+    it scans (TREE_SCAN_SUITES, SPAWN_SCAN_SUITE)."""
     import re
     listed = dict(REPORT_TARGETS)
     names = set()
@@ -2935,6 +2965,11 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
             if (os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))) \
                     or name in bases or (extension == ".py" and stem in stems) or path in reached.get(item, ()):
                 names.add(item)
+    if chain:  # lane lint only: a mutation run (`--tests-for`) never runs a whole-tree lint suite per mutant
+        on_disk = set(tracked)
+        names.update(suite for suite in TREE_SCAN_SUITES if suite in on_disk)
+        if SPAWN_SCAN_SUITE in on_disk and _scans_any_file(SPAWN_SCAN_SUITE, scan):
+            names.add(SPAWN_SCAN_SUITE)
     return names
 
 
