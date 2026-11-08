@@ -28683,11 +28683,11 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
 
 
 # ---- B4: the fix check marker (owner item 351 a, 2026-11-07 14:44 CST; coordinator pick, 2026-11-08 14:44 CST). A
-# reviewer's fix check carries no round, so it lifts to Sonnet on FIX_CHECK_MARKER, read from the first non-blank line of
-# its brief, as the audit marker lifts an Explore. It lifts a reviewer on Sonnet only: Haiku passes on its own row, Opus
-# stays under the ceiling, and a builder, a test-author or an Explore gets no lift. The constant is read from shared_names
-# at module load, never copied. Until it is built, it reads as FIX_UNBUILT, so each case fails on its assert, not on an
-# import error.
+# reviewer's fix check carries no round, so it lifts to Sonnet on FIX_CHECK_MARKER. The marker counts only when the brief's
+# first non-blank line starts with it, leading spaces and tabs aside, and it is case-sensitive: text ahead of it on that
+# line does not count. It lifts a reviewer on Sonnet only: Haiku passes on its own row, Opus stays under the ceiling, and a
+# builder, a test-author or an Explore gets no lift. The constant is read from shared_names at module load, never copied.
+# Until it is built, it reads as FIX_UNBUILT, so each case fails on its assert, not on an import error.
 FIX_UNBUILT = "FIX_CHECK_NOT_BUILT"
 try:
     FIX_MARKER = getattr(_shared_names_under_test(), "FIX_CHECK_MARKER", FIX_UNBUILT)
@@ -28727,10 +28727,10 @@ _FIX_CHECK_CHECKS = (
     ("brief markers: BRIEF_MARKERS has a first-line fixcheck row that reads FIX_CHECK_MARKER", fix_check_row_check),
     ("brief markers: the fix check marker on the first line counts as fixcheck, with no n",
      marker_rows_check((FIX_MARKER + ". Re-run the cases.", "fixcheck", None, True))),
-    ("brief markers: the fix check marker after prose on the first line counts as fixcheck",
-     marker_rows_check(("Reviewer, " + FIX_MARKER + ". Re-run the cases.", "fixcheck", None, True))),
-    ("brief markers: the fix check marker after markup on the first line counts as fixcheck",
-     marker_rows_check(("**" + FIX_MARKER + ":** re-run the cases.", "fixcheck", None, True))),
+    ("brief markers: the fix check marker after prose on the first line does not count as fixcheck",
+     marker_rows_check(("Reviewer, " + FIX_MARKER + ". Re-run the cases.", "fixcheck", None, False))),
+    ("brief markers: the fix check marker after markup on the first line does not count as fixcheck",
+     marker_rows_check(("**" + FIX_MARKER + ":** re-run the cases.", "fixcheck", None, False))),
     ("brief markers: the fix check marker on the first non-blank line after blank lines counts as fixcheck",
      marker_rows_check(("\n\n" + FIX_MARKER + ". Re-run the cases.", "fixcheck", None, True))),
     ("brief markers: the fix check marker on line two does not count as fixcheck",
@@ -28746,10 +28746,19 @@ for _label, _check in _FIX_CHECK_CHECKS:
 # test-author's and an Explore's refusals never name it.
 role_model_allow("role-model: fix check: reviewer on sonnet with the marker on line one is allowed", "reviewer", "sonnet",
                  FIX_MARKER + ". Re-run the cases.")
-role_model_allow("role-model: fix check: reviewer on sonnet with a role word ahead of the marker on line one is allowed",
-                 "reviewer", "sonnet", "Reviewer, " + FIX_MARKER + ". Re-run the cases.")
-role_model_allow("role-model: fix check: reviewer on sonnet with markup ahead of the marker on line one is allowed",
-                 "reviewer", "sonnet", "**" + FIX_MARKER + ":** re-run the cases.")
+role_model_refuse("role-model: fix check: reviewer on sonnet with a role word ahead of the marker on line one is denied",
+                  "reviewer", "sonnet", "Reviewer, " + FIX_MARKER + ". Re-run the cases.", carries=(ROLE_REMEDY, FIX_MARKER))
+role_model_refuse("role-model: fix check: reviewer on sonnet with markup ahead of the marker on line one is denied",
+                  "reviewer", "sonnet", "**" + FIX_MARKER + ":** re-run the cases.", carries=(ROLE_REMEDY, FIX_MARKER))
+role_model_allow("role-model: fix check: reviewer on sonnet with the marker first on line one and a Round 1 of 3 after it is "
+                 "allowed", "reviewer", "sonnet", FIX_MARKER + ". Round 1 of 3 finding F1, head abc1234.")
+role_model_allow("role-model: fix check: reviewer on sonnet with the marker after leading spaces on line one is allowed",
+                 "reviewer", "sonnet", "   " + FIX_MARKER + ", PR 7")
+role_model_refuse("role-model: fix check: reviewer on sonnet with Round 1 of 3 first on line one and the marker after it is denied",
+                  "reviewer", "sonnet", "Round 1 of 3. New lane after " + FIX_MARKER + " FAIL on PR 12. Review it.",
+                  carries=(ROLE_REMEDY, FIX_MARKER))
+role_model_refuse("role-model: fix check: reviewer on sonnet with Re: ahead of the marker on line one is denied",
+                  "reviewer", "sonnet", "Re: " + FIX_MARKER + " of PR 7", carries=(ROLE_REMEDY, FIX_MARKER))
 role_model_allow("role-model: fix check: reviewer on sonnet with the marker after blank lines, as its first non-blank "
                  "line, is allowed", "reviewer", "sonnet", "\n\n" + FIX_MARKER + ". Re-run the cases.")
 role_model_allow("role-model: fix check: the same reviewer spawn as a Task on sonnet is allowed", "reviewer", "sonnet",
