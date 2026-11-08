@@ -136,7 +136,9 @@ PR on its line is refused and asks for the PR. The remedy names the act (`merge 
 record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
-blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
+blocks: it adds a systemMessage that says UNKNOWN. The comment's last edit time and the cutover (merge/merge.py review_stamp_since, for the PR's base) go to parse_review, so an unstamped
+record from before the cutover reads done, as merge --reviewed reads it; with no cwd the Stamp line is required. Cost: 2 gh reads and one git log
+(review_stamp_since, cached per base in the process) per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
 process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
@@ -1636,11 +1638,16 @@ def _gh_json(args, cwd):
     return json.loads(run.stdout)
 
 
-def _newest_record(n, comments, merge_mod):
-    """The parsed newest review record comment of `comments` (oldest first), else None."""
-    bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
-    marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
-    return merge_mod.parse_review(marked[-1]) if marked else None
+def _newest_record(n, comments, merge_mod, cutover=None):
+    """The parsed newest review record comment of `comments` (oldest first), else None. With a `cutover` (merge's review_stamp_since), the
+    comment's last edit time (updated_at, else created_at) goes to parse_review, so an unstamped record from before the cutover reads as
+    merge --reviewed reads it. With no cutover, the Stamp line is required."""
+    marked = [c for c in comments if isinstance(c, dict) and (c.get("body") or "").splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
+    if not marked:
+        return None
+    newest = marked[-1]
+    edited = (newest.get("updated_at") or newest.get("created_at")) if cutover else None
+    return merge_mod.parse_review(newest.get("body") or "", edited, cutover)
 
 
 def review_record_problem(hook, text):
@@ -1666,11 +1673,13 @@ def review_record_problem(hook, text):
             if merge_mod is None:
                 raise ImportError("merge/merge.py not found")
             cwd = hook.get("cwd")
-            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)["head"]["sha"]
+            pull = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)
+            live = pull["head"]["sha"]
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
                               "--paginate", "--slurp"], cwd)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
-            rec = _newest_record(n, comments, merge_mod)
+            cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"]) if cwd else None
+            rec = _newest_record(n, comments, merge_mod, cutover)
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue

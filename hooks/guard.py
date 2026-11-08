@@ -5334,6 +5334,8 @@ def judge(payload) -> None:
     if tool == UPDATE_COMMENT_TOOL:
         owner, name, comment_id = (tool_input.get(k) for k in ("owner", "repo", "comment_id"))
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        if isinstance(comment_id, str) and comment_id.isascii() and comment_id.isdigit():  # the id is a number; a client may send it as a string
+            comment_id = int(comment_id)
         if isinstance(comment_id, int) and not isinstance(comment_id, bool):
             hit = review_record_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
             if hit:

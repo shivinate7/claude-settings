@@ -880,13 +880,14 @@ class Host:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def review_comments(self, since):
-        """-> {PR number: [(created_at, review record body), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
-        when the review record marker is its whole first line. The number comes from the comment's issue_url. A failed read is a Stop."""
+        """-> {PR number: [(updated_at, review record body), oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
+        when the review record marker is its whole first line. The time is the comment's last edit (updated_at, else created_at), because an edit keeps
+        created_at and the cutover must date the body as it now reads. The number comes from the comment's issue_url. A failed read is a Stop."""
         found = {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
             if m and review_marked(body):
-                found.setdefault(int(m.group(1)), []).append((c.get("created_at"), body))
+                found.setdefault(int(m.group(1)), []).append((c.get("updated_at") or c.get("created_at"), body))
         return found
 
     def open_heads(self):
@@ -3249,7 +3250,7 @@ def parse_review(text, created=None, cutover=None):
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. The `Stamp: <16 hex>` line between Net value and
     the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. A body with no Stamp line still parses when its
-    comment's `created` time is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
+    comment's `created` time (its last edit, see review_comments) is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
     as for a new post, the Stamp line is required. Trailing whitespace on a line and trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = [line.rstrip() for line in text.splitlines()]  # trailing spaces and CRLF are no part of a line, the marker's included
@@ -3363,8 +3364,8 @@ def reviewed_read(h, cutover=None):
         if not bodies:
             bare.append(f"#{n}")
             continue
-        created, body = bodies[-1]
-        rec = parse_review(body, created, cutover)
+        edited, body = bodies[-1]
+        rec = parse_review(body, edited, cutover)
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
         if state == "done":
             done.append((n, d["base"]["ref"]))
@@ -3660,7 +3661,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 cutover = review_stamp_since(root, info["base"])
-                earlier = [parse_review(b, created, cutover) for created, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
+                earlier = [parse_review(b, edited, cutover) for edited, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
