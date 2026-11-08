@@ -1530,7 +1530,7 @@ class PinnedHarness(Job):
         self.assertIn("fixture harness: lenient", text, "the harness at the pin did not run where symlinks are refused\n" + text)
 
     def test_a_pinned_tree_with_a_symlink_runs_where_symlinks_work(self):
-        """Control: green on 01fbc47d0. The same pin with symlinks allowed passes, so the fixture alone is no failure."""
+        """Control: the same pin with symlinks allowed passes, so the fixture alone is no failure."""
         pin = self.symlink_pin()
         rc, lines, text = self.run_pinned(pin, "--pinned")
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned code-check with a symlink in its tree did not PASS\n" + text)
@@ -1590,16 +1590,16 @@ class PinnedHarness(Job):
         self.assertIn("fixture harness: strict", text, "--lint ran the harness at the pin, not the local copy\n" + text)
 
     def test_plan_under_the_flag_prints_as_without_it(self):
-        """Control: green on 01fbc47d0, and on a mutant that lets --plan fetch, since a pin the clone holds plans the same
-        either way. The unfetchable-pin case after it is the one that tells them apart."""
+        """Control: a pin the clone holds plans the same with or without the flag, so a --plan that fetched would still pass
+        here. The unfetchable-pin case after it is the one that tells them apart."""
         (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step(self.pin_a), "--plan", "--step", "Code check", "--base", "origin/main")
         self.assertEqual(by_step(lines0).get("Code check"), "would run", "scope: the plan does not reach the code-check step\n" + text0)
         self.assertEqual((rc, lines), (rc0, lines0), "under --pinned --plan prints differently from --plan\n" + text)
 
     @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
     def test_plan_under_the_flag_with_an_unfetchable_pin_says_would_run_and_never_fetches(self):
-        """Control: green on 01fbc47d0. A plan under --pinned plans the local copy and runs no git fetch or archive, even for
-        a sha no clone holds. A plan that fetched would read unknown here."""
+        """Control: a plan under --pinned plans the local copy and runs no git fetch or archive, even for a sha no clone
+        holds. A plan that fetched would read unknown here."""
         env, calls = self.git_stub(RUN_FOLDER)
         _, lines, text = self.run_pinned(UNFETCHABLE, "--plan", "--pinned", env=env)
         self.assertIn("Code check", by_step(lines), "scope: the plan does not reach the code-check step\n" + text)
@@ -1621,8 +1621,8 @@ class PinnedHarness(Job):
         self.assert_local_uses_runs_the_repo_copy("./actions/code-check")
 
     def test_a_branch_ref_under_the_flag_keeps_the_local_copy(self):
-        """Control: green on 01fbc47d0. The run without --pinned is the scope check: it must run the local copy. The run with
-        --pinned must read the same, FAIL included, since a branch ref never takes the pinned tree."""
+        """Control: the run without --pinned is the scope check and must run the local copy. The run with --pinned must
+        read the same, FAIL included, since a branch ref never takes the pinned tree."""
         (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step("main"), *self.LINT)
         self.assertIn("fixture harness: strict", text0, "scope: without the flag the branch ref did not run the local copy\n" + text0)
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "under --pinned a branch ref did not FAIL on the local copy\n" + text)
