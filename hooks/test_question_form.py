@@ -1683,10 +1683,9 @@ def case_step_loop_keyword_before_a_cmdlet_path_is_a_shell_line():
 
 
 def case_step_quoted_wrapper_value_before_a_cmdlet_path_is_a_shell_line():
-    # A quoted wrapper value can hold a space. The prefix reader splits words on that space, so `-f "%E` takes the
-    # first half and `s"` is read as the command word; `-u "my` leaves `user"`. No path is found there, so the cmdlet
-    # path after the quoted value passes. The forward-slash forms are the controls: the shell reader reads a quoted
-    # value whole.
+    # A quoted wrapper value can hold a space. A whitespace split would take `-f "%E` as the first half and `s"` as the
+    # command word, and `-u "my` would leave `user"`. No path would be found there, so the cmdlet path after the quoted
+    # value would pass. The forward-slash forms are the controls: the shell reader reads a quoted value whole.
     refused = ("command-in-item", "shell line")
     for span in (r'time -f "%E s" C:\tools\Get-Thing', r'sudo -u "my user" C:\tools\Get-Thing'):
         page("a step holding `%s` is refused as a shell line" % span, "set",
@@ -1705,14 +1704,22 @@ def case_step_quoted_wrapper_value_before_a_folder_is_text():
 
 
 def case_step_unbalanced_quote_passes_with_no_exception():
-    # A quote with no close has no raw-word reading, so _raw_words falls back to a whitespace split. The step passes and
-    # no exception escapes the check. Only the fallback reads an unbalanced quote, so a fallback that raises turns these
-    # red. The last span has balanced quotes and never reaches the fallback: it is a pass control only.
+    # RAW_WORD keeps a quote with no close as one character of its word, so _raw_words reads each unbalanced span
+    # without raising, and the step passes with no exception escaping the check. A raising _raw_words turns these cases
+    # red. The last span has balanced quotes and reads no unclosed quote: it is a pass control only.
     for span in ('say "hi', '"', "'"):
         page("a step holding `%s` with an unbalanced quote passes, with no exception" % span, "set",
              entry_of(task_item(["Check the output of `%s`" % span])), None)
     page(r'a step holding `sudo -u "my user" C:\Docs\Read-Me/` with balanced quotes passes, a control', "set",
          entry_of(task_item([r'Check the output of `sudo -u "my user" C:\Docs\Read-Me/`'])), None)
+
+
+def case_step_lone_quote_before_a_cmdlet_path_is_text():
+    # A lone quote is a one-character word in RAW_WORD (the `['"]` alternative). It is the first word, so the prefix walk
+    # stops there and the cmdlet path after it is never read as the command. Without the alternative, RAW_WORD skips the
+    # quote, the path becomes the first word, and the step is refused. Pinned so the alternative stays in RAW_WORD.
+    page(r'a step holding `" C:\tools\Get-Thing` is text and passes', "set",
+         entry_of(task_item([r'Check the output of `" C:\tools\Get-Thing`'])), None)
 
 
 def case_step_quote_starting_mid_word_before_a_cmdlet_path_is_a_shell_line():
@@ -2467,6 +2474,7 @@ def main():
                  case_step_quoted_wrapper_value_before_a_cmdlet_path_is_a_shell_line,
                  case_step_quoted_wrapper_value_before_a_folder_is_text,
                  case_step_unbalanced_quote_passes_with_no_exception,
+                 case_step_lone_quote_before_a_cmdlet_path_is_text,
                  case_step_quote_starting_mid_word_before_a_cmdlet_path_is_a_shell_line,
                  case_step_powershell_assignment_of_a_cmdlet_path_is_a_shell_line,
                  case_powershell_spaced_literals_are_no_bash_test,
