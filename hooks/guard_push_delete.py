@@ -411,18 +411,20 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         for spec in plain:
             source, colon, target = spec.partition(":")
             if colon:
-                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
-                    return main()
+                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():
+                    return "main"
                 agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
             elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
-                return main()
+                # A local origin makes main() empty; the other refspecs are still read for agent and stray.
+                if main():
+                    return "main"
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
                 implied = True
                 agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))
             else:
                 agent = agent or bool(AGENT_BRANCH.fullmatch(source.removeprefix("refs/heads/")))
-        if implied and current() in DEFAULT_BRANCH_FALLBACK:
-            return main()
+        if implied and current() in DEFAULT_BRANCH_FALLBACK and main():
+            return "main"
     if agent:
         return "agent"
     if not implied or current() is None:
