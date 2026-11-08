@@ -2879,7 +2879,7 @@ WORKFLOW_FOLDER = ".github/workflows/"
 FOLDER_SCAN_SUITES = {
     "lint/test_ci_job.py": ("lint/test_ci_job.py", "_scan_workflow_files"),
     "lint/test_check_agent_models.py": ("lint/check_agent_models.py", "_scan_agent_files"),
-    "lint/test_rule_audit.py": ("lint/rule_audit.py", "_scan_guard_paths"),
+    "lint/test_rule_audit.py": ("lint/rule_audit.py", "_scan_hook_modules"),
     "lint/test_check_landed_dirs.py": ("lint/check_landed_dirs.py", "_scan_guard_glob"),
     "lint/test_guard_log_report.py": ("lint/test_guard_log_report.py", "_scan_guard_log_folders"),
 }
@@ -2897,24 +2897,28 @@ def _load_suite(suite: str):
         return None
 
 
-def _scans_any_file(suite: str, paths) -> bool:
-    """True when the suite `suite` (test_no_window_spawn.py) scans any of `paths`, by its own `product_kind` (PY_DIRS,
-    JS_DIRS, test files apart). It loads the suite once. A suite that cannot be loaded reads True: an over-pick costs a
-    run, a miss costs a batch cycle."""
-    module = _load_suite(suite)
+def _read_scope(source: str, reader) -> bool:
+    """`reader(module)` for the file `source` loaded as a module. A file that cannot be loaded, or a reader that raises,
+    reads True: an over-pick costs a run, a miss costs a batch cycle."""
+    module = _load_suite(source)
     if module is None:
         return True
+    try:
+        return reader(module)
+    except Exception:  # noqa: BLE001  the same fail-safe as a file that does not load
+        return True
 
+
+def _scans_any_file(suite: str, paths) -> bool:
+    """True when the suite `suite` (test_no_window_spawn.py) scans any of `paths`, by its own `product_kind` (PY_DIRS,
+    JS_DIRS, test files apart). It loads the suite once."""
     def head(rel):
         try:
             with open(rel, "rb") as handle:
                 return handle.read(200)
         except OSError:
             return b""
-    try:
-        return any(module.product_kind(path, head) is not None for path in paths)
-    except Exception:  # noqa: BLE001  same fail-safe as a suite that does not load
-        return True
+    return _read_scope(suite, lambda module: any(module.product_kind(path, head) is not None for path in paths))
 
 
 def _walks_any_file(suite: str, paths) -> bool:
@@ -2942,27 +2946,41 @@ def _scan_workflow_files(module, paths) -> bool:
 
 
 def _scan_agent_files(module, paths) -> bool:
-    # check_agent_models builds its `agents/*.md` glob inline in main(), so no constant holds it: the literal is the home.
-    return any(_in_folder(path, os.path.join(module.ROOT, "agents")) and path.endswith(".md") for path in paths)
+    # main() of check_agent_models builds its `agents/*.md` and `skills/*/SKILL.md` globs inline, so no constant holds
+    # them: these literals are the one copy, under `module.ROOT`.
+    for path in paths:
+        parts = os.path.relpath(os.path.abspath(path), module.ROOT).split(os.sep)
+        if (parts[0] == "agents" and len(parts) == 2 and parts[1].endswith(".md")) \
+                or (parts[0] == "skills" and len(parts) == 3 and parts[2] == "SKILL.md"):
+            return True
+    return False
 
 
-def _scan_guard_paths(module, paths) -> bool:
-    """Asks rule_audit.guard_paths (its glob is inline) about each path by placing an empty file there in a scratch root."""
-    import tempfile
-    named = [path for path in paths if path.startswith("hooks/") and path.count("/") == 1]
-    if not named:
-        return False
-    with tempfile.TemporaryDirectory() as root:
-        os.makedirs(os.path.join(root, "hooks"))
-        for path in named:
-            open(os.path.join(root, path), "w").close()
-        return bool(module.guard_paths(root))
+def _scan_hook_modules(module, paths) -> bool:
+    # test_rule_audit's `_hooks_world` globs the hooks folder inline. The folder is read from where rule_audit globs the
+    # guard modules (guard.py is one of them), so a moved folder moves the scope. The test files are no part of the scan.
+    guards = module.guard_paths(module.ROOT)
+    if not guards:
+        return True
+    folder = os.path.dirname(guards[0])
+    return any(path.endswith(".py") and not os.path.basename(path).startswith("test_") and _in_folder(path, folder)
+               for path in paths)
 
 
 def _scan_guard_glob(module, paths) -> bool:
+    # A guard file by GUARD_GLOB, or a skill file by repo_skills. The skills folder is asked by placing each path as an
+    # empty file in a scratch root: repo_skills lists the skills there, so no folder name is copied here.
     import fnmatch
+    import tempfile
     folder, pattern = os.path.split(module.GUARD_GLOB)
-    return any(_in_folder(path, folder) and fnmatch.fnmatch(os.path.basename(path), pattern) for path in paths)
+    if any(_in_folder(path, folder) and fnmatch.fnmatch(os.path.basename(path), pattern) for path in paths):
+        return True
+    relative = [path for path in paths if not os.path.isabs(path) and not path.startswith("..")]
+    with tempfile.TemporaryDirectory() as root:
+        for path in relative:
+            os.makedirs(os.path.dirname(os.path.join(root, path)), exist_ok=True)
+            open(os.path.join(root, path), "w").close()
+        return bool(module.repo_skills(root))
 
 
 def _scan_guard_log_folders(module, paths) -> bool:
@@ -2977,13 +2995,7 @@ def _scans_folder_file(suite: str, paths) -> bool:
     """True when the folder-scan suite `suite` (FOLDER_SCAN_SUITES) reads any of `paths`. A scope that cannot be loaded or
     read reads True, as in `_scans_any_file`."""
     source, reader = FOLDER_SCAN_SUITES[suite]
-    module = _load_suite(source)
-    if module is None:
-        return True
-    try:
-        return globals()[reader](module, paths)
-    except Exception:  # noqa: BLE001  same fail-safe as a suite that does not load
-        return True
+    return _read_scope(source, lambda module: globals()[reader](module, paths))
 
 
 def _tracked_files():
