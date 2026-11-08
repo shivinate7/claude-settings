@@ -5247,6 +5247,11 @@ sh("git-after-cd: a check, then && a landed cd, then && a git push, passes",
    "pytest -q && cd %s && %s push" % (slash(ROOT), VCS), "allow", cwd=NOGIT)
 sh("git-after-cd: a check, then && a git push, passes",
    "pytest -q && %s push" % VCS, "allow", cwd=NOGIT)
+# A CHECK JOINED BY || OR |. A `||` or a `|` before the push's chain is no `;` join, so the push passes.
+sh("git-after-cd: a check joined to a push by ||, then a git push -u, passes",
+   "pytest || %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a pipe into tee, then && a git push -u, passes",
+   "make check | tee l && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
