@@ -134,3 +134,56 @@ export const verdicts = (out) =>
 
 /** What the verdict string says when every check in `IDS` passes, except the ids in `except`, which get the given verdict. */
 export const expected = (except = {}) => IDS.map((id) => `${id}=${except[id] ?? DEFAULT_VERDICT[id] ?? 'PASS'}`).join(' ');
+
+/** The verdict of one check in a run (`PASS`, `FAIL` or `SKIP`), or null when the run prints no line for it. */
+export const verdictOf = (out, id) => out.match(new RegExp(`^\\[(PASS|FAIL|SKIP)\\] ${id}\\b`, 'm'))?.[1] ?? null;
+
+/** The `[FAIL]` lines of a run. */
+export const failLines = (out) => out.split('\n').filter((l) => l.startsWith('[FAIL]'));
+
+/** The first 1500 characters of a run's output, for a failure message. */
+export const tail = (out) => out.slice(0, 1500);
+
+/** Reads a file of a scratch repository as text. */
+export const readIn = (dir, rel) => readFileSync(join(dir, rel), 'utf8');
+
+/** Writes a file of a scratch repository. The folder must exist. */
+export const writeIn = (dir, rel, body) => writeFileSync(join(dir, rel), body);
+
+// ---- Sub-lines of a map line: `  - Decisions: ` and `  - Debts: ` (one home, read and set by the decision and the record-named suites).
+const SUB_LINE_RE = /^\s+[-*+]\s/; // an indented list line under a map line
+
+const mapIndexOf = (lines, page, file) => {
+  const found = lines.flatMap((l, i) => (l.startsWith(`- \`${file}\` `) ? [i] : []));
+  assert.equal(found.length, 1, `${page} must hold exactly one map line for ${file}`);
+  return found[0];
+};
+
+/** The ids on the sub-line labelled `label` under the map line of `file` on `page`, in order. [] when it has none. The label may sit at any position among the sub-lines. */
+export const subLineIds = (dir, page, file, label) => {
+  const lines = readIn(dir, page).split('\n');
+  const labelled = new RegExp(`^\\s+[-*+]\\s+${label}:`);
+  const ids = [];
+  for (let j = mapIndexOf(lines, page, file) + 1; j < lines.length && SUB_LINE_RE.test(lines[j]); j++)
+    if (labelled.test(lines[j])) ids.push(...[...lines[j].matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  return ids;
+};
+
+/** Sets the sub-line labelled `label` under the map line of `file` to `ids`, or removes it when `ids` is null. Edits the page only. */
+export const setSubLine = (dir, page, file, label, ids) => {
+  const lines = readIn(dir, page).split('\n');
+  const i = mapIndexOf(lines, page, file);
+  const labelled = new RegExp(`^\\s+[-*+]\\s+${label}:`);
+  for (let j = i + 1; j < lines.length && SUB_LINE_RE.test(lines[j]); ) {
+    if (labelled.test(lines[j])) lines.splice(j, 1);
+    else j++;
+  }
+  if (ids) lines.splice(i + 1, 0, `  - ${label}: ${ids.map((d) => `\`${d}\``).join(', ')}`);
+  writeIn(dir, page, lines.join('\n'));
+};
+
+/** The debts folder of a repository, as lint/layout.py `path()` gives it. It is read from lint/layout.json by that one home, never written here. */
+export const debtsDirOf = (dir) =>
+  execFileSync('python3', ['-c', 'import sys; sys.path.insert(0, sys.argv[1]); import layout; print(layout.path(sys.argv[2], "debts"))', join(ROOT, 'lint'), dir], {
+    cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
