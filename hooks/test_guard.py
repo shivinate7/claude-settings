@@ -15846,10 +15846,18 @@ BS_PROJECT = os.path.join(ROOT, "briefscope", "projects", "-briefscope-slug")
 BS_SESSION = "briefscope-session-0001"
 BS_TRANSCRIPT = os.path.join(BS_PROJECT, BS_SESSION + ".jsonl")   # the payload's transcript_path
 BS_TOOL_NOTES = ["notes/tool-a-%02d.md" % n for n in range(1, 13)]   # twelve notes of another tool
+BS_POINTER_TEXT = "Task: fix the guard.\nFiles: `hooks/guard.py`. Report in 10 lines."
+BS_LONG_NAME = "src/" + "a" * 40 + ".txt"   # the name a ten-star glob fails on: separated stars backtrack over it
 BS_BASE = {**BASE_FILES, "src/contest/old.py": "z = 1\n", "src/myapp.py": "m = 1\n",
            "hooks/test_guard.py": "def test_g():\n    assert True\n",
            "lint/test_retired_repos.py": "def test_retired():\n    assert True\n",
-           "docs/catalog.md": "catalog\n", "docs/records.md": "records\n", "docs/map/hooks.md": "map\n"}
+           "docs/catalog.md": "catalog\n", "docs/records.md": "records\n", "docs/map/hooks.md": "map\n",
+           # an in-repo pointer's target, and the files the pointer and folder cases change
+           "docs/briefs/brief-t7.md": BS_POINTER_TEXT + "\n",
+           "hooks/guard.py": "g = 1\n", "hooks/other.py": "o = 1\n",
+           "app/[id]/page.tsx": "export default 1\n", "app/other/index.tsx": "export default 2\n",
+           "docs/decisions/x.md": "x\n", "docs/decisions-old/x.md": "y\n",
+           BS_LONG_NAME: "s\n"}
 BS_NOTES_BASE = {**BASE_FILES, "notes/verdict-1.md": "v1\n", "notes/verdict-2.md": "v2\n",
                  **{name: "t\n" for name in BS_TOOL_NOTES}}
 # The briefs, by key. Each is one agent's first user message.
@@ -15863,6 +15871,9 @@ BS_BRIEFS = {
     "author": "Task: add the retired-repos case.\nFiles: `hooks/test_guard.py`. Report in 10 lines.",
     "notes": "Task: write the verdict notes.\nFiles: the notes named by the prefix `verdict-`. Report in 10 lines.",
     "other": "Task: fix the contest score.\nFiles: `src/contest.py`. Report in 10 lines.",
+    "bracket": "Task: fix the page.\nFiles: `app/[id]/page.tsx`. Report in 10 lines.",
+    "folder": "Task: amend the decisions.\nFiles: `docs/decisions`. Report in 10 lines.",
+    "slowglob": "Task: tidy the sources.\nFiles: `src/*a*a*a*a*a*a*a*a*a*a.py`. Report in 10 lines.",
 }
 
 
@@ -15879,9 +15890,20 @@ BS_LINES["later"] = [_bs_user(BS_BRIEFS["exact"]),
 # A brief whose content is a list of text blocks, the other shape a user record takes.
 BS_LINES["list"] = [json.dumps({"type": "user", "timestamp": BS_TIME, "message": {
     "role": "user", "content": [{"type": "text", "text": BS_BRIEFS["exact"]}]}})]
+# A pointer brief: its first user message names a file that holds the brief. The target is in tmp (an
+# absolute path); the chain file names the target, and the guard must not follow it a second time.
+BS_POINTER_DIR = os.path.join(ROOT, "briefscope", "pointers")
+BS_POINTER_TARGET = os.path.join(BS_POINTER_DIR, "brief-guard.md")
+BS_POINTER_CHAIN = os.path.join(BS_POINTER_DIR, "brief-chain.md")
+BS_POINTER_MISSING = os.path.join(BS_POINTER_DIR, "brief-missing.md")   # never written
+BS_LINES["ptr-abs"] = [_bs_user("Read your full brief at " + BS_POINTER_TARGET)]
+BS_LINES["ptr-repo"] = [_bs_user("Read your full brief at docs/briefs/brief-t7.md")]
+BS_LINES["ptr-missing"] = [_bs_user("Read your full brief at " + BS_POINTER_MISSING)]
+BS_LINES["ptr-chain"] = [_bs_user("Read your full brief at " + BS_POINTER_CHAIN)]
 # One id per agent, none a prefix of another. `missing` gets no file; `unreadable` gets a folder.
 BS_IDS = {key: "b5a%013x" % n for n, key in enumerate(
     ["exact", "bare", "dir", "glob", "nopaths", "lone", "author", "notes", "other", "later", "list",
+     "ptr-abs", "ptr-repo", "ptr-missing", "ptr-chain", "bracket", "folder", "slowglob",
      "missing", "unreadable"], 1)}
 
 
@@ -15895,6 +15917,8 @@ def build_bs_transcripts():
     for key, lines in BS_LINES.items():
         write(bs_agent(key), "\n".join(lines) + "\n")
     os.makedirs(bs_agent("unreadable"), exist_ok=True)   # a folder where the file belongs: open() fails
+    write(BS_POINTER_TARGET, BS_POINTER_TEXT + "\n")
+    write(BS_POINTER_CHAIN, "Read your full brief at " + BS_POINTER_TARGET + "\n")
 
 
 lazy_fixture([BS_TRANSCRIPT] + [bs_agent(key) for key in BS_IDS], build_bs_transcripts)
@@ -16014,6 +16038,92 @@ bs_judge("brief-scope: the main session's commit is not judged", "allow", bs_app
 bs_judge("brief-scope: a reviewer's commit is not judged", "allow", bs_app_unnamed, "reviewer", "exact")
 
 
+def bs_history(name, *steps):
+    """A worktree on `work`, cut from a base that is also origin/main, after `steps` (each takes the
+    worktree): the agent's own commits and its uncommitted changes, as the agent leaves them."""
+    main = os.path.join(DIFFROOT, "bs-" + name + "-main")
+    where = os.path.join(DIFFROOT, "bs-" + name)
+
+    def build():
+        make_repo(main, BS_BASE)
+        _must(main, "update-ref", "refs/remotes/origin/main", "HEAD")
+        made = run_vcs(main, "worktree", "add", "-q", "-b", "work", where)
+        if made.returncode != 0:
+            sys.exit("fixture setup failed: worktree in %r: %s" % (where, made.stderr.strip()))
+        for step in steps:
+            step(where)
+    lazy_fixture([where, main], build)
+    return where
+
+
+def _own_commit(message, *pairs):
+    """An own commit that writes each (path, text) pair, then commits them with `message`."""
+    def go(w):
+        for rel, text in pairs:
+            write(os.path.join(w, rel), text)
+        _must(w, "add", "-A")
+        _must(w, *IDENT, "commit", "-q", "-m", message)
+    return go
+
+
+def _revert_head(w):
+    _must(w, *IDENT, "revert", "--no-edit", "HEAD")
+
+
+# ---- a pointer brief is read, and the pointer path itself is not a scope path
+bs_ptr_other = bs_repo("ptr-other", _put("hooks/other.py", "o = 2\n"))
+bs_ptr_guard = bs_repo("ptr-guard", _put("hooks/guard.py", "g = 2\n"))
+bs_ptr_pointer = bs_repo("ptr-pointer", _put("docs/briefs/brief-t7.md", BS_POINTER_TEXT + "\nEdited.\n"))
+bs_judge("brief-scope: a pointer to a brief in tmp is read: a commit of a file it does not name is denied",
+         "deny", bs_ptr_other, "builder", "ptr-abs", rule=BS_RULE, lacks="hooks/other.py")
+bs_judge("brief-scope: a pointer to a brief in tmp is read: a commit of the file it names is allowed",
+         "allow", bs_ptr_guard, "builder", "ptr-abs")
+bs_judge("brief-scope: an in-repo pointer is read: a commit of the file it names is allowed",
+         "allow", bs_ptr_guard, "builder", "ptr-repo")
+bs_judge("brief-scope: an in-repo pointer is read: a commit of a file it does not name is denied",
+         "deny", bs_ptr_other, "builder", "ptr-repo", rule=BS_RULE, lacks="hooks/other.py")
+bs_judge("brief-scope: the pointer file is not a scope path: a commit of it is denied", "deny", bs_ptr_pointer,
+         "builder", "ptr-repo", rule=BS_RULE, lacks="docs/briefs/brief-t7.md")
+bs_judge("brief-scope: a pointer inside a pointer is not followed a second time", "allow", bs_ptr_other,
+         "builder", "ptr-chain")
+
+# ---- a file an own earlier commit added is new, judged against the agent's base (origin/main)
+bs_hist_new = bs_history("hist-new", _own_commit("add helper", ("src/new_helper.py", "n = 1\n")),
+                         _put("src/new_helper.py", "n = 2\n"))
+bs_hist_new2 = bs_history("hist-new2", _own_commit("add helper", ("src/new_helper.py", "n = 1\n")),
+                          _own_commit("change helper", ("src/new_helper.py", "n = 2\n")))
+bs_hist_old = bs_history("hist-old", _own_commit("change contest", ("src/contest.py", "y = 2\n")))
+bs_revert = bs_history("revert", _own_commit("add helper", ("src/new_helper.py", "n = 1\n")), _revert_head)
+bs_judge("brief-scope: a file an own commit added is new: a later change to it in the tree is allowed",
+         "allow", bs_hist_new, "builder", "exact")
+bs_judge("brief-scope: a file one own commit added and a later own commit changed is new: the push is allowed",
+         "allow", bs_hist_new2, "builder", "exact", command=PUSH)
+bs_judge("brief-scope: a file at the base that an own commit changes is refused at push", "deny", bs_hist_old,
+         "builder", "exact", command=PUSH, rule=BS_RULE, lacks="src/contest.py")
+bs_judge("brief-scope: a git revert of an own commit is not judged", "allow", bs_revert, "builder", "exact",
+         command=PUSH)
+
+# ---- a bracketed path keeps its brackets; a folder with no slash or extension covers its files
+bs_brackets_other = bs_repo("brackets-other", _put("app/other/index.tsx", "export default 3\n"))
+bs_brackets_named = bs_repo("brackets-named", _put("app/[id]/page.tsx", "export default 3\n"))
+bs_folder_under = bs_repo("folder-under", _put("docs/decisions/x.md", "x 2\n"))
+bs_folder_sibling = bs_repo("folder-sibling", _put("docs/decisions-old/x.md", "y 2\n"))
+bs_judge("brief-scope: a bracketed path keeps its brackets: a commit of a sibling folder is denied", "deny",
+         bs_brackets_other, "builder", "bracket", rule=BS_RULE, lacks="app/other/index.tsx")
+bs_judge("brief-scope: a bracketed path names its file whole: a commit of that file is allowed", "allow",
+         bs_brackets_named, "builder", "bracket")
+bs_judge("brief-scope: a folder named with no slash or extension covers the files under it", "allow",
+         bs_folder_under, "builder", "folder")
+bs_judge("brief-scope: a folder covers whole segments: one that only shares its name is denied", "deny",
+         bs_folder_sibling, "builder", "folder", rule=BS_RULE, lacks="docs/decisions-old/x.md")
+
+# ---- a glob with ten stars is judged in under two seconds
+bs_slow_glob = bs_repo("slow-glob", _put(BS_LONG_NAME, "s 2\n"))
+add("brief-scope: a glob with ten stars is judged in under two seconds", "deny", rule=BS_RULE,
+    tool="Bash", cwd=bs_slow_glob, agent_id=BS_IDS["slowglob"], agent_type="builder",
+    transcript=BS_TRANSCRIPT, max_seconds=2, carries=BS_REMEDY, lacks=BS_LONG_NAME, command=COMMIT)
+
+
 def _bs_scope(repo, rel):
     """The fixture's own change, read from git before any guard call: a log check judges only what it built."""
     status = run_vcs(repo, "status", "--porcelain", "--untracked-files=all")
@@ -16105,12 +16215,34 @@ def bs_fixture_check():
              (bs_author_retired, "lint/test_retired_repos.py"), (bs_notes_named, "notes/verdict-1.md"),
              (bs_notes_named, "notes/verdict-2.md")]
     wants += [(bs_notes_other, name) for name in ["notes/verdict-1.md"] + BS_TOOL_NOTES]
+    wants += [(bs_ptr_other, "hooks/other.py"), (bs_ptr_guard, "hooks/guard.py"),
+              (bs_ptr_pointer, "docs/briefs/brief-t7.md"), (bs_hist_new, "src/new_helper.py"),
+              (bs_brackets_other, "app/other/index.tsx"), (bs_brackets_named, "app/[id]/page.tsx"),
+              (bs_folder_under, "docs/decisions/x.md"), (bs_folder_sibling, "docs/decisions-old/x.md"),
+              (bs_slow_glob, BS_LONG_NAME)]
     for repo, rel in wants:
         materialize(repo)
         problem = _bs_scope(repo, rel)
         if problem:
             return False, problem
-    return True, "every fixture holds the change its cases judge (%d paths)" % len(wants)
+    # The history fixtures hold their own commits, and each has origin/main, read from git.
+    history = [(bs_hist_new, "add helper"), (bs_hist_new2, "change helper"), (bs_hist_old, "change contest"),
+               (bs_revert, 'Revert "add helper"')]
+    for repo, subject in history:
+        materialize(repo)
+        subjects = run_vcs(repo, "log", "--format=%s", "-n", "3").stdout.splitlines()
+        if subject not in subjects:
+            return False, "the fixture in %s has no own commit %r: %s" % (repo, subject, subjects)
+        if run_vcs(repo, "rev-parse", "--verify", "-q", "origin/main").returncode != 0:
+            return False, "the fixture in %s has no origin/main" % repo
+    return True, "every fixture holds the change its cases judge (%d paths, %d histories)" % (
+        len(wants), len(history))
+
+
+def bs_pointer_missing_log():
+    """A pointer to a brief that is not there allows the commit and logs brief-scope-unread."""
+    return bs_logged(os.path.join(ROOT, "briefscope-log-pointer-missing"), bs_ptr_other, ["hooks/other.py"],
+                     _bs_bodies(bs_ptr_other, "builder", "ptr-missing", [COMMIT]), BS_UNREAD)
 
 
 LOG_CHECKS_EXTRA.append(("brief-scope: each fixture repo holds the change its cases judge", bs_fixture_check))
@@ -16121,6 +16253,8 @@ LOG_CHECKS_EXTRA.append(("brief-scope: an unreadable brief is allowed and logs b
                          "transcript path, a missing file or a folder", bs_unread_log))
 LOG_CHECKS_EXTRA.append(("brief-scope: a second stop with an unnamed file is allowed and logs a brief-scope "
                          "line", bs_second_stop_log))
+LOG_CHECKS_EXTRA.append(("brief-scope: a pointer to a missing brief is allowed and logs brief-scope-unread",
+                         bs_pointer_missing_log))
 
 
 # =========================================================================== builder refusal
