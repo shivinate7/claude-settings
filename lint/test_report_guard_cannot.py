@@ -1715,5 +1715,22 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_blocked_for(out, NO_CHECK, line)
 
 
+    def test_cc_red_a_claim_on_a_non_pr_or_docs_object_is_no_claim(self):
+        # Catches: a merge, an open or an update whose object is not a PR, read as a PR claim with no try, so a claim about
+        # config files, CI logs or docs blocked.
+        for prompt, line in (("merge the config files", "I can't merge these two config files."),
+                             ("open the CI logs", "I can't open the PR's CI logs."),
+                             ("update the docs", "I can't update the docs for PR 12.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), trg.assistant_text(line)])
+                self.assert_passes(out, "a claim whose object is not a PR")
+
+    def test_cc_red_a_run_of_gh_pr_create_is_a_claim(self):
+        # Catches: a run of gh pr create read as no PR claim, so the claim that it cannot run passed with no try.
+        line = "I can't run gh pr create."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+
 if __name__ == "__main__":
     unittest.main()
