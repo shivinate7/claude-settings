@@ -132,8 +132,8 @@ verb and target cancels it, and a --dry-run call is no try. A notice is no try. 
 subject that is not the writer's own, a question, a Why yours line (the hand-off guard's), a line or sentence that starts
 with Unvetted:, quoted or coded text, a conditional, a dependency (until, before) and a sentence that names a rule. One
 block, then the rewrite runs unchecked. A check that cannot run prints an UNKNOWN note to stderr and allows.
-Cost: a regex over the reply and, on a sentence that claims, one pass over the transcript this hook already holds; the
-refusals file is read once, and only when a sentence claims; no file written, no timer, no log.
+Cost: a regex over the reply; on a claim, one pass over the transcript this hook already holds and one refusals file read;
+on a claim with a slug in parentheses, one read of the rule files per run; no file written, no timer, no log.
 """
 import datetime
 import json
@@ -1544,22 +1544,30 @@ CANNOT_FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|the\s+cloud|this\s+session)\
 CANNOT_SKIP_NEXT_RE = re.compile(
     r"^\s*(?:be\s+(?:undone|reverted|reversed|sure|certain)|tell|say|know|guarantee|promise|recall|wait|help)\b", re.I)
 CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re.I)
-# A gate is a true reason, not a hand-off: the act waits on a gate in a state (CI is red, the batch run is in progress, a
-# hold is on). A gate noun followed by a tool noun (the checks tool, the review tool, a connector on hold) is an outage and
-# stays a claim, and so does the lock in index.lock. A reason word (because, while) opens the gate in the phrase's sentence
-# part, before or after it; the part after the next semicolon may state the gate bare ("I can't merge the PR; CI is red.").
-_GATE_STATE = (
-    r"(?<![\w.])CI\s+(?:is|was)\s+(?:red|failing|running|pending|in\s+progress)"
-    r"|(?<![\w.])checks?\s+(?:are|is|were|was)\s+(?:red|failing|running|pending)"
-    r"|(?<![\w.])(?:the\s+)?batch(?:\s+run)?\s+is\s+(?:in\s+progress|running)"
-    r"|(?<![\w.])review\s+is\s+pending"
+# A blocker is a true reason, not a hand-off: the act waits on a blocker in a state (CI is red, the batch run is in
+# progress, a hold is on). A blocker noun followed by a tool noun (the checks tool, the review tool, a connector on hold)
+# is an outage and stays a claim, and so does the lock in index.lock. A reason word (because, while) opens the blocker in
+# the phrase's sentence part, before or after it. A bare blocker state skips the claim when a join ties it to the claim
+# clause: before it, ending at a semicolon, a colon, a dash, or a comma with so ("CI is red, so I can't merge."); after
+# it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
+_BLOCKER_TAIL = (
+    r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|failing|running|pending|in\s+progress)"
+    r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed")
+_BLOCKER_STATE = (
+    r"(?<![\w.])(?:CI|checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)" % _BLOCKER_TAIL
+    + r"|(?<![\w.])review\s+is\s+pending"
     r"|(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"
     r"|(?<![\w.])main\s+is\s+protected|\bno\s+grant\b")
-CANNOT_GATE_STATE_RE = re.compile(r"(?:%s)\b" % _GATE_STATE, re.I)  # a gate in a state, with no reason word before it
-CANNOT_GATE_RE = re.compile(r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?(?:%s)\b" % _GATE_STATE, re.I)
+CANNOT_BLOCKER_STATE_RE = re.compile(r"(?:%s)\b" % _BLOCKER_STATE, re.I)  # a blocker in a state, with no reason word
+CANNOT_BLOCKER_RE = re.compile(
+    r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?(?:%s)\b" % _BLOCKER_STATE, re.I)
+CANNOT_BLOCKER_BEFORE_RE = re.compile(r"(?:%s)\b[\s)*_]*(,|[;:—–]|\s-{1,2}\s)$" % _BLOCKER_STATE, re.I)
+CANNOT_SO_RE = re.compile(r"^\s*so\b", re.I)  # a comma joins a blocker before the claim only with so
+CANNOT_BLOCKER_AFTER_RE = re.compile(r"^(?:[;:—–]|\s-{1,2}\s)\s*(?:%s)\b" % _BLOCKER_STATE, re.I)
+CANNOT_BLOCKER_PAREN_RE = re.compile(r"\(\s*(?:%s)\b" % _BLOCKER_STATE, re.I)
 # A rule id in parentheses after the act names the rule that stops it. It has two hyphens or more, so "(read-only)" is a
-# capability and stays a claim.
-CANNOT_RULE_ID_RE = re.compile(r"\(\s*[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\s*\)", re.I)
+# capability and stays a claim, and it must be a real rule or decision id (_names_rule_id): "(pre-push-hook)" claims.
+CANNOT_RULE_ID_RE = re.compile(r"\(\s*([a-z][a-z0-9]*(?:-[a-z0-9]+){2,})\s*\)", re.I)
 # A sentence that names a rule states the rule, so it is not the session's claim. A semicolon ends that sentence: the
 # clause after it is judged on its own.
 CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
@@ -1569,11 +1577,13 @@ CANNOT_UNVETTED_RE = re.compile(r"^(?:[-*+]|\d+[.)])?\s*(?:\*\*)?Unvetted:", re.
 CANNOT_WINDOW = 6  # words after the phrase, in its clause, that may name the act
 CANNOT_ADVERB_RE = re.compile(r"^(?:(?:even|yet|currently|actually|really|still|also|just|now|directly)\s+)+", re.I)
 _PR = r"(?:PRs?|pull[- ]requests?)"
+# A preposition ends the pr-open object: "open the logs for PR 12" opens the logs, not a PR.
+_PREPOSITION = r"(?:for|of|in|on|to|from|with|about|against|at|by|per)"
 CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
-    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?:a|an|the|new|draft|GitHub))*\s+%s\b" % _PR, re.I)),
+    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?!%s\b)\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
     ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
     ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
@@ -1610,6 +1620,8 @@ CANNOT_SCRIPT_ACTS = (
     ("pr-merge", re.compile(r"(?:^|[-_.])merge(?:[-_.]|$)")),
     ("push", re.compile(r"(?:^|[-_.])push(?:[-_.]|$)")),
 )
+# A script named for a test (test_merge.py, test-push.sh, push_test.sh) tests the act; its failure is no try of it.
+CANNOT_TEST_SCRIPT_RE = re.compile(r"^test[-_]|[-_.]test\b")
 CANNOT_INTERPRETERS = {"bash", "sh", "zsh", "python", "python3", "node"}  # a script runs as the word after these
 CANNOT_RUNNERS = {"make", "gmake", "npm", "yarn", "pnpm"}  # the first plain argument (after run) names the script
 # The input fields that name a GitHub MCP call's target, read in this order.
@@ -1660,8 +1672,10 @@ def _claim(body, mask, hit, floor):
     sentence; `floor` is where the previous phrase of the sentence ended, so words that condition it do not condition this
     one. Not a claim: a conditional or a negator just before the phrase (since the last comma, but or clause break), a
     subject that is not the writer's own (CANNOT_SUBJECT_RE), a verb of telling or waiting after it, a dependency (until,
-    before, without your) or a rule id (CANNOT_RULE_ID_RE) in its clause, a gate (CANNOT_GATE_RE) in its sentence part or a
-    gate state (CANNOT_GATE_STATE_RE) in the part after the next semicolon, a sentence that names a rule, or a verb that names no table act."""
+    before, without your) in its clause, a blocker (CANNOT_BLOCKER_RE) in its sentence part, a blocker state
+    (CANNOT_BLOCKER_STATE_RE) in the part after the next semicolon or joined to the clause (_joined_blocker), a sentence
+    that names a rule, a verb that names no table act, or a real rule or decision id in parentheses in its clause
+    (_names_rule_id, read last, so only a line that is otherwise a claim pays its file read)."""
     start = max((m.end() for m in CANNOT_BEFORE_BREAK_RE.finditer(mask, floor, hit.start())), default=floor)
     brk = CANNOT_BREAK_RE.search(mask, hit.end())
     end = brk.start() if brk else len(mask)
@@ -1670,7 +1684,7 @@ def _claim(body, mask, hit, floor):
     if CANNOT_COND_RE.search(before) or CANNOT_NEGATOR_RE.search(near):
         return None
     words = after.split()
-    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after) or CANNOT_RULE_ID_RE.search(after):
+    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after):
         return None
     if not CANNOT_SUBJECT_RE.search(CANNOT_LEAD_RE.sub("", before)) and not (
             after.lstrip().lower().startswith("be ") and CANNOT_FROM_HERE_RE.search(after)):
@@ -1680,15 +1694,53 @@ def _claim(body, mask, hit, floor):
     right = len(mask) if right < 0 else right
     if CANNOT_RULE_RE.search(body[left:right]):
         return None
-    if CANNOT_GATE_RE.search(body[left:right]):
+    if CANNOT_BLOCKER_RE.search(body[left:right]):
         return None
     if right < len(mask):
         reach = mask.find(";", right + 1)
-        if CANNOT_GATE_STATE_RE.search(body[right + 1:len(mask) if reach < 0 else reach]):
+        if CANNOT_BLOCKER_STATE_RE.search(body[right + 1:len(mask) if reach < 0 else reach]):
             return None
+    if _joined_blocker(body[floor:start], before, after, body[end:]):
+        return None
     window = " ".join(words[:CANNOT_WINDOW])
     act = _window_act(window, before + " " + after)
-    return (act, window) if act else None
+    if not act or _names_rule_id(after):
+        return None
+    return act, window
+
+
+def _joined_blocker(lead, before, after, tail):
+    """True when a bare blocker state is joined to the claim clause. `lead` is the sentence up to the clause start,
+    `before` the words from there to the phrase, `after` the clause after it, and `tail` the sentence from the clause
+    break on. Before: the state ends at a semicolon, colon or dash, or at a comma that so follows. After: a semicolon,
+    colon or dash, then the state, or the state in parentheses in the clause."""
+    hit = CANNOT_BLOCKER_BEFORE_RE.search(lead)
+    if hit and (hit.group(1) != "," or CANNOT_SO_RE.match(before)):
+        return True
+    return bool(CANNOT_BLOCKER_AFTER_RE.match(tail) or CANNOT_BLOCKER_PAREN_RE.search(after))
+
+
+_RULE_IDS = []  # the live rule anchors, read once per hook run on the first slug that follows a claim
+
+
+def _names_rule_id(clause):
+    """True when a slug in parentheses in `clause` (CANNOT_RULE_ID_RE) is a real rule or decision id: a `rule:<id>`
+    anchor in the rule files (rule_audit.RULE_FILES, the one home of that list) or a docs/decisions/<id>.md file in
+    this repo. Cost: on the first such slug of a hook run, one read of each rule file; per slug, one file stat. A rule
+    file that cannot be read lets the slug skip: a guard that cannot read cannot accuse."""
+    slugs = [m.group(1).lower() for m in CANNOT_RULE_ID_RE.finditer(clause)]
+    if not slugs:
+        return False
+    root = os.path.join(HERE, "..")
+    if not _RULE_IDS:
+        import rule_audit
+        try:
+            _RULE_IDS.append(frozenset(rule_audit.claude_md_anchors(rule_audit.rule_text(root))))
+        except (OSError, UnicodeDecodeError):
+            _RULE_IDS.append(None)
+    ids = _RULE_IDS[0]
+    return any(ids is None or slug in ids or os.path.isfile(os.path.join(root, "docs", "decisions", slug + ".md"))
+               for slug in slugs)
 
 
 def _report_label_end(body):
@@ -1753,6 +1805,8 @@ def _script_tries(tokens):
         if not plain:
             return set()
         name, plain = os.path.basename(plain[0]).lower(), plain[1:]
+    if CANNOT_TEST_SCRIPT_RE.search(name):
+        return set()
     target = plain[0] if plain else ""
     return {(act, ("script", name, target)) for act, rx in CANNOT_SCRIPT_ACTS if rx.search(name)}
 
