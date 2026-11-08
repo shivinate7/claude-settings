@@ -1,11 +1,11 @@
 {
   "title": "Main is green again on Windows guard shard 2 (#1402's conflict-markers case)",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 0.1,
   "owner": "coordinator",
   "why": "Coordinator, 13:52 CST Nov 7: main red at 174b005c1, Windows guard shard 2.",
-  "note": "Main red at 174b005c1. The commit-refuses-conflict-markers lane was unarchived for it.",
+  "note": "Main red at 174b005c1. The commit-refuses-conflict-markers lane was unarchived for it. Done: #1434 merged in batch 60 (#1719) at efbbbd6b7, 20:18 CST; #1488 (third Windows guard shard) rode with it. Main's own run after the merge is not yet read (20:20 CST).",
   "lane": "session_013NEJKzXJPDWrSRe3i1fGJd",
-  "updatedAt": "2026-11-07T13:52:00-06:00"
+  "updatedAt": "2026-11-07T20:20:00-06:00"
 }

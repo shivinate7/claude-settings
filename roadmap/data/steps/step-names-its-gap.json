@@ -1,11 +1,11 @@
 {
   "title": "A roadmap commit that stages a step whose gap key matches an open step's is refused",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 0.07,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL39dinAf2VGG2b3Weo",
   "why": "One gap filed as several steps splits the work and its review: guard-pipe-on-merge-lint, verdict-pipe-masks-exit and bg-tail-loses-verdict; explore-no-create-session and reviewer-no-session-tools (b619241c4).",
-  "note": "Home: roadmap/build.py check_staged on the record branch, which roadmap/hooks/pre-commit runs. Each step names its gap (a link from note to step). Done check: a red test where a commit staging a step whose gap key matches an open step's is refused, then green. From lane process-held-end-to-end's record (#1711), 20:20 CST Nov 7. It gates triage's own roadmap commits.",
+  "note": "Home: roadmap/build.py check_staged on the record branch, which roadmap/hooks/pre-commit runs. Each step names its gap (a link from note to step). Done check: a red test where a commit staging a step whose gap key matches an open step's is refused, then green. From lane process-held-end-to-end's record (#1711), 20:20 CST Nov 7. It gates triage's own roadmap commits. Topic roadmap. Lane started by the coordinator, 20:20 CST.",
   "updatedAt": "2026-11-07T20:20:00-06:00"
 }
