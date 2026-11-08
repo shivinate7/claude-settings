@@ -13421,6 +13421,16 @@ sh("builder-test: shell sed -i -e before -- on hooks/guard.py, a script naming t
 # A -f script is read, not written, so the file operand after it is still judged.
 sh("builder-test: shell sed -i -f fix.sed tests/x.py is refused",
    "sed -i -f fix.sed tests/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+# A `;` inside a quoted sed script is part of the script, not a command break: the w command after it,
+# and the file operand after the script, are still judged.
+sh("builder-test: shell sed -i, a w command after ; in the script, on hooks/guard.py, is refused",
+   "sed -i 's/a/b/;w tests/x.py' hooks/guard.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell sed -i, a w command inside a { } block after ;, on hooks/guard.py, is refused",
+   "sed -i '1,3{p;w tests/x.py}' hooks/guard.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell sed -i, a ; in the script before p, onto tests/x.py, is refused",
+   "sed -i 's/a/b/;p' tests/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell sed -i, a y command on hooks/guard.py, is allowed",
+   "sed -i 'y/abc/xyz/' hooks/guard.py", "allow", **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
