@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T04:35:00Z",
+  "answeredAt": "2026-11-08T12:13:31Z",
   "context": "Goal: #1492 is fixed and goes back into a batch. It was dropped from batch 63b.\nWhy you: the lane waits on a Bash permission prompt in its own session, and only you can answer a prompt there.\nSteps: open the lane's session with the link below, read the command in its prompt, and answer it. Then press Done here.",
   "home": "#1492",
   "id": "notes-fix-guard-1-prompt",

@@ -1,11 +1,11 @@
 {
   "title": "Inside .claude/worktrees/, the guard refuses an agent's git worktree add unless the target is the agent's own recorded home",
   "why": "A test-author ran git worktree add by hand and made /home/user/claude-settings/.claude/worktrees/agent-a38387a49922752ec-red, beside the harness's own trees. guard.py's hand_made_worktree_hit refuses only trees outside <primary>/.claude/worktrees/, so it let this through (lane fail-record-ancestor-head, session_013NEJKzYhDtNPLcEdeVFEVe; coordinator, 05:44 CST Nov 8).",
-  "note": "Fix: inside .claude/worktrees/, refuse an agent's worktree add unless the target is its own recorded home; red case first, from this incident. Not covered by guard-relative-write-escape, which covers relative ../ paths that leave the worktree; this act stays inside .claude/worktrees/. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 05:47 CST Nov 8; the coordinator assigns a lane.",
+  "note": "Fix: inside .claude/worktrees/, refuse an agent's worktree add unless the target is its own recorded home; red case first, from this incident. Not covered by guard-relative-write-escape, which covers relative ../ paths that leave the worktree; this act stays inside .claude/worktrees/. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 05:47 CST Nov 8; the coordinator assigns a lane. Doing in lane session_013NEJL382EZLqWkzVvjj7UP (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane).",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 624,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T05:47:00-06:00"
+  "lane": "session_013NEJL382EZLqWkzVvjj7UP",
+  "updatedAt": "2026-11-08T06:21:00-06:00"
 }

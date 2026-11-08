@@ -1,11 +1,11 @@
 {
   "title": "An agent's commit names the agent's own model in its Co-Authored-By trailer, and a check refuses one that names another",
   "why": "Lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m) told Haiku test-authors to sign commits as Opus 5.5; one did (3b5516cf8 on pwsh-followups). A trailer that names the wrong model misstates who wrote the code (lane, 05:47 CST Nov 8).",
-  "note": "Fix: the brief template's trailer line names the spawn's model; a check refuses an agent commit whose Co-Authored-By model differs from the spawn's model; red case first, from 3b5516cf8. Queue fix (owner 13:20 CST Nov 7). Filed 05:50 CST Nov 8; the coordinator assigns a lane.",
-  "status": "todo",
+  "note": "Fix: the brief template's trailer line names the spawn's model; a check refuses an agent commit whose Co-Authored-By model differs from the spawn's model; red case first, from 3b5516cf8. Queue fix (owner 13:20 CST Nov 7). Filed 05:50 CST Nov 8; the coordinator assigns a lane. Doing in lane session_013NEJKyrvZKvULem1eZzY1o (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane).",
+  "status": "doing",
   "order": 627,
-  "lane": "",
+  "lane": "session_013NEJKyrvZKvULem1eZzY1o",
   "phase": "now",
   "owner": "triage",
-  "updatedAt": "2026-11-08T05:48:00-06:00"
+  "updatedAt": "2026-11-08T06:21:00-06:00"
 }

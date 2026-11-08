@@ -5,7 +5,7 @@
   "order": 103.68,
   "owner": "coordinator",
   "why": "A local triage session twice asked the owner to push a commit he had already pushed: its copy of the roadmap branch was stale, and the guard refuses before git reaches GitHub, so the refusal could not say the commit was already there (owner's ask ask-mw79vy66rf, 21:28 CST Nov 7).",
-  "note": "Fix: the refusal's remedy says to run `git fetch origin roadmap` and to ask the owner only when the commit is not on origin/roadmap. Remedy text only; the hook adds no network call. The debt local-triage-tier-proof removes the situation once local triage can push. Filed 21:30 CST Nov 7. Lane session_013NEJL4KjioFCNuafMd8V8Q started (coordinator, received 21:39 CST Nov 7). Nov 7 22:47 CST: #1777 handed to runner 8. Note from the lane: test RECORD_CARRIES pins neither \"exit 0\" nor \"the commit the push would send\". A note, not a debt.",
-  "updatedAt": "2026-11-07T22:47:00-06:00",
+  "note": "Fix: the refusal's remedy says to run `git fetch origin roadmap` and to ask the owner only when the commit is not on origin/roadmap. Remedy text only; the hook adds no network call. The debt local-triage-tier-proof removes the situation once local triage can push. Filed 21:30 CST Nov 7. Lane session_013NEJL4KjioFCNuafMd8V8Q started (coordinator, received 21:39 CST Nov 7). Nov 7 22:47 CST: #1777 handed to runner 8. Note from the lane: test RECORD_CARRIES pins neither \"exit 0\" nor \"the commit the push would send\". A note, not a debt. Runner 8 (06:16 CST Nov 8): #1777 is in no batch. `merge --reviewed` lists it under \"no record:\", and runner 8 has no hand-off logged. To join batch 65, the lane posts the tool-printed record for head 26869a9fc (`merge 1777 --review-record --head ...`), runs `merge --lane-lint 1777`, and hands it to runner 8 again.",
+  "updatedAt": "2026-11-08T06:21:00-06:00",
   "lane": "session_013NEJL4KjioFCNuafMd8V8Q"
 }

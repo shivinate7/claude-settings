@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T10:56:00Z",
+  "answeredAt": "2026-11-08T12:11:17Z",
   "context": "Goal: no reviewed PR waits, and every found gap gets a fix (owner, 13:20 CST Nov 7).\nProblem (rule): during the hold, only the lanes that land the fixes and your own asks start. The coordinator has read \"the fixes\" two ways. At 23:07 and 23:09 CST Nov 7 (steps feedback-same-anywhere and ci-scope-dynamic-paths), it read them as fixes that unblock a merge. Since then it has started lanes for gap fixes that block no merge, such as report-guard-role-default-model at 04:42 CST Nov 8. The hold is your ruling, so its scope needs your word.\nBased on (ruling): item 384 (your chat, 21:42 CST Nov 7): new lanes wait, and the lanes that make the idle-PR, archive and drain fixes land still start.\nBased on (ruling): your words at 13:20 CST Nov 7: a found gap gets a fix, not a note.\nBased on (ruling): item 386 b (22:28 CST Nov 7): a lane's findings ride in its own PR, so a gap a lane found starts no new lane.\nDeparts from: main, which has no record of which lanes the hold lets start \u2014 adds one reading to record lane-inflow-hold.\nMeanwhile: a gap a lane found rides in that lane. The coordinator starts new lanes only for your asks and for fixes that unblock a merge until you answer.",
   "home": "pr-backlog-clear",
   "id": "hold-which-fixes-start",

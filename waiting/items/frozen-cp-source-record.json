@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T10:00:00Z",
+  "answeredAt": "2026-11-08T12:13:18Z",
   "context": "Goal: guards refuse only what can do harm, and records say what main does.\nProblem (rule): record frozen-path-resolves-shell-vars says \"A `cp` with a frozen source is refused (`MUTATING_COMMAND` over-refuses `cp` and `mv` on purpose).\" Main already allows `cp <frozen hook> /tmp/x`, and a test pins that allow. So the sentence is false on main, and changing a recorded decision needs your word.\nBased on (read): main's docs/decisions/frozen-path-resolves-shell-vars.md (the Rule 7 paragraph) and hooks/test_guard.py case \"frozen: cp FROM a frozen hook to scratch is a read\", which expects allow; triage read both at 03:58 CST.\nBased on (ruling): the same record's owner line (owner, 2026-10-07) covers env-var values only, not cp.\nDeparts from: the record says a cp from a frozen source is refused \u2014 it would say a cp from a frozen source is a read, and a frozen target is refused.\nMeanwhile: nothing waits on this. PR #1867 (lane other-checkout-cp-own) carries on.",
   "home": "other-checkout-cp-own",
   "id": "frozen-cp-source-record",

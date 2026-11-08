@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T05:50:00Z",
+  "answeredAt": "2026-11-08T12:08:10.433Z",
   "context": "Goal: a guard or check change gets exactly the review it needs, no more.\nProblem (rule): your item 359 b says to skip round 3 unless the change touches a guard or check, or round 2 failed. It does not say whether a fix check that passes before round 3 ends the review of a guard change.\nBased on (ruling): item 359 b (Nov 7 14:41 CST): \"Skip round 3 unless the change touches a guard or check, or round 2 failed.\" Asked because it is silent on a passing fix check.\nBased on (ruling): decisions/hold-unsafe-after-round-3: from item 271 b, a fix check may follow a FAIL in any round. The lane's reading of 271 b is that a PASS before round 3 counts as that round passing, so no net-value test is owed. Asked again because the coordinator's 22:36 CST reading said round 3 is still owed, and the two conflict. GLOSSARY.md and CLAUDE.md's fix-check text differ from item 359 b on the same point.\nDeparts from: main, which has no rule on a fix-check PASS before round 3 \u2014 one rule, which #1773's check reads.\nMeanwhile: #1773 (with runner 8) enforces option a, the stricter side, so it may merge; option b would loosen it later. The coordinator's 22:36 reading is withdrawn until you answer.",
   "home": "review-rounds-rework",
   "id": "guard-fix-pass-round3",
