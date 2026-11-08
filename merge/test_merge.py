@@ -12459,6 +12459,10 @@ class ReviewEnv(Env):
         cutover = cutover_at(REVIEW_CUTOVER_PAST)
         cutover.start()
         self.addCleanup(cutover.stop)
+        # fetch_default_branch asks gh for the default branch. Here it answers main, so its fetch runs against the local bare origin and no case calls gh.
+        default = unittest.mock.patch.object(merge, "host_default_branch", lambda root: "main")
+        default.start()
+        self.addCleanup(default.stop)
 
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
@@ -14054,6 +14058,12 @@ class ReviewStampSince(unittest.TestCase):
     """review_stamp_since is the committer time of the first first-parent commit on origin/<base> whose merge/merge.py holds the salt line.
     Each case reads a temp repo in this run's folder, not the repo's history, and makes no network call."""
 
+    def setUp(self):
+        # review_stamp_since reads the default branch, which host_default_branch asks gh for. This class answers main, so no case calls gh.
+        default = unittest.mock.patch.object(merge, "host_default_branch", lambda root: "main")
+        default.start()
+        self.addCleanup(default.stop)
+
     def commit(self, root, n, text, date):
         path = os.path.join(root, "merge", "merge.py")
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -14066,7 +14076,7 @@ class ReviewStampSince(unittest.TestCase):
 
     def repo(self, salt_at):
         """origin/main at commit 3. Commit 1 has no salt line. Commit `salt_at` (2, or None for none) adds it, and commit 3 keeps it.
-        Committer times are fixed: commit 1, then the salt commit, then commit 3. Author times are all 2026-10-01, earlier than those."""
+        Committer times are fixed: commit 1, then the salt commit, then commit 3. Each author time is earlier than all of them, so a read of the author time instead of the committer time gives another cutover."""
         root = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
         self.addCleanup(shutil.rmtree, root, True)
         subprocess.run(["git", "-C", root, "init", "-q"], check=True, capture_output=True)
@@ -14147,8 +14157,7 @@ class ReviewStampSince(unittest.TestCase):
         root = self.repo(salt_at=2)
         first = subprocess.run(["git", "-C", root, "rev-parse", "HEAD~2"], check=True, capture_output=True, text=True).stdout.strip()
         self.git_at(root, "2026-10-20 10:00:00 +0000", "update-ref", "refs/remotes/origin/feat", first)
-        with unittest.mock.patch.object(merge, "host_default_branch", lambda root: "main"):
-            got = review_fn(self, "review_stamp_since")(root, "feat")
+        got = review_fn(self, "review_stamp_since")(root, "feat")
         self.assertEqual(got, "2026-10-21T15:04:05Z", "the stacked base feat has no salt commit, and its cutover is %r, not the default branch's" % (got,))
 
 
