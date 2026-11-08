@@ -1514,3 +1514,5 @@
 - push-unbriefed-deletes-unjudged: a delete, `--prune`, `--all` and `--mirror` from a builder or test-author are not judged by push-unbriefed-branch; main allows them too (hooks/guard_push_delete.py `push_unbriefed_hit`). Step: push-ask-reads-brief.
 - push-unbriefed-roles: only builder and test-author are judged; a record-writer or designer push is not (hooks/guard_push_delete.py `push_unbriefed_hit`). Step: push-ask-reads-brief.
 - push-unbriefed-cost-unproven: no case fails when a non-push agent call reads the transcript, because a missing file allows (hooks/test_guard.py push-unbriefed block). Step: push-ask-reads-brief.
+- push-unbriefed-read-base: a brief that names `origin/X` only as a read base ("Base on origin/X") counts as naming X, so a push to X is silent (hooks/guard_push_delete.py `_brief_names`). Step: push-ask-reads-brief.
+- push-unbriefed-prefix-boundary: no case or mutant pins the start of a `refs/heads/` or `<remote>/` prefix, so `xorigin/X` counting as named would pass the suite (hooks/guard_push_delete.py `_prefixed`). Step: push-ask-reads-brief.
