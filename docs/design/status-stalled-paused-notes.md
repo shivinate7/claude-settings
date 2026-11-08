@@ -21,7 +21,7 @@ stalled mark is already red.
    Gain: the cells read as the roadmap's, one family. Stalled differs from solid red blocked, and
    paused from solid grey to do, by shape.
    Loss: every `.segbar` here is `aria-hidden`, so the colour-alone rule does not require the shape.
-   In a rail chip at 390 a cell is 2.25 px wide at 13 steps and 0 px at 30, and the ring fades to a grey line there.
+   In a rail chip at 390 (104.7 px, measured at 24b1f98e3) a cell is 6.2 px wide at 13 steps and 1.55 px at 30; the ring fills the cell at 30.
    Pick: yes, so both pages draw one bar.
 
 2. **Bar cells, option Tint.** Stalled is `color-mix(in srgb, var(--holds) 45%, transparent)`, paused
