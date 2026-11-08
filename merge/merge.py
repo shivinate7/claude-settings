@@ -1515,7 +1515,7 @@ def claim_paths(wt, base_ref, cfgrel=STAMP_CFG):
 def tool_commit(wt, sha, body, base_ref, cfgrel=STAMP_CFG):
     """True when commit `sha` of checkout `wt`, whose message is `body`, is one commit_claim writes: its message matches and every path it changes is a path the tool writes.
     A claim (its subject and a Record-claim trailer) writes the records page and the record paths of the stamp config on `base_ref` (claim_paths). A records rebuild (its subject and its
-    Drops-lines trailer) writes the records page alone. Such a commit is the merge tool's own, and no lane work (owner pick a, 21:26 CST 2026-11-07, page item 382). A commit that matches by message
+    Drops-lines trailer) writes the records page alone. Such a commit is the merge tool's own, and no lane work (owner pick a (page item 382)). A commit that matches by message
     and also changes another path, a product file, is lane work. A read that fails raises, so the caller refuses as unknown."""
     lines = body.strip().splitlines()
     if not lines:
