@@ -931,15 +931,16 @@ def _push_calls(segment: str, script: str, cwd: str):
     inner = inner_commands(tokens) if tokens else []
     from guard_env import substitution_commands   # imported late: a family reads only the families before it
     inner += substitution_commands(segment, segment)   # the shell runs each `$( )` and backtick text
-    if inner:
-        inner_cwd = push_target(segment, script, cwd)[0] or cwd
-        for text in inner:
-            # The shell reads the wrapped script as it reads a command: a heredoc body is data, and
-            # each `$( )` or backtick text runs as a command of its own (judge_shell does the same).
-            stripped = strip_heredoc_bodies(text)
-            for each in (stripped, *substitution_commands(text, stripped)):
-                for part in split_segments(each):
-                    yield from _push_calls(part, each, inner_cwd)
+    if not inner:
+        return
+    inner_cwd = push_target(segment, script, cwd)[0] or cwd
+    for text in inner:
+        # The shell reads the wrapped script as it reads a command: a heredoc body is data, and
+        # each `$( )` or backtick text runs as a command of its own (judge_shell does the same).
+        stripped = strip_heredoc_bodies(text)
+        for each in (stripped, *substitution_commands(text, stripped)):
+            for part in split_segments(each):
+                yield from _push_calls(part, each, inner_cwd)
 
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
