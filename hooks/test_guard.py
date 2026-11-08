@@ -9416,11 +9416,20 @@ STRAND_STOPPED = "a0e6d3c9b27f18e45"
 STRAND_FAILED = "f58c1b4e7a0d2c9b6"
 STRAND_FULL_FIRST = "c4a7e1f0b93d8256e"
 STRAND_FULL_MIDDLE = "e9b0d6a3f5c71482d"
+STRAND_QUEUED = "7f1d3a9c6e0b25d48"
+STRAND_QUOTED = "2b8e5c0f4a71d936c"
+STRAND_HANDBACK = "5d2a9f0c7e13b68a4"  # the agent whose hand-back quotes STRAND_QUOTED's notice
+STRAND_SESSION = "5f1e0c3a-8b7d-4e2a-9c60-d4b3a1f07e28"  # the session id a queue-operation line carries
+STRAND_QUEUE_TIME = "2026-11-08T03:31:02.114Z"
+STRAND_QUOTED_BODY = ("[Subagent hand-back] The text below is the final report of a subagent this session spawned. "
+                      "Its log quotes an older run's notice: <task-notification><task-id>%s</task-id>"
+                      "<status>completed</status> It is a quote, not a notice that the agent ended.")
 
 
-def strand_notice(agent, tool_id, status, summary=None, note=None):
-    """The user line that notifies `agent` ended with `status`. A completed notice carries a result. A failed one copies
-    the shape of a background command's notice, which has none."""
+def strand_notice(agent, tool_id, status, summary=None, note=None, queued=False):
+    """The line that notifies `agent` ended with `status`. A completed notice carries a result. A failed one copies
+    the shape of a background command's notice, which has none. `queued` writes the notice as the queue-operation
+    enqueue that holds it before any user record delivers it: the keys a real transcript writes on that line."""
     summary = summary or 'Agent "Red cases" finished'
     lines = ["<task-notification>", "<task-id>%s</task-id>" % agent, "<tool-use-id>%s</tool-use-id>" % tool_id,
              "<output-file>tasks/%s.output</output-file>" % agent, "<status>%s</status>" % status,
@@ -9430,7 +9439,19 @@ def strand_notice(agent, tool_id, status, summary=None, note=None):
     if status == "completed":
         lines.append("<result>This agent's report was delivered to you. It is not repeated here.</result>")
     lines.append("</task-notification>")
-    return role_said("\n".join(lines), origin=STRAND_ORIGIN)
+    text = "\n".join(lines)
+    if queued:
+        return json.dumps({"type": "queue-operation", "operation": "enqueue", "timestamp": STRAND_QUEUE_TIME,
+                           "sessionId": STRAND_SESSION, "content": text})
+    return role_said(text, origin=STRAND_ORIGIN)
+
+
+def strand_handback(sender, body):
+    """A hand-back from agent `sender`, as a user record: the wrapper and the origin fields a real transcript writes for
+    one. The text opens with a sentence, so a notice quoted in `body` is not at its start."""
+    text = 'Another Claude session sent a message:\n<agent-message from="%s">\n%s' % (sender, body)
+    origin = {"kind": "peer", "from": sender, "senderTaskId": sender, "name": "test-author", "body": body}
+    return json.dumps({"type": "user", "message": {"role": "user", "content": text}, "origin": origin})
 
 
 def strand_resume(tool_id, agent):
@@ -9581,6 +9602,12 @@ ROLE_LINES = {
     "strand-failed": spawn_call("s1", STRAND_FAILED, "builder") + [strand_notice(
         STRAND_FAILED, "s1", "failed", summary='Background command "Red cases" failed with exit code 1')],
     "strand-full": strand_full_lines(),
+    # One agent whose completed notice is queued, not yet delivered as a user record.
+    "strand-queued": spawn_call("s1", STRAND_QUEUED, "builder") + [strand_notice(
+        STRAND_QUEUED, "s1", "completed", queued=True)],
+    # One agent still running, and a hand-back from another agent that quotes this agent's completed notice mid-text.
+    "strand-quoted": spawn_call("s1", STRAND_QUOTED, "builder") + [strand_handback(
+        STRAND_HANDBACK, STRAND_QUOTED_BODY % STRAND_QUOTED)],
 }
 
 
@@ -9713,6 +9740,8 @@ T_STRAND_DONE = role_path("strand-done")
 T_STRAND_STOPPED = role_path("strand-stopped")
 T_STRAND_FAILED = role_path("strand-failed")
 T_STRAND_FULL = role_path("strand-full")
+T_STRAND_QUEUED = role_path("strand-queued")
+T_STRAND_QUOTED = role_path("strand-quoted")
 
 
 def strand_refuse(name, transcript, carries, **kw):
@@ -9742,6 +9771,9 @@ strand_allow("no transcript at all", None)
 strand_allow("the same open-agent transcript, but the call carries agent_id: an agent's own call is not judged here",
              T_STRAND_OPEN, agent_id=STRAND_OPEN)
 strand_allow("ExitWorktree with an agent open: the rule covers EnterWorktree only", T_STRAND_OPEN, tool="ExitWorktree")
+strand_allow("a notice queued as a queue-operation line, before any user record, closes its agent", T_STRAND_QUEUED)
+strand_refuse("a hand-back that quotes another agent's completed notice mid-text leaves that agent open",
+              T_STRAND_QUOTED, STRAND_QUOTED)
 FAMILY = PRIOR_FAMILY
 
 
