@@ -910,6 +910,30 @@ def heredoc_sources(bodies) -> dict:
     return sources
 
 
+def _pipeline_stages(text: str):
+    """The plain words of each stage of each pipeline in TEXT, a redirect target left out: a list per pipeline."""
+    return [[_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
+            for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text))]
+
+
+def _unresolved_file_arg(args, known) -> bool:
+    """True when ARGS, the words after a runner, hold a file argument that names a path (a `/`, `$`, `~`, glob
+    character, brace or backslash) no heredoc wrote under that name (KNOWN), so the runner may run any body."""
+    return any(re.search(r"[/$~*?\[{\\]", arg) and arg not in known for arg in args if not arg.startswith("-"))
+
+
+def _runs_unresolved_path(text: str, known) -> bool:
+    """True when a shell, a wrapper, or an interpreter that reads its program elsewhere runs, in TEXT, a file
+    argument the guard cannot resolve to a heredoc's file (`_unresolved_file_arg`), as `_written_file_use` reads it."""
+    for stages in _pipeline_stages(text):
+        for words in stages:
+            for at, word in enumerate(words):
+                if _RUNNER(word.rsplit("/", 1)[-1]) and interpreter_script(words[at:]) in (None, PROGRAM_NOT_A_FILE) \
+                        and _unresolved_file_arg(words[at + 1:], known):
+                    return True
+    return False
+
+
 def _written_file_use(text: str, headers, bodies=()) -> str:
     """How a file a heredoc writes is used later, in TEXT (the command with its bodies dropped): 'run' when
     its pipeline holds a shell, a runner or an interpreter that reads its program elsewhere (`sh < f`,
@@ -923,8 +947,7 @@ def _written_file_use(text: str, headers, bodies=()) -> str:
     sources = heredoc_sources(bodies)
     known = set(sources)
     use = ""
-    for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
-        stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
+    for stages in _pipeline_stages(text) if written else ():
         runs, loose, scripts = False, False, set()   # scripts: the files a python, node, perl or ruby stage runs as its script
         for words in stages:
             for at, word in enumerate(words):
@@ -933,8 +956,7 @@ def _written_file_use(text: str, headers, bodies=()) -> str:
                 script = interpreter_script(words[at:])
                 if script is None or script == PROGRAM_NOT_A_FILE:
                     runs = True   # a shell, a wrapper, or an interpreter that reads its program elsewhere
-                    if any(re.search(r"[/$~*?\[{\\]", arg) and arg not in known for arg in words[at + 1:]
-                           if not arg.startswith("-")):
+                    if _unresolved_file_arg(words[at + 1:], known):
                         return "run"   # a file argument no heredoc wrote under that name: every body stays
                     continue
                 name = words[at + script]
@@ -959,8 +981,13 @@ def _runs_written_file(text: str, headers, bodies=()) -> bool:
 def _kept_headers(text: str, bodies) -> set:
     """The headers whose body stays in view: a body whose file a later command runs, and every body whose
     file a kept body names as a word (`bash helper.sh`, `source ./helper.sh`, `subprocess.run(['bash','helper.sh'])`),
-    repeated until nothing more is added. The kept script may run the file, so the file's body is not data."""
+    repeated until nothing more is added. The kept script may run the file, so the file's body is not data. A
+    kept body that runs a path the guard cannot resolve (`bash "$PWD/helper.sh"`, `bash $f`, `bash h*.sh`) keeps
+    every body, as the top-level run does (`_written_file_use`)."""
     kept = {header for _, _, header in bodies if _runs_written_file(text, [header], bodies)}
+    known = set(heredoc_sources(bodies))
+    if any(_runs_unresolved_path(body, known) for _, body, header in bodies if header in kept):
+        return {header for _, _, header in bodies}
     grew = bool(kept)
     while grew:
         grew = False
