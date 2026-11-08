@@ -427,7 +427,16 @@ class Homes:
         places, err = self._locate(path, closed)
         if err:
             return err, False
-        return None, not places or any(ruling_home.value_resolves(rel, root) for root, rel in places)
+        held, read, failed = not places, not places, None
+        for root, rel in places:  # a repo git cannot read is skipped; a readable one still decides
+            try:
+                held = ruling_home.value_resolves(rel, root) or held
+                read = True
+            except ruling_home._GitFailure as e:
+                failed = failed or e
+        if not read:  # no repo could be read: the caller stands the check down
+            raise failed
+        return None, held
 
     def problem(self, item_id, kind, rest, grant=False):
         """None when the home is good in some repo or the check stood down, else the reason text (the first
@@ -448,8 +457,15 @@ class Homes:
             places, err = self._locate(home_path(rest))
             if err:
                 return "%s [%s] %s" % (item_id, kind, err)
-            reasons = [self._judge(layout, item_id, kind, root, rel, grant) for root, rel in places]
-            return None if not reasons or None in reasons else reasons[0]
+            reasons, failed = [], None
+            for root, rel in places:  # a repo whose read fails is skipped; a readable one still decides
+                try:
+                    reasons.append(self._judge(layout, item_id, kind, root, rel, grant))
+                except (layout.LayoutError, ruling_home._GitFailure) as e:
+                    failed = failed or e
+            if not reasons:  # no repo could be read (or none resolved): stand down
+                return self._stand_down(failed) if failed else None
+            return None if None in reasons else reasons[0]
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return self._stand_down(e)
 
