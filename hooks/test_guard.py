@@ -5394,6 +5394,19 @@ sh("git-after-cd: an if ! check whose then body is echo bad && exit 1, then ; a 
 sh("git-after-cd: an if ! check whose then body is make x && exit 1, then ; a git push -u, is refused",
    "if ! pytest -q; then make x && exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&",))
+# A REDIRECT IN AN && STEP CAN FAIL AND SKIP THE EXIT, SO THE PUSH AFTER THE fi RUNS. A cd walk with the same
+# step is refused on the same rule. A `;`-joined echo of a substitution cannot leave the body, so its exit runs
+# and the push is gated. An `||` that runs a print step lets the `&&` chain reach the push.
+sh("git-after-cd: an if ! check whose then body is echo to a redirect && exit 1, then ; a git push -u, is refused",
+   "if ! pytest -q; then echo bad > /no/dir/log && exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an if ! cd whose then body is echo to a redirect && exit 1, then ; a git commit, is refused",
+   "if ! cd %s; then echo bad > /no/dir/x && exit 1; fi; %s commit -am x" % (AFTER_CD_GONE, VCS), "deny",
+   "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a check || an echo then && a git push -u, is refused",
+   "pytest -q || echo x && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an if ! check whose then body is an echo of a substitution then ; exit 1, then ; a git push -u, passes",
+   'if ! pytest -q; then echo "$(date)"; exit 1; fi; %s push -u origin b' % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
