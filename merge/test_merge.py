@@ -178,7 +178,7 @@ class FakeHost:
 
     def with_default_records(self, found):
         """-> `found` with a done record for the own head and each lane tip, oldest, under PR 7. Without one, a lane tip or a lone head with no
-        record is refused (owner pick a, merge-unreviewed-head). A case that tests the absence of a record sets `records_default` False. Each
+        record is refused (owner pick a, 21:26 CST 2026-11-07, merge-unreviewed-head). A case that tests the absence of a record sets `records_default` False. Each
         lane tip is read with read_lanes, as the round-3 check reads it."""
         if not self.records_default:
             return found
@@ -13850,7 +13850,7 @@ class ReviewRoundCheckEnv(Env):
 
 class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
     """`merge 7 --confirm` on a ready batch refuses a lane whose newest record for its tip is not done and whose Guard or check is yes. Each
-    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too. Owner pick a (merge-unreviewed-head):
+    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too. Owner pick a, 21:26 CST 2026-11-07 (merge-unreviewed-head):
     a lane tip with no done record for its head is refused. The cases that test a missing record set records_default False."""
 
     def test_an_integration_pr_with_a_guard_lane_at_round_one_is_refused_before_any_push(self):
@@ -14324,7 +14324,7 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     """The round-3 check's stale-record rule and its comment window, each red case beside a green control. A record for a head already on origin/main
     is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes the third round when its
     record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
-    batch still refuses. Owner pick a (merge-unreviewed-head): a lane tip with no done record for its head is refused, so the
+    batch still refuses. Owner pick a, 21:26 CST 2026-11-07 (merge-unreviewed-head): a lane tip with no done record for its head is refused, so the
     one stale-only case here expects the refusal; the other cases keep their records and their points. A stale record of the pull request's own names its remedy by its state: held, a failed fix check, or the third round owed."""
 
     def test_a_guard_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
@@ -14380,7 +14380,7 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
 
 class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     """`merge 7 --confirm` refuses a lane tip, and a lone pull request's own head, whose review record for that exact head is not done, whatever its
-    Guard or check value (owner pick a, merge-unreviewed-head). An integration pull request's own head is never refused for having
+    Guard or check value (owner pick a, 21:26 CST 2026-11-07, merge-unreviewed-head). An integration pull request's own head is never refused for having
     no record. Cases 1, 2, 3 and 6 are red on the old code. Cases 4, 5 and 7 are green controls beside them, so a check that refuses every head fails too.
     Case 5's integration head holds only its lanes' merges. Case 8 adds an own commit beyond a lane tip and is refused. Case 9 is an integration head with
     a FAIL on its own head, which passes. Cases 8, 9 and 11 are red on the old code. Cases 10 and 12 are green controls: the newest record across pull
@@ -14391,9 +14391,13 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     fetch origin/<default> before the read, or main's newer commit merged into a stacked pull request reads as an unreviewed lane tip.
     Case 17: an integration head with no commit of its own still owes the third review for its own Guard or check yes record. Case 5 is its green control.
     Cases 18, 19 and 20 are red on the old code: the merge tool's own commits, a records rebuild and a claim, are no lane work, so a head that
-    ends on one is read through the commits under it. Case 21 is the green control that keeps the guard: a real commit under a generated one still refuses."""
+    ends on one is read through the commits under it. Case 21 is the green control that keeps the guard: a real commit under a generated one still refuses.
+    Two more red cases, each with a green control. Owing is read per pull request: a done record on another pull request for the same tip does not clear
+    a record that owes the third round, and the same record alone refuses. The merge tool's own commit is one whose message and changed paths both match
+    what the tool writes: a commit that also changes a product file is lane work, and cases 18 to 20 stay green."""
 
     ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
+    PRODUCT = "src/product.py"  # a path no tool commit writes
 
     def lone_scope(self, host):
         """Scope before subject: feat holds no lane tip, and pull request 7 is the open pull request at feat's live head."""
@@ -14663,11 +14667,11 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 7, owed="the integration pull request's own head owes round 3")
         self.assertIn(f"#7 (head {feat[:9]})", out, "the refusal does not name the own head:\n" + out)
 
-    def tool_commit(self, ref, trailer=None):
+    def tool_commit(self, ref, trailer=None, also=()):
         """Push the merge tool's own commit on top of origin/`ref`, made by merge.commit_claim, the tool's own function: its subject and Drops-lines
         come from the tool. No trailer: the records rebuild. With `trailer` (a Record-claim line): the claim, a decision record it claims. A test repo
-        has no page the generator writes (rebuild_records is False there), so the rebuild commits a stand-in page at the tool's page path.
-        -> the new head of `ref`."""
+        has no page the generator writes (rebuild_records is False there), so the rebuild commits a stand-in page at the tool's page path. `also`: paths
+        the test writes too, so the commit changes them as well (commit_claim stages every change). -> the new head of `ref`."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", ref, f"origin/{ref}")
@@ -14675,6 +14679,8 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
             put(os.path.join(o, "docs", "decisions", "claimed.md"), record("D-002", "claimed"))
         else:
             put(os.path.join(o, *merge.RECORDS_PAGE.split("/")), "# Records\n\nrebuilt\n")
+        for rel in also:
+            put(os.path.join(o, *rel.split("/")), "value = 1\n")
         merge.commit_claim(o, trailer)
         sh(o, "git", "push", "-q", "origin", ref)
         return sh(o, "git", "rev-parse", "HEAD")
@@ -14784,6 +14790,94 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("Get round 3 done", self.remedy_line(out), "the remedy does not ask for the third round on an open record:\n" + out)
         self.assertNotIn("held for the owner", out, "the remedy says an open record is held for the owner:\n" + out)
+
+    def assert_owes_round_three(self, rc, out, host, before, tip):
+        """The round-1 record on pull request 8 for `tip` owes the third round: the refusal names #8 and its tip, and it is refused with nothing pushed."""
+        self.assert_refused(rc, out, host, before, 8, owed="pull request 8's record for the tip owes round 3")
+        self.assertIn(f"#8 (tip {tip[:9]}) changes a guard or check and round 3 is owed", out,
+                      "the refusal does not say #8's record owes round 3 for the tip:\n" + out)
+
+    def test_a_round_one_guard_yes_record_on_pr_8_owes_round_three_though_pr_9_has_a_later_done_record_for_the_tip(self):
+        # owing is read per pull request: #8's record owes the third round, and a later done record for the same tip on #9 does not clear it
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        tip = tips["agent/lane1"]
+        comments = [round_check_comment(1, 8, tip, guard="yes", rounds=REVIEW_PASS),
+                    review_comment(2, 9, record_text(n=9, head=tip, guard="no", rounds=REVIEW_PASS), created="2026-10-02T02:00:00Z")]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # only the two scripted records name the tip
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_owes_round_three(rc, out, host, before, tip)
+
+    def test_a_round_one_guard_yes_record_on_pr_8_alone_owes_round_three(self):
+        # the control beside the case above: the same record with no record on #9 is refused for the same reason
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        tip = tips["agent/lane1"]
+        host = self.batch_host(tips, [round_check_comment(1, 8, tip, guard="yes", rounds=REVIEW_PASS)])
+        host.records_default = False  # only the scripted record names the tip
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_owes_round_three(rc, out, host, before, tip)
+
+    def assert_tool_commit_with_product(self, head, subject):
+        """Scope before subject: the head is the tool's commit by its subject, and the same commit also changes the product file."""
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%s", head), subject, "the head does not carry the tool's subject")
+        changed = sh(self.co, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", head).split()
+        self.assertIn(self.PRODUCT, changed, "the head does not change the product file:\n" + "\n".join(changed))
+
+    def assert_own_head_unreviewed(self, rc, out, host, before, head):
+        """The own head is a lane: no record names it, so the refusal names #7 at that head as unreviewed, and nothing is pushed."""
+        self.assert_refused(rc, out, host, before, 7, owed=self.UNREVIEWED)
+        self.assertIn(f"#7 (head {head[:9]}) has no done review record for its head", out,
+                      "the refusal does not name the own head as unreviewed:\n" + out)
+
+    def test_integration_head_ending_on_a_records_rebuild_that_also_changes_a_product_file_is_refused(self):
+        # the rebuild's subject and Drops-lines trailer are the tool's, but the commit also changes a product file: it is lane work, so the head owes a record
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        head = self.tool_commit("feat", also=(self.PRODUCT,))
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assert_tool_commit_with_product(head, merge.REBUILD_SUBJECT)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_own_head_unreviewed(rc, out, host, before, head)
+
+    def test_integration_head_ending_on_a_claim_that_also_changes_a_product_file_is_refused(self):
+        # the same, for the claim: its subject and Record-claim trailer are the tool's, and the product file beside the claim makes it lane work
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        head = self.tool_commit("feat", trailer="Record-claim: D-002", also=(self.PRODUCT,))
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assert_tool_commit_with_product(head, merge.CLAIM_SUBJECT)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_own_head_unreviewed(rc, out, host, before, head)
+
+class PickACitations(unittest.TestCase):
+    """A docstring that cites the owner's pick a ruling gives its time too, so a reader can find the ruling. The scan reads docstrings through ast, the
+    language's own parser, so a string or a comment is never taken for one. A plain TestCase: it needs no fixture."""
+    RULING_TIME = "21:26 CST 2026-11-07"
+    SCANNED = ("merge.py", "test_merge.py")  # the merge tool and its suite, the files whose docstrings cite the ruling
+
+    def test_every_docstring_that_cites_owner_pick_a_carries_the_ruling_time(self):
+        cited, bare = [], []
+        for name in self.SCANNED:
+            path = os.path.join(HERE, name)
+            with open(path, encoding="utf-8") as f:
+                tree = ast.parse(f.read(), filename=path)
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                doc = ast.get_docstring(node, clean=False)
+                if not doc or not re.search(r"owner pick a", doc, re.I):
+                    continue
+                where = f"{name}:{getattr(node, 'lineno', 1)} {getattr(node, 'name', '<module>')}"
+                cited.append(where)
+                if self.RULING_TIME not in doc:
+                    bare.append(where)
+        self.assertTrue(any(w.endswith(" tool_commit") for w in cited),
+                        "the scan does not reach merge.py's tool_commit docstring, so it reads no citation:\n" + "\n".join(cited))
+        self.assertEqual(bare, [], f"these docstrings cite the owner's pick a without its time {self.RULING_TIME}:\n" + "\n".join(bare))
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
