@@ -15740,6 +15740,114 @@ class ReviewStampSince(unittest.TestCase):
             else:
                 self.fail("review_stamp_since returned %r while the merge tool's checkout has no salt commit, instead of stopping" % (got,))
 
+    # A child run of merge.py's code, with `__file__` naming the tool checkout (argv[2]) and merge.py read from argv[1]. It prints the outcome of the
+    # tool's stamp read as JSON. exec gives merge.py's code the sys.path of this child, which is what `python merge/merge.py` gets.
+    SAFE_PATH_CHILD = (
+        "import json, sys\n"
+        "real, tool_py = sys.argv[1], sys.argv[2]\n"
+        "g = {'__name__': 'merge_under_test', '__file__': real}\n"
+        "with open(real, encoding='utf-8') as f:\n"
+        "    exec(compile(f.read(), real, 'exec'), g)\n"
+        "g['__file__'] = tool_py  # tool_stamp_since names the tool checkout from __file__, read at call time\n"
+        "try:\n"
+        "    g['tool_stamp_since']()\n"
+        "    out = {'raised': 'returned', 'message': ''}\n"
+        "except BaseException as e:\n"
+        "    out = {'raised': type(e).__name__, 'message': str(e)}\n"
+        "print(json.dumps(out))\n"
+    )
+
+    def tool_read_stop(self, root):
+        """-> the message of the Stop that review_stamp_since raises for `root` when the merge tool's checkout gives no cutover. A read that does not stop fails here."""
+        try:
+            got = review_fn(self, "review_stamp_since")(root, "main")
+        except merge.Stop as stop:
+            return str(stop)
+        self.fail("review_stamp_since returned %r while the merge tool's checkout gives no cutover, instead of stopping" % (got,))
+
+    def safe_path_read(self, pythonpath=None):
+        """-> the outcome of the merge tool's stamp read in a child run under PYTHONSAFEPATH=1: {"raised": the class name of what it raised, "message": its text}.
+        `pythonpath`, when given, is the only path that holds merge/. The tool checkout has no salt commit, so the read stops."""
+        tool = self.repo(salt_at=None, branch="fixture")
+        cwd = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, cwd, True)
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONSAFEPATH", "MERGE_TOOL_SOURCE")}
+        env["PYTHONSAFEPATH"] = "1"
+        if pythonpath is not None:
+            env["PYTHONPATH"] = pythonpath
+        r = subprocess.run([sys.executable, "-c", self.SAFE_PATH_CHILD, os.path.join(HERE, "merge.py"), os.path.join(tool, "merge", "merge.py")],
+                           cwd=cwd, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, "the child run of the merge tool's stamp read failed:\n" + r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def test_a_tool_stop_with_no_salt_adds_no_temporary_copy_note_when_the_source_is_the_tool(self):
+        # launch.py passes the checkout it started from. When that is the tool checkout itself, no temporary copy ran, so the Stop adds no note.
+        root = self.repo(salt_at=None)
+        with self.tool_checkout(salt_at=None):
+            tool = os.path.realpath(self.tool_root())
+            with unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": tool}):
+                message = self.tool_read_stop(root)
+        self.assertIn("lacks the review stamp salt", message, "the Stop is not the tool checkout's salt Stop, so the note check proves nothing:\n" + message)
+        self.assertNotIn("temporary copy", message, "a Stop whose source is the tool checkout names a temporary copy of it:\n" + message)
+
+    def test_a_tool_stop_for_a_failed_git_read_adds_no_temporary_copy_note_when_the_source_is_the_tool(self):
+        root = self.repo(salt_at=None)
+        with self.tool_checkout(repo=False):
+            tool = os.path.realpath(self.tool_root())
+            with unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": tool}):
+                message = self.tool_read_stop(root)
+        self.assertIn("could not read the merge tool's source checkout", message, "the Stop is not the tool checkout's git-read Stop, so the note check proves nothing:\n" + message)
+        self.assertNotIn("temporary copy", message, "a git-read Stop whose source is the tool checkout names a temporary copy of it:\n" + message)
+
+    def test_a_shallow_tool_stop_adds_no_temporary_copy_note_when_the_source_is_the_tool(self):
+        root = self.repo(salt_at=None)
+        with self.tool_checkout(depth=2):
+            tool = os.path.realpath(self.tool_root())
+            with unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": tool}):
+                message = self.tool_read_stop(root)
+        self.assertIn("is a shallow history", message, "the Stop is not the tool checkout's shallow Stop, so the note check proves nothing:\n" + message)
+        self.assertNotIn("temporary copy", message, "a shallow Stop whose source is the tool checkout names a temporary copy of it:\n" + message)
+
+    def test_a_tool_stop_whose_source_is_another_checkout_names_it_as_a_temporary_copy(self):
+        # The control for the three cases above: the same no-salt Stop, with a source other than the tool, does get the note.
+        root = self.repo(salt_at=None)
+        source = os.path.realpath(tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder()))
+        self.addCleanup(shutil.rmtree, source, True)
+        with self.tool_checkout(salt_at=None):
+            with unittest.mock.patch.dict(os.environ, {"MERGE_TOOL_SOURCE": source}):
+                message = self.tool_read_stop(root)
+        self.assertIn("lacks the review stamp salt", message, "the Stop is not the tool checkout's salt Stop, so the note check proves nothing:\n" + message)
+        self.assertIn("a temporary copy of " + source, message, "a Stop whose source is another checkout names no temporary copy of it, so the three cases above prove nothing:\n" + message)
+
+    def test_two_roots_in_one_process_read_the_tool_checkout_once(self):
+        # The tool checkout's cutover is cached for the process. Two roots with no salt commit each need it, and the tool's git log runs once.
+        roots = [self.repo(salt_at=None), self.repo(salt_at=None)]
+        reads, real = [], merge.git
+        with self.tool_checkout():
+            tool = os.path.realpath(self.tool_root())
+
+            def counting_git(cwd, *args, **kwargs):
+                if args[:1] == ("log",) and os.path.realpath(cwd) == tool:
+                    reads.append(args)
+                return real(cwd, *args, **kwargs)
+
+            with unittest.mock.patch.object(merge, "git", counting_git):
+                cutovers = [review_fn(self, "review_stamp_since")(root, "main") for root in roots]
+        self.assertEqual(cutovers, ["2026-10-21T15:04:05Z"] * 2, "the two roots did not both take the tool checkout's cutover: %r" % (cutovers,))
+        self.assertEqual(len(reads), 1, "the merge tool's checkout was read %d times in one process, not once: %r" % (len(reads), reads))
+
+    def test_a_tool_stamp_read_under_pythonsafepath_raises_stop_not_module_not_found(self):
+        # PYTHONSAFEPATH=1 keeps merge/ off sys.path. tool_source_note imports `launch` by its bare name, so a tool Stop raised ModuleNotFoundError
+        # where it should raise Stop.
+        outcome = self.safe_path_read()
+        self.assertEqual(outcome["raised"], "Stop", "under PYTHONSAFEPATH=1 the merge tool's stamp read raised %s instead of Stop: %s" % (outcome["raised"], outcome["message"]))
+        self.assertIn("lacks the review stamp salt", outcome["message"], "the Stop is not the tool checkout's salt Stop:\n" + outcome["message"])
+
+    def test_the_same_tool_stamp_read_under_pythonsafepath_raises_stop_when_merge_is_on_the_path(self):
+        # The control for the case above: with merge/ on PYTHONPATH, `launch` imports under PYTHONSAFEPATH=1, and the same read raises Stop.
+        outcome = self.safe_path_read(pythonpath=HERE)
+        self.assertEqual(outcome["raised"], "Stop", "with merge/ on PYTHONPATH and PYTHONSAFEPATH=1 the merge tool's stamp read raised %s instead of Stop: %s" % (outcome["raised"], outcome["message"]))
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
