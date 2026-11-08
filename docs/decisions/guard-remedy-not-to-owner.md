@@ -57,9 +57,10 @@ Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.
 
 Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" needs its source).
 
-- On each listed line, add where the answer came from: a link, a PR number, a commit, a file path, a waiting-page item number, a session or inbox id, or the time. Put it on the same line.
+- On each listed line, add where the answer came from: a link, `#<n>`, a commit, a file path, `item <n>`, a session or inbox id, or the time. Put it on the same line.
 - Or say what is meant, in other words.
-- Lines inside code, and lines that end in a question mark, are not checked.
+- A mention of the word, not a claim, can go in an inline code span.
+- Lines inside a code fence, and lines that end in a question mark, are not checked.
 
 ### Recovered guard (any reply whose report shape holds)
 
