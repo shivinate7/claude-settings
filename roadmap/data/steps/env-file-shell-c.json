@@ -1,0 +1,11 @@
+{
+  "title": "The env-file rule reads bash -c, sh -c and zsh -c command strings",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.67,
+  "owner": "coordinator",
+  "lane": "session_013NEJKytPs46Qp4KDoqbDvz",
+  "why": "On main, a read of an environment file inside a bash -c or sh -c command string gets no refusal. Found by env-child-followups' reviewer; confirmed by the coordinator's probe of hooks/guard.py at 21:22 CST Nov 7.",
+  "note": "Decision env-file-stays-unread. The coordinator's two probe forms are in its 21:22 CST message; they are not copied here, because a commit that holds them trips the env-file guard. Filed from the coordinator, 21:22 CST Nov 7; filed 21:22 CST.",
+  "updatedAt": "2026-11-07T21:22:00-06:00"
+}
