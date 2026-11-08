@@ -3338,8 +3338,8 @@ def reviewed_read(h):
     return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
 
 def reviewed_lines(h):
-    """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
-    gh calls scale with the number of roots; no new process, file or timer."""
+    """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). For the cost of `--root`, see
+    reviewed_roots; no new process, file or timer."""
     return reviewed_read(h)[0]
 
 def reviewed_block(h):
@@ -3407,9 +3407,8 @@ def reviewed_roots(roots, hosts, config):
     """-> (lines, ok) of `merge --reviewed --root ...`: each root's block in the order given. A root whose read or config stops, or whose folder
     is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
-    says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
-    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
-    request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
+    says are held with its block and follow it, so nothing prints until every root is read. Cost per root: the usage text's `--root` line; the
+    formula is the docstring of test_gh_calls_per_root_match_the_formula_with_and_without_a_done_pr; no new process, file or timer."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
