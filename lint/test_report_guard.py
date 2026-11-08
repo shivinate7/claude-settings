@@ -858,8 +858,12 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=()):
+    def verdict(self, reply, spawns, denied=(), before_human=()):
         records = [human("do the task")]
+        for spawn in before_human:  # spawns in an earlier window, before the last human message
+            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        if before_human:
+            records += [human("round 2, go on")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
         for spawn in denied:
@@ -901,6 +905,79 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict("> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none",
                            [{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}])
         self.assertIn("ran haiku", out["reason"])
+
+    def test_dm_green_reviewer_no_model_takes_file_pin(self):
+        # No model field: the reviewer's agents/reviewer.md pin, haiku, beats the env fallback (set to sonnet).
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Unstarted: none",
+            [{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}]))
+
+    def test_dm_red_explicit_model_beats_file_pin_blocks(self):
+        # A model field wins over the pin: this reviewer ran sonnet, so a haiku name matches no spawn.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Unstarted: none",
+                           [{"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 1 of 3"}])
+        self.assertIsNotNone(out, "a reviewer spawned with model sonnet let a haiku name through")
+        self.assertIn("matches no reviewer spawn, which ran sonnet", out["reason"])
+
+    def test_dm_green_round1_haiku_before_last_human_counts(self):
+        # A reviewer spawned before the last human message ran haiku. Its haiku counts in Done.
+        round_1 = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}
+        round_2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Unstarted: none",
+            [round_2], before_human=[round_1]))
+
+    def test_dm_red_round1_opus_before_last_human_still_blocks(self):
+        # Same transcript as above, with a name no spawn ran: opus still matches nothing.
+        round_1 = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}
+        round_2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (reviewer opus)\n> **Next** Unstarted: none",
+                           [round_2], before_human=[round_1])
+        self.assertIsNotNone(out, "a reviewer name no spawn ran was let through")
+        self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
+
+    def test_dm_green_builder_sonnet_before_last_human_counts(self):
+        # A role's name matches any spawn of that role this session, not only the in-turn ones.
+        builder_sonnet = {"subagent_type": "builder", "model": "sonnet", "prompt": "build it"}
+        builder_opus = {"subagent_type": "builder", "model": "opus", "prompt": "Round 3 of 3"}
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
+            [builder_opus], before_human=[builder_sonnet]))
+
+    def test_dm_red_builder_haiku_no_spawn_still_blocks_before_last_human(self):
+        # Same transcript as above: a name no builder spawn ran still matches nothing.
+        builder_sonnet = {"subagent_type": "builder", "model": "sonnet", "prompt": "build it"}
+        builder_opus = {"subagent_type": "builder", "model": "opus", "prompt": "Round 3 of 3"}
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder haiku)\n> **Next** Unstarted: none",
+                           [builder_opus], before_human=[builder_sonnet])
+        self.assertIsNotNone(out, "a builder name no builder spawn ran was let through")
+        self.assertIn("'builder haiku' matches no builder spawn", out["reason"])
+
+    def test_dm_green_design_reviewer_name_is_not_a_reviewer(self):
+        # design-reviewer is no named role, so its name must not read as "reviewer opus". The earlier-turn
+        # reviewer ran haiku before the last human message, and a reviewer opus name would be refused.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, design-reviewer opus)\n> **Next** Unstarted: none",
+            [{"subagent_type": "builder", "model": "sonnet", "prompt": "build it"}],
+            before_human=[{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}]))
+
+    def test_dm_green_spaced_design_reviewer_name_is_not_a_reviewer(self):
+        # "design reviewer opus", with a space, names design-reviewer, which is no named role. The earlier-turn
+        # reviewer ran haiku before the last human message, and the turn's reviewer ran sonnet.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet, design reviewer opus)\n"
+            "> **Next** Unstarted: none",
+            [{"subagent_type": "builder", "model": "sonnet", "prompt": "build it"},
+             {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}],
+            before_human=[{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}]))
+
+    def test_dm_green_out_of_window_spawns_need_no_name_or_unstarted(self):
+        # Naming and the Unstarted line stay on the in-turn spawns: spawns before the last human
+        # message add no required name and no required Unstarted line to this turn's Done.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5\n> **Next** ship it",
+            [], before_human=[{"subagent_type": "reviewer", "prompt": "Round 1 of 3"},
+                              {"subagent_type": "builder", "prompt": "build it"}]))
 
     def test_dm_green_names_match_spawns(self):
         self.assertIsNone(self.verdict(
