@@ -74,9 +74,7 @@ Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five muta
 - banchi had no per-file `select` in these scores. A survivor may sit in code that no changed suite reaches.
 - banchi `t7/cli_identify.py` was not green on the clean source (assert) in PRs 898, 923, 926, 930 and 956. Cause unread.
 
-Open items, each a debt:
-
-- `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
+A file that does not parse is skipped, and its row reads UNKNOWN with no rate, never OK.
 
 ## The CI report
 
