@@ -12606,6 +12606,65 @@ class StandingGrantSwitch(CloudSession):
         self.assert_merged(rc, out, err)
 
 
+class BatchRunnerHead(CloudSession):
+    """A batch runner's `merge <pr> --confirm` names the head its CI ran on (coordinator ruling 2026-11-08 12:55 CST, option (a)). With no
+    --head the confirm is refused before the lock, any claim or any write, and the refusal names no retry target (git-remedy-never-names-target).
+    With --head set to the live head it proceeds. A session with no batch-runner role is not checked here: MergeRoleCheck and Flow pin those paths."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_role("batch-runner")
+
+    def assert_scope(self):
+        """The case probes the batch-runner branch, so the role it probes is read back first (P7)."""
+        with self.cloud():
+            self.assertEqual(merge.read_merge_role(), "batch-runner", "the case did not record the batch-runner role it probes")
+
+    def refused_without_head(self):
+        """`merge 7 --confirm` with no --head in the batch runner's session: rc 1, a line on stderr, nothing merged. -> stderr"""
+        self.assert_scope()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, "a batch runner's confirm with no --head was not refused: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a batch runner's confirm with no --head merged")
+        self.assertNotIn("Traceback", err)
+        return err
+
+    def test_a_confirm_with_no_head_is_refused_before_the_lock_claim_or_write(self):
+        self.assert_scope()
+        taken = []
+        acquire = self.lock.acquire
+        self.lock.acquire = lambda b, ttl: (taken.append(b), acquire(b, ttl))[1]
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, "a batch runner's confirm with no --head was not refused: " + out + err)
+        self.assertEqual(taken, [], "the refused confirm took the lock")
+        self.assertEqual(self.refs(), refs, "the refused confirm pushed a claim or took the lock")
+        self.assertEqual(self.claims(), 0, "the refused confirm pushed a claim to main")
+        self.assertEqual(self.worktrees(), 1, "the refused confirm left a worktree")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_the_refusal_says_the_merge_needs_the_head_the_ci_ran_on(self):
+        err = self.refused_without_head()
+        self.assertRegex(err, r"(?i)needs the head the CI ran on", "the refusal does not say the merge needs the head the CI ran on")
+
+    def test_the_refusal_names_no_retry_target(self):
+        err = self.refused_without_head()
+        head = self.head()
+        self.assertNotIn("--confirm", err, "the refusal names the refused command's flag --confirm")
+        self.assertNotIn("--head", err, "the refusal names the flag to retry with")
+        self.assertNotRegex(err, r"\bmerge\s+[<\d]", "the refusal names the refused command, merge <pr>")
+        self.assertNotIn(head[:7], err, "the refusal names the live head")
+        self.assertNotRegex(err, r"[0-9a-f]{40}", "the refusal names a full sha")
+
+    def test_a_confirm_with_the_live_head_flag_merges(self):
+        # the control: the head flag is the way through, so the refusal above is the missing flag and nothing else
+        self.assert_scope()
+        rc, out, err = self.runner_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+
 REPO_ROOT = os.path.dirname(HERE)
 CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")
 # The one shim form, plain and with trailing arguments. Bare `merge` is not on a cloud session's PATH, and `bin/merge` would allow any
