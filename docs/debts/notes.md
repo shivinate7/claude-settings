@@ -1162,7 +1162,9 @@
 - launch-checkout-read-as-pr: `python3 merge/launch.py <checkout> N --confirm` parses the checkout as the PR number (merge/launch.py). Decision: merge-confirm-repo
 - job-workflow-unreadable-skipped: `job_workflow` (lint/workflow_steps.py) skips an unreadable workflow file with no log. Decision: merge-confirm-repo
 - ci-job-discovery-no-case: lint/test_ci_job.py has no case for default workflow discovery with 0 or 2 files. Decision: merge-confirm-repo
-- redirect-strip-ignores-quotes: the guard drops redirections with `REDIRECTION.sub` before it parses a merge (hooks/guard_merge.py). That strip ignores quotes. So `merge N --confirm --base-red-ok "fix -> lane"` is denied with a reason about the record. Decision: merge-confirm-repo
+- merge-env-c-allowed: `env -C <dir> merge N --confirm` is allowed in a cloud session, because `dir_before_segment` never applies env's `-C` (hooks/guard_core.py), so the merge is judged in the shell's directory. Decision: merge-confirm-repo
+- merge-python-w-script: `python3 -W ignore merge/merge.py ...` reads `ignore` as the script, so `merge_tool_args` does not see a merge tool call and the call is not judged (hooks/guard_merge.py `merge_tool_args`). Decision: merge-confirm-repo
+- merge-in-substitution-after-cd: a merge inside `$(...)` or backticks after a `cd` is not judged by the merge-confirm-repo clause (hooks/guard_merge.py `_unproved_confirm`). Decision: merge-confirm-repo
 - cd-subst-relative-repo-dir: after `cd $(…)`, a relative `-C` resolves against the folder before the cd. Decision: merge-confirm-repo
 - mockup-link-target-text-ok: a link whose target file holds the link's own target-path text reads as ok on origin (origin check, `mockup_on_origin`). Unlikely in normal work: Claude does not write such a file by mistake. Decision: mockup-home (mockups live in the design folder).
 - layout-test-docstring-home-none: lint/test_layout.py:1264 docstring says `mockup_homes(root, home=None)`, but `mockup_homes` takes `root` only (lint/layout.py:520). Decision: mockup-home (mockups live in the design folder).

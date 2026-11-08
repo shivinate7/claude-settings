@@ -13,7 +13,7 @@ import re
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, REDIRECTION,
+    is_cloud, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -949,7 +949,7 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     else one parse, one read of the origin and one transcript read.
 
     A redirection (`2>&1`, `> run.log`) belongs to the shell, not to the merge tool, so the parser reads the segment without them
-    (REDIRECTION, the one reader of their shape). When the segment no longer tokenizes once they are gone (a `>` inside a quoted
+    (strip_redirections, the one reader of their shape; a quoted `<` or `>` is text and stays). When the segment no longer tokenizes once they are gone (a `>` inside a quoted
     value), the merge is denied, never skipped."""
     if not is_cloud():
         return ""
@@ -978,15 +978,14 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
                 if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
                     return True
-        rest = merge_tool_args(segment)
-        if rest is None:
-            continue
-        rest = _command_words(rest)
-        bare = merge_tool_args(REDIRECTION.sub(" ", segment))
-        bare = None if bare is None else _command_words(bare)
-        if "--confirm" not in (rest if bare is None else bare):
+        if merge_tool_args(segment) is None:
             continue
         try:
+            rest = _command_words(merge_tool_args(segment))
+            bare = merge_tool_args(strip_redirections(segment))
+            bare = None if bare is None else _command_words(bare)
+            if "--confirm" not in (rest if bare is None else bare):
+                continue
             if bare is None:
                 raise _FlagsUnreadable("the segment does not tokenize without its redirections")
             flags = _merge_flags(bare)
