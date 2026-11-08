@@ -43,7 +43,7 @@ declaration only, and it holds inside the `{...}` block of that declaration. Pyt
 own function, so a nested def that asserts on a name its outer function tainted is missed. A function
 value (an arrow or function expression, a closure, a lambda or def) taints its name only when its
 return value reads a clock; a Swift `func` or a JS `function` declaration taints nothing. A clock handed
-to a call is an input, which decision test-strategy-reset endorses, so it taints nothing. In an assert
+to a call is an input, which decision test-practices P5 endorses, so it taints nothing. In an assert
 it still counts when it is an operand of `-` or the receiver or argument of `.timeIntervalSince` or
 `.duration(to:`: that is a measured duration. An assert's message argument is not read. Clock reads inside a Swift interpolation
 hole are masked.
@@ -362,7 +362,7 @@ def counts(m, a, s, e, pass_through, durations):
 def reads_clock(m, a, b, clock_re, tainted, pass_through, durations):
     """True when the value m[a:b] reads a clock or a name inside the block of a tainted declaration of it.
     An object key or a call label (`at:` after `{`, `,` or `(`) is not a read. A clock handed to a call that
-    is not a pass-through is an injected input, which decision test-strategy-reset endorses. With
+    is not a pass-through is an injected input, which decision test-practices P5 endorses. With
     `durations`, a measured duration in such a call's arguments still counts (see `counts`)."""
     if any(counts(m, a, hit.start(), hit.end(), pass_through, durations) for hit in clock_re.finditer(m, a, b)):
         return True

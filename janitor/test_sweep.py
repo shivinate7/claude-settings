@@ -7545,8 +7545,8 @@ class SimulatorTierActTests(unittest.TestCase):
 # --------------------------------------------------------------------------- the sweep finishes
 #
 # `decide_worktree` costs about 7.5 s per tree, and SessionEnd gives the whole sweep 25 s. Per
-# decision test-strategy-reset, no case times a run on a local device. These cases count calls
-# and drive an injected clock.
+# decision test-practices P5, a verdict that depends on elapsed time uses a synthetic clock. These
+# cases count calls and drive an injected clock.
 #
 # The contract these cases pin. The seams are set with `create=True`, so they exist only
 # inside these cases:
