@@ -909,6 +909,25 @@ class SwiftScan(Case):
 class ShellScan(Case):
     """Shell comments: a `#` inside quotes, after an escape, in an expansion, in arithmetic or in a heredoc body is text."""
 
+<<<<<<< HEAD
+=======
+    def scan(self, files):
+        self.base({"keep.py": "x = 1\n"})
+        self.change(files)
+        return self.lint()
+
+    def assertReadsClean(self, src):
+        """The construct reads with no Unread, so the file exits 0."""
+        rc, out = self.scan({"x.sh": src})
+        self.assertEqual(rc, 0, out)
+
+    def assertLaterCommentFlagged(self, src):
+        """The construct reads, and a comment on the line after it is still flagged."""
+        rc, out = self.scan({"x.sh": src + "# fixed in round 2\n"})
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "x.sh", src.count("\n") + 1)
+
+>>>>>>> 40cac3b7839048adb43f00a0ab3bf459a13da0da
     def test_full_line_comment_is_flagged(self):
         rc, out = self.scan({"x.sh": "# fixed in round 2\necho hi\n"})
         self.assertHit(out, "x.sh", 1)
@@ -1130,6 +1149,7 @@ class ShellScan(Case):
         self.assertHit(out, "x.sh", 2)
         self.assertEqual(rc, 1, out)
 
+<<<<<<< HEAD
     def test_round2_pin_arithmetic_base_with_a_trailing_comment_then_a_later_comment(self):
         rc, out = self.scan({"x.sh": "(( x = 16#ff )) # c\n# fixed in round 2\n"})
         self.assertHit(out, "x.sh", 2)
@@ -1175,10 +1195,31 @@ class ShellScan(Case):
 
     def test_round2_gap_control_real_heredoc_after_a_subscript_shift_still_skips_its_body(self):
         rc, out = self.scan({"x.sh": "a[1<<2]=x\ncat <<EOF\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+=======
+    def test_reader_gap_comment_in_a_case_arm_in_a_quoted_substitution_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\n# fixed in round 2\nesac)"\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_comment_in_a_case_arm_in_an_unquoted_substitution_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=$(case $k in\na) echo ;;\n# fixed in round 2\nesac)\n"})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_comment_in_a_case_arm_in_an_unquoted_parameter_default_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=${y:-$(case $k in\na) echo ;;\n# fixed in round 2\nesac)}\n"})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_hash_in_a_quoted_string_in_a_later_arm_is_text(self):
+        src = 'x="$(case $k in\na) echo ;;\nb) echo "# fixed in round 2" ;;\nesac)"\n# fixed in round 2\n'
+        rc, out = self.scan({"x.sh": src})
+>>>>>>> 40cac3b7839048adb43f00a0ab3bf459a13da0da
         self.assertHit(out, "x.sh", 5)
         self.assertNoHit(out, "x.sh", 3)
         self.assertEqual(rc, 1, out)
 
+<<<<<<< HEAD
     def test_let_argument_redirect_is_a_heredoc_and_skips_its_body(self):
         rc, out = self.scan({"x.sh": "let x=1 <<EOF\nit's\nEOF\n# fixed in round 2\n"})
         self.assertHit(out, "x.sh", 4)
@@ -1245,6 +1286,86 @@ class SelfCheck(unittest.TestCase):
                 for m in pat.finditer(text):
                     hits.append("%d: %s: %s" % (line, name, m.group(0)))
         self.assertEqual(hits, [], "\n".join(hits))
+=======
+    def test_reader_gap_spaced_hash_in_a_quoted_string_in_a_later_arm_is_text(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\nb) echo "x # fixed in round 2" ;;\nesac)"\n'})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_reader_gap_comment_after_a_quoted_word_in_a_later_arm_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\nb) echo "x" # fixed in round 2\nesac)"\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_case_inside_backticks_reads_clean(self):
+        self.assertReadsClean("x=`case $x in a) echo 1;; esac`\n")
+
+    def test_case_inside_double_quoted_backticks_reads_clean(self):
+        self.assertReadsClean('x="`case $x in a) echo 1;; esac`"\n')
+
+    def test_case_as_array_element_reads_clean(self):
+        self.assertReadsClean("kw=(case esac)\n")
+
+    def test_case_as_appended_array_element_reads_clean(self):
+        self.assertReadsClean("arr+=(case)\n")
+
+    def test_case_as_first_element_of_multi_line_array_reads_clean(self):
+        self.assertReadsClean("arr=(\n  case\n  b\n)\n")
+
+    def test_case_in_regex_alternation_reads_clean(self):
+        self.assertReadsClean("[[ $w =~ ^(if|case|esac)$ ]]\n")
+
+    def test_case_in_extglob_pattern_reads_clean(self):
+        self.assertReadsClean("[[ $w == @(case|esac) ]]\n")
+
+    def test_one_line_function_with_case_reads_clean(self):
+        self.assertReadsClean("function f { case $1 in a) :;; esac; }\n")
+
+    def test_case_word_in_echo_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("echo case\n")
+
+    def test_case_word_in_assignment_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("x=case\n")
+
+    def test_case_word_as_option_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("cmd --case\n")
+
+    def test_esac_as_argument_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("echo esac\n")
+
+    def test_nested_case_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) case $y in\n    b) echo ;;\n  esac ;;\nesac\n")
+
+    def test_paren_led_pattern_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  (a|b) echo 1 ;;\nesac\n")
+
+    def test_fallthrough_and_continue_terminators_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) echo 1 ;&\n  b) echo 2 ;;&\n  c) echo 3 ;;\nesac\n")
+
+    def test_heredoc_inside_arm_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) cat <<EOF\nhello\nEOF\n;;\nesac\n")
+
+    def test_subshell_inside_arm_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) (cd /tmp; ls) ;;\nesac\n")
+
+    def test_case_with_no_esac_at_end_of_input_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "case $x in\n  a) echo 1 ;;\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("case never ends with esac", out)
+
+    def test_esac_with_no_case_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "echo x\nesac\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("esac with no case", out)
+
+    def test_unclosed_backtick_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "x=`echo a\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("command substitution never closes", out)
+>>>>>>> 40cac3b7839048adb43f00a0ab3bf459a13da0da
 
 
 class Degraded(Case):
