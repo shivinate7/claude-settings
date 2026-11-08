@@ -10239,6 +10239,13 @@ mcp_post("review-record: a note between the CI line and --- is refused with the 
          rule=REVIEW_RULE, carries=REMEDY_FRAGMENTS)
 bash_post("review-record: a note between the CI line and --- is refused with the rule remedy, gh pr comment --body",
           "%s --body '%s'" % (PR_CMD, REVIEW_PROSE_FOOTED), "deny", rule=REVIEW_RULE, carries=REMEDY_FRAGMENTS)
+# The remedy names the step wording merge.py gives it (REVIEW_RULE_STEP), which only the current wording carries. A merge.py without the constant
+# fails this pin by name: the fallback text is never in a reason.
+REVIEW_RULE_STEP_FRAGMENT = getattr(review_form(), "REVIEW_RULE_STEP", "merge.py names no REVIEW_RULE_STEP")
+mcp_post("review-record: the remedy names the REVIEW_RULE_STEP wording, MCP add_issue_comment", REVIEW_PROSE_FOOTED, "deny",
+         rule=REVIEW_RULE, carries=(REVIEW_RULE_STEP_FRAGMENT,))
+bash_post("review-record: the remedy names the REVIEW_RULE_STEP wording, gh pr comment --body",
+          "%s --body '%s'" % (PR_CMD, REVIEW_PROSE_FOOTED), "deny", rule=REVIEW_RULE, carries=(REVIEW_RULE_STEP_FRAGMENT,))
 # A well-formed record with its Stamp line taken out, as a body typed by hand is: the Stamp was owed just above the CI line, so the CI line is named.
 mcp_post("review-record: a fresh post with no Stamp line names the CI line where the Stamp was owed, MCP add_issue_comment", REVIEW_NO_STAMP,
          "deny", rule=REVIEW_RULE, carries=("line 8: " + CI_LINE_TEXT,))

@@ -524,6 +524,16 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertFalse([line for line in out.splitlines() if "Review record" in line and "FAIL" in line], out)
         self.assertTrue([line for line in out.splitlines() if "no record" in line], "the lane lint prints no note naming no record:\n" + out)
 
+    def test_a_review_record_fail_tells_the_lane_to_post_a_new_record_not_only_push(self):
+        # the remedy of a Review record FAIL names the new record a lane posts, and does not say only to push
+        self.pr_host([tm.review_comment(1, 7, tm.record_text(head=self.head("feat")) + "Lane note.\n" + tm.REVIEW_FOOTER)])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, out)
+        self.review_record_line(out)
+        self.assertTrue("new record" in out or "--review-record" in out, "the Review record FAIL does not tell the lane to post a new record:\n" + out)
+        self.assertNotIn("only push", out, "the Review record FAIL says only to push:\n" + out)
+
     def test_a_good_record_at_the_live_head_passes_the_review_record_step(self):
         # control: the newest record parses and names the live head, so the step does not fail
         head = self.head("feat")

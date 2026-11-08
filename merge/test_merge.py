@@ -13092,6 +13092,13 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments"], "the marker-less flag made a read the list did not need")
 
+    def test_a_head_line_that_is_not_a_sha_is_not_flagged_as_a_marker_less_record(self):
+        # control: `Head:` must hold a 40-hex sha, so prose that opens with PR: #12 and a Head line of words is an ordinary comment
+        prose = "PR: #12\nHead: main is green now\n"
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(9, 7, prose)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("comment 9", out, "a body whose Head line is not a sha was flagged as a marker-less record:\n" + out)
+
     def test_prose_that_mentions_a_pr_number_mid_text_is_not_flagged(self):
         # control: a body whose lines do not open with the field names is an ordinary comment, so it is not flagged
         prose = "Reviewed the change.\nIt matches PR: #5 and the Head: the lane named.\n"
