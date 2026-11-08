@@ -12,7 +12,7 @@ The window is the days since the stamp, the stamp day through the day before tod
 
 - a `crash` line in the window: a guard hook crashed.
 - a guard.log that exists and cannot be read: unknown. A missing guard.log is not a failure.
-- an agent-end reap run in the window that was killed or crashed. A run counts when its `started` row has no `done` row after it, or one of its rows has an `error`. It reads the agent-end payload log, `state/agent-end-payloads.jsonl` under the config dir. The log keeps the last 200 rows. The note reads only those rows, so a run whose rows the cap cut prints nothing. A done row the log lost also fires the line (debt `agent-end-log-loses-row`, a row the log can lose on Windows).
+- an agent-end reap run in the window that was killed or crashed. A run counts when its `started` row has no `done` row after it, or one of its rows has an `error`. It reads the agent-end payload log, `state/agent-end-payloads.jsonl` under the config dir. The log keeps the last 200 rows. The note reads only those rows, so a run whose rows the cap cut prints nothing. A done row that `log()` dropped (a timeout, a refused read or a failed write, each printed to stderr) also fires the line.
 - the daily sweep's error log, `janitor/launchd-sweep.err.log` under the config dir, is not empty and was last written in the window. The line names it and the stdout log, `launchd-sweep.log`. The person who follows the line reads that stdout log.
 
 Reader: `hooks/daily_note.py`, for each file above. Each failed line names the file to read next. The output goes to the session that started.
