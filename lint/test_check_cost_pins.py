@@ -207,9 +207,13 @@ class CostPinTests(unittest.TestCase):
                            "\n"
                            "* **Cost:** It reads `state/f4.json` once.\n"
                            "\n"
+                           "- **Cost.** It reads `state/f5.json` once.\n"
+                           "\n"
+                           "Cost. It reads `state/f6.json` once.\n"
+                           "\n"
                            "Costs: It reads `state/c.json` once.\n")
         self.assert_found([row("forms-cost.md", text, "state/f%d.json" % n, "state/f%d.json" % n)
-                           for n in (1, 2, 3, 4)])
+                           for n in (1, 2, 3, 4, 5, 6)])
 
     def test_cost_lines_under_debts_are_ignored(self):
         line = "- **Cost:** It reads `state/d.json` once.\n"
