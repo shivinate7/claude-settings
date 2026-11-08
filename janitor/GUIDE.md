@@ -217,7 +217,7 @@ means keep. The conditions are in decision `sweep-shuts-down-idle-simulators`
 
 The preview lists each device with `WOULD STOP` or `KEEP` and a reason code.
 `--confirm` runs one `xcrun simctl shutdown <UDID>` per device, at most 4 per
-run. The rest wait for the next run. There is no `all`, and no erase. With no
+run (`janitor/sweep.py: SIM_SHUTDOWN_CAP = 4`). The rest wait for the next run. There is no `all`, and no erase. With no
 `xcrun`, or on Windows, the tier is absent and prints nothing. The tier is
 machine-wide, so `janitor.roots` and `.claude/janitor.json` do not narrow it.
 
