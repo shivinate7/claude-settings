@@ -9530,6 +9530,11 @@ MERGE_CALL_FORMS += [(prefix, form, "") for prefix in ("", "cd somewhere && ")
                                   "py merge/merge.py", "py -3 merge/merge.py")]
 MERGE_CALL_FORMS += [(prefix, wrap, close) for prefix in ("", "cd somewhere && ")
                      for wrap, close in (('bash -c "merge', '"'), ("sh -c 'merge", "'"))]
+# A script run by its own path is the merge tool when its folder is `merge`: bare, `./`, an absolute path, or under a python
+# build's suffixed name (pythonw, python3.13t). The controls after the roots loop name a merge.py in another folder.
+MERGE_CALL_FORMS += [(prefix, form, "") for prefix in ("", "cd somewhere && ")
+                     for form in ("merge/merge.py", "./merge/merge.py", "./merge/merge.py 1", "merge/launch.py",
+                                  "/work/repo/merge/merge.py", "pythonw merge/merge.py", "python3.13t merge/merge.py")]
 for _role_prefix, _role_form, _role_close in MERGE_CALL_FORMS:
     _role_cmd = _role_prefix + _role_form + " --role batch-runner" + _role_close
     role_allow(_role_cmd + " allows its own record", _role_cmd, role_path("runner"))
@@ -9574,6 +9579,9 @@ role_allow("a comment that names the role form is text", "echo done # " + MERGE_
            role_path("lane"))
 role_allow("a heredoc body that names the role form is data",
            "cat > notes.txt <<'EOF'\n" + MERGE_SHIM + " --role batch-runner\nEOF", role_path("lane"))
+# The same body inside a shell wrapper is still data: the wrapper's script is read with its heredoc bodies dropped.
+role_allow("a bash -c heredoc body that names the role form is text, on a lane record",
+           "bash -c 'cat <<EOF\n" + MERGE_SHIM + " --role batch-runner\nEOF'", role_path("lane"))
 role_allow("quoted text that names the role form is text", "echo '" + MERGE_SHIM + " --role batch-runner'",
            role_path("lane"))
 role_allow("a multi-line quoted string that names the role form is text",
@@ -9759,6 +9767,37 @@ roots_refuse("a lone quote inside a string does not hide the real call",
              'echo "it\'s" && ' + ROOTS_ONE, role_path("roots-runner"), carries=("o/bravo",))
 roots_refuse("a lone quote in a comment does not hide the call on the next line",
              "echo done # it's\n" + ROOTS_ONE, role_path("roots-runner"), carries=("o/bravo",))
+# A heredoc body is text inside a shell wrapper too. The wrapper's script is read once with its bodies dropped, so a bare call
+# in a body allows. A call after the body's end, or a body piped to a shell that runs it, still refuses.
+roots_allow("a bash -c heredoc body that names a bare merge --reviewed is text, for a runner with two repo tags",
+            "bash -c 'cat <<EOF\nmerge --reviewed\nEOF'", role_path("roots-runner"))
+roots_allow("a bash -c heredoc body with a lone quote, then a bare merge --reviewed, is text, for two repo tags",
+            "bash -c 'cat <<EOF\nit\"s\nmerge --reviewed\nEOF'", role_path("roots-runner"))
+roots_refuse("a bash -c call after a heredoc's end is refused for a runner with two repo tags, with the tags",
+             "bash -c 'cat <<EOF\nnote\nEOF\nmerge --reviewed'", role_path("roots-runner"), carries=ROOTS_BARE_CARRIES,
+             lacks=(ROOTS_REMEDY,))
+roots_refuse("a bash -c heredoc body piped to sh runs, so a bare merge --reviewed in it is refused for two repo tags",
+             "bash -c 'cat <<EOF | sh\nmerge --reviewed\nEOF'", role_path("roots-runner"), carries=ROOTS_BARE_CARRIES,
+             lacks=(ROOTS_REMEDY,))
+# A merge.py in a folder that is not `merge` is no merge tool: a lane's --role and a runner's bare --reviewed both allow.
+for _other in ("scripts/merge.py", "mymerge/merge.py", "merge/other.py"):
+    role_allow(_other + " --role batch-runner is not the merge tool, so a lane's record allows it",
+               _other + " --role batch-runner", role_path("lane"))
+    roots_allow(_other + " --reviewed is not the merge tool, so a runner with two repo tags allows it",
+                _other + " --reviewed", role_path("roots-runner"))
+# The shell wrappers inner_commands unwraps, for a bare --reviewed. A runner with two repo tags is refused in each, with the
+# tags; a runner with one repo tag allows in each. Each one pins the reader, so a change that drops a wrapper shows.
+for _wrap_label, _wrap_cmd in (("eval", "eval 'merge --reviewed'"),
+                               ("ssh host", "ssh host 'merge --reviewed'"),
+                               ("docker exec", "docker exec c merge --reviewed"),
+                               ("find -exec", "find . -exec merge --reviewed \\;"),
+                               ("su -c", "su -c 'merge --reviewed'"),
+                               ("env -S", "env -S 'merge --reviewed'"),
+                               ("pwsh -c", "pwsh -c 'merge --reviewed'")):
+    roots_refuse(_wrap_label + " wrapper: a bare --reviewed of a runner with two repo tags is refused, with the tags",
+                 _wrap_cmd, role_path("roots-runner"), carries=ROOTS_BARE_CARRIES, lacks=(ROOTS_REMEDY,))
+    roots_allow(_wrap_label + " wrapper: a bare --reviewed of a runner with one repo tag allows",
+                _wrap_cmd, role_path("runner"))
 
 
 # =========================================================================== 5e-2. the record branch's one writer
@@ -9832,6 +9871,11 @@ record_allow("a push to lane/foo inside bash -c is allowed", 'bash -c "' + VCS +
              LANE_TRANSCRIPT)
 record_allow("a triage session's push to roadmap inside bash -c is allowed",
              'bash -c "' + VCS + ' push origin roadmap"', TRIAGE_TRANSCRIPT)
+# A push named in a heredoc body under bash -c is text, and the same body piped to a shell is a push that runs.
+record_allow("a push to roadmap in a heredoc body under bash -c is text",
+             "bash -c 'cat <<EOF\n" + VCS + " push origin roadmap\nEOF'", LANE_TRANSCRIPT)
+record_refuse("a push to roadmap in a heredoc body piped to sh is refused",
+              "bash -c 'cat <<EOF | sh\n" + VCS + " push origin roadmap\nEOF'", LANE_TRANSCRIPT)
 # A dry run moves no branch, so it stays allowed (read_verb in guard.py).
 record_allow("a lane's dry run of a push to roadmap with --dry-run is allowed",
              VCS + " push --dry-run origin roadmap", LANE_TRANSCRIPT)
