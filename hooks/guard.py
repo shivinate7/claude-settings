@@ -355,7 +355,7 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
+            CD_WORDS, _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -3583,6 +3583,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = "" if POWERSHELL_CALL[0] else git_after_cd_hit(stripped, cwd)
     if matched:
         refuse(tool, "deny", "git-after-cd", GIT_AFTER_CD_REASON, matched)
+    matched = "" if POWERSHELL_CALL[0] else git_push_after_check_hit(stripped)
+    if matched:
+        refuse(tool, "deny", "git-after-cd", GIT_PUSH_AFTER_CHECK_REASON, matched)
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
@@ -4669,6 +4672,13 @@ GIT_AFTER_CD_REASON = (
 )
 
 
+GIT_PUSH_AFTER_CHECK_REASON = (
+    "Rule (git-after-cd, decision git-after-cd-joins-with-and): a git push that follows another command "
+    "joined to it by `;` runs even when that command fails, so a failed check does not stop it. "
+    "Remedy: join the commands with `&&`, so the push runs only when the command before it succeeds."
+)
+
+
 # The `branch` flags that move, rename or delete a ref (a force, a move, a delete).
 GIT_BRANCH_WRITE_FLAGS = BRANCH_DELETE_FLAGS | {"-f", "--force", "-m", "-M", "--move"}
 
@@ -4777,6 +4787,43 @@ def git_after_cd_hit(command: str, cwd: str) -> str:
         if named is not None and (_unexpanded(named) or shell_abs(named, None)):
             continue
         return verbs[0]
+    return ""
+
+
+# The words that start a compound body (`if X; then git push`): the body's own test guards the push, so
+# the `;` before it is no join to a check.
+GIT_PUSH_BODY_WORDS = ("then", "do", "else", "elif")
+# The last command before a `;` that leaves a cd's own protection standing: the `exit` of
+# `cd X || exit 1` and the `fi` of `if ! cd X; then exit 1; fi`. The cd itself and the `)` that closes
+# a subshell holding a cd stand too (`git_push_after_check_hit`).
+GIT_PUSH_CD_TAIL_WORDS = ("exit", "fi")
+
+
+def git_push_after_check_hit(command: str) -> str:
+    """'push' when COMMAND holds a `git push` that a `;` joins to the command before it, else '' (decision
+    git-after-cd-joins-with-and). It reads the segments and ends `git_after_cd_hit` reads. The push passes
+    when the command before the `;` is a cd or the tail of a cd's exit guard and the command holds a cd
+    (the forms `git_after_cd_hit` already judges), when it opens a compound body (`then`, `do`), or when
+    a segment cannot be tokenized. A dry run is no write (`git_write_verb`)."""
+    ends = []
+    segments = split_segments(command, ends)
+    for number in range(1, len(segments)):
+        if number > len(ends) or ends[number - 1] != ";":
+            continue
+        calls = [(verb.rstrip(")}"), args) for verb, args in git_calls(segments[number])]
+        if not any(verb == "push" and git_write_verb(verb, args) for verb, args in calls):
+            continue
+        tokens, before = segment_tokens(segments[number]), segment_tokens(segments[number - 1])
+        if not tokens or not before or tokens[0] in GIT_PUSH_BODY_WORDS:
+            continue
+        # the first three words of a segment hold its cd, as in `if ! cd X`
+        openings = [[word.lstrip("({") for word in (segment_tokens(segment) or [])[:3]]
+                    for segment in segments[:number]]
+        last = before[0].lstrip("({")
+        tail = last in CD_WORDS or last in GIT_PUSH_CD_TAIL_WORDS or before[-1].endswith(")")
+        if tail and any(word in CD_WORDS for words in openings for word in words):
+            continue
+        return "push"
     return ""
 
 

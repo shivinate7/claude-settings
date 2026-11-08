@@ -18,6 +18,17 @@ A call whose argv names a read, such as `push --dry-run` or `push -n` (`read_ver
 2. The rule reads `cd_walk(...).stranded` for each write, with `failed_cd_stays=True`. A missing folder leaves the shell where it was, so `stranded` is true until a cd to a full path, home or `-` lands. `cd_walk(...).skipped` marks a segment that a failed `&&` chain never runs.
 3. The refusal tells the session to join the cd to the write with `&&`, or to leave out the cd and use `-C` with a full path. It names no target.
 
+The rule also refuses a `git push` that follows any other command joined to it by `;`, with or without a cd (coordinator step push-after-check-semicolon, 2026-11-08 09:51 CST; lane pick 2026-11-08 10:01 CST). A failed check does not stop a `;`-joined push. Incident 2026-11-08, PR #2098: a check and a push were joined by `;`, and the push ran after the check failed. The refusal tells the session to join the commands with `&&`. `git_push_after_check_hit` reads the same segments and ends as `git_after_cd_hit`.
+
+Forms the push check passes, the same ones the cd check already passes:
+
+- A push whose `;` follows a cd, or the tail of a cd's exit guard (`exit`, `fi`, or a `)` that closes a subshell), when the command holds a cd: `cd X; git push`, `cd X || exit 1; git push`, `if ! cd X; then exit 1; fi; git push`.
+- A push that opens a compound body (`then git push`, `do git push`).
+- A `--dry-run` push, a read.
+- A push that comes first, and a push joined by `&&`, `||`, `|` or a newline.
+
+A newline before the push is not read: `git commit -m m` on one line and `git push` on the next pass.
+
 Allowed forms:
 
 - `cd X && git push`: a failed cd stops the chain. The skip covers a whole compound that follows the `&&`: a `{ ... }` group, an `if ... fi`, a `for`, `while` or `until` loop through `done`, across `;` and newlines, so `cd X && { git add -A; git commit -m m; }` passes. Every opener and closer in a segment counts, so nested ones do: `{ { git add; } }`, `{ for f in a; do git add; done }`. A closer with a redirect attached counts once (`}>/dev/null`, `done>/dev/null`). A word counts only as the shell reads it: a quoted `"done"`, `echo "done }"` and `done_x` open and close nothing. The skip ends when the compound closes: a `;` or newline after it runs in the stranded folder, so `cd X && { git add -A; }; git push` is refused. A `case` is not read, so the skip ends at its first `;`.
