@@ -13831,14 +13831,16 @@ def _load_guard_frozen():
     return module
 
 
-# The predicate calls the scan makes on a `for` list one word past the cap. A list over the cap keeps this count: the cap is
-# what stops a long list from costing one scan per word it expands to.
+# The most predicate calls the scan makes on a `for` list one word past the cap: 45 on a22cd37ec. It is a bound, not an
+# exact count, so a change that makes fewer calls still passes. The cap is what stops a long list from costing one scan
+# per word it expands to, and a list over the cap keeps the scan within this bound.
 SHELL_SCAN_OVER_CAP_CALLS = 45
 
 
 def shell_scan_cost_check():
-    """(ok, note): a `for` list one word past the cap is scanned as today. The scope comes first: the scan reaches the sed
-    operand "$f". Then the count of predicate calls, which must stay at today's count. The predicate accepts nothing."""
+    """(ok, note): a `for` list one word past the cap is scanned within the bound. The scope comes first: the scan reaches
+    the sed operand "$f". Then the count of predicate calls, which must stay at or under the bound. The predicate accepts
+    nothing."""
     seen = []
 
     def accepts_nothing(word, where):
@@ -13849,14 +13851,14 @@ def shell_scan_cost_check():
     _load_guard_frozen()._shell_write_hit(command, NOGIT, accepts_nothing)
     if "$f" not in seen:
         return False, "the scan did not reach the sed operand $f: it saw %d words, the last %r" % (len(seen), seen[-4:])
-    if len(seen) != SHELL_SCAN_OVER_CAP_CALLS:
-        return False, "the scan made %d predicate calls for a list over the cap, want %d" % (len(seen),
-                                                                                           SHELL_SCAN_OVER_CAP_CALLS)
+    if len(seen) > SHELL_SCAN_OVER_CAP_CALLS:
+        return False, "the scan made %d predicate calls for a list over the cap, want at most %d" % (
+            len(seen), SHELL_SCAN_OVER_CAP_CALLS)
     return True, "the scan makes %d predicate calls for a list over the cap, and reaches the sed operand" % len(seen)
 
 
-SHELL_SCAN_COST_LABEL = ("frozen: the shell scan of a for list one word past the cap makes today's predicate calls, "
-                         "and reaches the sed operand")
+SHELL_SCAN_COST_LABEL = ("frozen: the shell scan of a for list one word past the cap makes at most today's predicate "
+                         "calls, and reaches the sed operand")
 LOG_CHECKS_EXTRA.append((SHELL_SCAN_COST_LABEL, shell_scan_cost_check))
 LOG_FAMILY[SHELL_SCAN_COST_LABEL] = "frozen"
 FIXTURELESS_CHECKS.add(shell_scan_cost_check)
