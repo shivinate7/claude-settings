@@ -27,7 +27,7 @@ new name. So it can hold the old name while a new run holds the new one. Code: `
   `refuse_or_take_over`, `refuse_old_lock`.
 - **Backend.** `GitLock` on every host. Leased pushes take, swap and release the lock.
 - **Release.** The run's `finally` releases its lock. The release removes the ref only while the ref holds
-  one of this run's commits. It deletes the ref with a leased push. A cloud proxy refuses ref deletes (HTTP
+  one of this run's commits, which it learns from the remote's ref listing alone, never a commit read. It deletes the ref with a leased push. A cloud proxy refuses ref deletes (HTTP
   403). There the release pushes an expired commit under the same lease instead: the ref stays, and any run
   may take it. A release that fails prints one line. It stops nothing.
 - **Unlock.** `merge --unlock [branch]` removes the lock for the branch, or for the default branch when no
