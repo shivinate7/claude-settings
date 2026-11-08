@@ -315,7 +315,7 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_passes(out, "a failed gh pr create, named")
 
     def test_cc_green_curl_on_the_pulls_route_with_a_403_passes(self):
-        # The text carries the failure (no error flag), so the HTTP 4xx reading is the one that counts.
+        # The text carries the failure as an exit code with no error flag, which counts; the HTTP 403 names the check.
         line = "I cannot open the PR: `curl` returned HTTP 403."
         out = self.stop([trg.human("open a PR"),
                          *failed_bash("curl -s -X POST https://api.github.com/repos/o/r/pulls -d @body.json",
@@ -483,7 +483,8 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_red_a_successful_call_with_refused_in_its_output_is_no_try(self):
         # Catches: a successful call whose output holds the word refused counted as a failed try. A failure is an error
-        # flag, an exit code above zero, or an HTTP 4xx or 5xx status. A loose word in the output is none of these.
+        # flag or an exit code above zero. A status counts only in an error result, so an HTTP 4xx or 5xx in an ok
+        # result is no failure. A loose word in the output is none of these.
         line = "I could not open the PR: `gh pr create` failed."
         out = self.stop([trg.human("open a PR"), use("Bash", {"command": "gh pr create --title t"}, "tu_g"),
                          done("tu_g", "3 refused connections in the log; nothing failed."), landed_reply(line)])
