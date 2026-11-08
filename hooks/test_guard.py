@@ -20532,6 +20532,8 @@ def worktree_home_cross_checkout_heredoc_text_case():
           command="perl - <<'PL'\n# don't\nprint 1;\nPL")
     check("ruby body with a lone quote in a string", "allow", "Bash", lane_a,
           command="ruby - <<'RB'\nputs \"it's\"\nRB")
+    check("perl body that prints an open-for-write line naming another checkout", "allow", "Bash",
+          lane_a, command="perl - <<'PL'\nprint \"open(F, '>', '%s/x')\";\nPL" % other)
 
     # Controls: each write into another checkout, run by an interpreter body, stays refused.
     check("control: python f-string os.system copies into another checkout", "deny", "Bash", lane_a,
