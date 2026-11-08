@@ -3964,11 +3964,13 @@ def shell_run_texts(raw: str) -> list:
     shells = strip_heredoc_bodies(raw, shells_only=True)
     texts.append(shells)
     if "<<" in raw:
+        earlier = {}   # heredocs already seen on each header text, so a body knows which `<<` is its own
         for quote, body, header in _split_heredocs(raw)[1]:
+            nth = earlier[header] = earlier.get(header, -1) + 1
             if not quote:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
             elif ("`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw)
-                  and not python_runs_body(raw, header)):
+                  and not python_runs_body(raw, header, nth)):
                 # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
                 # backtick span as a shell, `$(` and `<(` inside the span too. Outside a span they stay
                 # text: no interpreter reads them as a shell. The split follows _substitutions' span
