@@ -5185,10 +5185,10 @@ sh("git-after-cd: a set -e in a subshell, then a failed cd, then ; a git push is
    "(set -e); cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 
 
-# A PUSH AFTER A CHECK JOINED BY ;. Incident 2026-11-08, PR #2098 (the notes-fix-large-3 lane): a check and a
-# push were joined by `;`, so the push ran after the check failed. A push that follows a `;`-joined command is
-# refused, with or without a cd before it, and the remedy names `&&`. The cd here lands on a real folder, so
-# git-after-cd sees no stranded shell: the push is judged on its own.
+# A PUSH AFTER A CHECK JOINED BY ;. A git push that follows a `;`-joined command is refused, with or without a
+# cd before it, and the remedy names `&&`. The cd here lands on a real folder, so git-after-cd sees no stranded
+# shell: the push is judged on its own. The forms git-after-cd already passes stay allowed: the same chain
+# joined by `&&`, a push alone, a fetch then a status, a push that comes first, and a dry run.
 sh("git-after-cd: a landed cd, a check, then ; echo, then ; a git push is refused",
    'cd %s && %s commit -q -am "msg" && python3 lint/check_silent_undo.py --upstream origin/b --head HEAD '
    '--strict; echo "undo $?"; %s push origin HEAD:refs/heads/b 2>&1 | tail -1' % (slash(ROOT), VCS, VCS),
