@@ -2383,6 +2383,10 @@ MODEL_FLOOR_REASON = (
     "Sonnet is the floor for this role. Start the agent or session with model sonnet, "
     "or name no model and let the default apply."
 )
+# A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
+LANE_MODEL_FLOOR_REASON = (
+    "Sonnet is the floor for a lane session. Start the lane with model sonnet and the source_url of its repo."
+)
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
 
@@ -2503,17 +2507,27 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
+def lane_tags(tool_input) -> list:
+    """The `tags` of a call as a list: one string is a list of one; anything else that is not a list is empty."""
+    tags = tool_input.get("tags")
+    if isinstance(tags, str):
+        return [tags]
+    return tags if isinstance(tags, list) else []
+
+
+def is_lane_create_session(tool: str, tool_input) -> bool:
+    """True for a create_session call that tags a lane: any tag that, stripped and casefolded, is LANE_TAG. The one
+    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
+    return tool == CREATE_SESSION_TOOL and any(
+        isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
+
+
 def lane_effort_hit(tool: str, tool_input) -> str:
     """The prompt of a create_session call that tags a lane and is not the effort command exactly, or "".
     A slash command runs only as the whole prompt, so the compare is exact: no strip. A lane tag is any
     tag that, stripped and casefolded, is LANE_TAG; `tags` may be one string. A call with no lane tag
     is not judged. A missing prompt is not the command."""
-    tags = tool_input.get("tags")
-    if tool != CREATE_SESSION_TOOL:
-        return ""
-    if isinstance(tags, str):
-        tags = [tags]
-    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+    if not is_lane_create_session(tool, tool_input):
         return ""
     prompt = tool_input.get("prompt")
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
@@ -2524,13 +2538,9 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
     ("", None). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
     key first, then the origin's path. A lane tag is judged as in lane_effort_hit. With no readable repo, any full
     `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
-    tags = tool_input.get("tags")
-    if tool != CREATE_SESSION_TOOL:
+    if not is_lane_create_session(tool, tool_input):
         return "", None
-    if isinstance(tags, str):
-        tags = [tags]
-    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
-        return "", None
+    tags = lane_tags(tool_input)
     repo = git_reads.github_repo(cwd) if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None
     # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
     for tag in tags:
@@ -2545,12 +2555,7 @@ def lane_start_settings_hit(tool: str, tool_input) -> str:
     """The settings a lane `create_session` call leaves out, as "model", "source_url" or "model, source_url", or "".
     A lane tag is judged as in lane_effort_hit. A value counts as missing when it is not text or is empty once
     stripped. A call with no lane tag is not judged."""
-    tags = tool_input.get("tags")
-    if tool != CREATE_SESSION_TOOL:
-        return ""
-    if isinstance(tags, str):
-        tags = [tags]
-    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+    if not is_lane_create_session(tool, tool_input):
         return ""
     missing = [k for k in ("model", "source_url")
                if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
@@ -5123,7 +5128,9 @@ def judge(payload) -> None:
     # model; the log holds what the call asked for.
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
-        refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
+        refuse(tool, "deny", "agent-model-floor",
+               LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,
+               floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
