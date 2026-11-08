@@ -8,8 +8,9 @@ The mistake (incident, PR 1179, 2026-11-08): a hook refused a builder's Bash cal
 
 The harm it stops: a review that reads a change that is not there.
 
-The lane rule: before a lane spawns the reviewer, it runs `python3 lint/check_report_in_head.py --branch <name>` on the builder's report.
+The lane rule: before a lane spawns the reviewer, it runs `python3 ~/.claude/lint/check_report_in_head.py --branch <branch> --report <file>` on the builder's report. That is the installed copy, so a lane in another repo runs it too.
 
+- A fix round passes `--base <last reviewed head>`, so a refused fix-round edit to a file round 1 already touched still fails.
 - A 0 passes. The lane spawns the reviewer.
 - A 1 sends the builder back. The output names each reported path that is not in the diff.
 - A 2 is reported as unknown (branch not on origin, git failure, no `Files:` line, an empty one, or an absolute path). The lane does not call it a pass.
@@ -17,7 +18,9 @@ The lane rule: before a lane spawns the reviewer, it runs `python3 lint/check_re
 
 Scope: reported but not in the diff only. A changed file the report leaves out is not judged.
 
-Cost: 3 git calls per run (one fetch of one branch, one rev-parse, one diff). It writes no file. A lane runs it once per builder report, before review.
+Cost: 3 git calls per run (one fetch of the branch and the base, one rev-parse, one diff). The fetch updates FETCH_HEAD and the remote-tracking refs it fetches, nothing else. A lane runs it once per builder report, before review.
+
+One home: the check keeps its own diff call, not `changed_paths` in `hooks/guard.py`. That helper runs `git -C <dir>` with a 10 s timeout and hides git's error text. The suite pins the call count by subcommand and the check prints git's error.
 
 Why: the builder's report is a claim. The pushed head is the only state the reviewer reads.
 

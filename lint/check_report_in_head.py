@@ -5,22 +5,25 @@
         # base: origin/main when no flag is given; root: the current directory; report: stdin when no flag or `-`
 
 A builder's report lists the files it changed on one `Files:` line (`agents/builder.md`). A hook can refuse a
-builder's edit and the builder still report it. The reviewer then reads a change that is not there. This check reads the pushed head, never the local tree: it fetches refs/heads/<branch> from origin and
-diffs `--name-only --no-renames` from the merge base of <base> and that head to the head. A renamed file shows under
-both names.
+builder's edit and the builder still report it. The reviewer then reads a change that is not there. This check reads the pushed head, never the local tree: it fetches refs/heads/<branch> from origin, and
+the base too when <base> is `origin/<name>`, so a stale local ref never stands in. It diffs `--name-only
+--no-renames` from the merge base of <base> and that head to the head. A renamed file shows under both names. A fix
+round passes `--base <last reviewed head>`, so only the round's own change counts.
 
 The report line: one line that starts, after any blockquote, bullet or bold marks, with `Files:`. It holds
-comma-separated repo-relative paths, each with optional backticks, a leading `./`, and an optional `:<range>`
-(`lint/a.py:10-20`). Other lines are not read.
+comma-separated repo-relative paths, each with optional backticks or bold marks, a leading `./`, and an optional
+`:<range>` (`lint/a.py:10-20`, a hyphen or an en dash). A bare range after a comma (`30-40`) continues the prior
+path's range. Other lines are not read. The report is read as strict UTF-8, from stdin or the file, whatever the locale.
 
 Exit 0: every listed path is in the diff. Exit 1: each missing path is named. Exit 2: UNKNOWN, because the branch is
-not on origin, git failed, the report has no `Files:` line, more than one, an empty one, or an absolute path entry.
+not on origin, git failed, the report is not UTF-8, has no `Files:` line, more than one, an empty one, or an
+absolute path entry.
 Unknown is never 0 here: a green exit on an unread head would hide the gap.
 
 Scope: reported but not in the diff. A changed file the report leaves out is not judged.
 
-Cost: 3 git calls per run (fetch of one branch, rev-parse of the fetched head, one diff). It fetches objects into
-the repo's object store and writes no other file. The lane runs it once per builder report, before it spawns the
+Cost: 3 git calls per run (one fetch of the branch and the base, one rev-parse of the fetched head, one diff). The
+fetch adds objects and updates FETCH_HEAD and the remote-tracking refs it fetches, and nothing else. The lane runs it once per builder report, before it spawns the
 reviewer (decision `builder-report-in-head`).
 """
 import os
@@ -31,7 +34,9 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 
 TAG = "check_report_in_head"
 FILES_LINE = re.compile(r"^[\s>*\-]*Files\**\s*:\**\s*(.*)$")
-RANGE = re.compile(r":\d+(?:-\d+)?$")
+DASHES = "-–—"
+RANGE = re.compile(r":\d+(?:[%s]\d+)?$" % DASHES)
+BARE_RANGE = re.compile(r"^\d+(?:[%s]\d+)?$" % DASHES)
 ABSOLUTE = re.compile(r"^(?:/|\\|[A-Za-z]:[\\/])")
 USAGE = "usage: check_report_in_head.py --branch <name> [--base <ref>] [--root <dir>] [--report <path>|-]"
 
@@ -56,8 +61,12 @@ def reported_paths(report):
         raise Unknown("the report has %d Files lines, want one" % len(lines))
     paths = []
     for entry in lines[0].split(","):
-        entry = entry.strip().strip("`").strip()
+        entry = entry.replace("`", "").strip().strip("*").strip()
         if not entry:
+            continue
+        if BARE_RANGE.match(entry):
+            if not paths:
+                raise Unknown("the Files line starts with a range and no path: " + entry)
             continue
         if ABSOLUTE.match(entry):
             raise Unknown("the Files line holds an absolute path: " + entry)
@@ -73,11 +82,15 @@ def reported_paths(report):
 
 def pushed_diff(root, branch, base):
     """(head sha, set of paths changed from merge-base(base, head) to head), read from origin's refs/heads/<branch>."""
+    specs = ["+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch)]
+    if base.startswith("origin/") and base != "origin/" + branch:
+        name = base[len("origin/"):]
+        specs.append("+refs/heads/%s:refs/remotes/origin/%s" % (name, name))
     try:
-        git(root, "fetch", "--quiet", "--no-tags", "origin", "refs/heads/" + branch)
+        git(root, "fetch", "--quiet", "--no-tags", "origin", *specs)
     except Unknown as err:
-        raise Unknown("branch %s is not readable on origin: %s" % (branch, err))
-    head = git(root, "rev-parse", "--verify", "FETCH_HEAD^{commit}").strip()
+        raise Unknown("branch %s (or base %s) is not readable on origin: %s" % (branch, base, err))
+    head = git(root, "rev-parse", "--verify", "refs/remotes/origin/%s^{commit}" % branch).strip()
     out = git(root, "diff", "--name-only", "--no-renames", "-z", "%s...%s" % (base, head))
     return head, set(p for p in out.split("\0") if p)
 
@@ -104,10 +117,14 @@ def main(args):
         return 2
     try:
         if report_path == "-":
-            report = sys.stdin.read()
+            raw = sys.stdin.buffer.read()
         else:
-            with open(report_path, encoding="utf-8", errors="replace") as f:
-                report = f.read()
+            with open(report_path, "rb") as f:
+                raw = f.read()
+        try:
+            report = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as err:
+            raise Unknown("the report is not UTF-8 (%s)" % err)
         paths = reported_paths(report)
         head, changed = pushed_diff(root, branch, base)
     except (Unknown, OSError) as err:
