@@ -11088,17 +11088,8 @@ def review_matcher_case():
 
 
 FIXTURELESS_CHECKS.add(review_matcher_case)
-REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused with no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "deny", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail is refused with no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 0)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused even when its comment cannot be read, MCP update_issue_comment",
-                         review_refused_unread(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT),
-                                               GHRECORDBROKEN + os.pathsep + PY_PATH)))
+
+
 REVIEW_LOG_CHECKS.append(("review-record:a settings.json matcher routes update_issue_comment to the guard", review_matcher_case))
 
 
@@ -11118,6 +11109,19 @@ REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judg
                          review_reads("Bash", {"command": "%s -e --body '%s'" % (PR_CMD, review_record())}, "allow", 1)))
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh issue comment -e --body",
                          review_reads("Bash", {"command": "%s -e --body '%s'" % (ISSUE_CMD, review_record())}, "allow", 1)))
+
+
+REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused with no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "deny", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail is refused with no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused even when its comment cannot be read, MCP update_issue_comment",
+                         review_refused_unread(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT),
+                                     GHRECORDBROKEN + os.pathsep + PY_PATH)))
 
 
 # =========================================================================== 5g. archive of a lane
