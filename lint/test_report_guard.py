@@ -1044,15 +1044,14 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "a builder that ran in the turn and is named nowhere got through")
         self.assertIn("no model named for builder", out["reason"])
 
-    def test_dm_red_next_names_model_no_spawn_ran_blocks(self):
-        # Next's reviewer opus matches no reviewer spawn: the turn's reviewer ran haiku, and an
-        # earlier-turn reviewer ran sonnet.
-        out = self.verdict("> **Done** BUILT the guard, PR #5 (reviewer haiku)\n"
-                           "> **Next** Round 2 (reviewer opus). Unstarted: none",
-                           [{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}],
-                           before_human=[{"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}])
-        self.assertIsNotNone(out, "a reviewer name under Next that no reviewer spawn ran got through")
-        self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
+    def test_dm_green_next_plan_model_not_checked(self):
+        # Next names a plan for a later reviewer, with a model no reviewer ran. Next's model is never
+        # checked against spawns: it only excuses the "no model named" refusal.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5\n"
+            "> **Next** Round 2 (reviewer opus) runs next. Unstarted: none",
+            [{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}],
+            before_human=[{"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}]))
 
 
 class UnstartedItemsTests(unittest.TestCase):
