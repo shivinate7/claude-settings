@@ -8024,6 +8024,18 @@ sh("env: interpreter heredoc: allow, a js template literal around a bash -c stri
 sh("env: interpreter heredoc: deny, an unquoted heredoc whose backtick runs the read",
    'python3 <<PY\nx = "`cat ' + ENV + '`"\nPY', "deny", "env-file", cwd=NOGIT)
 
+# A quoted body is text only while nothing runs it. A body written to a file that a shell then runs is
+# code, so the guard judges the file's text. The scanner cases below hold quotes, backticks and comment
+# openers inside quoted bodies, which are text, and must not be misread (building-scanner-respects-strings).
+sh("env: interpreter heredoc: deny, a quoted python body written to a file that sh runs",
+   'python3 <<\'PY\' > run.sh\nprint("`cat ' + ENV + '`")\nPY\nsh run.sh', "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: allow, a quoted python body with a lone quote and a backtick in a string",
+   'python3 <<\'PY\'\nx = "don\'t run `bash -c \'cat ' + ENV + '\'`"\nPY', "allow", cwd=NOGIT)
+sh("env: interpreter heredoc: allow, a quoted node body with a template literal across two lines",
+   'node <<\'EOF\'\nconst s = `run\nbash -c "cat ' + ENV + '"`;\nEOF', "allow", cwd=NOGIT)
+sh("env: interpreter heredoc: allow, a quoted python body with a comment opener in a string",
+   'python3 <<\'PY\'\nx = "/* not a comment"\ny = "# nor this, and don\'t"\nPY', "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
