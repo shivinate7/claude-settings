@@ -33,9 +33,10 @@ new name. So it can hold the old name while a new run holds the new one. Code: `
   release that fails prints one line. It stops nothing.
 - **Unlock.** `merge --unlock [branch]` removes the lock for the branch, or for the default branch when no
   branch is named. It removes the lock whether its holder is live or not, and even when its commit cannot be
-  read, so long as the remote listed a full sha for the ref. The delete is a leased push on the sha it
-  listed, so a lock taken after the listing stays. It prints "removed", or "nothing to remove" when no lock is there or the lock is already released (expires 0). A
-  released lock whose commit cannot be read is released again, and it prints "removed".
+  read. It needs a full sha in the remote's listing of the ref. The delete is a leased push on the sha it
+  listed, so a lock taken after the listing stays. It prints "removed", or "nothing to remove" when no lock
+  is there or the lock is already released (expires 0). A released lock whose commit cannot be read is
+  released again, and it prints "removed".
   Where the delete is refused, it releases the lock to an expired commit instead, and it still prints
   "removed".
 
