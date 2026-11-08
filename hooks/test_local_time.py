@@ -17,7 +17,7 @@ Contract the builder codes against:
     whatever stdin holds. As a UserPromptSubmit hook it also saves each owner prompt; those cases
     are in test_feedback_inbox.py. With --agent, prints one JSON object:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
-    The printed line in both modes may end with a pointer to now-central, on the same line (LINE_PRINTED).
+    The printed line in both modes ends with local_time.NOW_CENTRAL_POINTER, on the same line (LINE_PRINTED).
     As a UserPromptSubmit hook it also grants the owner override when the prompt starts with the
     word `override` (the rest is the reason, logged to guard.log). The whole-prompt forms
     `override <n>[m|h]` and `override off` keep their meaning. The cases for that are the override_* ones.
@@ -59,9 +59,7 @@ FAILED = []
 LINE_FULL = re.compile(
     r"Local time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT \(UTC-05:00\)|CST \(UTC-06:00\))"
 )
-# The hook's printed line may carry a pointer to now-central after it, on the same line. Optional here: the
-# pointer's presence is checked once, in hooks/test_now_central.py. LINE_FULL stays exact for line() itself.
-LINE_PRINTED = re.compile(LINE_FULL.pattern + r"(?: [^\n]*now-central[^\n]*)?")
+# LINE_FULL stays exact for line() itself. The printed line ends with LINE_PRINTED's pointer, defined below.
 
 
 def utc(*args):
@@ -105,6 +103,12 @@ except Exception as e:
     LT = None
     LOAD_ERROR = "%s: %s" % (type(e).__name__, e)
 
+# The printed line ends with the pointer the hook emits, exactly: the constant itself, never a copy of it
+# (building-allow-list-is-the-constant). Without the constant nothing matches, so no printed line passes.
+POINTER = getattr(LT, "NOW_CENTRAL_POINTER", None)
+LINE_PRINTED = (re.compile(LINE_FULL.pattern + re.escape(POINTER)) if isinstance(POINTER, str)
+                else re.compile(r"(?!)"))
+
 
 def check(name, condition, detail=""):
     if condition:
@@ -132,6 +136,13 @@ def case_table_in_process():
     for name, instant, want in TABLE:
         got, err = call_line(instant)
         check("in process: " + name, got == want, "want %r, got %r %s" % (want, got, err))
+
+
+def case_pointer_constant():
+    # The pointer the printed line ends with is the hook's own constant: a leading space, then a sentence naming now-central.
+    check("local_time has NOW_CENTRAL_POINTER: a leading space, then a sentence that names now-central",
+          isinstance(POINTER, str) and POINTER.startswith(" ") and "now-central" in POINTER,
+          "NOW_CENTRAL_POINTER is %r (module %s)" % (POINTER, LOAD_ERROR or "loaded"))
 
 
 def case_real_clock():
@@ -2058,6 +2069,7 @@ def case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session():
 def main():
     try:
         case_table_in_process()
+        case_pointer_constant()
         case_real_clock()
         case_no_tz_database()
         case_machine_zone_is_not_used()
