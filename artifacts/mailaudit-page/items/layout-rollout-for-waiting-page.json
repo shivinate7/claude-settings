@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-26T21:15:00-05:00",
+  "context": "Goal: sessions find this page on their own.\nProblem: a session finds the page through a key in .claude/layout-extras.json. That same file also tells every shared tool that mailaudit has moved to the shared folder layout (decisions and debts under docs/). mailaudit keeps them at the root. Adding the file alone would point the shared tools at folders that do not exist.\nBased on: lint/layout.py rolled_out() and lint/layout.json (read).\nMeanwhile: I put this page's link in my handoff note and in each question box.",
+  "home": "the 10-26 orchestrator handoff note, then a mailaudit record",
+  "id": "layout-rollout-for-waiting-page",
+  "kind": "decision",
+  "n": 1,
+  "options": [
+    {
+      "gain": "No shared tool changes its verdict on mailaudit today.",
+      "how": "The page works now through my handoff note. A later lane moves decisions/ and debts/ under docs/, updates check-records and CLAUDE.md, then adds the key.",
+      "key": "a",
+      "label": "Link later, with the layout move",
+      "lose": "Other sessions only find the page through my handoff until the move."
+    },
+    {
+      "gain": "Every session finds the page on its own.",
+      "how": "One record-and-check lane moves the folders and adds the key, in parallel with the restyle.",
+      "key": "b",
+      "label": "Do the layout move now",
+      "lose": "A large rename lands while the card lanes edit CLAUDE.md, so merge conflicts are likely."
+    }
+  ],
+  "owner": "mailaudit orchestrator (this session)",
+  "pick": "a",
+  "ref": "skill waiting-page (one page per repo); layout-extras.json (the file that marks a repo as moved to the shared folder layout)",
+  "status": "closed",
+  "title": "Link this page from mailaudit now, or with a layout move later?",
+  "why": "The restyle is the priority, and the move touches every record path while three lanes edit CLAUDE.md."
+}

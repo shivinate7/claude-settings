@@ -1,0 +1,18 @@
+{
+  "added": "2026-10-27T12:33:00-05:00",
+  "context": "Goal: measure the open Duo fold, as you chose in item 14.\nProblem: at 12:28 CDT the run asked macOS for Device Hub access and got \"denied\". You were likely away from the Mac, or macOS remembered the 01:26 denial. Only you can click Allow on that prompt.\nMeanwhile: Duo draws design round 2 with both keyboard cases, so nothing waits on this.",
+  "home": "manifest-duo's duo-card-in-hand decision record",
+  "id": "duo-fold-allow-click",
+  "kind": "task",
+  "minutes": "2 min",
+  "n": 20,
+  "owner": "manifest-duo",
+  "ref": "item 14 duo-fold-measure (you picked a: let it drive Device Hub once)",
+  "status": "closed",
+  "steps": [
+    "Mark this done when you are at the Mac and free for about a minute.",
+    "When the macOS prompt asks to let Claude control Device Hub, click Allow.",
+    "If no prompt appears, open System Settings > Privacy & Security > Accessibility and check whether Claude is listed as denied."
+  ],
+  "title": "Be at the Mac to click Allow for the one Duo fold measurement"
+}

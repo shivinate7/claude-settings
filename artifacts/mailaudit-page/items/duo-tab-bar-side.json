@@ -1,0 +1,56 @@
+{
+  "added": "2026-10-27T12:58:00-05:00",
+  "context": "Goal: settle Card in Hand's open choices, so Duo can plan the build.\nProblem: with two pages, the bar can sit under either one, and the keys sit on the left.\nBased on: decision duo-card-in-hand, your 12:25 picks (ruling); the fold and keyboard are unmeasured (measured: the runs failed at load 157).\nMeanwhile: Duo plans the build and starts nothing until you answer.",
+  "designs": [
+    {
+      "label": "a) Under the right page",
+      "slug": "d23-a"
+    },
+    {
+      "label": "b) Left, on top of the keys",
+      "slug": "d23-b"
+    },
+    {
+      "label": "c) Left, as degen",
+      "slug": "d23-c"
+    }
+  ],
+  "group": "duo-round2",
+  "holds": "Duo's build plan for Card in Hand waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-tab-bar-side",
+  "kind": "decision",
+  "n": 23,
+  "options": [
+    {
+      "design": "d23-a",
+      "gain": "The left thumb keeps the keys; the bar never jumps.",
+      "how": "The bar never moves.",
+      "key": "a",
+      "label": "Under the right page, always",
+      "lose": "Differs from degen, which puts it on the left."
+    },
+    {
+      "design": "d23-b",
+      "gain": "Close to the thumb.",
+      "how": "The bar rides above the keys.",
+      "key": "b",
+      "label": "Under the left page, on top of the keys",
+      "lose": "Jumps 256pt each time the keys rise or fall, and crowds the query."
+    },
+    {
+      "design": "d23-c",
+      "gain": "Matches degen.",
+      "how": "The keys cover it.",
+      "key": "c",
+      "label": "Under the left page, as degen does",
+      "lose": "On mail day you must drop the keys to change tabs."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo design round 2, draft PR #144 (Card in Hand screens)",
+  "status": "closed",
+  "title": "Where does the tab bar sit on the open Duo?",
+  "why": "It never moves and never hides behind the keys."
+}

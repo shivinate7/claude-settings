@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-08T13:12:00-06:00",
+  "context": "Goal: the phone app does everything the web app does, photos included.\nProblem (goal): five debts say \"the owner names the lane\". The phone has photo views, but no screen shows them, nothing takes a photo, nothing syncs photos with the Worker, nothing fetches photos before a merge, and nothing removes unused ones. The Ledger tab lacks the web's View group (Showing, Sorted by, Orders from). No test scans SwiftUI view state for stored keys.\nBased on (read): PhotoSync and PhotoCapture have no caller on main, and Info.plist has no camera permission line.\nBased on (read): the lane plan gives Photo* files to the pins lane and the screens to the restyle lane.\nDeparts from: main has no lane for these five debts \u2014 option a gives the photo wiring and the key scan to the pins lane, and the View group and photo screens to the restyle lane after step 10.\nMeanwhile: nothing is built.",
+  "home": "pins lane: photo wiring and key scan; restyle lane after step 10: photo screens, camera and View group",
+  "id": "native-unowned-lanes",
+  "kind": "decision",
+  "n": 59,
+  "options": [
+    {
+      "gain": "Photos and the View group reach the phone, using lanes that already own those files.",
+      "how": "After its last three debts, the pins lane wires PhotoSync, the pre-merge fetch, the sweep and the key scan, with swift test only. Restyle builds the photo screens, the camera control and the View group after step 10.",
+      "key": "a",
+      "label": "Pins takes photo wiring and the key scan; restyle takes the screens after step 10",
+      "lose": "The screens wait for restyle's queue; the camera needs your device check."
+    },
+    {
+      "gain": "Nothing competes with the restyle.",
+      "how": "No lane starts on these until restyle step 10 lands.",
+      "key": "b",
+      "label": "All of it waits until the restyle goal is done",
+      "lose": "The phone has no photos for longer."
+    },
+    {
+      "gain": "Less to build and keep up.",
+      "how": "The phone drops its photo code; the View group and key scan go to restyle after step 10.",
+      "key": "c",
+      "label": "Photos stay web-only",
+      "lose": "You can't add or see photos from the phone."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 17,
+  "ref": "debts native-photo-screens-unwired, native-merge-skips-photo-fetch, native-photo-sweep-unbuilt, native-ledger-tab-unbuilt, native-key-scan-skips-views; decision native-build-lanes",
+  "short": "Unowned native work",
+  "status": "closed",
+  "title": "Photos, the Ledger View group and a key scan have no lane on the phone. Who builds them, and when?",
+  "why": "Each part goes to the lane that already owns its files, and the wiring needs no simulator, so it adds no wait to the restyle."
+}

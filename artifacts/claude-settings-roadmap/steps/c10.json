@@ -1,0 +1,9 @@
+{
+  "note": "Freeze = your building-guard-needs-incident rule, enforced; the no-incident exception is gone (c11). Oct 19: most decision regrowth after the cull was splits and older rulings getting a home, not new rules. Oct 20, measured at 84d4076: decisions 100, debt files 47 (27 yesterday), hook lines 49,261 (code 17,441, baseline 16,963, +2.8%), CLAUDE.md 2,399 words. New guard lane #528 (refuse npm installs and recursive deletes into a linked node_modules, +483 lines) has an incident section in its decision, so it passes the freeze. Watch: 20 new debts since yesterday (5 from the no-window spawn work), and none names an incident by keyword. Debts need 'likely to hit in normal work', not an incident, so this is not a breach, but the debt count is climbing back.",
+  "order": 95,
+  "phase": "cleanup",
+  "status": "todo",
+  "title": "Freeze new guard rules, except after a real incident",
+  "updatedAt": "2026-10-20T16:55:00Z",
+  "why": "The guard is now 47k lines and the biggest product in the repo. New rules only when Claude actually did the harmful thing, as your own building-guard-needs-incident rule says."
+}

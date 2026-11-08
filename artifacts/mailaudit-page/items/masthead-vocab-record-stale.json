@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-08T13:26:00-06:00",
+  "context": "You asked for visuals (10:55 CST). Each option now has its mockup, drawn on the folded Duo (466 pt wide).\nGoal: the records describe the app as it is.\nProblem (rule): decision ruled-head-masthead-vocabulary still describes head cells on the Packages and Tally lists. The web removed them; on the web they now live in the Ledger tab's View group. The phone has no View group today, only the web does, so option a also adds one on the phone. The record protected one shared vocabulary for the head, which the sync-particulars record still protects.\nBased on (record): decision ledger-tab-holds-options.\nBased on (read): native LedgerTab.swift draws Data and Reset only; TallyView.swift keeps search, sort and Hide received until the View group lands.\nDeparts from: main ruled-head-masthead-vocabulary says head cells sit on the lists \u2014 option a rewrites it to say they live in the Ledger View group, and adds that group on the phone.\nMeanwhile: restyle works on. Nothing waits on this.",
+  "designs": [
+    {
+      "drawn": 466,
+      "file": "docs/design/item-47-head-cells/a.html",
+      "focus": "#view-group",
+      "label": "a) Head cells in a new View group (the web has it today)",
+      "slug": "d47-a"
+    },
+    {
+      "drawn": 466,
+      "file": "docs/design/item-47-head-cells/b.html",
+      "focus": "#head-cells",
+      "label": "b) Head cells on the Packages and Tally lists",
+      "slug": "d47-b"
+    }
+  ],
+  "home": "decision ruled-head-masthead-vocabulary, rewritten by restyle",
+  "id": "masthead-vocab-record-stale",
+  "kind": "decision",
+  "look": true,
+  "n": 47,
+  "options": [
+    {
+      "design": "d47-a",
+      "gain": "The record matches the app, and the lists show more mail.",
+      "how": "The record says the head cells live in the Ledger tab's View group, as on the web. The phone gains that group.",
+      "key": "a",
+      "label": "Rewrite the record in place",
+      "lose": "Changing sort or range takes a trip to the Ledger tab."
+    },
+    {
+      "design": "d47-b",
+      "gain": "The sort and range stay in view where you check mail.",
+      "how": "The record keeps the head cells on the Packages and Tally lists, under the masthead.",
+      "key": "b",
+      "label": "Leave it",
+      "lose": "The record no longer matches the web, and the list starts about 48 pt lower."
+    }
+  ],
+  "owner": "restyle local_96bb7b5c-71b1-45b5-b222-2df64d74f80f",
+  "pick": "a",
+  "rank": 12,
+  "ref": "decision ruled-head-masthead-vocabulary (one vocabulary for the ruled head); decision ledger-tab-holds-options (the Ledger tab holds the view options)",
+  "short": "Stale masthead record",
+  "status": "closed",
+  "title": "A record still puts head cells on the Packages and Tally lists, which the web removed. Rewrite it?",
+  "why": "The cells moved, and the vocabulary the record protected is still protected by the sync-particulars record."
+}

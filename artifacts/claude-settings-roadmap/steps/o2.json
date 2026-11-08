@@ -1,0 +1,9 @@
+{
+  "note": "Oct 17 order ruling: apply the layout to claude-settings first; each child repo gets it in Roll out. Oct 20: unblocked, the map merged in #525. This is the next big step.",
+  "order": 120,
+  "phase": "organize",
+  "status": "todo",
+  "title": "One layout for every repo",
+  "updatedAt": "2026-10-20T16:55:00Z",
+  "why": "docs/design, docs/decisions, docs/debts, docs/plans, tokens/tokens.json, scripts/shoot. Plus a DESIGN.md template."
+}

@@ -1,0 +1,80 @@
+{
+  "added": "2026-10-26T23:16:00-05:00",
+  "context": "Goal: MANIFEST on the open Duo breaks the phone-list mold.\nProblem: a blind designer drew five concepts from the mail-day job, not from today's screens. Only you pick the direction.\nPictures: a) to e) each have a drawing above. f) has none of its own: it is a) with c)'s past-transit page and b)'s Suspense line.\nMeanwhile: nothing is built; the restyle continues.\nAlso open: the claim window (assumed 28 days) and usual transit time (assumed 10 days). Put them in the note if you know them.",
+  "designs": [
+    {
+      "label": "a) Card in Hand",
+      "slug": "q11-a"
+    },
+    {
+      "label": "b) Account Book",
+      "slug": "q11-b"
+    },
+    {
+      "label": "c) Sorting Frame",
+      "slug": "q11-c"
+    },
+    {
+      "label": "d) The Letter",
+      "slug": "q11-d"
+    },
+    {
+      "label": "e) Fold to Seal",
+      "slug": "q11-e"
+    }
+  ],
+  "home": "a new mailaudit decision record on the Duo layout",
+  "id": "duo-blind-concept",
+  "kind": "decision",
+  "n": 11,
+  "options": [
+    {
+      "gain": "Fastest match with cards in hand; works one-handed.",
+      "how": "Type a few letters of the card you hold; the app shows its envelope and what else should be in it.",
+      "key": "a",
+      "label": "Card in Hand",
+      "lose": "Needs typing for every card."
+    },
+    {
+      "gain": "Money and owed cards read like a ledger, fits the parchment look.",
+      "how": "Each seller is an account that owes you cards; blank envelopes sit in a Suspense line until matched.",
+      "key": "b",
+      "label": "Account Book",
+      "lose": "Less direct for the open-the-envelope moment."
+    },
+    {
+      "gain": "Lost mail is obvious at a glance.",
+      "how": "Envelopes sit in pigeonholes by thickness and age; the fold splits in-transit from past-usual-transit.",
+      "key": "c",
+      "label": "Sorting Frame",
+      "lose": "Thickness is a guess the app has to make."
+    },
+    {
+      "gain": "Calm, very on-brand.",
+      "how": "The app writes today's mail as a short letter; you answer by touching its words.",
+      "key": "d",
+      "label": "The Letter",
+      "lose": "Slow for a big pile."
+    },
+    {
+      "gain": "Uses the hardware like nothing else.",
+      "how": "Closing the phone seals what came; the hinge angle picks a blank envelope's sender.",
+      "key": "e",
+      "label": "Fold to Seal (wild)",
+      "lose": "Impractical; easy to trigger by accident."
+    },
+    {
+      "gain": "Fast matching, lost mail and blank envelopes each get their best tool.",
+      "how": "Card in Hand, plus Sorting Frame's past-transit page and Account Book's Suspense line.",
+      "key": "f",
+      "label": "Card in Hand + two borrowed parts",
+      "lose": "More to build than one pure concept."
+    }
+  ],
+  "owner": "mailaudit orchestrator",
+  "pick": "f",
+  "ref": "PR #139 (blind Duo concepts, draft); served at localhost:4190",
+  "status": "closed",
+  "title": "Which Duo concept should MANIFEST grow from?",
+  "why": "The designer's pick: each part answers one mail-day job best."
+}

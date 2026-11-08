@@ -1,0 +1,23 @@
+{
+  "added": "2026-11-08T13:42:00-06:00",
+  "closedNote": "Closed 2026-11-08 15:02 CST: the owner told the coordinator to start it in chat, and the lane is running.",
+  "context": "Goal: the orders extension you picked in item 50 gets built.\nWhy yours: a session can't start another one while you use Remote Control (measured 2026-11-08, the coordinator's start_session was refused while you were on Remote Control).\nBrief (copy everything from the next line to the end):\nLane brief: orders by browser extension (waiting-page item 50, owner picked a at 10:55 CST 2026-11-08)\nBuild the orders extension plan: a browser extension reads the owner's TCGplayer orders while signed in and sends them to the Worker at POST /orders, reusing draft PR #154's parser and merge code (branch b/orders-cron).\nRead first: ~/.claude/handoffs/0bb58e2e-cb7a-4ce8-a1c8-dd9d53587024.md lines 15-26; side-session-notes orders-scrape-spike.md; records sync-revamp-cloudflare, orders-job-unbuilt, csv-import-stays-web, orderwand-csv; invariants imports-merge-never-replace, parser-filters, the-token-is-a-credential.\nActs item 50 names, which the pick covers:\n1. Rewrite the three records in place for the extension plan.\n2. Push b/orders-cron to archive/b/orders-cron; close PR #154 pointing at this lane.\n3. Build Worker POST /orders reusing #154's parser and merge. Imports merge, never replace.\n4. Build the browser extension (designer before its UI, design reviewer after).\n5. Last, after the endpoint works: remove Worker secret TCG_COOKIE and Keychain item mailaudit-tcg-cookie; report each.\nOne lane with its own agents: test-author red first, builder, reviewer. Merge go from the coordinator (local_3159e21b-972b-4db6-950c-ad7fd0613fda) through batch. Deploy nothing without asking the coordinator. Never write a token or cookie value anywhere. Do not edit claude-settings. Never write answers/. Owner questions go to the coordinator in question form. Report in 25 lines or fewer at each merge-ready point.",
+  "holds": "Item 50's build waits until the lane starts.",
+  "home": "item 50 orders-extension-go",
+  "id": "orders-extension-lane-start",
+  "kind": "task",
+  "links": [],
+  "minutes": 2,
+  "n": 64,
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "rank": 1,
+  "ref": "item 50 (orders extension plan, you picked a at 10:55 CST)",
+  "short": "Start orders lane",
+  "status": "closed",
+  "steps": [
+    "On the Mac, in the Claude desktop app, open a new session in the mailaudit folder.",
+    "Paste the brief from this card's text (from \"Lane brief\" to the end) as its first message.",
+    "Mark this done."
+  ],
+  "title": "Start the orders-extension lane (item 50)"
+}

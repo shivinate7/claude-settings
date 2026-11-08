@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-27T14:03:00-05:00",
+  "context": "Goal: the phone app's step 4 screens pass their accessibility checks, so step 4 can ship.\nProblem: two checks on the Orphaned card-entry screen fail only on the iPhone keyboard's word-suggestion bar, which Apple draws, not us. Item 19 covered only our own named buttons, so this needs your word.\nBased on: the 14:00 full test run, 71 tests: these 2 fail only on Apple's suggestion cells (measured).\nBased on: your item 19 ruling, a skip for named elements only (ruling).\nMeanwhile: Restyle adds the missing names the Edit button needs for item 19's skip. That third failure is ours, and it's being fixed.",
+  "holds": "Step 4's two composer accessibility checks can't pass, so step 4 can't merge.",
+  "home": "manifest-restyle's step 4 skip record",
+  "id": "audit-skip-system-keyboard",
+  "kind": "decision",
+  "n": 29,
+  "options": [
+    {
+      "gain": "The checks pass, and our views are still fully checked with the keyboard up.",
+      "how": "In the two card-entry checks only, ignore problems on the keyboard's suggestion bar. Every check on our own screens stays on.",
+      "key": "a",
+      "label": "Skip Apple's keyboard in these two checks",
+      "lose": "The check stops reporting on Apple's keyboard, which we can't change anyway."
+    },
+    {
+      "gain": "No skip at all.",
+      "how": "The test hides the keyboard, then runs the check.",
+      "key": "b",
+      "label": "Close the keyboard before checking",
+      "lose": "The check no longer sees the screen the way you use it, with the keyboard up."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "ref": "item 19 (your narrow skip for named elements); step 4 full suite on step4-polish 87e88fe",
+  "status": "closed",
+  "title": "The accessibility check fails on Apple's keyboard suggestion bar. Skip it there?",
+  "why": "It keeps checking the real screen, and skips only what Apple draws."
+}

@@ -1,0 +1,34 @@
+{
+  "added": "2026-10-27T14:38:00-05:00",
+  "context": "Goal: build Card in Hand on the Duo with no surprises.\nProblem: with the pages stacked, answer on top as you picked in 28, the tab bar could sit at the screen's bottom edge or under the answer page.\nBased on: your item 28 pick, answer on top (ruling).\nMeanwhile: Duo files your earlier answers. No build lane starts.",
+  "group": "duo-round2",
+  "holds": "Duo's Card in Hand build waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-tabs-stacked",
+  "kind": "decision",
+  "n": 32,
+  "options": [
+    {
+      "design": "d32-a",
+      "gain": "Least work.",
+      "how": "The normal iPhone tab bar, as degen does.",
+      "key": "a",
+      "label": "At the bottom of the screen",
+      "lose": "None known."
+    },
+    {
+      "design": "d32-b",
+      "gain": "Matches the open pose.",
+      "how": "A custom bar between the two pages.",
+      "key": "b",
+      "label": "Under the answer page",
+      "lose": "Custom work."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo build plan; your item 28 pick: answer on top",
+  "status": "closed",
+  "title": "When the pages are stacked (laptop or held tall), where does the tab bar go?",
+  "why": "It's the standard bar, and nothing is lost."
+}

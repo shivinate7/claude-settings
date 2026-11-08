@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-08T13:10:00-06:00",
+  "context": "Goal: the envelope composer is easy to tap and type in on the phone.\nProblem (rule): the card name and note fields draw about 48 pt tall, two lines, where the web's are single-line inputs. A one-line field fails Apple's tap-area check, because Cochin 16 is under 20 pt (measured 2026-10-27). The Tally search field has the same shape. The debt closes only on your ruling or a one-line field that passes.\nBased on (measured): the 2026-10-27 scratch audit matrix.\nBased on (read): OrphanedView.swift:173-174 and 225-226 set two to three lines on purpose.\nDeparts from: OrphanedView.swift:ComposerView \u2014 the web fields are one line; option a keeps two-line fields on the phone.\nMeanwhile: the phone ships two-line fields.",
+  "group": "orphaned-line-departures",
+  "home": "branch records-owner-1523: ruling filed, debt native-composer-fields-two-lines closed",
+  "id": "composer-fields-two-lines",
+  "kind": "decision",
+  "n": 57,
+  "options": [
+    {
+      "gain": "Each field is a big, easy tap target, and the audit passes.",
+      "how": "The fields stay two lines tall, and the debt closes.",
+      "key": "a",
+      "label": "Two lines are right on the phone",
+      "lose": "The fields look taller than the web's."
+    },
+    {
+      "gain": "The phone matches the web.",
+      "how": "A lane tries a one-line field with a taller tap area until one passes.",
+      "key": "b",
+      "label": "Keep looking for a one-line field",
+      "lose": "More test rounds, and none has passed yet."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "port": true,
+  "rank": 22,
+  "ref": "debt native-composer-fields-two-lines (composer fields draw two lines tall); decision typography-cochin-and-mono",
+  "short": "Composer fields 2 lines",
+  "status": "closed",
+  "title": "The phone's envelope composer fields are two lines tall, where the web's are one. Is that right?",
+  "why": "It is the only shape that passes the tap-size check today, and a bigger tap target helps on the phone."
+}

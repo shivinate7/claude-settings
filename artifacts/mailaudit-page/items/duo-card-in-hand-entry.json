@@ -1,0 +1,32 @@
+{
+  "added": "2026-10-28T20:14:00-05:00",
+  "context": "Goal: check cards in by name on the open Duo.\nProblem: the PR 144 mockup makes Card in Hand the Packages tab itself on the open Duo. The record duo-card-in-hand says Packages keeps its one-page layout. Those two disagree, and you haven't ruled either way.\nBased on: the mockup README, line 5 (design).\nBased on: record duo-card-in-hand, Defaults (a default, not your ruling).\nDeparts from: option b departs from the phone's Packages list, which today sits on the Packages tab.\nMeanwhile: Duo builds option a. Switching to b later is a small change to the entry point.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-card-in-hand-entry",
+  "kind": "decision",
+  "n": 35,
+  "options": [
+    {
+      "gain": "Packages stays the list you know, and Card in Hand is one tap away.",
+      "how": "Packages stays as it is. A \"Card in Hand\" control at the top of Packages opens the two-page screen.",
+      "key": "a",
+      "label": "Keep Packages; add a Card in Hand control",
+      "lose": "One extra tap each mail day."
+    },
+    {
+      "gain": "No extra tap, and it matches the mockup.",
+      "how": "On the open Duo, the Packages tab opens Card in Hand, and you reach the list from inside it.",
+      "key": "b",
+      "label": "Packages becomes Card in Hand",
+      "lose": "The Packages list moves from where it sits on the phone."
+    }
+  ],
+  "owner": "duo local_ce9eac1d-fccf-498c-ae3b-66df4210b936",
+  "pick": "a",
+  "rank": 2,
+  "ref": "decision duo-card-in-hand, Defaults; PR 144 mockup README line 5",
+  "short": "Card in Hand entry",
+  "status": "open",
+  "title": "On the open Duo, is Card in Hand the Packages tab, or one tap inside it?",
+  "why": "It keeps the phone's Packages list where it is, and it's what Duo is building now."
+}

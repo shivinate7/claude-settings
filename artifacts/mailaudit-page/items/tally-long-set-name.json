@@ -1,0 +1,41 @@
+{
+  "added": "2026-10-27T19:03:00-05:00",
+  "context": "Goal: the phone app's Tally rows look like the web's.\nProblem: on the phone, a long set name in a Tally row's second line is cut off with no \"\u2026\". The web shows \"\u2026\". The phone can too, but then Apple's accessibility check flags the line as cut-off text. Skipping that check needs your word, as with items 19 and 29.\nBased on: the web's Tally row ends a long line in \"\u2026\" (read, src/app.jsx:1345).\nBased on: VoiceOver reads the whole line either way (assumed, not checked).\nMeanwhile: Restyle pushed step 4's other review fixes. Step 4's look check waits for the simulator.",
+  "holds": "Step 4's last review failed on this, so step 4 can't merge until it's settled.",
+  "home": "decision audit-skips-measured-flags (manifest-restyle)",
+  "id": "tally-long-set-name",
+  "kind": "decision",
+  "n": 33,
+  "options": [
+    {
+      "design": "d33-a",
+      "gain": "Matches the web, and you can see the name is cut.",
+      "how": "The line ends in \"\u2026\". Apple's cut-off-text check is skipped on this one line only.",
+      "key": "a",
+      "label": "Show \"\u2026\", as the web does",
+      "lose": "One more named skip in the checks."
+    },
+    {
+      "design": "d33-b",
+      "gain": "No skip, and nothing is hidden.",
+      "how": "A long line wraps instead of being cut.",
+      "key": "b",
+      "label": "Wrap to two lines",
+      "lose": "Long rows get taller, unlike the web."
+    },
+    {
+      "design": "d33-c",
+      "gain": "No code change.",
+      "how": "The text is cut off with no \"\u2026\".",
+      "key": "c",
+      "label": "Keep the hard cut",
+      "lose": "Text is cut with no cue, and it doesn't match the web."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "ref": "step 4 polish review round 1; web src/app.jsx:1345; decision card-tally-row-counts-first",
+  "status": "closed",
+  "title": "A long set name in a Tally row: show \"\u2026\" like the web?",
+  "why": "It's what the web already does. VoiceOver should still read the full name, but nobody has checked that yet."
+}

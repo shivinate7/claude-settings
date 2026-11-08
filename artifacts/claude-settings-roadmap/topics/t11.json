@@ -1,0 +1,12 @@
+{
+  "order": 110,
+  "points": [
+    "fb: fits how you work, since you post in the right repo's session. Two gaps: a task can live only in the handoff, outside git, and [closed] is self-attested. Fix: home tasks in the repo, and check each closed id against its home.",
+    "/board was a proof of concept built from three plain elements (Box, Text, Button). The desktop app also offers Svg, Markdown and a custom Client region. Add done, now and next per session, read from each handoff.",
+    "Map PR #457 adds 4,161 lines and its gates check is failing. Every new file needs a map line. Better: generate the structure from code, write descriptions lazily, make the sync checks advisory. Close #455 and #456, which it replaces.",
+    "Health view: the map (structure), /board (live work), compliance-check (rules), plus the size numbers and the sweep's keep reasons.",
+    "Roadmap per repo: debts, feedback items, repo plans, session plans, PRs. Read each from its one home, store no copy, show freshness, and mark anything unreadable as unknown. Session-only items need homes in git first; live session state stays in /board."
+  ],
+  "summary": "Your own tools, and how they fit together.",
+  "title": "fb:, map, board, health view and roadmap"
+}

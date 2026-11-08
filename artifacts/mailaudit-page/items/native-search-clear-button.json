@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-07T14:03:00-06:00",
+  "context": "Goal: search on the phone works as well as the web's.\nProblem (goal): the designer drew a clear (x) button in the phone's search pill. The web's pill has none, and clearing a query with the iOS keyboard takes many taps.\nBased on (read): src/app.jsx .mdl-pill has no clear button.\nDeparts from: src/app.jsx:mdl-pill \u2014 the web pill has no clear button; option a adds a clear (x) button inside the phone's search pill.\nMeanwhile: the lane builds option b, the web's behaviour.",
+  "home": "roadmap step restyle-8-head (restyle builds the clear button in step 8)",
+  "id": "native-search-clear-button",
+  "kind": "decision",
+  "n": 46,
+  "options": [
+    {
+      "gain": "One tap clears a search.",
+      "how": "An (x) inside the phone's search pill empties the query in one tap.",
+      "key": "a",
+      "label": "Add the clear button",
+      "lose": "The phone differs from the web here."
+    },
+    {
+      "gain": "Both apps match.",
+      "how": "The phone's pill matches the web's, with no clear button.",
+      "key": "b",
+      "label": "No clear button, as on the web",
+      "lose": "Clearing a search takes many keyboard taps."
+    }
+  ],
+  "owner": "restyle local_96bb7b5c-71b1-45b5-b222-2df64d74f80f",
+  "pick": "a",
+  "port": true,
+  "rank": 11,
+  "ref": "restyle step 8 design (head cells, search and filters); decision port-keeps-behaviour (a port keeps the app's behaviour)",
+  "short": "Search clear button",
+  "status": "closed",
+  "title": "Should the phone's search pill get a clear (x) button the web doesn't have?",
+  "why": "The phone has no select-all-and-delete as fast as a desktop's."
+}

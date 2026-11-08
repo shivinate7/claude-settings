@@ -1,0 +1,57 @@
+{
+  "added": "2026-10-29T06:30:00Z",
+  "context": "Goal: on the open Duo, Card in Hand shows who sent the card and the Post button at the same time.\nProblem: today, on every card you hold, the Post offer scrolls the seller's name off the top of the page. The test measured the seller at y=-131, above the screen.\nDeparts from: HandScreen.swift envelope. The Post offer moves from under the card lines to under \"It came from\" and the seller.\nDeparts from: HandModel.swift post. After Post, saved or refused, the offer's space stays as a receipt instead of vanishing, so no line moves under your finger.\nThe builder (sonnet) is building A now. It is easy to undo if you pick B.",
+  "designs": [
+    {
+      "label": "A: offer under the sender",
+      "option": "a",
+      "slug": "d42",
+      "state": "a"
+    },
+    {
+      "label": "A after Post",
+      "option": "a",
+      "slug": "d42",
+      "state": "a-posted"
+    },
+    {
+      "label": "B: pinned head and foot",
+      "option": "b",
+      "slug": "d42",
+      "state": "b"
+    },
+    {
+      "label": "Today: the seller scrolls off",
+      "slug": "d42",
+      "state": "today"
+    }
+  ],
+  "home": "decision duo-card-in-hand",
+  "id": "duo-hand-post-order",
+  "kind": "decision",
+  "n": 42,
+  "options": [
+    {
+      "design": "d42",
+      "gain": "The sender and Post both show. It needs no keyboard measurement.",
+      "how": "Post sits right under \"It came from\" and the seller. After Post, its space stays as a receipt.",
+      "key": "a",
+      "label": "Offer under the sender",
+      "lose": "The offer no longer sits under the card lines."
+    },
+    {
+      "design": "d42",
+      "gain": "Today's order stays.",
+      "how": "The lines stay in today's order, and Post is pinned just above the keyboard.",
+      "key": "b",
+      "label": "Keep today's order, pin the offer above the keys",
+      "lose": "It needs an unmeasured 44 pt pad. If the keys draw higher, Post sits under them and you can't scroll to it."
+    }
+  ],
+  "owner": "duo local_ce9eac1d-fccf-498c-ae3b-66df4210b936",
+  "pick": "a",
+  "ref": "duo-card-in-hand (On the iPhone Duo, Card in Hand checks cards in by name)",
+  "status": "open",
+  "title": "Post offer sits under the sender on the open Duo",
+  "why": "A is the only option that doesn't rest on an unmeasured keyboard figure."
+}

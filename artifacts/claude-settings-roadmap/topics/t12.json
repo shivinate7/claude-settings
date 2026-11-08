@@ -1,0 +1,35 @@
+{
+  "order": 120,
+  "points": [
+    "Project instructions apply to every chat in a project, and chat search inside a project covers only that project's chats. The advisor guide lives there.",
+    "GitHub in project knowledge is a snapshot of chosen files, refreshed only when you press Sync, and it uses up context. Cloning the live repo in chat, as we did, is fresher, so the project doesn't sync repos.",
+    "Artifact comments are anchored to an element. A thread sent to Claude can be read, answered and resolved by a session, and a running Claude Code session replies on its own. Comments need a Team or Enterprise plan and in-organization sharing.",
+    "Claude Code sessions publish and update artifacts too, and /design drafts a Claude Design canvas. /design-sync brings a repo's design system in, and a design can be handed back to Claude Code to build.",
+    "A page can call Claude itself (the sample capability), but each call is memoryless and has no file system, shell, git, skills or web search, only tools the page defines. Fine for small helpers on the page, not a replacement for chat.",
+    "Artifacts can reach your claude.ai connectors (the mcp capability), so they're not cut off from your apps. They still can't clone repos or run commands, which is most of what this work needs.",
+    "The advisor stays outside Claude Code on purpose. Under claude-settings it would be bound by STE, fewest words and the question judge, which brings back the plain-versus-short problem, and a session judged by your rules is in a worse spot to say a rule is the problem. Skipping your user settings to avoid that would also skip your guards, and you run in bypass mode.",
+    "So: chat to do the work, the roadmap page as the record, session pages for live questions, comments to point at exact things.",
+    "GitHub access from an advisor chat (Oct 17): there is no GitHub connector, but a chat can attach repos with your GitHub access when you ask for it by name. Say 'attach claude-settings, q_max, home-app and home' at the start of a chat that needs PR details or the private repos. The advisor still doesn't push.",
+    "Two advisor chats can edit this page at once. Every write is pinned to the version the chat last read, so a clash fails and gets redone instead of overwriting. The real risk is a chat reasoning from an old read, so each chat re-reads the page before filing, and works only on its own steps."
+  ],
+  "sources": [
+    {
+      "label": "Claude Code artifacts",
+      "url": "https://code.claude.com/docs/en/artifacts.md"
+    },
+    {
+      "label": "Claude Design",
+      "url": "https://support.claude.com/en/articles/14604416-get-started-with-claude-design"
+    },
+    {
+      "label": "GitHub integration",
+      "url": "https://support.claude.com/en/articles/10167454-use-the-github-integration"
+    },
+    {
+      "label": "Projects",
+      "url": "https://support.claude.com/en/articles/9519177-how-can-i-create-and-manage-projects"
+    }
+  ],
+  "summary": "Why the chat stays the workbench and the page stays the record.",
+  "title": "Where to work: chats, artifacts, comments"
+}

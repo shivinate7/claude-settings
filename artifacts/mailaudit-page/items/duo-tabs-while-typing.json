@@ -1,0 +1,34 @@
+{
+  "added": "2026-10-27T14:38:00-05:00",
+  "context": "Goal: build Card in Hand on the Duo with no surprises.\nProblem: the iPhone keys span both open pages, so they cover the tab bar under the right page while you type.\nBased on: the keyboard measured 951 x 263 pt on the open Duo (measured).\nMeanwhile: Duo files your earlier answers. No build lane starts.",
+  "group": "duo-round2",
+  "holds": "Duo's Card in Hand build waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-tabs-while-typing",
+  "kind": "decision",
+  "n": 31,
+  "options": [
+    {
+      "design": "d31-a",
+      "gain": "No extra work.",
+      "how": "The tab bar shows again when the keys close.",
+      "key": "a",
+      "label": "Keep it under the keys",
+      "lose": "You can't switch tabs while typing."
+    },
+    {
+      "design": "d31-b",
+      "gain": "Tabs are always reachable.",
+      "how": "The tab bar rides just above the keys on the right page.",
+      "key": "b",
+      "label": "Lift it above the keys",
+      "lose": "Less room for the answer."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo build plan; keyboard spans the open screen, 951 x 263 pt (measured 14:03)",
+  "status": "closed",
+  "title": "While you type a card name, the keys cover the tab bar. Keep it or lift it?",
+  "why": "You rarely switch tabs mid-name, and it's free."
+}

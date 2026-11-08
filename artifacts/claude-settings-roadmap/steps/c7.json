@@ -1,0 +1,10 @@
+{
+  "ask": "Draft the shiv-stylisms edits for plain-beats-short, how each option works, and unclear options mean fewer options.",
+  "note": "Draft it in a separate advisor chat in this project (you chose this Oct 17); the starting prompt is in the reference topic 'Reusable prompts and snippets'. Hand the finished text to a session after the cull ends. Agreed Oct 17, add to the draft: one decision per question, and a question about how something looks says so and shows each option.",
+  "order": 70,
+  "phase": "cleanup",
+  "status": "todo",
+  "title": "Fix the reply-style conflict",
+  "updatedAt": "2026-10-17T18:45:00Z",
+  "why": "Plain beats short when they clash; each option says how it works; options that can't be told apart mean fewer options or a decision made for you."
+}

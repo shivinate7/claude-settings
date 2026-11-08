@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-08T13:58:00-06:00",
+  "context": "Goal: lanes keep moving without wasting your attention.\nProblem (goal): today the whole team runs on the Mac, so lanes stop when the Mac sleeps. Cloud lanes would keep running, but they report only by pull request.\nBased on (ruling): your ruling of 2026-11-04 07:56 CST, lanes-start-as-agents: one placement for the whole team.\nBased on (read): plan cloud-sessions, section Decisions for the owner.\nDeparts from: lanes-start-as-agents puts the whole team in one place \u2014 option b moves the lanes to the cloud and keeps the coordinator on the Mac.\nUnvetted: the past-ruling check timed out.",
+  "group": "cloud-sessions-plan",
+  "home": "decision lanes-start-as-agents; plan cloud-sessions",
+  "id": "team-placement",
+  "kind": "decision",
+  "n": 66,
+  "options": [
+    {
+      "gain": "Nothing on main changes.",
+      "how": "Lanes stay on the Mac; cloud sessions do only one-off web or records work.",
+      "key": "a",
+      "label": "Keep the whole team on the Mac",
+      "lose": "Lanes stop when the Mac sleeps."
+    },
+    {
+      "gain": "Lanes keep running while the Mac sleeps.",
+      "how": "Lane sessions run in the cloud and hand work back by PR.",
+      "key": "b",
+      "label": "Coordinator on the Mac, lanes in the cloud",
+      "lose": "It departs from lanes-start-as-agents, and cloud lanes report only by PR."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 27,
+  "ref": "plan docs/plans/cloud-sessions.md; claude-settings decision lanes-start-as-agents (your ruling 2026-11-04 07:56 CST)",
+  "short": "Where the team runs",
+  "status": "open",
+  "title": "Keep the whole mailaudit team on the Mac, or run the lanes in the cloud?",
+  "why": "Most lanes need the simulator, which runs only on the Mac, and it keeps your one-placement ruling."
+}

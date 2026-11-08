@@ -1,0 +1,9 @@
+{
+  "note": "Done Oct 20, 12:44 am: #525 (batch-oct19j, 'the plain-English map skill moves here, with a format version') merged the map lanes to main; decision map-skill-lives-here; skill at skills/plain-english-map. batch-map (#457's branch) is still on origin but adds nothing over main: close #457 and delete batch-map. Not checked: #457's PR state, and whether the gates check passes on main.",
+  "order": 160,
+  "phase": "organize",
+  "status": "done",
+  "title": "Merge the map PR #457",
+  "updatedAt": "2026-10-20T16:55:00Z",
+  "why": "After the cull. Fix its failing gates check, and consider generated structure with advisory checks."
+}

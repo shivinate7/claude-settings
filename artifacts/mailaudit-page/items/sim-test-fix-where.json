@@ -1,0 +1,33 @@
+{
+  "added": "2026-10-28T22:02:00-05:00",
+  "closedNote": "Closed 2026-11-08 13:25 CST: the owner asked for a claude-settings prompt; the coordinator gave it in chat. The diagnose and UDID fix already landed in claude-settings (3cfebb9be, 13e511063). The prompt carries what is left: the stale pro slot and the lanes' guard list.",
+  "context": "Goal: simulator test runs don't load the machine with a diagnostic nobody reads, and never land on the wrong simulator.\nProblem: the fix belongs in the shared sim-test script. That script lives in claude-settings, not in mailaudit. You told this session not to edit claude-settings itself, so who works there is your call.\nBased on: ~/.claude/bin/sim-test resolves to the claude-settings checkout (read, Restyle 22:01).\nBased on: your instruction not to edit claude-settings yourself (ruling).\nMeanwhile: Restyle and Duo add -collect-test-diagnostics never and pin the device by UDID by hand on every run.",
+  "home": "debt sim-test-diagnose-and-pin (mailaudit)",
+  "id": "sim-test-fix-where",
+  "kind": "decision",
+  "n": 38,
+  "options": [
+    {
+      "gain": "The fix lands where the script lives, by a session that owns that repo.",
+      "how": "A session that works in claude-settings takes the fix, with its own red test and review.",
+      "key": "a",
+      "label": "A claude-settings session fixes it",
+      "lose": "You start or brief that session. Until then, the hand-added flags are the only guard."
+    },
+    {
+      "gain": "It's done sooner, by the session that found it.",
+      "how": "Restyle runs one lane there: a red test, a builder, a review and a PR.",
+      "key": "b",
+      "label": "Restyle gets a lane in claude-settings",
+      "lose": "A mailaudit session writes in claude-settings."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 4,
+  "ref": "debt sim-test-diagnose-and-pin; claude-settings bin/sim-test",
+  "short": "Where sim-test gets fixed",
+  "status": "closed",
+  "title": "sim-test lives in claude-settings. Who fixes it?",
+  "why": "It keeps each repo's work in that repo's own sessions."
+}

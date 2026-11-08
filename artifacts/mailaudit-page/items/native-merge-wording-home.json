@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-08T13:12:00-06:00",
+  "context": "Goal: after a sync merges changes, the phone tells you what changed, in the same words as the web.\nProblem (rule): the web words the notice with mergeSummary in src/merge-rules.mjs. The native build keeps the merge rules out of its bundle, so the phone can't call it. Which module holds the phone's wording waits on your ruling.\nBased on (read): SyncClient keeps the stats of the last reply, and no screen shows them.\nBased on (read): git grep finds no mergeSummary in native.\nDeparts from: build.mjs:RULES_OUT \u2014 the merge rules stay out of native rules.js; option a bundles mergeSummary into it.\nMeanwhile: the phone shows no merge notice.",
+  "group": "merge-rules-in-native",
+  "home": "pins lane: bundle mergeSummary into native rules.js; restyle after step 10: the notice screen",
+  "id": "native-merge-wording-home",
+  "kind": "decision",
+  "n": 60,
+  "options": [
+    {
+      "gain": "One home for the wording; the phone always says what the web says.",
+      "how": "The native rules.js gains mergeSummary, and a phone screen shows its text after a merge.",
+      "key": "a",
+      "label": "Bundle mergeSummary into the phone's rules",
+      "lose": "The phone's rules bundle grows."
+    },
+    {
+      "gain": "The bundle stays as it is.",
+      "how": "A Swift copy of the wording builds the notice.",
+      "key": "b",
+      "label": "Write the wording in Swift",
+      "lose": "Two copies of one wording, which can drift apart."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "port": true,
+  "rank": 18,
+  "ref": "debt native-merge-notice-unbuilt (no native screen shows the merge notice); src/merge-rules.mjs mergeSummary",
+  "short": "Merge notice wording",
+  "status": "closed",
+  "title": "Where should the phone's merge notice wording come from: the web's rule, or a Swift copy?",
+  "why": "It keeps one home for the wording, the same way item 43 option a keeps one home for the restore rule."
+}

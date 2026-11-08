@@ -1,0 +1,42 @@
+{
+  "added": "2026-10-27T14:30:00-05:00",
+  "context": "Goal: settle Card in Hand's open choices, so Duo can plan the build.\nProblem: the last version invented an \"end of mail day\". The app has no such thing, and I'm sorry for that. The real question: in Card in Hand, a card that could belong to two envelopes waits on a Suspense line until it's decided. What happens to it if you close Card in Hand first?\nBased on: decision duo-card-in-hand, your 12:25 pick f with the Suspense line (ruling).\nMeanwhile: Duo plans the build and starts nothing until you answer.",
+  "designs": [
+    {
+      "label": "The Suspense line",
+      "slug": "d27-s"
+    },
+    {
+      "label": "End of mail day",
+      "slug": "d27-e"
+    }
+  ],
+  "group": "duo-round2",
+  "holds": "Duo's build plan for Card in Hand waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-suspense-day-end",
+  "kind": "decision",
+  "n": 27,
+  "options": [
+    {
+      "gain": "Nothing moves without you; no new path.",
+      "how": "Held cards wait there until you decide them, however long that takes.",
+      "key": "a",
+      "label": "They stay on the Suspense line",
+      "lose": "The line can carry cards from an older pile."
+    },
+    {
+      "gain": "Card in Hand starts clean every time.",
+      "how": "When you close Card in Hand, held cards become one envelope on the Orphaned tab.",
+      "key": "b",
+      "label": "They move to Orphaned",
+      "lose": "A new way into Orphaned, and you decide those cards there instead."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo design round 2, draft PR #144 (Card in Hand screens)",
+  "status": "closed",
+  "title": "Card in Hand: what happens to held cards when you close it?",
+  "why": "Least to build, and no card changes place on its own."
+}

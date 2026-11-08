@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-08T13:10:00-06:00",
+  "context": "Goal: the records use words you recognise.\nProblem (rule): on 2026-10-27 you objected to the term \"mail day\". The Duo lane removed it from its own record only. CLAUDE.md and about ten records still use it, such as hourly-tier-closes-the-gap and recent-log-unmeasured.\nBased on (read): git grep finds the term in 10 files on main.\nBased on (read): decision masthead-is-not-project-name keeps \"Mail Day Ledger\" as the project name, so this is only the working-view wording.\nDeparts from: main CLAUDE.md calls Packages \"the mail-day working view\" \u2014 option a rewrites each use in plain words, such as \"when the mail comes\".\nMeanwhile: nothing waits on this. Low priority.",
+  "home": "branch records-owner-1523 (coordinator's record writer), then batch",
+  "id": "mail-day-wording",
+  "kind": "decision",
+  "n": 55,
+  "options": [
+    {
+      "gain": "No record uses a term you found confusing.",
+      "how": "One records lane rewrites each use in plain words. The project name stays.",
+      "key": "a",
+      "label": "Replace it everywhere but the project name",
+      "lose": "One small records lane."
+    },
+    {
+      "gain": "No work.",
+      "how": "The records keep the term; owner-facing text avoids it.",
+      "key": "b",
+      "label": "Leave it in the records",
+      "lose": "Sessions keep reading the term and may use it with you again."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 20,
+  "ref": "your 2026-10-27 page comment on item 27 (\"what is a mailday?\"); decision masthead-is-not-project-name",
+  "short": "\"Mail day\" wording",
+  "status": "closed",
+  "title": "\"Mail day\" still appears in CLAUDE.md and about ten records. Replace it with plain words?",
+  "why": "You objected to the term, and sessions copy what the records say."
+}

@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-08T13:10:00-06:00",
+  "context": "Goal: a fixed Duo bug is recorded as fixed, and stays fixed.\nProblem (rule): five Duo debts are fixed in code and pass DuoHandUITests on the Mac, but each says it retires only when a CI path runs Duo UI tests. The Duo classes need the hinge tool, so the hosted CI runner leaves them out. As things stand, none of the five can ever retire.\nBased on (read): debt native-ui-tests-not-in-ci, Status: the Duo classes stay out of CI and are a local proof only.\nBased on (read): hand-notice-cuts-match-row, hand-post-scroll-hides-sender, hand-stray-keeps-tie, hand-suspense-tap-shift and hand-match-row-ax3-unmeasured each wait for a CI path.\nDeparts from: main retires a Duo debt only on a CI run \u2014 option a lets a recorded local Duo run retire it.\nMeanwhile: the five debts stay open. Nothing else waits.",
+  "home": "debt native-ui-tests-not-in-ci; decision native-ci-on-hosted-macos",
+  "id": "duo-ui-tests-ci-path",
+  "kind": "decision",
+  "n": 54,
+  "options": [
+    {
+      "gain": "Fixed Duo bugs leave the debt list now.",
+      "how": "A debt retires on a green DuoHandUITests run on the Mac, recorded with its commit and time. The CI gap stays one debt of its own.",
+      "key": "a",
+      "label": "A recorded local Duo run retires the debt",
+      "lose": "Nothing in CI catches a later Duo break; only the next local run does."
+    },
+    {
+      "gain": "Every Duo fix is pinned on every pull request.",
+      "how": "A lane finds a way to run the Duo classes in CI, such as a self-hosted Mac runner with the hinge tool.",
+      "key": "b",
+      "label": "Build a CI path for the Duo tests",
+      "lose": "A runner to build and keep up, and it may cost money; the debts wait until it works."
+    },
+    {
+      "gain": "No new rule.",
+      "how": "No change: the debts wait for a CI path nobody is building.",
+      "key": "c",
+      "label": "Keep the debts open",
+      "lose": "Five fixed bugs read as open, and the list grows with each Duo fix."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 3,
+  "ref": "debt native-ui-tests-not-in-ci (native UI tests are not in CI); debts hand-notice-cuts-match-row, hand-post-scroll-hides-sender, hand-stray-keeps-tie, hand-suspense-tap-shift, hand-match-row-ax3-unmeasured",
+  "short": "Duo tests: CI path",
+  "status": "open",
+  "title": "Duo UI tests can't run in CI, so five fixed Duo debts can never retire. What counts as their proof?",
+  "why": "The Duo tests already run on every Duo change on the Mac, and a recorded run is the only proof that exists today."
+}

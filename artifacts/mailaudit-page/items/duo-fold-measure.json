@@ -1,0 +1,37 @@
+{
+  "added": "2026-10-27T01:27:00-05:00",
+  "context": "Goal: know before design round 2 whether Card in Hand's keys can sit on the left page.\nProblem: the Duo simulator boots folded, and only the Device Hub window can unfold it. You denied manifest-duo access to Device Hub at 01:26.\nBased on: simctl help lists no hinge control (read, 01:25); the access denial (read, 01:26).\nMeanwhile: manifest-duo waits for item 11.",
+  "home": "the Duo notes draft, then the Duo decision record",
+  "id": "duo-fold-measure",
+  "kind": "decision",
+  "n": 14,
+  "options": [
+    {
+      "gain": "Fold width and keyboard measured today.",
+      "how": "Allow computer use on Device Hub for one short run.",
+      "key": "a",
+      "label": "Let it drive Device Hub once",
+      "lose": "The Device Hub window shows on your screen for a few minutes."
+    },
+    {
+      "gain": "No screen control.",
+      "how": "You unfold the Duo in Device Hub; the session reads its probe headless.",
+      "key": "b",
+      "label": "You unfold it",
+      "lose": "Needs you at the Mac at a time it names."
+    },
+    {
+      "gain": "No wait.",
+      "how": "Design round 2 draws both keyboard cases.",
+      "key": "c",
+      "label": "Skip the measurement",
+      "lose": "One case is wasted design work, and the risk carries into the build."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "manifest-duo notes draft (Duo boots closed, 382x644 pt, no fold)",
+  "status": "closed",
+  "title": "Duo: how to measure the open fold?",
+  "why": "One short run settles it; if you denied on purpose, pick c."
+}

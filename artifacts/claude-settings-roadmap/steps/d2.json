@@ -1,0 +1,9 @@
+{
+  "note": "Keep Haiku for round-1 code review. With cost no limit, put design-review's reviewer on Opus: visual judgment is where the strongest model earns its cost. To prove the case, rerun a few past design-review screenshots through Haiku, Sonnet and Opus. Like d1, this needs a standing exception to 'Sonnet is the ceiling' (the subagent-model-cap guard), so write both exceptions as one ruling.",
+  "order": 220,
+  "phase": "design",
+  "status": "todo",
+  "title": "Add a design-reviewer agent",
+  "updatedAt": "2026-10-17T18:03:00Z",
+  "why": "Opus judges screenshots instead of Haiku. Design-review gates every screen change, solo mode too."
+}

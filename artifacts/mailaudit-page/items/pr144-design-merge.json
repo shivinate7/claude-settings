@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-07T22:05:00-06:00",
+  "context": "Goal: the code and debts that cite the Card in Hand design point at a file on main.\nProblem (rule): draft PR #144, the Duo round 2 Card in Hand design page, never merged. Main still cites it: HandScreen.swift:4-5, DuoHandUITests.swift:2, debt duo-hand-mockup-gaps and decision duo-card-in-hand. Its body says not to merge without your word. It merges cleanly and is docs-only.\nBased on (read): git merge-tree is clean; four later rulings (items 24b, 25, 27 and 48) override some of its picks.\nDeparts from: main has no docs/design/duo-card-in-hand \u2014 adds the page, with a top note listing where later rulings override it.",
+  "home": "decision duo-card-in-hand; debt duo-hand-mockup-gaps",
+  "id": "pr144-design-merge",
+  "kind": "decision",
+  "n": 51,
+  "options": [
+    {
+      "gain": "The citations resolve, and the only drawing of the stacked poses is on main.",
+      "how": "The page lands on main with a note at the top naming each part a later ruling overrides.",
+      "key": "a",
+      "label": "Merge it as a reference page with an override note",
+      "lose": "A page that's partly out of date, though the note says where."
+    },
+    {
+      "gain": "No out-of-date page on main.",
+      "how": "The branch moves to an archive name, the PR closes, and the code and records cite the archive.",
+      "key": "b",
+      "label": "Archive it and re-point the citations",
+      "lose": "The source drawing lives only on an archive branch."
+    }
+  ],
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "pick": "a",
+  "rank": 14,
+  "ref": "draft PR #144 (Duo round 2 Card in Hand design, branch design/duo-round2); HandScreen.swift:4-5; DuoHandUITests.swift:2",
+  "short": "Merge PR 144 design",
+  "status": "open",
+  "title": "The Card in Hand design page (PR #144) never merged, but main cites it. Merge it as a reference?",
+  "why": "Open debts already depend on it, and the note keeps readers from building the overridden parts."
+}

@@ -1,0 +1,39 @@
+{
+  "added": "2026-10-27T12:58:00-05:00",
+  "context": "Goal: settle Card in Hand's open choices, so Duo can plan the build.\nProblem: a stray card that fits two envelopes is held. The next card from the same envelope can settle it, but only if the app knows a new envelope started.\nBased on: decision duo-card-in-hand, your 12:25 picks (ruling); the fold and keyboard are unmeasured (measured: the runs failed at load 157).\nMeanwhile: Duo plans the build and starts nothing until you answer.",
+  "designs": [
+    {
+      "label": "The stray screen: held, then decided (a)",
+      "slug": "d26"
+    }
+  ],
+  "group": "duo-round2",
+  "holds": "Duo's build plan for Card in Hand waits on this.",
+  "home": "decision duo-card-in-hand (manifest-duo)",
+  "id": "duo-new-envelope-control",
+  "kind": "decision",
+  "n": 26,
+  "options": [
+    {
+      "design": "d26",
+      "gain": "Strays resolve on their own.",
+      "how": "One tap says the next cards are from a new envelope; a held stray is decided by the next card.",
+      "key": "a",
+      "label": "Add New envelope",
+      "lose": "One more control on mail day."
+    },
+    {
+      "gain": "No added control.",
+      "how": "Held strays stay on the Suspense line until you pick.",
+      "key": "b",
+      "label": "No new control",
+      "lose": "More strays wait for a manual pick."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo design round 2, draft PR #144 (Card in Hand screens)",
+  "status": "closed",
+  "title": "Add a New envelope control to decide held strays?",
+  "why": "Strays mostly settle without your hand."
+}

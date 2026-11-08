@@ -1,0 +1,31 @@
+{
+  "added": "2026-10-27T12:36:00-05:00",
+  "context": "Goal: the native masthead shows on every tab, as on the web, and each tab's accessibility check runs.\nProblem: on 2026-10-21 you let the Packages check ignore problems Apple's own tab bar raises, since we can't fix Apple's bar. Step 5 adds the same check to three more tabs under that same bar. Your ruling named Packages only, so extending it needs your word.\nBased on: your 2026-10-21 ruling, the tab-bar skip on Packages (ruling).\nBased on: step 5's tests at commit 3043852 already use the same skip (read).\nMeanwhile: step 5's builder writes code and runs the checks that need no simulator. These three checks wait.",
+  "holds": "Step 5's accessibility checks on Ledger, Orphaned and Tally cannot run green.",
+  "home": "manifest-restyle's step 5 records",
+  "id": "tab-bar-skip-every-tab",
+  "kind": "decision",
+  "n": 21,
+  "options": [
+    {
+      "gain": "Each tab is checked the same way, for the same reason.",
+      "how": "Ledger, Orphaned and Tally ignore only the system tab bar's own problems, as Packages does. Every other check stays on.",
+      "key": "a",
+      "label": "Extend the skip to all tabs",
+      "lose": "Three more checks ignore the tab bar strip."
+    },
+    {
+      "gain": "No added skip.",
+      "how": "The three new checks run in full, tab bar included.",
+      "key": "b",
+      "label": "Run those checks with no skip",
+      "lose": "They will likely fail on Apple's tab bar, which we can't fix, so step 5 can't show a passing run."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "ref": "your 2026-10-21 ruling (tab-bar skip, Packages only); step 5, the masthead on every tab",
+  "status": "closed",
+  "title": "Extend the iOS tab-bar skip to the Ledger, Orphaned and Tally accessibility checks?",
+  "why": "It's the same reason you already accepted for Packages, on the same Apple bar."
+}

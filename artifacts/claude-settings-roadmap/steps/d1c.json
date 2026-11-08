@@ -1,0 +1,10 @@
+{
+  "ask": "Should the designer agent run /design itself, or should I run /design and hand the canvas to the builder?",
+  "note": "Needs Claude Code v2.1.234 or later with artifacts available. The standalone claude.ai/design site closes Dec 14, 2026; the Design artifact type stays.",
+  "order": 212,
+  "phase": "design",
+  "status": "todo",
+  "title": "Use /design as the designer's canvas",
+  "updatedAt": "2026-10-17T17:48:00Z",
+  "why": "Claude Code's /design drafts a mockup as artboards on a Claude Design canvas, published as an artifact. /design-sync pulls a repo's design system in first, and a finished design can be handed back to Claude Code to build. That is the designer step, already built."
+}

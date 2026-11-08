@@ -1,0 +1,59 @@
+{
+  "added": "2026-10-27T08:58:00-05:00",
+  "context": "Goal: the native Orphaned and Tally screens look like the web, and the native screen tests pass so step 4 can ship.\nProblem: Apple's accessibility check says \"Contrast failed\" on the small bordered buttons (Edit, Discard, Cancel) and, in 2 of 8 runs, on the red \"left\" line in Tally. Every one of them measures above the 4.5:1 floor. It needs your word because the only ways to green are to skip that check on those few items or change how they look.\nBased on: measured contrast, ink on card 12.2, grey ink on card 5.2, red on card 5.5, from two test-app runs of 105+ rows (Restyle's table, measured).\nBased on: your ruling of 2026-10-21 that one contrast check was a bad test (read).\nMeanwhile: Restyle fixes every cause it can without changing the look (the card shadow and the rest), and keeps building step 4.",
+  "designs": [
+    {
+      "label": "a) Skip the check: look unchanged",
+      "slug": "q19-a"
+    },
+    {
+      "label": "b) 15pt button text",
+      "slug": "q19-b1"
+    },
+    {
+      "label": "b) No button border",
+      "slug": "q19-b2"
+    },
+    {
+      "label": "c) Leave it red: look unchanged",
+      "slug": "q19-c"
+    }
+  ],
+  "holds": "Step 4 (Orphaned and Tally restyle) cannot pass its native screen tests or merge.",
+  "home": "a debt or decision filed by manifest-restyle with step 4",
+  "id": "audit-contrast-false-flags",
+  "kind": "decision",
+  "n": 19,
+  "options": [
+    {
+      "design": "q19-a",
+      "gain": "The web look stays, and the tests go green.",
+      "how": "Turn off Apple's contrast check for the named small buttons and the Tally \"left\" line. Each skip points at the measured table. Every other accessibility check stays on.",
+      "key": "a",
+      "label": "Skip the check on those items only",
+      "lose": "Apple's check no longer watches contrast on those few items. The colour tests still pin their ratios."
+    },
+    {
+      "design": "q19-b1",
+      "gain": "No skipped checks.",
+      "how": "Make the small-button text 15pt, or drop its border.",
+      "key": "b",
+      "label": "Change the look",
+      "lose": "The phone's small buttons look bigger or plainer than the web's."
+    },
+    {
+      "design": "q19-c",
+      "gain": "Nothing is hidden.",
+      "how": "Keep the check failing and record it as a known gap.",
+      "key": "c",
+      "label": "Leave it red",
+      "lose": "Step 4 can't report a passing test run."
+    }
+  ],
+  "owner": "manifest-restyle",
+  "pick": "a",
+  "ref": "manifest-restyle scratchpad/audit-diag/table.md",
+  "status": "closed",
+  "title": "Apple's accessibility check flags text you can read clearly, so step 4 can't go green",
+  "why": "The text measures well above the floor, and the colour tests still guard it."
+}

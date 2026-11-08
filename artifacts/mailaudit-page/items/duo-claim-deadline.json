@@ -1,0 +1,30 @@
+{
+  "added": "2026-10-27T01:18:00-05:00",
+  "context": "Goal: the Duo design warns about lost mail at the right time.\nProblem: the blind mockups assumed a 28-day claim window. The app already rules 30 days from the order date. No feed gives a delivery date, so the order date stays the clock.\nMeanwhile: manifest-duo waits for item 11.",
+  "home": "the Duo decision record",
+  "id": "duo-claim-deadline",
+  "kind": "decision",
+  "n": 12,
+  "options": [
+    {
+      "gain": "One rule across web, phone and Duo.",
+      "how": "The Duo uses the existing 30-day rule.",
+      "key": "a",
+      "label": "Reuse 30 days",
+      "lose": "Nothing new."
+    },
+    {
+      "gain": "A small safety margin.",
+      "how": "The Duo warns 2 days earlier.",
+      "key": "b",
+      "label": "Use 28 days",
+      "lose": "The Duo disagrees with the web and phone."
+    }
+  ],
+  "owner": "manifest-duo",
+  "pick": "a",
+  "ref": "Duo concepts PR #139; record lost-mail-flags-use-order-date (when lost-mail warnings start)",
+  "status": "closed",
+  "title": "Duo: which claim deadline should the Duo design use?",
+  "why": "One rule everywhere; 28 was only the designer's assumption."
+}

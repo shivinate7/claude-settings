@@ -1,0 +1,27 @@
+{
+  "added": "2026-11-08T14:26:00-06:00",
+  "closedNote": "Closed 2026-11-08 15:22 CST: the owner unlocked the phone, and the batch runner installed bda5388 over the Mac route. The TestFlight build is not needed.",
+  "context": "Goal: your phone runs the newest main, with the Duo tab-bar fix and the pins changes.\nThe batch runner sent main bda5388 (PR 229) to TestFlight as build 202611082049, the fallback in native-ships-via-testflight. It replaces build 202611082025, so the phone no longer needs to be near the Mac.\nWhy yours: a TestFlight install happens by your tap in the TestFlight app on your phone.",
+  "home": "the phone install of PR 229 (TestFlight build 202611082049)",
+  "id": "phone-unlock-install",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Open TestFlight",
+      "url": "itms-beta://"
+    }
+  ],
+  "minutes": 1,
+  "n": 69,
+  "owner": "coordinator local_3159e21b-972b-4db6-950c-ad7fd0613fda",
+  "rank": 30,
+  "ref": "PR #229; main bda5388",
+  "short": "Install TestFlight build",
+  "status": "closed",
+  "steps": [
+    "Open the TestFlight app on the iPhone.",
+    "Tap Install (or Update) on MANIFEST, build 202611082049.",
+    "Mark this done."
+  ],
+  "title": "Install TestFlight build 202611082049 (main bda5388)"
+}

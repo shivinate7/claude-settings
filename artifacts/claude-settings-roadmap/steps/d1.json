@@ -1,0 +1,10 @@
+{
+  "ask": "Draft the designer agent definition and its write-scope guard.",
+  "note": "Route with one test: does the lane touch a screen? Needs a standing exception to 'Sonnet is the ceiling', like the third builder try has.",
+  "order": 210,
+  "phase": "design",
+  "status": "todo",
+  "title": "Add a designer agent",
+  "updatedAt": "2026-10-17T17:30:00Z",
+  "why": "Opus writes an HTML mockup for every screen lane, so Sonnet builds to a picture of the target."
+}

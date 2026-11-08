@@ -1,0 +1,13 @@
+{
+  "order": 150,
+  "points": [
+    "Reading a batch report: did debts and decisions go down? Are more debts opening than closing? Did any change need all three review rounds? If the numbers rise two batches in a row, stop and bring the report to an advisor chat.",
+    "When a session asks you something: does it state the goal and the problem, and can you tell the options apart by what you gain and lose? If not, reply: 'Pick the simplest option that keeps main safe, and tell me which you picked.'",
+    "Ask for proof, not a description: 'show me the check that proves it' or 'give me the verdict command'.",
+    "When a step stalls, ask the session: 'What's the smallest change that moves this step forward?'",
+    "Red flags: a session asks something you already answered; one edge case takes more than about five commits; a new guard rule appears with no incident behind it; a cleanup adds more lines than it removes.",
+    "Starting a step: copy its ask into a new advisor chat, get a brief, then paste the brief into a Claude Code session."
+  ],
+  "summary": "What to check, what to say, and the red flags.",
+  "title": "Steering sessions without me"
+}

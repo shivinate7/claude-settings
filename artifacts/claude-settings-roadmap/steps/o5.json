@@ -1,0 +1,8 @@
+{
+  "order": 150,
+  "phase": "organize",
+  "status": "todo",
+  "title": "Give fb: items a home in the repo",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "Tasks and ideas land in the repo's todo, not only the handoff. Check that each closed item's home really holds it."
+}

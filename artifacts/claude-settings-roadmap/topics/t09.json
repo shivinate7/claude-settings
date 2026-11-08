@@ -1,0 +1,13 @@
+{
+  "order": 90,
+  "points": [
+    "Spacing comes from relationships, not numbers. banchi's table: icon to text 6, control to control 8, row to row 12, block to block 16, section to section 24.",
+    "Put spacing on containers: gap on a parent (a Stack, Row or Grid; VStack(spacing:) in Swift), not margins on each child. Gaps are then uniform by construction.",
+    "Compose screens from a few layout primitives (Stack, Cluster, Sidebar, Grid), the 'Every Layout' approach. Use clamp() tokens for spacing that grows smoothly from phone to desktop.",
+    "Pay the debt with banchi's per-file ratchet (token-literal-check), so the count of stray values can only fall. Redesign one screen at a time, mockup first.",
+    "Motion has four jobs only: answer a press, show where a thing came from or went, say a state is live, mark a rare result. Name roles with tokens; each repo keeps its own durations.",
+    "Icons: words for anything costly, irreversible or factual; an icon only when the verb is in the house vocabulary. This also answers the 4-word label limit."
+  ],
+  "summary": "How to get uniform gaps without pinning numbers.",
+  "title": "Spacing, motion and icons"
+}

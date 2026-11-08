@@ -1,0 +1,8 @@
+{
+  "order": 430,
+  "phase": "later",
+  "status": "todo",
+  "title": "Try Grok through grok-plugin-cc",
+  "updatedAt": "2026-10-17T17:20:00Z",
+  "why": "Only if you still want a second coding model inside Claude Code."
+}
