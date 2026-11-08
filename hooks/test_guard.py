@@ -107,6 +107,7 @@ FAMILIES = {
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
+    "stale-index": "a git commit whose index is an old tree while HEAD moved on: the refusals, the allows, and the cost of one index read",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -10261,6 +10262,25 @@ record_allow("a commit message that names a push to roadmap is text",
              VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
 
 
+def git_spawn_kinds(command, cwd, transcript, env, path, log):
+    """Run one Bash case through the guard, with the stand-in git first on PATH (`path`, which logs each spawn
+    to `log`). Returns (kinds, lines): kinds counts the spawns by git subcommand, lines is the log."""
+    if os.path.exists(log):
+        os.remove(log)
+    decide({"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
+            "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": env})
+    lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+    kinds = {}
+    for line in lines:
+        words = line.split()
+        # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
+        while len(words) >= 2 and words[0] in ("-C", "-c"):
+            words = words[2:]
+        word = words[0] if words else ""
+        kinds[word] = kinds.get(word, 0) + 1
+    return kinds, lines
+
+
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
@@ -10289,19 +10309,7 @@ def record_push_cost_case():
                 "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
 
     def spawn_kinds(command, cwd):
-        if os.path.exists(log):
-            os.remove(log)
-        decide(case_of(command, cwd, LANE_TRANSCRIPT))
-        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
-        kinds = {}
-        for line in lines:
-            words = line.split()
-            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
-            while len(words) >= 2 and words[0] in ("-C", "-c"):
-                words = words[2:]
-            word = words[0] if words else ""
-            kinds[word] = kinds.get(word, 0) + 1
-        return kinds, lines
+        return git_spawn_kinds(command, cwd, LANE_TRANSCRIPT, ROLE_ENV, path, log)
 
     for label, tail, want in (
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
@@ -11510,7 +11518,7 @@ CMK_OPEN = os.path.join(CMKROOT, "open")        # a string holding comment opene
 def _cmk_run(where, *args):
     done = run_vcs(where, *IDENT, *args)
     if done.returncode != 0:
-        sys.exit("fixture setup failed in the conflict-markers fixtures: %s %s in %r: %s"
+        sys.exit("fixture setup failed: %s %s in %r: %s"
                  % (VCS, " ".join(args), where, done.stderr.strip()))
     return done.stdout.strip()
 
@@ -11936,6 +11944,250 @@ cmk_refuse("a merge that conflicts on a clean tree, then add -A, commit and push
 # 8. A push judges the net change it sends: a triplet added and removed again is no hit.
 cmk_allow("two commits, the first adding a triplet and the second removing it, then a push",
           VCS + " push", R2_NET)
+
+
+# =========================================================================== 5g. stale index, at commit
+#
+# Rule stale-index. A plain commit takes the index as its tree. When HEAD moved on and the index did not, the
+# commit reverts the newer commit's files. Two moves leave the index behind: another worktree's update-ref of the
+# checked-out branch, and a reset or update-ref in a checkout that does not follow it with its index. The guard
+# refuses when the old head C is a strict ancestor of HEAD and a path the commit carries has the index entry it
+# had at C (absent included) while HEAD's entry differs. The remedy names `git read-tree -m -u <old> HEAD`.
+#
+# A row judges one command against one state, so each fixture runs every step it names at build time: a chain
+# is judged before its own steps run. Each fixture first proves, with `git diff-index --cached HEAD`, the exact
+# paths the commit would carry as stale (the scope before the subject).
+FAMILY = "stale-index"
+STALE_RULE = "stale-index"
+STALEROOT = os.path.join(ROOT, "stale-index")
+SI_R1P = os.path.join(STALEROOT, "r1")              # the primary, detached at N, moves topic by update-ref
+SI_R1A = os.path.join(STALEROOT, "r1-wt")           # a linked worktree on topic, left at the old head
+SI_R3P = os.path.join(STALEROOT, "r3")
+SI_R3A = os.path.join(STALEROOT, "r3-wt")           # reset --soft to N in this worktree
+SI_R4P = os.path.join(STALEROOT, "r4")
+SI_R4A = os.path.join(STALEROOT, "r4-wt")           # update-ref of topic to N in this worktree
+SI_R4X = os.path.join(STALEROOT, "r4-primary")      # update-ref of topic to N in the primary, on topic
+SI_R5P = os.path.join(STALEROOT, "r5")
+SI_R5A = os.path.join(STALEROOT, "r5-wt")           # the R1 move, and a staged edit of g.py
+SI_R6P = os.path.join(STALEROOT, "r6")
+SI_R6A = os.path.join(STALEROOT, "r6-wt")           # the only stale path is a file the moved head added
+SI_R7P = os.path.join(STALEROOT, "r7")
+SI_R7A = os.path.join(STALEROOT, "r7-wt")           # the R1 move of a head that changes 200 files
+SI_A1P = os.path.join(STALEROOT, "a1")
+SI_A1A = os.path.join(STALEROOT, "a1-wt")           # the R1 move, then read-tree -m -u O N
+SI_A2P = os.path.join(STALEROOT, "a2")              # a clean topic with two commits of its own, then a revert
+SI_A3P = os.path.join(STALEROOT, "a3")              # ... then a file checked out from HEAD~2
+SI_A4P = os.path.join(STALEROOT, "a4")              # ... then a file removed from the index
+SI_A5P = os.path.join(STALEROOT, "a5")              # ... then a backward reset --soft to HEAD~2
+SI_A6P = os.path.join(STALEROOT, "a6")              # no commit yet, a file staged
+SI_A7P = os.path.join(STALEROOT, "a7")
+SI_A7A = os.path.join(STALEROOT, "a7-wt")           # the R1 move, with this worktree's HEAD log unreadable
+SI_COSTP = os.path.join(STALEROOT, "cost")          # no move, one staged change
+NEW_HEAD = {"f.py": "x = 2\n", "h.py": "z = 1\n"}  # what the moved head N changes and adds
+NEW_ADD = {"k.py": "k = 1\n"}                       # a moved head that only adds k.py
+
+
+def _si_base(where):
+    """A checkout on main with f.py and g.py, and branch topic at that same commit. Returns that commit."""
+    make_repo(where, {"f.py": "x = 1\n", "g.py": "y = 1\n"})
+    _cmk_run(where, "branch", "topic")
+    return _cmk_run(where, "rev-parse", "HEAD")
+
+
+def _si_new_head(where, changes):
+    """Commit N on a detached HEAD of `where`, with `changes` (path to text) in it. Returns N."""
+    _cmk_run(where, "checkout", "-q", "--detach")
+    for rel, text in changes.items():
+        _cmk_stage(where, rel, text)
+    _cmk_run(where, "commit", "-q", "-m", "n")
+    return _cmk_run(where, "rev-parse", "HEAD")
+
+
+def _si_clean(where):
+    """A checkout on topic with two commits of its own: X changes f.py, and the head N2 changes g.py."""
+    _si_base(where)
+    _cmk_run(where, "checkout", "-q", "topic")
+    _cmk_stage(where, "f.py", "x = 2\n")
+    _cmk_run(where, "commit", "-q", "-m", "x")
+    _cmk_stage(where, "g.py", "y = 2\n")
+    _cmk_run(where, "commit", "-q", "-m", "n2")
+
+
+def _si_proof(where, want):
+    """Stop the suite unless `git diff-index --cached HEAD` in `where` names exactly the paths in `want`."""
+    done = run_vcs(where, "diff-index", "--cached", "--name-only", "HEAD")
+    got = sorted(done.stdout.split())
+    if done.returncode != 0 or got != sorted(want):
+        sys.exit("fixture setup failed: %r stages %s against HEAD, want %s. stderr: %s"
+                 % (where, got, sorted(want), done.stderr.strip()))
+
+
+def _build_stale_index():
+    # R1 and R2: the primary moves topic, and the linked worktree's index stays at the old head.
+    _si_base(SI_R1P)
+    _cmk_run(SI_R1P, "worktree", "add", "-q", SI_R1A, "topic")
+    n = _si_new_head(SI_R1P, NEW_HEAD)
+    _cmk_run(SI_R1P, "update-ref", "refs/heads/topic", n)
+    _si_proof(SI_R1A, ["f.py", "h.py"])
+
+    # R3: a reset --soft forward in the linked worktree.
+    _si_base(SI_R3P)
+    _cmk_run(SI_R3P, "worktree", "add", "-q", SI_R3A, "topic")
+    n = _si_new_head(SI_R3P, NEW_HEAD)
+    _cmk_run(SI_R3A, "reset", "-q", "--soft", n)
+    _si_proof(SI_R3A, ["f.py", "h.py"])
+
+    # R4: an update-ref of topic in the linked worktree.
+    _si_base(SI_R4P)
+    _cmk_run(SI_R4P, "worktree", "add", "-q", SI_R4A, "topic")
+    n = _si_new_head(SI_R4P, NEW_HEAD)
+    _cmk_run(SI_R4A, "update-ref", "refs/heads/topic", n)
+    _si_proof(SI_R4A, ["f.py", "h.py"])
+
+    # R4X: an update-ref of topic in the primary, which is on topic.
+    _si_base(SI_R4X)
+    n = _si_new_head(SI_R4X, NEW_HEAD)
+    _cmk_run(SI_R4X, "checkout", "-q", "topic")
+    _cmk_run(SI_R4X, "update-ref", "refs/heads/topic", n)
+    _si_proof(SI_R4X, ["f.py", "h.py"])
+
+    # R5: the R1 move, and a real staged edit of g.py.
+    _si_base(SI_R5P)
+    _cmk_run(SI_R5P, "worktree", "add", "-q", SI_R5A, "topic")
+    n = _si_new_head(SI_R5P, NEW_HEAD)
+    _cmk_run(SI_R5P, "update-ref", "refs/heads/topic", n)
+    _cmk_stage(SI_R5A, "g.py", "y = 2\n")
+    _si_proof(SI_R5A, ["f.py", "g.py", "h.py"])
+
+    # R6: the only stale path is a file the moved head added, which the index lacks.
+    _si_base(SI_R6P)
+    _cmk_run(SI_R6P, "worktree", "add", "-q", SI_R6A, "topic")
+    n = _si_new_head(SI_R6P, NEW_ADD)
+    _cmk_run(SI_R6P, "update-ref", "refs/heads/topic", n)
+    _si_proof(SI_R6A, ["k.py"])
+
+    # R7: a full-size move, a head that changes 200 files, so every path the commit carries is stale.
+    big = {"big/%03d.py" % i: "v = 1\n" for i in range(200)}
+    make_repo(SI_R7P, big)
+    _cmk_run(SI_R7P, "branch", "topic")
+    _cmk_run(SI_R7P, "worktree", "add", "-q", SI_R7A, "topic")
+    n = _si_new_head(SI_R7P, {rel: "v = 2\n" for rel in big})
+    _cmk_run(SI_R7P, "update-ref", "refs/heads/topic", n)
+    _si_proof(SI_R7A, list(big))
+
+    # A1: the R1 move, then the read-tree the remedy names. The index now holds the new tree.
+    old = _si_base(SI_A1P)
+    _cmk_run(SI_A1P, "worktree", "add", "-q", SI_A1A, "topic")
+    n = _si_new_head(SI_A1P, NEW_HEAD)
+    _cmk_run(SI_A1P, "update-ref", "refs/heads/topic", n)
+    _cmk_run(SI_A1A, "read-tree", "-m", "-u", old, n)
+    _si_proof(SI_A1A, [])
+
+    # A2: a revert of the head, staged.
+    _si_clean(SI_A2P)
+    _cmk_run(SI_A2P, "revert", "--no-commit", "HEAD")
+    _si_proof(SI_A2P, ["g.py"])
+
+    # A3: a file checked out from HEAD~2.
+    _si_clean(SI_A3P)
+    _cmk_run(SI_A3P, "checkout", "HEAD~2", "--", "f.py")
+    _si_proof(SI_A3P, ["f.py"])
+
+    # A4: a file removed from the index, then an amend.
+    _si_clean(SI_A4P)
+    _cmk_run(SI_A4P, "rm", "-q", "--cached", "g.py")
+    _si_proof(SI_A4P, ["g.py"])
+
+    # A5: a backward reset --soft to HEAD~2, a squash. The reset's old head, N2, is no ancestor of HEAD.
+    _si_clean(SI_A5P)
+    _cmk_run(SI_A5P, "reset", "-q", "--soft", "HEAD~2")
+    _si_proof(SI_A5P, ["f.py", "g.py"])
+
+    # A6: no commit yet, a file staged.
+    os.makedirs(SI_A6P, exist_ok=True)
+    _cmk_run(SI_A6P, "init", "-q", "-b", "topic", ".")
+    _cmk_stage(SI_A6P, "src/app.py", "x = 1\n")
+    if run_vcs(SI_A6P, "rev-parse", "--verify", "-q", "HEAD").returncode == 0:
+        sys.exit("fixture setup failed: %r has a HEAD, so it is not a repository with no commits" % SI_A6P)
+
+    # A7: the R1 move, with the linked worktree's HEAD log replaced by a directory, so the log cannot be read.
+    _si_base(SI_A7P)
+    _cmk_run(SI_A7P, "worktree", "add", "-q", SI_A7A, "topic")
+    n = _si_new_head(SI_A7P, NEW_HEAD)
+    _cmk_run(SI_A7P, "update-ref", "refs/heads/topic", n)
+    log_head = os.path.join(_cmk_run(SI_A7A, "rev-parse", "--absolute-git-dir"), "logs", "HEAD")
+    os.remove(log_head)
+    os.makedirs(log_head)
+    _si_proof(SI_A7A, ["f.py", "h.py"])
+
+    # The cost row: no move, one staged change.
+    _si_base(SI_COSTP)
+    _cmk_run(SI_COSTP, "checkout", "-q", "topic")
+    _cmk_stage(SI_COSTP, "f.py", "x = 2\n")
+    _si_proof(SI_COSTP, ["f.py"])
+
+
+lazy_fixture([SI_R1P, SI_R1A, SI_R3P, SI_R3A, SI_R4P, SI_R4A, SI_R4X, SI_R5P, SI_R5A, SI_R6P, SI_R6A,
+              SI_R7P, SI_R7A, SI_A1P, SI_A1A, SI_A2P, SI_A3P, SI_A4P, SI_A5P, SI_A6P, SI_A7P, SI_A7A, SI_COSTP],
+             _build_stale_index)
+
+
+def stale_refuse(name, command, cwd, carries=(), lacks=()):
+    sh("stale-index: %s is refused" % name, command, "deny", STALE_RULE, cwd=cwd,
+       carries=("read-tree",) + tuple(carries), lacks=lacks)
+
+
+def stale_allow(name, command, cwd):
+    sh("stale-index: %s is allowed" % name, command, "allow", cwd=cwd)
+
+
+# 1. A stale index: HEAD moved and the index did not. The remedy names the read-tree.
+stale_refuse("another worktree moves the checked-out branch, then a plain commit", VCS + " commit -m x", SI_R1A)
+stale_refuse("another worktree moves the checked-out branch, then commit -am", VCS + " commit -am x", SI_R1A)
+stale_refuse("a reset --soft forward in the worktree, then a plain commit", VCS + " commit -m x", SI_R3A)
+stale_refuse("an update-ref of the checked-out branch in the worktree, then a plain commit", VCS + " commit -m x",
+             SI_R4A)
+stale_refuse("an update-ref of the checked-out branch in the primary, then a plain commit", VCS + " commit -m x",
+             SI_R4X)
+stale_refuse("the same move, and a staged edit of g.py: the refusal names f.py and never g.py",
+             VCS + " commit -m x", SI_R5A, carries=("f.py",), lacks=("g.py",))
+stale_refuse("the only stale path is a file the moved head added, staged as deleted", VCS + " commit -m x", SI_R6A,
+             carries=("k.py",))
+stale_refuse("a moved head that changes 200 files, so every path the commit carries is stale", VCS + " commit -m x",
+             SI_R7A)
+
+# 2. The fixed index, the backward squash, and the forms that carry no stale path.
+stale_allow("a read-tree of the old head to the new one, then a plain commit", VCS + " commit -m x", SI_A1A)
+stale_allow("a revert of the head, staged, then a plain commit", VCS + " commit -m x", SI_A2P)
+stale_allow("a file checked out from HEAD~2, then a plain commit", VCS + " commit -m x", SI_A3P)
+stale_allow("a file removed from the index, then an amend", VCS + " commit --amend -m x", SI_A4P)
+stale_allow("a backward reset --soft to HEAD~2, a squash, then a plain commit", VCS + " commit -m x", SI_A5P)
+stale_allow("the R5 move, and a commit by path that names only g.py", VCS + " commit -m x -- g.py", SI_R5A)
+stale_allow("a staged file in a repository with no commits yet", VCS + " commit -m x", SI_A6P)
+stale_allow("the R1 move, with the worktree's HEAD log unreadable", VCS + " commit -m x", SI_A7A)
+
+
+# The commit check reads the index once more than before, for a commit segment with no move. STALE_COST_BASE is the
+# spawns of such a commit before the check, by git subcommand, measured on origin/main. The check adds exactly one spawn,
+# of any subcommand, and drops none.
+STALE_COST_BASE = {"diff": 1, "ls-tree": 3, "rev-parse": 6, "symbolic-ref": 1}
+
+
+def stale_commit_cost_case():
+    """A commit with no move costs one git spawn more than before stale-index, and no spawn is lost."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path = _stand_in_git("stalecost")
+    if path is None:
+        return False, "no git on PATH"
+    kinds, _lines = git_spawn_kinds(VCS + " commit -m x", SI_COSTP, None, None, path, log)
+    delta = {word: kinds.get(word, 0) - STALE_COST_BASE.get(word, 0) for word in set(kinds) | set(STALE_COST_BASE)}
+    added = sum(count for count in delta.values() if count > 0)
+    dropped = sorted(word for word, count in delta.items() if count < 0)
+    if added != 1 or dropped:
+        return False, "a commit with no move: git spawns %s, want %s and one more" % (
+            sorted(kinds.items()), sorted(STALE_COST_BASE.items()))
+    return True, "a commit with no move costs one git spawn more, and drops none"
 
 
 # =========================================================================== 6. frozen paths
@@ -22707,6 +22959,8 @@ LOG_CHECKS = (
     ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
      "for bare only, no read for a literal destination, and reads the transcript only at the record branch",
      record_push_cost_case),
+    ("stale-index: a commit with no move costs one git spawn more than before the check, and drops none",
+     stale_commit_cost_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
