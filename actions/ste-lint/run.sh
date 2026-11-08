@@ -57,7 +57,8 @@ else
   diff_failed() {
     if [ "$(git rev-parse --is-shallow-repository)" = "true" ] ||
        { [ "$RANGE" = "HEAD~1..HEAD" ] && ! git rev-parse --verify -q "HEAD~1" >/dev/null; } ||
-       { [ "$RANGE" != "HEAD~1..HEAD" ] && ! git merge-base "${RANGE%%...*}" HEAD >/dev/null 2>&1; }; then
+       { [ "$RANGE" != "HEAD~1..HEAD" ] && git rev-parse --verify -q "${RANGE%%...*}^{commit}" >/dev/null &&
+         ! git merge-base "${RANGE%%...*}" HEAD >/dev/null 2>&1; }; then
       echo "ste-lint: UNKNOWN, git diff $RANGE failed (no base history: a shallow clone, or the repo's first commit); check out with fetch-depth 0" >&2
       return 0
     fi
