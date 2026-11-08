@@ -8,4 +8,4 @@
 
 **Retire.** The pinned browser reaches the box that runs lane lint without an agent downloading it, or the checker's deny cases run without a browser. Lane lint then runs those cases and the skip line goes. Proof: the browser-absent case of `merge/test_lane_lint_guard_suite.py` is rewritten to expect the marker set.
 
-Fix: queued as step `guard-browser-once` (proposed to triage): the orchestrator installs the pinned Chromium once per box (decision playwright-install-once), so lane lint launches it. Until: 2026-11-21
+Fix: step `guard-browser-once`, doing in lane lane-lint-guard-suite-install: the orchestrator installs the pinned Chromium once per box (decision playwright-install-once), so lane lint launches it. Until: 2026-11-21

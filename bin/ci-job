@@ -61,8 +61,9 @@
 # Then ci-job probes the pinned browser as hooks/test_guard.py's pd_node_ready does: node, run from package-dir, checks that
 # `require('playwright').chromium.executablePath()` names a file and launches Chromium. When the browser is absent or does not launch, ci-job
 # unsets each BROWSER_MARKERS env of that step, inherited ones too, and prints one `noted` line naming the skipped cases and that CI runs them;
-# the suite runs without them. A probe that errors or times out (SETUP_PROBE_SECONDS) reads unknown and the suite does not run. A --plan runs
-# no install and no probe: it plans the step as if the install made its folder. Whether the NODE_PATH folder was missing or not, a step with such a
+# the suite runs without them. A probe that errors (executablePath() throwing too) or times out (SETUP_PROBE_SECONDS) reads unknown and the suite
+# does not run. A --plan runs no install and no probe: it plans the step as if the install made its folder. Limit: a --plan --step of a step whose
+# setup step has with: system-deps plans `would run`, though the real run reads unknown; merge calls only --lint --plan, which runs no setup step. Whether the NODE_PATH folder was missing or not, a step with such a
 # setup step gets the browser probe. Cost per setup step: one install.sh run when the folder is missing (one npm ci, 1.1 s for .github/shoot, 1 run,
 # cloud container, warm npm cache; two node calls in pin.sh) and one node call for the probe, which starts a headless Chromium (unmeasured: no
 # pinned browser on the box that measured the rest); one stat per NODE_PATH entry. A step whose shell or verdict a signal killed, and a step whose verdict printed no verdict line
@@ -324,7 +325,7 @@ def prepare_setup(st, folder, values, top, log):
     -> (problem, browser): problem is the unknown text, or None; browser is True when Chromium launched. The install is one bin/verdict run, so
     its output stays in the log. It downloads no browser, runs no apt. The probe is one node call run from the package folder, as
     hooks/test_guard.py's pd_node_ready is, with PROBE_EXIT: 0 launched, 1 the browser file is absent or the launch failed, 3 the probe itself
-    could not load playwright. Any other exit, a start failure and a timeout are a problem, never an absent browser."""
+    could not load playwright or read its executable path. Any other exit, a start failure and a timeout are a problem, never an absent browser."""
     keys = {k: expand(v.strip("'\""), values) for k, v in step_with(st).items() if k in ("system-deps", "npm-ci", "package-dir")}
     if None in keys.values():
         return "with: holds an expression this runner cannot read, so the playwright-setup install is not run", False
@@ -345,8 +346,8 @@ def prepare_setup(st, folder, values, top, log):
             return "the playwright-setup install failed (install.sh local, exit %d): %s" % (done.returncode, line), False
         if not os.path.isdir(folder):  # a clean exit that made no folder: never MISSING_INSTALL, which lane lint reads as `not run`
             return "the playwright-setup install ran (install.sh local, exit 0) but %s is still missing" % folder, False
-    probe = ("let c; try { c = require('playwright').chromium; } catch (e) { console.error(String(e)); process.exit(3); }\n"
-             "if (!require('fs').existsSync(c.executablePath())) process.exit(1);\n"
+    probe = ("let c, p; try { c = require('playwright').chromium; p = c.executablePath(); } catch (e) { console.error(String(e)); process.exit(3); }\n"
+             "if (!require('fs').existsSync(p)) process.exit(1);\n"
              "try { c.launch().then(b => b.close()).then(() => process.exit(0), e => { console.error(String(e)); process.exit(1); }); }\n"
              "catch (e) { console.error(String(e)); process.exit(3); }")
     try:

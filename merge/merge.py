@@ -2474,7 +2474,7 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
-CiRun = collections.namedtuple("CiRun", "state lines log liftable others timed_out")
+CiRun = collections.namedtuple("CiRun", "state lines log liftable others timed_out noted", defaults=((),))
 
 def ci_job_run(wt, *args, seconds=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
@@ -2483,7 +2483,7 @@ def ci_job_run(wt, *args, seconds=None):
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
     others: [(job, [suites])], from each `not run  job J: picked ...` line, the suites picked for a CI step of another job (workflow_steps.NOT_RUN_JOB).
-    timed_out: True when the run passed `seconds`."""
+    timed_out: True when the run passed `seconds`. noted: the `noted` lines ci-job printed (a skipped browser case, CI runs it), which change no state."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     seconds = LINT_SECONDS if seconds is None else seconds
     try:
@@ -2493,13 +2493,14 @@ def ci_job_run(wt, *args, seconds=None):
     lines = out.splitlines()
     log = [l for l in lines if l.startswith("log=")][-1:]
     others = [(m.group(1), [x.strip() for x in m.group(2).split(",")]) for m in map(workflow_steps.NOT_RUN_JOB_LINE.match, lines) if m]
+    noted = [l.rstrip() for l in lines if l.startswith("noted")]
     if c == 0:
-        return CiRun("pass", [], log, False, others, False)
+        return CiRun("pass", [], log, False, others, False, noted)
     if c == 1:
-        return CiRun("fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False, others, False)
+        return CiRun("fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False, others, False, noted)
     if c == 2:
-        return CiRun("unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True, others, False)
-    return CiRun("unknown", [f"ci-job exited {c}"], log, False, others, False)
+        return CiRun("unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True, others, False, noted)
+    return CiRun("unknown", [f"ci-job exited {c}"], log, False, others, False, noted)
 
 def other_job_runs(wt, others, base):
     """The lane lint's run of each picked suite CI step in another job (decision lanes-run-no-full-ci-job). `others` is ci_job_run's list
@@ -2508,8 +2509,9 @@ def other_job_runs(wt, others, base):
     this cannot read from the workflow at the head reads unknown, never a pass;
     so does a runs-on that is not one literal label (an expression, a map, empty). A step whose NODE_PATH folder an earlier playwright-setup step of its
     job makes needs no special read here: ci-job runs that action's install.sh `local` first (npm ci and the pin, no browser download, no apt), then the
-    suite, so checks-guard's guard suite reads PASS or FAIL. With the pinned browser absent it runs without GUARD_CHROMIUM and ci-job prints one `noted`
-    line naming the skipped page-item-design cases (CI runs them), when the browser is absent or does not launch. A failed install, or a system-deps input, reads unknown with its own text. A run whose
+    suite, so checks-guard's guard suite reads PASS or FAIL. With the pinned browser absent or not launching it runs without GUARD_CHROMIUM, and ci-job's one `noted`
+    line naming the skipped page-item-design cases (CI runs them) comes back in CiRun.noted; this prints it, as `noted  job J: ...`, and the state
+    stays what the suite gave, so a PASS still passes. A failed install, or a system-deps input, reads unknown with its own text. A run whose
     only unknowns are a NODE_PATH folder that no such setup step makes (MISSING_INSTALL_LINE) is one `not run` line and adds nothing to the result.
     Cost: one ci-job run (its own processes) per Linux job with a picked suite, none when nothing is picked; one read of the workflow; for a job with a
     playwright-setup step, one npm ci (1.1 s for .github/shoot, 1 run, cloud container, warm npm cache) with two node calls in pin.sh, and one node call that
@@ -2544,6 +2546,8 @@ def other_job_runs(wt, others, base):
             out.append((job, suites, CiRun("unknown", [f"unknown         job {job}: no named step runs the picked {', '.join(suites)}"], [], False, [], False)))
             continue
         run = ci_job_run(wt, job, *[a for name in names for a in ("--step", name)], "--base", f"origin/{base}", seconds=OTHER_JOB_SECONDS)
+        for line in run.noted:  # a skipped browser case: the lane's author must see it, whatever the state
+            say("%-15s job %s: %s" % ("noted", job, line[len("noted"):].strip()))
         gaps = [workflow_steps.MISSING_INSTALL_LINE.search(l) for l in run.lines]
         if run.state == "unknown" and not run.timed_out and gaps and all(gaps):
             # Every unknown is a NODE_PATH folder that no earlier playwright-setup step of the job makes here (ci-job installs the ones it can find),
