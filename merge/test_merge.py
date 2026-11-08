@@ -1151,6 +1151,7 @@ BODY_CHECKS_YML = CHECKS_YML + ("      - name: Record the PR body\n        env:\
                                 "        run: python3 lint/record_body.py\n")  # a lint step: the merge's own lint runs it with the PR body
 MERGE_PR_BODY = "The lane's PR body, read by the merge's own lint.\n"
 INHERITED_PR_BODY = "An inherited body, never the lane's.\n"
+DRAFT_PR_BODY = "Drops-lines: docs/guide.md -- the lines are dead\n"  # a body-only excuse: the draft step's proof must read it
 
 class SmallBaseMove(Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
@@ -1297,6 +1298,18 @@ class SmallBaseMove(Env):
         self.assertTrue(os.path.exists(record), "the merge's own lint never ran the record step: " + out)
         with open(record, encoding="utf-8", newline="") as f:
             self.assertNotEqual(f.read(), INHERITED_PR_BODY, "an inherited CI_JOB_PR_BODY_FILE reached the merge's own lint")
+
+    def test_the_draft_step_hands_the_pr_body_to_the_small_move_lint(self):
+        record = os.path.join(self.t, "body-seen.txt")
+        self.host.body = DRAFT_PR_BODY
+        self.record_body_scoped(record)
+        self.host.draft = True  # a draft confirm: the draft step's records proof is the small-move proof that reads the body
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], out)
+        self.assertTrue(os.path.exists(record), "the draft step's proof never ran the record step: " + out)
+        with open(record, encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read(), DRAFT_PR_BODY, "the draft step's small-move lint did not get the PR body")
 
     def test_the_preview_says_a_docs_only_move_keeps_the_green_run(self):
         self.scoped()
@@ -8441,9 +8454,9 @@ class RecordsRebuild(RecordsEnv):
             token = real_acquire(*a, **k)
             self.host.draft = True  # main's read saw a ready PR; the read under the lock sees a draft
             return token
-        def holds(wt, base_ref, sha, before_run=None):
+        def holds(wt, base_ref, sha, before_run=None, body=None):
             seen.append(before_run)
-            return real_holds(wt, base_ref, sha, before_run)
+            return real_holds(wt, base_ref, sha, before_run, body=body)
         lock.acquire = acquire
         with unittest.mock.patch.object(merge, "holds_base", holds):
             rc, out = self.run_merge("7", "--confirm", lock=lock)
