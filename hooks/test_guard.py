@@ -12305,6 +12305,19 @@ sh("frozen pin: echo naming a settings copy allows [cap-ask-fix r2 pin]",
    "echo \"cp a " + CFG_SETTINGS + "\"", "allow", cwd=NOGIT)
 sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask-fix r2 pin]",
    "gh pr create --draft --title \"Update " + CFG_CLAUDEMD + "\" --body \"notes\"", "allow", cwd=NOGIT)
+# PWSH-R3, frozen. A comma list is one PowerShell argument, so the frozen path after the first comma is a write.
+sh("frozen shell: PowerShell tool, Set-Content of a docs file and the config settings in one comma list, "
+   "denies [pwsh-r3 red]",
+   "Set-Content docs/a.md, '" + CFG_SETTINGS + "' x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+# The alias names below are arguments or text, not commands, so each ALLOWS. Each names the frozen settings file.
+sh("frozen pin: grep -n with ac as its pattern, on the frozen settings file, allows [pwsh-r3 red]",
+   "grep -n ac " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen pin: git log --grep with sc as its pattern, on the frozen settings file, allows [pwsh-r3 red]",
+   VCS + " log --grep sc -- " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen pin: diff with ni as a file name, against the frozen settings file, allows [pwsh-r3 red]",
+   "diff ni " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen pin: PowerShell tool, Write-Host of ac and the frozen settings file, allows [pwsh-r3 red]",
+   'Write-Host "ac ' + CFG_SETTINGS + '"', "allow", tool="PowerShell", cwd=NOGIT)
 
 
 # =========================================================================== 6b. the model cap
@@ -13727,6 +13740,25 @@ sh("pwsh-followups: cp of a product file into a folder is allowed [pwsh-followup
    "cp hooks/guard.py docs/", "allow", **BR)
 sh("pwsh-followups: PowerShell tool Copy-Item of a product file into a folder is allowed [pwsh-followups green]",
    "Copy-Item hooks/guard.py docs/", "allow", tool="PowerShell", **BR)
+
+# PWSH-R3. A comma list is one PowerShell argument, so the test path after the first comma is a write too.
+# The allow pins below name a test path in a read, a here-string or an escape, and no write follows them.
+sh("pwsh-r3 L1: PowerShell tool, Set-Content of a docs file and a test file in one comma list, is refused "
+   "[pwsh-r3 red]",
+   "Set-Content docs/a.md, 'hooks/test_x.py' x", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **BR)
+sh("pwsh-r3: PowerShell tool, a backtick escape in a double-quoted Write-Host, then a Get-Content of a "
+   "test file, is allowed [pwsh-r3 green]",
+   'Write-Host "line`n" ; Get-Content hooks/test_x.py', "allow", tool="PowerShell", **BR)
+sh("pwsh-r3: PowerShell tool, a single-quoted here-string whose body has an apostrophe and names a test "
+   "file, with nothing after it that writes, is allowed [pwsh-r3 green]",
+   "@'\nit's in hooks/test_x.py\n'@", "allow", tool="PowerShell", **BR)
+sh("pwsh-r3 control: PowerShell tool, Write-Host of a smart-apostrophe line, then Get-Date, is allowed "
+   "[pwsh-r3 green]",
+   "Write-Host it’s done; Get-Date", "allow", tool="PowerShell", **BR)
+sh("pwsh-r3 control: PowerShell tool, a smart-quoted here-string that names a test file with no write, "
+   "is allowed [pwsh-r3 green]",
+   "@“\nedit hooks/test_x.py later\n”@", "allow", tool="PowerShell", **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
