@@ -11728,6 +11728,29 @@ sh("frozen: a sudo wrapped cat of the config hook is a read and is allowed",
    "sudo cat " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("frozen: a taskset wrapped cat of the config hook is a read and is allowed",
    "taskset -c 0 cat " + CFG_HOOK, "allow", cwd=NOGIT)
+# A DUP WITH A SPACE BEFORE ITS WORD, A UV VALUE FLAG THE WRAPPER TABLE LACKS, OR `>&WORD` WITH A NON-DIGIT
+# WORD IS STILL A WRITE TO ITS PATH. bash reads `2>& 1` as a dup and then runs the cp. uv's `-w` (--with),
+# `-C` (--config-setting) and `--resolution` each take a value, and WRAPPER_VALUE_FLAGS["uv"] (guard_core.py) lacks
+# all three, so the scan reads the value as the command word. `>&WORD` with a non-digit WORD opens WORD for writing, as `&>WORD`.
+sh("frozen: a 2>& 1 dup with a space ahead of a cp onto the config hook is denied",
+   "2>& 1 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv run -w x wrapped cp onto the config hook is denied",
+   "uv run -w x cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv run -C 1 wrapped cp onto the config hook is denied",
+   "uv run -C 1 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv run --resolution lowest wrapped cp onto the config hook is denied",
+   "uv run --resolution lowest cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an echo x >& onto the config hook, a non-digit word after >&, is denied",
+   "echo x >&" + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an echo x 1>& onto the config hook, a non-digit word after 1>&, is denied",
+   "echo x 1>&" + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# THE WRAPPER PINS. A wrapper with no frozen path is allowed, so the value-flag rows above deny only the write.
+sh("frozen: uv run pytest with no frozen path is allowed", "uv run pytest", "allow", cwd=NOGIT)
+sh("frozen: uv sync with no frozen path is allowed", "uv sync", "allow", cwd=NOGIT)
+sh("frozen: fakeroot dpkg-deb -b x y with no frozen path is allowed", "fakeroot dpkg-deb -b x y",
+   "allow", cwd=NOGIT)
+sh("frozen: taskset -c 0 make with no frozen path is allowed", "taskset -c 0 make", "allow", cwd=NOGIT)
+sh("frozen: chrt -i 0 sleep 1 with no frozen path is allowed", "chrt -i 0 sleep 1", "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
