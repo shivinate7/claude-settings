@@ -1923,8 +1923,11 @@ PY_READ_ONLY_PROGRAMS = frozenset({"cat", "diff", "cmp", "head", "tail", "less",
 # The write flags of a program in `PY_READ_ONLY_PROGRAMS`: short flag letters (they may be bundled, `-io`) and
 # long flag names (`--log-file=x`). A call that holds one is not a read.
 PY_READ_ONLY_WRITE_FLAGS = {"less": ("oO", ("--log-file", "--LOG-FILE")), "file": ("C", ("--compile",))}
-# A shell run with `-c` (`sh -c "cat x > p"`): the next argument is a shell script. Frozen reading only.
-PY_SHELL_PROGRAMS = re.compile(r"^(?:bash|sh)(?:\.exe)?$")
+# A shell run with `-c` or a short-flag bundle that holds it (`sh -c "cat x > p"`, `bash -ce`): the next argument
+# is a shell script. So is the string `os.system`, `os.popen` and `subprocess.run(..., shell=True)` run.
+# Frozen reading only.
+PY_SHELL_PROGRAMS = re.compile(r"^(?:bash|sh|zsh|dash|ksh)(?:\.exe)?$")
+PY_SHELL_CALLS = frozenset({"system", "popen"})
 
 # `py_compile.compile(src)` reads src. It writes a `.pyc` of that same source into the `__pycache__` beside
 # it: under a frozen folder that cache is frozen too, but it holds only the compiled source the file
@@ -2014,14 +2017,25 @@ def _compile_read_call(call) -> bool:
     return isinstance(owner, ast.Name) and PY_COMPILE_READ_CALLS.get(_call_name(call)) == owner.id
 
 
+def _py_leading_text(node):
+    """The literal text an expression starts with: a string, the left of `"-o" + p`, the first part of
+    an f-string; else None."""
+    while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        node = node.left
+    if isinstance(node, ast.JoinedStr) and node.values:
+        node = node.values[0]
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
 def _run_list(call):
-    """(program name, the constant strings after it) of a subprocess call whose first argument is a list
-    that starts with a string, else None."""
+    """(program name, the literal text of each argument after it) of a subprocess call whose first
+    argument is a list that starts with a string, else None. An argument built from parts gives the
+    text it starts with, so a flag glued to its value (`"-o" + p`) is read."""
     first = call.args[0] if call.args else None
     head = first.elts[0] if isinstance(first, (ast.List, ast.Tuple)) and first.elts else None
     if not (isinstance(head, ast.Constant) and isinstance(head.value, str)):
         return None
-    rest = [arg.value for arg in first.elts[1:] if isinstance(arg, ast.Constant) and isinstance(arg.value, str)]
+    rest = [text for text in map(_py_leading_text, first.elts[1:]) if text is not None]
     return os.path.basename(head.value), rest
 
 
@@ -2030,6 +2044,23 @@ def _has_write_flag(program: str, words) -> bool:
     return any((word.startswith("--") and word.startswith(longs)) or (
         word.startswith("-") and not word.startswith("--") and any(char in letters for char in word[1:]))
         for word in words)
+
+
+def _glued_write_value(node, text, parents):
+    """The path glued to a write flag (`PY_READ_ONLY_WRITE_FLAGS`: `less -o<p>`, `--log-file=<p>`) when
+    `node`, whose text is `text`, is an argument in the list of a subprocess call; else None."""
+    held = parents.get(node)
+    call = parents.get(held)
+    if not (isinstance(held, (ast.List, ast.Tuple)) and isinstance(call, ast.Call) and call.args
+            and call.args[0] is held and held.elts[0] is not node and _call_name(call) in PY_RUN_CALLS):
+        return None
+    spelled = _run_list(call)
+    letters, longs = PY_READ_ONLY_WRITE_FLAGS.get(spelled[0] if spelled else "", ("", ()))
+    value = next((text[len(flag) + 1:] for flag in longs if text.startswith(flag + "=")), None)
+    if value is None and text.startswith("-") and not text.startswith("--"):
+        at = next((at for at, char in enumerate(text[1:], 1) if char in letters), None)
+        value = text[at + 1:] if at is not None else None
+    return value or None
 
 
 def _runs_program(call) -> bool:
@@ -2046,10 +2077,20 @@ def _runs_program(call) -> bool:
 
 
 def _shell_script_call(call) -> bool:
-    """True for a subprocess call that runs a shell with `-c`: `["sh", "-c", script]`."""
-    spelled = _run_list(call)
+    """True for a call that runs a string as a shell script (`PY_SHELL_PROGRAMS`, `PY_SHELL_CALLS`): a
+    subprocess list that runs a shell with `-c` or a bundle that holds it (`["zsh", "-c", s]`,
+    `["/bin/bash", "-ce", s]`), `os.system(s)`, `os.popen(s)` and `subprocess.run(s, shell=True)`."""
+    name = _call_name(call)
+    owner = call.func.value if isinstance(call.func, ast.Attribute) else None
+    if name in PY_SHELL_CALLS and isinstance(owner, ast.Name) and owner.id == "os":
+        return True
+    if name in PY_RUN_CALLS and call.args and not isinstance(call.args[0], (ast.List, ast.Tuple)) and any(
+            key.arg == "shell" and isinstance(key.value, ast.Constant) and key.value.value is True
+            for key in call.keywords):
+        return True
+    spelled = _run_list(call) if name in PY_RUN_CALLS else None
     return spelled is not None and PY_SHELL_PROGRAMS.match(spelled[0]) is not None and any(
-        re.match(r"^-[A-Za-z]*c$", word) for word in spelled[1])
+        re.match(r"^-[A-Za-z]*c[A-Za-z]*$", word) for word in spelled[1])
 
 
 def _open_mode(call, mode_at: int) -> str:
@@ -2110,25 +2151,52 @@ def _outer_loop(node, parents):
     return loop
 
 
-def _straight_uses(assign, uses, bound):
-    """The uses of a name after this binding and before the next binding of the name (the first binding
-    also takes the uses before it, as `_py_bound_value` does)."""
-    ends = [end for end, _ in bound.get(_assign_target(assign).id, ())]
+# A statement whose body may not run, or may run more than once: a use after a binding in one of its blocks
+# can still read the binding before it.
+PY_BLOCKS = tuple(getattr(ast, kind) for kind in ("If", "Try", "TryStar", "With", "AsyncWith", "For", "AsyncFor",
+                                                  "While", "ExceptHandler", "Match", "match_case")
+                  if hasattr(ast, kind))
+PY_BLOCK_FIELDS = ("body", "orelse", "finalbody", "handlers", "cases")
+
+
+def _blocks(node, parents):
+    """The blocks (a statement and its field: an if's `body`, a try's `finalbody`) that hold `node`,
+    not past a function."""
+    found = set()
+    while node is not None and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        parent = parents.get(node)
+        if isinstance(parent, PY_BLOCKS):
+            field = next((field for field in PY_BLOCK_FIELDS
+                          if any(child is node for child in getattr(parent, field, ()))), None)
+            if field is not None:
+                found.add((id(parent), field))
+        node = parent
+    return found
+
+
+def _straight_uses(assign, uses, bound, parents):
+    """The uses of a name after this binding and before the next binding of the name that surely runs
+    after it (the first binding also takes the uses before it, as `_py_bound_value` does). A later
+    binding in a block that does not hold this one (an `if`, a `try`, a `with`) may not run, so the
+    uses after it still count for this binding."""
+    bindings = [(end, parents.get(value)) for end, value in bound.get(_assign_target(assign).id, ())]
     mine = (assign.end_lineno, assign.end_col_offset)
-    if mine not in ends:
+    if mine not in [end for end, _ in bindings]:
         return uses
-    later = next((end for end in ends if end > mine), None)
-    first = ends[0] == mine
+    blocks = _blocks(assign, parents)
+    later = next((end for end, other in bindings
+                  if end > mine and (other is None or not _blocks(other, parents) - blocks)), None)
+    first = bindings[0][0] == mine
     return [use for use in uses if ((use.lineno, use.col_offset) >= mine or first)
             and (later is None or (use.lineno, use.col_offset) < later)]
 
 
 def _live_uses(assign, uses, bound, parents):
     """The uses of a name that read this binding: those after it and before the next binding of the
-    name. A binding the table does not hold keeps every use. Inside a loop a use can run under any
+    name that surely runs (`_straight_uses`). A binding the table does not hold keeps every use. Inside a loop a use can run under any
     binding the loop assigns, on a later pass, so the uses of every binding of the name in the loop,
     and every use inside the loop, count for each of them."""
-    live = _straight_uses(assign, uses, bound)
+    live = _straight_uses(assign, uses, bound, parents)
     loop = _outer_loop(assign, parents)
     if loop is None:
         return live
@@ -2140,7 +2208,7 @@ def _live_uses(assign, uses, bound, parents):
     for _, value in bound.get(_assign_target(assign).id, ()):
         other = parents.get(value)
         if other is not None and other is not assign and start <= (other.lineno, other.col_offset) < end:
-            for use in _straight_uses(other, uses, bound):
+            for use in _straight_uses(other, uses, bound, parents):
                 pooled[id(use)] = use
     return list(pooled.values())
 
@@ -2211,7 +2279,7 @@ def _python_mode(node, parents, path_object=False, names=None, seen=frozenset(),
         return _path_method_mode(call, parents, frozen)
     if name in PY_TEXT_CALLS or (frozen and name in PY_PATH_STRING_CALLS):
         return "text"
-    if frozen and name in PY_RUN_CALLS and _shell_script_call(call):
+    if frozen and _shell_script_call(call):
         return "shell"   # the script is read by the shell write scan (`_code_literal_hit`)
     if frozen and name in PY_RUN_CALLS and _runs_program(call):
         return "text"
@@ -2249,10 +2317,19 @@ def _py_is_format(node) -> bool:
             and isinstance(node.left.value, str))
 
 
-def _py_is_str_join(node) -> bool:
-    """True for `"/".join([a, b])`: a join of a list or tuple literal on a string literal."""
+def _py_list_items(node, bound):
+    """The items of a list or tuple literal, or of the one a name holds where it is read
+    (`parts = [h, "x"]`), else None."""
+    if isinstance(node, ast.Name) and bound is not None:
+        node = _py_bound_value(node, bound)
+    return node.elts if isinstance(node, (ast.List, ast.Tuple)) else None
+
+
+def _py_is_str_join(node, bound=None) -> bool:
+    """True for `"/".join([a, b])`: a join of a list or tuple literal (or a name bound to one) on a
+    string literal."""
     return (isinstance(node, ast.Call) and _call_name(node) == "join" and len(node.args) == 1
-            and isinstance(node.args[0], (ast.List, ast.Tuple)) and isinstance(node.func, ast.Attribute)
+            and _py_list_items(node.args[0], bound) is not None and isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Constant) and isinstance(node.func.value.value, str))
 
 
@@ -2263,12 +2340,14 @@ def _py_is_str_format(node) -> bool:
             and bool(node.args or node.keywords))
 
 
-def _py_join_parts(call):
-    """The arguments of `os.path.join(a, b)` or `Path(a, b)`, with a `*[a, b]` of list literals spread."""
+def _py_join_parts(call, bound=None):
+    """The arguments of `os.path.join(a, b)` or `Path(a, b)`, with a `*[a, b]` of list literals spread,
+    and a `*parts` of a name bound to one."""
     parts = []
     for arg in call.args:
-        if isinstance(arg, ast.Starred) and isinstance(arg.value, (ast.List, ast.Tuple)):
-            parts.extend(arg.value.elts)
+        items = _py_list_items(arg.value, bound) if isinstance(arg, ast.Starred) else None
+        if items is not None:
+            parts.extend(items)
         else:
             parts.append(arg)
     return parts
@@ -2277,14 +2356,16 @@ def _py_join_parts(call):
 def _py_format_text(call, bound, depth) -> str:
     """`"{}/x/{0}/{name}".format(a, b, name=c)` with each hole read as its argument; `_` for a hole it
     cannot tell: a slot with no argument, a keyword the call does not name, and every positional slot at
-    or after a star argument that is not a list or tuple literal (a `*[a, b]` is spread)."""
+    or after a star argument that is not a list or tuple literal (a `*[a, b]` is spread, and so is a
+    `*parts` of a name bound to one)."""
     args, unknown_from = [], None
     for arg in call.args:
         if isinstance(arg, ast.Starred):
             if unknown_from is not None:
                 continue
-            if isinstance(arg.value, (ast.List, ast.Tuple)):
-                args.extend(_py_composed_text(item, bound, depth) for item in arg.value.elts)
+            items = _py_list_items(arg.value, bound)
+            if items is not None:
+                args.extend(_py_composed_text(item, bound, depth) for item in items)
             else:
                 unknown_from = len(args)
         elif unknown_from is None:
@@ -2301,7 +2382,7 @@ def _py_format_text(call, bound, depth) -> str:
             if key is None:
                 return "_"
             key = str(key)
-        if key.isdigit():
+        if key.isascii() and key.isdigit():   # `{²}` is a digit to isdigit, not to int
             return args[int(key)] if int(key) < len(args) else "_"
         return named.get(key, "_")
 
@@ -2353,14 +2434,14 @@ def _py_composed_text(node, bound, depth=0) -> str:
             return "~"
         if name == "str" and first is not None:
             return _py_composed_text(first, bound, step)   # `str(p)` is p in another spelling
-        if _py_is_str_join(node):
-            sep, parts = node.func.value.value, node.args[0].elts
+        if _py_is_str_join(node, bound):
+            sep, parts = node.func.value.value, _py_list_items(node.args[0], bound)
             return sep.join(_py_composed_text(part, bound, step) for part in parts) or "_"
         if _py_is_str_format(node):
             return _py_format_text(node, bound, step)
         if name == "join" or name.endswith("Path") or (name == "joinpath" and isinstance(node.func, ast.Attribute)):
             text = _py_composed_text(node.func.value, bound, step) if name == "joinpath" else ""
-            for arg in _py_join_parts(node):
+            for arg in _py_join_parts(node, bound):
                 text = _join_text(text, _py_composed_text(arg, bound, step))
             return text or "_"
         if name in PY_PATH_SPELLINGS:
@@ -2369,52 +2450,64 @@ def _py_composed_text(node, bound, depth=0) -> str:
     return "_"
 
 
-def _py_builds_path(node) -> bool:
+def _py_builds_path(node, bound=None) -> bool:
     """True for an expression that builds one path from parts: `a / b`, `a + b`, `os.path.join(a, b)`,
     `Path(a, b)`, `p.joinpath(a)`, a %-format of a string, an f-string with a hole, `"/".join([a, b])`
-    and `"{}/x".format(a)`."""
+    and `"{}/x".format(a)`. A list a name holds is spread as its literal is (`os.path.join(*parts)`)."""
     if isinstance(node, ast.BinOp):
         return isinstance(node.op, (ast.Div, ast.Add)) or _py_is_format(node)
     if isinstance(node, ast.JoinedStr):
         return any(isinstance(part, ast.FormattedValue) for part in node.values)
     if isinstance(node, ast.Call) and node.args and _call_name(node) == "joinpath":
         return isinstance(node.func, ast.Attribute)
-    if _py_is_str_join(node) or _py_is_str_format(node):
+    if _py_is_str_join(node, bound) or _py_is_str_format(node):
         return True
-    return isinstance(node, ast.Call) and len(_py_join_parts(node)) > 1 and (
+    return isinstance(node, ast.Call) and len(_py_join_parts(node, bound)) > 1 and (
         _call_name(node) == "join" or _call_name(node).endswith("Path"))
 
 
 def _py_composed_paths(tree, parents, names, bound):
     """[(path, mode)] for each expression that builds a path from parts, once for the whole chain. The
     parts of `os.path.join(a, b, c)` are string literals the reader names one by one, and none of them
-    is a frozen file; the built path is."""
+    is a frozen file; the built path is. A crash on one expression (`_py_composed_node`) loses that
+    expression only, never the rest of the script."""
     found = []
     augmented = [value for values in bound.values() for _, value in values
                  if isinstance(parents.get(value), ast.AugAssign)]
     for node in [*ast.walk(tree), *augmented]:
-        if not _py_builds_path(node):
+        try:
+            found.extend(_py_composed_node(node, parents, names, bound))
+        except Exception:   # one unreadable expression must not hide a write later in the script
             continue
-        parent = parents.get(node)
-        if _py_builds_path(parent) and (not isinstance(parent, ast.Call) or node in parent.args):
-            continue   # a part of a longer chain: the chain is read whole
-        path_object = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) or (
-            isinstance(node, ast.Call) and (_call_name(node).endswith("Path") or _call_name(node) == "joinpath"))
-        texts = [_py_composed_text(node, bound)]
-        loop = _outer_loop(node, parents)
-        if loop is not None:
-            # On a later pass a name in the loop holds the value the loop last bound: read the path again
-            # with each name in it taken at the end of the loop.
-            later = copy.deepcopy(node)
-            for name in ast.walk(later):
-                if isinstance(name, ast.Name):
-                    name.lineno, name.col_offset = loop.end_lineno, loop.end_col_offset
-            texts.append(_py_composed_text(later, bound))
-        texts = [text for index, text in enumerate(texts) if text != "_" and text not in texts[:index]]
-        if texts:
-            mode = _python_mode(node, parents, path_object, names, frozen=True, bound=bound)
-            found.extend((text, mode) for text in texts)
     return found
+
+
+def _py_composed_node(node, parents, names, bound):
+    """[(path, mode)] for one expression of `_py_composed_paths`: [] when it builds no path or is a part
+    of a longer chain."""
+    if not _py_builds_path(node, bound):
+        return []
+    parent = parents.get(node)
+    if _py_builds_path(parent, bound) and (not isinstance(parent, ast.Call) or node in parent.args):
+        return []   # a part of a longer chain: the chain is read whole
+    path_object = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) or (
+        isinstance(node, ast.Call) and (_call_name(node).endswith("Path") or _call_name(node) == "joinpath"))
+    texts = [_py_composed_text(node, bound)]
+    loop = _outer_loop(node, parents)
+    if loop is not None:
+        # On a later pass a name in the loop holds the value the loop last bound: read the path again
+        # with each name in it taken at the end of the loop.
+        later = copy.deepcopy(node)
+        for name in ast.walk(later):
+            if isinstance(name, ast.Name):
+                name.lineno, name.col_offset = loop.end_lineno, loop.end_col_offset
+        texts.append(_py_composed_text(later, bound))
+    texts.extend(value for value in (_glued_write_value(node, text, parents) for text in texts) if value)
+    texts = [text for index, text in enumerate(texts) if text != "_" and text not in texts[:index]]
+    if not texts:
+        return []
+    mode = _python_mode(node, parents, path_object, names, frozen=True, bound=bound)
+    return [(text, mode) for text in texts]
 
 
 def _python_paths(code: str, frozen=False):
@@ -2438,8 +2531,14 @@ def _python_paths(code: str, frozen=False):
             bound.setdefault(node.target.id, []).append(((node.end_lineno, node.end_col_offset), value))
     for values in bound.values():
         values.sort(key=lambda item: item[0])
-    found = [(node.value, _python_mode(node, parents, names=names, frozen=frozen, bound=bound)) for node in ast.walk(tree)
-             if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            mode = _python_mode(node, parents, names=names, frozen=frozen, bound=bound)
+            found.append((node.value, mode))
+            glued = _glued_write_value(node, node.value, parents) if frozen else None
+            if glued:
+                found.append((glued, mode))
     return found + _py_composed_paths(tree, parents, names, bound) if frozen else found
 
 
