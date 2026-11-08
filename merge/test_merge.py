@@ -174,6 +174,9 @@ class FakeHost:
     def merge(self, n, method, sha):
         if self.refuse:
             return None, self.refuse
+        live = merge.origin_head(self.root, self.branch)
+        if sha != live:  # GitHub's PUT names the head it merges: a head that moved is a 409, and nothing merges
+            return None, f"409: #{n} is at {live[:9]}, not the {sha[:9]} the merge names"
         self.merged = True
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
@@ -645,6 +648,8 @@ class ConfirmHead(Env):
         relayed = self.head()
         live = self.competitor_push()
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)  # a run that merged would print nothing to check
+        self.assertIn("moved", out + err, "no moved-head refusal to check")
         text = without_usage(out + err)
         self.assertNotIn(relayed, text, "the refusal names the relayed head in full")
         self.assertNotIn(live, text, "the refusal names the live head in full")
@@ -660,6 +665,75 @@ class ConfirmHead(Env):
         self.assertEqual(self.claims(), 0, "a claim was pushed for a refused head")
         self.assertFalse(self.lock_ref(), "the lock was left behind")
         self.assertEqual(self.worktrees(), 1, "a worktree was left behind")
+
+    def test_the_main_compare_refuses_a_moved_head_before_the_lock(self):
+        relayed = self.head()
+        self.competitor_push()  # the head moved before main's read, so main's compare refuses it first
+        taken = []
+        acquire = self.lock.acquire
+        self.lock.acquire = lambda b, ttl: (taken.append(b), acquire(b, ttl))[1]
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the refusal does not say the head moved")
+        self.assertEqual(taken, [], "the moved head was refused only after the lock was taken")
+        self.assertEqual(self.claims(), 0, "a claim was pushed for a moved head")
+
+    def test_the_lock_compare_refuses_a_head_that_moves_after_main_reads_it(self):
+        relayed = self.head()
+        read, moved = self.host.pr, []
+        def pr_then_move(n):
+            info = read(n)  # main's read: still the relayed head
+            if not moved:
+                moved.append(self.competitor_push())  # the head moves after that read and before confirm re-reads under the lock
+            return info
+        self.host.pr = pr_then_move
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertTrue(moved, "the head was never moved between the two reads")
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the refusal does not say the head moved")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim was pushed for a moved head")
+
+    def network_drops_the_wait_after_the_claim(self):
+        """The second check wait, the one after the claim push, raises a network error: the claim stays on the branch, unproven (NetStop)."""
+        wait, calls = self.host.wait_checks, []
+        def dropped(n, sha, d, prior=None):
+            calls.append(sha)
+            if len(calls) == 2:
+                raise merge.NetStop("the network dropped the wait after the claim push")
+            return wait(n, sha, d, prior)
+        self.host.wait_checks = dropped
+
+    def test_a_rerun_on_the_tools_own_claim_commit_proceeds(self):
+        relayed = self.head()
+        self.network_drops_the_wait_after_the_claim()
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the claim is pushed, its result is unknown, so it stays
+        self.assertNotEqual(rc, 0, out + err)
+        claim = self.head()
+        self.assertNotEqual(claim, relayed, "the first run pushed no claim")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{claim}^"), relayed, "the claim is not directly on the relayed head")
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is the tool's own claim commit on the relayed head
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_rerun_on_the_tools_revert_of_its_claim_proceeds(self):
+        relayed = self.head()
+        self.host.seq = [(True, ""), (False, "a check is red after the claim push")]  # the claim wait is red, so the tool reverts its own claim
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertNotEqual(self.head(), relayed, "the revert did not land on the branch")
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)  # the live head is the tool's revert of its claim
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_a_head_that_moves_between_the_compare_and_the_put_merges_nothing(self):
+        relayed = self.head()
+        self.host.on_wait = self.competitor_push  # the rival lands in the wait after the claim push: after every compare, before the PUT
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT merged a head that moved after the compare")
+        self.assertEqual(self.claims(), 0, "a claim reached main")
 
     def test_a_head_that_is_not_40_hex_is_refused_as_bad_input(self):
         out, err = self.assert_usage_error("7", "--confirm", "--head", self.head()[:7])
