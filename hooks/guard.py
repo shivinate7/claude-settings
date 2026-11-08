@@ -3622,7 +3622,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
+# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
@@ -4923,6 +4923,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "gh-login-switch", question_form.PAGE_REASONS["gh-login-switch"], matched)
         if rule == "task-names-check":
             refuse(tool, "deny", "task-names-check", question_form.PAGE_REASONS["task-names-check"], matched)
+        if rule == "task-why-cited":
+            refuse(tool, "deny", "task-why-cited", question_form.PAGE_REASONS["task-why-cited"], matched)
         if rule == "owner-judge":
             refuse(tool, "deny", "owner-judge", question_form.PAGE_REASONS["owner-judge"], matched)
         if rule == "option-letter-keys":
