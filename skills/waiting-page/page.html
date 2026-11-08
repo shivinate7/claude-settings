@@ -2340,9 +2340,9 @@ const ASK_SEEN = readStamp("waiting.askSeen");
 const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
 const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
-// The stamp moves only while the Ask section is on screen: an answer that lands on a hidden tab or below the fold has not been seen.
+// The stamp moves only while the answer list (#askList, below the form) is on screen: an answer that lands on a hidden tab or below the fold has not been seen.
 // Hiding the tab stamps once, at the hide time. A visibilitychange or pagehide of a tab already hidden stamps nothing.
-const asksOnScreen = () => { const r = $("asks").getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+const asksOnScreen = () => { const r = $("askList").getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
 const markAsksSeen = () => { if (asksOnScreen()) writeStamp("waiting.askSeen"); };
 let tabWasHidden = document.hidden;
 document.addEventListener("visibilitychange", () => { const hiding = document.hidden && !tabWasHidden; tabWasHidden = document.hidden; if (hiding) markAsksSeen(); });
