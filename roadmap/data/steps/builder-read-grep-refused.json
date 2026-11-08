@@ -1,11 +1,11 @@
 {
-  "title": "Rule builder-test-edit lets a builder read a test file with grep",
+  "title": "Rule builder-test-edit lets a builder read a test file, or name one in a string",
   "why": "A builder may read tests but not edit them; a refused read-only grep costs a round and teaches the reader to scroll past the guard.",
-  "note": "Filed 09:28 CST Nov 8 (coordinator 09:21 CST, from lane message-time-matches-clock, session_013NEJL1PfmnFVDD3X2P28Kk): the rule refused a builder's read-only grep of hooks/test_guard.py. Red case first: that grep, allowed. Its own lane at round 1; lane builder-probe-false-alarm (#1979) declined it at 09:27 CST.",
+  "note": "Filed 09:28 CST Nov 8 (coordinator 09:21 CST, from lane message-time-matches-clock, session_013NEJL1PfmnFVDD3X2P28Kk): the rule refused a builder's read-only grep of hooks/test_guard.py. Red case first: that grep, allowed. Its own lane at round 1; lane builder-probe-false-alarm (#1979) declined it at 09:27 CST. Second red case 09:53 CST Nov 8 (lane notes-fix-large-1, session_013NEJL4DPEKRiC91yHkQV7m): a fed-write-r3 builder was refused on a Python string that only held a test path.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "",
   "status": "todo",
   "order": 701,
-  "updatedAt": "2026-11-08T09:28:00-06:00"
+  "updatedAt": "2026-11-08T09:53:00-06:00"
 }
