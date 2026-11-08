@@ -56,12 +56,16 @@ def names_env_file(name: str) -> bool:
 # Reading ANY backslash as a separator refuses `grep "import\.meta\.env"`, because the head
 # `import\.meta` holds a backslash. One identifier deeper than the first case, and the same defect.
 #
-# A head may hold a space, since a quoted path does (`C:\My Dir\.env`).
+# A head holds no space, except in a quote that sits inside the word (`C:\"My Dir"\.env`) or in a
+# quoted word that is a rooted path from its first character (`"C:\My Dir\.env"`). Prose before the
+# backslash (`"see C:\MyDir\.env"`) and a regex (`"\d+ \.env"`) have no root, so they stay text.
 #
 # The residue, stated rather than hidden: a RELATIVE Windows path whose every segment after the
 # first begins with a dot, such as `foo\.config\.env`, is no longer read as a path. Text alone
 # cannot tell it from a regex. The absolute form and the forward-slash form are unaffected.
-ENV_PATH_PREFIX = re.compile(r"^(\.{1,2}|~|[A-Za-z]:|.*(/|\\(?![.\\])).*)$")
+ENV_PATH_PREFIX = re.compile(r"^(\.{1,2}|~|[A-Za-z]:|\S*(/|\\(?![.\\]))\S*)$")
+ENV_QUOTED_ROOT = re.compile(r"^([A-Za-z]:[\\/]|\\\\|~[\\/]|\.{1,2}[\\/]|/)")
+ENV_QUOTED_SPAN = re.compile(r"\"[^\"]*\"|'[^']*'")
 
 # Runners that read the file into their own environment and echo nothing. `npm` and `npx` reach the
 # flag through node, so `node --env-file=.env <npm-cli.js> run x` is the npm form.
@@ -310,6 +314,17 @@ def _glob_could_name_env(word: str) -> bool:
     return False
 
 
+def _joined_spaces(word: str) -> str:
+    """Write each space that belongs to a quoted path as NUL, so the head test, which reads `\\S*`,
+    keeps the path in one word. Those are the spaces inside a quote within the word, and every space
+    of a quoted word that is a rooted path from its first character. A quoted word with prose or a
+    regex before the backslash keeps its spaces, and the head test then reads it as text."""
+    if len(word) > 1 and word[0] in "\"'" and word[-1] == word[0] and word.count(word[0]) == 2:
+        inner = word[1:-1]
+        return inner.replace(" ", "\0") if ENV_QUOTED_ROOT.match(inner) else inner
+    return ENV_QUOTED_SPAN.sub(lambda m: m.group(0).replace(" ", "\0"), word)
+
+
 def env_reference(word: str) -> str:
     """Return the environment file that one shell word names as a path, else ''.
 
@@ -321,7 +336,7 @@ def env_reference(word: str) -> str:
     `'.e'nv` are `.env`, and so does a backslash that is not an escaped dot, so `.e\\nv` is. A
     glob that starts with a dot and could match a name, such as `.en?` or `.env*`, is the name.
     """
-    word = re.sub(r"[\"'`]", "", word).strip("()")
+    word = re.sub(r"[\"'`]", "", _joined_spaces(word)).strip("()")
     for separator in ("/", "\\"):
         head, found, tail = word.rpartition(separator)
         if not found:
@@ -330,7 +345,7 @@ def env_reference(word: str) -> str:
             break  # `process\.env` is an escaped dot, not a Windows separator
         word = tail
         break
-    word = re.sub(r"\\(?!\.)", "", word)
+    word = re.sub(r"\\(?!\.)", "", word.replace("\0", " "))
     if ENV_GLOB.search(word) and word.startswith("."):
         return word if _glob_could_name_env(word) else ""
     return word if names_env_file(word) else ""
@@ -509,7 +524,7 @@ def _quoted_words(segment: str):
 
     while i < n:
         char = segment[i]
-        if char == "\\" and i + 1 < n:
+        if char == "\\" and i + 1 < n and not (segment[i + 1] in SMART_QUOTES and is_powershell(segment)):
             plain.append(segment[i:i + 2])
             i += 2
             continue

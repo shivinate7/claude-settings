@@ -157,19 +157,21 @@ def token_start(text: str, index: int) -> bool:
 
 
 # PowerShell reads these as quote marks. The first four hold a single-quoted string, the rest a
-# double-quoted one, and a string ends at any mark of its own kind. Bash reads them as text.
+# double-quoted one, and a string ends at any mark of its own kind, smart or straight. Bash reads
+# them as text.
 SMART_SINGLE = "\u2018\u2019\u201a\u201b"
-SMART_QUOTES = frozenset(SMART_SINGLE + "\u201c\u201d\u201e")
+SMART_DOUBLE = "\u201c\u201d\u201e"
+SMART_QUOTES = frozenset(SMART_SINGLE + SMART_DOUBLE)
 
 
 def smart_quote_span(text: str, index: int) -> int:
     """In PowerShell text, the index just past the string that the smart quote at `index` opens, or
-    0 when no mark of its kind follows: a lone smart apostrophe in prose opens nothing, so it must
+    0 when no mark of its kind follows (a straight `'` or `"` closes it too): a lone smart apostrophe in prose opens nothing, so it must
     not hide the words after it. Not in PowerShell text, always 0."""
     char = text[index]
     if char not in SMART_QUOTES or not is_powershell(text):
         return 0
-    marks = SMART_SINGLE if char in SMART_SINGLE else "\u201c\u201d\u201e"
+    marks = SMART_SINGLE + "'" if char in SMART_SINGLE else SMART_DOUBLE + '"'
     for end in range(index + 1, len(text)):
         if text[end] in marks:
             return end + 1
