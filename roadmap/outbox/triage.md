@@ -103,3 +103,8 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - spawn-model-any-earlier-match (lane report-guard-spawn-model, #2307): any earlier real spawn of a role can match a model the report names.
 - spawn-model-no-window-spawn-untested (lane report-guard-spawn-model, #2307): a role the report names with no spawn in the window is now checked against earlier models, with no test either way.
 - spawn-model-env-read-order-unmeasured (lane report-guard-spawn-model, #2307): the order of the model reads (call model, then file pin, then env var) is unmeasured.
+- git-fetch-docstring-callers (lane ste-lint-fetch-base, #2270): git_fetch.py's docstring names callers that main does not have (bin/ci-job, actions/code-check).
+- git-fetch-timeout-unknown (lane ste-lint-fetch-base, #2270): the 300 s fetch timeout turns a huge repo into UNKNOWN, which is red under CI.
+- diff-failed-shallow-wording (lane ste-lint-fetch-base, #2270): diff_failed still says "shallow clone" after a full fetch of unrelated history.
+- tag-base-ref-unknown (lane ste-lint-fetch-base, #2270): a tag BASE_REF reads as UNKNOWN.
+- scope-all-ls-files-exit (lane ste-lint-fetch-base, from #2262; #1330 has a finding plus an unread case): `scope all` drops git ls-files' exit code.
