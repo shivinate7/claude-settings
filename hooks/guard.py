@@ -1648,7 +1648,7 @@ WORKFLOW_REL = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 WORKFLOW_STEP_KEYS = {"name", "if", "run", "shell", "working-directory", "timeout-minutes"}
 WORKFLOW_STEP_START = re.compile(r"^(\s*)-\s+(name|run):")
 WORKFLOW_KEY_LINE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z][\w-]*):\s*(.*)$")
-WORKFLOW_INTERPRETERS = {"python", "python3", "py", "node", "bash", "sh", "pwsh"}
+WORKFLOW_INTERPRETERS = {"python", "python3", "node", "bash", "sh", "pwsh"}
 # Interpreter flags whose next token is their value, not the script (`python -X utf8`, `node -r ts-node/register`).
 WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
 # pytest's own value flags (`pytest -k expr F`, `-m mark`, `-c cfg`, `-p plugin`), read only when the runner is
@@ -5064,6 +5064,11 @@ def scratchpad_run_files(text: str, cwd: str, depth: int = 0):
         if depth < SCRATCHPAD_NESTING:
             for inner in inner_commands(tokens):
                 yield from scratchpad_run_files(inner, where or cwd, depth + 1)
+            # A substitution in double quotes runs too (`out="$(python3 F)"`), and its token is quoted, so
+            # `scratchpad_command_words` skips it. `_substitutions` cuts each one out, outside single quotes.
+            if "$(" in segment or "`" in segment:
+                for inner, _in_message in _substitutions(segment)[0][:-1]:
+                    yield from scratchpad_run_files(inner, where or cwd, depth + 1)
 
 
 def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:

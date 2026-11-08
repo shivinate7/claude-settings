@@ -686,9 +686,7 @@ _FED_SHELL = re.compile(
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
 _INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
-# The Windows launcher `py` heads a heredoc only as a whole command word: `cat > gen.py <<EOF` writes a file and
-# `app.py -` is no run, so a `.`, `/` or `-` before it is no word start. Not in `_INTERPRETERS`: `_RUNNER` reads that.
-_INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS + r"|(?<![\w./-])py")
+_INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
 
 
 def SHELL_HEREDOC(text: str) -> bool:
