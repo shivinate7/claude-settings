@@ -4759,18 +4759,26 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_allowed(line)
 
 
-    def test_pe_red_pre_existing_as_the_cause_is_refused(self):
+    def test_pe_green_cause_noun_named_as_the_cause_passes(self):
+        # Ruling (05:28 CST, #1935): a cause noun (issue, problem, bug) makes no failure claim. This case
+        # checks that a cause noun, named as a cause or as a subject, passes.
         rows = [
-            # Catches: "a pre-existing issue" named as the cause of a failure passes.
+            # Catches: "a pre-existing issue" as the cause of a failure is read as a claim.
             "The test fails due to a pre-existing issue.",
-            # Catches: "a pre-existing problem" named as the cause of a failure passes.
+            # Catches: "a pre-existing problem" as the cause of a failure is read as a claim.
             "CI fails from a pre-existing problem.",
-            # Catches: "a pre-existing bug" named as the cause of a red check passes.
+            # Catches: "a pre-existing bug" as the cause of a red check is read as a claim.
             "Lint is red because of a pre-existing bug.",
+            # Catches: "a pre-existing issue" as the cause of a red status is read as a claim.
+            "CI is red, because of a pre-existing issue.",
+            # Catches: "a pre-existing issue" as the subject of a sentence that breaks CI is read as a claim.
+            "A pre-existing issue in the parser breaks CI.",
+            # Catches: "the pre-existing issue" as the subject of a sentence that breaks CI is read as a claim.
+            "The pre-existing issue is breaking CI.",
         ]
         for line in rows:
             with self.subTest(line=line):
-                self.assert_blocked(line, line)
+                self.assert_allowed(line)
 
     def test_pe_green_pre_existing_in_a_noun_or_negated_phrase_passes(self):
         rows = [
@@ -4835,8 +4843,6 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
 
     def test_pe_red_pre_existing_failure_in_a_status_or_count_is_refused(self):
         rows = [
-            # Catches: a red status with "because of a pre-existing issue" passes as a cause.
-            "CI is red, because of a pre-existing issue.",
             # Catches: "pre-existing red tests" blocking a merge passes.
             "Two pre-existing red tests block the merge.",
             # Catches: a count of "pre-existing red suites" with no verb passes.
@@ -4847,10 +4853,6 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
             "Already red vs main.",
             # Catches: "main already red" with no run passes.
             "Main already red.",
-            # Catches: a pre-existing issue in a named part that breaks CI passes.
-            "A pre-existing issue in the parser breaks CI.",
-            # Catches: a pre-existing issue that is breaking CI passes.
-            "The pre-existing issue is breaking CI.",
         ]
         for line in rows:
             with self.subTest(line=line):
