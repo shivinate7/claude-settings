@@ -18,7 +18,7 @@ The cases pin this contract:
 - A comment that states a run's colour or result on a head, on main or on the base is history.
   It fails under the `history phrase` pattern. A colour phrase after when, if, unless, until, while or once in the
   same clause is a condition and stays clean.
-- A run of 200 slashes before a date ends within the scan bound, and the date stays flagged.
+- A run of 60 slashes before a date stays flagged, and the cost of the cite match grows near-linearly with the run.
 - The check is one file. The suite copies only that file into the fixture repo, so the check finds
   the repo from its working directory or from its own location, and both give the fixture repo.
 """
@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -498,16 +499,59 @@ class Quiet(Case):
                      if "date:" not in (self.hit_line(out, "n%d.py" % i, 2) or "")]
         self.assertEqual(unflagged, [], "a dated line that is not a cite is not flagged as a date:\n" + out)
 
-    def test_long_slash_run_before_a_date_is_flagged_within_the_bound(self):
-        # A run of slashes is not a cite, so the date stays flagged. The timeout keeps a stalled scan from hanging.
-        run = "/" * 200 + " Section 2026-11-08"
+    def test_ruling_cite_after_a_docstring_opener_passes(self):
+        src = ('def f():\n    """Owner, 2026-11-01 16:30 CST\n    """\n    return 1\n'
+               "def g():\n    '''Owner, 2026-11-01 16:30 CST\n    '''\n    return 2\n"
+               "# fixed in round 2\n")
+        _, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        flagged = [n for n in (2, 6) if self.hit_line(out, "cite.py", n)]
+        self.assertEqual(flagged, [], "a ruling cite after a docstring opener is flagged as a date:\n" + out)
+
+    def test_ruling_cite_with_hour_24_stays_flagged(self):
+        src = "x = 1\n# Owner, 2026-11-01 24:00 CST\n# fixed in round 2\ny = 2\n"
+        _, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        row = self.hit_line(out, "cite.py", 2)
+        self.assertIsNotNone(row, "a cite with hour 24 is exempt, so its date is not flagged:\n" + out)
+        self.assertIn("date: 2026-11-01", row, out)
+
+    def test_ruling_cite_with_minute_60_stays_flagged(self):
+        src = "x = 1\n# Owner, 2026-11-01 16:60 CST\n# fixed in round 2\ny = 2\n"
+        _, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        row = self.hit_line(out, "cite.py", 2)
+        self.assertIsNotNone(row, "a cite with minute 60 is exempt, so its date is not flagged:\n" + out)
+        self.assertIn("date: 2026-11-01", row, out)
+
+    def test_long_slash_run_before_a_date_is_flagged_and_its_cost_grows_near_linearly(self):
+        # A run of slashes is not a cite, so the date stays flagged. The cost is timed in this process: the fastest of
+        # five cite matches on a 60-slash run against the fastest on a 30-slash run. Linear growth doubles the cost.
+        # Backtracking that grows exponentially multiplies it, as the old `///|//!|//` alternatives did.
+        import check_comment_narration as checker
+        dated = checker.DatedText()
+
+        def fastest(n):
+            text = "/" * n + " Section 2026-11-08"
+            best, dates = None, None
+            for _ in range(5):
+                start = time.perf_counter()
+                dates = [m.group(0) for m in dated.finditer(text)]
+                elapsed = time.perf_counter() - start
+                best = elapsed if best is None else min(best, elapsed)
+            return best, dates
+
+        slow, dates = fastest(60)
+        fast, _ = fastest(30)
+        self.assertEqual(dates, ["2026-11-08"], "a date after a 60-slash run is not flagged")
+        ratio = slow / max(fast, 1e-7)
+        self.assertLess(ratio, 8, "the cite match grows faster than linear: 60 slashes cost %.1fx 30 slashes" % ratio)
+
+        run = "/" * 60 + " Section 2026-11-08"
         files = {"slash.py": "x = 1\n# %s\ny = 2\n" % run, "Slash.swift": "let x = 1\n// %s\n" % run}
         self.base({"keep.py": "x = 1\n"})
         self.change(files)
-        try:
-            rc, out = self.lint(timeout=5)
-        except subprocess.TimeoutExpired:
-            self.fail("the scan did not end within 5 s on a 200-slash comment before a date")
+        rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         for path in ("slash.py", "Slash.swift"):
             row = self.hit_line(out, path, 2)
@@ -713,6 +757,20 @@ class Scripts(Case):
 
 @NEEDS_TSC
 class JsTsScan(Case):
+    def test_ruling_cite_after_a_block_comment_opener_passes(self):
+        src = ("/* Owner, 2026-11-01 16:30 CST */\n"
+               "/**\n"
+               " * Owner, 2026-11-01 16:30 CST\n"
+               " */\n"
+               "const a = 1;\n"
+               "// fixed in round 2\n")
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"cite.js": src})
+        _, out = self.lint(path_tools=True)
+        self.assertHit(out, "cite.js", at(src, "fixed in round 2"))
+        flagged = [n for n in (1, 3) if self.hit_line(out, "cite.js", n)]
+        self.assertEqual(flagged, [], "a ruling cite after a block comment opener is flagged as a date:\n" + out)
+
     def test_comment_openers_in_strings_do_not_hide_the_real_comment_after_them(self):
         src = 'const a = "//";\nconst b = "fixed on 2026-10-28" + \'/*\';\nconst c = "#"; // fixed in round 2\n'
         self.base({"keep.js": "const k = 1;\n"})
