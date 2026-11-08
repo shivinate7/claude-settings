@@ -11131,6 +11131,15 @@ records_refusal("judged folder: a generator run for this lane, then commit -am, 
                 "cd " + LANE + " && " + GEN + " --root . && " + COMMIT_AM + " && cd " + RECMAIN, NOGIT)
 records_refusal("judged folder control: a generator run for this lane, then commit -am, with no cd after",
                 "cd " + LANE + " && " + GEN + " --root . && " + COMMIT_AM, NOGIT)
+# A `||` runs its right side only when the left side fails, so a `cd` after `||` may not have run. Here `cd LANE`
+# may work, leaving the shell in the lane, where the generator (--root this lane) has rewritten the page. The guard
+# cannot tell whether that `cd` ran, so the commit's folder is unknown, and the commit is refused.
+records_refusal("maybe-skipped cd after ||: cd lane || cd main, then a generator run for this lane, then commit -am",
+                "cd " + LANE + " || cd " + RECMAIN + " && " + GEN + " --root " + LANE + " && " + COMMIT_AM, NOGIT)
+# The narrowness control: a `cd` after `&&` always runs, so no earlier `cd` is maybe-skipped here. The generator run
+# is for another repo and writes none of the lane's page, so the commit, judged in the lane, is allowed.
+records_allow("a cd after && runs: cd lane && a generator run for another repo, then commit -am, from NOGIT",
+              "cd " + LANE + " && " + GEN + " --root " + OTHER_REPO + " && " + COMMIT_AM, NOGIT)
 
 # =========================================================================== 5d. conflict markers
 #
