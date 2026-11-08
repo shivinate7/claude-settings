@@ -1232,6 +1232,29 @@ class GitLockListing(Env):
                 self.lock.listed(ref)
         self.assertTrue(seen, "scope: ls-remote never ran through the faked call, so the case proves nothing")
 
+    def test_a_failed_listing_keeps_its_stderr_for_is_net(self):
+        """A failed ls-remote keeps its stderr: is_net reads the network line there, and the lock read stops as a network stop."""
+        ref = merge.lock_ref("main")
+        real, seen = merge._nowindow.run, []
+        def run_with_dropped_listing(args, *a, **kw):
+            if args[1:2] == ["-C"] and args[3:4] == ["ls-remote"]:
+                seen.append(args)
+                return subprocess.CompletedProcess(args, 128, stdout="", stderr=LockRetake.NET_DROP)
+            return real(args, *a, **kw)
+        with unittest.mock.patch.object(merge._nowindow, "run", run_with_dropped_listing):
+            self.assertTrue(merge.is_net(128, LockRetake.NET_DROP), "scope: the faked listing's stderr is no network error line")
+            rc, out = merge.sh(["git", "-C", self.co, "ls-remote", "origin", ref])
+            self.assertTrue(seen, "scope: ls-remote never reached the faked run, so the case proves nothing")
+            self.assertIn(LockRetake.NET_DROP, out, "a failed listing lost its stderr, so is_net has no network line to read")
+            self.assertTrue(merge.is_net(rc, out), "a failed listing with its stderr kept is not read as a network error")
+            try:
+                self.lock.listed(ref)
+            except merge.Stop as e:
+                stopped = e
+            else:
+                self.fail("listed read a dropped listing as no stop at all")
+        self.assertIsInstance(stopped, merge.NetStop, "listed stopped a dropped listing as a plain Stop, not as a network stop")
+
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
         old = self.head()
