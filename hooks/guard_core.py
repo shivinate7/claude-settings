@@ -998,9 +998,20 @@ def _kept_bodies(text: str, bodies, body_at) -> set:
         keep |= more
 
 
+class _Stripped(str):
+    """The output of `strip_heredoc_bodies`, with the text it came from in `source`.
+
+    The output holds each header with no closing line, so reading it as a command again takes every
+    line after a header for that header's body. The callers that strip for good (`_strip_heredoc_bodies_
+    unconditionally`, so `_run_dir`, `push_target`, `bare_background_hit`) read `source` instead, and
+    so strip the command once. A slice or a join of the output is a plain `str` and has no `source`."""
+    source = ""
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines."""
+    cmd = getattr(cmd, "source", "") or cmd   # the output of this strip, stripped again: read its source
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
     body_at = []
@@ -1026,7 +1037,9 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
         return cmd  # the body may be executed, so keep it under inspection
     # A body stays in view only when a command runs the file it writes; every other body is text.
     keep = _kept_bodies(text, bodies, body_at)
-    return "\n".join([_drop_heredoc_bodies(cmd, keep) if keep else dropped] + runs)
+    stripped = _Stripped("\n".join([_drop_heredoc_bodies(cmd, keep) if keep else dropped] + runs))
+    stripped.source = cmd
+    return stripped
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
@@ -1351,7 +1364,7 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
     kept for its OWN question, which is what a write or a refused command might say, not where
     the shell sits. The walk itself is `_drop_heredoc_bodies`, shared with that function.
     """
-    return _drop_heredoc_bodies(cmd)
+    return _drop_heredoc_bodies(getattr(cmd, "source", "") or cmd)   # the source of a strip's output, if it is one
 
 
 def _run_dir(cmd: str, shell_cwd: str) -> str:
