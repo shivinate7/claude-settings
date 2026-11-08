@@ -114,6 +114,7 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
+    "brief-scope": "an agent's commit, push and stop against the paths its brief names: a modified or deleted file outside them is refused, and a new file or a brief that names no path or cannot be read is logged and allowed",
     "impeccable": "impeccable is review-only",
     "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
@@ -14981,30 +14982,38 @@ def role_log_case():
     return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
 
 
-def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
-    """Run commit, push and stop for one agent in `repo`, or push and stop alone when `commit` is False.
-    Returns (stdout seen, guard.log rows)."""
-    materialize(repo)
+def _log_run(folder, bodies):
+    """Each payload through the guard, with `folder` as its config folder and guard.log. Returns each call's
+    stdout, in order, and the log's rows. A call that prints nothing is an allow."""
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
-    env.pop("CLAUDE_CODE_REMOTE", None)
+    for name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID",
+                 "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)
     env["CLAUDE_CONFIG_DIR"] = folder
-    env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    outs = []
+    for body in bodies:
+        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+                             text=True, env=env, timeout=120)
+        outs.append(got.stdout.strip())
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return outs, [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
+    """Run commit, push and stop for one agent in `repo`, or push and stop alone when `commit` is False.
+    Returns (stdout seen, guard.log rows)."""
+    materialize(repo)
     bodies = [{"tool_name": "Bash", "tool_input": {"command": c}, "cwd": repo,
                "agent_id": agent_id, "agent_type": agent_type} for c in ((COMMIT, PUSH) if commit else (PUSH,))]
     bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
                    "agent_type": agent_type})
-    out = ""
-    for body in bodies:
-        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
-                             text=True, env=env, timeout=120)
-        out += got.stdout.strip()
-    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
-    return out, [line.split("\t") for line in text.splitlines() if line.strip()]
+    outs, rows = _log_run(folder, bodies)
+    return "".join(outs), rows
 
 
 def _guard_answers(text):
@@ -15813,6 +15822,303 @@ def xctestplan_logs_case():
 
 LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line logs nothing, and a "
                          "test-author's plan edit logs no author-diff line", xctestplan_logs_case))
+
+
+# =========================================================================== brief scope
+#
+# An agent's commit, push and stop are judged against the paths its brief names (roadmap step
+# agent-commit-file-scope). A modified or deleted existing file outside them is refused under rule
+# brief-scope-diff, and the reason names no path. A new file is logged and allowed. A brief that names no
+# path, or cannot be read, is logged and allowed. The brief is the agent's own first user message, in its
+# own transcript, never another agent's. A generated page never counts. Judged roles: builder, test-author
+# and record-writer. The refusal is final: no override lifts it (decision owner-override).
+FAMILY = "brief-scope"
+BS_RULE = "brief-scope-diff"
+BS_NEW = "brief-scope-new"
+BS_UNNAMED = "brief-scope-unnamed"
+BS_UNREAD = "brief-scope-unread"
+# Both must be read: the undo the refusal gives, and the route for a need the brief did not name.
+BS_REMEDY = ("restore", "orchestrator")
+BS_TIME = "2026-11-08T10:00:00Z"
+BS_PROJECT = os.path.join(ROOT, "briefscope", "projects", "-briefscope-slug")
+BS_SESSION = "briefscope-session-0001"
+BS_TRANSCRIPT = os.path.join(BS_PROJECT, BS_SESSION + ".jsonl")   # the payload's transcript_path
+BS_TOOL_NOTES = ["notes/tool-a-%02d.md" % n for n in range(1, 13)]   # twelve notes of another tool
+BS_BASE = {**BASE_FILES, "src/contest/old.py": "z = 1\n", "src/myapp.py": "m = 1\n",
+           "hooks/test_guard.py": "def test_g():\n    assert True\n",
+           "lint/test_retired_repos.py": "def test_retired():\n    assert True\n",
+           "docs/catalog.md": "catalog\n", "docs/records.md": "records\n", "docs/map/hooks.md": "map\n"}
+BS_NOTES_BASE = {**BASE_FILES, "notes/verdict-1.md": "v1\n", "notes/verdict-2.md": "v2\n",
+                 **{name: "t\n" for name in BS_TOOL_NOTES}}
+# The briefs, by key. Each is one agent's first user message.
+BS_BRIEFS = {
+    "exact": "Task: fix the contest score.\nFiles: `src/app.py`. Report in 10 lines.",
+    "bare": "Task: fix the contest score.\nFiles: app.py. Report in 10 lines.",
+    "dir": "Task: add the contest cases.\nFiles: the cases under `src/contest/`. Report in 10 lines.",
+    "glob": "Task: tidy the sources.\nFiles: `src/*.py`. Report in 10 lines.",
+    "nopaths": "Task: make the timeout case pass and report back.",
+    "lone": "Don't rewrite the parser.\nFiles: `src/app.py`. Report in 10 lines.",
+    "author": "Task: add the retired-repos case.\nFiles: `hooks/test_guard.py`. Report in 10 lines.",
+    "notes": "Task: write the verdict notes.\nFiles: the notes named by the prefix `verdict-`. Report in 10 lines.",
+    "other": "Task: fix the contest score.\nFiles: `src/contest.py`. Report in 10 lines.",
+}
+
+
+def _bs_user(content):
+    """One user record, as the harness writes it. The content is a string, or a list of text blocks."""
+    return json.dumps({"type": "user", "timestamp": BS_TIME,
+                       "message": {"role": "user", "content": content}})
+
+
+BS_LINES = {key: [_bs_user(text)] for key, text in BS_BRIEFS.items()}
+# The first user message is the brief. A later one that names a path adds nothing.
+BS_LINES["later"] = [_bs_user(BS_BRIEFS["exact"]),
+                     _bs_user("Also change `src/contest.py` while you are there.")]
+# A brief whose content is a list of text blocks, the other shape a user record takes.
+BS_LINES["list"] = [json.dumps({"type": "user", "timestamp": BS_TIME, "message": {
+    "role": "user", "content": [{"type": "text", "text": BS_BRIEFS["exact"]}]}})]
+# One id per agent, none a prefix of another. `missing` gets no file; `unreadable` gets a folder.
+BS_IDS = {key: "b5a%013x" % n for n, key in enumerate(
+    ["exact", "bare", "dir", "glob", "nopaths", "lone", "author", "notes", "other", "later", "list",
+     "missing", "unreadable"], 1)}
+
+
+def bs_agent(key):
+    """The agent's own transcript, beside the session's: `<session stem>/subagents/agent-<id>.jsonl`."""
+    return os.path.join(BS_PROJECT, BS_SESSION, "subagents", "agent-%s.jsonl" % BS_IDS[key])
+
+
+def build_bs_transcripts():
+    write(BS_TRANSCRIPT, _bs_user("session") + "\n")
+    for key, lines in BS_LINES.items():
+        write(bs_agent(key), "\n".join(lines) + "\n")
+    os.makedirs(bs_agent("unreadable"), exist_ok=True)   # a folder where the file belongs: open() fails
+
+
+lazy_fixture([BS_TRANSCRIPT] + [bs_agent(key) for key in BS_IDS], build_bs_transcripts)
+
+
+def bs_repo(name, change, files=None):
+    return diff_repo("bs-" + name, change, files=files or BS_BASE)
+
+
+def _write_all(*pairs):
+    """A change that writes each (path, text) pair into the worktree."""
+    def go(w):
+        for rel, text in pairs:
+            write(os.path.join(w, rel), text)
+    return go
+
+
+bs_app_unnamed = bs_repo("app-unnamed", _put("src/contest.py", "y = 2\n"))   # only `other` names this file
+bs_app_named = bs_repo("app-named", _put("src/app.py", "x = 2\n"))
+bs_new_file = bs_repo("new-file", _write_all(("src/app.py", "x = 2\n"), ("src/new_helper.py", "n = 1\n")))
+bs_mixed = bs_repo("mixed", _write_all(("src/new_helper.py", "n = 1\n"), ("src/contest.py", "y = 2\n")))
+bs_deleted = bs_repo("deleted", _rm("src/contest.py"))
+bs_dir_named = bs_repo("dir-named", _put("src/contest/old.py", "z = 2\n"))
+bs_myapp = bs_repo("myapp", _put("src/myapp.py", "m = 2\n"))
+bs_results = bs_repo("results", _put("latest_results.md", "better\n"))
+bs_generated = bs_repo("generated", _write_all(("src/app.py", "x = 2\n"), ("docs/catalog.md", "catalog 2\n"),
+                                               ("docs/records.md", "records 2\n"), ("docs/map/hooks.md", "map 2\n")))
+bs_author_named = bs_repo("author-named", _put("hooks/test_guard.py", "def test_g():\n    assert 1\n"))
+bs_author_retired = bs_repo("author-retired", _put("lint/test_retired_repos.py", "def test_retired():\n    assert 1\n"))
+bs_notes_named = bs_repo("notes-named", _write_all(("notes/verdict-1.md", "v1 2\n"),
+                                                   ("notes/verdict-2.md", "v2 2\n")), files=BS_NOTES_BASE)
+bs_notes_other = bs_repo("notes-other", _write_all(("notes/verdict-1.md", "v1 2\n"),
+                                                   *[(name, "t 2\n") for name in BS_TOOL_NOTES]),
+                         files=BS_NOTES_BASE)
+
+
+def bs_judge(name, expected, repo, role=None, key=None, command=COMMIT, transcript=True, rule=None, lacks=()):
+    """One commit or push by an agent of `role` whose brief is `key`. Role None is the main session."""
+    sh(name, command, expected, rule=rule, cwd=repo, agent_id=BS_IDS[key] if key else None,
+       agent_type=role, transcript=BS_TRANSCRIPT if transcript else None, lacks=lacks,
+       carries=BS_REMEDY if rule else ())
+
+
+def bs_stop(name, expected, repo, role, key, stop_active=False, rule=None, lacks=()):
+    """The agent's SubagentStop, with both transcript fields the harness sends at a stop."""
+    body = {"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": BS_IDS[key], "agent_type": role,
+            "transcript_path": BS_TRANSCRIPT, "agent_transcript_path": bs_agent(key)}
+    if stop_active:
+        body["stop_hook_active"] = True
+    add(name, expected, rule=rule, raw=json.dumps(body), cwd=repo, lacks=lacks,
+        carries=BS_REMEDY if rule else ())
+
+
+# ---- refused: a modified or deleted file outside the brief, at commit, push and the first stop
+bs_judge("brief-scope: a builder's commit of an unnamed existing file is denied", "deny", bs_app_unnamed,
+         "builder", "exact", rule=BS_RULE, lacks="src/contest.py")
+bs_judge("brief-scope: a builder's push of an unnamed existing file is denied", "deny", bs_app_unnamed,
+         "builder", "exact", command=PUSH, rule=BS_RULE, lacks="src/contest.py")
+bs_stop("brief-scope: a builder's first stop with an unnamed existing file is blocked", "deny", bs_app_unnamed,
+        "builder", "exact", rule=BS_RULE, lacks="src/contest.py")
+# The second stop of that same diff is allowed (stop_hook_active). Its log line is in the log checks below.
+bs_stop("brief-scope: a builder's second stop with that file is allowed", "allow", bs_app_unnamed,
+        "builder", "exact", stop_active=True)
+bs_judge("brief-scope: a test-author's commit of an unnamed test file is denied", "deny", bs_author_retired,
+         "test-author", "author", rule=BS_RULE, lacks="lint/test_retired_repos.py")
+bs_judge("brief-scope: a test-author's push of an unnamed test file is denied", "deny", bs_author_retired,
+         "test-author", "author", command=PUSH, rule=BS_RULE, lacks="lint/test_retired_repos.py")
+bs_stop("brief-scope: a test-author's first stop with an unnamed test file is blocked", "deny", bs_author_retired,
+        "test-author", "author", rule=BS_RULE, lacks="lint/test_retired_repos.py")
+bs_judge("brief-scope: a record-writer's commit of 12 notes its brief does not name is denied", "deny",
+         bs_notes_other, "record-writer", "notes", rule=BS_RULE, lacks="notes/tool-a-01.md")
+bs_judge("brief-scope: a record-writer's push of 12 notes its brief does not name is denied", "deny",
+         bs_notes_other, "record-writer", "notes", command=PUSH, rule=BS_RULE, lacks="notes/tool-a-01.md")
+bs_stop("brief-scope: a record-writer's first stop with 12 notes its brief does not name is blocked", "deny",
+        bs_notes_other, "record-writer", "notes", rule=BS_RULE, lacks="notes/tool-a-01.md")
+bs_judge("brief-scope: a deleted unnamed file is denied", "deny", bs_deleted, "builder", "exact",
+         rule=BS_RULE, lacks="src/contest.py")
+bs_judge("brief-scope: a new unnamed file beside a modified unnamed one is denied", "deny", bs_mixed,
+         "builder", "exact", rule=BS_RULE, lacks="src/contest.py")
+bs_judge("brief-scope: a dir ending in a slash does not name a file that only shares its prefix", "deny",
+         bs_app_unnamed, "builder", "dir", rule=BS_RULE, lacks="src/contest.py")
+bs_judge("brief-scope: a bare basename does not name a file that only contains it", "deny", bs_myapp,
+         "builder", "bare", rule=BS_RULE, lacks="src/myapp.py")
+bs_judge("brief-scope: a glob names only the files it matches", "deny", bs_results, "builder", "glob",
+         rule=BS_RULE, lacks="latest_results.md")
+bs_judge("brief-scope: a lone apostrophe in the brief does not hide its named path", "deny", bs_app_unnamed,
+         "builder", "lone", rule=BS_RULE, lacks="src/contest.py")
+bs_judge("brief-scope: only the first user message of the agent's transcript is its brief", "deny",
+         bs_app_unnamed, "builder", "later", rule=BS_RULE, lacks="src/contest.py")
+bs_judge("brief-scope: a brief whose content is a list of text blocks is read", "deny", bs_app_unnamed,
+         "builder", "list", rule=BS_RULE, lacks="src/contest.py")
+# ---- allowed: a file the brief names, a file it covers, a generated page, a new file, and the non-judged calls
+bs_judge("brief-scope: a file named exactly is allowed", "allow", bs_app_named, "builder", "exact")
+bs_judge("brief-scope: a file under a named dir is allowed", "allow", bs_dir_named, "builder", "dir")
+bs_judge("brief-scope: a file a named glob matches is allowed", "allow", bs_app_named, "builder", "glob")
+bs_judge("brief-scope: a named bare basename allows its file", "allow", bs_app_named, "builder", "bare")
+bs_judge("brief-scope: a generated page beside the named file is not counted", "allow", bs_generated,
+         "builder", "exact")
+bs_judge("brief-scope: a record-writer's commit of the named notes is allowed", "allow", bs_notes_named,
+         "record-writer", "notes")
+bs_stop("brief-scope: a record-writer's first stop with the named notes is allowed", "allow", bs_notes_named,
+        "record-writer", "notes")
+bs_judge("brief-scope: a test-author's commit of the named test file is allowed", "allow", bs_author_named,
+         "test-author", "author")
+bs_judge("brief-scope: an agent may commit a file its own brief names, though another brief names it too",
+         "allow", bs_app_unnamed, "builder", "other")
+bs_judge("brief-scope: a new unnamed file is allowed", "allow", bs_new_file, "builder", "exact")
+bs_judge("brief-scope: a brief that names no path allows an unnamed file", "allow", bs_app_named, "builder",
+         "nopaths")
+bs_judge("brief-scope: a brief file that is missing allows the commit", "allow", bs_app_unnamed, "builder",
+         "missing")
+bs_judge("brief-scope: a brief file that cannot be read allows the commit", "allow", bs_app_unnamed,
+         "builder", "unreadable")
+bs_judge("brief-scope: a call with no transcript path allows the commit", "allow", bs_app_unnamed, "builder",
+         "exact", transcript=False)
+bs_judge("brief-scope: the main session's commit is not judged", "allow", bs_app_unnamed)
+bs_judge("brief-scope: a reviewer's commit is not judged", "allow", bs_app_unnamed, "reviewer", "exact")
+
+
+def _bs_scope(repo, rel):
+    """The fixture's own change, read from git before any guard call: a log check judges only what it built."""
+    status = run_vcs(repo, "status", "--porcelain", "--untracked-files=all")
+    if rel in status.stdout:
+        return ""
+    return "the fixture does not change %s in %s: %s" % (rel, repo, status.stdout.strip()[:80])
+
+
+def _bs_bodies(repo, role, key, commands, transcript=True, stop_active=False):
+    """The payloads of one agent: each command, then its SubagentStop, as the harness sends them."""
+    base = {"cwd": repo, "agent_type": role}
+    if key:
+        base["agent_id"] = BS_IDS[key]
+    if transcript:
+        base["transcript_path"] = BS_TRANSCRIPT
+    bodies = [dict(base, tool_name="Bash", tool_input={"command": c}) for c in commands]
+    stop = dict(base, hook_event_name="SubagentStop")
+    if transcript and key:
+        stop["agent_transcript_path"] = bs_agent(key)
+    if stop_active:
+        stop["stop_hook_active"] = True
+    return bodies + [stop]
+
+
+def bs_logged(folder, repo, changed, bodies, rule, startswith=False):
+    """Scope first: the fixture changed each path in `changed`. Then every call is allowed and the log holds `rule`."""
+    materialize(repo)
+    materialize(BS_TRANSCRIPT)
+    for rel in changed:
+        problem = _bs_scope(repo, rel)
+        if problem:
+            return False, problem
+    outs, rows = _log_run(folder, bodies)
+    decisions = [read_decision(out)[0] for out in outs]
+    rules = [row[3] for row in rows if len(row) > 3]
+    problems = []
+    if any(d != "allow" for d in decisions):
+        problems.append("expected an allow at each call, got %r" % decisions)
+    if not any(r == rule or (startswith and r.startswith(rule)) for r in rules):
+        problems.append("no %s line in the log: %r" % (rule, rules))
+    return (not problems), ("; ".join(problems) or "each call allowed, and the log holds %s" % rule)
+
+
+def bs_new_log():
+    return bs_logged(os.path.join(ROOT, "briefscope-log-new"), bs_new_file, ["src/new_helper.py", "src/app.py"],
+                     _bs_bodies(bs_new_file, "builder", "exact", [COMMIT]), BS_NEW)
+
+
+def bs_nopaths_log():
+    return bs_logged(os.path.join(ROOT, "briefscope-log-nopaths"), bs_app_named, ["src/app.py"],
+                     _bs_bodies(bs_app_named, "builder", "nopaths", [COMMIT]), BS_UNNAMED)
+
+
+def bs_second_stop_log():
+    return bs_logged(os.path.join(ROOT, "briefscope-log-second-stop"), bs_app_unnamed, ["src/contest.py"],
+                     _bs_bodies(bs_app_unnamed, "builder", "exact", [], stop_active=True), "brief-scope",
+                     startswith=True)
+
+
+def bs_unread_log():
+    """A brief that cannot be read allows each call and logs brief-scope-unread: no transcript path, no file, a folder."""
+    materialize(bs_app_unnamed)
+    materialize(BS_TRANSCRIPT)
+    problem = _bs_scope(bs_app_unnamed, "src/contest.py")
+    if problem:
+        return False, problem
+    problems = []
+    for suffix, key, transcript in (("no-path", "exact", False), ("missing", "missing", True),
+                                    ("folder", "unreadable", True)):
+        outs, rows = _log_run(os.path.join(ROOT, "briefscope-log-" + suffix),
+                              _bs_bodies(bs_app_unnamed, "builder", key, [COMMIT], transcript=transcript))
+        decisions = [read_decision(out)[0] for out in outs]
+        rules = [row[3] for row in rows if len(row) > 3]
+        if any(d != "allow" for d in decisions):
+            problems.append("%s: expected an allow at each call, got %r" % (suffix, decisions))
+        if BS_UNREAD not in rules:
+            problems.append("%s: no %s line in the log: %r" % (suffix, BS_UNREAD, rules))
+    return (not problems), ("; ".join(problems) or "an unreadable brief allows each call and logs %s" % BS_UNREAD)
+
+
+def bs_fixture_check():
+    """Each fixture holds the change its cases judge, read from git first: a red case then fails on the rule, not on its repo."""
+    wants = [(bs_app_unnamed, "src/contest.py"), (bs_app_named, "src/app.py"),
+             (bs_new_file, "src/new_helper.py"), (bs_new_file, "src/app.py"),
+             (bs_mixed, "src/new_helper.py"), (bs_mixed, "src/contest.py"), (bs_deleted, "src/contest.py"),
+             (bs_dir_named, "src/contest/old.py"), (bs_myapp, "src/myapp.py"), (bs_results, "latest_results.md"),
+             (bs_generated, "src/app.py"), (bs_generated, "docs/catalog.md"), (bs_generated, "docs/records.md"),
+             (bs_generated, "docs/map/hooks.md"), (bs_author_named, "hooks/test_guard.py"),
+             (bs_author_retired, "lint/test_retired_repos.py"), (bs_notes_named, "notes/verdict-1.md"),
+             (bs_notes_named, "notes/verdict-2.md")]
+    wants += [(bs_notes_other, name) for name in ["notes/verdict-1.md"] + BS_TOOL_NOTES]
+    for repo, rel in wants:
+        materialize(repo)
+        problem = _bs_scope(repo, rel)
+        if problem:
+            return False, problem
+    return True, "every fixture holds the change its cases judge (%d paths)" % len(wants)
+
+
+LOG_CHECKS_EXTRA.append(("brief-scope: each fixture repo holds the change its cases judge", bs_fixture_check))
+LOG_CHECKS_EXTRA.append(("brief-scope: a new unnamed file is allowed and logged brief-scope-new", bs_new_log))
+LOG_CHECKS_EXTRA.append(("brief-scope: a brief that names no path is allowed and logs brief-scope-unnamed",
+                         bs_nopaths_log))
+LOG_CHECKS_EXTRA.append(("brief-scope: an unreadable brief is allowed and logs brief-scope-unread, with no "
+                         "transcript path, a missing file or a folder", bs_unread_log))
+LOG_CHECKS_EXTRA.append(("brief-scope: a second stop with an unnamed file is allowed and logs a brief-scope "
+                         "line", bs_second_stop_log))
 
 
 # =========================================================================== builder refusal
