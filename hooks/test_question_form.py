@@ -34,6 +34,9 @@ Interface the module must match (the lane's form contract):
   is the text of question_form.PAGE_REASONS, the one table guard.py prints from.
 - A closed item passes. An update is judged only for the fields it carries. A str_replace on `context`
   that removes a Goal, Problem or Based on line is refused.
+- A waiting-page task's Why yours line (rule task-why-cited, decision claims-carry-backing part (v)): a
+  capability reason needs a cite that holds on this surface, a `(route <id>)` whose row says refused or asks, or a
+  dated `(measured <date>, ...)`. The page reads no refusals file. Cases: case_task_why_cited_reds and _greens.
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
   chat_hit names; the model sees only a box that passes.
 
@@ -43,13 +46,16 @@ the chat surface from one table (FORM_VARIANTS). The call_judge cases reuse test
 one home of the model stub). Temp files: the run folder of lint/_test_temp.py, whose sweep
 lint/test_find_copies.py proves once (decision test-temp-standard).
 """
+import atexit
 import contextlib
 import copy
 import io
 import json
 import os
 import re
+import shutil
 import sys
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -62,6 +68,9 @@ check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
+import route_match  # noqa: E402  the rows-file reader; the task-why cases count its reads
+import test_refusal_note as hook_base  # noqa: E402  the route-row fixture (one home), with its own run folder
+atexit.register(shutil.rmtree, hook_base.RUN, ignore_errors=True)  # that folder is not this module's, so it goes here
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 
 try:
@@ -168,7 +177,10 @@ def call(name, *args):
 
 
 def guard_hit(op, entry):
-    return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+    try:
+        return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+    except Exception as exc:  # a crash is a wrong verdict, shown by name, as call() shows it
+        return ("RAISED", "%s: %s" % (type(exc).__name__, exc))
 
 
 def verdict(name, got, want):
@@ -389,15 +401,190 @@ def case_str_replace():
     replace("on why is not judged", PROBLEM, "A keeps the allow list to one form.", None, field="why")
 
 
-def case_batch():
-    def batch(writes):
-        return guard.data_tool_hit({"url": PAGE_URL, "action": "batch", "writes": writes}, PAGE_REPO)
+def page_batch(writes):
+    """guard.data_tool_hit on one ArtifactData batch of waiting-page writes."""
+    return guard.data_tool_hit({"url": PAGE_URL, "action": "batch", "writes": writes}, PAGE_REPO)
 
+
+def case_batch():
     good = {"op": "set", "collection": "items", "doc_id": DOC, "data": page_item()}
     bad = {"op": "set", "collection": "items", "doc_id": "second", "data": ITEM92}
-    verdict("page guard: a batch of items that meet the form passes", batch([good, dict(good, doc_id="second")]), None)
-    verdict("page guard: a batch whose second write has no Problem line is refused", batch([good, bad]),
+    verdict("page guard: a batch of items that meet the form passes", page_batch([good, dict(good, doc_id="second")]),
+            None)
+    verdict("page guard: a batch whose second write has no Problem line is refused", page_batch([good, bad]),
             (FORM_RULE, "Problem"))
+
+
+# ------------------------------------------------------------------ a task's Why yours line cites what it claims
+#
+# Rule task-why-cited (decision claims-carry-backing, part (v)). The Why yours line of a waiting-page task
+# is judged on its cite: a capability reason needs one, and the cite must hold on this surface. The page accepts a
+# route cite and a dated measured cite, and no refusals-file cite. Each case judges one write through
+# guard.data_tool_hit alone, with its rows in a file of this run's folder and the surface pinned to local.
+
+WHY_RULE = "task-why-cited"
+CAP = "Why yours: the cloud proxy refused the delete (403)"  # a capability reason: "refused" and "403"
+STEPS = ["Open Terminal"]
+BACKTICK_TOOL = "mcp__claude-code-remote__archive_session"
+# The rows the cases cite. The first three are on the local surface the cases pin; r-cloud-only is on the cloud one.
+WHY_ROWS = [hook_base.route_row("r-refused", "delete_branch", "refused", surface="local"),
+            hook_base.route_row("r-asks", "ask_first", "asks", surface="local", route="ask-first"),
+            hook_base.route_row("r-works", "gh_api", "works", surface="local", route="gh-api"),
+            hook_base.route_row("r-cloud-only", "archive_session", "refused", surface="cloud")]
+
+
+def rows_at(name, rows):
+    """A route rows file named `name` in this run's folder, holding `rows`. Its path."""
+    path = os.path.join(RUN_FOLDER, name)
+    hook_base.write_route_rows(path, rows)
+    return path
+
+
+@contextlib.contextmanager
+def local_rows(path):
+    """The rows seam at `path`, on the local surface. The cloud markers are removed for the block, and os.environ is
+    restored after it, so no case judges a cite on the cloud surface."""
+    with mock.patch.dict(os.environ):
+        for name in (hook_base.CLOUD_ENV, hook_base.REMOTE_SESSION_ENV):
+            os.environ.pop(name, None)
+        os.environ[hook_base.ROUTE_ROWS_ENV] = path
+        yield
+
+
+@contextlib.contextmanager
+def counted_rows_reads():
+    """The reads of the rows file, counted. Every reader calls route_match.rows_path(), the one home of the path, so
+    the count sees each read. The real path is still returned, so a verdict is judged as it is."""
+    reads = []
+    real = route_match.rows_path
+
+    def counting():
+        reads.append(real())
+        return reads[-1]
+
+    with mock.patch.object(route_match, "rows_path", counting):
+        yield reads
+
+
+def on_local_surface(name):
+    """The scope before the subject (P7): the surface reads local. Off it, the case fails by name and judges nothing."""
+    if route_match.surface() == "local":
+        return True
+    check("task why cited: " + name, False, "the surface is not local, so the cite is judged on the wrong rows")
+    return False
+
+
+def why_guard(name, op, entry, want):
+    """One page write judged by guard.data_tool_hit alone, on the local surface."""
+    if on_local_surface(name):
+        verdict("task why cited: " + name, guard_hit(op, entry), want)
+
+
+def why_batch(name, writes, want):
+    if on_local_surface(name):
+        verdict("task why cited: " + name, page_batch(writes), want)
+
+
+def case_task_why_cited_reds():
+    """Each case here must be refused as task-why-cited. The code before the rule passes each one, so each is red on it."""
+    rows = rows_at("why-rows.json", WHY_ROWS)
+    with local_rows(rows):
+        why_guard("a capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP + ".")), (WHY_RULE, None))
+        why_guard("a works-row cite is refused, since the row says the act is doable here", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-works).")), (WHY_RULE, None))
+        why_guard("a cite of an id no row holds is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-missing).")), (WHY_RULE, None))
+        why_guard("an undated measured cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (measured, the proxy answered 403 to the delete).")),
+                  (WHY_RULE, None))
+        why_guard("a backtick tool name in place of a cite is refused, since the page reads no refusals file", "set",
+                  entry_of(task_item(STEPS, context="Why yours: I can't delete it, since `%s` was refused this session."
+                                     % BACKTICK_TOOL)), (WHY_RULE, None))
+        why_guard("an update that carries kind task and an uncited context is refused", "update",
+                  entry_of({"kind": "task", "context": CAP + "."}), (WHY_RULE, None))
+        why_guard("a str_replace whose new_str holds an uncited capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY, "new_str": CAP + "."},
+                  (WHY_RULE, None))
+        why_batch("a batch whose second write is uncited is refused",
+                  [{"op": "set", "collection": "items", "doc_id": DOC, "data": task_item(STEPS)},
+                   {"op": "set", "collection": "items", "doc_id": "second",
+                    "data": task_item(STEPS, context=CAP + ".")}], (WHY_RULE, None))
+        # A str_replace whose new_str holds only a cite, with no Why yours line: the cite must back on its own.
+        why_guard("a str_replace that swaps a works-row cite in for a refused one is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(route r-works)"}, (WHY_RULE, None))
+        why_guard("a str_replace that swaps an id no row holds in for a refused cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(route r-missing)"}, (WHY_RULE, None))
+        why_guard("a str_replace that drops the date from a measured cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context",
+                   "old_str": "(measured 2026-11-06, the proxy answered 403)",
+                   "new_str": "(measured, the proxy answered 403)"}, (WHY_RULE, None))
+        why_guard("a plain edit that adds a works-row cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
+                   "new_str": "Run the proxy check (route r-works)."}, (WHY_RULE, None))
+    with local_rows(rows_at("why-rows-empty.json", [])):
+        why_guard("a cite of an id in an empty rows file is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), (WHY_RULE, None))
+    # The scope control: a route-cited line reaches the rows file. Without a read, no cite is judged at all.
+    with local_rows(rows), counted_rows_reads() as reads:
+        if on_local_surface("a route-cited line reads the rows file"):
+            guard_hit("set", entry_of(task_item(STEPS, context=CAP + " (route r-refused).")))
+    check("task why cited: a route-cited line reads the rows file", len(reads) >= 1,
+          "the rows file was read %d times for a route-cited line" % len(reads))
+
+
+def case_task_why_cited_greens():
+    """Each case here passes on the code before the rule, and must still pass once it lands: a cite the page accepts,
+    a line the rule does not judge, and a rows file that does not judge."""
+    rows = rows_at("why-rows.json", WHY_ROWS)
+    with local_rows(rows):
+        why_guard("a refused-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), None)
+        why_guard("an asks-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-asks).")), None)
+        why_guard("a dated measured cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (measured 2026-11-06, the proxy answered 403 to the delete).")),
+                  None)
+        why_guard("a refused-row cite in a str_replace passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP + " (route r-refused)."}, None)
+        why_guard("a str_replace that swaps an asks-row cite in for a refused one passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-asks)",
+                   "new_str": "(route r-refused)"}, None)
+        why_guard("a str_replace that swaps a dated measured cite in for a refused one passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(measured 2026-11-06, the proxy answered 403)"}, None)
+        why_guard("a Based on (measured) premise line in a str_replace passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
+                   "new_str": "Based on (measured): the proxy refused the delete (403)."}, None)
+        why_guard("a bare premise-kind label in a str_replace passes, since it is no cite", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(read)",
+                   "new_str": "(measured)"}, None)
+        why_guard("a capability word outside the Why yours line passes", "set",
+                  entry_of(task_item(STEPS, context="The cloud proxy refused the delete (403).\n" + TASK_WHY)), None)
+        why_guard("a decision item with an uncited capability line passes, since the rule judges tasks", "set",
+                  entry_of(page_item(tail="\n" + CAP + ".")), None)
+    with local_rows(rows_at("why-rows-cloud.json", [WHY_ROWS[3]])):
+        why_guard("a row only on another surface passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-cloud-only).")), None)
+    with local_rows(os.path.join(RUN_FOLDER, "missing-route-rows.json")):
+        why_guard("a cite against a rows file that does not exist passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), None)
+    bad_path = os.path.join(RUN_FOLDER, "garbled-route-rows.json")
+    with open(bad_path, "w", encoding="utf-8") as handle:
+        handle.write("{not json")
+    with local_rows(bad_path):
+        why_guard("a cite against a rows file that is not JSON passes", "set",
+                  entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), None)
+    # The cost control: a Why yours line with no route cite never reads the rows file, whatever its verb.
+    with local_rows(rows), counted_rows_reads() as reads:
+        why_guard("a Why yours line with no route cite passes", "set", entry_of(task_item(STEPS)), None)
+        why_guard("a login line with no route cite passes", "set",
+                  entry_of(task_item(STEPS, context="Why yours: this needs your login.")), None)
+    check("task why cited: a Why yours line with no route cite never reads the rows file", not reads,
+          "the rows file was read %d times" % len(reads))
 
 
 # ------------------------------------------------------------------ chat only
@@ -518,6 +705,46 @@ PAGE_BUTTON_OR_PAST_ACT = [
     "The session merges it after he has merged the base PR.",
     "The session merges it after the owner approved the plan.",
 ]
+# A Claude clause that names a press not yet made, as a noun or behind a possessive ("after your click", "after the
+# owner's click"), hands the press to the owner, so it is refused: the option needs a link.
+CLAUDE_NAMES_OWNER_PRESS = [
+    "Claude merges them after your click on Merge.",
+    "Claude merges them after the owner's click on Merge.",
+]
+# A session clause that clicks or presses Merge after the owner's pick is the session's own act, as "merges" is.
+# The owner presses nothing, so the option needs no link.
+SESSION_PRESSES_AFTER_PICK = [
+    "The session clicks Merge after your pick.",
+    "The session presses Merge after your pick.",
+]
+# A Claude clause that waits for, or needs, an owner's press ("the owner's merge", "the owner has to approve it",
+# "the owner reviews and approves it") leaves that press to the owner, so it is refused: the option needs a link.
+CLAUDE_WAITS_ON_OWNER_PRESS = [
+    "Claude waits for the owner's merge.",
+    "Claude merges once the owner has to approve it.",
+    "Claude merges after the owner reviews and approves it.",
+]
+# A session or Claude clause that joins a press by "and" with no subject ("and approve it", "and approve on GitHub"),
+# or that waits on the owner's approval, leaves that press to the owner: the option needs a link.
+SESSION_LEAVES_OWNER_PRESS = [
+    "The session merges PR #374 and approve on GitHub.",
+    "The session clicks Merge and approve it.",
+    "Claude merges PR #374 after the review and approve it.",
+    "The session clicks Merge after the owner's approval.",
+]
+# "the owner's merge commit" names a git object the session keeps, not a press the owner makes: it needs no link.
+SESSION_KEEPS_OWNER_MERGE = ["The session merges PR #374 keeping the owner's merge commit."]
+# The owner's rights, access, queue or method, and a press he has already made ("has hit Merge"), name no press he
+# makes now: the session merges, and he presses nothing. Each passes.
+SESSION_NAMES_OWNER_RIGHTS = [
+    "The session merges PR #374 because the owner has merge rights.",
+    "The session merges PR #374 because Shivam has merge access.",
+    "The session merges PR #374 after the owner has hit Merge.",
+    "The session merges PR #374 through the owner's merge queue.",
+    "The session merges PR #374 with the owner's merge method.",
+]
+# A label that asks him to click is his press whatever the how says: the session's click in the how leaves it his.
+LABEL_ASKS_CLICK_SESSION_HOW = [("Click Merge on GitHub", "The session clicks Merge after your pick.")]
 
 
 def case_session_press_needs_no_link():
@@ -562,6 +789,41 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
         chat("a session clause that hides an owner press, %r, with no url, is refused as press-link" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in CLAUDE_NAMES_OWNER_PRESS:
+        page("a Claude clause that names an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause that names an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_PRESSES_AFTER_PICK:
+        page("a session clause that clicks or presses after the pick, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that clicks or presses after the pick, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in CLAUDE_WAITS_ON_OWNER_PRESS:
+        page("a Claude clause that waits for an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause that waits for an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_LEAVES_OWNER_PRESS:
+        page("a session clause that leaves an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a session clause that leaves an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_KEEPS_OWNER_MERGE:
+        page("a session clause that keeps the owner's merge commit, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that keeps the owner's merge commit, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in SESSION_NAMES_OWNER_RIGHTS:
+        page("a session clause that names the owner's rights or a past press, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that names the owner's rights or a past press, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for label, how in LABEL_ASKS_CLICK_SESSION_HOW:
+        page("a label %r that asks him to click, with how %r, with no link, is refused as press-link" % (label, how),
+             "set", entry_of(page_item(options=[dict(session, label=label, how=how), keep])), ("press-link", None))
+        chat("a label %r that asks him to click, with how %r, with no url, is refused as press-link" % (label, how),
+             chat_box(options=[chat_of(dict(session, label=label, how=how)), chat_of(keep)]), ("press-link", None))
     for how in SESSION_ONLY:
         page("a session clause with no press, %r, with no link, passes" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
@@ -577,6 +839,51 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, label="Merge the PR", how=how), keep])), None)
         chat("a page-button press or a past act, %r, with no url, passes" % how,
              chat_box(options=[chat_of(dict(session, label="Merge the PR", how=how)), chat_of(keep)]), None)
+
+
+# ------------------------------------------------------------------ the session's own merge, named as Claude
+
+def case_claude_own_merge_needs_no_link():
+    # Decision act-in-place: an option whose how says Claude makes the press after the owner's pick is the
+    # session's act, as "The session merges ..." is, so the owner presses nothing and it needs no link. A press in
+    # another clause, an owner's own act, and a label that asks him to click still need one.
+    claude = {"key": "a", "label": "Merge the lane PRs into one batch.", "how": "Claude merges them after your pick.",
+              "gain": "One batch lands at once.", "lose": "A second CI run."}
+    keep = {"key": "b", "label": "Hold it", "how": "Do nothing yet.", "gain": "A reviewer reads it first.",
+            "lose": "The change lands a day later."}
+    hold = {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}
+    page("Claude's own merge after the pick, with no link, passes", "set",
+         entry_of(page_item(options=[claude, keep])), None)
+    chat("Claude's own merge after the pick, with no url, passes",
+         chat_box(options=[{"label": "Merge the lane PRs into one batch.",
+                            "description": "Claude merges them after your pick. Gain: one batch lands at once. "
+                                           "Lose: a second CI run."}, hold]),
+         None)
+    # Claude asking the owner to press is the owner's press, however the clause starts with Claude, and however
+    # an adverb, "to", "please" or "for a click" stands between the owner's name and the act.
+    for how in ("Claude merges them after your pick, then you click Merge on GitHub.",
+                "Shivam merges the lane PRs on GitHub.",
+                "Claude asks the owner to press Merge on GitHub.",
+                "Claude asks Shivam to click Merge on GitHub.",
+                "Claude asks the owner to just click Merge.",
+                "Claude asks the owner to please click Merge.",
+                "Claude asks him to press Merge.",
+                "Claude asks the user to press Merge.",
+                "Claude asks the owner for a click on Merge."):
+        page("%r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(claude, how=how), keep])), ("press-link", None))
+        chat("%r, with no url, is refused as press-link" % how,
+             chat_box(options=[{"label": claude["label"],
+                                "description": "%s Gain: one batch lands at once. Lose: a second CI run." % how},
+                               hold]),
+             ("press-link", None))
+    page("a label that clicks Merge on GitHub, with Claude's merge as the how, is refused as press-link", "set",
+         entry_of(page_item(options=[dict(claude, label="Click Merge on GitHub."), keep])), ("press-link", None))
+    chat("a label that clicks Merge on GitHub, with Claude's merge in the description, is refused as press-link",
+         chat_box(options=[{"label": "Click Merge on GitHub.",
+                            "description": "Claude merges them after your pick. Gain: one batch lands at once. "
+                                           "Lose: a second CI run."}, hold]),
+         ("press-link", None))
 
 
 # ------------------------------------------------------------------ a press in the how-text only
@@ -1450,11 +1757,107 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
+#
+# Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
+# its test, by the check's name, so one runner and main() judge the same cases.
+
+def _judged(case):
+    """Run one case under pytest: each check it records as failed fails the test, by the check's name."""
+    before = len(FAILED)
+    case()
+    assert len(FAILED) == before, "; ".join(FAILED[before:])
+
+
+def case_press_link_links_not_a_list_on_a_step():
+    """`links` set to true or to a number is no list of links. The step's press has no valid link, so the hit fires as it
+    does for a missing link. It must not crash or fail open."""
+    for links in (True, 5):
+        page("a task step that presses in GitHub, with links %r, is refused as press-link" % (links,), "set",
+             entry_of(task_item(["Press Merge in GitHub on the pull request."], links=links)),
+             ("press-link", "no link to the page"))
+
+
+def case_press_link_links_not_a_list_on_an_option():
+    """The same for an option's links: true or a number is no valid link, so the press is refused as press-link."""
+    for links in (True, 5):
+        press = copy.deepcopy(ITEM92["options"])
+        press[1].update(label="Press Merge in GitHub", how="Do it by hand.", links=links)
+        page("an option that presses in GitHub, with links %r, is refused as press-link" % (links,), "set",
+             entry_of(page_item(options=press)), ("press-link", "no link to the page"))
+
+
+def case_task_str_replace_removes_only_the_label():
+    """A str_replace that removes only the Why yours label leaves a line with no label. It is refused as task-names-check."""
+    page("a str_replace that removes only the Why yours label is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Why yours:", "new_str": ""},
+         ("task-names-check", None))
+
+
+def case_str_replace_blank_prose_line_passes():
+    """A str_replace that blanks one plain prose line of a decision's context passes. The guard cannot read the stored
+    item, so a blank replacement that removes no Why yours line is no task-names-check fault."""
+    page("a str_replace that blanks one plain prose line in a decision's context passes", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": "The lane merge-role-allow would do it.", "new_str": ""}, None)
+
+
+def case_task_str_replace_rewords_the_reason():
+    """A control: an edit that keeps the label and rewords the text after it keeps the line, so it passes."""
+    page("a str_replace that rewords the Why yours reason and keeps the label passes", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": "Why yours: a session on your computer was asked first",
+          "new_str": "Why yours: a session on your desk was asked first"}, None)
+
+
+def case_task_str_replace_renames_the_label():
+    """A str_replace that renames the Why yours label to Why mine takes the label away, so it is refused as task-names-check."""
+    page("a str_replace that renames the Why yours label to Why mine is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Why yours:", "new_str": "Why mine:"},
+         ("task-names-check", None))
+
+
+def case_task_str_replace_prose_label_passes():
+    """A prose mention of the label, not at a line start, is no Why yours line. Editing that prose passes."""
+    page('a str_replace that changes prose the "Why yours:" label to the label passes', "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": 'the "Why yours:" label', "new_str": "the label"}, None)
+
+
+def test_press_link_links_true_or_a_number_on_a_step_is_no_link():
+    _judged(case_press_link_links_not_a_list_on_a_step)
+
+
+def test_press_link_links_true_or_a_number_on_an_option_is_no_link():
+    _judged(case_press_link_links_not_a_list_on_an_option)
+
+
+def test_task_str_replace_removing_only_the_label_is_refused():
+    _judged(case_task_str_replace_removes_only_the_label)
+
+
+def test_str_replace_blank_prose_line_in_a_decision_passes():
+    _judged(case_str_replace_blank_prose_line_passes)
+
+
+def test_task_str_replace_rewording_the_reason_passes():
+    _judged(case_task_str_replace_rewords_the_reason)
+
+
+def test_task_str_replace_renaming_the_label_is_refused():
+    _judged(case_task_str_replace_renames_the_label)
+
+
+def test_task_str_replace_prose_label_mention_passes():
+    _judged(case_task_str_replace_prose_label_passes)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
+                 case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
@@ -1468,7 +1871,12 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
-                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
+                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_task_why_cited_reds, case_task_why_cited_greens,
+                 case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
+                 case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
+                 case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
+                 case_task_str_replace_prose_label_passes):
         try:
             case()
         except Exception as exc:
