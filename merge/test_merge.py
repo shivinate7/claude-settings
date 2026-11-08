@@ -162,10 +162,10 @@ class FakeHost:
     def head_state(self, n):
         return self.state
 
-    def review_comments(self, since):  # the round-three check's comment read: no record unless a case scripts one (LanePulls, PullsHost)
+    def review_comments(self, since):  # the round-3 check's comment read: no record unless a case scripts one (LanePulls, PullsHost)
         return {}
 
-    def open_heads(self):  # the round-three check's open-PR read: none unless a case scripts it (LaneHost, LanePulls)
+    def open_heads(self):  # the round-3 check's open-PR read: none unless a case scripts it (LaneHost, LanePulls)
         return merge.OpenHeads()
 
     def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
@@ -1598,16 +1598,32 @@ LANE_HEADS_UNREAD = ("unreadable", "could not be read")  # ruling 2: the one lin
 LANE_MOVED = ("moved", "gone")  # ruling 2: the one line for a lane tip that no origin head sits at; it names the tip
 LANE_PROOF_NOT_RUN = "could not run"  # ruling 5: the kept line when the merge commit cannot be read, in place of WHY["unproven"]
 
-def lane_batch(env, *names):
+def cut_branch(o, name, older=False):
+    """Cut branch `name` off origin/main in clone `o` and push it: one commit, or two when `older`, the earlier one first. Nothing is merged.
+    -> the commits pushed, oldest first, so the last one is the tip."""
+    sh(o, "git", "fetch", "-q", "origin")
+    sh(o, "git", "checkout", "-q", "-B", name, "origin/main")
+    commits = []
+    if older:
+        put(os.path.join(o, name.replace("/", "-") + ".older.txt"), name + " older\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"lane {name}, older head")
+        commits.append(sh(o, "git", "rev-parse", "HEAD"))
+    put(os.path.join(o, name.replace("/", "-") + ".txt"), name + "\n")
+    sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"lane {name}"); sh(o, "git", "push", "-q", "origin", name)
+    commits.append(sh(o, "git", "rev-parse", "HEAD"))
+    return commits
+
+def lane_batch(env, *names, older=()):
     """Cut each lane off origin/main, push it, then merge every lane into feat with a merge commit, as an integration branch does.
-    -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line."""
+    -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line. A lane named in
+    `older` gets an earlier commit first: env.older_heads[lane] is that commit, an ancestor of the lane's tip."""
     o, tips = env.other, {}
+    env.older_heads = {}
     for n in names:
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", n, "origin/main")
-        put(os.path.join(o, n.replace("/", "-") + ".txt"), n + "\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"lane {n}"); sh(o, "git", "push", "-q", "origin", n)
-        tips[n] = sh(o, "git", "rev-parse", "HEAD")
+        commits = cut_branch(o, n, older=n in older)
+        tips[n] = commits[-1]
+        if len(commits) > 1:
+            env.older_heads[n] = commits[0]
     sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
     for n in names:
         sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge remote-tracking branch 'origin/{n}' into feat", tips[n])
@@ -2456,7 +2472,7 @@ class CutLanes(Env):
         self.assertNotIn("stray", out)
 
     def test_deleteBranch_false_keeps_every_lane_and_the_round_check_reads_no_open_prs(self):
-        # The round-three check reads no open pull request (decision pr-review-record, the cost). The deletion's read does not run here either:
+        # The round-3 check reads no open pull request (decision pr-review-record, the cost). The deletion's read does not run here either:
         # cut_lanes runs only with deleteBranch on, so no open-PR read runs at all.
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
@@ -3359,7 +3375,7 @@ try:
             finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
         finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
 
-    elif method == "GET" and rel == "issues/comments":  # the repo's comments, which the round-three check reads for review records: none in this fake
+    elif method == "GET" and rel == "issues/comments":  # the repo's comments, which the round-3 check reads for review records: none in this fake
         finish(listing([], None, params, flags, jq, cap), 0, include)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
@@ -12739,7 +12755,7 @@ class ReviewedList(ReviewEnv):
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
 
-# ------------------------------------------------------------------ the round-three check on a batch
+# ------------------------------------------------------------------ the round-3 check on a batch
 # A ready pull request whose batch holds a lane that still owes its third round is refused before any claim or push (decision
 # pr-review-record, the lane check; rule roles-review-cap-three). Each lane tip is read with read_lanes and mapped to its open pull request
 # by head sha, and the newest record for that exact head decides. A lone pull request with no lane tips reads its own record. One real batch
@@ -12776,14 +12792,44 @@ def round_check_comment(cid, number, head, **kw):
     return review_comment(cid, number, record_text(n=number, head=head, **kw))
 
 class ReviewRoundCheckEnv(Env):
-    """The round-three check's one home for its fixtures: a batch of lanes into feat, each lane an open pull request, and pull request 7 for feat.
+    """The round-3 check's one home for its fixtures: a batch of lanes into feat, each lane an open pull request, and pull request 7 for feat.
     The assertions every case shares sit here too. No test lives here."""
 
-    def batch_host(self, tips, comments=()):
-        """Pull request 7 is feat at its live head. Each lane in `tips` ({branch: tip}) is an open pull request, numbered 8, 9, ... in the order given."""
+    def batch_host(self, tips, comments=(), others=()):
+        """Pull request 7 is feat at its live head. Each lane in `tips` ({branch: tip}) is an open pull request, numbered 8, 9, ... in the order given.
+        `others` are open pull requests that are no lane of the batch, as lane_pull rows."""
         pulls = [lane_pull(7, "feat", self.head("feat"))]
         pulls += [lane_pull(8 + i, b, tip) for i, (b, tip) in enumerate(tips.items())]
-        return LanePulls(self.co, self.other, pulls=pulls, comments=list(comments))
+        return LanePulls(self.co, self.other, pulls=pulls + list(others), comments=list(comments))
+
+    def push_feat_commit(self):
+        """Push one commit to feat on origin. -> the head it replaced, an older head of feat that is an ancestor of the new one."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        older = sh(o, "git", "rev-parse", "HEAD")
+        put(os.path.join(o, "feat-next.txt"), "next\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "feat: next"); sh(o, "git", "push", "-q", "origin", "feat")
+        return older
+
+    def history_exit(self, sha, ref):
+        """The exit of `git merge-base --is-ancestor sha ref` in the checkout, after a fetch: 0 when `sha` is an ancestor of `ref`, 1 when it is a
+        commit that is not one, 128 when the checkout does not hold the sha. A case reads it before it probes the round-3 check on that sha."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return subprocess.run(["git", "merge-base", "--is-ancestor", sha, ref], cwd=self.co, capture_output=True, text=True).returncode
+
+    def unrelated_pr_case(self, guard):
+        """The defect's fixture. Pull request 20 is no lane of the batch: its branch was reviewed at `reviewed` and then pushed a fix, `fixed`, which
+        is its open head. Its one record names `reviewed` with Guard or check `guard`. The scope is asserted first: `reviewed` is a commit of the
+        checkout that is an ancestor of neither feat nor a lane tip. -> (tips, host, reviewed)."""
+        tips = lane_batch(self, "agent/lane1")
+        reviewed, fixed = cut_branch(self.other, "agent/other", older=True)
+        host = self.batch_host(tips, [round_check_comment(1, 20, reviewed, guard=guard, rounds=REVIEW_PASS)], others=[lane_pull(20, "agent/other", fixed)])
+        self.scope(tips, host)
+        self.assertEqual(self.history_exit(reviewed, self.head("feat")), 1, "the reviewed head of pull request 20 is in the history of feat")
+        for tip in tips.values():
+            self.assertEqual(self.history_exit(reviewed, tip), 1, "the reviewed head of pull request 20 is in the history of a lane tip")
+        return tips, host, reviewed
 
     def scope(self, tips, host):
         """Scope before subject: each lane is a lane of the batch, and an open pull request at its tip, before a case probes the check on it."""
@@ -12809,7 +12855,7 @@ class ReviewRoundCheckEnv(Env):
     def assert_refused(self, rc, out, host, before, pr_no):
         """A refusal: exit 1, the lane's pull request named, a cite to a decision or rule, no net value named as the remedy (rule
         git-remedy-never-names-target), and no claim or push."""
-        self.assertEqual(rc, 1, "the round-three check let the batch through, though a lane owes round 3:\n" + out)
+        self.assertEqual(rc, 1, "the round-3 check let the batch through, though a lane owes round 3:\n" + out)
         self.assertIn(f"#{pr_no}", out, f"the refusal does not name pull request #{pr_no}:\n" + out)
         self.assertNotIn("Net value: zero", out, "the refusal names `Net value: zero` as a remedy")
         self.assertNotIn("Net value: positive", out, "the refusal names `Net value: positive` as a remedy")
@@ -12881,28 +12927,50 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         self.assert_allowed(rc, out, host)
 
     def test_a_guard_record_for_an_older_head_of_the_lane_still_refuses(self):
-        # a push after review must not shed the guard owing: the newest record names an old head and says guard yes, and no record names the tip
-        tips = lane_batch(self, "agent/lane1")
-        host = self.batch_host(tips, [round_check_comment(1, 8, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS)])
+        # a push after review must not shed the guard owing: the newest record names an older head of the lane, an ancestor of its tip, and says guard yes,
+        # and no record names the tip
+        tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
+        older = self.older_heads["agent/lane1"]
+        host = self.batch_host(tips, [round_check_comment(1, 8, older, guard="yes", rounds=REVIEW_PASS)])
         self.scope(tips, host)
+        self.assertEqual(self.history_exit(older, tips["agent/lane1"]), 0, "the older head is not an ancestor of the lane tip")
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 8)
         self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
         self.assertIn("owed", out, "the refusal does not say round 3 is owed:\n" + out)
 
     def test_a_stale_guard_no_record_for_an_older_head_of_the_lane_still_passes(self):
-        # the control beside the refusal above: a record with guard no owes nothing, even for an old head
-        tips = lane_batch(self, "agent/lane1")
-        host = self.batch_host(tips, [round_check_comment(1, 8, REVIEW_OLD_HEAD, guard="no", rounds=REVIEW_PASS)])
+        # the control beside the refusal above, on the same older head: a record with guard no owes nothing, even for an old head
+        tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
+        host = self.batch_host(tips, [round_check_comment(1, 8, self.older_heads["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         self.scope(tips, host)
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
+    def test_an_unrelated_pr_guard_record_for_a_head_outside_the_batch_is_not_refused(self):
+        # the defect: pull request 20 is no lane of the batch and pushed a fix after its review. Its record names the reviewed head, which neither feat
+        # nor a lane tip holds, so the round-3 check owes nothing for it
+        _tips, host, _reviewed = self.unrelated_pr_case("yes")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn("#20", out, "the round-3 check refuses for pull request #20, which is no lane of this batch:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_an_unrelated_pr_guard_no_record_for_a_head_outside_the_batch_is_not_refused(self):
+        # the control beside the case above: the same fixture with Guard or check no, which owes nothing on any head
+        _tips, host, _reviewed = self.unrelated_pr_case("no")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
     def test_a_lone_pr_whose_guard_record_names_an_older_head_is_refused(self):
-        host = self.batch_host({}, [round_check_comment(1, 7, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS)])
+        # no lane tips: the pull request is its own lane and reads its own record. Its head moved on after review, so the record names the head it
+        # replaced, which is in its history: the stale record owes round 3 on the new head
+        older = self.push_feat_commit()
+        host = self.batch_host({}, [round_check_comment(1, 7, older, guard="yes", rounds=REVIEW_PASS)])
+        self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
+        self.assertIn("owed on the new head", out, "the refusal is not the stale-record refusal:\n" + out)
 
     def test_a_lone_pr_whose_history_merged_a_lane_still_checks_its_own_head(self):
         # the pull request's own head is checked along with the lane tips, not instead of them: feat holds lane1's merge, so read_lanes
@@ -12926,9 +12994,10 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 7)
 
     def test_a_stale_open_record_does_not_block_a_done_record_for_the_tip(self):
-        tips = lane_batch(self, "agent/lane1")
+        # the older head is a real ancestor of the tip, so only the record for the tip itself settles the lane
+        tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
         round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
-        comments = [round_check_comment(1, 8, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS),
+        comments = [round_check_comment(1, 8, self.older_heads["agent/lane1"], guard="yes", rounds=REVIEW_PASS),
                     round_check_comment(2, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="zero")]
         host = self.batch_host(tips, comments)
         self.scope(tips, host)
@@ -12948,9 +13017,9 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
 
     def test_the_tip_record_decides_even_when_a_stale_done_record_is_newer(self):
         # the newest record overall is for an old head and is done; the tip's own record is open, and only that one counts
-        tips = lane_batch(self, "agent/lane1")
+        tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
         comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS),
-                    round_check_comment(2, 8, REVIEW_OLD_HEAD, guard="no", rounds=REVIEW_PASS)]
+                    round_check_comment(2, 8, self.older_heads["agent/lane1"], guard="no", rounds=REVIEW_PASS)]
         host = self.batch_host(tips, comments)
         self.scope(tips, host)
         rc, out, before = self.run_round_check(host, "--confirm")
@@ -12983,7 +13052,7 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         self.assertNotRegex(out, r"#9\b", "the refusal names a lane that owes no round 3:\n" + out)
 
 class ReviewRoundCheckLiftedRead(ReviewRoundCheckEnv):
-    """A failed dropped-lane read, lifted by the reason flag, leaves no lane tips to check. The round-three check still runs on the pull request's
+    """A failed dropped-lane read, lifted by the reason flag, leaves no lane tips to check. The round-3 check still runs on the pull request's
     own head (decision hold-unsafe-after-round-3): feat's guard record at round 2 PASS owes round 3, and the refusal says the lane tips were unread.
     The same holds for `merge 7` and for `merge 7 --confirm`."""
 
@@ -13010,7 +13079,7 @@ class ReviewRoundCheckLiftedRead(ReviewRoundCheckEnv):
         self.assertIn("unread", out, "the preview does not say the lane tips were unread:\n" + out)
 
 class ReviewRoundCheckCommentRead(ReviewRoundCheckEnv):
-    """The round-three check's own read of the repo's comments. A failed read refuses before any claim or push (unknown is red). The reason
+    """The round-3 check's own read of the repo's comments. A failed read refuses before any claim or push (unknown is red). The reason
     flag lets it on, and the lift is logged with its reason, as the dropped-lane check's lift is."""
 
     def batch_with_unread_comments(self):
@@ -13098,7 +13167,7 @@ class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
         self.assertEqual(rc, 0, out)
 
 class ReviewRoundCheckCost(ReviewRoundCheckEnv):
-    """What the round-three check reads (decision pr-review-record, the cost): the repo's comment list once, and no open pull request. A preview
+    """What the round-3 check reads (decision pr-review-record, the cost): the repo's comment list once, and no open pull request. A preview
     runs the check alone. A confirm also runs cut_lanes, which reads the open pull requests after the merge, but only with deleteBranch on. The
     confirm case keeps its branches, so no open-PR read runs at all."""
 
