@@ -11705,19 +11705,20 @@ class StandingGrantSwitch(CloudSession):
 
 
 class SoloMergeScope(unittest.TestCase):
-    """SOLO_MERGE_REPOS (merge/merge.py) holds the repos whose record grants a solo session its merge. The record's own bullet is the
-    source, read here, so no list of repos is copied into this test. Red until the builder adds the constant: see the commit's report."""
+    """The grant record's solo-session bullet points at SOLO_MERGE_REPOS (merge/merge.py), the one source of the repos a solo session
+    merges in. The record copies no repo list, so this reads the pointer and the constant, never a list of repos."""
     GRANT = os.path.join(os.path.dirname(HERE), "docs", "decisions", "standing-merge-grant.md")
-    SOLO_BULLET = re.compile(r"holds the 2026-10-10 grant in ([A-Za-z0-9._/-]+) only")
+    SOLO_BULLET = "- A session with no coordinator"
 
-    def test_the_constant_holds_exactly_the_repos_the_grant_record_names_for_a_solo_session(self):
+    def test_the_solo_bullet_names_solo_merge_repos_and_the_constant_holds_this_repo(self):
         with open(self.GRANT, encoding="utf-8") as f:
-            named = self.SOLO_BULLET.findall(f.read())
-        self.assertEqual(len(named), 1, "the grant record must name the repos of a solo session's grant in one bullet")
+            bullets = [line for line in f.read().splitlines() if line.startswith(self.SOLO_BULLET)]
+        self.assertEqual(len(bullets), 1, "the grant record must have one bullet that starts with 'A session with no coordinator'")
+        self.assertIn("SOLO_MERGE_REPOS", bullets[0], "the grant record's solo-session bullet does not name SOLO_MERGE_REPOS")
         self.assertTrue(hasattr(merge, "SOLO_MERGE_REPOS"),
                         "merge/merge.py has no SOLO_MERGE_REPOS, so the solo scope has no list the tool reads")
-        held = {repo.rsplit("/", 1)[-1] for repo in merge.SOLO_MERGE_REPOS}
-        self.assertEqual(held, set(named), "SOLO_MERGE_REPOS does not hold the repos the grant record names for a solo session")
+        self.assertIn("shivinate7/claude-settings", merge.SOLO_MERGE_REPOS,
+                      "SOLO_MERGE_REPOS does not hold shivinate7/claude-settings, the repo this suite runs in")
 
 
 REPO_ROOT = os.path.dirname(HERE)
