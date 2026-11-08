@@ -4484,9 +4484,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     elif tool in SHELL_TOOLS:
         targets = None
         raw = str(tool_input.get("command", "") or "")
-        # The text a shell runs: an interpreter body is read by `interpreter_write_hit` below, so a path
-        # it quotes is not a shell word.
-        command = "\n".join(shell_run_texts(raw))
+        command = strip_heredoc_bodies(raw)
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command))) or interpreter_may_write(raw)
         moves = _cd_targets(tool, raw, where) if where else []
         # A git verb spends the list only when stat and file reads show it can reach another clone.
