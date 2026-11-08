@@ -907,15 +907,21 @@ def named_log_relative_tee_and_flag_forms_are_read():
     return problems
 
 
+def load_module():
+    """A fresh copy of the module under test, so a case may patch its names and no other case sees the patch."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("stall_watch_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6):
     """Run stall_watch.watch on a fake clock. The job writes a named log every `period` seconds from
     `phase`, then ends 1 s after its last write. Each ps takes `ps_secs`, each sleep overshoots by
     `tick_extra`, as on a loaded runner. Return watch's exit code."""
     import builtins
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("stall_watch_sim", MODULE)
-    sw = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(sw)
+    sw = load_module()
     clock = [0.0]
     stamps = [phase + period * i for i in range(writes)]
     end = stamps[-1] + 1.0
@@ -1089,6 +1095,89 @@ def sleeping_child_behind_a_pipe_still_stalls():
     """25b. control: sleep 30 behind `| tail -1` has no CPU time and no output: STALL, exit 3, the sleep alive"""
     rc, text, secs, _cmd = run_rewritten(pipe_job("sleep 30"))
     problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    reap()
+    return problems
+
+
+def read_with(sw, command):
+    """(paths, unresolved) that the module reads from command. A module with no read_named_logs gives its
+    paths from named_logs and no unresolved path, so a row fails on what it reads, never on a missing name."""
+    if hasattr(sw, "read_named_logs"):
+        return sw.read_named_logs(command)
+    return sw.named_logs(command), []
+
+
+def read_rows_problems(rows):
+    """rows: (command, want paths, want unresolved). Return one problem per row that reads otherwise."""
+    sw = load_module()
+    problems = []
+    for command, want_paths, want_unresolved in rows:
+        got_paths, got_unresolved = read_with(sw, command)
+        if got_paths != want_paths or got_unresolved != want_unresolved:
+            problems.append(f"{command!r}: reads paths {got_paths}, unresolved {got_unresolved}; "
+                            f"want {want_paths}, {want_unresolved}")
+    return problems
+
+
+@case
+def unknown_cd_leaves_the_log_unresolved():
+    """27a. a cd the hook cannot place (after &, ||, then, inside { }, or behind a test) leaves its relative log unresolved"""
+    return read_rows_problems([(c, [], ["log"]) for c in (
+        "[ -d /a ] && cd /b; make > log",
+        "cd /x & make > log",
+        "{ cd /x; make; } > log",
+        "true || cd /x; make > log",
+        "if true; then cd /x; fi; make > log",
+    )])
+
+
+@case
+def sure_cd_resolves_the_log():
+    """27b. a cd that surely runs in the main shell (cd or pushd, joined by &&) joins the log to its target"""
+    return read_rows_problems([
+        ("cd /x && make > log", ["/x/log"], []),
+        ("pushd /x && make > log", ["/x/log"], []),
+    ])
+
+
+@case
+def heredoc_cd_is_text():
+    """27c. a cd in a heredoc body is text: the log stays as written and no path is unresolved"""
+    return read_rows_problems([("cat <<'EOF'\ncd /y\nEOF\nmake > log", ["log"], [])])
+
+
+@case
+def cd_home_forms_resolve_against_home():
+    """27d. cd $HOME/p, cd ${HOME} and cd ~/p join the log to the HOME environment variable, which the case sets"""
+    saved = os.environ.get("HOME")
+    os.environ["HOME"] = "/stall-home"
+    try:
+        return read_rows_problems([
+            ("cd $HOME/p && make > log", ["/stall-home/p/log"], []),
+            ("cd ${HOME} && make > log", ["/stall-home/log"], []),
+            ("cd ~/p && make > log", ["/stall-home/p/log"], []),
+        ])
+    finally:
+        if saved is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = saved
+
+
+@posix_case
+def cd_to_an_unknown_dir_reports_the_log_as_unwatched():
+    """27e. cd "$REPO" && sleep 30 > log: the hook passes --unwatched log and no --also, and the STALL report says the log is not watched"""
+    repo = new_dir()
+    orig = 'cd "$REPO" && sleep 30 > log'
+    cmd, _hso = rewrite(orig)
+    if not re.search(r" --unwatched log(?=[ ;]|$)", cmd):
+        return ["the rewrite passes no --unwatched log, so the unknown directory is not reported"]
+    if " --also " in cmd:
+        return ["the rewrite still passes --also for a log whose directory is unknown"]
+    rc, text, secs, _cmd = run_rewritten(orig, env=job_env(REPO=repo))
+    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    if not any(line.startswith("Named log not watched") and line.endswith(": log") for line in text.splitlines()):
+        problems += ["the STALL report has no 'Named log not watched' line for log"]
     reap()
     return problems
 
