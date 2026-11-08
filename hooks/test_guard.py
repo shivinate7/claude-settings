@@ -29172,6 +29172,14 @@ CTM_REPO_UNDERSCORE = ctm_repo("underscore", [ctm_value("Claude_Opus_5.5")],
 CTM_REPO_OPUS4 = ctm_repo("opus4", [ctm_value("Claude Opus4.5")], local=[ctm_message(ctm_trailer("Claude Opus4.5"))])
 CTM_REPO_HAIKU1M = ctm_repo("haiku1m", [ctm_value("claude-haiku-5-5[1m]")],
                             local=[ctm_message(ctm_trailer("claude-haiku-5-5[1m]"))])
+# Round 4: a family word after a version, or no version at all. The family word may sit anywhere in the value.
+CTM_REPO_CLAUDE3OPUS = ctm_repo("claude3opus", [ctm_value("Claude 3 Opus")],
+                                local=[ctm_message(ctm_trailer("Claude 3 Opus"))])
+CTM_REPO_CLAUDE35SONNET = ctm_repo("claude35sonnet", [ctm_value("Claude 3.5 Sonnet")],
+                                   local=[ctm_message(ctm_trailer("Claude 3.5 Sonnet"))])
+CTM_REPO_CLAUDESONNET = ctm_repo("claudesonnet", [ctm_value("Claude Sonnet")],
+                                 local=[ctm_message(ctm_trailer("Claude Sonnet"))])
+CTM_REPO_CLAUDE21 = ctm_repo("claude21", [ctm_value("Claude 2.1")], local=[ctm_message(ctm_trailer("Claude 2.1"))])
 
 
 def ctm_case(name, repo, expected, agent, command=CTM_PUSH, transcript=CTM_TRANSCRIPT):
@@ -29258,6 +29266,23 @@ ctm_case("a claude-opus-5-5[1m] trailer from a Haiku agent is refused", CTM_REPO
 ctm_case("a Claude_Opus_5.5 trailer from a Haiku agent is refused", CTM_REPO_UNDERSCORE, "deny", CTM_HAIKU)
 ctm_case("a Claude Opus4.5 trailer from a Haiku agent is refused", CTM_REPO_OPUS4, "deny", CTM_HAIKU)
 ctm_case("a claude-haiku-5-5[1m] trailer from a Haiku agent passes", CTM_REPO_HAIKU1M, "allow", CTM_HAIKU)
+
+# Round 4. A family word counts wherever it sits in the value: before the version, or after it.
+ctm_case("a Claude 3 Opus trailer from a Haiku agent is refused", CTM_REPO_CLAUDE3OPUS, "deny", CTM_HAIKU)
+ctm_case("a Claude 3.5 Sonnet trailer from a Haiku agent is refused", CTM_REPO_CLAUDE35SONNET, "deny", CTM_HAIKU)
+ctm_case("a Claude 3.5 Sonnet trailer from a Sonnet 5.5 agent is refused (same family, other version)",
+         CTM_REPO_CLAUDE35SONNET, "deny", CTM_SONNET)
+ctm_case("a Claude Sonnet trailer from a Sonnet 5.5 agent passes", CTM_REPO_CLAUDESONNET, "allow", CTM_SONNET)
+ctm_case("a Claude 2.1 trailer from a Haiku agent passes (no family word)", CTM_REPO_CLAUDE21, "allow", CTM_HAIKU)
+ctm_case("a Claude Code 2.1 trailer from a Haiku agent passes (no family word)", CTM_REPO_CLAUDECODE, "allow",
+         CTM_HAIKU)
+ctm_case("a GPT-4 trailer from a Haiku agent passes (no family word)", CTM_REPO_GPT4, "allow", CTM_HAIKU)
+
+# Pin: a push wrapped by flock or in a command substitution is refused as the push it runs.
+ctm_case("a flock-wrapped push of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_INCIDENT, "deny",
+         CTM_HAIKU, command="flock /tmp/l git push origin HEAD:x")
+ctm_case("a command-substituted push of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_INCIDENT,
+         "deny", CTM_HAIKU, command="echo $(git push origin HEAD:x)")
 
 
 # A case or log check with a family that FAMILIES does not name would hide from GUARD_FAMILY.
