@@ -1068,17 +1068,18 @@ def _head_word(segment: str) -> str:
 
 
 def _exits_on_failure(segments, ends, at: int) -> bool:
-    """True when the `||` after `segments[at]` runs `exit` or `return` as its first command, bare or as
+    """True when the `||` after `segments[at]` runs `exit` as its first command, bare or as
     the first `;`-joined step of a `{ ... }` group: the shell stops there when the command before the
-    `||` fails, so nothing later runs in the folder it stayed in. An `exit` that follows an `&&`
-    or `||` inside the group runs only sometimes and is not read."""
+    `||` fails, so nothing later runs in the folder it stayed in. A top-level `return` does not stop
+    bash, so it is not read. An `exit` that follows an `&&` or `||` inside the group runs only
+    sometimes and is not read."""
     grouped = False
     for number in range(at + 1, len(segments)):
         tokens = segment_tokens(segments[number]) or []
         if number == at + 1:
             grouped = tokens[:1] == ["{"]
         index = resolve_command(tokens) if tokens else None
-        if index is not None and basename(tokens[index]) in ("exit", "return"):
+        if index is not None and basename(tokens[index]) == "exit":
             return True
         if not grouped or tokens[:1] == ["}"] or (number < len(ends) and ends[number] not in (";", "\n")):
             return False

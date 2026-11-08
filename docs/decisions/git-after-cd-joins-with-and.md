@@ -21,7 +21,7 @@ A call whose argv names a read, such as `push --dry-run` or `push -n` (`read_ver
 Allowed forms:
 
 - `cd X && git push`: a failed cd stops the chain.
-- `cd X || exit 1; git push`: the shell exits when the cd fails. The `exit` or `return` is read as the first command after the `||`, bare or first in a `{ ... }` group.
+- `cd X || exit 1; git push`: the shell exits when the cd fails. The `exit` is read as the first command after the `||`, bare or first in a `{ ... }` group. A top-level `return` does not stop bash, so `cd X || return 1; git push` is refused.
 - `if cd X; then git push; fi`: the `then` body runs only when the cd landed. An `else` body and the commands after `fi` run in the stranded folder and are refused.
 - `git -C /full/path push`, with or without a cd before it. A `-C` that holds a variable is unknown and passes.
 - A read: `status`, `log`, `branch -l`, `stash list`, `tag -l`, `config --get`.
