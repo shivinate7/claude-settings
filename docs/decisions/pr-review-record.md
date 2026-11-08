@@ -45,7 +45,7 @@ CI: read live by merge --reviewed
 
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
-- round 1 or 2 is its last round with Guard or check `no`, that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent;
+- round 1 or 2 is its last round, with Guard or check `no`: that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent;
 - round 3 is done, and Guard or check is `no`;
 - round 3 is done, Guard or check is `yes`, and Net value is zero or positive;
 - Kind is `delete-only`, Guard or check is `no`, and round 1 is done;
