@@ -211,15 +211,19 @@ def watch_flag(args) -> bool:
 
 # A loop ends at a clock time only when its one test orders a `date` read against a literal time of the same
 # kind, in the direction that turns the test at that time. Two shapes do: a `+%s` read ordered with -gt, -ge,
-# -lt or -le against an epoch number, and a read whose format has no `%s` ordered with `>` or `<` against a full
-# ISO date-time. `until` takes the later-than operators and `while` the earlier-than ones. Any other pairing
-# never turns: a numeric order of a text read is an error, and a text order of epoch digits never meets an ISO
-# time.
+# -lt or -le against an epoch number, and an ISO date-time read ordered with `>` or `<` against a full ISO
+# date-time. `until` takes the later-than operators and `while` the earlier-than ones. Any other pairing never
+# turns: a numeric order of a text read is an error, and a text order of epoch digits never meets an ISO time.
+# The read is the clock only with no flag but -u: `-d` and `-r` read a fixed time, and a format outside
+# CLOCK_FORMATS is not ordered like the ISO literal.
 CLOCK_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$|\d{9,}$")
 CLOCK_READ = re.compile(r"\$\(date(?:\s[^;&|<>$`()]*)?\)$|`date(?:\s[^;&|<>$`()]*)?`$")
 TEST_CLOSER = {"[": "]", "[[": "]]", "test": None}   # the only commands a clock loop's test may use
 LATER_THAN = {">", "-gt", "-ge"}     # ends an `until` loop once the clock is past the literal
 EARLIER_THAN = {"<", "-lt", "-le"}   # ends a `while` loop when the clock reaches the literal
+CLOCK_FLAGS = ("-u", "--utc")        # the only flags a clock read may carry
+# The formats a clock read may use: the epoch, and the ISO date-time with or without its `Z`.
+CLOCK_FORMATS = ("+%s", "+%Y-%m-%dT%H:%M:%S", "+%Y-%m-%dT%H:%M:%SZ", "+%FT%T", "+%FT%TZ")
 
 
 def clock_test(head) -> bool:
@@ -250,15 +254,18 @@ def clock_test(head) -> bool:
 
 
 def date_format(read: str):
-    """The one `+FORMAT` argument of a `$(date ...)` or backtick `date` read, unquoted; None when the read has
-    none, more than one, or cannot be split."""
+    """The `+FORMAT` argument of a `$(date ...)` or backtick `date` read, unquoted, when it is one of
+    CLOCK_FORMATS and every other argument is one of CLOCK_FLAGS; else None, as for a read that cannot be split."""
     inner = read[2:-1] if read.startswith("$(") else read[1:-1]
     try:
         words = shlex.split(inner)
     except ValueError:
         return None
     forms = [word for word in words[1:] if word.startswith("+")]
-    return forms[0] if len(forms) == 1 else None
+    flags = [word for word in words[1:] if not word.startswith("+")]
+    if len(forms) != 1 or forms[0] not in CLOCK_FORMATS or any(flag not in CLOCK_FLAGS for flag in flags):
+        return None
+    return forms[0]
 
 
 def clock_loop(token_rows) -> bool:
