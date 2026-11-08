@@ -336,15 +336,18 @@ class StaleCase(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(parse(out), [], out)
 
-    def route_range(self, rows, extra=None, base_notes="# Notes\n", head_extra=None):
+    def route_range(self, rows, extra=None, base_notes="# Notes\n", head_extra=None, head_change=None):
         """A range that rewrites NOTES as `rows`, given as (line, flagged) pairs. `extra` is committed at base and
-        `head_extra` ({path: text}) at head. Returns (range, flagged lines)."""
+        `head_extra` ({path: text}) at head. `head_change(repo)`, when given, moves or removes a file at head last,
+        before the commit. Returns (range, flagged lines)."""
         text, flagged = rows_text(rows)
 
         def change(repo):
             write(repo, NOTES, text)
             for path, body in (head_extra or {}).items():
                 write(repo, path, body)
+            if head_change:
+                head_change(repo)
             commit(repo)
         return self.make_range(base_files(base_notes, extra=extra), change), flagged
 
@@ -2902,6 +2905,9 @@ class CodeClaimTests(StaleCase):
         self.assert_code_claims(rng, [(DECISION, 1)])
 
     def test_a_cite_to_a_name_unbound_in_its_file_at_head_is_stale010_and_no_stale009_report(self):
+        """Class (d), a test re-pointed by a ruling: a dead cite moves from a STALE009 report to the STALE010 finding.
+        Coordinator ruling, 2026-11-08 04:03 CST (item 386): "a cite to a code name missing there is red". Lane pick,
+        04:16 CST: a dead cite has one home, STALE010, and STALE009 keeps only "a code claim with no cite"."""
         cited = [(DEAD_PAREN, "no_such_name"), (DEAD_TICK, "no_such_name"), (GONE_FILE, "lane_lint")]
         rng, _ = self.rows_range([("- " + text, False) for text, _ in cited] + [("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
@@ -2962,6 +2968,9 @@ class CodeClaimTests(StaleCase):
         self.assert_code_claims(rng, [(DECISION, 2)])
 
     def test_report_lines_leave_the_exit_code_at_zero_and_the_verdict_at_pass(self):
+        """Class (d), a test re-pointed by a ruling. Lane pick, 04:16 CST: STALE009 keeps only "a code claim with no
+        cite", so both lines here stay report lines. A dead cite is STALE010, never a report line (coordinator ruling,
+        2026-11-08 04:03 CST, item 386)."""
         rng, flagged = self.rows_range([("- " + INCIDENT, True), ("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
         rc, out = self.run_check(rng)
@@ -3171,6 +3180,55 @@ class NameCiteTests(StaleCase):
         self.assertIsNone(binding_kind(big, "f300"))
         self.assertIsNone(binding_kind("", "gone_eight"))  # scope: the empty file binds nothing
         self.assert_flags(rng, [(NOTES, 1, "STALE010"), (NOTES, 3, "STALE010")])
+
+    def test_a_name_the_range_removes_from_a_renamed_file_is_stale002_at_the_new_path_and_no_stale010(self):
+        keep = "".join("def keep_%s():\n    return 1\n\n\n" % c for c in "abcde")  # five kept defs, so git pairs the move
+        old = keep + "def gone_fn(lane):\n    return lane\n"
+
+        def rename_without_gone_fn(repo):
+            git(repo, "rm", "-q", "lint/old.py")
+            write(repo, "lint/new.py", keep)
+        rng, _ = self.route_range([("- (lint/new.py gone_fn)", True), ("- (lint/new.py keep_a)", False)],
+                                  extra={"lint/old.py": old}, head_change=rename_without_gone_fn)
+        self.assertEqual(binding_kind(old, "gone_fn"), "def")  # scope: the base file binds the name
+        self.assertIsNone(binding_kind(keep, "gone_fn"))  # scope: the renamed file does not bind it at head
+        self.assertRegex(git(rng.repo, "diff", "--name-status", "-M", rng.base, rng.head),
+                         r"(?m)^R\d+\tlint/old\.py\tlint/new\.py$")  # scope: git pairs the two paths as one rename
+        self.assert_flags(rng, [(NOTES, 1, "STALE002")])  # the kept name is silent; the removed name is STALE002, not STALE010
+
+    def test_a_cite_of_a_deleted_file_with_a_leading_dot_slash_is_stale001_as_the_same_cite_without_it(self):
+        gone = "def fn(lane):\n    return lane\n"
+        rows = [("- `lint/gone.py` `fn`", True), ("- `./lint/gone.py` `fn`", True)]  # the plain form, then the dotted one
+        rng, _ = self.route_range(rows, extra={"lint/gone.py": gone},
+                                  head_change=lambda repo: git(repo, "rm", "-q", "lint/gone.py"))
+        self.assertEqual(binding_kind(gone, "fn"), "def")  # scope: the base file binds the name
+        self.assertNotIn("lint/gone.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope: deleted
+        self.assert_flags(rng, [(NOTES, 1, "STALE001"), (NOTES, 2, "STALE001")])
+
+    def test_a_basename_cite_with_no_folder_part_is_no_path_cite_and_its_folder_twin_with_a_missing_name_is_stale010(self):
+        guard = GUARD + "\n\ndef some_fn(path):\n    return 7\n"
+        rows = [
+            ("- (guard.py some_fn)", False),  # no folder part, so no path cite, as for STALE003
+            ("- (hooks/guard.py missing_fn)", True),  # the twin: a folder part and a name the file does not bind
+        ]
+        rng, _ = self.route_range(rows, extra={"hooks/guard.py": guard})
+        self.assertEqual(binding_kind(guard, "some_fn"), "def")  # scope: hooks/guard.py binds the basename's name
+        self.assertIsNone(binding_kind(guard, "missing_fn"))  # scope: the twin's name is unbound there
+        self.assertNotIn("guard.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope: no root file
+        self.assert_flags(rng, [(NOTES, 2, "STALE010")])
+
+    def test_a_range_that_adds_one_py_name_cite_and_removes_nothing_starts_exactly_four_git_processes_with_one_cat_file(self):
+        rng, _ = self.route_range([("- (lint/x.py check)", False)])
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: Markdown only, nothing removed
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the cited name is bound at head
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        subs = [command.split()[0] for command in commands]
+        # The three starts of a Markdown-only range, and the one cat-file that reads lint/x.py for the cite: 4 in all.
+        # No ls-tree of the tree and no second cat-file. Passes on b63286047 already: a cost pin, not a red case.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
 
 
 if __name__ == "__main__":
