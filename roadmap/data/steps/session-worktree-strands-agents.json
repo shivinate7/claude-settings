@@ -1,11 +1,11 @@
 {
   "title": "A session does not enter a new worktree while its agents run",
   "why": "Nothing refuses an EnterWorktree while the session's agents run, and on Nov 8 it stranded two agents of lane msg-role-false-alarms (note session-worktree-strands-agents on #1849; lane, 03:04 CST Nov 8).",
-  "note": "Fix: EnterWorktree (and a cd into another checkout) refuses or asks while an agent of this session runs, and names the agents. Red case first: an EnterWorktree with one agent running; control: none running passes. Read the note on #1849 for the exact strand first. Related done steps: resume-lost-worktree, c46. Queue fix (owner 13:20 CST Nov 7). Slug from the note. Filed 03:06 CST Nov 8.",
+  "note": "Fix: EnterWorktree (and a cd into another checkout) refuses or asks while an agent of this session runs, and names the agents. Red case first: an EnterWorktree with one agent running; control: none running passes. Read the note on #1849 for the exact strand first. Related done steps: resume-lost-worktree, c46. Queue fix (owner 13:20 CST Nov 7). Slug from the note. Filed 03:06 CST Nov 8. Built in the lane that found it (owner item 386), resume-msg-role-check, as a follow-up from #1849's head (coordinator, 03:05 CST Nov 8).",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 577,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T03:04:00-06:00"
+  "lane": "session_013NEJL3bvXbg7UQvaKpwwq9",
+  "updatedAt": "2026-11-08T03:05:00-06:00"
 }
