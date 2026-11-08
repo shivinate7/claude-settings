@@ -10713,6 +10713,13 @@ rf_allow("the latest spawn with the name wins: an older finished reviewer, then 
 rf_allow("a send to main is allowed", {"to": "main", "message": RF_MSG}, rf_path("bg-reviewer-finished"))
 rf_allow("a name that matches no spawn (a peer session) is allowed",
          {"to": "session-peer-pr9", "message": RF_MSG}, rf_path("bg-reviewer-finished"))
+# Controls for the subagent cases below: a main-session send to the same finished spawns on the same transcripts. The old
+# code already refuses these, so each shows the transcript reads as finished, and a red subagent case is the guard's.
+rf_refuse("control: a main-session send to a finished reviewer on the subagent transcript is refused",
+          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("subagent-sender-finished-reviewer"))
+rf_refuse("control: a main-session send to a finished worktree builder on the subagent transcript is refused",
+          {"to": RF_WT_BUILDER, "message": RF_MSG}, rf_path("subagent-sender-finished-worktree"),
+          carries=("fresh builder",))
 # A subagent's own send. Its payload carries agent_id and agent_type, and agent_id is the spawn's agentId, which the
 # parent's transcript holds (the running builder in each of these). Its send is judged as the main session's is.
 rf_refuse("a subagent's send to a finished reviewer the parent spawned is refused",
