@@ -1,0 +1,11 @@
+{
+  "title": "`verdict` reports a fail when pytest collects 0 tests",
+  "phase": "next",
+  "status": "todo",
+  "order": 263,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "`verdict` reports pass when pytest collects 0 tests, a false green. Found by lane held-prs-release (coordinator, 23:22 CST Nov 7).",
+  "note": "Done check: a red test where `verdict pytest <path with no tests>` exits non-zero. Not a queue fix; waits under the item 384 hold. Slug from the coordinator; title by triage.",
+  "updatedAt": "2026-11-07T23:23:00-06:00"
+}

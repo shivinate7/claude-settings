@@ -35,9 +35,10 @@
   "pick": "a",
   "rank": 1,
   "ref": "step pr-backlog-clear",
-  "reply": "a, saved 13:12 CST. Sent to the coordinator: all ten held PRs go back to the revive lanes, each catches up with main and gets a fresh round-1 review, then batches alone or closes if out of date.",
+  "replied": "2026-11-08T05:25:00Z",
+  "reply": "a, saved 13:12 CST Nov 7. Done 23:22 CST: lane held-prs-release reports all held PRs handed to revive lanes or closed (8 PRs). #1099 belongs to lane lane-undo-check, not this hand-off (coordinator, 23:22 CST). Home: step pr-backlog-clear.",
   "short": "10 held PRs: release, one by one, or close",
-  "status": "open",
+  "status": "closed",
   "title": "Release the ten held claude-settings PRs to the revive lanes?",
   "why": "Only you can release a PR held after review round 3, and none of the ten has a recorded hold reason."
 }
