@@ -23,7 +23,7 @@ from guard_core import (
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
-    resolve_command, segment_tokens, split_segments,
+    resolve_command, segment_tokens, split_segments, subagent_transcript,
 )
 from guard_env import _substitutions
 
@@ -317,8 +317,7 @@ def in_own_agent_worktree(pid: int, transcript: str) -> bool:
         return False   # left-behind only: a pid whose parent is alive stays foreign
     cwd = _pid_cwd(pid)
     found = AGENT_WORKTREE_RE.search((cwd or "").replace("\\", "/"))
-    return bool(found) and os.path.isfile(
-        os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % found.group(1)))
+    return bool(found) and os.path.isfile(subagent_transcript(transcript, found.group(1)) or "")
 
 
 def _kill_pids(tokens):

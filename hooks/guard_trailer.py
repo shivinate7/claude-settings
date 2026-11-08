@@ -1,0 +1,138 @@
+"""The guard's commit-trailer family: an agent's push whose commits name another model.
+
+guard.py is the only entry point, and it runs this check in its fixed order. Other files reach these names
+through `guard`. Decision commit-trailer-model.
+"""
+import json
+import os
+import re
+
+import guard_core
+from guard_core import split_segments, subagent_transcript
+from guard_merge import _plain_source, git_call_of
+from guard_push_delete import push_refspecs, push_target
+
+# The families a model id and a trailer both map to a name for. A word outside it names no model here, so the
+# check passes (fail open): `claude-zzz-9-9` and "Claude Code" are no model.
+MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
+# `claude-<family>-<major>-<minor>` then an optional suffix such as `[1m]`. A minor of three or more digits is a
+# date (`claude-sonnet-4-20250514`), not a version, so it maps to nothing.
+MODEL_ID = re.compile(r"claude-([a-z]+)-(\d+)-(\d{1,2})(?:\D.*)?\Z", re.S)
+# A trailer value: `Claude`, a family word, an optional `<major>[.<minor>]`, then anything such as the address.
+TRAILER_MODEL = re.compile(r"\s*(?:Claude\s+)?([A-Za-z]+)(?:\s+(\d+)(?:\.(\d+))?)?(?=\s|<|\Z)")
+TAIL_BYTES = 64 * 1024   # the first read of a transcript's end; it doubles until an assistant record shows
+TAIL_MAX = 16 * 1024 * 1024
+SYNTHETIC = "<synthetic>"
+
+TRAILER_REASON = (
+    "Rule (Git, commit-trailer-model; decision commit-trailer-model): a commit this push sends names another model "
+    "in its Co-Authored-By trailer: {line}. Your transcript names {own}. "
+    "A trailer misstates who wrote the code. Remedy: amend the commit so Co-Authored-By names the model your own "
+    "system prompt names, then push again."
+)
+
+
+def model_name(model_id):
+    """(family, major, minor) for a model id such as `claude-opus-5-5[1m]`, else None."""
+    found = MODEL_ID.match(model_id) if isinstance(model_id, str) else None
+    if not found or found.group(1) not in MODEL_FAMILIES:
+        return None
+    return found.group(1), int(found.group(2)), int(found.group(3))
+
+
+def last_model(path):
+    """The `message.model` of the last assistant record in the transcript at `path`, else None. It reads the
+    end of the file, doubling the window until a record shows. An unreadable file, a line that is not JSON and
+    a synthetic record all read as no record."""
+    try:
+        size = os.path.getsize(path)
+        window = TAIL_BYTES
+        with open(path, "rb") as handle:
+            while True:
+                start = max(0, size - window)
+                handle.seek(start)
+                lines = handle.read(size - start).decode("utf-8", "replace").split("\n")
+                if start:
+                    lines = lines[1:]   # the first line of a window that starts mid-file is cut
+                for line in reversed(lines):
+                    try:
+                        record = json.loads(line)
+                        model = record["message"]["model"] if record["type"] == "assistant" else None
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                    if isinstance(model, str) and model != SYNTHETIC:
+                        return model
+                if not start or window >= TAIL_MAX:
+                    return None
+                window *= 2
+    except OSError:
+        return None
+
+
+def trailer_differs(value, own):
+    """True when the trailer `value` names a model that is not `own` (family, major, minor). A family word with
+    no version differs only by family; a version with no minor differs only by major."""
+    found = TRAILER_MODEL.match(value)
+    if not found:
+        return False
+    family = found.group(1).lower()
+    if found.group(2) is None and family not in MODEL_FAMILIES:
+        return False   # "Claude Code", a person: no model word
+    if family != own[0]:
+        return True
+    if found.group(2) is None:
+        return False
+    if int(found.group(2)) != own[1]:
+        return True
+    return found.group(3) is not None and int(found.group(3)) != own[2]
+
+
+def unpushed_trailers(where, sources):
+    """The Co-Authored-By values git's own trailer parse reads from the commits `sources` reach that no remote
+    ref holds, else None when git cannot answer."""
+    done = guard_core._git(where, "log", "--format=%(trailers:key=Co-Authored-By,valueonly)", *sources,
+                           "--not", "--remotes")
+    if done is None or done.returncode != 0:
+        return None
+    return [line.strip() for line in done.stdout.splitlines() if line.strip()]
+
+
+def commit_trailer_hit(stripped, cwd, transcript, agent_id):
+    """(matched text, reason) for the first push of an agent that sends a commit whose Co-Authored-By names a model
+    other than the agent's own, read from its transcript. Else None. No agent, no readable transcript, an
+    unmapped model id and a git error all give None. Cost: one transcript read and one `git log` per push."""
+    if not agent_id or not isinstance(transcript, str) or not transcript.endswith(".jsonl"):
+        return None
+    own = None   # the agent's (family, major, minor), False when unreadable; read at most once
+    for segment in split_segments(stripped):
+        call = git_call_of(segment) if segment.strip() else None
+        if call is None or call[0] != "push":
+            continue
+        named = push_refspecs(call[1])
+        where, _overrides = push_target(segment, stripped, cwd)
+        if named is None or not where or not os.path.isdir(where):
+            continue
+        sources = []
+        for spec in named[1] or [""]:
+            source = _plain_source(spec.lstrip("+").partition(":")[0])
+            if source not in sources:
+                sources.append(source)
+        values = unpushed_trailers(where, sources)
+        if not values:
+            continue
+        if own is None:   # only when a push has a trailer to judge
+            path = subagent_transcript(transcript, agent_id)
+            own = (model_name(last_model(path)) if path else None) or False
+        if not own:
+            return None
+        for value in values:
+            if trailer_differs(value, own):
+                line = "Co-Authored-By: " + value
+                return line, TRAILER_REASON.format(
+                    line=line, own="%s %d.%d" % (own[0].capitalize(), own[1], own[2]))
+    return None
+
+
+# The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
+# ids across the modules it loads. In the repo it stays a comment, which counts as a match.
+# INSTALL_ID = "uninstalled"

@@ -1455,6 +1455,18 @@ def set_log_session(value) -> None:
     _log_session = session_log_field(value)
 
 
+SUBAGENT_ID = re.compile(r"[\w-]+\Z")
+
+
+def subagent_transcript(session: str, agent: str):
+    """The path of an agent's transcript beside its session's file:
+    <dir>/<session stem>/subagents/agent-<id>.jsonl. None for an id with a separator or an empty session."""
+    if not session or not SUBAGENT_ID.match(agent or ""):
+        return None
+    stem = os.path.splitext(os.path.basename(session))[0]
+    return os.path.join(os.path.dirname(session), stem, "subagents", "agent-%s.jsonl" % agent)
+
+
 def record(tool: str, decision: str, rule: str, matched: str) -> None:
     try:
         folder = config_dir()
