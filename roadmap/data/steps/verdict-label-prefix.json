@@ -1,0 +1,11 @@
+{
+  "title": "verdict-label-prefix (lane verdict-format-line follow-up after #1968)",
+  "phase": "next",
+  "status": "doing",
+  "order": 647,
+  "owner": "lane verdict-format-line",
+  "lane": "session_013NEJL1BCgLVUACYU5ujv9A",
+  "why": "Named by the coordinator (07:20 CST Nov 8; items 386 and 410 a) as a follow-up of #1968, built in lane verdict-format-line.",
+  "note": "Follow-up PR after #1968; not to be queued elsewhere. Triage asked the lane for the title and done check (07:20 CST Nov 8).",
+  "updatedAt": "2026-11-08T07:19:00-06:00"
+}
