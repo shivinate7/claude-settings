@@ -21,7 +21,9 @@ module path, which a stub run uses.
 """
 import importlib.util
 import os
+import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -42,7 +44,9 @@ TEST_TEXT = "def test_widget():\n    assert widget() == 1\n"
 GOOD = "Red-run: python3 lint/test_widgets.py -> 2 failed on abc1234"
 # Lines carry the placeholder SHA, filled with a real fixture sha by each case (see filled).
 VALID_LINE = "Red-run: python3 lint/test_widgets.py -> 1 failed on SHA"
-# Keyword typos. Each must flag its commit, and none may pass as a failed-form command.
+# Keyword typos. Each must flag its commit, and none may pass as a failed-form command. The last six and the generic
+# one name the words a builder's rule refuses: a first word that ends in a colon (other than `mutant:` and `none:`), or
+# that starts `mutat` or `mutan`. `runner:` stands for every colon word.
 KEYWORD_TYPOS = ("Red-run: mutants: x -> 1 failed on SHA",
                  "Red-run: mutation: x -> 1 failed on SHA",
                  "Red-run: mutant x -> 1 failed on SHA",
@@ -51,7 +55,14 @@ KEYWORD_TYPOS = ("Red-run: mutants: x -> 1 failed on SHA",
                  "Red-run: mutations x -> 1 failed on SHA",
                  "Red-run: mutate x -> 1 failed on SHA",
                  "Red-run: none x -> 1 failed on SHA",
-                 "Red-run: non x -> 1 failed on SHA")
+                 "Red-run: non x -> 1 failed on SHA",
+                 "Red-run: mutated x -> 1 failed on SHA",
+                 "Red-run: mutating x -> 1 failed on SHA",
+                 "Red-run: mutates: x -> 1 failed on SHA",
+                 "Red-run: mutan: x -> 1 failed on SHA",
+                 "Red-run: mutnat: x -> 1 failed on SHA",
+                 "Red-run: nonee: x -> 1 failed on SHA",
+                 "Red-run: runner: x -> 1 failed on SHA")
 # The refused keywords that start `mutant` or `mutation`. Their FAIL line holds the hint that names the mutant form.
 MUTANT_TYPOS = tuple(line for line in KEYWORD_TYPOS if re.match(r"Red-run: mut(?:ant|ation)", line, re.IGNORECASE))
 # A mutant keyword with text glued on. The failed form would read it as a command, so each must flag its commit.
@@ -64,15 +75,25 @@ CASE_VARIANT_KEYS = ("Red-Run: none (x)", "red-run: none", "Red-run : x")
 VALID_NONE = "Red-run: none: ok"
 # Prose that mentions the key mid-line. It is not a Red-run line, so it passes.
 PROSE_LINE = "Prose: the Red-run: none form is for re-points."
-# Real commands whose first word is an ordinary word. Each passes. A path is not a keyword.
+# Real commands pass as the failed form. Each first word is an ordinary word, a path, or an environment assignment
+# (`NAME=value`, quoted or not). A word rule must not refuse one, even when the name starts `MUTATE` or the value holds a
+# colon: main's commit 049f8d8c0 carries the quoted form. `mutant=x` is different: it stays refused (PREFIX_BYPASSES).
 REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: MUTATE_ONLY='x' python3 hooks/test_guard.py -> 1 failed on SHA",
+                 "Red-run: MUTATE_ONLY=x python3 lint/test_x.py -> 1 failed on SHA",
+                 'Red-run: MUTATE_ONLY="worktree-home: the cross-checkout read costs" python3 hooks/test_guard.py -> 1 failed on SHA',
+                 "Red-run: NONE=1 python3 lint/test_x.py -> 1 failed on SHA",
+                 "Red-run: env X=1 python3 lint/test_x.py -> 1 failed on SHA",
+                 "Red-run: nonstop lint/test_x.py -> 1 failed on SHA",
                  "Red-run: make test -> 1 failed on SHA",
                  "Red-run: ./bin/verdict python3 lint/test_x.py -> 1 failed on SHA",
                  "Red-run: mutmut run -> 1 failed on SHA",
+                 "Red-run: ./mutation_probe.sh -> 1 failed on SHA",
                  "Red-run: ./scripts/mutation_probe.sh -> 1 failed on SHA")
 BASE_REF = "origin/main"
-BASE_VERDICT = "has_trailer"  # origin/main's name for the message verdict, read from its checker
+# origin/main's name for the message verdict, read from its checker. #1672 renames has_trailer to has_valid_trailer,
+# so the baseline read takes either name.
+BASE_VERDICTS = ("has_valid_trailer", "has_trailer")
 VERDICT = "has_valid_trailer"  # this checker's name for the message verdict
 FIELD = "\x1f"
 # Every commit carries this block, as real commits do. A check that wants Red-run as the last
@@ -123,6 +144,16 @@ def git_text(*args):
     return done.stdout
 
 
+def shallow_clone():
+    """True when this checkout is a shallow clone, whose history stops short of origin/main's."""
+    return git_text("rev-parse", "--is-shallow-repository").strip() == "true"
+
+
+# A shallow clone cuts origin/main's history short, so the pin would pass falsely there. CI fetches the full history.
+SHALLOW_REASON = ("shallow clone: origin/main's history stops short here, so the pin would pass falsely. "
+                  "CI fetches the full history (fetch-depth 0 in .github/workflows/checks.yml)")
+
+
 def load_module(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -159,11 +190,20 @@ def load_baseline(folder):
     return load_module("check_red_run_on_main", path)
 
 
+def base_verdict_name(module):
+    """The name origin/main's checker gives the message verdict. Raises when it has neither, so the pin says why."""
+    for name in BASE_VERDICTS:
+        if hasattr(module, name):
+            return name
+    raise AssertionError("origin/main's checker has none of %s: re-point the pin" % ", ".join(BASE_VERDICTS))
+
+
 def lost_trailers(baseline, current, records):
     """One line per message that origin/main's checker accepts and `current` refuses, named by short sha and subject."""
+    base_name = base_verdict_name(baseline)
     lost = []
     for sha, subject, message in records:
-        if verdict(baseline, BASE_VERDICT, message) and not verdict(current, VERDICT, message):
+        if verdict(baseline, base_name, message) and not verdict(current, VERDICT, message):
             lost.append("%s %s" % (sha[:7], subject))
     return lost
 
@@ -684,20 +724,24 @@ class MainHistory(unittest.TestCase):
     """The history pin: a message origin/main's checker accepts must still pass this checker.
 
     It reads origin/main's whole history, which CI fetches (fetch-depth 0). A ref it cannot read is unknown, and fails.
+    A shallow clone cannot read it all, so the class skips there (SHALLOW_REASON).
     """
 
-    # Predate the mutant form. The checker judges a branch's own range only, so the pin is the one place main's
-    # commits are re-judged. These two are exempt there; no other main commit is.
+    # Main commits that wrote the no-colon mutant line (`Red-run: mutant A ...`). Main's history cannot change, so each
+    # stays exempt here. The checker judges a branch's own range only, so the pin is the one place main's commits are
+    # re-judged. No other main commit is exempt.
     GRANDFATHERED = frozenset(("408340997f6b913294cc44691eab705caf80a6e0",
-                               "1762ec79f2f44d35720e2f32b8ee7ccec1291db4"))
+                               "1762ec79f2f44d35720e2f32b8ee7ccec1291db4",
+                               "b2f0fb754befe1667228529d4dc266fb476e3315"))
 
     @classmethod
     def setUpClass(cls):
+        if shallow_clone():
+            raise unittest.SkipTest(SHALLOW_REASON)
         cls.records = main_messages()
         cls.baseline = load_baseline(RUN_FOLDER)
         cls.current = load_module("check_red_run_under_test", MODULE)
-        if not hasattr(cls.baseline, BASE_VERDICT):
-            raise AssertionError("origin/main's checker has no %s: re-point the pin" % BASE_VERDICT)
+        cls.base_name = base_verdict_name(cls.baseline)
         if not hasattr(cls.current, VERDICT):
             raise AssertionError("this checker has no %s: re-point the pin" % VERDICT)
 
@@ -707,7 +751,7 @@ class MainHistory(unittest.TestCase):
 
     def test_no_valid_trailer_on_main_turns_invalid(self):
         judged = [record for record in self.records if record[0] not in self.GRANDFATHERED]
-        accepted = [record for record in judged if verdict(self.baseline, BASE_VERDICT, record[2])]
+        accepted = [record for record in judged if verdict(self.baseline, self.base_name, record[2])]
         self.assertGreater(len(accepted), 0, "scope: origin/main holds no valid trailer, so the pin checks nothing")
         lost = lost_trailers(self.baseline, self.current, judged)
         self.assertEqual(lost, [], "a valid trailer on origin/main turns invalid under this checker:\n" + "\n".join(lost))
@@ -720,6 +764,31 @@ class MainHistory(unittest.TestCase):
 
         lost = lost_trailers(self.baseline, RefusesAll(), self.records)
         self.assertGreater(len(lost), 0, "a checker that refuses every message must trip the pin")
+
+
+class ShallowPin(Fixture):
+    """In a shallow clone the history pin skips, so a cut-short history cannot pass it. A depth-1 clone runs it."""
+
+    def test_shallow_clone_skips_the_pin(self):
+        tracked_tree.copy_tracked(self.tree, "testing")  # the module imports tracked_tree from testing/
+        shutil.copyfile(os.path.abspath(__file__), os.path.join(self.tree, "lint", "test_check_red_run.py"))
+        self.git("add", "-A")  # the copied lint, hooks and testing folders, and this module
+        self.commit("fixture base", {})
+        self.commit("fixture tip", {"README.md": "tip\n"})  # a second commit, so depth 1 cuts the history
+        clone_parent = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="shallow_")
+        self.addCleanup(tracked_tree.rm_tree, clone_parent)
+        clone = os.path.join(clone_parent, "clone")
+        done = subprocess.run(["git", "clone", "-q", "--depth", "1", pathlib.Path(self.tree).as_uri(), clone],
+                              capture_output=True, text=True, env=GIT_ENV)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        scope = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=clone,
+                               capture_output=True, text=True, env=GIT_ENV).stdout.strip()
+        self.assertEqual(scope, "true", "scope: the clone must be shallow")
+        done = subprocess.run([sys.executable, os.path.join(clone, "lint", "test_check_red_run.py"), "-v", "MainHistory"],
+                              cwd=clone, capture_output=True, text=True, encoding="utf-8", errors="replace", env=GIT_ENV)
+        out = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, "the pin must skip in a shallow clone, not fail:\n" + out)
+        self.assertRegex(out, r"skipped .*shallow clone", "the pin must skip, naming the shallow clone, not run:\n" + out)
 
 
 if __name__ == "__main__":
