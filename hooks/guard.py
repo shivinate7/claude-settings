@@ -2782,11 +2782,6 @@ def brief_blind_hit(brief) -> tuple:
     return "", 0
 
 
-def brief_blind_shape(brief) -> str:
-    """The shape of a brief that a reviewer must not read: "report", "item" or "verdict", else ""."""
-    return brief_blind_hit(brief)[0]
-
-
 def brief_blind_role(role) -> bool:
     """True for a role in BRIEF_BLIND_ROLES, with any plugin prefix and the case of role_key ignored."""
     return isinstance(role, str) and role_key(role).rsplit(":", 1)[-1] in BRIEF_BLIND_ROLES
