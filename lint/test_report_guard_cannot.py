@@ -37,6 +37,10 @@ REFUSED_ROW_ID = "r-archive"
 ROW_REFUSED = hook_base.route_row(REFUSED_ROW_ID, "archive_session", "refused", surface="local")
 # Words a remedy must not name: the act a refusal is about (git-remedy-never-names-target).
 ACT_WORDS = re.compile(r"\bPR\b|pull request|\bopen\b|\bpush\b|\bmerge\b|\bgit\b|\bgh\b|mcp__", re.I)
+# The weren't forms of the be-form claims, with straight and curly apostrophes. Two cases build lines from them.
+WEREN_T_CLAIMS = ("We weren't able to merge PR 12", "We weren’t able to merge PR 12",
+                  "We weren't allowed to merge PR 12", "We weren’t allowed to merge PR 12",
+                  "We weren't going to be able to merge PR 12", "We weren’t going to be able to merge PR 12")
 
 
 # Runs report_guard.py as the Stop hook runs it, and writes to stderr the paths its process opened (the audit event
@@ -890,6 +894,26 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p1"),
                          *ok_bash("git push origin HEAD", "tu_p2"), landed_reply(line)])
         self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_past_werent_form_recovered_by_a_later_merge_is_no_claim(self):
+        # Catches: "weren't" dropped from the past-tense read (CANNOT_PAST_RE), so "We weren't able to merge PR 12 at
+        # first" reads as a present claim that the merge cannot be done, although a later merge of the same PR
+        # succeeded. Each form runs after a failed `gh pr merge 12` and a later success in the turn.
+        for claim in WEREN_T_CLAIMS:
+            line = claim + " at first; the retry merged it."
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
+                                 *ok_bash("gh pr merge 12", "tu_m2"), landed_reply(line)])
+                self.assert_passes(out, "a past failure of a merge that a later merge recovered: %r" % line)
+
+    def test_cc_green_a_werent_form_without_a_later_merge_still_blocks(self):
+        # Control: the same claims after the same failed merge, with no later success and no reason. Each line is read
+        # as a claim here, so the pass above comes from the past read and not from a line the check never reads.
+        for claim in WEREN_T_CLAIMS:
+            line = claim + "."
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_blocked_for(out, NO_CHECK, line)
 
     def test_cc_red_r4_rule_forms_and_the_cannot_suite_pass(self):
         # A sentence that names a rule or a decision is the rule's text, not the session's claim. "Cannot" directly
