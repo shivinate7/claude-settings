@@ -84,9 +84,13 @@ class Matcher(unittest.TestCase):
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
 # model on every .ts, .tsx and .json edit.
-def pre_tool_entries():
+def tool_entries(event):
     with open(SETTINGS, encoding="utf-8") as f:
-        return json.load(f)["hooks"]["PreToolUse"]
+        return json.load(f)["hooks"][event]
+
+
+def pre_tool_entries():
+    return tool_entries("PreToolUse")
 
 
 def covers(entry, tool):
@@ -519,6 +523,95 @@ class JudgeModelRows(unittest.TestCase):
         judges = call_judge_judges()
         wrong = dict(judges, Agent=(judges["Agent"][0], "claude-haiku-9-9") + tuple(judges["Agent"][2:]))
         self.assertTrue(any(g.startswith("Agent: table model") for g in table_gaps(self.text, wrong)))
+
+
+# Mac names of the cloud artifact tools, by the cloud tool each stands in for. Owner-relayed waiting-page item 434
+# (home-artifact-tool-names, 2026-11-08 18:22Z) is the source. The tests below read this one constant; no copy.
+MAC_ARTIFACT_TOOLS = {
+    "Artifact": ("publish_files", "get_artifact", "read_artifact", "list_artifacts",
+                 "declare_capabilities", "describe_capabilities", "watch", "guide"),
+    "ArtifactData": ("db_get", "db_list", "db_query", "db_write", "db_str_replace", "db_usage"),
+    "ArtifactComments": ("read_comments",),
+}
+
+
+def mac_tool(name):
+    """The Mac tool name for a name in MAC_ARTIFACT_TOOLS. A name the constant does not hold is a test bug."""
+    if not any(name in names for names in MAC_ARTIFACT_TOOLS.values()):
+        raise AssertionError("%s is not in MAC_ARTIFACT_TOOLS" % name)
+    return "mcp__claude-artifacts__" + name
+
+
+def guard_entries():
+    return [e for e in pre_tool_entries() if any("guard.py" in h.get("command", "") for h in e["hooks"])]
+
+
+def page_note_entries():
+    """The PostToolUse entries whose command hook runs local_time.py --page-note."""
+    return [e for e in tool_entries("PostToolUse") for h in e["hooks"]
+            if h.get("type") == "command" and "local_time.py" in h.get("command", "")
+            and "--page-note" in h.get("command", "")]
+
+
+def lookalikes():
+    """Names no artifact matcher may take: each Mac name under another server, each cloud name with a prefix."""
+    names = [n for ns in MAC_ARTIFACT_TOOLS.values() for n in ns]
+    return ["mcp__claude-artifacts-evil__" + n for n in names] + ["x" + cloud for cloud in MAC_ARTIFACT_TOOLS]
+
+
+def lookalike_hits(entries):
+    """(matcher, name) pairs where an entry's matcher takes a lookalike name. An empty list means none does."""
+    return [(e.get("matcher", ""), name) for e in entries for name in lookalikes() if covers(e, name)]
+
+
+class ArtifactMacNames(unittest.TestCase):
+    def test_guard_matcher_covers_mac_publish_and_item_writes(self):
+        # Rule page-stale needs publish_files; page-item-design and mockup-home need the two item writes.
+        entries = guard_entries()
+        self.assertTrue(entries, "no PreToolUse entry runs guard.py")
+        for name, rule in (("publish_files", "page-stale"), ("db_write", "page-item-design, mockup-home"),
+                           ("db_str_replace", "page-item-design, mockup-home")):
+            with self.subTest(name=name):
+                tool = mac_tool(name)
+                self.assertTrue(any(covers(e, tool) for e in entries),
+                                "guard.py matcher does not cover %s (needed by rule %s): %r"
+                                % (tool, rule, [e.get("matcher") for e in entries]))
+
+    def test_call_judge_matcher_covers_mac_item_writes(self):
+        # The waiting-page item review (ruled Nov 1 11:51 CST) reads the two item writes, so call_judge.py sees them.
+        entries = [e for e, _ in call_judge_entries()]
+        self.assertTrue(entries, "no PreToolUse entry runs call_judge.py")
+        for name in ("db_write", "db_str_replace"):
+            with self.subTest(name=name):
+                tool = mac_tool(name)
+                self.assertTrue(any(covers(e, tool) for e in entries),
+                                "call_judge.py matcher does not cover %s (needed by the waiting-page item review): %r"
+                                % (tool, [e.get("matcher") for e in entries]))
+
+    def test_page_note_matcher_covers_mac_reads(self):
+        entries = page_note_entries()
+        self.assertTrue(entries, "no PostToolUse entry runs local_time.py --page-note")
+        for name in ("db_get", "db_list", "db_query"):
+            with self.subTest(name=name):
+                tool = mac_tool(name)
+                self.assertTrue(any(covers(e, tool) for e in entries),
+                                "local_time.py --page-note matcher does not cover %s: %r"
+                                % (tool, [e.get("matcher") for e in entries]))
+
+    def test_mac_lookalikes_match_no_artifact_entry(self):
+        # Green on main by design: a fix that widens a matcher with a wildcard would take these names.
+        groups = {"guard.py": guard_entries(), "call_judge.py": [e for e, _ in call_judge_entries()],
+                  "local_time.py --page-note": page_note_entries()}
+        for label, entries in groups.items():
+            self.assertTrue(entries, "no entry runs %s" % label)
+        hits = lookalike_hits([e for entries in groups.values() for e in entries])
+        self.assertEqual(hits, [], "an artifact matcher takes a lookalike name (matcher, name): %s" % hits)
+
+    def test_lookalike_check_goes_red_on_a_broad_matcher(self):
+        # Green on main by design: it shows the negative case above can fail, so it is not an empty pass.
+        broad = [{"matcher": "mcp__claude-artifacts.*|.*ArtifactData"}]
+        self.assertTrue(lookalike_hits(broad),
+                        "lookalike_hits passes a broad matcher, so the negative case proves nothing")
 
 
 if __name__ == "__main__":
