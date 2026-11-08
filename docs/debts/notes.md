@@ -1533,3 +1533,6 @@
 - brief-discard-colon-window: the 4-word prohibition window crosses a colon, so "If there are no conflicts: run `<discard>`" passes (hooks/guard.py `_brief_prohibits`). Decision: brief-destructive-git.
 - brief-discard-tilde-fence: a `~~~` fence is not read, so a discard in it passes (hooks/guard.py `_brief_commands`). Decision: brief-destructive-git.
 - brief-discard-marker-whole-line: a `Must deny:` or `Add a case:` marker exempts every later span on its line, an order too (hooks/guard.py `brief_destructive_hit`). Decision: brief-destructive-git.
+- brief-discard-nul-unpinned: the brief scan reads a NUL as a space, and a Workflow `${x}` template reaches the scan as a NUL, but no `brief-destructive-git:` case carries a NUL or `${` (hooks/guard.py `_brief_prohibits`). Decision: brief-destructive-git.
+- brief-discard-any-role-comment: the step 9e2 comment in hooks/guard.py says "Any role", but read-only roles are skipped; the decision record is right. Decision: brief-destructive-git.
+- brief-discard-wrapped-prohibition: a prohibition hard-wrapped across lines ("Never run these commands in the shared tree:" then a span on the next line, or a comma list split across lines) is denied, because the text before a span is read per line (hooks/guard.py `_brief_prohibits`). Decision: brief-destructive-git.
