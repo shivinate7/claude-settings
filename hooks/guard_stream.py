@@ -160,11 +160,13 @@ def check_stage(segment: str, background: bool) -> str:
     return _roster_word(tokens, index, interpreter_only=True)
 
 
-def _pipeline_hit(stages, find_stage) -> str:
+def _pipeline_hit(stages, find_stage, any_filter: bool = False) -> str:
     """The matched text when a stage that `find_stage` names in one pipeline's stages reaches
     `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
     what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk for the
-    narrated rule and the check rule."""
+    narrated rule and the check rule. `any_filter` (the check rule, coordinator ruling 2026-11-08
+    07:16 CST) widens the reach to every later stage but `tee`, since `sed -n`, `grep -m1` and `awk`
+    cut what the agent reads as `tail` does."""
     for first, segment in enumerate(stages):
         stage = find_stage(segment)
         if not stage:
@@ -175,12 +177,12 @@ def _pipeline_hit(stages, find_stage) -> str:
             if at is None:
                 continue
             word = basename(tokens[at])
-            if word in TRUNCATING_FILTERS:
+            if (word != "tee") if any_filter else (word in TRUNCATING_FILTERS):
                 return stage + " | " + word
     return ""
 
 
-def _walk_pipelines(stripped: str, find_stage) -> str:
+def _walk_pipelines(stripped: str, find_stage, any_filter: bool = False) -> str:
     """Split a call into pipelines (a pipeline ends at any separator other than `|`) and return the
     first `_pipeline_hit`."""
     ends = []
@@ -189,17 +191,17 @@ def _walk_pipelines(stripped: str, find_stage) -> str:
     for segment, end in zip(segments, ends):
         stages.append(segment)
         if end != "|":
-            hit = _pipeline_hit(stages, find_stage)
+            hit = _pipeline_hit(stages, find_stage, any_filter)
             if hit:
                 return hit
             stages = []
-    return _pipeline_hit(stages, find_stage)
+    return _pipeline_hit(stages, find_stage, any_filter)
 
 
 def check_tail_hit(stripped: str, background: bool) -> str:
-    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
-    filters."""
-    return _walk_pipelines(stripped, lambda segment: check_stage(segment, background))
+    """The matched text when a call pipes a named check into any filter but a lone `tee`, directly or
+    through other filters."""
+    return _walk_pipelines(stripped, lambda segment: check_stage(segment, background), any_filter=True)
 
 
 CHECK_TAIL_REASON = (
