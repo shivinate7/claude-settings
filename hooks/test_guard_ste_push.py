@@ -781,14 +781,51 @@ def case_cd_then_push_control(case_dir):
     return want_denied_in(guard_run(clone, command, case_dir), "the control: cd into A, then a push", other)
 
 
-def unknown_folder_bare_push(template):
-    """A bare push after a `cd` the guard cannot read. The push is allowed, and the guard notes the lint it could not
-    run. `%(a)s` is the bad checkout the push would send the bad note from, if its folder were read."""
+def want_unread_ask(out, label):
+    """Asked alone under rule push-unread-folder, no lint start, and a guard.log line that names ste-push and unknown.
+    The ask is not a refusal by ste-push."""
+    if out.error:
+        return out.error
+    if out.decision != "ask":
+        return "decision is %r, want ask (%s; %s)" % (out.decision, label, out.reason[:160])
+    if "push-unread-folder" not in out.reason:
+        return "the ask does not name rule push-unread-folder (%s)" % label
+    if lint_starts(out):
+        return "%d lint start(s), want none (%s)" % (len(lint_starts(out)), label)
+    if not any("unknown" in line.lower() for line in out.notes):
+        return "no guard.log line names ste-push and unknown under the ask (%s)" % label
+    return None
+
+
+def want_chained_unread_ask(out, label):
+    """Denied as the chained ask of rule push-unread-folder, with no lint start. Not a refusal by ste-push."""
+    if out.error:
+        return out.error
+    if out.decision != "deny":
+        return "decision is %r, want deny: a chained ask (%s; %s)" % (out.decision, label, out.reason[:160])
+    if "ask-alone" not in out.reason or "push-unread-folder" not in out.reason:
+        return "the deny is not the chained ask of push-unread-folder (%s; %s)" % (label, out.reason[:160])
+    if "ste-push" in out.reason:
+        return "refused by rule ste-push, want the chained ask (%s)" % label
+    if lint_starts(out):
+        return "%d lint start(s), want none (%s)" % (len(lint_starts(out)), label)
+    return None
+
+
+# Owner ruling 413 a (2026-11-08 06:11 CST) and coordinator ruling under item 410 a (2026-11-08 06:22 CST): a push
+# whose folder cannot be read asks, as the forced push does. A `cd "$(...)"` is a second command, so its ask chains
+# with the push and denies; a `cd` to a folder that is not there is one command and asks alone.
+def unread_folder_push(template, chained):
+    """A bare push after a `cd` the guard cannot read. `%(a)s` is the bad checkout the push would send the bad note
+    from, if its folder were read."""
     def check(case_dir):
         clone = make_pair(case_dir, MAIN_C, None)
         other = bad_checkout(case_dir)
         command = template % {"a": shlex.quote(other)}
-        return want_unknown_note(guard_run(clone, command, case_dir), command, lints=0)
+        out = guard_run(clone, command, case_dir)
+        if chained:
+            return want_chained_unread_ask(out, command)
+        return want_unread_ask(out, command)
     return check
 
 
@@ -1010,10 +1047,10 @@ CASES = [
      case_mkdir_cd_push),
     ("ste-push: the control, `cd <A>; git push` with a known folder is denied in A",
      case_cd_then_push_control),
-    ("ste-push: a bare push after `cd \"$(...)\"` is allowed and noted unknown, since its folder cannot be read",
-     unknown_folder_bare_push('cd "$(echo %(a)s)" && git push')),
-    ("ste-push: a bare push after `cd $HOME/x` is allowed and noted unknown, since its folder cannot be read",
-     unknown_folder_bare_push("cd $HOME/x && git push")),
+    ("ste-push: a bare push after `cd \"$(...)\"` is a chained ask, denied in its own call, with no lint",
+     unread_folder_push('cd "$(echo %(a)s)" && git push', chained=True)),
+    ("ste-push: a bare push after `cd $HOME/x` asks, noted unknown, with no lint, since its folder cannot be read",
+     unread_folder_push("cd $HOME/x && git push", chained=False)),
     ("ste-push: the control, a bare push after `cd <A>` with a known folder is denied in A",
      case_cd_bare_push_control),
     ("ste-push: a pinned fail: false (report only) is allowed with no unknown note",
