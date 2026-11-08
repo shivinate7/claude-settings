@@ -5282,6 +5282,17 @@ sh("detached: nohup wrapping a real kill still hits rule 2, not this rule",
 sh("detached: the shape inside a heredoc body is data, not a command",
    "cat <<'EOF' > notes.txt\nnohup python3 server.py &\nEOF", "allow", cwd=NOGIT)
 
+# A background job after a body that a shell script or a later command runs. The strip keeps that body and
+# drops its closing line, so a second strip reads the header as unclosed and drops the job after it.
+sh("detached: heredoc-kept-tail: a body written to run.sh, then nohup bash run.sh &, is denied",
+   "cat > run.sh <<'EOT'\necho hi\nEOT\nnohup bash run.sh &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: heredoc-kept-tail: a body written to run.sh, then python3 server.py &, is denied",
+   "cat > run.sh <<'EOT'\necho hi\nEOT\npython3 server.py &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: heredoc-kept-tail: a body written to run.sh, then npm start &, is denied",
+   "cat > run.sh <<'EOT'\necho hi\nEOT\nnpm start &", "deny", "detached-launch", cwd=NOGIT)
+sh("detached: heredoc-kept-tail: a body written to f and run by bash f, then npm start &, is denied",
+   "cat > f <<'EOT'\necho hi\nEOT\nbash f\nnpm start &", "deny", "detached-launch", cwd=NOGIT)
+
 # THE WINDOWS FORMS, the owner's scope change: the same protection PowerShell needs, since
 # guard.py judges Bash and PowerShell alike (SHELL_TOOLS). MEASURED 2026-09-24 against local
 # transcripts: 4 real `Start-Process` calls, all through the PowerShell tool, all already
@@ -9150,6 +9161,41 @@ def incident_write_strip_case():
 
 
 FIXTURELESS_CHECKS.add(incident_write_strip_case)  # it loads the module and builds no fixture
+
+
+# A background job after a body that a later command runs, the body kept in view. Each text is a header, a
+# body, its closer and a job. The keep-aware strip is idempotent on its own kept text; the unconditional strip,
+# which the callers that strip again run, must leave the job's line as one strip of the raw text does.
+KEPT_BODY_TAILS = (
+    "cat > run.sh <<'EOT'\necho hi\nEOT\nnohup bash run.sh &",
+    "cat > run.sh <<'EOT'\necho hi\nEOT\npython3 server.py &",
+    "cat > run.sh <<'EOT'\necho hi\nEOT\nnpm start &",
+    "cat > f <<'EOT'\necho hi\nEOT\nbash f\nnpm start &",
+)
+
+
+def kept_body_second_strip_case():
+    """A kept body's tail survives the second strip that the callers which strip again run.
+
+    strip_heredoc_bodies keeps the body of a file a later command runs and drops its closing delimiter
+    line. bare_background_hit, push_target and _run_dir strip that kept text a second time with the
+    unconditional strip. On a header with no closer, that strip drops every line after it, so the
+    background job after the body is never judged.
+    """
+    guard = _load_guard_module()
+    for command in KEPT_BODY_TAILS:
+        once = guard.strip_heredoc_bodies(command)
+        if guard.strip_heredoc_bodies(once) != once:
+            return False, "strip_heredoc_bodies changes its own kept text on a second pass: %r" % once
+        want = guard._strip_heredoc_bodies_unconditionally(command)
+        got = guard._strip_heredoc_bodies_unconditionally(once)
+        if got != want:
+            return False, ("the unconditional strip of the kept text %r gives %r, want the one strip's %r"
+                           % (once, got, want))
+    return True, "a kept body's tail survives the second strip, and the keep-aware strip is idempotent"
+
+
+FIXTURELESS_CHECKS.add(kept_body_second_strip_case)  # it loads the module and builds no fixture
 
 
 # =========================================================================== git env set
@@ -22889,6 +22935,8 @@ LOG_CHECKS = (
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
     ("env: heredoc-allow-strip: strip_heredoc_bodies keeps no body line of the incident cat write",
      incident_write_strip_case),
+    ("misc: heredoc-kept-tail: a kept body's tail survives the second strip the callers run, and the keep-aware strip is idempotent",
+     kept_body_second_strip_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
      process_start_ms_repeated_hour_cdt_case),
