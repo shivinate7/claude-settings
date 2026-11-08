@@ -478,6 +478,25 @@ class Quiet(Case):
         self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
         self.assertNoHit(out, "cite.py", at(src, "9:05 CST"))
 
+    def test_ruling_cite_with_a_lowercase_zone_passes(self):
+        zones = ["cst", "cdt", "ct", "est", "edt", "et", "mst", "mdt", "mt", "pst", "pdt", "pt", "utc", "gmt"]
+        files = {"z%d.py" % i: "x = 1\n# owner, 2026-10-30 16:20 %s\n# fixed in round 2\ny = 2\n" % zone
+                 for i, zone in enumerate(zones)}
+        _, out = self.scan(files)
+        unread = [zone for i, zone in enumerate(zones) if self.hit_line(out, "z%d.py" % i, 3) is None]
+        self.assertEqual(unread, [], "the scan did not read each control line:\n" + out)
+        flagged = [zone for i, zone in enumerate(zones) if self.hit_line(out, "z%d.py" % i, 2) is not None]
+        self.assertEqual(flagged, [], "a ruling cite with a lowercase zone is flagged as a date:\n" + out)
+
+    def test_lowercase_zone_on_a_dated_line_that_is_not_a_cite_stays_flagged(self):
+        texts = ["Changed by the owner, 2026-10-30 16:20 cdt", "Fixed after owner, 2026-10-30 16:20 cdt",
+                 "Changed 2026-10-30 16:20 cdt"]
+        files = {"n%d.py" % i: "x = 1\n# %s\ny = 2\n" % text for i, text in enumerate(texts)}
+        _, out = self.scan(files)
+        unflagged = [text for i, text in enumerate(texts)
+                     if "date:" not in (self.hit_line(out, "n%d.py" % i, 2) or "")]
+        self.assertEqual(unflagged, [], "a dated line that is not a cite is not flagged as a date:\n" + out)
+
     def test_same_words_in_string_literals_do_not_fail(self):
         src = '''\
 A = "fixed in round 2"
@@ -789,6 +808,17 @@ class JsTsScan(Case):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("Traceback", out)
 
+    def test_ruling_cite_after_a_triple_slash_opener_in_ts_passes(self):
+        src = ("/// owner, 2026-10-30 16:20 CDT\nexport const x = 1;\n"
+               "// owner, 2026-10-30 16:20 CDT\n// fixed in round 2\n")
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"util.ts": src})
+        rc, out = self.lint(path_tools=True)
+        self.assertHit(out, "util.ts", 4)
+        self.assertNoHit(out, "util.ts", 3)
+        self.assertIsNone(self.hit_line(out, "util.ts", 1),
+                          "a ruling cite after /// in a TS file is flagged as a date:\n" + out)
+
 
 @NEEDS_TSC
 class AstroScan(Case):
@@ -845,6 +875,17 @@ class AstroScan(Case):
         rc, out = self.lint(path_tools=True)
         self.assertEqual(rc, 1, out)
         self.assertHit(out, "page.astro", 2)
+
+    def test_ruling_cite_in_an_html_comment_passes(self):
+        src = ("<!-- owner, 2026-10-30 16:20 CDT -->\n<p>x</p>\n<!-- (owner, 2026-10-30 16:20 CDT) -->\n"
+               "<!-- fixed in round 2 -->\n")
+        self.base({"keep.js": "const k = 1;\n"})
+        self.change({"page.astro": src})
+        rc, out = self.lint(path_tools=True)
+        self.assertHit(out, "page.astro", 4)
+        self.assertNoHit(out, "page.astro", 3)
+        self.assertIsNone(self.hit_line(out, "page.astro", 1),
+                          "a ruling cite in an HTML comment is flagged as a date:\n" + out)
 
 
 class SwiftScan(Case):
@@ -952,6 +993,47 @@ class SwiftScan(Case):
         self.base({"keep.py": "x = 1\n"})
         self.change({"Urls.swift": 'let u = "http://x red on main"\nlet v = "/* green on the base */"\n'})
         self.assertClean()
+
+    # The reader keeps the opener in the comment text, so the check reads the cite after it.
+    def test_ruling_cite_after_a_triple_slash_opener_passes(self):
+        src = "/// owner, 2026-10-30 16:20 CDT\nfunc f() {}\n// owner, 2026-10-30 16:20 CDT\n// fixed in round 2\n"
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Doc.swift": src})
+        rc, out = self.lint()
+        self.assertHit(out, "Doc.swift", 4)
+        self.assertNoHit(out, "Doc.swift", 3)
+        self.assertIsNone(self.hit_line(out, "Doc.swift", 1), "a ruling cite after /// is flagged as a date:\n" + out)
+
+    def test_ruling_cite_after_a_bang_opener_passes(self):
+        src = "//! owner, 2026-10-30 16:20 CDT\nlet x = 1\n// owner, 2026-10-30 16:20 CDT\n// fixed in round 2\n"
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Inner.swift": src})
+        rc, out = self.lint()
+        self.assertHit(out, "Inner.swift", 4)
+        self.assertNoHit(out, "Inner.swift", 3)
+        self.assertIsNone(self.hit_line(out, "Inner.swift", 1),
+                          "a ruling cite after //! is flagged as a date:\n" + out)
+
+    def test_parenthesised_ruling_cite_after_a_doc_opener_stays_clean(self):
+        src = "/// (owner, 2026-10-30 16:20 CDT)\n//! (owner, 2026-10-30 16:20 CDT)\n// fixed in round 2\n"
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Doc.swift": src})
+        rc, out = self.lint()
+        self.assertHit(out, "Doc.swift", 3)
+        self.assertNoHit(out, "Doc.swift", 1)
+        self.assertNoHit(out, "Doc.swift", 2)
+
+    def test_dated_line_after_a_doc_opener_without_a_cite_stays_flagged(self):
+        src = ("/// Changed by the owner, 2026-10-30 16:20 CDT\n//! fixed on 2026-10-30 16:20 CDT\n"
+               "// owner, 2026-10-30 16:20 CDT\n// fixed in round 2\n")
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"Doc.swift": src})
+        rc, out = self.lint()
+        self.assertHit(out, "Doc.swift", 4)
+        self.assertNoHit(out, "Doc.swift", 3)
+        rows = [self.hit_line(out, "Doc.swift", n) for n in (1, 2)]
+        self.assertTrue(all(row and "date:" in row for row in rows),
+                        "a dated line with no cite after a doc opener is not flagged as a date:\n" + out)
 
 
 class ShellScan(Case):
