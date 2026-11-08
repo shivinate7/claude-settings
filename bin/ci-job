@@ -54,6 +54,10 @@
 # bin/ste-changed). With no pin, a step
 # runs as before. Two pinned refs, a ref that is no sha, a sha that cannot be fetched or a failed `npm ci` makes each
 # named step one `unknown` line naming the reason, exit 2, and none runs. The worktree is removed on every exit.
+# A remote action step (code-check, zizmor, ste-lint) runs from a worktree of its own pinned sha, as CI downloads each pinned sha
+# separately. CLAUDE_SETTINGS_DIR is set only when the job has exactly one distinct pin. With two or more pins, a plain run step is
+# unknown and names both shas, while an action step still runs from its own pin. A ref that is no sha on an action step makes that
+# step unknown. Only the steps that need a missing or unfetchable tree are unknown; the others run.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
@@ -66,7 +70,8 @@
 # --step with a pin: one worktree (a temp folder named by this run's pid, removed after, on a SIGTERM too), a git fetch
 # only when the sha is absent, an `npm ci --ignore-scripts` only when the pinned tree has a package-lock.json, and one
 # `git worktree list` of the clone to remove the trees of dead runs (a SIGKILL leaves one; only a tree whose pid is not
-# alive goes). --plan with a pin reads the clone for the sha and makes no fetch and no worktree. Under
+# alive goes). Each worktree made runs that list once. With two or more pins: one worktree per distinct pinned sha a named step needs.
+# --plan with a pin reads the clone for the sha and makes no fetch and no worktree. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
 # are one print.
@@ -76,7 +81,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
-from workflow_steps import COMMIT_SHA, job_block, run_body, settings_pins, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import COMMIT_SHA, SETTINGS_ACTION, job_block, run_body, settings_pins, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -392,6 +397,20 @@ def pin_of(text):
     return (refs[0] if refs else None), None
 
 
+def own_pin(step):
+    """(sha, why) of the commit a remote claude-settings action step (code-check, zizmor, ste-lint) pins itself, as CI downloads
+    each pinned sha separately; (None, None) when the step is no such action, so it takes the job's pin. A ref that is no
+    commit sha gives (None, why): that step is unknown."""
+    if LOCAL_ACTION.fullmatch(uses(step)) or not known_action(step):
+        return None, None
+    m = SETTINGS_ACTION.search(uses(step))
+    if not m:
+        return None, None
+    if not COMMIT_SHA.fullmatch(m.group(2)):
+        return None, "the step pins claude-settings at %s, which is no 40-hex commit sha" % m.group(2)
+    return m.group(2), None
+
+
 STALE_TREE = re.compile(r"[/\\]ci-job-pin-(\d+)-[^/\\]+[/\\]tree$")  # a pinned tree's path: its temp folder names the pid that owns it
 LIVE = []  # the bin/verdict process of the step now running: a SIGTERM ends it, not the step it started
 
@@ -549,17 +568,33 @@ def run(argv, stack):
         for w in absent:
             print("%-15s --step %s: no step of job %r has this name" % ("unknown", w, job))
         return 2
-    pinned = None  # --step only: the tree the workflow pins claude-settings at; None runs as before
+    trees, need, blocked = {}, {}, {}  # --step only: sha -> its tree; step index -> (sha, why); step index -> why it is unknown
+    plain_sha = None  # the one sha the job pins, when it pins exactly one: a plain run step takes it
     if wanted:
-        sha, why = pin_of(block)  # the pins of this job's steps only
-        if sha and dry:
-            why = clone_problem(sha, settings_clone(), False)  # --plan makes no fetch and no worktree
-        elif sha:
-            end_on_sigterm(stack)  # before the tree exists, so a signal while it is made still removes it
-            pinned, why = stack.enter_context(pinned_tree(sha, settings_clone()))
-        if why:  # no tree to run in: a step run against other code would be a guess
-            for w in dict.fromkeys(wanted):
-                print("%-15s %s: %s" % ("unknown", w, why))
+        plain_sha, plain_why = pin_of(block)  # the pins of this job's steps only
+        for n, st in enumerate(steps):
+            if names[n] in wanted:
+                sha, why = own_pin(st)
+                need[n] = (sha, why) if sha or why else (plain_sha, plain_why)
+        clone = settings_clone()
+        for sha in dict.fromkeys(sha for sha, _ in need.values() if sha):  # one tree per distinct sha a named step needs
+            if dry:
+                tree, why = None, clone_problem(sha, clone, False)  # --plan makes no fetch and no worktree
+            else:
+                if not trees:
+                    end_on_sigterm(stack)  # before the first tree exists, so a signal while it is made still removes it
+                tree, why = stack.enter_context(pinned_tree(sha, clone))
+            if tree:
+                trees[sha] = tree
+            for n, (own, _) in need.items():
+                if own == sha and why:  # no tree to run in: a step run against other code would be a guess
+                    blocked[n] = why
+        for n, (_, why) in need.items():
+            if why:
+                blocked[n] = why
+        if need and all(n in blocked for n in need):
+            for n in need:
+                print("%-15s %s: %s" % ("unknown", names[n], blocked[n]))
             return 2
     base, no_base = opts["--base"], False
     if lint and not base:
@@ -591,6 +626,11 @@ def run(argv, stack):
         name = names[n - 1]
         if wanted and name not in wanted:
             continue
+        if n - 1 in blocked:
+            tally["unknown"] += 1
+            print("%-15s %s: %s" % ("unknown", name, blocked[n - 1]))
+            continue
+        pinned = trees.get(need[n - 1][0]) if wanted else None  # this step's own tree: its own sha, else the job's one
         if lint and not kind[n - 1]:
             if LOCAL_ACTION.fullmatch(uses(step)):
                 tally["unknown"] += 1
@@ -636,7 +676,7 @@ def run(argv, stack):
                                  stderr=subprocess.STDOUT, text=True,
                                  env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"}},
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
-                                      **({"CLAUDE_SETTINGS_DIR": pinned} if pinned else {}),
+                                      **({"CLAUDE_SETTINGS_DIR": trees[plain_sha]} if plain_sha in trees else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
                 LIVE[:] = [proc]
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
