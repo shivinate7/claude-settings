@@ -27,7 +27,8 @@ The contract pinned here (hooks/sim_boot_record.py must match it):
     pinned: it needs an environment seam, and the suite must not wait.
   - frame_uniform(path) (decision sim-boot-is-verified): True when every pixel of the PNG is one colour, False when
     not, None when the file cannot be judged (not a PNG, 16-bit, palette, interlaced, truncated, empty, missing).
-    `sim_ok` fails only on True. The frame cases build their PNGs with the encoder below, under all five filters.
+    `sim_ok` fails only on True. The frame cases build their PNGs with the encoder below. The judged
+    8-bit cases cover all five filters; the undecodable and plain uniform cases use filter 0.
   - a record line is {"udid", "name", "deviceTypeIdentifier", "runtime", "at", "launchd_pid",
     "launchd_start"}. `at` is ISO-8601 UTC. launchd_pid and launchd_start are the pid and the start
     time of the device's launchd_sim, as `ps` prints them, read when the device is booted.
