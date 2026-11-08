@@ -2039,13 +2039,16 @@ def cut_local(root, branch, merged):
         c, out = git(root, "branch", "-D", branch)
         say(f"merge: {branch} here: " + ("deleted." if not c else "not deleted: " + out))
 
-def read_lanes(wt, base_ref, sha, own_out=None):
+def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None):
     """-> (tips, dropped). tips: parents 2+ of each merge commit in base_ref..sha, less any already on base_ref
-    (a merge of the base into the branch has a base commit as its second parent). dropped: the tips whose every such
+    (a merge of the base into the branch has a base commit as its second parent) and any on `default_ref`, the default branch (a stacked pull request whose base is a lane branch
+    that merged the default branch: the default branch's new commit is on neither the base nor in any lane, and is no lane tip). The same log is cut at `default_ref`, so it costs no extra read;
+    a default_ref the clone does not hold cuts nothing. dropped: the tips whose every such
     merge is net-reverted on the batch: a "This reverts commit <sha>." message names it, and a revert of that revert
     undoes it, so an odd chain is a revert. A read that fails raises. `own_out`, a list, receives the commits the pull request adds itself: the non-merge commits
     of base_ref..sha that no lane tip holds, from the same log (no second read). A pull request with tips and none of these is an integration pull request."""
-    c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
+    cut = ["--ignore-missing", f"^{default_ref}"] if default_ref and default_ref != base_ref else []  # a default branch the clone lacks holds no commit, so it cuts none
+    c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", *cut, f"{base_ref}..{sha}")
     if c:
         raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
     undone, took, parents_of = {}, {}, {}  # commit -> the commit that reverts it; tip -> the merges that took it in; commit -> its parents
@@ -2067,6 +2070,8 @@ def read_lanes(wt, base_ref, sha, own_out=None):
         return n % 2 == 1
     tips = []
     for t in took:
+        if t not in parents_of:  # outside the cut log: on the base or on the default branch
+            continue
         c = ancestor(wt, t, base_ref)
         if c is None:  # a failed read, or a shallow clone that cut the history: never "not an ancestor"
             raise ValueError(f"git merge-base failed on {t[:9]}: git could not tell (a shallow clone needs "
@@ -2091,13 +2096,14 @@ def lane_tips(wt, base_ref, sha):
         say(f"merge: no lane branch is deleted: the batch's merge commits could not be read ({type(e).__name__}: {e}).")
         return [], set()
 
-def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out=None):
+def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out=None, default_ref=None):
     """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
     the revert silently deletes its files (batch #663: the platform-ask lane lost 11 of 13 files). Refuse it before anything
     is claimed. A read that fails refuses too, unless the run has the reason flag --undo-check-unknown-ok "<reason>", which Claude may type with a reason.
-    A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, and `own_out` the pull request's own commits, so the round-3 check reads no second time."""
+    A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, and `own_out` the pull request's own commits, so the round-3 check reads no second time. `default_ref` (origin/<default branch>) is passed to read_lanes: a commit of the default
+    branch is no lane tip and no own commit, and the cut is made in the one log read that was made already, so it adds no git call."""
     try:
-        tips, dropped = read_lanes(wt, base_ref, sha, own_out)
+        tips, dropped = read_lanes(wt, base_ref, sha, own_out, default_ref)
         if tips_out is not None:
             tips_out.extend(tips)
     except Exception as e:
@@ -2207,7 +2213,8 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
     its Guard or check value (no record names it, or its newest record is not done and has Guard or check no: kind "unreviewed"), or when a lane's newest record for its
     head has Guard or check yes and is not done. An integration pull request is read through its lane tips: its own head is no row at all, whatever records name it. The own head is a lane, and owes a done
     record for it, when the tips were read and the pull request has no lane tip (a lone lane) or adds a commit of its own: `own`, the non-merge commits of base..head that no lane tip
-    holds (read_lanes' own_out). Only when every commit of its own is a merge of lane tips is it an integration pull request. Per head, the newest record that names it decides, across
+    holds (read_lanes' own_out; merge commits never count as own, so an edited merge on an integration head is read through its tips only; a revert of a lane merge and a revert of that revert
+    are two own commits, a rare false alarm). Only when every commit of its own is a merge of lane tips is it an integration pull request. Per head, the newest record that names it decides, across
     every pull request (owed_round), and its PR line must be the PR it was posted on. A pull request whose newest record has Guard or check yes and whose records name no lane tip and not the own head is refused too (stale_guard_round),
     when that record's head is new to the batch: in the history of the pull request's own head and not on its base. A record for a head outside that history is another
     pull request's, and one for a head on the base is a pull request's merged earlier.
@@ -2926,7 +2933,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
             debt_check(wt, f"origin/{base}", host, info)
             tips, own = [], []
-            lifted = refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips, own)
+            lifted = refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}")
             refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted), own=own)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
@@ -3074,7 +3081,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
         debt_check(wt, base_ref, host, info)
         tips, own = [], []
-        lifted = refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok, tips, own)
+        lifted = refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok, tips, own, f"origin/{cfg['defaultBranch']}")
         record_lift(lifts, UNDO_FLAG, lifted)
         record_lift(lifts, UNDO_FLAG, refuse_owed_round(tips, info, n, host, unknown_ok, wt, tips_unread=bool(lifted), own=own))  # a lifted lane read leaves no tips: the own head is still checked
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
