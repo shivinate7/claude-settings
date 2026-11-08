@@ -14091,6 +14091,62 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
         self.assert_refused(rc, out, err)
         self.assert_names(err, "Round 1", "design-reviewer")
 
+class ReviewFixAfterFinalFail(ReviewChainFixture):
+    """A fix check after the final round (decision hold-unsafe-after-round-3, decision pr-review-record): a failed or WIDE fix check on a record that
+    reached round 3 holds the change, and its finding starts a new lane at round 1. The fix check reads only the newest earlier record, so a plain
+    record that copies rounds 1 to 3 at a new head would hide that fix check, and a fix check from that head would be written. Record A, at EARLIER,
+    holds the rounds and the fix check; record B, at NEWEST, copies the rounds with no fix line; the fix check PASS from B at LIVE must be refused. A
+    refusal exits 2 and prints no record. Its stderr names head A and the cause. Before the final round a FAIL counts as the next round, and a chain
+    after records that PASS every round with no failed fix check is written. Those cases pass on the old code and are the controls."""
+
+    TWO_FAILS = REVIEW_FAILED_THREE[:2]  # rounds 1 and 2 FAIL: the rounds a record holds before its final round
+
+    def copy_pair(self, a_fix=()):
+        """Pull request 7's two earlier records: A at EARLIER with REVIEW_FAILED_THREE and `a_fix` as its fix check lines, then B at NEWEST with the
+        same rounds and no fix line. The fix check reads B, so only A's fix lines can refuse it."""
+        return (review_comment(1, 7, record_text(head=self.EARLIER, rounds=REVIEW_FAILED_THREE, fix=a_fix)),
+                review_comment(2, 7, record_text(head=self.NEWEST, rounds=REVIEW_FAILED_THREE)))
+
+    def test_a_failed_fix_check_after_round_3_is_not_hidden_by_a_plain_copy_of_the_rounds(self):
+        # control, green on the old code: with no fix line on A, the fix check PASS from B is written
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.copy_pair(), rounds=round_args(REVIEW_FAILED_THREE))
+        self.assertEqual(rc, 0, "control: a fix check from a plain copy of the rounds was refused with no failed fix check:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.copy_pair((fix_check_line(verdict="FAIL", head=self.OTHER),)),
+                                         rounds=round_args(REVIEW_FAILED_THREE))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertIn(self.EARLIER[:9], err, "the refusal does not name head A, whose fix check FAILed after round 3:\n" + err)
+        self.assertIn(ReviewFixRemedies.FAIL_FINAL_REMEDY, err, "the refusal does not hold the remedy for a FAIL after round 3:\n" + err)
+
+    def test_a_wide_fix_check_after_round_3_is_not_hidden_by_a_plain_copy_of_the_rounds(self):
+        # control, green on the old code: the same two records with no fix line on A
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.copy_pair(), rounds=round_args(REVIEW_FAILED_THREE))
+        self.assertEqual(rc, 0, "control: a fix check from a plain copy of the rounds was refused with no WIDE fix check:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.copy_pair((fix_check_line(verdict="WIDE", head=self.OTHER),)),
+                                         rounds=round_args(REVIEW_FAILED_THREE))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertIn(self.EARLIER[:9], err, "the refusal does not name head A, whose fix check was WIDE after round 3:\n" + err)
+        self.assertIn("WIDE", err, "the refusal does not name the WIDE verdict:\n" + err)
+        self.assertIn("new lane at round 1", err, "the refusal does not say the finding starts a new lane at round 1:\n" + err)
+
+    def test_a_fail_fix_check_before_round_3_counts_as_the_next_round_and_the_chain_is_written(self):
+        # control, green on the old code: before the final round a FAIL is the next round, so B's round 2 FAIL fills its slot and the PASS is written
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=ReviewFixRemedies.FAIL_ONE,
+                                                     fix=(fix_check_line(verdict="FAIL", head=self.OTHER),))),
+                    review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.TWO_FAILS)))
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.TWO_FAILS))
+        self.assertEqual(rc, 0, "a fix check from B after a FAIL fix check before round 3 was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+
+    def test_a_chain_after_records_that_pass_every_round_with_no_failed_fix_check_is_written(self):
+        # control, green on the old code: no record of the pull request holds a failed fix check, so the PASS from B is written
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=ReviewFixRemedies.ALL_PASS)),
+                    review_comment(2, 7, record_text(head=self.NEWEST, rounds=ReviewFixRemedies.ALL_PASS)))
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=ReviewFixRemedies.ALL_PASS_ARGS)
+        self.assertEqual(rc, 0, "a fix check from B after records that passed every round was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
