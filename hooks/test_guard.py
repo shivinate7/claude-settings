@@ -11456,10 +11456,10 @@ mcp_post("review-record: a marker with no record is refused, MCP update_issue_co
 mcp_post("review-record: a record with a round skipped is refused, MCP update_issue_comment", REVIEW_SKIPPED_ROUND, "deny",
          rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
 # The update tool's comment id may arrive as a string of digits. Each case below takes the verdict and the gh reads of its int-id twin above.
-mcp_post("review-record: a record at the live head is allowed, MCP update_issue_comment with a string comment id", review_record(),
-         "allow", comment_id=REVIEW_TEXT_ID)
+mcp_post("review-record: a record at the live head is refused on an edit, MCP update_issue_comment with a string comment id", review_record(),
+         "deny", rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_TEXT_ID)
 mcp_post("review-record: a wrong head tail is refused, MCP update_issue_comment with a string comment id", review_record(head=REVIEW_TAIL),
-         "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,), comment_id=REVIEW_TEXT_ID)
+         "deny", rule=REVIEW_RULE, carries=(EDIT_REFUSAL,), comment_id=REVIEW_TEXT_ID)
 mcp_post("review-record: a record with no Stamp line is refused, MCP update_issue_comment with a string comment id", REVIEW_NO_STAMP,
          "deny", rule=REVIEW_RULE, comment_id=REVIEW_TEXT_ID)
 
@@ -11544,10 +11544,10 @@ REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused even when it
                          review_refused_unread(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT),
                                      GHRECORDBROKEN + os.pathsep + PY_PATH)))
 # The string-id twins of the read counts above: the same verdict and the same gh reads as the int id.
-REVIEW_LOG_CHECKS.append(("review-record:a marked update at the live head with a string comment id makes two gh reads, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_TEXT_ID), "allow", 2)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail and a string comment id makes two gh reads, and is refused, MCP update_issue_comment",
-                         review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_TEXT_ID), "deny", 2)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update at the live head with a string comment id is refused with no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_TEXT_ID), "deny", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail and a string comment id is refused with no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_TEXT_ID), "deny", 0)))
 REVIEW_LOG_CHECKS.append(("review-record:a malformed marked update with a string comment id is refused before any gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(REVIEW_NO_STAMP, comment_id=REVIEW_TEXT_ID), "deny", 0)))
 REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker and a string comment id makes no gh read, MCP update_issue_comment",
