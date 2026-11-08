@@ -30,7 +30,9 @@ The modes, as the builder implements them. This file is their interface.
   tracked `test_<stem>.py` and `test_<stem>_*.py` beside PATH. A .py PATH also gets each tracked `test_*.py` in the
   repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
   loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`) whose path names `<stem>.py`. The loads are
-  found with `ast`, never a grep. A tracked test that fails to parse is skipped.
+  found with `ast`, never a grep. A path that a function takes as a parameter counts too: a call of a function defined in
+  the same file counts when its argument for that parameter, by position or by keyword, names `<stem>.py`. Calls through
+  an attribute, such as `json.load`, are not followed. A tracked test that fails to parse is skipped.
 
 Each mode is dispatched from main() in hooks/mutate_guard.py and has an entry point beside `report_main` and
 `replay_main`: `changed_main`, `known_defects_main`, `tests_for_main`. A case checks for its entry point first and
@@ -1236,6 +1238,18 @@ class ReplayChangedOnlyTests(unittest.TestCase):
 # mentions it. Each dict maps a path to its text. A load is printed; a mention, a parse failure, a non-test file, an
 # untracked file and a different module name are not.
 SPEC_HEADER = "import importlib.util\nimport os\n\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+# A loader function whose path is its `path` parameter and whose module name is its `name` parameter, in either order.
+LOADER_BODY = ("    spec = importlib.util.spec_from_file_location(name, path)\n"
+               "    module = importlib.util.module_from_spec(spec)\n"
+               "    spec.loader.exec_module(module)\n"
+               "    return module\n")
+
+
+def wrapper_suite(def_line, tail):
+    """A suite text: the header, one loader function under `def_line`, then `tail`."""
+    return SPEC_HEADER + "\n\n" + def_line + "\n" + LOADER_BODY + "\n" + tail
+
+
 TESTS_FOR_PRODUCT = {
     "pkg/widget.py": "VALUE = 1\n",
     "pkg/lonely.py": "VALUE = 2\n",
@@ -1266,6 +1280,14 @@ TESTS_FOR_LOADS = {
         + 'SPEC = importlib.util.spec_from_file_location("x_under_test", location=os.path.join(HERE, "widget.py"))\n',
     "tests/test_form_spec_in_function.py": SPEC_HEADER
         + 'def load():\n    path = os.path.join(HERE, "widget.py")\n    spec = importlib.util.spec_from_file_location("x_under_test", path)\n',
+    "tests/test_form_wrapper_first.py": wrapper_suite(
+        "def load_file_module(path, name):",
+        'WIDGET = os.path.join(HERE, "widget.py")\n\n\ndef read_value():\n'
+        '    return load_file_module(WIDGET, "x_under_test").VALUE\n'),
+    "tests/test_form_wrapper_second.py": wrapper_suite(
+        "def load(name, path):", 'WIDGET = load("x_under_test", os.path.join(HERE, "widget.py"))\n'),
+    "tests/test_form_wrapper_keyword.py": wrapper_suite(
+        "def load(name, path):", 'WIDGET = load(name="x_under_test", path=os.path.join(HERE, "widget.py"))\n'),
     "tests/test_form_lone_quote.py": "# don't mind this note\nimport widget\n",
     "other/sub/test_form_deep.py": "import widget\n",
 }
@@ -1283,6 +1305,27 @@ TESTS_FOR_MENTIONS = {
         + 'OTHER = os.path.join(HERE, "other_module.py")\nSPEC = importlib.util.spec_from_file_location("widget.py", OTHER)\n',
     "tests/test_no_other_basename.py": SPEC_HEADER
         + 'SPEC = importlib.util.spec_from_file_location("x_under_test", os.path.join(HERE, "old_widget.py"))\n',
+    # The loader is called, but never with widget.py: the path parameter is fed another module.
+    "tests/test_no_wrapper_other.py": wrapper_suite(
+        "def load_file_module(path, name):",
+        'OTHER = load_file_module(os.path.join(HERE, "other_module.py"), "x_under_test")\n'),
+    # "widget.py" reaches the module-name slot, not the path. A path-only read of the call would print this file.
+    "tests/test_no_wrapper_name_slot.py": wrapper_suite(
+        "def load(path, name):", 'OTHER = load(os.path.join(HERE, "other_module.py"), "widget.py")\n'),
+    # A path with no .py suffix does not name the module, as bin/sim-lease does not name a .py file.
+    "tests/test_no_wrapper_bare_name.py": wrapper_suite(
+        "def load(path, name):", 'BARE = load(os.path.join(HERE, "widget"), "x_under_test")\n'),
+    # json.load is an attribute call, not a load of the module. The loader in this file is called with another module.
+    "tests/test_no_json_load.py": "import json\n" + wrapper_suite(
+        "def load(path, name):",
+        'DATA = json.load(open(os.path.join(HERE, "widget.py"), encoding="utf-8"))\n'
+        'OTHER = load(os.path.join(HERE, "other_module.py"), "x_under_test")\n'),
+    # Two functions share the parameter name `path`. Only the loader is called with another module, so only a
+    # per-function read keeps widget.py out of the loader's path.
+    "tests/test_no_shared_param_name.py": SPEC_HEADER
+        + "\n\ndef describe(path):\n    return os.path.basename(path)\n\n\ndef load(path, name):\n" + LOADER_BODY
+        + '\nNAME = describe(os.path.join(HERE, "widget.py"))\n'
+        + 'OTHER = load(os.path.join(HERE, "other_module.py"), "x_under_test")\n',
     "tests/test_no_prefix.py": "import widget_extra\n",
     "tests/test_broken.py": "import widget\ndef broken(:\n",
     "tests/helper.py": "import widget\n",
@@ -1346,20 +1389,27 @@ class TestsForTests(unittest.TestCase):
 
     def test_each_load_form_prints_its_file(self):
         repo = tests_for_fixture()
-        self.assertIn("pkg/widget.py", git(repo, "ls-files").split("\n"), "the fixture: the product module is tracked")
+        tracked = git(repo, "ls-files").split("\n")
+        self.assertIn("pkg/widget.py", tracked, "the fixture: the product module is tracked")
         code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         printed = set(out.splitlines())
         for name in sorted(TESTS_FOR_LOADS):
             with self.subTest(form=name):
+                self.assertIn(name, tracked, "the fixture: %s is tracked, so it can load widget" % name)
                 self.assertIn(name, printed, "%s loads widget, so --tests-for pkg/widget.py must print it" % name)
 
     def test_each_mention_that_is_not_a_load_prints_nothing(self):
         repo = tests_for_fixture()
+        tracked = git(repo, "ls-files").split("\n")
         code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         printed = set(out.splitlines())
-        for name in sorted(set(TESTS_FOR_MENTIONS) | set(UNTRACKED)):
+        for name in sorted(TESTS_FOR_MENTIONS):
+            with self.subTest(file=name):
+                self.assertIn(name, tracked, "the fixture: %s is tracked, so the read reaches it" % name)
+                self.assertNotIn(name, printed, "%s does not load widget, so --tests-for must not print it" % name)
+        for name in sorted(UNTRACKED):
             with self.subTest(file=name):
                 self.assertNotIn(name, printed, "%s does not load widget, so --tests-for must not print it" % name)
 
@@ -1423,6 +1473,25 @@ class TestsForTests(unittest.TestCase):
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         self.assertIn(loader, out.splitlines(),
                       "%s loads guard_rm_var inside a function, so --tests-for %s must print it" % (loader, target))
+
+    def test_the_real_suites_that_load_a_module_through_a_parameter_are_printed(self):
+        """Each suite passes the module's path to a function of its own, which loads it by that parameter. The call text is
+        the scope: it is asserted first, so the print is asserted on a suite known to reach the load."""
+        cases = (
+            ("hooks/guard.py", "hooks/test_call_judge.py", "load_file_module(GUARD, "),
+            ("hooks/guard.py", "lint/test_layout.py", 'load("guard_under_test", os.path.join(REPO, "hooks", "guard.py"))'),
+            ("lint/ste_lint.py", "lint/test_layout.py", 'load("ste_lint_under_test", os.path.join(LINT, "ste_lint.py"))'),
+        )
+        printed = {}
+        for target in sorted({target for target, _, _ in cases}):
+            code, out, err = run_cli(["--tests-for", target])
+            self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+            printed[target] = set(out.splitlines())
+        for target, suite, call in cases:
+            with self.subTest(suite=suite, target=target):
+                self.assertIn(call, show(REPO, "HEAD", suite), "the fixture: %s calls its loader with %s" % (suite, target))
+                self.assertIn(suite, printed[target],
+                              "%s loads %s through a parameter, so --tests-for %s must print it" % (suite, target, target))
 
 
 if __name__ == "__main__":
