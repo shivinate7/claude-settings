@@ -25,6 +25,9 @@
   merge --reviewed        the ledger: one line per open PR, `#n branch act age`, with its one next act read from GitHub alone, first match wins:
                           `lane lint red: <steps>` (a done record for the live head, and a `Lint: red <live head> <steps>` comment that
                           `merge --build-batch` posted: it comes before `batch`), `batch` (a done review record for the live head),
+                          `lane: <cause>` (a done record whose Findings are not filed: a filing is owed, not a round; the cause is
+                          `findings not filed: this PR`, `follow-up #N does not exist`, `follow-up #N closed unmerged` or `follow-up #N is this PR`;
+                          the lane round age limit holds; a Findings read that could not run is `findings unknown: <why>`),
                           `lane round n` (an open record, or one for another head),
                           `waits on debt:<slug>|page:<item id>` (a held, parked or replaced label and a `Waits on:` comment line),
                           `batch run` (the `batch` label: an integration PR, aged from its labeled event, the batch limit),
@@ -101,6 +104,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
+import layout  # noqa: E402  the one home of where records live (lint/layout.json); hook_catalog above has already loaded it
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 from shared_names import BATCH_LABEL  # noqa: E402  the one home of the integration pull request's label (hooks/shared_names.py)
 
@@ -2913,7 +2917,7 @@ def build_batch(root, h, base, push="", findings_ok=""):
     try:
         pulls = h.pages("pulls", fields={"state": "open"})
         by_num = {d["number"]: d for d in pulls}
-        acts = pr_acts(h, pulls, holds=False) if pulls else {}  # holds off: only the batch act matters, so a held PR costs no events read; the labels are read below
+        acts = pr_acts(root, h, pulls, holds=False) if pulls else {}  # holds off: only the batch act matters, so a held PR costs no events read; the labels are read below
         unknown = [n for n in sorted(acts) if acts[n][2] == FINDINGS_UNKNOWN]  # a done record whose Findings read could not run: out of the batch, unless the reason flag lifts it
         cands = [n for n in sorted(acts) if acts[n][2] == "batch" or (n in unknown and findings_ok.strip())]
         after = {n: merge_after_targets(by_num[n].get("body")) for n in cands}
@@ -2929,7 +2933,7 @@ def build_batch(root, h, base, push="", findings_ok=""):
         return 2
     cap = max(1, (os.cpu_count() or 1) - 2)
     out, left, joined = [], {}, []
-    for n in unknown:  # the lift is logged like the silent-undo one; with no reason the pull request stays out and the line says how to lift it
+    for n in unknown:  # the lift prints one line (the Findings read UNKNOWN line below) and no other log; with no reason the pull request stays out and the line says how to lift it
         why = acts[n][1].split(": ", 1)[-1]
         out.append(f"merge: #{n} Findings read UNKNOWN ({why}). {FINDINGS_FLAG}, reason: {' '.join(findings_ok.split())}" if findings_ok.strip()
                    else f"merge: #{n} left out, Findings read UNKNOWN ({why}). If the cause is known, run again with the reason flag {FINDINGS_FLAG} \"<reason>\". {UNKNOWN_CITE}")
@@ -3565,7 +3569,7 @@ REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 # The value of the Findings line (and of --findings): none, a count filed in this pull request, or a count filed in follow-up pull requests (decision pr-review-record).
 REVIEW_FINDINGS = r"none|[1-9][0-9]*, this PR|[1-9][0-9]*, follow-up #[1-9][0-9]*(?:, #[1-9][0-9]*)*"
-FILING_DIR, FILING_NOTES = "docs/debts/", "docs/debts/notes.md"  # where a finding is filed: a new debt file under the folder, or lines added to the notes file
+FILING_KINDS = ("debts", "debt-notes")  # the layout kinds where a finding is filed: a new debt file under the first's folder, or lines added to the second's file (lint/layout.py has the paths)
 FINDINGS_UNKNOWN = "findings unknown"  # the kind of a ledger line whose Findings read could not run
 FINDINGS_FLAG = "--findings-unknown-ok"  # the reason flag of --build-batch that lets such a line join the batch; Claude may type it with a reason (decision pr-review-record, as UNDO_FLAG)
 
@@ -3727,24 +3731,33 @@ def label_names(d):
     """-> the label names of an open pull request `d` as `pages("pulls")` lists it: the one read of them, for pr_acts and build_batch."""
     return {x["name"] for x in d.get("labels") or []}
 
-def findings_read(h, n, findings):
+def filing_homes(root):
+    """-> (folder prefix, notes file): where `root` files a finding, from lint/layout.py. The repo's own path (layout.path) and the layout's path both
+    count, as in hooks/feedback_guard.py, so a repo not yet rolled out files in its legacy folder and a rolled-out one in the layout's."""
+    base = layout.layout()["kinds"]
+    homes = {k: {layout.path(root, k), base[k]["path"].strip("/")} for k in FILING_KINDS}
+    return tuple(h + "/" for h in sorted(homes["debts"])), tuple(sorted(homes["debt-notes"]))
+
+def findings_read(root, h, n, findings):
     """-> (state, why) of the Findings line `findings` (REVIEW_FINDINGS, not `none`) of pull request `n`'s record: `done`, `open` or `unknown`; `why` is
-    "" or text for the ledger line. `N, this PR` is done when the pull request's files (every page) add a file under FILING_DIR or add lines to
-    FILING_NOTES. `N, follow-up #X, ...` is done when each named pull request exists, is not `n`, and is open or merged; the first one that is not
-    ends the read (one that could not be read does not). A 404 is open and names the number. Any other failed read, a network stop or a reply that does not parse, is unknown, never open or done.
+    the cause of an open read, as the ledger line states it: `findings not filed: this PR`, `follow-up #X does not exist`, `follow-up #X closed unmerged`
+    or `follow-up #X is this PR`. `N, this PR` is done when the pull request's files (every page) add a file under the debts folder or add lines to the
+    debt notes file (FILING_KINDS, read by `filing_homes` from the layout of `root`). `N, follow-up #X, ...` is done when each named pull request exists,
+    is not `n`, and is open or merged; the first one that is not ends the read (one that could not be read does not). A 404 is open and names the number. Any other failed read, a network stop or a reply that does not parse, is unknown, never open or done.
     Cost: one list read of `pulls/<n>/files` per page, or one `pulls/<x>` read per named pull request until one is not done; none for `none`, and
     no call to Host.pr, which sets the host's base."""
     if findings.endswith("this PR"):
+        folders, notes = filing_homes(root)
         try:
             rows = h.pages(f"pulls/{n}/files")
-            filed = any(r["status"] == "added" and r["filename"].startswith(FILING_DIR) or r["filename"] == FILING_NOTES and r["additions"] > 0 for r in rows)
+            filed = any(r["status"] == "added" and r["filename"].startswith(folders) or r["filename"] in notes and r["additions"] > 0 for r in rows)
         except Stop:
             return "unknown", f"the files of #{n} could not be read"
-        return ("done", "") if filed else ("open", "")
+        return ("done", "") if filed else ("open", "findings not filed: this PR")
     unknown = ""
     for x in dict.fromkeys(int(m) for m in re.findall(r"#(\d+)", findings)):
         if x == n:
-            return "open", ""
+            return "open", f"follow-up #{x} is this PR"
         try:
             c, out = h.api(f"pulls/{x}")
             if c and re.search(r"HTTP 404", out):
@@ -3756,16 +3769,16 @@ def findings_read(h, n, findings):
             unknown = unknown or f"follow-up #{x} could not be read"
             continue
         if state == "CLOSED":
-            return "open", ""
+            return "open", f"follow-up #{x} closed unmerged"
     return ("unknown", unknown) if unknown else ("done", "")
 
-def pr_acts(h, pulls, holds=True):
+def pr_acts(root, h, pulls, holds=True):
     """-> {n: (branch, act text, kind or None for no next act, since, the number it is blocked on)} for the open `pulls`, the one home of the next-act
     rules in `_reviewed_lines` (its docstring lists them). Reads the repo's comments since the oldest pull request (one list read) and, only when
     `holds` and a pull request reaches the hold rule, its issue events. `holds` False skips the hold rule, so a pull request with a hold label and no
     record reads as blocked, the first `lane round` (a draft) or NO NEXT ACT. One with a done record still reads `batch`, because the record rule runs first:
     a caller that wants no held pull request checks the labels itself (build_batch does). A done record with a Findings line other than `none` and no
-    red lint line is read by `findings_read`, which costs its reads per such pull request: the pull request's files, or each named follow-up."""
+    red lint line is read by `findings_read` (for the layout of `root`), which costs its reads per such pull request: the pull request's files, or each named follow-up."""
     records, plain = {}, {}  # PR number -> [(time, body)], oldest first: its review records, and all its comments
     for c in h.issue_comments(min(d["created_at"] for d in pulls)):
         m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
@@ -3792,9 +3805,9 @@ def pr_acts(h, pulls, holds=True):
                 if red:  # the lint of the head the record passed is red: the pull request is no candidate, whatever its record says
                     act = (f"lane lint red: {red[1].group(2)}", "lane lint red", red[0], None)
                 elif rec["findings"] not in (None, "none"):  # after the lint line, so a red head costs no Findings read
-                    found, why = findings_read(h, n, rec["findings"])
-                    if found == "open":
-                        act = (f"lane round {owed}" + (f": {why}" if why else ""), "lane round", at, None)
+                    found, why = findings_read(root, h, n, rec["findings"])
+                    if found == "open":  # the lane owes a filing, not a round: the line names the cause, and keeps the lane round age limit
+                        act = (f"lane: {why}", "lane round", at, None)
                     elif found == "unknown":
                         act = (f"{FINDINGS_UNKNOWN}: {why}", FINDINGS_UNKNOWN, at, None)
             elif state in ("open", "stale"):
@@ -3826,7 +3839,8 @@ def _reviewed_lines(h, root):
     """-> (lines, red) of `merge --reviewed`, built before any is printed so a failed read prints none (a Stop). Every open pull request gets one next
     act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch` (`lane lint red: <steps>` instead, when
     the newest `Lint: red <live head> <steps>` comment of the pull request names the live head); a done record whose Findings line is not met (see
-    `findings_read`: `none` is met with no read) is `lane round n`, with the follow-up number named when it does not exist, or `findings unknown: <why>`
+    `findings_read`: `none` is met with no read) is `lane: <cause>` (the filing is owed, no round is: `findings not filed: this PR`, `follow-up #N does not exist`,
+    `follow-up #N closed unmerged` or `follow-up #N is this PR`; the lane round age limit holds), or `findings unknown: <why>`
     when the read could not run, which holds like any unknown and counts against the batch limit; the record is open or for another
     head, `lane round n` (n the next round owed, at most 3; 1 when its fix check failed); a label of held, parked or replaced and a
     `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line, `waits on <id>`; the BATCH_LABEL, `batch run` (the batch limit); its base
@@ -3847,7 +3861,7 @@ def _reviewed_lines(h, root):
         return ["no open pull requests.", summary(0, 0)], False
     now = epoch_of(h.now())
     hours = lambda since: int(max(0.0, now - since) // 3600)
-    acts = pr_acts(h, pulls)
+    acts = pr_acts(root, h, pulls)
     held = ""
     if any(a[2] == "batch" for a in acts.values()):  # one read of the base's latest run, for the red-main text of each batch line
         verdict, detail = base_verdict(root, h, h.base)
