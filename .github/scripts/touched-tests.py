@@ -6,7 +6,7 @@ Output: lines written to $GITHUB_OUTPUT (stdout when unset):
   files, any                    every test either OS runs (the union), and whether it is non-empty
   files_windows, any_windows    the tests the Windows job runs
   files_macos, any_macos        the tests the macOS job runs
-  matrix                        {"include": [{"os", "files"}]}, one entry per OS that has tests; files is a sorted list of paths
+  matrix                        {"include": [{"os", "files"}]}, one entry per OS that has tests; files is a JSON list as text
   commands                      {path: cmd} over every selected file: the tokens before the path on the checks.yml run line
                                 (mod-tests.sh files: `node` for a mods test, `node --test` for a map skill test). A file
                                 both systems run with different commands keeps the Windows one.
@@ -298,7 +298,7 @@ def flag(listed):
 def write_outputs(windows, macos, cmds):
     """`cmds` is {OS word: {test: command}}."""
     files = sorted(set(windows) | set(macos))
-    matrix = [{"os": name, "files": sorted(listed)}
+    matrix = [{"os": name, "files": json.dumps(sorted(listed))}
               for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
     commands = {t: cmds["windows"][t] if t in cmds["windows"] else cmds["macos"][t] for t in files}
     lines = (f"files={json.dumps(files)}\nany={flag(files)}\n"
