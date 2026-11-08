@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fails when a decision record's Cost sentence names a file that no test pins.
+"""Fails when a decision record's Cost sentence names a file that no test pins, or states a count with no reader.
 
     python3 lint/check_cost_pins.py [--root DIR]
 
@@ -26,11 +26,22 @@ holds the token's name as a whole name: its basename, or the folder before a `<p
 digit, `_`, `-` or `.`-and-name character beside it. A sentence that says "not pinned", "unpinned", "unmeasured" or
 "no test" pins nothing and flags nothing: the writer has said so.
 
+A count claim is a count word (one to six, once, twice, thrice, or digits) with at most three words between it and
+a cost noun (read, call, process, spawn, `ps`, write, file, run, start, times, line, command, request, lookup, query;
+plural too), or a cost noun followed within two words by once, twice or thrice. Code spans, dates (YYYY-MM-DD), times
+(HH:MM) and ids (`ruling`, `item`, `rule`, `step` or `decision` and a number; `#` and a number) are not read as part of
+a claim. A claim passes when its sentence holds a bound (at most, up to, no more than, fewer, at least), says "not
+pinned", "unpinned", "unmeasured" or "no test", or holds a test-name candidate that exists under the root and holds, as a
+whole name, the code span nearest the count word. A test-name span is never the nearest span. A sentence with no other
+code span passes on any existing test-name candidate. A sentence with a claim that passes none of these is one finding,
+on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`.
+
 The report is one line per token and line: `<record>:<line>: <token> named in a Cost sentence with no pin`.
 Exit 1 when there is a finding, 0 when there is none. Only the decision records (kind `decisions` in lint/layout.json)
 are read: a debt's Cost line is not. Each test file is read once per run.
 """
 import argparse
+import collections
 import glob
 import os
 import re
@@ -56,6 +67,18 @@ LINE_SUFFIX = re.compile(r"(?::\d+)+$")
 TEST_NAME = re.compile(r"^(?:test_.*|.*_test\..*|.*\.test\..*|.*Tests\.swift|.*\.spec\.(?:js|jsx|ts|tsx|mjs|cjs|mts|cts))$")
 CLOSERS = ")*\"'"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
+NO_READER = "count in a Cost sentence with no reader"
+WORD = re.compile(r"\w+(?:['\u2019-]\w+)*")
+COUNT_WORD = re.compile(r"(?:one|two|three|four|five|six|once|twice|thrice|\d+)", re.IGNORECASE)
+TIMES_WORD = re.compile(r"(?:once|twice|thrice)", re.IGNORECASE)
+COST_NOUN = re.compile(r"(?:reads?|calls?|process(?:es)?|spawns?|ps|writes?|files?|runs?|starts?|times|lines?|commands?"
+                       r"|requests?|lookups?|quer(?:y|ies))", re.IGNORECASE)
+BOUND = re.compile(r"\b(?:at\s+most|up\s+to|no\s+more\s+than|fewer|at\s+least)\b", re.IGNORECASE)
+# A number beside a cost noun that counts nothing: a date, a time, an id.
+NOT_COUNTS = [re.compile(r"\b\d{4}-\d{2}-\d{2}\b"), re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"),
+              re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
+# text, [(code span text, line)], line of the first character, text with code spans blanked, [(start, end)] of each span
+Sentence = collections.namedtuple("Sentence", "text spans line blanked holes")
 
 
 def indent_of(text):
@@ -112,30 +135,43 @@ def mid_line_start(number, text):
     nothing."""
     sentences, _ = read_paragraph([(number, text)])
     offset = 0
-    for k, (sentence, _spans) in enumerate(sentences):
-        if k and COST_START.match(sentence):
+    for k, sentence in enumerate(sentences):
+        if k and COST_START.match(sentence.text):
             return [(number, text[offset:].lstrip())]
-        offset += len(sentence)
+        offset += len(sentence.text)
     return None
+
+
+def sentence_of(text, spans, line, holes):
+    blanked = list(text)
+    for start, end in holes:
+        blanked[start:end] = "_" * (end - start)
+    return Sentence("".join(text), spans, line, "".join(blanked), holes)
 
 
 def read_paragraph(paragraph):
     """(sentences, balanced) of one paragraph, from one pass over its backticks.
 
-    A sentence is (text, spans): spans is [(code span text, line number)]. A backtick holds the sentence open,
+    A sentence is a `Sentence`: spans is [(code span text, line number)]. A backtick holds the sentence open,
     so a stop inside a code span ends nothing, and each span lies wholly inside one sentence."""
     chars = [(number, c) for number, text in paragraph for c in text + "\n"]
-    sentences, text, spans, inside, opened, width, i = [], [], [], False, 0, 0, 0
+    sentences, text, spans, holes, inside, opened, width, i = [], [], [], [], False, 0, 0, 0
+    begin, hole = 0, 0
     while i < len(chars):
+        if not text:
+            begin = chars[i][0]
         c = chars[i][1]
         if c == "`":
             # a run of backticks opens a span, and the next run of the same length closes it
             n = 1
             while i + n < len(chars) and chars[i + n][1] == "`":
                 n += 1
+            if not inside:
+                hole = len(text)
             text.extend("`" * n)
             if inside and n == width:
                 spans.append((unpadded("".join(ch for _, ch in chars[opened:i])), chars[opened][0]))
+                holes.append((hole, len(text)))
                 inside = False
             elif not inside:
                 inside, opened, width = True, i + n, n
@@ -148,11 +184,11 @@ def read_paragraph(paragraph):
                 j += 1
             if j == len(chars) or chars[j][1].isspace():
                 text.extend(ch for _, ch in chars[i + 1:j])
-                sentences.append(("".join(text), spans))
-                text, spans, i = [], [], j - 1
+                sentences.append(sentence_of(text, spans, begin, holes))
+                text, spans, holes, i = [], [], [], j - 1
         i += 1
     if "".join(text).strip():
-        sentences.append(("".join(text), spans))
+        sentences.append(sentence_of(text, spans, begin, holes))
     return sentences, not inside
 
 
@@ -179,6 +215,8 @@ def is_file(token):
 def pin_name(token):
     """What a test must hold to pin the token: its basename, or the folder before a placeholder basename."""
     parts = [p for p in bare(token).split("/") if p]
+    if not parts:
+        return None
     base = parts[-1]
     if "<" not in base:
         return base
@@ -194,6 +232,14 @@ def read(path):
         return None
 
 
+def held(candidate, root, texts):
+    """The text of a test file under the root, read once per run, or None when it is absent."""
+    rel = bare(candidate)
+    if rel not in texts:
+        texts[rel] = read(os.path.join(root, *rel.split("/")))
+    return texts[rel]
+
+
 def pinned(token, candidates, root, texts):
     name = pin_name(token)
     if not name:
@@ -201,12 +247,39 @@ def pinned(token, candidates, root, texts):
     # The name stands alone: no name character before it, and none after it but a stop that ends the word.
     whole = re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(name) + r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_-])")
     for candidate in candidates:
-        rel = bare(candidate)
-        if rel not in texts:
-            texts[rel] = read(os.path.join(root, *rel.split("/")))
-        if texts[rel] is not None and whole.search(texts[rel]):
+        text = held(candidate, root, texts)
+        if text is not None and whole.search(text):
             return True
     return False
+
+
+def counts(sentence):
+    """(start, end) in the sentence text of each count word that makes a claim. A span, a date, a time and an id
+    are blanked first, so none counts as a word of the claim; a span stays one word between count and noun."""
+    blanked = sentence.blanked
+    for pattern in NOT_COUNTS:
+        blanked = pattern.sub(lambda m: "_" * len(m.group()), blanked)
+    words = list(WORD.finditer(blanked))
+    found = []
+    for i, word in enumerate(words):
+        if not COUNT_WORD.fullmatch(word.group()):
+            continue
+        after = any(COST_NOUN.fullmatch(w.group()) for w in words[i + 1:i + 5])
+        before = TIMES_WORD.fullmatch(word.group()) and any(COST_NOUN.fullmatch(w.group()) for w in words[max(0, i - 3):i])
+        if after or before:
+            found.append((word.start(), word.end()))
+    return found
+
+
+def has_reader(sentence, start, end, candidates, root, texts):
+    """True when a bound, or a test that holds the code span nearest the count word, backs the count."""
+    if BOUND.search(sentence.blanked):
+        return True
+    near = [(min(abs(a - end), abs(start - b)), k) for k, (a, b) in enumerate(sentence.holes)
+            if not is_test_name(sentence.spans[k][0])]
+    if not near:
+        return any(held(c, root, texts) is not None for c in candidates)
+    return pinned(sentence.spans[min(near)[1]][0], candidates, root, texts)
 
 
 def check(root):
@@ -226,14 +299,19 @@ def check(root):
             if not balanced:
                 findings.append((record, paragraph[0][0], None, UNBALANCED))
                 continue
-            for sentence, spans in sentences:
-                if EXEMPT.search(sentence):
+            for sentence in sentences:
+                if EXEMPT.search(sentence.text):
                     continue
-                candidates = [t for t, _ in spans if is_test_name(t) and EXTENSION.search(basename(bare(t)))]
-                for token, number in spans:
+                candidates = [t for t, _ in sentence.spans if is_test_name(t) and EXTENSION.search(basename(bare(t)))]
+                for token, number in sentence.spans:
                     row = (record, number, token, "%s named in a Cost sentence with no pin" % token)
                     if is_file(token) and row not in findings and not pinned(token, candidates, root, texts):
                         findings.append(row)
+                for start, end in counts(sentence):
+                    if not has_reader(sentence, start, end, candidates, root, texts):
+                        line = sentence.line + sentence.text.count("\n", 0, start)
+                        findings.append((record, line, None, NO_READER))
+                        break
     return findings
 
 
