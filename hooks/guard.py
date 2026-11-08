@@ -1104,12 +1104,12 @@ def _settings_place(path: str, cwd: str) -> bool:
         root = _checkout_root_by_stat(os.path.realpath(_expanded(cwd, "")))
         if root:
             here.add(os.path.normcase(root))
-        # A folder holding `install.ps1` is an install source: a local install links ~/.claude/settings.json to its settings.json.
+        # A folder holding `install.ps1` is an install source: a local install links ~/.claude/settings.json to its
+        # settings.json. Every such ancestor counts, not the nearest only: the outer one's file is as reachable.
         up = os.path.realpath(_expanded(cwd, ""))
         while up:
             if os.path.exists(os.path.join(up, "install.ps1")):
                 here.add(os.path.normcase(up))
-                break
             if os.path.dirname(up) == up:
                 break
             up = os.path.dirname(up)
