@@ -2202,3 +2202,4 @@
 - sed-s-e-flag: the `s///e` flag of a sed script is not read (hooks/guard_frozen.py `_sed_script_targets`). Decision: builders-cannot-edit-tests.
 - quoted-in-place-false-alarm: `sed -n '/use --in-place/p'` is refused, because the quoted text reads as an in-place flag (hooks/guard_frozen.py). Decision: builders-cannot-edit-tests.
 - from-cwd-clone-wording: at hooks/guard.py near line 4535 the clone_hit wording can change after a cd; unmeasured. Decision: builders-cannot-edit-tests.
+- globstar-double-star: `**` is read as one `*`, which is right for default bash and wrong with globstar or zsh (hooks/guard_frozen.py `_shell_glob_test`). Fix: none — Claude's Bash runs default bash. Until: 2026-11-21. Decision: builders-cannot-edit-tests.
