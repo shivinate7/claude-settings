@@ -19463,10 +19463,10 @@ repo_case("adjacent quoted pieces ending in ) before -C naming this checkout are
           f'{MERGE_SHIM} 5 --confirm --base-red-ok "a""b (x)" -C {REPO_A}', REPO_A, TX_A)
 repo_case("an escaped quote in a reason ending in ) before -C naming this checkout is allowed", "allow",
           rf'{MERGE_SHIM} 5 --confirm --base-red-ok "say \"x\" (y)" -C {REPO_A}', REPO_A, TX_A)
-# Decision merge-confirm-repo (a cloud merge acts only in the checkout its own record names). Debt merge-subst-paren-closes: the merge
-# clause reads an unquoted `$(...)` as the command's closing `)`, so the flags after it are not judged. A PR number taken from
-# `$(gh pr list ...)` is a likely mistake. Each deny names another checkout with -C beside a substitution. Its controls name this
-# checkout, or give no -C, and are allowed: the deny turns on the -C that the substitution hid.
+# Decision merge-confirm-repo (a cloud merge acts only in the checkout its own record names). A `$(...)` in a merge's arguments is one
+# argument: the `)` that closes it does not end the merge, so the flags after it are judged. A PR number taken from `$(gh pr list ...)`
+# is a likely mistake. Each deny names another checkout with -C beside a substitution. Its controls name this checkout, or give no -C,
+# and are allowed: the deny turns on the -C, not on the substitution.
 repo_case("a $(date) before -C naming another checkout is denied", "deny",
           f"{MERGE_SHIM} 5 --confirm --base-red-ok $(date) -C {REPO_B}", REPO_A, TX_A)
 repo_case("a $(echo 5) PR number before -C naming another checkout is denied", "deny",
@@ -19490,6 +19490,27 @@ repo_case("a $(gh ...) PR number with a quote inside and no -C is allowed", "all
 # A real subshell close, unquoted, still ends the merge's arguments. The -C form checks that the close is not read as part of the path.
 repo_case("a merge in a subshell whose ) closes is allowed", "allow", f"({MERGE_SHIM} 5 --confirm)", REPO_A, TX_A)
 repo_case("a -C naming this checkout, then a subshell's ), is allowed", "allow", f"({MERGE_SHIM} 5 --confirm -C {REPO_A})", REPO_A, TX_A)
+# A `)` that closes a `$(` opened in the merge's command is part of its argument, so the flags after it are judged. A `)` inside quotes
+# is text, and so is a `$(` left open inside quotes. A `)` that closes the whole command still ends it.
+repo_case("a $(echo ')') PR number before -C naming another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C {REPO_B} $(echo ')') --confirm", REPO_A, TX_A)
+repo_case('a $(echo ")") PR number before -C naming another checkout is denied', "deny",
+          f'{MERGE_SHIM} -C {REPO_B} $(echo ")") --confirm', REPO_A, TX_A)
+repo_case("a nested $(echo $(echo 5)) PR number before -C naming another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C {REPO_B} $(echo $(echo 5)) --confirm", REPO_A, TX_A)
+repo_case("an arithmetic $((1+2)) before -C naming another checkout is denied", "deny",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok $((1+2)) -C {REPO_B}", REPO_A, TX_A)
+repo_case('a quoted unclosed $( before -C naming another checkout is denied', "deny",
+          f'{MERGE_SHIM} 5 --confirm -C {REPO_B} --base-red-ok "$(date"', REPO_A, TX_A)
+repo_case("an unclosed $( after --confirm is denied", "deny", f"{MERGE_SHIM} 5 --confirm $(date", REPO_A, TX_A)
+repo_case("a merge inside $(...) whose ) ends the command, naming this checkout, is allowed", "allow", f"$({MERGE_SHIM} 5 --confirm)", REPO_A, TX_A)
+# Controls: the same forms that name this checkout are allowed.
+repo_case("a $(echo ')') PR number before -C naming this checkout is allowed", "allow",
+          f"{MERGE_SHIM} -C {REPO_A} $(echo ')') --confirm", REPO_A, TX_A)
+repo_case("a nested $(echo $(echo 5)) PR number before -C naming this checkout is allowed", "allow",
+          f"{MERGE_SHIM} -C {REPO_A} $(echo $(echo 5)) --confirm", REPO_A, TX_A)
+repo_case("an arithmetic $((1+2)) before -C naming this checkout is allowed", "allow",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok $((1+2)) -C {REPO_A}", REPO_A, TX_A)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {REPO_B} 5", REPO_A, TX_NONE)
