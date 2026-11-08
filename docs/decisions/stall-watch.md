@@ -62,14 +62,20 @@ guard rule, so the watcher does the waiting and the session is told once.
   the command, so a path in quotes or a comment is text. A change of size or mtime on any of them resets the
   quiet time. A job with no named log, or whose logs stop changing, stalls as before. The redirection is the
   signal because it is the act; a declared note can be wrong, and an unnamed file is not read.
-  A relative log after a `cd` is joined to the cd's target when the hook builds the wrapper. The same
-  tokenizer reads the cd, so a cd in quotes or a comment is text. If the target cannot be read
-  (`cd $X`, `cd -`), the hook refuses the wrap and names the absolute form.
-  CPU time is life too (owner item 386, 2026-11-08): a child with no output, such as `cmd | tail -1`, is
-  working while its CPU time advances. Any process under the job's shell counts; the shell's own time does not.
+  A relative log after a `cd` or `pushd` is joined to its target when the hook builds the wrapper. The same
+  tokenizer reads the cd, so a cd in quotes, a comment or a heredoc body is text. Only a cd that surely
+  runs in the main shell moves the directory: the first command of a list item, or one that follows only
+  cds joined by `&&`. A cd behind `||`, `&`, `|` or `then`, or inside `{ }`, leaves it unknown.
+  The hook never refuses for this (coordinator ruling, 2026-11-08). It leaves that log out of `--also`,
+  passes it as `--unwatched`, and the STALL report names it. A refusal on `cd "$REPO" && make > log`
+  costs more than a missed log.
+  CPU time is life too (coordinator ruling, 2026-11-08 05:02 CST): a child with no output, such as
+  `cmd | tail -1`, is working while its CPU time advances. Any process under the job's shell counts;
+  the shell's own time does not.
   Cost: no new process, timer or file. The once-a-second `ps` that reads the job's state reads the
   process table with CPU time, and the watcher compares each process to its last reading. On Linux ps
-  gives whole seconds, so a child under 1% CPU may still stall. A job that `exec`s has no child to count.
+  gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall. A job that
+  `exec`s has no child to count.
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
   Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
