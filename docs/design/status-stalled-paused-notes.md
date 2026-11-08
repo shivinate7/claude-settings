@@ -30,18 +30,20 @@ stalled mark is already red.
    Loss: colour alone. Paused is hard to tell from to do in dark.
    Pick: no.
 
-3. **Count words in the Now card.** The line reads "4 of 12 done, 1 in progress, 1 stalled, 1 paused".
-   Option No count words keeps today's line.
-   Gain: the Now bar is aria-hidden, so this line is its only text. Today a stalled step drops out
-   of it.
+3. **Count words in the Now card.** The line reads "4 of 12 done, 1 in progress, 1 stalled, 1 paused,
+   1 blocked". Done always shows. A kind at 0 is left out. Option No count words drops them.
+   A listed id with no step in the plan stays in the Stalled band only. No bar, rail or Now card line
+   counts it.
+   Gain: the Now bar is aria-hidden, so this line is its only text. It names every kind the bar draws,
+   but to do.
    Loss: "stalled" shows once more on the screen. It is in a sentence, so `ux-label-once` passes it.
    Pick: yes.
 
 4. **Cell order.** Done, in progress, stalled, paused, blocked, to do. The same as the roadmap.
    Pick: yes.
 
-5. **Spoken counts.** Each rail button's `aria-label` and the phase head's `.sr` text add ", 1
-   stalled, 1 paused" where the count is not 0.
+5. **Spoken counts.** The rail button's `aria-label` and the phase head's `.sr` text name in progress,
+   stalled, paused and blocked where the count is not 0. `stallWords` feeds both.
    Gain: a screen reader hears what the hidden bar shows.
    Pick: yes.
 

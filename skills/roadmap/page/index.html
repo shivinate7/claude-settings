@@ -593,7 +593,7 @@ function renderRail(){
   $('#rail').innerHTML = PH.map(p=>{
     const ss=byPhase(p.k), c=tally(ss), d=c.done;
     const w=n=>ss.length?n/ss.length*100:0;
-    return `<button data-phase="${p.k}" aria-pressed="${p.k===shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${c.stl?', '+c.stl+' stalled':''}${c.pzd?', '+c.pzd+' paused':''}${c.blk?', '+c.blk+' blocked':''}${p===cur?', current phase':''}"><div class="nm"><span>${esc(p.n)}${p===cur?'<span class="here" title="Current phase: the first with work left"></span>':''}</span><span class="num">${d}/${ss.length}</span></div>
+    return `<button data-phase="${p.k}" aria-pressed="${p.k===shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${c.act?', '+c.act+' in progress':''}${c.stl?', '+c.stl+' stalled':''}${c.pzd?', '+c.pzd+' paused':''}${c.blk?', '+c.blk+' blocked':''}${p===cur?', current phase':''}"><div class="nm"><span>${esc(p.n)}${p===cur?'<span class="here" title="Current phase: the first with work left"></span>':''}</span><span class="num">${d}/${ss.length}</span></div>
       <div class="bar">${segs(c,ss.length)}</div></button>`;
   }).join('');
 }
