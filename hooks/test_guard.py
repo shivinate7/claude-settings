@@ -9288,10 +9288,12 @@ def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
     return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
 
 
-def role_tag_call(tool_id, session=ROLE_OWN):
-    """One paired set_session_tags call that adds a tag to `session`."""
-    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [session], "add": ["cs-build:coordinator"]}),
-            role_result(tool_id, "ok")]
+def role_tag_call(tool_id, session=ROLE_OWN, add=("cs-build:coordinator",), remove=None):
+    """One paired set_session_tags call on `session`: it adds `add`, and removes `remove` when one is given."""
+    tool_input = {"session_ids": [session], "add": list(add)}
+    if remove is not None:
+        tool_input["remove"] = list(remove)
+    return [role_use(tool_id, SET_SESSION_TAGS, tool_input), role_result(tool_id, "ok")]
 
 
 # How a read of another session's text comes back: an opening tag with a nonce, a preamble line, the JSON indented
@@ -9406,6 +9408,10 @@ ROLE_LINES = {
     # The coordinator-scope tier fallback (no role file): a foreign coordinator record, and a stale untagged read then a coordinator.
     "other-coordinator": role_call("g1", COORD_TAGS, session=ROLE_OTHER),
     "untagged-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", COORD_TAGS),
+    # A self-tag with no get_session read before it, and a self-tag added after an untagged read then removed again.
+    "tags-only": role_tag_call("t1"),
+    "tags-then-removed": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1")
+    + role_tag_call("t2", add=(), remove=["cs-build:coordinator"]),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
@@ -11456,6 +11462,15 @@ sh("frozen: sed -i --expression= with a w command that writes the config setting
    "sed -i --expression='w " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i with a comma-delimited s whose w flag writes the config settings file",
    "sed -i 's,a,b,w " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+# A `for` list or a brace list names the frozen paths it holds, and a `do` hides the sed in a loop body from the sed reader.
+# A loop over a file outside the config folder stays allowed.
+CFG_BRACE = slash(os.path.join(CFG, "{settings.json,x}"))
+sh("frozen: sed -i in a for loop over the config settings file, the sed operand a loop variable",
+   'for f in ' + CFG_SETTINGS + '; do sed -i "s/a/b/" "$f"; done', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i on a brace list that names the config settings file", "sed -i 's/a/b/' " + CFG_BRACE, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i in a for loop over a file outside the config folder is allowed",
+   'for f in ' + slash(os.path.join(NOGIT, "f.txt")) + '; do sed -i "s/a/b/" "$f"; done', "allow", cwd=NOGIT)
 sh("frozen: sed -n on a config hook, with no -i, is a read",
    "sed -n 'p' " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("frozen: sed -i on a scratch file is allowed", "sed -i 's/a/b/' /tmp/x", "allow", cwd=NOGIT)
@@ -13804,6 +13819,49 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+
+
+def _load_guard_frozen():
+    """hooks/guard_frozen.py beside the guard under test (GUARD), so a mutant copy of the guard is the scan read."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_frozen_under_test",
+                                                  os.path.join(os.path.dirname(GUARD), "guard_frozen.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# The predicate calls the scan makes on a `for` list one word past the cap. A list over the cap keeps this count: the cap is
+# what stops a long list from costing one scan per word it expands to.
+SHELL_SCAN_OVER_CAP_CALLS = 45
+
+
+def shell_scan_cost_check():
+    """(ok, note): a `for` list one word past the cap is scanned as today. The scope comes first: the scan reaches the sed
+    operand "$f". Then the count of predicate calls, which must stay at today's count. The predicate accepts nothing."""
+    seen = []
+
+    def accepts_nothing(word, where):
+        seen.append(word)
+        return False
+
+    command = 'for f in %s; do sed -i "s/a/b/" "$f"; done' % " ".join(CS_LOOP_WORDS)
+    _load_guard_frozen()._shell_write_hit(command, NOGIT, accepts_nothing)
+    if "$f" not in seen:
+        return False, "the scan did not reach the sed operand $f: it saw %d words, the last %r" % (len(seen), seen[-4:])
+    if len(seen) != SHELL_SCAN_OVER_CAP_CALLS:
+        return False, "the scan made %d predicate calls for a list over the cap, want %d" % (len(seen),
+                                                                                           SHELL_SCAN_OVER_CAP_CALLS)
+    return True, "the scan makes %d predicate calls for a list over the cap, and reaches the sed operand" % len(seen)
+
+
+SHELL_SCAN_COST_LABEL = ("frozen: the shell scan of a for list one word past the cap makes today's predicate calls, "
+                         "and reaches the sed operand")
+LOG_CHECKS_EXTRA.append((SHELL_SCAN_COST_LABEL, shell_scan_cost_check))
+LOG_FAMILY[SHELL_SCAN_COST_LABEL] = "frozen"
+FIXTURELESS_CHECKS.add(shell_scan_cost_check)
+
+
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -25247,6 +25305,47 @@ for _where, _cwd in (("repo root", GITMAIN), ("repo folder", os.path.join(GITMAI
         cs_shell("sed_script_beside_a_path_in_no_repo_allowed (%s)" % _where, "allow",
                  "sed -i %s %s" % (_script, slash(OUTSIDE_TEMP)), cwd=_cwd)
 
+# ---- a `for` loop and a brace list (rule coordinator-scope). The judge reads a loop variable as a path, and a `do` hides the
+# sed in the loop body from the sed reader, so a loop over record files is refused today. A loop names its words: each word
+# of a list is judged, and a brace list expands. A word the judge cannot place keeps today's reading, and so does a list
+# over the cap of 32 words.
+CS_LOOP_WORDS = ["docs/decisions/w%02d.md" % _i for _i in range(33)]  # one word past the cap of 32
+cs_shell("loop_over_records_sed_allowed", "allow", 'for f in docs/decisions/*.md; do sed -i "s/a/b/" "$f"; done')
+cs_shell("loop_var_unused_in_body_sed_on_record_allowed", "allow", "for x in 1; do sed -i 's/a/b/' docs/todo.md; done")
+cs_shell("brace_of_records_sed_allowed", "allow", "sed -i 's/a/b/' docs/{todo.md,debts/x.md}")
+# A range keeps its literal reading today: a record range is allowed and a product range is refused.
+cs_shell("loop_over_record_range_sed_allowed", "allow", 'for f in docs/decisions/{1..3}.md; do sed -i "s/a/b/" "$f"; done')
+cs_shell("brace_range_of_records_sed_allowed", "allow", "sed -i 's/a/b/' docs/decisions/{1..3}.md")
+cs_shell("loop_list_at_cap_sed_allowed", "allow",
+         'for f in %s; do sed -i "s/a/b/" "$f"; done' % " ".join(CS_LOOP_WORDS[:32]))
+# Controls: text that only looks like loop syntax keeps its verdict: a quoted brace, an echoed loop, a `#` or a lone quote
+# in a quoted script, and a line break in one.
+cs_shell("brace_inside_quoted_sed_script_allowed", "allow", "sed -i 's/{a,b}/x/' docs/todo.md")
+cs_shell("echo_of_quoted_loop_naming_product_file_allowed", "allow", "echo \"for f in src/app.py; do sed -i 's/a/b/' x; done\"")
+cs_shell("hash_in_quoted_sed_in_loop_allowed", "allow", 'for f in docs/decisions/a.md; do sed -i "s/#/x/" "$f"; done')
+cs_shell("lone_quote_in_quoted_sed_in_loop_allowed", "allow", "for f in docs/decisions/a.md; do sed -i \"s/it's/it is/\" \"$f\"; done")
+cs_shell("multi_line_loop_do_on_own_line_allowed", "allow", "for f in docs/decisions/a.md\ndo\n  sed -i 's/a/b/' \"$f\"\ndone")
+cs_shell("multi_line_quoted_script_with_comment_in_loop_allowed", "allow",
+         'for f in docs/decisions/a.md; do sed -i "s/a/b/\n# c\ns/d/e/" "$f"; done')
+# Refused rows stay refused under the fix. A product path is in some of their words. Each other word that the fix keeps
+# literal is refused on its own: `"$f.md"`, a glob, a substitution, backticks, and `"$f"` in a `while read` loop. The list
+# one word past the cap keeps today's literal reading of its loop variable.
+cs_shell("loop_list_with_product_file_sed_denied", "deny",
+         'for f in docs/decisions/a.md src/app.py; do sed -i "s/a/b/" "$f"; done', "app.py")
+cs_shell("brace_with_product_file_sed_denied", "deny", "sed -i 's/a/b/' docs/{todo.md,hooks/a.py}", "a.py")
+cs_shell("loop_var_with_bak_suffix_sed_denied", "deny", 'for f in docs/decisions/a.md; do sed -i "s/a/b/" "$f.bak"; done')
+cs_shell("loop_list_from_command_substitution_denied", "deny", 'for f in $(ls src); do sed -i "s/a/b/" "$f"; done')
+cs_shell("loop_list_from_backticks_denied", "deny", 'for f in `ls src`; do sed -i "s/a/b/" "$f"; done')
+cs_shell("loop_var_assigned_in_body_denied", "deny",
+         'for f in docs/decisions/a.md; do f=src/app.py; sed -i "s/a/b/" "$f"; done', "app.py")
+cs_shell("loop_over_product_range_sed_denied", "deny", 'for f in hooks/{1..3}.py; do sed -i "s/a/b/" "$f"; done')
+cs_shell("loop_partial_word_denied", "deny", 'for f in docs/decisions/a; do sed -i "s/a/b/" "$f.md"; done')
+cs_shell("nested_loop_partial_word_denied", "deny", 'for f in docs/decisions/a; do for g in x; do sed -i "s/a/b/" "$f.md"; done; done')
+cs_shell("loop_glob_over_docs_subfolders_denied", "deny", 'for f in docs/*/x.md; do sed -i "s/a/b/" "$f"; done')
+cs_shell("while_read_loop_denied", "deny", 'while read f; do sed -i "s/a/b/" "$f"; done < docs/decisions/list.txt')
+cs_shell("loop_list_one_word_past_cap_denied", "deny",
+         'for f in %s; do sed -i "s/a/b/" "$f"; done' % " ".join(CS_LOOP_WORDS))
+
 # ---- a commit holds the staged paths: `git commit -m x` in a worktree whose index holds them
 CS_COMMIT_FILES = dict(BASE_FILES, **{"docs/decisions/a.md": "a\n", "docs/todo.md": "- a\n"})
 
@@ -25698,6 +25797,18 @@ cs_write("no_role_file_newest_own_coordinator_tag_denied", "deny", CS_CODE, role
 cs_write("role_file_wins_over_tag", "allow", CS_CODE, role="lane-own", env=TAG_ENV, transcript=role_path("coordinator"))
 cs_write("role_file_wins_over_tag_coordinator_file", "deny", CS_CODE, role="coordinator-own", env=TAG_ENV,
          transcript=role_path("lane"))
+# A set_session_tags call on the own id after the newest own read is a tag that read does not show: the session tags
+# itself after it reads its record untagged at start. A tag call with no read before it counts the same. A tag on
+# another session, and an add that a later remove undoes, leave the tier as it was.
+cs_write("no_role_file_untagged_then_tags_write_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("untagged-then-tags"))
+cs("no_role_file_untagged_then_tags_agent_spawn_denied", "deny", role="none", env=TAG_ENV,
+   transcript=role_path("untagged-then-tags"), tool="Agent", subagent_type="builder", **CS_SPAWN)
+cs_write("no_role_file_tags_only_write_denied", "deny", CS_CODE, role="none", env=TAG_ENV, transcript=role_path("tags-only"))
+cs_write("no_role_file_untagged_then_other_tags_write_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("untagged-then-other-tags"))
+cs_write("no_role_file_tags_then_removed_write_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("tags-then-removed"))
 
 # ---- what needs more than one verdict runs as a check
 # Each refused input is a row: (what, tool, tool input, cwd, text its refusal must not name).
@@ -25954,6 +26065,8 @@ CS_CHECKS.append(("coordinator-scope tag_cost: a missing role file reads the own
                                     cwd=NOGIT)))
 CS_CHECKS.append(("coordinator-scope tag_cost: a role file that is there is judged alone, and the own record is not opened",
                   cs_tag_cost_check("deny", 0, "coordinator-own", "Write", CS_COST_CODE, role_path("lane"))))
+CS_CHECKS.append(("coordinator-scope tag_cost: a missing role file reads the own record once, for a Write after a set_session_tags call on the own id",
+                  cs_tag_cost_check("deny", 1, "none", "Write", CS_COST_CODE, role_path("untagged-then-tags"))))
 
 
 # 7. guard.log: these cases pin that each coordinator-scope refusal appends exactly one guard.log line, and each
