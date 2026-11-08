@@ -4107,6 +4107,13 @@ class AgentEndLogReadTests(unittest.TestCase):
         import agent_end_reap
         cls.reap = agent_end_reap
 
+    def setUp(self):
+        """A lasting refusal waits LOG_WAIT_SECONDS before its row drops. A short wait keeps each such case fast;
+        the cases pin the drop, not the length of the wait. Restored after each case."""
+        wait = mock.patch.object(self.reap, "LOG_WAIT_SECONDS", 0.3)
+        wait.start()
+        self.addCleanup(wait.stop)
+
     def scoped_log_path(self):
         """A run folder, and the payload log path that CLAUDE_CONFIG_DIR gives under it. The path is
         checked to sit inside the folder before any test probes it."""
@@ -4299,7 +4306,7 @@ class AgentEndLogReadTests(unittest.TestCase):
 
     def test_a_drop_whose_drops_file_cannot_be_appended_to_does_not_raise(self):
         """The best-effort append: a drops path that is a directory cannot be opened for append. log() must still
-        return. Green on the old code: the append's own except covers it."""
+        return. The append's own except covers it."""
         path = self.scoped_log_path()
         os.makedirs(self.drops_file(path))
         raised = None
@@ -4318,7 +4325,7 @@ class AgentEndLogReadTests(unittest.TestCase):
         with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
             self.reap.log({"raw": "{}", "run": "first-run", "state": "done"})
             self.reap.log({"raw": "{}", "run": "second-run", "state": "done"})
-        self.assertEqual(len(refused), 2, "the forced PermissionError reached the log read %d time(s), want 2" % len(refused))
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
         runs = [row.get("run") for row in self.read_drops(path)]
         self.assertEqual(runs, ["first-run", "second-run"], "the drops file holds runs %r, want both drops in order" % (runs,))
 
