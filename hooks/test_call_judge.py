@@ -176,6 +176,37 @@ def origin_page_repo():
     return repo
 
 
+# The record-branch checkout of incident 2026-11-07: a checkout on the record branch `roadmap` with no extras file, while
+# origin/main holds the page's extras file. lint/layout.py reads the page from origin/main when the checkout has none, so
+# the page checks run from here too. Built from plumbing and one branch switch. origin/main is a ref only (no local main
+# stays), as a fetch leaves it. The one home of this fixture.
+RECORD_CHECKOUT = os.path.join(ROOT, "record-branch-checkout")
+
+
+def record_branch_checkout():
+    """The checkout on `roadmap` whose origin/main holds the extras file of PAGE_URL, in the registry form main holds."""
+    repo = RECORD_CHECKOUT
+    if os.path.isdir(repo):
+        return repo
+    os.makedirs(repo)
+    git(repo, "init", "-q")
+    git(repo, "symbolic-ref", "HEAD", "refs/heads/roadmap")
+    with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as f:
+        f.write("# Record branch\n")
+    git(repo, "add", "README.md")
+    git(repo, "commit", "-q", "-m", "record")
+    git(repo, "checkout", "-q", "-b", "main")
+    os.makedirs(os.path.join(repo, ".claude"))
+    with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
+        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "url": PAGE_URL, "role": "waiting-page", "account": "current"}]}, f)
+    git(repo, "add", ".claude/layout-extras.json")
+    git(repo, "commit", "-q", "-m", "extras")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "roadmap")
+    git(repo, "branch", "-q", "-D", "main")
+    return repo
+
+
 try:
     import override
 except ImportError:
