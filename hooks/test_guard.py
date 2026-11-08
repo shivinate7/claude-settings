@@ -20544,12 +20544,12 @@ def worktree_home_cross_checkout_case():
 def _read_row(what, expect, template, rule=None):
     """One row of the read-into-another-checkout block, as its own case, so a failure names one cause.
     `template` is the shell command, with %s where the other checkout's path goes, if it has one. The
-    session stands in the primary checkout, as in the incident. The red rows fail on one of two causes,
-    both in writes_to (hooks/guard_frozen.py), which other_checkout_hit (hooks/guard.py) calls with no
-    command position. (1) A MUTATING_COMMAND word anywhere earlier in the segment reads as a write to a
-    target after it, so `grep -n install <other>/x.md` is refused. (2) _words_of repeats a quoted path in
-    the text the scan reads, so a write word in that path's own name stands before a copy of the path.
-    Not the cause: a `W=` variable or a `| head`. Rule: other-checkout (hooks/guard.py,
+    session stands in the primary checkout, as in the incident. other_checkout_hit (hooks/guard.py)
+    passes predicate_command to _shell_write_hit (hooks/guard_frozen.py), so a mutating word is a write
+    only in command position. An allow row pins a read whose argument holds a write word, such as
+    `grep -n install <other>/x.md`. A deny row pins a write form that command position must still catch:
+    a verb glued to `(`, `$(` or a backtick, a python shutil call, a wrapper the guard does not unwrap, or
+    a quoted path whose name holds a write word. Rule: other-checkout (hooks/guard.py,
     OTHER_CHECKOUT_REASON)."""
     def case():
         primary, _lane_a, lane_b, _ = _cross_checkout_fixture("xcoread")
@@ -22053,6 +22053,41 @@ LOG_CHECKS = (
     ("worktree-home: a cp into another checkout is refused",
      _read_row("a cp into another checkout", "deny", "cp src/app.py %s/src/b.py",
                rule="other-checkout")),
+    ("worktree-home: a cp in a parenthesised subshell into another checkout is refused",
+     _read_row("a cp in a parenthesised subshell into another checkout", "deny",
+               "(cp src/app.py %s/src/sub.py)", rule="other-checkout")),
+    ("worktree-home: a sed -i in a parenthesised subshell into another checkout is refused",
+     _read_row("a sed -i in a parenthesised subshell into another checkout", "deny",
+               "(sed -i 's/line/LINE/' %s/docs/decisions/x.md)", rule="other-checkout")),
+    ("worktree-home: a cp in a $(...) substitution into another checkout is refused",
+     _read_row("a cp in a $(...) substitution into another checkout", "deny",
+               "echo $(cp src/app.py %s/src/sub.py)", rule="other-checkout")),
+    ("worktree-home: a cp in a backtick substitution into another checkout is refused",
+     _read_row("a cp in a backtick substitution into another checkout", "deny",
+               "echo `cp src/app.py %s/src/sub.py`", rule="other-checkout")),
+    ("worktree-home: a python shutil.copy into another checkout is refused",
+     _read_row("a python shutil.copy into another checkout", "deny",
+               "python3 -c \"import shutil; shutil.copy('src/app.py', '%s/src/sub.py')\"",
+               rule="other-checkout")),
+    ("worktree-home: a python shutil.move into another checkout is refused",
+     _read_row("a python shutil.move into another checkout", "deny",
+               "python3 -c \"import shutil; shutil.move('src/app.py', '%s/src/sub.py')\"",
+               rule="other-checkout")),
+    ("worktree-home: a busybox cp into another checkout is refused",
+     _read_row("a busybox cp into another checkout", "deny", "busybox cp src/app.py %s/src/sub.py",
+               rule="other-checkout")),
+    ("worktree-home: a stdbuf-wrapped cp into another checkout is refused",
+     _read_row("a stdbuf-wrapped cp into another checkout", "deny",
+               "stdbuf -o0 cp src/app.py %s/src/sub.py", rule="other-checkout")),
+    ("worktree-home: a watch-wrapped cp into another checkout is refused",
+     _read_row("a watch-wrapped cp into another checkout", "deny", "watch cp src/app.py %s/src/sub.py",
+               rule="other-checkout")),
+    ("worktree-home: a quoted touch of install.sh in another checkout is refused",
+     _read_row("a quoted touch of install.sh in another checkout", "deny", 'touch "%s/install.sh"',
+               rule="other-checkout")),
+    ("worktree-home: a dd of= write to a quoted install.sh in another checkout is refused",
+     _read_row("a dd of= write to a quoted install.sh in another checkout", "deny",
+               'dd if=src/app.py of="%s/install.sh"', rule="other-checkout")),
     ("worktree-home: a grep with a write word as its search term, of a file in another checkout, passes",
      _read_row("a grep with a write word as its search term, of a file in another checkout", "allow",
                "grep -n install %s/docs/decisions/x.md")),
@@ -22864,8 +22899,8 @@ def sh_read_row(what, expect, template):
     session stands in the primary checkout with its worktree gone, as in the incident. `template` is
     the shell command, with %s where the primary's path goes. `expect` is allow or deny; a deny must
     name session-home and EnterWorktree, and no path (sh_refusal_problems). Why: session_home_hit
-    calls _shell_write_hit with no predicate_command, the call that the other-checkout read fix
-    (701aae810, hooks/guard_frozen.py) changed to read a mutating word only in command position."""
+    passes predicate_command to _shell_write_hit (hooks/guard_frozen.py), so a mutating word is a write
+    only in command position. A deny row pins a write form that command position must still catch."""
     def case():
         primary, lane, session, problems = sh_lost_primary("read" + uuid.uuid4().hex[:12])
         write(os.path.join(primary, "docs", "decisions", "x.md"), "line 1\n")
@@ -22898,6 +22933,50 @@ LOG_CHECKS_EXTRA.append(("session-home: while lost, an echo redirect into the pr
                          "naming session-home and EnterWorktree",
                          sh_read_row("an echo redirect into the primary checkout", "deny",
                                      "echo x > %s/docs/decisions/x.md")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a cp in a parenthesised subshell into the primary checkout "
+                         "is refused, naming session-home and EnterWorktree",
+                         sh_read_row("a cp in a parenthesised subshell into the primary checkout", "deny",
+                                     "(cp src/app.py %s/src/sub.py)")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a sed -i in a parenthesised subshell into the primary "
+                         "checkout is refused, naming session-home and EnterWorktree",
+                         sh_read_row("a sed -i in a parenthesised subshell into the primary checkout", "deny",
+                                     "(sed -i 's/line/LINE/' %s/docs/decisions/x.md)")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a cp in a $(...) substitution into the primary checkout "
+                         "is refused, naming session-home and EnterWorktree",
+                         sh_read_row("a cp in a $(...) substitution into the primary checkout", "deny",
+                                     "echo $(cp src/app.py %s/src/sub.py)")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a cp in a backtick substitution into the primary checkout "
+                         "is refused, naming session-home and EnterWorktree",
+                         sh_read_row("a cp in a backtick substitution into the primary checkout", "deny",
+                                     "echo `cp src/app.py %s/src/sub.py`")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a python shutil.copy into the primary checkout is refused, "
+                         "naming session-home and EnterWorktree",
+                         sh_read_row("a python shutil.copy into the primary checkout", "deny",
+                                     "python3 -c \"import shutil; shutil.copy('src/app.py', '%s/src/sub.py')\"")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a python shutil.move into the primary checkout is refused, "
+                         "naming session-home and EnterWorktree",
+                         sh_read_row("a python shutil.move into the primary checkout", "deny",
+                                     "python3 -c \"import shutil; shutil.move('src/app.py', '%s/src/sub.py')\"")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a busybox cp into the primary checkout is refused, "
+                         "naming session-home and EnterWorktree",
+                         sh_read_row("a busybox cp into the primary checkout", "deny",
+                                     "busybox cp src/app.py %s/src/sub.py")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a stdbuf-wrapped cp into the primary checkout is refused, "
+                         "naming session-home and EnterWorktree",
+                         sh_read_row("a stdbuf-wrapped cp into the primary checkout", "deny",
+                                     "stdbuf -o0 cp src/app.py %s/src/sub.py")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a watch-wrapped cp into the primary checkout is refused, "
+                         "naming session-home and EnterWorktree",
+                         sh_read_row("a watch-wrapped cp into the primary checkout", "deny",
+                                     "watch cp src/app.py %s/src/sub.py")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a quoted touch of install.sh in the primary checkout is "
+                         "refused, naming session-home and EnterWorktree",
+                         sh_read_row("a quoted touch of install.sh in the primary checkout", "deny",
+                                     'touch "%s/install.sh"')))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a dd of= write to a quoted install.sh in the primary checkout "
+                         "is refused, naming session-home and EnterWorktree",
+                         sh_read_row("a dd of= write to a quoted install.sh in the primary checkout", "deny",
+                                     'dd if=src/app.py of="%s/install.sh"')))
 
 
 # =========================================================================== mask_script lexemes
