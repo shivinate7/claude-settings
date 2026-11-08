@@ -7,7 +7,7 @@ A Cost sentence may name a file or state a count only when the same sentence bac
 - For a file: a test file that exists and holds the file's name.
 - For a count: the code span nearest the count word must be one that a test file holds as a whole name, or a bound, or a mark. A held span farther away does not rescue a near one that no test holds. The docstring lists the bounds.
 - For either: a mark, "not pinned", "unpinned", "unmeasured" or "no test".
-- A count in a debt note is `among N` or `N of M`. It passes on a bound, a mark, a date (YYYY-MM-DD), or a test named in the sentence that holds its nearest code span. It also passes on `run` and digits that `of` does not follow. A run of backticks that nothing closes is plain text in a note, with no finding. A note's count is a dated past observation, not a standing fact. An undated count in a note went stale at once, as in work item #2063.
+- A count in a debt note is `among N` or `N of M`. It passes on a bound, a mark, a date (YYYY-MM-DD), or a test named in the sentence that holds its nearest code span. It also passes on `run` and digits that `of` does not follow. A run of backticks that nothing closes is plain text in a note, with no finding. A note's count is a dated past observation, not a standing fact. An undated count in a note went stale at once, as in PR #2063 (STALE010 skips a cite outside the tracked top folders).
 
 A check refuses any Cost sentence that does none of these. A count with no code span needs a bound or a mark.
 
@@ -38,7 +38,7 @@ Source: step `cost-line-pinned` (file pins) and step `cost-line-has-reader` (cou
 
 Corpus: coordinator, 09:47 CST: mark the flagged sentences "unmeasured", or "(not pinned)" where a measured figure stands. This lane checks counts only; refusal reasons are a separate finding.
 
-Cost: one python start per CI run, and no file written (unmeasured). It reads the debt notes file once per run (not pinned). `lint/layout.py` reads `lint/layout.json` and the repo's extras file again on each record-kind lookup, with no cache (not pinned: no test counts these reads). It also reads git files to name the repo. It reads each decision record at most once. It reads each test file that a Cost sentence or a debt note names once per run, from a cache (unmeasured: no test counts the reads). `lint/test_check_cost_pins.py` proves the flag and the pin.
+Cost: one python start per CI run, and no file written (unmeasured). It reads the debt notes file once per run (unmeasured). `lint/layout.py` reads `lint/layout.json` and the repo's extras file again on each record-kind lookup, with no cache (unmeasured: no test counts these reads). It also reads git files to name the repo. It reads each decision record at most once. It reads each test file that a Cost sentence or a debt note names once per run, from a cache (unmeasured: no test counts the reads). `lint/test_check_cost_pins.py` proves the flag and the pin.
 
 ## Known limits
 

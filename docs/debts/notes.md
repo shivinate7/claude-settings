@@ -1504,3 +1504,4 @@
 - cost-count-hollow-pin: the nearest span by position can be a plain word the test happens to hold. Decision: cost-line-pinned. Fix: none — a reviewer reads the pin. Until: 2026-11-21.
 - cost-count-units-gap: secs, hrs, KiB, days and weeks, "line N of", and "N percent" are flagged. Decision: cost-line-pinned. Fix: none — none seen in the corpus. Until: 2026-11-21.
 - cost-count-misses: the check misses seven to nine and twelve; fetch, stat, invocation, append and round trip as nouns; "two-process"; "up to date" or "at least" read as a bound; "a second time". Decision: cost-line-pinned. Fix: none — the corpus marks show no such form slipped through. Until: 2026-11-21.
+- notes-count-second-term: the notes count finding and the map row say "debt note", but GLOSSARY.md names the term "note" (lint/check_cost_pins.py `check_notes`). Fix: say "note" in the message and the row when the check is next changed. Decision: cost-line-pinned.
