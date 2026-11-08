@@ -89,7 +89,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
   push-main            ask. A non-forced push whose destination is literally main or master,
-                       `--all` included. The remote's HEAD is not read. A dry run passes.
+                       `--all` included, to a network remote. A remote the shell has not expanded
+                       counts as one. The remote's HEAD is not read. A dry run passes.
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
