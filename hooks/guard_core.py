@@ -1069,9 +1069,12 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets `skipped` (None unless the caller names a value, so it can tell a segment
     that never runs from a folder it cannot read), and its own `cd` moves nothing. `failed_cd_stays`
-    is off by default, so a rule that fails closed on an untrusted `cd` keeps doing so."""
+    is off by default, so a rule that fails closed on an untrusted `cd` keeps doing so. With it on, a
+    `cd` into a folder an earlier `mkdir` of this walk makes reads as a move to the nearest folder that
+    exists now (the shell will be in the new folder, which sits in that one's checkout)."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    made = []   # folders an earlier `mkdir` makes, absolute and normalized
     dirs = []   # the `pushd` stack: folders to `popd` back to, or None once it cannot be told
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
@@ -1107,6 +1110,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        if failed_cd_stays and tokens:
+            made.extend(_mkdir_targets(tokens, where))
         if tokens is None:
             where = None
         elif move is not None:
@@ -1126,6 +1131,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 dirs = None if pushes else dirs
             else:
                 target = shell_abs(move or "~", where)
+                if target and failed_cd_stays and not os.path.isdir(target) and _under_any(target, made):
+                    target = _existing_parent(target)
                 if target and os.path.isdir(target):
                     where = target
                     if pushes and dirs is not None:
@@ -1141,6 +1148,44 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             if stack:
                 where, prev, dirs = stack.pop()
     return where
+
+
+def _mkdir_targets(tokens, where):
+    """The folders a tokenized `mkdir` segment makes, absolute and normalized: its operands, less its
+    flags and the value of `-m` or `--mode`. A relative operand is read against `where`; an operand that
+    holds a variable or a backtick, or that cannot be made absolute, is left out."""
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]).lower() != "mkdir":
+        return []
+    found, skip = [], False
+    for token in tokens[index + 1:]:
+        if skip:
+            skip = False
+        elif token in ("-m", "--mode"):
+            skip = True
+        elif token.startswith("-") or token[:1] in "<>" or REDIRECTION.match(token):
+            continue
+        elif not any(mark in token for mark in "$%`"):
+            path = shell_abs(token, where)
+            if path:
+                found.append(os.path.normpath(path))
+    return found
+
+
+def _under_any(path, folders):
+    """True when `path` is one of `folders` or sits under one."""
+    path = os.path.normpath(path)
+    return any(path == folder or path.startswith(folder.rstrip(os.sep) + os.sep) for folder in folders)
+
+
+def _existing_parent(path):
+    """`path`, or the nearest folder above it that exists."""
+    while path and not os.path.isdir(path):
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        path = parent
+    return path
 
 
 def _operands(tokens):

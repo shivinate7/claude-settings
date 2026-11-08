@@ -11,7 +11,7 @@ import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move,
     _segment_git_c_target, dir_before_segment, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
+    bare_words, basename, command_indexes, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
@@ -86,24 +86,21 @@ def _push_default_branches(cwd: str, remote: str):
 PUSH_QUOTED = re.compile(r"\"[^\"\s]*\s[^\"]*\"|'[^'\s]*\s[^']*'")
 
 
-def push_target(segment: str, cmd: str, cwd: str, number=None):
-    """(directory, config overrides) a `git push` in this segment runs against.
+def push_target(segments, ends, number: int, cwd: str):
+    """(directory, config overrides) a `git push` in `segments[number]` runs against.
 
-    The directory is the segment's own `git -C <dir>`, else the folder the shell is in when the
-    push runs (`dir_before_segment`: each earlier `cd` or `pushd`, a subshell's `cd` ended with its
-    parenthesis, a failed `cd` that left the shell where it was), else the session's cwd. `number`
-    is the segment's place in `cmd`, which a caller with two equal segments passes; without it the
-    first equal segment is read. A segment or folder that cannot be read gives ('', {}): a
-    directory that does not exist, which the verdict reads as unknown, and unknown asks.
+    `segments` and `ends` are the caller's own `split_segments` result, so the segment is read in
+    the list the caller walks, never in a second reading of the command. The directory is the
+    segment's own `git -C <dir>`, else the folder the shell is in when the push runs
+    (`dir_before_segment`: each earlier `cd` or `pushd`, a subshell's `cd` ended with its
+    parenthesis, a failed `cd` that left the shell where it was, a `cd` into a folder an earlier
+    `mkdir` makes), else the session's cwd. A segment or folder that cannot be read gives ('', {}):
+    a directory that does not exist, which the verdict reads as unknown, and unknown asks.
     """
-    tokens = segment_tokens(segment)
+    tokens = segment_tokens(segments[number])
     if tokens is None:
         return "", {}
-    ends = []
-    segments = split_segments(_strip_heredoc_bodies_unconditionally(cmd), ends)
-    if not (number is not None and number < len(segments) and segments[number] == segment):
-        number = segments.index(segment) if segment in segments else None
-    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True) if number is not None else None
+    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)
     git_c = _segment_git_c_target(tokens)
     if git_c is not None:
         where = _absolute(git_c, where or "")

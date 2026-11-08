@@ -656,7 +656,7 @@ def _checked_range(where, source, tracking, memo):
     return None, source
 
 
-def _push_hit(segment, stripped, cwd, args, number=None):
+def _push_hit(segments, ends, number, cwd, args):
     """Return the first file a `git push` would send with all three conflict markers, else ''. For each
     ref the push names, the range is the merge base with the destination's remote-tracking tip
     (`refs/remotes/<remote>/<dest>`, the named remote else origin), else the source's upstream, else the
@@ -664,7 +664,7 @@ def _push_hit(segment, stripped, cwd, args, number=None):
     glob, a typo) is read as HEAD. The range comes from the arguments alone: in the usual case one
     `git diff --check`, with no read of the top folder, the source or a base first."""
     named = push_refspecs(args)
-    where, overrides = push_target(segment, stripped, cwd, number)
+    where, overrides = push_target(segments, ends, number, cwd)
     if named is None or not where or not os.path.isdir(where):
         return ""
     specs = named[1] or [""]
@@ -746,7 +746,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
-            name = _push_hit(segment, stripped, cwd, call[1], number)
+            name = _push_hit(segments, ends, number, cwd, call[1])
             if name:
                 return "push", name
             readable = False
@@ -1041,8 +1041,11 @@ def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
         if call is None or call[0] != "push" or read_verb("push", call[1]):
             continue
         named = push_refspecs(call[1])
-        where, overrides = push_target(segment, stripped, cwd, number)
-        if named is None or not where or not os.path.isdir(where):
+        where, overrides = push_target(segments, ends, number, cwd)
+        if named is None:
+            continue
+        if not where or not os.path.isdir(where):
+            note("the folder the push runs in could not be read")
             continue
         done = _toplevel(where)
         top = os.path.normpath(done.stdout.strip()) if done is not None and done.returncode == 0 and done.stdout.strip() else ""
@@ -1256,23 +1259,26 @@ def _command_words(args):
     return words
 
 
-def _push_calls(segment: str, script: str, cwd: str, number=None):
-    """(arguments, directory, config overrides) of each `git push` in one segment, and in the scripts the
-    segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
-    `script` is the text the segment came from, which push_target reads for a leading `cd`, and `number` is
-    the segment's place in it, so two equal segments are each read in their own folder. A script
-    runs in the folder its segment's own `cd` or `git -C` names."""
+def _push_calls(segments, ends, number: int, cwd: str):
+    """(arguments, directory, config overrides) of each `git push` in `segments[number]`, and in the scripts
+    that segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
+    `segments` and `ends` are the caller's own `split_segments` result, which push_target reads for each
+    earlier `cd`, so two equal segments are each read in their own folder. A script runs in the folder its
+    segment's own `cd` or `git -C` names."""
+    segment = segments[number]
     for subcommand, args in git_calls(push_text(segment)):
         if subcommand == "push":
-            where, overrides = push_target(segment, script, cwd, number)
+            where, overrides = push_target(segments, ends, number, cwd)
             yield _command_words(args), where, overrides
     tokens = segment_tokens(segment)
     inner = inner_commands(tokens) if tokens else []
     if inner:
-        inner_cwd = push_target(segment, script, cwd, number)[0] or cwd
+        inner_cwd = push_target(segments, ends, number, cwd)[0] or cwd
         for text in inner:
-            for place, part in enumerate(split_segments(text)):
-                yield from _push_calls(part, text, inner_cwd, place)
+            inner_ends = []
+            inner_segments = split_segments(text, inner_ends)
+            for place in range(len(inner_segments)):
+                yield from _push_calls(inner_segments, inner_ends, place, inner_cwd)
 
 
 _TOPLEVELS = {}   # where -> the finished `git rev-parse --show-toplevel`, for the life of one hook process
@@ -1292,8 +1298,10 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
     reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
     args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
     reaches the branch."""
-    for number, segment in enumerate(split_segments(stripped)):
-        for args, where, overrides in _push_calls(segment, stripped, cwd, number):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number in range(len(segments)):
+        for args, where, overrides in _push_calls(segments, ends, number, cwd):
             if read_verb("push", args):
                 continue
             top = _toplevel(where) if where else None
