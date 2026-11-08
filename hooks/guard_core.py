@@ -7,14 +7,17 @@ checkout, a tree's status, the default branch, a branch's proof, session livenes
 git_reads.py, shared with the janitor: a test or the janitor that patches one of them patches it
 there, on the one object that every caller reads.
 """
+import ast
 import errno
 import functools
+import io
 import json
 import os
 import re
 import shlex
 import sys
 import time
+import tokenize
 from datetime import datetime
 
 # No try/except: a guard copy without git_reads.py judges nothing, so it fails closed (guard.py).
@@ -1882,6 +1885,408 @@ def command_indexes(tokens):
         at = resolve_command(tokens[start:])
         if at is not None and start + at not in found:
             found.append(start + at)
+    return found
+
+
+# ------------------------------------------------------------------ the code an interpreter runs
+#
+# `python -c`, `node -e` and a python or node heredoc run code that opens files as the interpreter
+# does. These helpers are the one reader of that code, for every rule that judges a path in it (the
+# env-file rule, and any rule that judges a write). They are stdlib only.
+
+CODE_EXISTS_CALLS = frozenset({"exists", "lexists", "isfile", "isdir", "islink", "access"})
+CODE_EXISTS_METHODS = frozenset({"exists", "is_file", "is_dir", "is_symlink"})
+# Python calls by the mode they give the path in their first argument. The destination is judged
+# apart: `shutil.copy(src, dst)` reads src and writes dst, and a move or rename changes both.
+PY_READ_METHODS = frozenset({"read_text", "read_bytes"})
+PY_WRITE_CALLS = frozenset({"remove", "unlink", "rmdir", "rmtree", "mkdir", "makedirs", "removedirs",
+                            "truncate", "chmod", "chown", "utime", "touch", "write_text", "write_bytes",
+                            "symlink_to", "hardlink_to", "rename", "replace", "move"})
+PY_COPY_CALLS = frozenset({"copy", "copy2", "copyfile", "copytree", "copymode", "copystat"})
+PY_MOVE_CALLS = frozenset({"rename", "replace", "move"})
+# A call whose argument is only printed, written as content, or compared: the string is text, as an
+# `echo` argument is in the shell. `write(x)` takes x as the CONTENT, never the path.
+PY_TEXT_CALLS = frozenset({"print", "pprint", "write", "writelines", "write_text", "write_bytes",
+                           "dumps", "dump"})
+PY_TEXT_COMPARES = (ast.In, ast.NotIn, ast.Eq, ast.NotEq)
+# Nodes that carry a string on to the call around them: a list, a dict, an f-string, a sum.
+PY_CARRIERS = (ast.Dict, ast.List, ast.Tuple, ast.Set, ast.JoinedStr, ast.FormattedValue, ast.BinOp,
+               ast.Starred, ast.keyword, ast.IfExp, ast.BoolOp)
+# Node calls (fs, fs.promises) by the mode they give the path at an argument index.
+JS_READ_CALLS = frozenset({"readFileSync", "readFile", "createReadStream", "readdirSync", "readdir"})
+JS_WRITE_CALLS = frozenset({"writeFileSync", "writeFile", "appendFileSync", "appendFile",
+                            "createWriteStream", "unlinkSync", "unlink", "rmSync", "rm", "rmdirSync",
+                            "rmdir", "mkdirSync", "mkdir", "truncateSync", "truncate", "chmodSync",
+                            "chmod", "utimesSync", "utimes"})
+JS_COPY_CALLS = frozenset({"copyFileSync", "copyFile", "cpSync", "cp"})   # read, then write
+JS_MOVE_CALLS = frozenset({"renameSync", "rename"})                       # write, then write
+JS_CONTENT_CALLS = frozenset({"writeFileSync", "writeFile", "appendFileSync", "appendFile"})
+JS_EXISTS_CALLS = frozenset({"exists", "existsSync", "access", "accessSync"})
+JS_JOIN_CALLS = frozenset({"join", "resolve", "normalize"})
+JS_TEXT_CALLS = frozenset({"write", "writeln", "stringify", "includes", "indexOf"})
+JS_CONSOLE_CALLS = frozenset({"log", "error", "warn", "info", "debug"})
+JS_CALLEE = re.compile(r"([\w$.?]+)\s*$")
+JS_COMPARE_BEFORE = re.compile(r"[!=]==?\s*$")
+JS_COMPARE_AFTER = re.compile(r"\s*[!=]==?")
+JS_EVAL_FLAGS = ("-e", "-p", "--eval", "--print")
+# After one of these a `/` opens a regex, and after anything else it divides.
+JS_REGEX_AFTER = frozenset("(,=:[!&|?{};+-*%<>~^}")
+JS_REGEX_WORDS = frozenset({"return", "typeof", "case", "in", "of", "delete", "void", "throw", "new",
+                            "else", "do", "yield", "await"})
+JS_DEPTH = 64
+# `uv run`, `poetry run` and `pipenv run` start the command after them. The reader unwraps them
+# itself: `wrapped_commands` and `resolve_command` are read by other rules, which test `uv run` as
+# a runner with no skip rule, so a change there would move their verdicts.
+CODE_RUNNERS = frozenset({"uv", "poetry", "pipenv"})
+CODE_RUNNER_VALUE_FLAGS = frozenset({"--with", "--python", "-p", "--project", "--directory", "--extra",
+                                     "--group", "--package", "--with-requirements", "--env-file",
+                                     "--index", "--from", "--python-version"})
+
+
+def _call_name(call) -> str:
+    func = call.func
+    return func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+
+
+def _stdlib_call(call) -> bool:
+    """True for a bare call (`open(p)`) and a call on os, shutil, io or a `.path` (`os.path.exists`).
+    A method of some other object (`names.remove(x)`, `text.replace(a, b)`) is no file call."""
+    func = call.func
+    if isinstance(func, ast.Name):
+        return True
+    owner = func.value if isinstance(func, ast.Attribute) else None
+    return (isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "path")) or (
+        isinstance(owner, ast.Attribute) and owner.attr == "path")
+
+
+def _open_mode(call, mode_at: int) -> str:
+    """"write" for an `open` call whose mode string holds w, a, x or +, "read" when it holds none
+    (the default too), "unknown" when the mode is not a string literal."""
+    mode = call.args[mode_at] if len(call.args) > mode_at else next(
+        (k.value for k in call.keywords if k.arg == "mode"), None)
+    if mode is None:
+        return "read"
+    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
+        return "write" if set(mode.value) & set("wax+") else "read"
+    return "unknown"
+
+
+def _path_method_mode(call, parents) -> str:
+    """The mode a `Path(...)` call gives its path, from the method called on it."""
+    method = parents.get(call)
+    outer = parents.get(method)
+    if not (isinstance(method, ast.Attribute) and isinstance(outer, ast.Call) and outer.func is method):
+        return "unknown"
+    if method.attr in CODE_EXISTS_METHODS:
+        return "exists"
+    if method.attr in PY_READ_METHODS:
+        return "read"
+    if method.attr == "open":
+        return _open_mode(outer, 0)
+    return "write" if method.attr in PY_WRITE_CALLS else "unknown"
+
+
+def _python_mode(node, parents) -> str:
+    """The mode a python string constant gives its path, from the call that holds it. A join
+    (`os.path.join(a, p)`) passes the mode of its result on; a list, a dict, an f-string or a sum
+    carries the string to the call around it, where only a text call reads it (`direct` is then off)."""
+    value, direct = node, True
+    while True:
+        parent = parents.get(value)
+        if isinstance(parent, ast.Compare):
+            return "text" if all(isinstance(op, PY_TEXT_COMPARES) for op in parent.ops) else "unknown"
+        if (direct and isinstance(parent, ast.Call) and _call_name(parent) == "join"
+                and _stdlib_call(parent) and value in parent.args):
+            value = parent
+        elif isinstance(parent, PY_CARRIERS):
+            value, direct = parent, False
+        else:
+            break
+    call = parent
+    if not isinstance(call, ast.Call):
+        return "unknown"
+    name = _call_name(call)
+    if direct and name.endswith("Path") and value in call.args:
+        return _path_method_mode(call, parents)
+    if name in PY_TEXT_CALLS:
+        return "text"
+    position = call.args.index(value) if direct and value in call.args else -1
+    if position < 0 or position > 1 or not _stdlib_call(call):
+        return "unknown"
+    if name in CODE_EXISTS_CALLS:
+        return "exists" if position == 0 else "unknown"
+    if name == "open":
+        return _open_mode(call, 1) if position == 0 else "unknown"
+    if name in PY_COPY_CALLS:
+        return "read" if position == 0 else "write"
+    if name in PY_MOVE_CALLS:
+        return "write"
+    return "write" if position == 0 and name in PY_WRITE_CALLS else "unknown"
+
+
+def _python_paths(code: str):
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return [(text, "unknown") for text in _python_token_strings(code)]
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    return [(node.value, _python_mode(node, parents)) for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+
+
+def _python_token_strings(code: str):
+    found = []
+    middle = getattr(tokenize, "FSTRING_MIDDLE", None)
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(code).readline):
+            if token.type == tokenize.STRING:
+                text = token.string.lstrip("rRbBuUfF")
+                for quote in ('"""', "'''", '"', "'"):
+                    if text.startswith(quote) and text.endswith(quote) and len(text) >= 2 * len(quote):
+                        text = text[len(quote):-len(quote)]
+                        break
+                found.append(text)
+            elif middle is not None and token.type == middle:
+                found.append(token.string)
+    except (tokenize.TokenError, SyntaxError):
+        pass  # what was read before the break still counts
+    return found
+
+
+def _js_file_mode(name: str, index: int) -> str:
+    if name in JS_EXISTS_CALLS:
+        return "exists" if index == 0 else "unknown"
+    if name in JS_CONTENT_CALLS and index >= 1:
+        return "text"   # the content, never the path
+    if index == 0:
+        return "read" if name in JS_READ_CALLS or name in JS_COPY_CALLS else (
+            "write" if name in JS_WRITE_CALLS or name in JS_MOVE_CALLS else "unknown")
+    if index == 1 and (name in JS_COPY_CALLS or name in JS_MOVE_CALLS):
+        return "write"
+    return "unknown"
+
+
+def _js_mode(frames, code: str, start: int, end: int, whole: bool) -> str:
+    """The mode a node string at code[start:end] gives its path. `frames` are the open brackets,
+    `[kind, callee, argument index]`. `whole` is true when the string is a whole argument (a
+    quote or comma before it, a comma or paren after it): only then does a file call read it as its
+    path. A text call (console.log, JSON.stringify, a `write` content) reads it at any depth. A
+    join passes the mode of its result on to the call around it."""
+    if JS_COMPARE_BEFORE.search(code[max(0, start - 8):start]) or JS_COMPARE_AFTER.match(code, end):
+        return "text"
+    direct = whole
+    for kind, callee, index in reversed(frames):
+        if kind != "(":
+            direct = False
+            continue
+        base = callee.rsplit(".", 1)[-1]
+        if base in JS_TEXT_CALLS or (base in JS_CONSOLE_CALLS and callee.startswith("console.")):
+            return "text"
+        if base in JS_JOIN_CALLS:
+            continue
+        return _js_file_mode(base, index) if direct else "unknown"
+    return "unknown"
+
+
+def _js_paths(code: str):
+    found, stack, frames, prev = [], [], [], ""
+    i, n = 0, len(code)
+
+    def whole_arg(start: int, end: int) -> bool:
+        before = code[:start].rstrip()[-1:]
+        after = code[end:].lstrip()[:1]
+        return bool(frames) and frames[-1][0] == "(" and before in ("(", ",") and after in (",", ")")
+
+    def close(kind: str):
+        while frames and frames[-1][0] != kind and frames[-1][0] != "{":
+            frames.pop()   # an unbalanced bracket never reaches past a brace
+        if frames and frames[-1][0] == kind:
+            frames.pop()
+
+    while i < n:
+        if len(stack) > JS_DEPTH or len(frames) > JS_DEPTH:
+            raise ValueError("nest")
+        if stack and stack[-1] == "`":
+            first = i > 0 and code[i - 1] == "`"
+            j, part = i, []
+            while j < n and code[j] != "`" and not code.startswith("${", j):
+                step = 2 if code[j] == "\\" else 1
+                part.append(code[j:j + step])
+                j += step
+            closed = j < n and code[j] == "`"
+            whole = first and closed and whole_arg(i - 1, j + 1)
+            found.append(("".join(part), _js_mode(frames, code, i - 1 if first else i, j + closed, whole)))
+            if closed:
+                stack.pop()
+                prev, i = "a", j + 1
+            elif j < n:
+                stack.append("${")
+                frames.append(["{", "", 0])
+                prev, i = "{", j + 2
+            else:
+                i = n
+            continue
+        char = code[i]
+        if code.startswith("//", i):
+            end = code.find("\n", i)
+            i = n if end < 0 else end
+        elif code.startswith("/*", i):
+            end = code.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        elif char in "'\"":
+            j = i + 1
+            while j < n and code[j] != char and code[j] != "\n":
+                j += 2 if code[j] == "\\" else 1
+            found.append((code[i + 1:j], _js_mode(frames, code, i, j + 1, whole_arg(i, j + 1))))
+            prev, i = "a", j + 1
+        elif char == "`":
+            stack.append("`")
+            i += 1
+        elif char == "/" and (not prev or prev in JS_REGEX_AFTER or prev == "kw"):
+            j, in_class = i + 1, False
+            while j < n and code[j] != "\n" and (in_class or code[j] != "/"):
+                if code[j] == "[":
+                    in_class = True
+                elif code[j] == "]":
+                    in_class = False
+                j += 2 if code[j] == "\\" else 1
+            prev, i = "a", j + 1
+        elif char in "{}":
+            if char == "{":
+                stack.append("{")
+                frames.append(["{", "", 0])
+            else:
+                if stack:
+                    stack.pop()
+                close("{")
+            prev, i = char, i + 1
+        elif char in "([":
+            callee = JS_CALLEE.search(code[max(0, i - 120):i]) if char == "(" else None
+            frames.append([char, callee.group(1) if callee else "", 0])
+            prev, i = char, i + 1
+        elif char in ")]":
+            close("(" if char == ")" else "[")
+            prev, i = char, i + 1
+        elif char == ",":
+            if frames and frames[-1][0] == "(":
+                frames[-1][2] += 1
+            prev, i = char, i + 1
+        elif char.isalnum() or char in "_$":
+            j = i
+            while j < n and (code[j].isalnum() or code[j] in "_$"):
+                j += 1
+            prev, i = ("kw" if code[i:j] in JS_REGEX_WORDS else "a"), j
+        else:
+            if not char.isspace():
+                prev = char
+            i += 1
+    return found
+
+
+def code_paths(code: str, language: str):
+    """[(string literal, mode)] for each string literal of the code that could be a path.
+
+    `language` is "python" or "node". Python is read with `ast` (the literal parts of an f-string
+    too) and, when the code does not parse, with `tokenize`; node is read by one left-to-right
+    scan that skips comments and regex literals and reads each template literal's literal parts
+    and the code in its `${...}`. A comment is never read. The mode comes from the call the
+    literal is an argument of: "read" (`open(p)`, `Path(p).read_text()`, `shutil.copy(p, d)`,
+    `fs.readFileSync(p)`), "write" (`open(p, 'w')`, the destination of a copy, a move, a rename,
+    `fs.writeFileSync(p)`), "exists" (`os.path.exists(p)`, `Path(p).is_file()`, `fs.existsSync(p)`,
+    also through `os.path.join` and `Path(a, b)`), "text" (printed, written as content, dumped as
+    JSON, or compared: `print(s)`, `f.write(s)`, `console.log(s)`, `s in names`), and "unknown" for
+    any other literal: a name handed to some other call, bound to a variable, or built from parts.
+    A caller that refuses a path must refuse "unknown" as well as the modes it names. Raises
+    ValueError for a nest deeper than JS_DEPTH."""
+    return _python_paths(code) if language == "python" else _js_paths(code)
+
+
+def code_language(word: str) -> str:
+    """"python" for `python`, `python3.12` and `py`, "node" for `node`, `nodejs` and `bun`, else ''."""
+    name = re.sub(r"\.exe$", "", word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1])
+    if re.fullmatch(r"python[\d.]*|py", name):
+        return "python"
+    return "node" if name in ("node", "nodejs", "bun") else ""
+
+
+def _interpreter_calls(tokens):
+    """[(language, the tokens after the interpreter word)] for each python, node, bun or deno
+    command of one segment, looking through `uv run`, `poetry run` and `pipenv run` and their
+    flags. "node" is also the language of `deno eval`."""
+    found = []
+    for at in command_indexes(tokens):
+        rest = tokens[at:]
+        while len(rest) > 1 and basename(rest[0]) in CODE_RUNNERS and rest[1] == "run":
+            rest = rest[2:]
+            while rest and rest[0].startswith("-"):
+                rest = rest[2:] if rest[0] in CODE_RUNNER_VALUE_FLAGS else rest[1:]
+            if rest and (at2 := resolve_command(rest)) is not None:
+                rest = rest[at2:]
+        if not rest:
+            continue
+        language = code_language(rest[0])
+        if language:
+            found.append((language, rest[1:]))
+        elif re.sub(r"\.exe$", "", rest[0].rsplit("/", 1)[-1]) == "deno" and rest[1:2] == ["eval"]:
+            found.append(("deno", rest[1:]))
+    return found
+
+
+def inline_code(tokens):
+    """[(code, language)] for the code one segment hands to python or node by flag: `python -c`,
+    `node -e` or `-p`, `bun --eval`, and `deno eval`, also behind `uv run`, `poetry run` and
+    `pipenv run`. `tokens` are the segment's `segment_tokens`, so the quotes and wrappers around
+    the code are already read. A segment with no such code gives []. The heredoc form is
+    `heredoc_code`."""
+    found = []
+    for language, rest in _interpreter_calls(tokens):
+        if language == "python":
+            for k, token in enumerate(rest[:-1]):
+                if re.fullmatch(r"-[A-Za-z]*c", token):
+                    found.append((rest[k + 1], "python"))
+                    break
+        elif language == "node":
+            for k, token in enumerate(rest):
+                if token.startswith(("--eval=", "--print=")):
+                    found.append((token.partition("=")[2], "node"))
+                elif (token in JS_EVAL_FLAGS or re.fullmatch(r"-[pe]{2}", token)) and k + 1 < len(rest):
+                    found.append((rest[k + 1], "node"))
+        else:
+            found.extend((code, "node") for code in [t for t in rest[1:] if not t.startswith("-")][:1])
+    return found
+
+
+def heredoc_code(cmd: str):
+    """[(quote, body, language)] for each heredoc of the command that holds python or node code.
+    `quote` is the delimiter's quote character, '' when unquoted. Two shapes hold code. The header
+    runs the interpreter (INTERPRETER_HEREDOC and not SHELL_HEREDOC, the test
+    `_plain_escaped_quotes` uses; also behind `uv run` and its kin), and the language is that of the
+    header's command word. Or the header writes a file (`cat > dbg.py <<'PY'`) that another
+    segment of the same command runs with python or node (`_runs_written_file`'s reading of the
+    written name), and the language is that runner's."""
+    if "<<" not in cmd:
+        return []
+    found = []
+    bodies = _split_heredocs(cmd)[1]
+    rest = None
+    for quote, body, header in bodies:
+        header = _without_message_values(header)
+        if not body:
+            continue
+        if INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
+            languages = [language for piece in split_segments(header)
+                         for language, _ in _interpreter_calls(segment_tokens(piece) or [])]
+        else:
+            written = {word for word in _plain_words(_WRITE_TARGET.findall(header))}
+            if not written:
+                continue
+            if rest is None:
+                rest = _without_message_values(_drop_heredoc_bodies(cmd))
+            languages = [language for piece in split_segments(rest)
+                         for language, args in _interpreter_calls(segment_tokens(piece) or [])
+                         if written & set(_plain_words(args))]
+        found.extend((quote, body, "python" if language == "python" else "node")
+                     for language in dict.fromkeys(languages))
     return found
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

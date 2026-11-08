@@ -39,6 +39,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -8284,6 +8285,189 @@ sh("env: a glob that could name a covered backup, cat .env.example*", "cat " + E
 # The envrc candidate in the glob check is the only thing that holds this: the sample names hold no name.
 sh("env: a glob that could name an envrc file, cat .*rc", "cat .*rc", "deny", "env-file", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Shell form": the script a shell gets with `-c`, or an `eval`, is a
+# command of its own, and the guard judges it as one, recursively, up to ENV_MAX_DEPTH. Every name below
+# starts "env: shell -c", so MUTATE_ONLY="env: shell -c" runs this block alone.
+import guard_env  # noqa: E402  ENV_MAX_DEPTH, the depth the guard reads a nest to
+
+
+def nest_bash(script, levels):
+    """`script` in `levels` layers of `bash -c`. Each layer quotes the one under it, so the text grows fast."""
+    for _ in range(levels):
+        script = "bash -c " + shlex.quote(script)
+    return script
+
+
+for shape, command in (
+    ("bash -c, a double-quoted cat", 'bash -c "cat ' + ENV + '"'),
+    ("sh -c, a single-quoted cat of an envrc", "sh -c 'cat " + ENVRC + "'"),
+    ("zsh -c, a double-quoted cat", 'zsh -c "cat ' + ENV + '"'),
+    ("dash -c, a single-quoted cat", "dash -c 'cat " + ENV + "'"),
+    ("bash -lc, a login flag bundled with -c", "bash -lc 'cat " + ENV + "'"),
+    ("bash -o pipefail -c, an option before -c", "bash -o pipefail -c 'cat " + ENV + "'"),
+    ("bash -c, a redirect onto the file", 'bash -c "echo KEY=1 > ' + ENV + '"'),
+    ("bash -c, git add of the file", 'bash -c "git add ' + ENV + '"'),
+    ("sh -c inside sh -c, two levels", 'sh -c "sh -c \'cat ' + ENV + '\'"'),
+    ("sh -c inside docker exec", "docker exec c sh -c 'cat " + ENV + "'"),
+    ("eval of a double-quoted cat", 'eval "cat ' + ENV + '"'),
+):
+    sh("env: shell -c: deny, " + shape, command, "deny", "env-file", cwd=NOGIT)
+
+# The depth cap: a nest past ENV_MAX_DEPTH is refused though its innermost script is harmless. `eval`
+# adds a level with no quoting, so the text stays short. A pure bash -c nest that deep cannot be
+# written, since each layer doubles the quote marks under it. `eval` runs through the same reader.
+sh("env: shell -c: deny, a nest past ENV_MAX_DEPTH with a harmless script",
+   nest_bash("eval " * (guard_env.ENV_MAX_DEPTH + 2) + "true", 3), "deny", "env-file", cwd=NOGIT)
+sh("env: shell -c: allow, a nest under ENV_MAX_DEPTH with a harmless script",
+   nest_bash("eval " * 10 + "true", 3), "allow", cwd=NOGIT)
+sh("env: shell -c: allow, a three-level bash -c nest with a harmless script",
+   nest_bash("true", 3), "allow", cwd=NOGIT)
+
+for shape, command in (
+    ("bash -c, ls of the file", 'bash -c "ls ' + ENV + '"'),
+    ("bash -c, echo of the name", 'bash -c "echo ' + ENV + '"'),
+    ("bash -c, an existence test of the envrc", 'bash -c "[ -f ' + ENVRC + ' ] && echo yes"'),
+    ("bash -c, a runner loading the file", 'bash -c "node --env-file=' + ENV + ' x.js"'),
+    ("git commit message quoting the form", 'git commit -m "fix: sh -c \'cat ' + ENV + '\' is now refused"'),
+    ("echo of text quoting the form", 'echo "bash -c \'cat ' + ENV + '\'"'),
+):
+    sh("env: shell -c: allow, " + shape, command, "allow", cwd=NOGIT)
+
+# A quoted interpreter heredoc whose string holds a backtick around a shell form is a false alarm today:
+# the backtick is body text, and bash runs no substitution there. An unquoted heredoc does run its
+# backticks. Names start "env: interpreter heredoc", so MUTATE_ONLY="env: interpreter heredoc" runs
+# this block alone.
+sh("env: interpreter heredoc: allow, a python body with a backtick around a bash -c string",
+   'test -e a.json && echo EXISTS || python3 - "$T" <<\'PY\'\n'
+   'd={"why":"On main, `bash -c \\"cat ' + ENV + '\\"` and `sh -c \'cat ' + ENVRC + '\'` get no refusal."}\n'
+   'json.dump(d, open("o.json","w"))\n'
+   'PY', "allow", cwd=NOGIT)
+sh("env: interpreter heredoc: allow, a js template literal around a bash -c string",
+   'node <<\'EOF\'\nconst s = `run bash -c "cat ' + ENV + '"`;\nEOF', "allow", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, an unquoted heredoc whose backtick runs the read",
+   'python3 <<PY\nx = "`cat ' + ENV + '`"\nPY', "deny", "env-file", cwd=NOGIT)
+
+# A quoted body is text only while nothing runs it. A body written to a file that a shell then runs is
+# code, so the guard judges the file's text. The scanner cases below hold quotes, backticks and comment
+# openers inside quoted bodies, which are text, and must not be misread (building-scanner-respects-strings).
+sh("env: interpreter heredoc: deny, a quoted python body written to a file that sh runs",
+   'python3 <<\'PY\' > run.sh\nprint("`cat ' + ENV + '`")\nPY\nsh run.sh', "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: allow, a quoted python body with a lone quote and a backtick in a string",
+   'python3 <<\'PY\'\nx = "don\'t run `bash -c \'cat ' + ENV + '\'`"\nPY', "allow", cwd=NOGIT)
+sh("env: interpreter heredoc: allow, a quoted node body with a template literal across two lines",
+   'node <<\'EOF\'\nconst s = `run\nbash -c "cat ' + ENV + '"`;\nEOF', "allow", cwd=NOGIT)
+sh("env: interpreter heredoc: allow, a quoted python body with a comment opener in a string",
+   'python3 <<\'PY\'\nx = "/* not a comment"\ny = "# nor this, and don\'t"\nPY', "allow", cwd=NOGIT)
+
+# A comment line in a quoted python body does not end the body: each line after it is still code, and
+# each case below names the file by its quoted constant in one of those lines.
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a copy",
+   "python3 <<'PY'\n# note\n" + 'shutil.copy("a", "' + ENV + '")' + "\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a rename",
+   "python3 <<'PY'\n# note\n" + 'os.rename("tmp", "' + ENV + '")' + "\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a name bound to it, then a read",
+   "python3 <<'PY'\n# note\n" + 'ENV_FILE = "' + ENV + '"' + "\nprint(open(ENV_FILE).read())\nPY",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a subprocess call",
+   "python3 <<'PY'\n# note\n" + 'subprocess.run(["cat", "' + ENV + '"])' + "\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a list element",
+   "python3 <<'PY'\n# note\n" + 'paths = [".gitignore", "' + ENV + '"]' + "\nPY", "deny", "env-file", cwd=NOGIT)
+
+# Decision env-file-stays-unread, "Interpreter code": code that a runner takes with `-c`, `-e`, `-p` or
+# `--eval`, and the body of a quoted python or node heredoc, reads the file as the interpreter does, so
+# the guard judges it as it judges `cat` of the file. Names start "env: interpreter code", so
+# MUTATE_ONLY="env: interpreter code" runs this block alone.
+sh("env: interpreter code: deny, python3 -c, an open of the file",
+   "python3 -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, python -c, a pathlib read of the file",
+   "python -c 'import pathlib; print(pathlib.Path(\"" + ENV + "\").read_text())'", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, a dotenv loader of the file",
+   "python3 -c \"from dotenv import dotenv_values; print(dotenv_values('" + ENV + "'))\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, an open of an envrc in a folder",
+   "python3 -c \"print(open('./config/" + ENVRC + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, node -e, a readFileSync of the file",
+   "node -e \"console.log(require('fs').readFileSync('" + ENV + "','utf8'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, node -p, a readFileSync of the double-quoted file",
+   "node -p \"require('fs').readFileSync(\\\"" + ENV + "\\\", 'utf8')\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, node --eval, a template literal holding the file",
+   "node --eval 'fs.readFileSync(`" + ENV + "`)'", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a quoted python heredoc that opens the file",
+   "python3 <<'PY'\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a quoted python heredoc with a comment line, then an open of the file",
+   "python3 <<'PY'\n# note\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a quoted node heredoc that reads the file in a template literal",
+   "node <<'EOF'\nconst fs = require('fs');\nconsole.log(fs.readFileSync(`" + ENV + "`, 'utf8'));\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a quoted node heredoc whose multi-line template literal holds the file",
+   "node <<'EOF'\nconst p = `\n" + ENV + "\n`.trim();\nconsole.log(require('fs').readFileSync(p, 'utf8'));\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, bash -c nesting a python -c open of the file",
+   'bash -c "python3 -c \\"print(open(\'' + ENV + '\').read())\\""', "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code: allow, python3 -c, a print of prose that names the file",
+   "python3 -c \"print('run cat " + ENV + " first')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, a quoted python heredoc that writes JSON quoting bash -c of cat",
+   "python3 <<'PY'\nimport json\njson.dump({\"why\": \"bash -c \\\"cat " + ENV + "\\\" leaks\"}, open(\"o.json\", \"w\"))\nPY",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an open of the example file",
+   "python3 -c \"print(open('" + ENV + ".example').read())\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, node -e, a comment opener inside a string",
+   "node -e \"const u = 'http://x/*'; console.log(u)\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a comment opener inside a string",
+   "python3 -c 'x = \"# not a comment\"; print(x)'", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a lone quote in printed text",
+   "python3 -c \"print(\\\"don't\\\")\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, a quoted python heredoc with the file named in a comment only",
+   "python3 <<'PY'\n# never open " + ENV + "\nprint(1)\nPY", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, a quoted node heredoc with the file named in a comment only",
+   "node <<'EOF'\n// read " + ENV + "? no\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an existence test of the file",
+   "python3 -c \"import os; print(os.path.exists('" + ENV + "'))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a pathlib existence test of the file",
+   "python3 -c \"from pathlib import Path; print(Path('" + ENV + "').exists())\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, node --env-file, a runner handed the file and a script",
+   "node --env-file=" + ENV + " app.js", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3, a runner of a script file",
+   "python3 app.py", "allow", cwd=NOGIT)
+
+sh("env: interpreter code: deny, uv run python -c, an open of the file",
+   "uv run python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, uv run python heredoc, an open of the file",
+   "uv run python <<'PY'\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, poetry run python -c, an open of the file",
+   "poetry run python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a python heredoc written to a file that python then runs",
+   "cat > dbg.py <<'PY'\nprint(open(\"" + ENV + "\").read())\nPY\npython3 dbg.py", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a node heredoc written to a file that node then runs",
+   "cat > dbg.js <<'JS'\nconsole.log(require('fs').readFileSync('" + ENV + "', 'utf8'))\nJS\nnode dbg.js",
+   "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code: allow, python3 -c, a print of the name as a string",
+   "python3 -c \"print('" + ENV + "')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a json dump with the name as a value",
+   "python3 -c \"import json; print(json.dumps({'env_file': '" + ENV + "'}))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a write of the name to the gitignore",
+   "python3 -c \"open('.gitignore','a').write('" + ENV + "\\n')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a membership test against a listing",
+   "python3 -c \"import os; print('" + ENV + "' in os.listdir('.'))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, node -e, a console.log of the name",
+   "node -e \"console.log('" + ENV + "')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an existence test through os.path.join",
+   "python3 -c \"import os; print(os.path.exists(os.path.join('.', '" + ENV + "')))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an existence test through a two-part Path",
+   "python3 -c \"from pathlib import Path; print(Path('.', '" + ENV + "').exists())\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, a quoted node heredoc with an existence test through path.join",
+   "node <<'EOF'\nconst fs=require('fs'), path=require('path');\n"
+   "console.log(fs.existsSync(path.join(__dirname, '" + ENV + "')));\nEOF", "allow", cwd=NOGIT)
+
+sh("env: interpreter code: deny, python3 -c, a getsize of the file",
+   "python3 -c \"import os; print(os.path.getsize('" + ENV + "'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, a subprocess cat of the file",
+   "python3 -c \"import subprocess; subprocess.run(['cat', '" + ENV + "'])\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, a write to the file",
+   "python3 -c \"open('" + ENV + "','w').write('X=1')\"", "deny", "env-file", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
@@ -11527,9 +11711,9 @@ cmk_allow("a fix script, add -A, commit and push, with no triplet in the tree be
 # A cd is a safe earlier segment: the commit is judged in the repository it names. These run from a
 # directory that is no repository, so only the cd leads to the repository.
 cmk_allow("a cd into a repo with a clean change, then add -A, commit and push",
-          "cd " + CMK_CL + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+          "cd " + slash(CMK_CL) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
 cmk_refuse("a cd into a repo with a triplet in a tracked file, then add -A, commit and push",
-           "cd " + CMK_CLT + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+           "cd " + slash(CMK_CLT) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
 
 # An earlier commit is a safe segment too, so each commit is judged and the push sees both.
 cmk_allow("two clean commits, each after an add, then a push",

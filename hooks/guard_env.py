@@ -5,11 +5,14 @@ Other files reach these names through `guard`.
 """
 import fnmatch
 import re
+import shlex
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
-    is_powershell, norm, split_segments,
+    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _drop_heredoc_bodies, _runs_written_file,
+    _split_heredocs, _without_message_values,
+    JS_DEPTH, code_paths, heredoc_code, inline_code,
+    inline_script, inner_commands, is_powershell, norm, segment_tokens, split_segments,
 )
 
 
@@ -136,6 +139,9 @@ ENV_RUNNER_REASON = (
 )
 ENV_CONTENTS_REASON = (
     "this command would read, write or commit the contents of an environment file"
+)
+ENV_CODE_REASON = (
+    "interpreter code would read, write or commit the contents of an environment file"
 )
 ENV_TOOL_REASON = (
     "an environment file holds the user's own secrets, and this tool would put the contents "
@@ -340,17 +346,93 @@ _ESCAPED_QUOTE = re.compile(r"""\\\\|\\['"]""")
 def _plain_escaped_quotes(cmd: str) -> str:
     """Write a backslash-escaped quote in the body of a python, node, perl or ruby heredoc as a plain
     character. Those languages read the backslash as an escape, but the word reader below does not:
-    a `\\'` would flip its quote state, and the prose after it would read as bare shell words."""
-    if "<<" not in cmd or "\\" not in cmd:
+    a `\\'` would flip its quote state, and the prose after it would read as bare shell words.
+
+    The body of a heredoc with a QUOTED delimiter is text for bash, as long as nothing runs the file
+    it is written to (`_runs_written_file`, the test `strip_heredoc_bodies` uses). Its backticks are
+    plain characters. Each line keeps its newline, so a `#` comment ends at it, and starts with the
+    neutral word `_`, so no line is a command that hands a script on (`bash -c`, `eval`); every word
+    on it is still judged. An unquoted body keeps its backticks and its lines."""
+    if "<<" not in cmd:
         return cmd
-    for _, body, header in _split_heredocs(cmd)[1]:
+    bodies = _split_heredocs(cmd)[1]
+    runs_file = None
+    for quote, body, header in bodies:
         header = _without_message_values(header)
         if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
-            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub(lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body), 1)
+            plain = _ESCAPED_QUOTE.sub(
+                lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body)
+            if quote and runs_file is None:
+                runs_file = _runs_written_file(
+                    _without_message_values(_drop_heredoc_bodies(cmd)), [h for _, _, h in bodies])
+            if quote and not runs_file:
+                plain = "\n".join("_ " + line if line.strip() else line
+                                  for line in plain.replace("`", "_").split("\n"))
+            cmd = cmd.replace(body, plain, 1)
     return cmd
 
 
-def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
+# ------------------------------------------------------------------ interpreter code
+#
+# Decision env-file-stays-unread, "Interpreter code": the code `python -c`, `node -e` and a python
+# or node heredoc run opens a file as the interpreter does, so it is judged by its STRING LITERALS
+# (guard_core `code_paths` reads them), each read as one path with `env_reference`. Prose that holds
+# the name among other words, an example file and a comment all stay out. A literal that only asks
+# whether the file exists stays out too, as `test -f` does in the shell form, and so does a literal
+# that is only text: printed, written as content, dumped as JSON or compared, as `echo` is in the
+# shell form. Every other mode, "unknown" too, is refused.
+
+
+CODE_WORDS = re.compile(r"py|node|bun|deno").search
+
+
+def _literal_refusal(code: str, language: str):
+    try:
+        paths = code_paths(code, language)
+    except ValueError:
+        return ENV_DEPTH_REASON, "%s code nested past %d levels" % (language, JS_DEPTH)
+    for literal, mode in paths:
+        named = env_reference(literal.strip())  # a template literal may carry its line breaks
+        if named and mode not in ("exists", "text"):
+            return ENV_CODE_REASON, "%s code holds the path '%s' in a string" % (language, named)
+    return "", ""
+
+
+def _code_refusal(text: str):
+    """(reason, log) for the `-c` or `-e` code of one text that names an environment file."""
+    if not CODE_WORDS(text):
+        return "", ""   # no interpreter word: nothing to tokenize
+    for piece in split_segments(text):
+        for segment in _env_parts(piece):
+            tokens = segment_tokens(segment)
+            for code, language in inline_code(tokens) if tokens else ():
+                refusal = _literal_refusal(code, language)
+                if refusal[0]:
+                    return refusal
+    return "", ""
+
+
+def _heredoc_code(cmd: str):
+    """(reason, log, cmd) for the python and node heredoc bodies of a command. The reason is set when
+    the code of a body names an environment file. Else each QUOTED body judged clean is blanked in
+    the returned command: its code was read as code, and read again as shell words, its comments
+    would be judged as commands."""
+    bodies = heredoc_code(cmd)
+    clean = []
+    for quote, body, language in bodies:
+        refusal = _literal_refusal(body, language)
+        if refusal[0]:
+            return refusal + (cmd,)
+        if quote:
+            clean.append(body)
+    if clean and not _runs_written_file(
+            _without_message_values(_drop_heredoc_bodies(cmd)), [h for _, _, h in _split_heredocs(cmd)[1]]):
+        for body in clean:   # a body written to a file that is then run stays in view as text
+            cmd = cmd.replace(body, ":", 1)
+    return "", "", cmd
+
+
+def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, depth: int = 0):
     """Return (printed reason, logged text) when the command touches an environment file.
 
     Both are the empty string when the command is clean.
@@ -367,9 +449,18 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     set for one that sits in a commit or pull request message: an `echo` or `printf` there only
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
+
+    The script a segment hands on (`inner_commands`: `sh -c`, `eval`, `env -S`, `docker exec`, ssh)
+    is judged as a command of its own by a call one `depth` deeper. Substitutions and scripts share
+    ENV_MAX_DEPTH.
     """
+    if depth > ENV_MAX_DEPTH:
+        return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
+    reason, logged, cmd = _heredoc_code(cmd)  # before the quotes are made plain: the code reads them
+    if reason:
+        return reason, logged
     cmd = _plain_escaped_quotes(cmd)
-    texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
+    texts, too_deep = _substitutions(cmd, depth, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
@@ -383,7 +474,32 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
         refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
+        refusal = _code_refusal(text)
+        if refusal[0]:
+            return refusal
+        for script in _handed_on_scripts(text):
+            refusal = env_refusal(script, depth=depth + 1)
+            if refusal[0]:
+                return refusal
     return _env_relay(texts)
+
+
+def _reads_as(word: str, script: str) -> bool:
+    """True when the shell word, quotes and all, is that one script."""
+    try:
+        return shlex.split(word) == [script]
+    except ValueError:
+        return False
+
+
+def _handed_on_scripts(text: str):
+    """The scripts each segment of one text hands on, read by the one shared reader."""
+    scripts = []
+    for piece in split_segments(text):
+        tokens = segment_tokens(piece)
+        if tokens:
+            scripts.extend(inner_commands(tokens))
+    return scripts
 
 
 def env_heredoc_refusal(raw: str):
@@ -648,8 +764,11 @@ def _env_flat(cmd: str, text_ok: bool = False):
                 patterns = set(patterns) | {
                     i for i, w in enumerate(words)
                     if i and words[i - 1] == "-v" and ENV_GLOB.search(w)}
+            # The script of `sh -c` is judged as a command of its own by `env_refusal`. Read here as
+            # a plain word, a script that starts with a loader flag would look like an assignment.
+            script = inline_script(segment_tokens(segment) or [])
             for index, word in enumerate(words):
-                if index in patterns:
+                if index in patterns or (script and _reads_as(word, script)):
                     continue
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
