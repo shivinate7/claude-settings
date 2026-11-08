@@ -480,5 +480,46 @@ def probe_writes_no_bytecode():
     return expect(not found, "the probe wrote bytecode folders: %s" % sorted(found)[:3])
 
 
+def runner_source(keep_temp_dir):
+    """A runner that loads the probe under test and calls its main. With keep_temp_dir, rmtree does nothing,
+    so the probe's temp dir cannot be removed and stays behind."""
+    return (
+        "import importlib.util, shutil, sys\n"
+        "spec = importlib.util.spec_from_file_location('probe_under_test', %r)\n"
+        "probe = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(probe)\n"
+        "if %r:\n"
+        "    shutil.rmtree = lambda path, ignore_errors=False: None\n"
+        "sys.exit(probe.main())\n" % (PROBE, keep_temp_dir)
+    )
+
+
+@case
+def temp_dir_removal_failure_is_reported():
+    """Probe: a temp dir the probe cannot remove gets a stderr note; the verdict and exit code do not change."""
+    control = os.path.join(new_dir(), "runner.py")
+    write(control, runner_source(False).encode("utf-8"))
+    stub = os.path.join(new_dir(), "runner.py")
+    write(stub, runner_source(True).encode("utf-8"))
+    # Scope first: with removal working, the run prints one verdict line, exits 0, and writes no note.
+    rc, out, err = probe(flags(HARMLESS), script=control)
+    bad = scope(rc, out, err)
+    if bad:
+        return ["control, removal works: " + bad[0]]
+    if "could not remove" in err:
+        return ["control, removal works: stderr has a note"]
+    tmp = new_dir()
+    rc2, out2, err2 = probe(flags(HARMLESS), script=stub, tmp=tmp)
+    bad = scope(rc2, out2, err2)
+    if bad:
+        return ["removal fails: " + bad[0]]
+    problems = expect(out2 == out, "verdict %r, want the control's %r" % (out2[:60], out[:60]))
+    problems += expect(rc2 == rc, "exit %d, want the control's %d" % (rc2, rc))
+    match = re.search(r"could not remove its temp dir (\S+)", err2)
+    if match is None:
+        return problems + ["stderr has no 'could not remove its temp dir' line"]
+    return problems + expect(os.path.isdir(match.group(1)), "the path the note names is not left behind")
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))
