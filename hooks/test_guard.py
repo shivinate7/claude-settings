@@ -19799,16 +19799,22 @@ add("brief-destructive-git: builder brief whose comma list of prohibitions names
     "`git clean -fd` is allowed", "allow", tool="Agent",
     prompt="Never run `git stash`, `git reset --hard`, or `git clean -fd`.", subagent_type="builder", model="sonnet")
 # A prose word that ends in x, then a comma, then a reset order. The comma-list join reads that x as a span placeholder
-# and drops the clause, so the negator before the comma reads as covering the order. Each is an order, so each is denied.
+# and drops the clause, so the negator before the comma covers the order. Each is an order, so each is denied.
 add("brief-destructive-git: builder brief, tests fail and you can't fix, then a reset order is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent",
-    prompt="If the tests fail and you can't fix, `git reset --hard` and restart.", subagent_type="builder", model="sonnet")
+    prompt="If the tests fail and you can't fix, `git reset --hard` and restart.",
+    subagent_type="builder", model="sonnet")
 add("brief-destructive-git: builder brief, no need to fix, then a reset order is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent",
     prompt="No need to fix, `git reset --hard` instead.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: builder brief, never leave the box, then a reset order is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent",
     prompt="Never leave the box, `git reset --hard` first.", subagent_type="builder", model="sonnet")
+# The x cases above fail on the no-case half only: the join reads a lower-case x. An upper-case X at the end of a
+# word is read the same way, so this case pins the word-start half that a case-only fix would leave open.
+add("brief-destructive-git: builder brief, a word ending in capital X (INBOX,) then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Never edit the INBOX, `git reset --hard` first.", subagent_type="builder", model="sonnet")
 # Control, green on the old code: a comma before an order is a clause break too, so the order is still denied. A
 # builder that drops the comma from the clause split would let this through.
 add("brief-destructive-git: control, a comma before the order keeps it an order and is denied", "deny",
