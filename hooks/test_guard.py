@@ -90,7 +90,7 @@ FAMILIES = {
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
     "stale-tree-commit": "a commit from a checkout whose branch moved under it: refused while the index holds the old copy of a file the move changed, passed after the acts that sync the index, and the git processes a commit or a read starts",
-    "commit-leaves-edit-unstaged": "a plain commit that leaves a tracked edit unstaged beside a staged path in the same folder: asked, including the quoted-text forms, the forms that name or stage their own paths pass, a failed read passes, and the git reads a commit starts",
+    "commit-leaves-edit-unstaged": "a plain commit that leaves a tracked edit unstaged beside a staged path in the same folder: asked alone, denied when chained (ask-alone), including the quoted-text forms; a partly staged path is in the commit, a rename counts for both folders, a split (a later add, then a commit) passes; the forms that name or stage their own paths pass, a failed read passes, and the git reads a commit starts",
     "hand-made-worktree": "a worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
@@ -4432,6 +4432,9 @@ UL_FULL_STAGED = ["docs/s%02d.md" % number for number in range(20)]
 UL_FULL_LEFT = ["docs/u%02d.md" % number for number in range(20)]
 UL_RMCHAIN = os.path.join(ULDIR, "rmchain")      # docs/a.md tracked and clean, docs/b.md edited and left unstaged
 UL_ADDCHAIN = os.path.join(ULDIR, "addchain")    # docs/a.md and docs/b.md both edited and left unstaged
+UL_MV = os.path.join(ULDIR, "mv")                # docs/a.md git mv'd to archive/a.md (staged), docs/b.md left unstaged
+UL_PARTIAL = os.path.join(ULDIR, "partial")      # docs/a.md with one hunk staged and a second left unstaged
+UL_PARTIAL_LINES = ["line %02d\n" % number for number in range(1, 31)]
 
 
 def _ul_must(ok, what):
@@ -4452,11 +4455,14 @@ def _ul_names(where, *args):
     return sorted(line for line in _ul_git(where, *args).splitlines() if line)
 
 
-def _ul_state(where, staged, unstaged, untracked=()):
+def _ul_state(where, staged, unstaged, untracked=(), no_renames=False):
     """Scope: STAGED is what differs from HEAD in the index, UNSTAGED is what differs from the index in the
-    work tree, and UNTRACKED is the untracked set. Each is read back with git and must match exactly."""
+    work tree, and UNTRACKED is the untracked set. Each is read back with git and must match exactly.
+    NO_RENAMES reads STAGED with rename detection off, the read the rule makes, so a rename lists both paths."""
+    staged_read = ("diff", "--cached", "--no-renames", "--name-only") if no_renames \
+        else ("diff", "--cached", "--name-only")
     reads = (
-        ("staged", staged, _ul_names(where, "diff", "--cached", "--name-only")),
+        ("staged", staged, _ul_names(where, *staged_read)),
         ("unstaged", unstaged, _ul_names(where, "diff", "--name-only")),
         ("untracked", untracked, _ul_names(where, "ls-files", "--others", "--exclude-standard")),
     )
@@ -4535,6 +4541,26 @@ def _build_uladdchain():
     _ul_state(UL_ADDCHAIN, [], ["docs/a.md", "docs/b.md"])
 
 
+def _build_ulmv():
+    make_repo(UL_MV, {"docs/a.md": "base\n", "docs/b.md": "base\n"})
+    os.makedirs(os.path.join(UL_MV, "archive"))
+    _ul_git(UL_MV, "mv", "docs/a.md", "archive/a.md")
+    _ul_edit(UL_MV, "docs/b.md")
+    _ul_state(UL_MV, ["archive/a.md", "docs/a.md"], ["docs/b.md"], no_renames=True)
+    # The premise of the case: with rename detection on, the staged read names the new path alone.
+    _ul_must(_ul_names(UL_MV, "diff", "--cached", "--name-only") == ["archive/a.md"],
+             "the default staged read of the git mv is not archive/a.md alone")
+
+
+def _build_ulpartial():
+    make_repo(UL_PARTIAL, {"docs/a.md": "".join(UL_PARTIAL_LINES), "docs/b.md": "base\n"})
+    first = ["changed top\n"] + UL_PARTIAL_LINES[1:]
+    write(os.path.join(UL_PARTIAL, "docs/a.md"), "".join(first))
+    _ul_git(UL_PARTIAL, "add", "--", "docs/a.md")       # the first hunk, staged as git add -p stages it
+    write(os.path.join(UL_PARTIAL, "docs/a.md"), "".join(first[:-1] + ["changed bottom\n"]))  # the second, unstaged
+    _ul_state(UL_PARTIAL, ["docs/a.md"], ["docs/a.md"])
+
+
 lazy_fixture([UL_ASK], _build_ulask)
 lazy_fixture([UL_EDIT], _build_uledit)
 lazy_fixture([UL_OTHER], _build_ulother)
@@ -4544,6 +4570,8 @@ lazy_fixture([UL_ROOT], _build_ulroot)
 lazy_fixture([UL_FULL], _build_ulfull)
 lazy_fixture([UL_RMCHAIN], _build_ulrmchain)
 lazy_fixture([UL_ADDCHAIN], _build_uladdchain)
+lazy_fixture([UL_MV], _build_ulmv)
+lazy_fixture([UL_PARTIAL], _build_ulpartial)
 
 
 def _ul_ask(name, command, cwd, carries="docs/b.md"):
@@ -4560,6 +4588,7 @@ _ul_ask("a plain commit with docs/a.md removed by git rm and docs/b.md unstaged 
 _ul_ask("a plain commit with docs/a.md staged and docs/b.md unstaged asks", VCS + " commit -m x", UL_EDIT)
 _ul_ask("git -C naming the repo with the unstaged edit, from a cwd that is no git tree, asks",
         VCS + " -C " + slash(UL_EDIT) + " commit -m x", NOGIT)
+# A leading `cd X &&` is no extra command (decision ask-commands-run-alone, owner 2026-10-15), so this asks once.
 _ul_ask("a cd into the repo with the unstaged edit before the commit asks",
         "cd " + slash(UL_EDIT) + " && " + VCS + " commit -m x", NOGIT)
 _ul_ask("commit --amend -m x with docs/b.md unstaged beside a git rm asks", VCS + " commit --amend -m x", UL_ASK)
@@ -4568,6 +4597,8 @@ _ul_ask("git commit --dry-run with docs/b.md unstaged beside a staged edit asks"
 _ul_ask("the root folder: a.txt staged and b.txt unstaged asks", VCS + " commit -m x", UL_ROOT, carries="b.txt")
 _ul_ask("full size: 20 staged and 20 unstaged files in docs/ asks", VCS + " commit -m x", UL_FULL,
         carries="docs/u00.md")
+_ul_ask("a git mv of docs/a.md to archive/a.md, staged, with docs/b.md unstaged asks: the rename counts for docs/",
+        VCS + " commit -m x", UL_MV)
 
 # THE QUOTED TEXT. A flag, a path or a comment opener inside -m is text, so each form still leaves docs/b.md
 # out and asks.
@@ -4594,17 +4625,25 @@ _ul_allow("commit --include -m x docs/b.md is allowed", VCS + " commit --include
 _ul_allow("git status with docs/b.md unstaged is allowed", VCS + " status", UL_EDIT)
 _ul_allow("a read that fails passes: a commit aimed at a folder that is no git tree is allowed",
           VCS + " -C " + slash(NOGIT) + " commit -m x", NOGIT)
+# A file partly staged, one hunk in and one left out, is in the commit, not left out: nothing else is left out.
+_ul_allow("a file partly staged (one hunk in, one left out) is in the commit, so a plain commit is allowed",
+          VCS + " commit -m x", UL_PARTIAL)
+_ul_allow("git status with the file partly staged is allowed", VCS + " status", UL_PARTIAL)
+_ul_allow("commit -a with the git mv staged and docs/b.md unstaged is allowed", VCS + " commit -a -m x", UL_MV)
 
 
 # THE CHAINS. An earlier `git rm` or `git add` of a named path puts that path in the commit, and the check
-# still runs on what stays out, so the chain asks. The rule raises its ask on the commit segment itself,
-# outside ask-alone, so the chain keeps the ask. An earlier `git add` that names a path with nothing left
-# out, or `git add -A` or `-u`, leaves nothing out, so the commit is allowed. A plain commit with nothing
-# staged has nothing in it to share a folder with, so it is allowed beside the same unstaged edit.
-_ul_ask("a chained git rm of docs/a.md, then a commit, with docs/b.md unstaged, asks",
-        VCS + " rm docs/a.md && " + VCS + " commit -m x", UL_RMCHAIN)
-_ul_ask("a chained git add of docs/a.md, then a commit, with docs/b.md unstaged, asks",
-        VCS + " add docs/a.md && " + VCS + " commit -m x", UL_ADDCHAIN)
+# still runs on what stays out. The commit's ask is one ask command, so a chain holding it denies as ask-alone
+# (decision ask-commands-run-alone): the commit asks only when it runs alone. An earlier `git add` that names a
+# path with nothing left out, or `git add -A` or `-u`, leaves nothing out, so the commit is allowed. A plain
+# commit with nothing staged has nothing in it to share a folder with, so it is allowed beside the same edit.
+chained_ask("commit-leaves-edit-unstaged: a chained git rm of docs/a.md, then a commit, with docs/b.md unstaged, "
+            "denies", VCS + " rm docs/a.md && " + VCS + " commit -m x", cwd=UL_RMCHAIN)
+chained_ask("commit-leaves-edit-unstaged: a chained git add of docs/a.md, then a commit, with docs/b.md unstaged, "
+            "denies", VCS + " add docs/a.md && " + VCS + " commit -m x", cwd=UL_ADDCHAIN)
+chained_ask("commit-leaves-edit-unstaged: a commit chained with a push to main, docs/b.md left out beside a staged "
+            "docs/a.md, denies as a chained ask, not as an ask",
+            VCS + " commit -m x && " + VCS + " push origin main", cwd=UL_EDIT)
 _ul_allow("a plain commit with nothing staged and docs/b.md unstaged is allowed",
           VCS + " commit -m x", UL_RMCHAIN)
 _ul_allow("a plain commit with nothing staged and docs/a.md and docs/b.md unstaged is allowed",
@@ -4615,6 +4654,10 @@ _ul_allow("a chained git add -A, then a commit, with docs/b.md unstaged is allow
           VCS + " add -A && " + VCS + " commit -m x", UL_EDIT)
 _ul_allow("a chained git add -u, then a commit, with docs/b.md unstaged is allowed",
           VCS + " add -u && " + VCS + " commit -m x", UL_EDIT)
+# A split: docs/b.md is left out of the first commit and a later git add stages it for the second, so the first
+# commit passes. Without the later-add read this chain asks, so the case fails there.
+_ul_allow("a commit, then a git add of docs/b.md and a second commit, with docs/b.md left out of the first, is allowed",
+          VCS + " commit -m x && " + VCS + " add docs/b.md && " + VCS + " commit -m y", UL_EDIT)
 
 
 # THE COST. The rule's two reads are the only git processes it starts. Each check judges its own guard run
