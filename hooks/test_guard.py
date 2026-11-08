@@ -23203,9 +23203,10 @@ def _guard_copy(name, drop):
     return folder
 
 
-def _run_copy(folder, command, name):
-    """One Bash call through the copy's guard.py, with a config folder of its own. No -I, and no
-    PYTHONPATH, so the script's own folder is on the path and the sibling imports resolve there."""
+def _copy_env(name, pythonpath=None):
+    """The environment of one copy's run, with a config folder of its own. PYTHONPATH is unset unless
+    `pythonpath` names a folder, so a case's sitecustomize.py is the one a run loads. No -I, so the script's
+    own folder is on the path."""
     cfg = os.path.join(ROOT, "failclosed-cfg", name)
     os.makedirs(cfg, exist_ok=True)
     env = dict(os.environ)
@@ -23214,9 +23215,17 @@ def _run_copy(folder, command, name):
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = cfg
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    if pythonpath:
+        env["PYTHONPATH"] = pythonpath
+    return env
+
+
+def _run_copy(folder, command, name, pythonpath=None):
+    """One Bash call through the copy's guard.py, with a config folder of its own. The script's own folder
+    is on the path, so the sibling imports resolve there."""
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
     return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
-                          capture_output=True, text=True, env=env, timeout=120)
+                          capture_output=True, text=True, env=_copy_env(name, pythonpath), timeout=120)
 
 
 def _decision(run):
@@ -23297,6 +23306,49 @@ for _label, _check in (
 ):
     FAILCLOSED_CHECKS.append(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+# A Python without _ctypes fails `import ctypes`. proc_env.py imports ctypes inside its one read, not at the
+# top (decision install-hooks-whole), so a copy that a no-_ctypes Python loads still judges a plain call.
+# A top-level import there would refuse every call as guard-crash.
+NO_CTYPES_SHIM = os.path.join(ROOT, "noctypes-shim")  # a folder whose sitecustomize.py drops ctypes
+NO_CTYPES_SOURCE = "import sys\nsys.modules['ctypes'] = None\n"
+NO_CTYPES_LABEL = "install-hooks-whole fail-closed: with ctypes blocked a copy loads and allows a plain Bash call"
+NO_CTYPES_WINDOWS = "a Windows CPython always ships _ctypes, so the blocked import is a POSIX build case"
+
+
+def no_ctypes_case():
+    """With ctypes blocked in the guard's interpreter, a copy loads and judges a plain Bash call: allow, exit 0,
+    never the guard-crash refusal. The shim's reach is probed first, so a shim that never blocks ctypes cannot
+    pass. The control call must be denied by a rule, not by the crash path."""
+    def check():
+        write(os.path.join(NO_CTYPES_SHIM, "sitecustomize.py"), NO_CTYPES_SOURCE)
+        probe = subprocess.run([sys.executable, "-c", "import ctypes"], capture_output=True, text=True,
+                               env=_copy_env("no-ctypes-probe", NO_CTYPES_SHIM), timeout=120)
+        if probe.returncode == 0 or not any(word in probe.stderr for word in ("ImportError", "ModuleNotFoundError")):
+            return False, "the shim did not block ctypes in the guard's interpreter: exit %d, stderr %r" % (
+                probe.returncode, probe.stderr[-90:])
+        folder = _guard_copy("no-ctypes", None)
+        run = _run_copy(folder, FAILCLOSED_CALL, "no-ctypes", pythonpath=NO_CTYPES_SHIM)
+        decision, reason = _decision(run)
+        if decision == "deny" and GUARD_CRASH in reason:
+            return False, "refused as guard-crash: the copy did not load with ctypes blocked"
+        if decision != "allow":
+            return False, "with ctypes blocked the plain call is %r, want allow: %r" % (decision, reason[:90])
+        if run.returncode != 0:
+            return False, "with ctypes blocked the plain call exits %d, want 0" % run.returncode
+        control = _run_copy(folder, FAILCLOSED_CONTROL, "no-ctypes-control", pythonpath=NO_CTYPES_SHIM)
+        control_decision, control_reason = _decision(control)
+        if control_decision != "deny" or GUARD_CRASH in control_reason:
+            return False, "with ctypes blocked the control call is %r, want a rule's deny" % (
+                (control_decision, control_reason[:90]),)
+        return True, "with ctypes blocked the plain call is allowed, exit 0, and the control is denied by a rule"
+    return check
+
+
+if os.name == "nt":
+    skip_case(NO_CTYPES_LABEL, NO_CTYPES_WINDOWS)
+else:
+    LOG_CHECKS_EXTRA.append((NO_CTYPES_LABEL, no_ctypes_case()))
 
 
 def _guard_family_constant(path):
