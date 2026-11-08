@@ -232,6 +232,13 @@ def lock_pr(pr, lock_dir):
     return True
 
 
+def judged_red(runs):
+    """True when judge_runs finds a red run among `runs`. An unloadable merge tool judges nothing red."""
+    from guard_merge import merge_module
+    merge = merge_module()
+    return merge is not None and bool(merge.Host.judge_runs(runs)[0])
+
+
 def wait_for(sha, cwd, deadline, repo=""):
     """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
@@ -240,7 +247,8 @@ def wait_for(sha, cwd, deadline, repo=""):
     list once more at once and judge any run not yet read there, then return. The runs come back
     newest first, as judge_runs reads them: the re-list's runs go ahead of the runs read before,
     so a newer run of a name outranks the older one. A refused re-list returns the runs already
-    judged. A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once)."""
+    judged only when they judge red: a red run stays red. Otherwise it raises Unknown, as a refused first
+    list does, since the unread list could hold a red or a running run (rule verification-report-unknown-reads). A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once)."""
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
@@ -249,9 +257,9 @@ def wait_for(sha, cwd, deadline, repo=""):
         try:
             listed = gh_json(list_args, cwd)
         except Unknown:
-            if viewed:
-                return viewed   # the at-once re-list failed: the judged runs are the answer
-            raise
+            if viewed and judged_red(viewed):
+                return viewed   # the at-once re-list failed: a red run stays red, whatever the list hid
+            raise   # no run judged yet, or the judged runs are not red: a green line would claim the unread list passed
         runs = [r for r in listed if r["conclusion"] != "skipped"]
         live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
         fresh = [r for r in runs if r["databaseId"] not in seen
