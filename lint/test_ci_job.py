@@ -494,13 +494,35 @@ class GithubBaseRef(Job):
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
 
     SEEN_PR_BODY = "printf '%s' \"${PR_BODY-<unset>}\" > seen.txt"
+    EVENT_BODY_SCRIPT = (  # the reader a CI step runs for the body: its event file, as CI gives it (merge/test_merge.py EVENT_BODY reads it too)
+        "import json, os\n"
+        "path = os.environ.get('GITHUB_EVENT_PATH')\n"
+        "if path is None:\n"
+        "    text = '<no GITHUB_EVENT_PATH>'\n"
+        "else:\n"
+        "    try:\n"
+        "        with open(path, encoding='utf-8') as f:\n"
+        "            pull = json.load(f).get('pull_request')\n"
+        "    except (OSError, ValueError, AttributeError):\n"
+        "        pull = None\n"
+        "    body = pull.get('body') if isinstance(pull, dict) else None\n"
+        "    text = body if isinstance(body, str) else '<no body in the event file>'\n"
+        "with open('seen.txt', 'w', encoding='utf-8', newline='') as f:\n"
+        "    f.write(text)\n")
 
-    def test_a_step_env_that_reads_the_pull_request_body_gets_the_body_ci_job_is_given(self):
-        """The pull request body reaches a step as `${{ github.event.pull_request.body }}`, which ci-job reads from the UTF-8 file
-        that CI_JOB_PR_BODY_FILE names."""
+    def event_body_step(self):
+        """A step that writes the body it reads from its event file to seen.txt. The reader is a script in the run's lint/ folder."""
+        os.makedirs(os.path.join(self.root, "lint"), exist_ok=True)
+        with open(os.path.join(self.root, "lint", "seen_event_body.py"), "w", encoding="utf-8") as f:
+            f.write(self.EVENT_BODY_SCRIPT)
+        return step("seen", "python3 lint/seen_event_body.py")
+
+    def test_a_step_that_reads_the_pull_request_body_from_its_event_file_gets_the_body_ci_job_is_given(self):
+        """ci-job reads the pull request body from the UTF-8 file that CI_JOB_PR_BODY_FILE names, and gives each step an event file
+        at GITHUB_EVENT_PATH that holds `.pull_request.body`. The step reads the body there, not from its env."""
         body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n"
-        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
-                                              args=("--base", "origin/main"), env={"CI_JOB_PR_BODY_FILE": self.body_file(body)})
+        verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": self.body_file(body)})
         self.assertEqual((verdicts, seen), (["PASS"], body), out)
 
     def test_a_body_step_with_no_body_source_reads_unknown(self):
@@ -510,9 +532,16 @@ class GithubBaseRef(Job):
         self.assertEqual(verdicts, ["unknown"], out)
 
     def test_an_empty_body_file_passes_a_body_step_with_an_empty_body(self):  # control: an empty body is known, so the step runs
-        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
-                                              args=("--base", "origin/main"), env={"CI_JOB_PR_BODY_FILE": self.body_file("")})
+        verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": self.body_file("")})
         self.assertEqual((verdicts, seen), (["PASS"], ""), out)
+
+    def test_a_step_env_that_holds_the_pull_request_body_reads_unknown_even_with_a_body_file(self):
+        """The body is data, never an expression: a step env that holds `${{ github.event.pull_request.body }}` reads unknown,
+        and the step does not run, even when a body file is named."""
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
+                                              args=("--base", "origin/main"), env={"CI_JOB_PR_BODY_FILE": self.body_file("Drops-lines: a -- b")})
+        self.assertEqual((verdicts, seen), (["unknown"], "(no seen.txt: the step did not run)"), out)
 
     def test_the_ci_job_pr_body_env_alone_is_not_read(self):
         """One transport: ci-job reads the body from the file that CI_JOB_PR_BODY_FILE names, never from env CI_JOB_PR_BODY. With no file,
