@@ -4,6 +4,6 @@
   "filed": "2026-11-05T13:53:00Z",
   "home": "step:owner-word-relay",
   "id": "ask-mw3lqb8bwx",
-  "reply": "Filed as roadmap step owner-word-relay (dd574d33). Auto mode trusts only words typed in a session's own chat, so a relay from another session reads as untrusted text. The fix: the receiving session reads your saved answer on this page itself, and auto mode counts that as your word for that one act. The relay is never taken on trust. Your ask is the word for the auto-mode change. The coordinator starts the lane.",
+  "reply": "Filed as roadmap step owner-word-relay (dd574d33). Auto mode trusts only words typed in a session's own chat, so a relay from another session reads as untrusted text. The fix: the receiving session reads your saved answer on this page itself, and auto mode counts that as your word for that one act. The relay is never taken on trust. Your ask is the word for the auto-mode change. The coordinator starts the lane.\n\nUpdate 21:38 CST Nov 7: owner-word-relay is done, merged. Source: the roadmap. Triage.",
   "text": "i need sessions to be able to relay my word to other cloud sessions and it be trust worthy add in auto mode"
 }

@@ -1,5 +1,6 @@
 {
   "at": "2026-11-08T03:29:43.562Z",
+  "dismissed": null,
   "id": "ask-mw79xeveem",
   "reply": "Built, not merged. The git mailbox is PR #1371: send, read and take between cloud sessions and your computers, through the private repo shivinate7/session-mailbox. It passed review round 3 on Nov 6 and has sat as an idle draft since, never batched. I told the coordinator now. After the merge, three things stay open (step session-mailbox-followups): Mac and Windows git auth, which needs a Mac session; a settings default for the store; and a 20-message cloud-to-Mac trial. Models: any session can use it, whatever its model. Accounts: a session under another GitHub account needs access to that private repo; no step covers that yet. Triage, 21:31 CST.",
   "status": "answered",

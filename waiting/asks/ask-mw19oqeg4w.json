@@ -6,6 +6,6 @@
   "id": "ask-mw19oqeg4w",
   "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "read": "2026-11-03T22:38:00Z",
-  "reply": "Nothing is fixing either one yet. Today the batch runner is supposed to archive finished lanes (decision session-tiers), but no rule stops a coordinator from handing new work to an idle lane, and nothing checks for lanes left unarchived. New step one-lane-one-step: a lane session holds one step, new work starts a new lane, and the batch runner archives each lane once its PR merges, with a check behind both. The coordinator starts it.",
+  "reply": "Nothing is fixing either one yet. Today the batch runner is supposed to archive finished lanes (decision session-tiers), but no rule stops a coordinator from handing new work to an idle lane, and nothing checks for lanes left unarchived. New step one-lane-one-step: a lane session holds one step, new work starts a new lane, and the batch runner archives each lane once its PR merges, with a check behind both. The coordinator starts it.\n\nUpdate 21:38 CST Nov 7: one-lane-one-step is done, merged. Source: the roadmap. Triage.",
   "text": "I sometimes find repo coordinators assigning totally different work to lane sessions that were on a different topic and then currently have nothing going on, rather than spawning a new lane \n\nCoordinators are also weak on archiving their kids ( I think we are working on fixing this alrdy?)"
 }

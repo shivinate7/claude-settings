@@ -7,6 +7,6 @@
   "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "re": "ask-mw3lqbojbc",
   "read": "2026-11-06T17:31:00Z",
-  "reply": "Right: an answered ask stays on the page, and nothing lets you clear it. I filed roadmap step ask-dismiss: each answered ask gets a Dismiss press, and a dismissed ask leaves your view. The coordinator starts the lane.",
+  "reply": "Right: an answered ask stays on the page, and nothing lets you clear it. I filed roadmap step ask-dismiss: each answered ask gets a Dismiss press, and a dismissed ask leaves your view. The coordinator starts the lane.\n\nUpdate 21:38 CST Nov 7: ask-dismiss is done, merged. Source: the roadmap. Triage.",
   "text": "there doesn't seem to be a way to dismiss completed items like this one"
 }

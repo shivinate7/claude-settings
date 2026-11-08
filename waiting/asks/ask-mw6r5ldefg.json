@@ -1,7 +1,7 @@
 {
   "at": "2026-11-07T18:44:12.530Z",
   "id": "ask-mw6r5ldefg",
-  "reply": "You are right. Only the Opus refusal got the plain-word route (step opus-plain-ask, #1204 and #1208). The general override still takes only the keyword forms, and 'override 15m please' grants nothing on purpose (decision owner-override). Filed step override-plain-ask: a plain typed override ask gets the same judged, fail-closed route. Triage, 12:47 CST.",
+  "reply": "You are right. Only the Opus refusal got the plain-word route (step opus-plain-ask, #1204 and #1208). The general override still takes only the keyword forms, and 'override 15m please' grants nothing on purpose (decision owner-override). Filed step override-plain-ask: a plain typed override ask gets the same judged, fail-closed route. Triage, 12:47 CST.\n\nUpdate 21:38 CST Nov 7: override-plain-ask is built, its PR waits on the batch runner (#1463, open). Source: the roadmap. Triage.",
   "status": "answered",
   "text": "also note it seems on other sesisons only the plain word override or override 15m work even tho i thought we made overriding way more dynamic"
 }

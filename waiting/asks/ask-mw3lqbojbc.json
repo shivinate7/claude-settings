@@ -4,6 +4,6 @@
   "filed": "2026-11-05T13:53:00Z",
   "home": "step:page-unpark-completes",
   "id": "ask-mw3lqbojbc",
-  "reply": "You were right, and item 10 is fixed now (07:51 CST): it is back with its steps. When I routed your Unpark, I reopened the item but left its parked line, so the page still showed it as parked. The build lets that slip, because unpark takes three manual writes and nothing checks them. Filed as step page-unpark-completes (dd574d33): the page shows an open item even if a stale parked line names it, and the writer's check flags any half-done unpark.",
+  "reply": "You were right, and item 10 is fixed now (07:51 CST): it is back with its steps. When I routed your Unpark, I reopened the item but left its parked line, so the page still showed it as parked. The build lets that slip, because unpark takes three manual writes and nothing checks them. Filed as step page-unpark-completes (dd574d33): the page shows an open item even if a stale parked line names it, and the writer's check flags any half-done unpark.\n\nUpdate 21:38 CST Nov 7: page-unpark-completes is done, merged. Source: the roadmap. Triage.",
   "text": "hitting \u201cunpark\u201d doesnt seem to reprovidenoptions"
 }

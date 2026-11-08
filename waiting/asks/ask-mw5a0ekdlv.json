@@ -6,6 +6,6 @@
   "id": "ask-mw5a0ekdlv",
   "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "read": "2026-11-06T18:13:00Z",
-  "reply": "None of our code limits this. A search of claude-settings main (7975f6d8) found no cap on messages between sessions. So it is most likely Claude Code's own limit, but no one has checked. I filed roadmap step peer-message-turn-cap and sent it to the coordinator. A lane will find where the message comes from: Claude Code's changelog, its binary, or a hook on your Mac. Then it says whether a setting changes the limit.",
+  "reply": "None of our code limits this. A search of claude-settings main (7975f6d8) found no cap on messages between sessions. So it is most likely Claude Code's own limit, but no one has checked. I filed roadmap step peer-message-turn-cap and sent it to the coordinator. A lane will find where the message comes from: Claude Code's changelog, its binary, or a hook on your Mac. Then it says whether a setting changes the limit.\n\nUpdate 21:38 CST Nov 7: peer-message-turn-cap is done, merged. Source: the roadmap. Triage.",
   "text": "my mac recently has been saying that sesssions can no longer message eachother after 10 turns of messages between each other without me saying something to them first hand to refresh them. can you please look into what the heck has happened to it? it claims it's not code related but given how new and random of a change it is im sure it is"
 }
