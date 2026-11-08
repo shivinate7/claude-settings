@@ -25,7 +25,7 @@ An item write whose picture the page would refuse, or would draw as a thin strip
   - Home's item 43 drew each option picture as a strip a few px high: a wide multi-screen design scaled to card width. The page had no floor check at write.
   - Landed 2026-11-01.
 - Cost:
-  - Per judged item: one node start and one Chromium start, 0.75 s wall measured here (1 sample; the lane brief measured about 2.4 s, 1 sample) (unmeasured). One temp file, removed at once (unmeasured).
+  - Per judged item: one node start and one Chromium start, 0.75 s wall measured here (1 sample; the lane brief measured about 2.4 s, 1 sample) (not pinned). One temp file, removed at once (unmeasured).
   - Per call: at most 45 s of those runs, by the batch budget. A call of N pictured items starts N runs while the budget lasts.
   - Per waiting-page publish allowed: one small file write (unmeasured).
   - A write with no picture, a read, and any other call: no cost beyond the `ArtifactData` read the guard already does.
