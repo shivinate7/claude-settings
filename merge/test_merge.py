@@ -13464,6 +13464,22 @@ class ReviewFixRemedies(ReviewChainFixture):
         self.assertNotIn(self.HEAD_REMEDY, remedy, "the layout refusal prints the head remedy, which does not fix an unreadable layout:\n" + err)
         self.assertIn("layout", remedy, "the layout refusal does not name the layout as its remedy:\n" + err)
 
+    def test_a_fix_base_whose_layout_will_not_import_names_lint_layout_py_as_its_remedy(self):
+        # a layout.py that will not import refuses the fix base in fix_base_problem before any compare, as an unreadable layout does. Its remedy
+        # names the file that failed, lint/layout.py, not the layout JSON. The control runs the same fix base with the module importable
+        diffs = {(self.NEWEST, self.OTHER): compare_of("ahead", self.CODE)}
+        rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"), diffs=diffs)  # control, green on the old code
+        self.assertTrue(self.compared(host, self.NEWEST, self.OTHER), "control: the base was not compared with the newest record's Head")
+        self.assertIn("are not all record or notes files", err, "control: the importable layout did not reach the base rule:\n" + err)
+        with unittest.mock.patch.dict(sys.modules, {"layout": None}):  # `import layout` now raises, as a layout.py that will not load does
+            rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"))
+        self.assert_refused(rc, out, err)
+        self.assertIn("cannot be read from the layout", err, "scope: the refusal is not the import failure's:\n" + err)
+        self.assertEqual(host.compare_reads, [], "scope: a compare was read before the layout, so the refusal is not the layout's")
+        self.assertIn("cannot be told from code", err, "scope: the cause sentence is not in the refusal:\n" + err)
+        remedy = err.split("cannot be told from code", 1)[1]
+        self.assertIn("layout.py", remedy, "the import failure does not name lint/layout.py as its remedy:\n" + err)
+
     def test_a_record_below_the_round_floor_names_the_round_flag_as_its_remedy(self):
         # the floor is the highest round an earlier record reached, here every round. A record that carries fewer round lines is refused where it
         # is written, and its remedy is the round lines, not the head
@@ -13508,6 +13524,18 @@ class ReviewFixRemedies(ReviewChainFixture):
         rc, out, err, host = self.run_chain(self.NEWEST, self.pair("PASS"))
         self.assertEqual(host.compare_reads, [(self.NEWEST, self.LIVE)], "scope: the ancestor read was not the one compare of base and live head")
         self.assert_own_remedy(rc, out, err, "diverged", self.ANCESTOR_REMEDY)
+
+    def test_a_fix_base_newer_than_the_live_head_is_called_ahead_of_it_not_behind(self):
+        # the live head is an ancestor of the fix base, so the base is the newer head, and its compare with the live head reads behind (ahead_by 0).
+        # The refusal must say the base is ahead of the live head, and the ancestor remedy still applies
+        diffs = {(self.NEWEST, self.LIVE): compare_of("behind")}
+        rc, out, err, host = self.run_chain(self.NEWEST, self.pair("PASS"), diffs=diffs)
+        self.assertEqual(host.compare_reads, [(self.NEWEST, self.LIVE)], "scope: the ancestor read was not the one compare of base and live head")
+        clause = f"the fix base {self.NEWEST[:9]} is "
+        self.assert_own_remedy(rc, out, err, clause, self.ANCESTOR_REMEDY)
+        sentence = err.split(clause, 1)[1].split(". ", 1)[0]  # the refusal's clause on the base, up to the sentence's end
+        self.assertNotIn("behind", sentence, "the refusal calls the newer fix base behind the live head:\n" + err)
+        self.assertIn("ahead", sentence, "the refusal does not say the fix base is ahead of the live head:\n" + err)
 
     def test_a_newest_fix_check_that_failed_or_was_wide_names_its_own_remedy(self):
         # a FAIL before the final round leaves the next round open, a FAIL after it holds the change, and a WIDE is a new lane. Each names its own
@@ -13569,7 +13597,8 @@ class ReviewFixRemedies(ReviewChainFixture):
 
     def test_a_copy_that_drops_a_round_line_names_the_copy_as_its_remedy_without_the_head_remedy(self):
         # the newest earlier record's design FAIL line is dropped, so dropped_round_lines refuses the copy, and its remedy is the copy. The head
-        # remedy fits only a head refusal and must stay out. The control keeps both lines in order and is written
+        # remedy fits only a head refusal and must stay out. The control keeps both lines in order and is written, so only the dropped line
+        # can refuse the copy
         lines = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")
         comments = self.pair(None, rounds=lines)
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines))
