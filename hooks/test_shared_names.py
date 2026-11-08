@@ -417,6 +417,55 @@ def case_config_dir_copies_sit_only_in_the_import_fallback():
     return not problems, "; ".join(problems) or "every copy sits in the import fallback"
 
 
+# Fixture modules for the scan, written under this run's folder. In each, the copy's own function names no home:
+# the `.claude` default sits in a helper that the copy calls.
+HELPER_DEFAULT_COPY = '''import os
+
+
+def _default_dir():
+    return os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def config_dir():
+    return os.environ.get("CLAUDE_CONFIG_DIR") or _default_dir()
+'''
+HELPER_DEFAULT_COPY_LINE = 9  # the CLAUDE_CONFIG_DIR read in config_dir
+HELPER_DEFAULT_IN_FALLBACK = '''import os
+
+try:
+    from shared_names import config_dir
+except ImportError:
+    def _default_dir():
+        return os.path.join(os.path.expanduser("~"), ".claude")
+
+    def config_dir():
+        return os.environ.get("CLAUDE_CONFIG_DIR") or _default_dir()
+'''
+
+
+def _fixture_module(name, text):
+    """Writes a fixture module under this run's folder and returns its path."""
+    path = os.path.join(RUN, "copy-fixtures", name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    return path
+
+
+def case_scan_flags_a_copy_whose_default_sits_in_a_helper():
+    """A copy outside the import fallback that reads its `.claude` default through a helper it calls is a second home.
+    The scan reads only the copy's own function, so it must follow the call and flag the CLAUDE_CONFIG_DIR read."""
+    lines = _unguarded_copies(_fixture_module("helper_default.py", HELPER_DEFAULT_COPY))
+    return lines == [HELPER_DEFAULT_COPY_LINE], "lines flagged %s, want [%d]" % (lines, HELPER_DEFAULT_COPY_LINE)
+
+
+def case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper():
+    """Control: the same copy inside the `except ImportError` branch is the fallback, so it is never flagged. Following
+    helpers must not flag the fallback."""
+    lines = _unguarded_copies(_fixture_module("helper_default_fallback.py", HELPER_DEFAULT_IN_FALLBACK))
+    return lines == [], "lines flagged %s, want none" % (lines,)
+
+
 def case_guard_merge_binds_tag_prefixes_to_shared_names():
     """hooks/guard_merge.py binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to the shared_names tags, by an imported name,
     not to a copied literal. TOPIC_TAG_PREFIX already reads TOPIC_TAG, so it is the green control beside ROLE_TAG_PREFIX."""
@@ -461,6 +510,10 @@ CASES = [
      case_one_home_for_lane_heads),
     ("(l) every config dir copy in the four hook modules sits only in an ImportError fallback of shared_names",
      case_config_dir_copies_sit_only_in_the_import_fallback),
+    ("(l2) a copy whose .claude default sits in a helper, outside the import fallback, is flagged",
+     case_scan_flags_a_copy_whose_default_sits_in_a_helper),
+    ("(l3) a fallback copy whose .claude default sits in a helper is not flagged",
+     case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper),
     ("(m) sim_boot_record exits 0 with shared_names.py absent", case_sim_boot_record_exits_zero_without_shared_names),
     ("(n) precompact_handoff still writes its digest with shared_names.py absent",
      case_precompact_builds_its_digest_without_shared_names),
