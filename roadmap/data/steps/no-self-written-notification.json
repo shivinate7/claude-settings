@@ -1,0 +1,11 @@
+{
+  "title": "A check refuses an assistant message that holds notification markup, so a session never writes its own fake result",
+  "why": "Coordinator 12:58 CST Nov 8: lane cite-range-symbol-match (session_013NEJL34KjkQwzUueKThXhM) reports it once wrote a fake task-notification itself in its own output. Harm: a session can treat its own text as a finished agent or a result that never happened. Fix to find: a check that refuses an assistant message holding notification markup (for example `<task-notification>`), with the lane's sighting as the red case.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 797,
+  "updatedAt": "2026-11-08T12:58:00-06:00"
+}
