@@ -31,8 +31,8 @@ Four more rules read the notes file (decision notes-name-their-fix):
     PR_BODY (CI and `merge --lane-lint` set it, as for lint/check_silent_undo.py), read as a reader sees it (fenced blocks and
     comments dropped, a comment opener in a code span ignored: check_silent_undo.body_prose). Its items are bullets with
     their continuation lines, up to the next bullet, heading or blank line, and paragraphs; every item counts, not only the last
-    paragraph. A `Fix: none` field is the label (`Fix:`, `**Fix:**` or `**Fix**:`), `none` in any case or in backticks, then a
-    colon, en dash, em dash or `--`. The text after it, to the end of the item or the next `Fix:`, is read; a field inside a code
+    paragraph. A `Fix: none` field is the label (`Fix:`, `**Fix:**` or `**Fix**:`, in any case), `none` in any case or in
+    backticks, then a colon, en dash, em dash, `--`, single `-`, `.`, `,`, `;` or an ellipsis. The text after it, to the end of the item or the next `Fix:`, is read; a field inside a code
     span is read only to the span's end. Text that names a commit or a cost with no check output prints one FAIL line and
     fails the run. A step or already-fixed Fix is no free reason and is skipped.
   Check output may also be a link to a GitHub Actions run (https://github.com/<owner>/<repo>/actions/runs/<digits>), in a note or the body.
@@ -375,9 +375,9 @@ def cite_problem(line):
 
 
 BODY_LABEL = 60  # characters of a refused body line that its FAIL line quotes
-# A Fix label in a PR body as a person writes it: `Fix:`, `**Fix:**` or `**Fix**:`, then `none` in any case, maybe in backticks,
-# then a colon, en dash, em dash or `--`. The field after it is free text.
-BODY_FIX_NONE = re.compile(r"(?<![\w-])(?:\*\*)?Fix(?:\*\*)?:(?:\*\*)?[ \t]*`?none`?(?!\w)[ \t]*(?:\u2014|\u2013|--|:)[ \t]*", re.I)
+# A Fix label in a PR body as a person writes it: `Fix:`, `**Fix:**` or `**Fix**:` in any case, then `none` in any case, maybe in
+# backticks, then a colon, en dash, em dash, `--`, single `-`, `.`, `,`, `;` or an ellipsis. The field after it is free text.
+BODY_FIX_NONE = re.compile(r"(?<![\w-])(?:\*\*)?Fix(?:\*\*)?:(?:\*\*)?[ \t]*`?none`?(?!\w)[ \t]*(?:\u2014|\u2013|--|[:.,;\u2026-])[ \t]*", re.I)
 BODY_FIX_ANY = re.compile(r"(?<![\w-])(?:\*\*)?Fix(?:\*\*)?:")
 BODY_BULLET = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)]|#{1,6})[ \t]")
 ALREADY_FIXED = re.compile(r"already fixed on main [0-9a-f]{7,40}(?!\w)")
