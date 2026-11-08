@@ -1,10 +1,10 @@
 {
   "title": "A subagent's Stop never overwrites its parent's handoff",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKz785dJ3UKyxpvQuZu",
   "why": "Subagents share the parent's session id and overwrote ~/.claude/handoffs/<session>.md all of Nov 7 in lane notes-fix-large-3.",
   "note": "Fix: key a subagent's handoff by its agent id, or skip the handoff write for subagents. Done check: a hook test where a subagent's Stop leaves the parent handoff unchanged. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask.",
   "updatedAt": "2026-11-07T18:05:00-06:00"

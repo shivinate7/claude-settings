@@ -1,10 +1,10 @@
 {
   "title": "The model-name report guard skips ids and reads each agent's served model",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL4HFe7Gz9VNMNryxaZ",
   "why": "The guard fired on the role word inside the backticked id `builders-cannot-edit-tests` (about 17:43 CST Nov 7); an Opus third try shows sonnet in the spawn record, so the report names the wrong model.",
   "note": "Fix: skip role words inside backticked ids; read each agent's served model, not the brief's. Done check: lint tests for the backticked-id case and the Opus-third-try case. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask.",
   "updatedAt": "2026-11-07T18:05:00-06:00"
