@@ -11466,6 +11466,80 @@ records_allow("a commit of a staged page edit where the base page is hand-writte
 records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
               GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
 
+# ---- a stacked lane. Its base PR (base-pr) moved the page after the lane was cut from it, and the lane merges
+# base-pr in. HEAD, main and origin/main all hold the old page, so the page the merge brings is none of the three.
+# A commit that completes the merge holds the page of MERGE_HEAD (the branch merged in): that page is allowed.
+# A page equal to neither side, or a commit with no merge in progress, is still refused.
+STK_P1 = "# Records index\nrecords page rebuilt on the stacked base\n"   # base-pr's page, brought in by the merge
+STK_P2 = "# Records index\nrecords page hand-edited by the lane\n"      # equal to neither side
+REC_STACK = os.path.join(RECMORE, "stack")
+REC_STACK_LANES = {name: os.path.join(RECMORE, "stack-" + name) for name in ("merge", "hand", "plain")}
+COMMIT_NOEDIT = VCS + " commit --no-edit"
+
+
+def _build_records_stack():
+    run, need, page = _rec_run, _rec_need, _rec_page
+    lanes = REC_STACK_LANES
+
+    make_repo(REC_STACK, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(REC_STACK, "update-ref", "refs/remotes/origin/main", "main")
+    run(REC_STACK, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run(REC_STACK, "checkout", "-q", "-b", "base-pr")
+    write(os.path.join(REC_STACK, "src", "base.py"), "y = 1\n")
+    run(REC_STACK, "add", "-A")
+    run(REC_STACK, "commit", "-q", "-m", "base-pr adds a product file")
+    cut = run(REC_STACK, "rev-parse", "HEAD")                   # the older commit the lane is cut from
+    write(page(REC_STACK), STK_P1)
+    run(REC_STACK, "commit", "-q", "-am", "base-pr moves the page")
+    run(REC_STACK, "checkout", "-q", "main")
+    need(run(REC_STACK, "show", "main:docs/records.md") == REC_V0.strip(), "main's page is not v0")
+    need(run(REC_STACK, "show", "base-pr:docs/records.md") == STK_P1.strip(), "base-pr's page is not P1")
+    need(run(REC_STACK, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") == "origin/main",
+         "origin/HEAD does not resolve to origin/main")
+
+    merge = lanes["merge"]
+    run(REC_STACK, "worktree", "add", "-q", "-b", "lane-stack-merge", merge, cut)
+    write(os.path.join(merge, "src", "lane.py"), "z = 1\n")
+    run(merge, "add", "-A")
+    run(merge, "commit", "-q", "-m", "lane adds a product file")
+    lane_head = run(merge, "rev-parse", "HEAD")                 # the lane's own commit: its page is v0
+    run(merge, "merge", "-q", "--no-commit", "--no-ff", "base-pr")
+    need(run(merge, "rev-parse", "--verify", "-q", "MERGE_HEAD"), "no merge is in progress in the stacked lane")
+    need(run(merge, "show", ":docs/records.md") == STK_P1.strip(), "the stacked lane's merged page is not P1")
+
+    hand = lanes["hand"]
+    run(REC_STACK, "worktree", "add", "-q", "-b", "lane-stack-hand", hand, lane_head)
+    run(hand, "merge", "-q", "--no-commit", "--no-ff", "base-pr")
+    need(run(hand, "rev-parse", "--verify", "-q", "MERGE_HEAD"), "no merge is in progress in the hand lane")
+    write(page(hand), STK_P2)
+    run(hand, "add", "docs/records.md")
+    need(run(hand, "show", ":docs/records.md") == STK_P2.strip(), "the hand lane's staged page is not P2")
+
+    plain = lanes["plain"]
+    run(REC_STACK, "worktree", "add", "-q", "-b", "lane-stack-plain", plain, lane_head)
+    write(page(plain), STK_P1)
+    run(plain, "add", "docs/records.md")
+    need(run_vcs(plain, "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0
+         and run(plain, "show", ":docs/records.md") == STK_P1.strip(),
+         "the plain lane is not 'no merge in progress, page P1 staged'")
+
+
+lazy_fixture([REC_STACK, *REC_STACK_LANES.values()], _build_records_stack)
+
+# Red on origin/main: the merge's page is P1, which HEAD (v0), main and origin/main (v0) do not hold, so the
+# commit is refused. Each form is a commit that completes the merge: bash, PowerShell, and stage then commit.
+records_allow("a merge commit that brings a stacked base PR's page, which main does not hold", COMMIT_NOEDIT,
+              REC_STACK_LANES["merge"])
+records_allow("a merge commit that brings a stacked base PR's page, under PowerShell", COMMIT_NOEDIT,
+              REC_STACK_LANES["merge"], tool="PowerShell")
+records_allow("stage then commit: add -A and commit a stacked base PR's page, merge in progress",
+              ADD_A + " && " + COMMIT_NOEDIT, REC_STACK_LANES["merge"])
+# Control, same merge: the page is hand-edited to a third page that equals neither side, so refused.
+records_deny("a merge commit whose page is hand-edited to a third page, equal to neither side", COMMIT_NOEDIT,
+             REC_STACK_LANES["hand"])
+# Control, no merge: the same page as the base PR's, staged with no merge in progress, so refused.
+records_deny("a plain commit of the base PR's page with no merge in progress", COMMIT_X, REC_STACK_LANES["plain"])
+
 # =========================================================================== 5d. conflict markers
 #
 # `conflict-markers`. A Bash `git commit` is refused when the commit would hold a git conflict marker:
