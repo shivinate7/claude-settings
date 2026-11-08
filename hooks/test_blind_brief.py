@@ -493,6 +493,14 @@ class Devices(unittest.TestCase):
                     self.assertNotIn(name, text.lower())
 
 
+def designer_lines(path):
+    """The lines of an agent file after its front matter."""
+    with open(path, encoding="utf-8") as h:
+        lines = h.read().splitlines()
+    fence = [i for i, line in enumerate(lines) if line == "---"]
+    return lines[fence[1] + 1:] if len(fence) > 1 and fence[0] == 0 else lines
+
+
 class DesignerSteps(unittest.TestCase):
     """The designer loads a design skill before it draws and critiques its own mockup before it reports.
 
@@ -509,10 +517,7 @@ class DesignerSteps(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        with open(os.path.join(HERE, "..", "agents", "designer.md"), encoding="utf-8") as h:
-            lines = h.read().splitlines()
-        fence = [i for i, line in enumerate(lines) if line == "---"]
-        cls.lines = lines[fence[1] + 1:] if len(fence) > 1 and fence[0] == 0 else lines
+        cls.lines = designer_lines(os.path.join(HERE, "..", "agents", "designer.md"))
 
     def at(self, anchor):
         hits = [i for i, line in enumerate(self.lines) if line.startswith(anchor)]
@@ -551,6 +556,22 @@ class DesignerSteps(unittest.TestCase):
                             for step in self.steps(self.REPORT, start=self.DRAW) for s in step),
                         "no sentence between the lines starting %r and %r skips impeccable's Setup and its "
                         "Launcher fallback in a blind designer" % (self.DRAW, self.REPORT))
+
+    def tells_skip_impeccable_context(self, sentence):
+        if re.search(r"\b(?:not|never)\s+skip\b|n't\s+skip\b", sentence, re.I):
+            return False
+        return bool(re.search(r"\bskip\b|\b(?:not|never)\s+run\b|n't\s+run\b", sentence, re.I))
+
+    def test_informed_or_directed_designer_skips_impeccable_context_and_uses_the_launcher_fallback(self):
+        # The review-only guard refuses the launcher to an informed or directed designer. A blind designer skips
+        # the fallback already, so the sentence names the other kinds and never the blind one.
+        found = [s for step in self.steps(self.REPORT) for s in step
+                 if re.search(r"impeccable context", s, re.I) and "Launcher unavailable" in s
+                 and re.search(r"\b(?:informed|directed)\b", s, re.I) and not re.search(r"\bblind\b", s, re.I)
+                 and self.tells_skip_impeccable_context(s)]
+        self.assertTrue(found, "no sentence before the line starting %r tells an informed or directed designer "
+                        "to skip `impeccable context` and use the \"Launcher unavailable\" fallback, "
+                        "without naming the blind kind" % self.REPORT)
 
 
 class Hook(unittest.TestCase):
@@ -795,6 +816,46 @@ class IosApps(unittest.TestCase):
     def test_full_form_folded_then_unfolded_gets_no_duo_order(self):
         found, out = self.device_codes("iPhone Duo, folded, then iPhone Duo, unfolded.")
         self.assertEqual(found, set(), out)
+
+    def test_short_form_unfolded_after_folded_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded after the Duo folded.")
+        self.assertEqual(found, set(), out)
+
+    def test_short_form_folded_after_unfolded_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo folded after the Duo unfolded.")
+        self.assertEqual(found, {"duo-order"}, out)
+
+    def test_unfolded_after_the_header_before_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded after the header, before the folded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_first_then_after_that_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded first. After that, draw the Duo folded.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_then_after_a_pause_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Duo unfolded, then after a pause the folded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_first_then_after_that_the_duo_folded_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded first, then after that the Duo folded.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_folded_first_then_after_that_the_duo_unfolded_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the Duo folded first, then after that the Duo unfolded.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
+
+    def test_folded_after_the_header_before_the_unfolded_duo_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the folded Duo after the header, before the unfolded Duo.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
+
+    def test_before_the_folded_duo_draw_the_unfolded_gets_duo_order(self):
+        found, out = self.device_codes("Before the folded Duo, draw the unfolded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_before_the_unfolded_duo_draw_the_folded_gets_no_duo_order(self):
+        found, out = self.device_codes("Before the unfolded Duo, draw the folded Duo.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
 
 
 def tearDownModule():
