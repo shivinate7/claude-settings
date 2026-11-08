@@ -2373,7 +2373,7 @@ def message_role_hit(tool: str, tool_input, transcript):
 # ---- worktree-strands-agents: an EnterWorktree from the main session while this session's agents run.
 # Each agent's home is a worktree under the checkout the session started in; a session that moves into a worktree
 # cuts every running agent off from its own (worktree-home refuses its next call). The running agents are read by
-# stall_watch.open_agents, the reader of running agents. stall_watch.scan_jobs reads the session's background commands.
+# stall_watch.open_agents, the reader of running agents. stall_watch.scan_jobs reads the session's background commands and agents.
 STRANDS_TOOL = "EnterWorktree"
 STRANDS_REASON = (
     "This session's agents still run: %s. Entering a worktree now cuts each one off from its own, and its round is lost. "
