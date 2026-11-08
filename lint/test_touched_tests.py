@@ -770,6 +770,162 @@ class Selector(unittest.TestCase):
         self.assertEqual(windows, ["mods/m/sub/deep/b.test.mjs", "mods/m/tests/a.test.mjs"],
                          "a touched mods/m/ source does not list every test under mods/m/, or lists another mod's test")
 
+    # Item 1: a touched mods/<mod>/ source selects that mod's check.mjs, which mod-tests.sh runs with node. The negatives
+    # are a check.mjs in another mod, one under node_modules, and a file named precheck.mjs.
+    def test_a_touched_mod_source_selects_its_check_mjs(self):
+        base = {"mods/m/check.mjs": "old\n", "mods/m/lib.mjs": "old\n", "mods/m/tests/a.test.mjs": "old\n",
+                "mods/other/check.mjs": "old\n", "mods/m/node_modules/x/check.mjs": "old\n", "mods/m/precheck.mjs": "old\n"}
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: bash .github/scripts/mod-tests.sh
+            """)
+        outputs, _ = self.run_outputs(with_checks(base, text), {"mods/m/lib.mjs": "new\n"})
+        windows, _ = self.os_lists(outputs)
+        self.assertIn("mods/m/check.mjs", windows, "a touched mods/m/ source does not select mods/m/check.mjs")
+        self.assertEqual(self.commands_of(outputs, "commands_windows").get("mods/m/check.mjs"), "node",
+                         "mods/m/check.mjs is not given the command node")
+        self.assertNotIn("mods/other/check.mjs", windows, "a touched mods/m/ source selected another mod's check.mjs")
+        self.assertNotIn("mods/m/node_modules/x/check.mjs", windows,
+                         "a touched mods/m/ source selected a check.mjs under node_modules")
+        self.assertNotIn("mods/m/precheck.mjs", windows, "a file named precheck.mjs was selected as a check.mjs")
+
+    # Item 2: a job-level defaults block exits 1, naming its line, with no output: a default shell changes how a step reads.
+    def test_a_job_level_defaults_exits_1_naming_its_line(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                defaults:
+                  run:
+                    shell: bash
+                steps:
+                  - run: python3 lint/test_a.py
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn(f"line {self.line_of(text, 'defaults:')}", stderr,
+                      f"the exit does not name the job-level defaults line: {stderr}")
+
+    # Item 2: a workflow-level defaults block exits 1, naming its line, with no output.
+    def test_a_workflow_level_defaults_exits_1_naming_its_line(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            defaults:
+              run:
+                shell: bash
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: python3 lint/test_a.py
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn(f"line {self.line_of(text, 'defaults:')}", stderr,
+                      f"the exit does not name the workflow-level defaults line: {stderr}")
+
+    # Item 3: a backslash at a line's end joins that line to the next, so the command is the joined line's first word.
+    def test_a_line_join_with_a_backslash_resolves_the_command(self):
+        a = "lint/test_a.mjs"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: |
+                      node --test \\
+                        lint/test_a.mjs
+            """)
+        outputs, _ = self.run_outputs(with_checks({a: "old\n"}, text), {a: "new\n"})
+        windows, _ = self.os_lists(outputs)
+        self.assertEqual(windows, [a], "a backslash-joined run line did not list its test on Windows")
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "node --test"},
+                         "a backslash-joined run line did not resolve its command to node --test")
+
+    # Item 4: a chain before the test path is not a command word. The run line exits 1, naming its line.
+    def chained_line_exits_1(self, run):
+        """A checks.yml whose one windows run line is `run`, with a test changed. Exit 1, no output, the line named."""
+        a = "lint/test_a.py"
+        text = ("name: fixture checks\non: pull_request\njobs:\n  windows:\n    runs-on: windows-latest\n"
+                f"    steps:\n      - run: {run}\n")
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn(f"line {self.line_of(text, run)}", stderr, f"the exit does not name the chained run line: {stderr}")
+
+    def test_a_chain_and_before_the_test_path_exits_1_naming_its_line(self):
+        self.chained_line_exits_1("python3 lint/gen.py && python3 lint/test_a.py")
+
+    def test_a_chain_semicolon_before_the_test_path_exits_1_naming_its_line(self):
+        self.chained_line_exits_1("python3 lint/gen.py; python3 lint/test_a.py")
+
+    def test_a_chain_pipe_before_the_test_path_exits_1_naming_its_line(self):
+        self.chained_line_exits_1("python3 lint/gen.py | python3 lint/test_a.py")
+
+    # Item 4 control: a chain after the test path leaves the command word as the path's own command.
+    def test_a_chain_after_the_test_path_still_resolves_the_command(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: python3 lint/test_a.py && echo ok
+            """)
+        outputs, _ = self.run_outputs(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "python3"},
+                         "a chain after the test path changed its command")
+
+    # Item 4 control: a pipe inside quotes is part of an argument, not a chain. A naive split on | would break it.
+    def test_a_quoted_pipe_before_the_test_path_is_not_a_chain(self):
+        a = "lint/test_a.mjs"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: node --test --test-name-pattern="a|b" lint/test_a.mjs
+            """)
+        outputs, _ = self.run_outputs(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "node --test"},
+                         "a pipe inside quotes was read as a chain, which changed the command")
+
+    # Item 5: a powershell step's backtick at a line's end continues the line, as a backslash does in bash.
+    def test_a_powershell_backtick_continuation_resolves_the_command(self):
+        a = "lint/test_x.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - shell: powershell
+                    run: |
+                      python `
+                        lint\\test_x.py
+            """)
+        repo, sha, out = self.fixture(with_checks({a: "old\n"}, text), {a: "new\n"})
+        r, outputs = self.select(repo, sha, out)
+        self.assertEqual(r.returncode, 0,
+                         f"a powershell backtick at a line's end was not joined to the next line: {r.stderr}")
+        windows, _ = self.os_lists(outputs)
+        self.assertEqual(windows, [a], "a backtick-continued powershell run line did not list its test on Windows")
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "python"},
+                         "a backtick-continued powershell run line did not resolve its command to python")
+
 
 if __name__ == "__main__":
     unittest.main()
