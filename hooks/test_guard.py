@@ -9823,6 +9823,11 @@ sh("env: walk safety hole, cd into a folder that holds an env file, then a recur
 _CD_INTO_HELD_SRC = "cd " + slash(ENVWALK_HELD) + " && grep -r K src"
 sh("env: walk control, cd into the env folder, then a search of its src folder with no env file, allowed: "
    + _CD_INTO_HELD_SRC, _CD_INTO_HELD_SRC, "allow", cwd=ENVWALK_CLEAN)
+# The flip: a search after `cd` into a folder with no env file is judged there, so it is allowed, though the
+# folder the shell started in holds an env file. The walk reads that folder today, so this is red now.
+_CD_OUT_TO_CLEAN = "cd " + slash(ENVWALK_CLEAN) + " && grep -r K ."
+sh("env: walk, cd out of a folder that holds an env file into one with none, then a recursive grep, allowed: "
+   + _CD_OUT_TO_CLEAN, _CD_OUT_TO_CLEAN, "allow", cwd=ENVWALK_HELD)
 
 
 # =========================================================================== git env set
