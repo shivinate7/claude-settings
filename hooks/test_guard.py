@@ -13281,6 +13281,40 @@ add("builder-test: continue-on-error added under a test step is refused", "deny"
 add("builder-test: if: false added under a test step is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + IF_FALSE,
     carries=("test-author", "Report"), **B)
+# A mutation test is a test run too: a disabled mutate step reads green while its mutants go unrun. Its file is
+# named in AUTHOR_MUTATION_TESTS, not a test_ name, so the step check must count that list. The controls keep a
+# non-test script, a near-miss hooks/mutate_x.py and a timeout change on the mutate step allowed.
+MUTATE_GUARD = ("      - name: Guard mutation test\n        run: python3 hooks/mutate_guard.py\n"
+                "        timeout-minutes: 25\n")
+MUTATE_GUARD_CONTINUE = ("      - name: Guard mutation test\n        continue-on-error: true\n"
+                         "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_IF_FALSE = ("      - name: Guard mutation test\n        if: false\n"
+                         "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_TIMEOUT = MUTATE_GUARD.replace("minutes: 25", "minutes: 30")
+MUTATE_SWEEP = "      - name: Mutate sweep\n        run: python3 janitor/mutate_sweep.py\n"
+MUTATE_SWEEP_CONTINUE = ("      - name: Mutate sweep\n        continue-on-error: true\n"
+                         "        run: python3 janitor/mutate_sweep.py\n")
+SOME_TOOL = "      - name: Some tool\n        run: python3 hooks/some_tool.py\n"
+SOME_TOOL_CONTINUE = ("      - name: Some tool\n        continue-on-error: true\n"
+                      "        run: python3 hooks/some_tool.py\n")
+MUTATE_X = "      - name: Mutate tool\n        run: python3 hooks/mutate_x.py\n"
+MUTATE_X_CONTINUE = ("      - name: Mutate tool\n        continue-on-error: true\n"
+                     "        run: python3 hooks/mutate_x.py\n")
+add("builder-test: continue-on-error added under the mutate_guard step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the mutate_sweep step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_SWEEP, new_string=LINT + MUTATE_SWEEP_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the mutate_guard step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added to a step running hooks/some_tool.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + SOME_TOOL, new_string=LINT + SOME_TOOL_CONTINUE, **B)
+add("builder-test: continue-on-error added to a step running hooks/mutate_x.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_X, new_string=LINT + MUTATE_X_CONTINUE, **B)
+add("builder-test: a timeout change on the mutate_guard step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_TIMEOUT, **B)
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
