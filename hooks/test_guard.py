@@ -5425,6 +5425,11 @@ sh("git-after-cd: an if ! check whose then body is echo of a substitution holdin
 # the push after the if is gated. A file redirect there could fail and skip the exit, so it stays refused.
 sh("git-after-cd: an if ! check whose then body is echo to an fd copy && exit 1, then ; a git push -u, passes",
    "if ! pytest -q; then echo bad >&2 && exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# `>&-` closes stdout, so the echo fails and its && skips the exit: the push after the if runs. A close can fail
+# a write, so it is not an fd copy that cannot fail, and the push is refused.
+sh("git-after-cd: an if ! check whose then body is echo to a closed stdout && exit 1, then ; a git push -u, is refused",
+   "if ! pytest -q; then echo bad >&- && exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
