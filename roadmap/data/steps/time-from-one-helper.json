@@ -1,11 +1,11 @@
 {
   "title": "One shared helper prints the Central time, so no session types a time from memory",
   "why": "Sessions keep typing times from memory: triage, lanes and the coordinator sent guessed times on Nov 8 (10:04, 10:16-10:20 and 10:25 CST, each off by 1-8 minutes).",
-  "note": "Filed 10:25 CST Nov 8 from the owner's ask, 10:17 CST (\"yes\"), relayed by the coordinator; a gap fix under item 410 a. Topic written-time. The cause fix; related guards after the fact: message-time-matches-clock, stamp-check-page-and-roadmap. Sightings Nov 8: lane record-claim-cites-code (session_013NEJL33wvLc6xtDnBTJDAw) stamped 12:08 CST at 12:06 and said it had read `date` (12:06 CST), after two guessed times at 11:29; the coordinator stamped 11:50 and 11:52 at 11:45-11:47; triage wrote 11:49 at 11:46. The lane proposes a PreToolUse check on send_message and PR comment bodies that refuses a US-zone time more than 2 minutes from the clock, starting no process. Lane to confirm scope. Triage drifted again 12:31 CST Nov 8: wrote 12:33 and 12:34 on items 354 and 440, a thread reply and three messages; the page replies were fixed, the thread reply and messages keep the wrong times. Lane lint-before-record-push wrote 13:16 CST at 13:10 CST Nov 8 (six minutes ahead).",
+  "note": "Filed 10:25 CST Nov 8 from the owner's ask, 10:17 CST (\"yes\"), relayed by the coordinator; a gap fix under item 410 a. Topic written-time. The cause fix; related guards after the fact: message-time-matches-clock, stamp-check-page-and-roadmap. Sightings Nov 8: lane record-claim-cites-code (session_013NEJL33wvLc6xtDnBTJDAw) stamped 12:08 CST at 12:06 and said it had read `date` (12:06 CST), after two guessed times at 11:29; the coordinator stamped 11:50 and 11:52 at 11:45-11:47; triage wrote 11:49 at 11:46. The lane proposes a PreToolUse check on send_message and PR comment bodies that refuses a US-zone time more than 2 minutes from the clock, starting no process. Lane to confirm scope. Triage drifted again 12:31 CST Nov 8: wrote 12:33 and 12:34 on items 354 and 440, a thread reply and three messages; the page replies were fixed, the thread reply and messages keep the wrong times. Lane lint-before-record-push wrote 13:16 CST at 13:10 CST Nov 8 (six minutes ahead). Triage wrote 13:16 CST at 13:15 CST Nov 8 (message to lane past-ruling-on-send) and 19:17Z on item 441 (fixed to 19:15Z before the write).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKyggQsYbfxs62CE1mx",
   "status": "doing",
   "order": 729,
-  "updatedAt": "2026-11-08T13:11:00-06:00"
+  "updatedAt": "2026-11-08T13:15:00-06:00"
 }
