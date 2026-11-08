@@ -15213,8 +15213,7 @@ sh("builder-refuse: a builder's merge of main that conflicts in a test file, res
 
 # A builder's fresh worktree checks out a test-author's merge commit (a resolved test file and a resolved
 # product file). That merge is the test-author's commit, handed over by checkout, so the builder's product
-# edit is allowed. The test-author's own checkout of the same merge is refused by the conflicted-merge case
-# above (its `commit (merge)` is the agent's own reflog entry).
+# edit is allowed.
 _bd_author_merge = diff_repo("bd-author-merge-checkout", _author_merge_checkout)
 sh("builder-refuse: a builder in a fresh worktree that checks out a test-author's merge commit is allowed at commit",
    COMMIT, "allow", cwd=_bd_author_merge, agent_id="bld1", agent_type="builder")
