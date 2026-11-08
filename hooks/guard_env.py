@@ -12,7 +12,7 @@ import warnings
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _git, _split_heredocs,
-    _without_message_values, is_powershell, norm, segment_tokens, split_segments,
+    _without_message_values, dir_before_segment, is_powershell, norm, segment_tokens, split_segments,
 )
 
 
@@ -958,13 +958,14 @@ def _quoted_words(segment: str, keep_newlines=False):
     return [w.replace("\0", " ").replace("\1", "\n") for w in "".join(chunks).split()]
 
 
-def _env_words(segment: str, walk: bool = False):
+def _env_words(segment: str, walk: bool = False, keep_newlines: bool = False):
     """Return (words, index of the command word, command word) of one segment, redirects spaced
-    into words of their own. `walk` also looks through the wrappers a folder search hides behind:
+    into words of their own. `keep_newlines` is `_quoted_words`'s. `walk` also looks through the
+    wrappers a folder search hides behind:
     a subshell paren, a `{` brace group, `command [-p]`, `env [-i] [-u NAME] [--] [VAR=value]...` and
     `nice [-n N | -nN | -N | --adjustment N | --adjustment=N] [--]`. The
     other callers read each of those as the command itself."""
-    words = _quoted_words(_blank_messages(segment))
+    words = _quoted_words(_blank_messages(segment), keep_newlines)
     if walk and words:
         # A lone `{` opens a brace group. A `{` glued to a word is part of the command name to bash.
         while words and (words[0] == "{" or words[0].startswith("(")):
@@ -1324,46 +1325,110 @@ def _pwd_rest(word: str, pwd_text: bool):
     return None if found is None else (found.group(1) or "")
 
 
-def _env_walk(texts, cwd: str):
+def _glob_could_pick_env(glob: str, fold: bool) -> bool:
+    """True when `glob` matches a sample env file name (`ENV_SAMPLE_NAMES`). A glob with a `/` is
+    judged by its last part, as the folder in front of it can be any folder. A glob that ends in `/`
+    picks every file under a folder."""
+    tail = glob.rpartition("/")[2]
+    return not tail or any(_glob_picks(name, name, tail, fold, by_name=True) for name in ENV_SAMPLE_NAMES)
+
+
+def _rules_skip_env(rules) -> bool:
+    """True when the search reads no env file by its glob rules (grep's, or rg's include rules). The
+    first rule is an include, so a file that no rule matches is not read, and no include glob could
+    pick an env file name. With no rule, or a first rule that excludes, a file no rule matches is read."""
+    return bool(rules) and rules[0][0] == "include" and not any(
+        kind == "include" and _glob_could_pick_env(glob, fold) for kind, glob, fold, _ in rules)
+
+
+# The shell commands that run a string as a command of their own.
+ENV_SHELL_STRING_COMMANDS = ("bash", "sh", "eval")
+# The long options of bash and sh that take a value word, so the word is no script.
+ENV_SHELL_VALUE_LONG = ("--rcfile", "--init-file")
+
+
+def _shell_string(words, position: int, command: str) -> str:
+    """The text a shell runs from a string, else ''. `bash -c STRING` and `sh -c STRING` (the `-c` may
+    sit in a cluster such as `-lc`) run the first word after their options. `eval` runs its words
+    joined by spaces. Each word is read by `_shell_value`, the tokenizer's quote removal."""
+    if command == "eval":
+        return " ".join(_shell_value(word) for word in words[position + 1:])
+    run, i = False, position + 1
+    while i < len(words):
+        word = _flag_word(words[i])
+        if word in ("-", "--", "+") or not word.startswith(("-", "+")):
+            return _shell_value(words[i]) if run else ""
+        long_option = word.startswith("--")
+        run = run or (word[0] == "-" and not long_option and "c" in word)
+        i += 2 if word in ENV_SHELL_VALUE_LONG or (not long_option and word[-1] in "oO") else 1
+    return ""
+
+
+def _env_walk(texts, cwd: str, depth: int = 0):
     """Return (reason, log) when `rg` or `ag` with a hidden flag, `rg` with a positive glob, or a
     recursive grep, walks a folder that holds an env file on disk. The
-    folder is each path word that is a folder, or `cwd` when no path is named. For rg and ag no
-    pipe or `<` may feed the search either; a recursive grep walks `cwd` whatever feeds it. `rg
-    --files` lists names and reads no contents.
+    folder is each path word that is a folder, or the folder the command runs in when no path is
+    named. For rg and ag no pipe or `<` may feed the search either; a recursive grep walks that
+    folder whatever feeds it. `rg --files` lists names and reads no contents.
+
+    The folder the command runs in is `cwd`, moved by each literal `cd <dir>` earlier in the command
+    (`dir_before_segment`). A `cd` the guard cannot resolve (a variable, `popd`, a folder that does
+    not exist) leaves the search at `cwd`.
 
     The search is found behind a subshell paren, a brace group, `command`, `env` and `nice`
-    (`_env_words`). An unquoted comma brace list in a word (`{a,b}`) is expanded as bash expands it. A path
-    word that starts with `$PWD`, `${PWD}` or a `pwd` substitution is `cwd`. A glob word is expanded
-    against `cwd` as the shell does (no dotfile).
+    (`_env_words`). A string that `bash -c`, `sh -c` or `eval` runs is a command of its own: it is cut
+    by `_substitutions` and walked from the folder the shell command runs in. An unquoted comma brace
+    list in a word (`{a,b}`) is expanded as bash expands it. A path word that starts with `$PWD`,
+    `${PWD}` or a `pwd` substitution is that folder. A glob word is expanded against it as the shell
+    does (no dotfile).
 
     The files read are narrowed as the tool narrows them. A grep `--include` and `--exclude` glob
     decides each file by the last of them that matches, on the file's base name alone. An rg positive
     `-g` or `--iglob` glob picks the files read, and reads a file that is hidden or ignored too. A glob
-    with a `/` matches the path from `cwd` (`_glob_anchor`). With no hidden flag, rg reads only the
-    dotfiles a glob picks. An rg `-t` type picks by its
-    globs, and a type the guard does not list picks every file. For rg and ag with no flag that turns
-    the ignore rules off, a file or folder that the checkout ignores is not read, so it is skipped
-    (`_ignored_paths`, one call, made only when the first walk found a file or ran past the cap). An
-    ignored folder that a positive glob picks is entered, as rg enters it.
+    with a `/` matches the path from that folder (`_glob_anchor`). With no hidden flag, rg reads only
+    the dotfiles a glob picks. An rg `-t` type picks by its globs, and a type the guard does not list
+    picks every file. When no include glob (rg `-g` or `--iglob`, grep `--include`) matches a sample
+    env file name (`_rules_skip_env`), the search reads no env file, so the folder is not walked and
+    its size is no reason to refuse. A search with an rg `-t` type is always walked. For rg and ag with no flag that turns the ignore rules off, a file or folder
+    that the checkout ignores is not read, so it is skipped (`_ignored_paths`, one call, made only
+    when the first walk found a file or ran past the cap). An ignored folder that a positive glob
+    picks is entered, as rg enters it.
 
     FAILS CLOSED: an rg flag that is in neither of the guard's flag tables might take a word, so the
-    search is walked as if it took one, and `cwd` is walked when the words left could all be that
+    search is walked as if it took one, and the folder is walked when the words left could all be that
     flag's value.
 
-    ACCEPTED LIMITS: a path word with any other variable or substitution is not resolved, a `cd`
-    earlier in the command is not followed (a path reads against `cwd`), any other wrapper
-    (`sudo`, `xargs`, `env -C`) is not looked through, a search in the body of a heredoc is not
-    walked, an rg `!` glob is not read, a brace sequence (`{a..c}`) is not expanded, and an ignore
-    file other than the checkout's own that skips the file is not read, so such a search of a folder
-    with an env file is refused.
+    ACCEPTED LIMITS: a path word with any other variable or substitution is not resolved, any other
+    wrapper (`sudo`, `xargs`, `env -C`) or shell (`zsh`, `dash`, `ksh`, `bash` with a script file) is
+    not looked through, a search in the body of a heredoc is not walked, an rg `!` glob is not read,
+    a brace sequence (`{a..c}`) is not expanded, a glob that no sample name matches (`*.py`) clears
+    the walk though a name with an env stem and a `.py` suffix would match it, and an ignore file
+    other than the checkout's own that skips the file is not read, so such a search of a folder with
+    an env file is refused.
     """
+    if depth > ENV_MAX_DEPTH:
+        return ENV_DEPTH_REASON, "shell strings nested past %d levels" % ENV_MAX_DEPTH
     pwd_text = any(text.strip() in ("pwd", "pwd -P", "pwd -L") for text, _ in texts[:-1])
     for text, _ in texts:
         ends = []
-        for number, piece in enumerate(split_segments(text, ends)):
+        pieces = split_segments(text, ends)
+        for number, piece in enumerate(pieces):
             fed = number > 0 and ends[number - 1] == "|"
             for part, segment in enumerate(_env_parts(piece)):
                 words, position, command = _env_words(segment, walk=True)
+                if command in ENV_SHELL_STRING_COMMANDS:
+                    # The string keeps its newlines, each of which ends a command.
+                    words, position, command = _env_words(segment, walk=True, keep_newlines=True)
+                    inner = _shell_string(words, position, command)
+                    inner_texts, too_deep = _substitutions(inner) if inner else ([], False)
+                    if too_deep:
+                        return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
+                    if inner_texts:
+                        here = dir_before_segment(pieces, number, cwd, ends) or cwd
+                        refusal = _env_walk(inner_texts, here, depth + 1)
+                        if refusal[0]:
+                            return refusal
+                    continue
                 grep = command in ENV_GREP_COMMANDS + (ENV_GREP_RECURSIVE_COMMAND,)
                 if not (command in ENV_WALK_COMMANDS or grep):
                     continue
@@ -1380,6 +1445,14 @@ def _env_walk(texts, cwd: str):
                     # With no hidden flag, rg reads a dotfile only when a positive glob picks it, and
                     # the walk judges each glob against the env files it finds.
                     continue
+                if grep:
+                    rules, exclude_dir = _grep_globs(words, position)
+                else:
+                    rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
+                # An rg type is always walked: its globs name a suffix, which an env stem can carry.
+                if (grep or not extras["types"]) and _rules_skip_env(rules):
+                    continue
+                here = dir_before_segment(pieces, number, cwd, ends) or cwd
                 paths = [i for i in plain if i not in skip and i != extras["pattern"]]
                 folders = []
                 for i in paths:
@@ -1389,20 +1462,16 @@ def _env_walk(texts, cwd: str):
                         word = "." + rest
                     elif re.search(r"[$`]", word):
                         continue
-                    target = os.path.join(cwd, os.path.expanduser(word))
+                    target = os.path.join(here, os.path.expanduser(word))
                     # A quoted glob is no glob to the shell, so it is not expanded.
                     expand = re.search(r"[*?\[]", word) and words[i] == word
                     folders += [f for f in (glob.glob(target) if expand else [target])
                                 if os.path.isdir(f) and f not in folders]
                 if len(paths) <= extras["unknown"] and (
                         grep or not ((fed and part == 0) or "<" in words)):
-                    folders += [cwd] * (cwd not in folders)
-                if grep:
-                    rules, exclude_dir = _grep_globs(words, position)
-                else:
-                    rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
+                    folders += [here] * (here not in folders)
                 for folder in folders:
-                    anchor = _glob_anchor(folder, cwd)
+                    anchor = _glob_anchor(folder, here)
                     found = _env_file_in(folder, rules, exclude_dir, by_name=grep, anchor=anchor)
                     if found and not grep and not no_ignore:
                         found = _env_file_in(folder, rules, exclude_dir, ignored=_ignored_paths(folder),

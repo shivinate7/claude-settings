@@ -71,7 +71,9 @@ Known limits:
 - ag and grep do not fail closed. An unknown flag there is read as a switch, so the walk can miss a folder the search reads.
 - An rg `!` glob is not read.
 - A brace sequence, such as `{a..c}`, is not expanded.
-- A `cd` earlier in the command is not followed. Other variables and substitutions in a path word are not resolved.
+- A literal `cd <dir>` earlier in the command is followed, so the search is judged in the folder it runs in. A `cd` the guard cannot resolve (a variable, `popd`, a folder that does not exist) leaves the walk at the starting folder. Other variables and substitutions in a path word are not resolved.
+- A string that `bash -c`, `sh -c` or `eval` runs is walked as a command of its own. `zsh`, `dash`, `ksh` and `bash` with a script file are not looked into.
+- Accepted limit: an rg `-g` or `--iglob` glob, or a grep `--include` glob, that matches none of the sample env file names, such as `*.py`, clears the walk, so a folder past the cap is not refused. A name with an env stem and a `.py` suffix would match that glob and is read. An rg `-t` type is always walked.
 - A search in a heredoc body is not walked.
 - The walk sees a search behind a subshell paren, a `{ ...; }` group, `command`, `env` (with `--` too) or `nice` (with any form of its adjustment flag). A search behind `sudo`, `xargs` or `env -C` is not walked.
 - An ignore file other than the checkout's own is not read. So a search of a folder with an env file is refused, even when such a file skips it.
