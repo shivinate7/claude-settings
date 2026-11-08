@@ -1,0 +1,11 @@
+{
+  "title": "Each test file a lane touches runs on Windows before the batch",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.62,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "Lane lint runs on Linux only, and #1543's trigger runs the Windows shards only when guard files change. So a Windows-only red in a skill test reaches the batch run, drops the lane and costs a full rebuild. Incident: #1472 (map import aliases), T11b in skills/plain-english-map/tests/fact-lines.test.mjs line 817, dropped from batch 63 #1782 at 23:12 CST Nov 7 (runner 8; coordinator, 23:21 CST).",
+  "note": "Fix: #1543's trigger, or lane lint, runs on Windows every test file a lane touches. Not folded into step guard-pr-runs-windows-shards: its PR #1543 is open and scoped to guard diffs, and widening it mid-review restarts its review. Build on #1543's trigger after it merges, or stack on it. A queue fix under the item 384 hold. Slug from the coordinator; title by triage.",
+  "updatedAt": "2026-11-07T23:22:00-06:00"
+}
