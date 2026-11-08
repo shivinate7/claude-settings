@@ -1644,6 +1644,39 @@ def case_step_prefixed_folder_path_is_text():
              entry_of(task_item(["Check the output of `%s`" % span])), None)
 
 
+def case_step_wrapper_flags_before_a_cmdlet_path_is_a_shell_line():
+    # `_cmdlet_prefix` skips a command-wrapper word (`sudo`, `nice`, `time`, `timeout`) but not the flags or values
+    # after it, so the cmdlet path behind them is never reached: `sudo -u bob C:\tools\Get-Thing` passes on main. The
+    # forward-slash forms are refused on main already, so they are the controls. The reader to reuse is guard_core's
+    # token reader: guard_core._walk_wrappers walks COMMAND_WRAPPERS, and _wrapper_flags skips each flag and its value
+    # (WRAPPER_VALUE_FLAGS: `-u bob` for sudo, `-n 5` for nice). Its `timeout` branch skips the DURATION word (`5`).
+    # That reader takes tokens, and the POSIX reader strips the backslashes of a raw path, so the fix must walk the
+    # segment's raw words the same way.
+    refused = ("command-in-item", "shell line")
+    for span in (r"sudo -u bob C:\tools\Get-Thing", r"nice -n 5 C:\tools\Get-Thing", r"time -p C:\tools\Get-Thing",
+                 r"timeout 5 C:\tools\Get-Thing"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+    for span in ("sudo -u bob C:/tools/Get-Thing", "nice -n 5 C:/tools/Get-Thing", "time -p C:/tools/Get-Thing",
+                 "timeout 5 C:/tools/Get-Thing"):
+        page("a step holding `%s` is refused as a shell line, a control" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+
+
+def case_step_wrapper_flags_before_a_folder_or_prose_is_text():
+    # The fix must not over-reach. Flags and values are skipped only to find a cmdlet path, so prose with no path, and
+    # a folder whose path ends in a separator, pass after the same wrapper and flags. All four pass on main already:
+    # the prose names no path, and a folder with a `/` or `\` at its end is text
+    # (case_step_verb_noun_folder_with_slash_is_text). The folder controls have Verb-Noun names, so each tests that the
+    # trailing separator keeps the path check from matching. `nice -n 5 C:\Docs\Notes\` is no control here: main refuses
+    # it with the generic shell-line text, since its POSIX read fails on the trailing `\` (segment_tokens is None) and
+    # the fallback reads `-n` as a flag.
+    for span in ("time -p is the POSIX flag", "sudo -u bob C:\\Docs\\Read-Me/", "nice -n 5 C:\\Docs\\Read-Me/",
+                 "timeout 5 C:\\Docs\\Read-Me\\"):
+        page("a step holding `%s` is text and passes, a control" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+
+
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
 # `[ \t]+` form about 4. The limit sits between them.
 RATIO_LIMIT = 3.0
@@ -2368,6 +2401,8 @@ def main():
                  case_step_span_flag_after_a_prose_determiner_is_text, case_step_camel_verb_cmdlet_is_a_shell_line,
                  case_step_bare_cmdlet_outside_the_verb_list_is_a_shell_line, case_step_foreach_cmdlet_is_a_shell_line,
                  case_step_time_prefix_before_a_cmdlet_path_is_a_shell_line, case_step_prefixed_folder_path_is_text,
+                 case_step_wrapper_flags_before_a_cmdlet_path_is_a_shell_line,
+                 case_step_wrapper_flags_before_a_folder_or_prose_is_text,
                  case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
