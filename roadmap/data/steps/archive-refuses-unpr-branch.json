@@ -1,0 +1,11 @@
+{
+  "title": "An archive of a lane is refused while that lane pushed a branch with no PR",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.34759,
+  "owner": "coordinator",
+  "lane": "session_013NEJL14UraPZKQB8r9Ue3J",
+  "why": "A lane that pushes a branch with no PR and says done leaves work that no runner will ever batch.",
+  "note": "Topic guards. Extends the guard of step lane-closes-after-records. Incident: q_max lane qmax-hosted-db-probe-gate pushed claude/qmax-hosted-db-gate-notes with no PR and said done (19:28 CST Nov 7); the coordinator told it to open a draft PR for runner 9. Filed from the coordinator, 19:28 CST Nov 7.",
+  "updatedAt": "2026-11-07T19:28:00-06:00"
+}
