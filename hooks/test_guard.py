@@ -10391,6 +10391,10 @@ RF_EXPLORE, RF_EXPLORE_AGENT = "explore-pr28", "e4f1c8a3d7b29065"
 RF_RW, RF_RW_AGENT = "record-writer-pr30", "c2e9a4d7f1b08356"
 RF_TA, RF_TA_AGENT = "test-author-pr31", "c6f1b8e3d9a27054"
 RF_PLAN, RF_PLAN_AGENT = "plan-pr32", "f7b2d9e4a1c60835"
+# A Plan spawned with isolation remote, and a builder spawned with an empty isolation input. Each sets its isolation
+# input, so the role's pin is not what decides.
+RF_REMOTE_PLAN, RF_REMOTE_PLAN_AGENT = "plan-remote-pr33", "d3a8f6c1e9b47205"
+RF_EMPTY_BUILDER, RF_EMPTY_BUILDER_AGENT = "builder-empty-pr34", "e9f2b5d7a4c18036"
 # A reviewer named `rev`. A `to` in the `name [ref]` form names it by that name and by the first eight hex of its id.
 RF_REV, RF_REV_AGENT = "rev", "a5eb5d25c7e90b41"
 # A record the reader cannot parse: a user record whose message is a string, not an object.
@@ -10551,6 +10555,11 @@ RF_TRANSCRIPTS = {
     "record-writer-finished": rr_session(rf_launch("w1", "record-writer", RF_RW, RF_RW_AGENT), rf_finish("w1")),
     "test-author-finished": rr_session(rf_launch("t1", "test-author", RF_TA, RF_TA_AGENT), rf_finish("t1")),
     "plan-finished": rr_session(rf_launch("p1", "Plan", RF_PLAN, RF_PLAN_AGENT), rf_finish("p1")),
+    # A Plan that ran with isolation remote, and a builder whose isolation input is empty: both finished.
+    "remote-plan-finished": rr_session(
+        rf_launch("p1", "Plan", RF_REMOTE_PLAN, RF_REMOTE_PLAN_AGENT, isolation="remote"), rf_finish("p1")),
+    "builder-empty-isolation-finished": rr_session(
+        rf_launch("b1", "builder", RF_EMPTY_BUILDER, RF_EMPTY_BUILDER_AGENT, isolation=""), rf_finish("b1")),
     # No spawn at all: the empty state.
     "no-spawn": rr_session(),
 }
@@ -10626,12 +10635,20 @@ rf_refuse("a finished record-writer with no isolation input is refused: agents/r
 rf_refuse("a finished test-author with no isolation input is refused: agents/test-author.md pins a worktree",
           {"to": RF_TA, "message": RF_MSG}, rf_path("test-author-finished"), carries=("fresh test-author",),
           config=RF_POINTER)
+# The input is set to remote, which leaves no local tree after the run, so it is refused as a worktree is. Plan's
+# pin is none: the input alone decides.
+rf_refuse("a finished Plan spawned with isolation remote is refused: remote leaves no tree, and the Plan pins none",
+          {"to": RF_REMOTE_PLAN, "message": RF_MSG}, rf_path("remote-plan-finished"), carries=("fresh Plan",),
+          config=RF_POINTER)
 # Allowed: the target runs, is a finished spawn with no worktree that is not a reviewer, is not in the transcript,
 # or the send is not the main session's.
 rf_allow("a running reviewer is allowed, though another spawn's finish notice is in the transcript",
          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-running"))
 rf_allow("a finished Plan with no isolation input passes: agents/plan.md pins no isolation",
          {"to": RF_PLAN, "message": RF_MSG}, rf_path("plan-finished"), config=RF_POINTER)
+# The input is set, even empty, so the builder's worktree pin is not read: a set input that is not worktree passes.
+rf_allow("a finished builder spawned with an empty isolation input passes: the set input beats the worktree pin",
+         {"to": RF_EMPTY_BUILDER, "message": RF_MSG}, rf_path("builder-empty-isolation-finished"), config=RF_POINTER)
 rf_allow("a running builder spawned with isolation worktree passes",
          {"to": RF_WT_RUNNING, "message": RF_MSG}, rf_path("worktree-builder-running"))
 rf_allow("a finished Explore spawned with no isolation passes",
