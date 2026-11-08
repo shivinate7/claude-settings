@@ -442,7 +442,7 @@ MUTATIONS = [
     ("reviewed-head-push: a push after another command may send nothing",
      'and not (first and _sends_nothing(scope[1], where, d["head"]["sha"]))]',
      'and not _sends_nothing(scope[1], where, d["head"]["sha"])]', "guard",
-     'reviewed-head-push: a commit chained before an explicit push to the lane asks, after both reads'),
+     'reviewed-head-push: a commit chained before an explicit push to the lane denies, because a chained ask runs alone, after both reads'),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",

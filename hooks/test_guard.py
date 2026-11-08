@@ -14233,8 +14233,7 @@ rpush_case("reviewed-head-push: a -u push of a newer local commit onto the lane 
 
 # A commit chained before the push. The guard judges the push before the chain runs, so local HEAD still equals the
 # pull request's live head, and the push would send the commit the chain makes. The ask is held, and an ask command
-# chained with another command denies (owner ruling ask-commands-run-alone, 2026-10-14; harmless forms 2026-10-15
-# 12:00 CDT). Both reads still run, so each case proves the push was judged, not dropped. The bare push names its lane
+# chained with another command denies (decision ask-commands-run-alone). Both reads still run, so each case proves the push was judged, not dropped. The bare push names its lane
 # through the branch's upstream, so it is judged on an origin lane too.
 rpush_case("reviewed-head-push: a commit chained before an explicit push to the lane denies, "
            "because a chained ask runs alone, after both reads",
