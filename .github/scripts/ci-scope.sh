@@ -82,6 +82,19 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *.md) ;;
       *) on="$on $ALL " ;;
     esac
+    # shoot also covers the files the waiting page export suite (skills/waiting-page/test_export_page.py) imports, lazy
+    # imports included: page_check.py reaches the guard family, question_form.py, _nowindow.py and report_guard.py;
+    # the suite's run folder is lint/_test_temp.py; SKILL.md holds the steps it reads. This is a second case, so the
+    # flags each path sets above stay as they are, and guard_test_* (not imported) stays out. Chosen over one arm
+    # (hooks/*.py, lint/*.py): that would start the browser job on every hook and lint edit, 88 + 94 files, most of
+    # which the suite never reads, and the control cases pin hooks/mutate_shared.py and hooks/config_watch.py off.
+    # The cost of the list is drift: a new import of the suite needs a line here. test_ci_scope.py pins the paths.
+    # The cost per start: the suite ran 57 s, the browser install adds to it, the job cap is 10 min, and the job
+    # runs beside the others on its own runner, so it adds billed minutes and no wall time.
+    case "$f" in
+      hooks/guard_test_*) ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/layout.py|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/export_page.py) on="$on shoot " ;;
+    esac
   done <<< "$files"
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
   # the guard suite see. An unreadable or empty list turns everything on.
