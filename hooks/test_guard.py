@@ -1031,6 +1031,11 @@ else:
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
             print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
+    elif re.fullmatch(r"issues/comments/\d+", rel) and rel.rsplit("/", 1)[1] in state["comments"]:
+        # GET of a conversation comment: its issue_url names the pull request the comment sits on, as GitHub's does.
+        comment = rel.rsplit("/", 1)[1]
+        print(json.dumps({"id": int(comment), "body": "", "issue_url": "https://api.github.com/" + path.split("/issues/comments/")[0]
+                          + "/issues/%d" % state["comments"][comment]}))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
@@ -1052,13 +1057,16 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None, head_sha=None):
+                 count_file=None, compares=None, head_sha=None, comments=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
 
     `head_sha`, when given, is the sha the pull request's head reports. Without it the head reports the fixed placeholder sha that the state's `pr` record starts with.
+
+    `comments`, when given, maps a conversation comment's id to the number of the pull request it sits on. The stand-in answers
+    that comment's read with its issue_url; any other comment id is a 404.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -1121,6 +1129,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
+        "comments": {str(k): int(v) for k, v in (comments or {}).items()},  # comment id -> the pull request number it sits on
     }
     if head_sha:
         state["pr"]["head"]["sha"] = head_sha
@@ -7086,6 +7095,20 @@ sh("push: main, a bare push under push.default current on main asks",
 sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
    VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
 
+# The host's file-write tools push too. A write to main or master asks, as the shell push does (rule push-main); a write to a
+# feature branch is silent. Each call names its branch in its input, so no repo is read.
+PUSH_MAIN_TOOLS = (
+    ("mcp__github__push_files", {"files": [{"path": "f.txt", "content": "x"}], "message": "x"}),
+    ("mcp__github__create_or_update_file", {"path": "f.txt", "content": "x", "message": "x"}),
+    ("mcp__github__delete_file", {"path": "f.txt", "message": "x"}),
+)
+for _tool, _fields in PUSH_MAIN_TOOLS:
+    for _branch in ("main", "master"):
+        add("push-main: %s to %s asks" % (_tool, _branch), "ask", PUSH_MAIN_RULE, tool=_tool, cwd=NOGIT,
+            owner="y", repo="x", branch=_branch, **_fields)
+    add("push-main: %s to a feature branch is silent" % _tool, "allow", silent=True, tool=_tool, cwd=NOGIT,
+        owner="y", repo="x", branch="feat", **_fields)
+
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
 push_case("lane from main, -u HEAD is silent", "-u origin HEAD", "allow", cwd=PUSHLANE, silent=True)
@@ -9147,12 +9170,13 @@ def _build_stamp_repos():
 
 lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE],
              _build_stamp_repos)
-add("merge-batch: the merge tool of the host is allowed past an ignored running workflow on another ready pr", "allow",
-    tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
+add("merge-batch: the merge tool of the host asks, not denies, past an ignored running workflow on another ready pr", "ask",
+    BARE_MERGE, carries=BARE_SAYS, tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
     env_path=GHRUNIGNORED + os.pathsep + PY_PATH)
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
-add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
-    tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
+add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "ask",
+    BARE_MERGE, carries=BARE_SAYS, tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y",
+    env_path=GHPINNED + os.pathsep + PY_PATH)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
@@ -9198,6 +9222,17 @@ for _name, _where in (
        cwd=_where, **_BARE_GUARD)
 sh("bare-merge: a subfolder of a repo with no stamp.json allows", "gh pr merge 12 --squash", "allow",
    silent=True, cwd=os.path.join(STAMPNONE, "hooks"), **_BARE_GUARD)
+# The host's merge tools are judged as `gh pr merge` is (decision bare-merge-asks): a green merge through either tool asks in a
+# repo with a merge block, and allows in a repo without one. A pending head still denies first.
+for _tool in ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge"):
+    add("bare-merge: %s of the host asks in a repo with a merge block" % _tool, "ask", BARE_MERGE, carries=BARE_SAYS,
+        tool=_tool, cwd=STAMPREPO, pullNumber=12, repo="x", owner="y", **_BARE_GUARD)
+    for _name, _where in (("a repo with no stamp.json", STAMPNONE), ("a stamp.json with no merge block", STAMPNOBLOCK)):
+        add("bare-merge: %s of the host allows in %s" % (_tool, _name), "allow", silent=True, tool=_tool, cwd=_where,
+            pullNumber=12, repo="x", owner="y", **_BARE_GUARD)
+add("bare-merge: the merge tool of the host still denies a pending head in a repo with a merge block", "deny", "merge-checks",
+    carries="pending", tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=12, repo="x", owner="y",
+    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("bare-merge: reading a pull request in a repo with a merge block allows",
    "gh pr view 12", "allow", silent=True, cwd=STAMPREPO)
 sh("bare-merge: the merge tool in a repo with a merge block allows",
@@ -9868,7 +9903,10 @@ FAMILY = "review-record"
 # (merge/merge.py review_body), so a case cannot drift from the form the merge tool parses.
 REVIEW_RULE = "pr-review-record"
 MCP_COMMENT = "mcp__github__add_issue_comment"
+MCP_UPDATE = "mcp__github__update_issue_comment"
 REVIEW_PR = 12
+REVIEW_COMMENT = 4242                         # a conversation comment on REVIEW_PR, answered by the record fakes; not 12, so a read that takes it for a pull request number finds none
+REVIEW_COMMENTS = {REVIEW_COMMENT: REVIEW_PR}
 REVIEW_LIVE = "3a7c9e21" * 5                  # the PR's live head, in every fake below
 REVIEW_TAIL = REVIEW_LIVE[:32] + "0badbeef"   # the live head with a wrong tail, the way a hand-typed sha goes wrong
 REVIEW_OLD = "5e0f1a2b" * 5                   # the head before a push
@@ -9919,8 +9957,8 @@ REVIEW_SKIPPED_ROUND = review_record(rounds=[(1, "reviewer", "claude-sonnet-5-5"
 
 def build_record_fixtures():
     """The pull request tools the record cases name, and the body files the Bash forms read. One folder each."""
-    make_fake_gh(GHRECORD, "main", need=["12"], head_sha=REVIEW_LIVE)
-    make_fake_gh(GHRECORDREPO, "main", need=["y/x", "12"], head_sha=REVIEW_LIVE)
+    make_fake_gh(GHRECORD, "main", need=["12"], head_sha=REVIEW_LIVE, comments=REVIEW_COMMENTS)
+    make_fake_gh(GHRECORDREPO, "main", need=["y/x", "12"], head_sha=REVIEW_LIVE, comments=REVIEW_COMMENTS)
     make_fake_gh(GHRECORDBROKEN, "main", broken=True, head_sha=REVIEW_LIVE)
     write(os.path.join(GHRECORDDIR, "ok.md"), review_record())
     write(os.path.join(GHRECORDDIR, "wrong_tail.md"), review_record(head=REVIEW_TAIL))
@@ -9935,15 +9973,18 @@ def build_record_fixtures():
 lazy_fixture([GHRECORD, GHRECORDREPO, GHRECORDBROKEN, GHRECORDDIR, GHRECORDBRANCH], build_record_fixtures)
 
 
-def mcp_input(body, number=REVIEW_PR):
-    """The input of one call of the comment tool on pull request `number` of y/x."""
+def mcp_input(body, number=REVIEW_PR, comment_id=None):
+    """The input of one call of the comment tool on pull request `number` of y/x. With `comment_id`, the input of the update
+    tool on that comment: it names no pull request."""
+    if comment_id is not None:
+        return {"owner": "y", "repo": "x", "comment_id": comment_id, "body": body}
     return {"owner": "y", "repo": "x", "issue_number": number, "body": body}
 
 
-def mcp_post(name, body, expected, rule=None, carries=(), number=REVIEW_PR):
-    """A case for one call of the comment tool. It reads the live head from the repo the input names (GHRECORDREPO)."""
-    add(name, expected, rule=rule, tool=MCP_COMMENT, cwd=NOGIT, env_path=GHRECORDREPO + os.pathsep + PY_PATH,
-        carries=carries, **mcp_input(body, number))
+def mcp_post(name, body, expected, rule=None, carries=(), number=REVIEW_PR, comment_id=None):
+    """A case for one call of the comment tool, or of the update tool on `comment_id`. It reads the live head from the repo the input names (GHRECORDREPO)."""
+    add(name, expected, rule=rule, tool=MCP_COMMENT if comment_id is None else MCP_UPDATE, cwd=NOGIT,
+        env_path=GHRECORDREPO + os.pathsep + PY_PATH, carries=carries, **mcp_input(body, number, comment_id))
 
 
 def bash_post(name, command, expected, rule=None, carries=()):
@@ -10029,7 +10070,7 @@ bash_post("review-record: a record with a 39-digit Head is refused, gh api -f bo
 
 def review_counted_fake():
     """The counted pull request tool, with its log emptied. Each call it answers is logged."""
-    make_fake_gh(GHRECORDCOUNT, "main", need=["12"], head_sha=REVIEW_LIVE,
+    make_fake_gh(GHRECORDCOUNT, "main", need=["12"], head_sha=REVIEW_LIVE, comments=REVIEW_COMMENTS,
                  count_file=os.path.join(GHRECORDCOUNT, REVIEW_CALLS))
     gh_calls_taken(GHRECORDCOUNT, REVIEW_CALLS)
 
@@ -10137,9 +10178,60 @@ REVIEW_LOG_CHECKS.append(("review-record:an unreadable body file allows the post
                                      GHRECORD + os.pathsep + PY_PATH)))
 REVIEW_LOG_CHECKS.append(("review-record:a plain stdin body the guard cannot read is allowed and noted on stderr, gh pr comment -F -",
                          review_note("Bash", {"command": "some_cmd | %s -F -" % PR_CMD}, GHRECORD + os.pathsep + PY_PATH)))
-# The update tool's input names a comment, not a pull request. Finding the pull request is a second read, and the rule allows one.
-skip_case("review-record: mcp__github__update_issue_comment is not judged",
-          "its input names a comment, not a pull request, and finding the pull request costs a second read per marked update")
+# The update tool names a comment, not a pull request, so the guard finds the pull request from the comment (one read) and
+# reads its live head (a second read). A marked update is judged as a post is; its two reads are the cost pr-review-record states.
+mcp_post("review-record: a record at the live head is allowed, MCP update_issue_comment", review_record(), "allow",
+         comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a full-size record with its footer is allowed, MCP update_issue_comment", REVIEW_FULL, "allow",
+         comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a comment with no marker is allowed, MCP update_issue_comment", "Round 1 ran. No review record yet.",
+         "allow", comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a marker in prose below the first line is allowed, MCP update_issue_comment", REVIEW_PROSE, "allow",
+         comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a wrong head tail is refused, MCP update_issue_comment", review_record(head=REVIEW_TAIL), "deny",
+         rule=REVIEW_RULE, carries=(REVIEW_RENDER,), comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a stale record is refused, MCP update_issue_comment", review_record(head=REVIEW_OLD), "deny",
+         rule=REVIEW_RULE, carries=(REVIEW_RENDER,), comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a record for another pull request is refused, MCP update_issue_comment", review_record(n=REVIEW_PR + 1),
+         "deny", rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a marker with no record is refused, MCP update_issue_comment", REVIEW_MARKER_TEXT, "deny",
+         rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
+mcp_post("review-record: a record with a round skipped is refused, MCP update_issue_comment", REVIEW_SKIPPED_ROUND, "deny",
+         rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
+
+
+def comment_read_check():
+    """The record fakes answer the comment read with the pull request the comment sits on (issue_url ends /issues/12). Without
+    this, a fake that answers wrong would look like a guard bug."""
+    materialize(GHRECORDREPO)
+    env = dict(os.environ, PATH=fake_gh_path(GHRECORDREPO))
+    program = shutil.which("gh", path=env["PATH"])
+    if not program:
+        return False, "the record pull request tool is not on PATH, so the comment read cannot be checked"
+    done = subprocess.run([program, "api", "repos/y/x/issues/comments/%d" % REVIEW_COMMENT], capture_output=True, text=True,
+                          env=env, timeout=60)
+    try:
+        issue = json.loads(done.stdout).get("issue_url", "")
+    except (ValueError, AttributeError):
+        return False, "the comment read does not answer a JSON object: %r" % done.stdout[:120]
+    if not issue.endswith("/issues/%d" % REVIEW_PR):
+        return False, "the comment read names %r, want an issue_url ending /issues/%d" % (issue, REVIEW_PR)
+    return True, "the comment read names pull request %d" % REVIEW_PR
+
+
+REVIEW_LOG_CHECKS.append(("review-record:the record fake answers the comment read with the pull request the comment sits on",
+                         comment_read_check))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update at the live head makes two gh reads, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "allow", 2)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail makes two gh reads, and is refused, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 2)))
+REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update whose comment cannot be read is allowed and noted on stderr, MCP update_issue_comment",
+                         review_note(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT),
+                                     GHRECORDBROKEN + os.pathsep + PY_PATH)))
 
 
 # =========================================================================== 5g. archive of a lane
