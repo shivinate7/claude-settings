@@ -5725,8 +5725,8 @@ sh("check-tail: merge --lane-lint piped to tail, then a background &, is refused
 add("check-tail: ci-job checks --lint piped to grep, then a trailing background &, is refused", "deny",
     "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint | grep FAIL & echo $!")
-add("check-tail: ci-job checks --lint piped to tail, then a trailing background &, is refused", "deny",
-    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL,
+add("check-tail: ci-job checks --lint piped to tail, then a trailing background &, is refused; detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint | tail -3 &")
 sh("check-tail: ci-job checks --lint piped to tail in the foreground, with no &, is allowed",
    "~/.claude/bin/ci-job checks --lint | tail -3", "allow", cwd=NOGIT)
