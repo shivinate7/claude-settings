@@ -128,7 +128,7 @@ FAMILIES = {
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
-    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a git push after a check joined by ; is refused; a && chain, -C with an absolute path, a push that comes first, and reads pass",
+    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a git push after a check joined by ; or a newline is refused unless a || exit protects the check; a && chain, -C with an absolute path, a push that comes first, and reads pass",
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
@@ -5185,10 +5185,12 @@ sh("git-after-cd: a set -e in a subshell, then a failed cd, then ; a git push is
    "(set -e); cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 
 
-# A PUSH AFTER A CHECK JOINED BY ;. A git push that follows a `;`-joined command is refused, with or without a
-# cd before it, and the remedy names `&&`. The cd here lands on a real folder, so git-after-cd sees no stranded
-# shell: the push is judged on its own. The forms git-after-cd already passes stay allowed: the same chain
-# joined by `&&`, a push alone, a fetch then a status, a push that comes first, and a dry run.
+# A PUSH AFTER A CHECK JOINED BY ; OR A NEWLINE. A git push that follows a check joined by `;` or a newline is
+# refused, and the remedy names `&&`: the push runs whatever the check did. A cd between them is looked through
+# only when it lands or a `|| exit` protects it. A check protected by `|| exit` is exempt, since that exit stops
+# the shell before the push. `|| return` and `|| (exit)` do not stop the shell, so the push after them is refused.
+# The forms git-after-cd already passes stay allowed: the same chain joined by `&&`, a push alone, a fetch then a
+# status, a push that comes first, and a dry run.
 sh("git-after-cd: a landed cd, a check, then ; echo, then ; a git push is refused",
    'cd %s && %s commit -q -am "msg" && python3 lint/check_silent_undo.py --upstream origin/b --head HEAD '
    '--strict; echo "undo $?"; %s push origin HEAD:refs/heads/b 2>&1 | tail -1' % (slash(ROOT), VCS, VCS),
@@ -5210,6 +5212,41 @@ sh("git-after-cd: a git push that comes first, then ; echo, passes",
 sh("git-after-cd: a check, then ; a git push --dry-run, a read, passes",
    "python3 lint/check_silent_undo.py --upstream origin/b --head HEAD --strict; "
    "%s push --dry-run origin HEAD:refs/heads/b" % VCS, "allow", cwd=NOGIT)
+# A CHECK THE PUSH CANNOT SEE. The `;` or the newline after a check lets the push run whatever the check did. A cd
+# that lands is looked through, so it does not end the check's reach. ROOT is a real folder, so every cd here lands.
+sh("git-after-cd: a check, then ; a landed cd, then && a git push, is refused",
+   "pytest -q; cd %s && %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then ; git add, commit and push joined by &&, is refused",
+   "pytest -q; %s add -A && %s commit -m m && %s push" % (VCS, VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; a landed cd, then ; a git push, is refused",
+   "pytest -q; cd %s; %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then && a landed cd, then ; a git push, is refused",
+   "pytest -q && cd %s; %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a landed cd, then ; a subshell holding a check, then ; a git push, is refused",
+   "cd %s; (pytest -q); %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then a newline and a git push, is refused",
+   "pytest -q\n%s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+# A CHECK THAT EXIT GUARDS. `|| exit` stops the shell when the check fails, so the push after `;` runs only when the
+# check passed. `|| return` and `|| (exit)` leave the shell running, so the push after them still runs on a failure.
+sh("git-after-cd: a check protected by || exit 1, then ; a git push, passes",
+   "pytest -q || exit 1; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check protected by || return 1, then ; a git push, is refused",
+   "pytest -q || return 1; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check protected by || (exit 1), then ; a git push, is refused",
+   "pytest -q || (exit 1); %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+# Green controls: a landed cd with no check before it, and a check joined to the push by && alone. Only a `;` or a
+# newline makes a push run whatever the check did.
+sh("git-after-cd: a landed cd, then ; a git push, with no check before it, passes",
+   "cd %s; %s push" % (slash(ROOT), VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a check, then && a landed cd, then && a git push, passes",
+   "pytest -q && cd %s && %s push" % (slash(ROOT), VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a check, then && a git push, passes",
+   "pytest -q && %s push" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
