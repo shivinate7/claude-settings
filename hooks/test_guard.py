@@ -6055,6 +6055,21 @@ sh("wsl: a glob in a plain python3 test path is refused",
    "wsl -e python3 hooks/test_*.py", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a glob in a pwsh -File test path is refused",
    "wsl -e pwsh -NoProfile -File hooks/test_*.test.ps1", "deny", rule=WSL_RULE, cwd=NOGIT)
+# A lone `?`, `[` or `]` is a glob character as well, so the literal check refuses it on each runner.
+# A bracket sits in a directory, where the runner's pattern takes it, so only the literal check refuses.
+for _cmd in (
+    "wsl -e node mods/x?.test.mjs",
+    "wsl -e node mods/a[1/x.test.mjs",
+    "wsl -e node mods/a]1/x.test.mjs",
+    "wsl -e python3 hooks/test_?.py",
+    "wsl -e python3 hooks/a[1/test_x.py",
+    "wsl -e python3 hooks/a]1/test_x.py",
+    "wsl -e pwsh -NoProfile -File hooks/test_?.test.ps1",
+    "wsl -e pwsh -NoProfile -File hooks/a[1/x.test.ps1",
+    "wsl -e pwsh -NoProfile -File hooks/a]1/x.test.ps1",
+):
+    sh("wsl: a single glob character in a test path is refused, %s" % _cmd, _cmd, "deny",
+       rule=WSL_RULE, cwd=NOGIT)
 
 # The same allowed call from each role: "allowed (any role)".
 sh("wsl: an allowed test call from a builder agent",
@@ -8891,6 +8906,16 @@ sh("git env set: a pwsh -Command echo of a block piped to iex, denies",
    "pwsh -NoProfile -Command 'echo {$env:GIT_DIR=1} | iex'", "deny", GIT_ENV_RULE, cwd=NOGIT)
 sh("git env set: PowerShell, a value set inside try, denies",
    "try{$env:GIT_DIR='x'}catch{}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# A set after the try block's `}` sits in its catch or finally block. Both run, so both deny.
+for _cmd in (
+    r'try{1}catch{$env:GIT_DIR="x"}',
+    r'try{1}finally{$env:GIT_DIR="x"}',
+):
+    sh("git env set: PowerShell, a value set after try, in its catch or finally, denies, %s" % _cmd,
+       _cmd, "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# A set glued to the `}` of an empty if block, with no space between them, still denies.
+sh("git env set: PowerShell, a value set glued after an empty if block, denies",
+   r'if($x){}$env:GIT_DIR="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a call operator on a block that sets, denies",
    "& { $env:GIT_DIR=1 }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # Each form below runs the block it prints, through `.Invoke()`, a `%` pipe into `& $_`, or Invoke-Expression,
