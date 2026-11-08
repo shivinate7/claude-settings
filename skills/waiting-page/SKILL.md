@@ -51,17 +51,24 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     new items come first, then seen ones, each part in that order. Seen: the item is open, has no
     `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
     `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
-    never seen. The page works this out once at load and keeps it, so a Send re-sorts nothing; a reload
-    works it out again. A seen card folds every answer part behind one control (options, or steps, command and
-    links; the ready line; Mark done; None of these; the note box), under a divider that reads "Asked before".
-    An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
+    never seen. The page works this out once at load and keeps it; a reload works it out again. A seen card keeps every answer part open (options, or steps, command and links; the ready
+    line; Mark done; None of these; the note box), under a divider that reads "Asked before". An item the owner
+    still owes never folds. It folds only once answered (see "Answered" below).
+    An item that arrives after load is new, and so is any group that gains a member after load. It sorts first in its
+    tier, ahead of the other new items. A group is an arrival while any member is. The page keeps the set of ids
+    present at load. An open card sits above an answered one: a Send moves the sent card out of its tier (see "Answered"),
+    and a group moves only when every member is sent.
   - An item answered at or before load (`answers/<id>` exists, filed or not) sits in the
     "Answered" section, after the open tiers and before "Arbiter rulings", newest answer first. A group sits there only
     when every member is answered, as one frame headed by its group title, or "Answered together" when it has none, at its newest member's time. A group with an
     open member stays whole in its tier. The page works this out once, when the items and answers have loaded, and keeps
-    it: an answer sent on the open page, or a receipt that arrives later, moves no card until a reload. The section is open on load, each card folded
-    to its top row, title and answer line; one control holds the owner's note, last answer and reply. A Change keeps
-    the card in the section, open, until reload. With no answered item the page draws no section and no rail row.
+    it: a receipt that arrives later moves no card until a reload. The page has one switch, `SENT_MOVE`. With "sink" (the
+    default) a Send moves each sent card to this section, folded, and the next open card takes its place; Undo puts it
+    back in its tier, open. A group moves whole. With "stay" a sent card keeps its place until reload. The sub-head reads
+    "Your sent answers, newest first." under "sink". The section is open on load, each card folded
+    to its top row, title and answer line; one control holds the owner's note, last answer and reply. A card with a
+    new reply (see `replied`) opens at load and carries the mark "New reply", in place. A Change keeps
+    the card in the section, open, until reload, and a reply that arrives opens a card in place. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -108,6 +115,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     The writer refuses a task with no such line (guard rule `task-names-check`).
   - `reply` (a string) is what the session says back to a comment or a note. The card shows it as "Reply: <text>".
     A reply over 220 characters folds to three lines, with a "More of the reply" button.
+  - `replied` (an ISO time) is when the writer last wrote `reply` or changed `waits`. The writer sets it to now in the same update. A write of `lastAnswer` alone never sets it, because it copies the owner's own answer. Dropping `lane` sets none. The page
+    marks an item "New reply" when `replied` is later than both the owner's last Send (the same time that decides seen) and the owner's last visit
+    (`waiting.visit` in the browser, which the page writes on each load; with none, the last Send alone decides). The page reads both once at load, so a Send or a
+    visit on the open page moves no mark. A roadmap step is marked "Updated" the same way, when its `updatedAt` is later than the last visit; with no visit, no step is marked. An answered card with a new reply opens in place, and no card moves. Write no `replied` for any other change.
   - `lastAnswer` (`{choice, note, at}` on a decision, `{done, note, at}` on a task, `{act: "park", note, at}` on an item the owner parked and then unparked) is the owner's last answer to this item.
     The card shows it above the reply, as "Your last answer, <time>". The writer copies it from `answers/<id>` before it
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the writer rewrites `options`,
@@ -115,12 +126,12 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set when an answer
     takes the busy-lane path. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
     reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
-  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. `run` and
+  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. Setting or dropping it also sets `replied` to now. `run` and
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
     with `waits` and `lastAnswer` reads as answered on the page.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
-  - Before writing `reply`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
-    check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the four.
+  - Before writing `reply`, `replied`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
+    check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the five.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged.
@@ -153,7 +164,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 - `asks/<id>`: one per ask typed in the page's Ask box, and one per reply the owner writes under an answer, never an item. The owner stacks asks with Add to list (nothing is
   written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
   `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. A reply
-  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. A reply goes through the same
+  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. The page writes one more
+  field later, at the owner's press: `dismissed` (ISO time), on a thread's root ask only, with `update` (Dismiss). Restore writes
+  `dismissed: null` (the runtime has no field delete). It never deletes or replaces the owner's `text` or a `reply`. No session writes
+  `dismissed`. A session answering a dismissed record uses `update`, which keeps it (see "Route an ask"). A reply goes through the same
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
   answered by <owner of the ask `re` names>: <text>." The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
@@ -164,7 +178,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
   An ask with `reply` is answered. The page lists threads newest first by the `at` of their root ask, and a reply sits in its root's thread.
   It shows each waiting ask, each new answer (whatever its age) and the newest 3 answers already seen.
-  A thread with a waiting reply always shows. No session deletes or replaces an ask.
+  A thread with a waiting reply always shows. The page hides a dismissed thread (root `dismissed` is an ISO time) unless a
+  record in it waits or has an `answered` later than `dismissed`, and opens it again under "Show N dismissed asks". No session deletes or replaces an ask.
   An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
@@ -182,8 +197,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 The page hides an item with status `closed`, except an arbiter ruling (see `arbiter` above). It shows an item as answered when
 `answers/<id>` exists: a green edge and the badge "Filing pending, sent" or "Filed
-in <home>" in the Answered section (see `rank` above), never "waited". An item answered on the open page keeps its tier
-until reload, with the badge "Answered, filing pending" or "Answered, filed in <home>". It stays on the page until the owning session closes the item.
+in <home>" in the Answered section (see `rank` above), never "waited". An item answered on the open page goes where `SENT_MOVE` says (see "Answered" above); while it keeps its tier it
+carries the badge "Answered, filing pending" or "Answered, filed in <home>". It stays on the page until the owning session closes the item.
 
 ## The writer
 
@@ -272,7 +287,7 @@ one short read-only git process, with no fetch, and one gh call per open item wi
 A page that is lost or moved to another org takes its items with it. Once, 80 items were rebuilt from old
 transcripts because no repo held them. So the writer keeps a copy of the page's data in the repo (decision
 `waiting-data-in-repo`). The copy lives on the repo's record branch, never on main. Main moves only by pull
-request. The record branch (`roadmap` by default, `layout.py` `record_branch()`) takes a direct push.
+request. The record branch (`roadmap` by default, `~/.claude/lint/layout.py` `record_branch()`) takes a direct push.
 
 The writer runs this at each wake, as step 3 of "Keep the page on main's code", before any republish. A lane
 never runs it. There is one path: the record branch's own worktree. Never write the copy anywhere else.
@@ -520,14 +535,14 @@ the item open, so the page shows it. There is no age threshold.
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
-`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). With `lane` set, that is all: the close and the
+`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}, "replied": "<now>"}`). With `lane` set, that is all: the close and the
 delete of `answers/<id>` wait for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
    home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
    direction becomes a step: a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
-   `record_branch()` in `lint/layout.py` names it, default `roadmap`). Otherwise it becomes a todo record
+   `git rev-parse --verify --quiet origin/<branch>^{commit}` succeeds, with `<branch>` from `record_branch()` in `~/.claude/lint/layout.py`, default `roadmap`). Otherwise it becomes a todo record
    (layout `todo` or `debts`). When the home is a roadmap step, the filed note cites `page item <n>`, which the
    roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
@@ -556,7 +571,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 
 A parked answer (`answers/park.<id>`, or an item's answer with `act: "park"` under `answers/<item id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads the answer again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
-This re-read saves nothing to the inbox, because the hook skips a document with `parked: true`. Then the writer finds the entry in `meta/page.parked` by `id`.
+A re-read of `answers/park.<id>` saves nothing to the inbox, because the hook skips a document with `parked: true`. An item's park answer has no `parked` key, so the hook saves its note when it has one. Then the writer finds the entry in `meta/page.parked` by `id`.
 A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`).
 A Copy word `<n> park (<note>)` parks the open item numbered `<n>`, with that note, by the park answer branch below.
 The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.
@@ -596,6 +611,9 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
+
+The owner may Dismiss an answered thread. That sets `dismissed` on its root ask. The page draws Dismiss off while a reply in the
+thread waits, and on only when every record of the thread has its `reply`. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
 
 ## Make a repo's page
 
@@ -718,7 +736,7 @@ Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 
 A batch that changes `page.html` republishes each waiting page this account can reach, before the
 batch report. The pages are the `waiting-page` keys of the repos' extras files, read by
-`live_pages()` in `lint/layout.py`.
+`live_pages()` in `~/.claude/lint/layout.py`.
 
 1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
    that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not

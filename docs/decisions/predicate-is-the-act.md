@@ -9,7 +9,7 @@ shapes records the ways people were seen to write a file. It can only grow and c
 `hooks/decision_watch.py` reads the act this way. It does not read command text. Its predicate is a
 file under the turn's working directory, with an mtime newer than the last human message, and dirty
 against HEAD. The markdown sweep (`md_sweep.py`) used the same predicate for a markdown file written
-through Bash. The sweep is now an exit-0 stub (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`).
+through Bash. The sweep is deleted (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`).
 
 - The last human message carries an ISO timestamp in the transcript. That marks the start of the turn.
 - The git check removes the large false positive: a `git pull` or a branch switch rewrites many

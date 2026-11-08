@@ -3,12 +3,12 @@
 Copy this list once for each changed screen, at each size and theme it ships in. Mark each line
 pass or fail. A fail is a finding. Give the rule id, the screen, the size and the theme. The rules
 and their checks are in `principles.md`. A line marked (guidance) is advice: its fail is a note, not a
-finding.
+finding. A line marked (not adopted) is no rule: skip it, and file nothing.
 
 Screen: ____ Size: ____ Theme: ____
 
-- [ ] ux-press-moves-nothing: Do all other elements keep their place and size on each press and load?
-- [ ] ux-order-holds-still (guidance): Do the rows keep their order after an act on one row?
+- [ ] ux-press-moves-nothing (not adopted): Do all other elements keep their place and size on each press and load?
+- [ ] ux-order-holds-still (guidance): After an act on one row, do the other rows stay in the open list and keep their order? If that row left, did the next open row, if any, take its slot?
 - [ ] ux-unknown-is-not-empty: Do a failed read and an unknown state each show their own words? Is each empty state one sentence and one control? With no data, are filters hidden? After a filter empties the list, do filters show with a clear control?
 - [ ] ux-statements-are-true (guidance): Is each promise in the copy true of the product now?
 - [ ] ux-machine-text-hidden (guidance): Is each code, path, id and server text behind a closed disclosure?
@@ -33,6 +33,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-full-height-fits: Does each `vh` value in the changed CSS have an `svh` or `dvh` declaration on the same property, after the `vh` line?
 - [ ] ux-vitals-measured: In a mobile lab trace, are LCP, INP (or Total Blocking Time) and CLS "good"? Where field data at the 75th percentile exists, is it "good" too?
 - [ ] ux-feature-baseline-or-fallback: Does each new feature that the browser target does not cover sit behind a feature test, with a fallback seen working?
+- [ ] ux-text-zooms (guidance): At 200% zoom and a larger browser default font size, does web text grow and lose no content?
 - [ ] ux-gap-on-parent: Does each flex or grid parent space its children with `gap`, with no child margin between siblings? A `margin-inline: auto` or other one-item offset passes. Prose and flow margins outside flex or grid pass.
 - [ ] ux-control-beside-area (guidance): Does each control sit next to the area it changes? Is each element between them the same in every state of the control?
 - [ ] ux-layout-primitives: Is each page region built from a named layout primitive (stack, cluster, sidebar, grid, center)?
