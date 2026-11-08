@@ -4802,15 +4802,12 @@ GIT_PUSH_INERT_WORDS = ("for", "select", "case", "in", "esac", "fi", "done", "{"
                         "exit", "set", "true", ":")
 # Commands that only print or set a variable: inert when no word of theirs runs a substitution.
 GIT_PUSH_PLAIN_WORDS = ("export", "echo")
-# An if test that is no check: a `[`, `[[` or `test` reads a value and runs nothing the push needs to see.
-GIT_PUSH_TEST_WORDS = ("[", "[[", "test")
 
 
-def _push_segment_inert(segment: str, test: bool = False):
+def _push_segment_inert(segment: str):
     """True when SEGMENT holds no command that can fail a check: empty, a compound word, a cd, `exit`,
-    `set`, `true`, `:`, or an `export` or `echo` whose words run no substitution. With TEST, a `[`,
-    `[[` or `test` is inert too (an if test that is no check). None when a quote is cut in it
-    (unknown). A group opener at the head is walked into, so `{ pytest -q`, `( pytest -q` and
+    `set`, `true`, `:`, or an `export` or `echo` whose words run no substitution. None when a quote is cut
+    in it (unknown). A group opener at the head is walked into, so `{ pytest -q`, `( pytest -q` and
     `(pytest -q)` are commands and `(cd X; true)` is not."""
     tokens = segment_tokens(segment)
     if tokens is None:
@@ -4823,7 +4820,7 @@ def _push_segment_inert(segment: str, test: bool = False):
     head = re.split(r"[<>&]", words[0].lstrip("({"))[0].rstrip(")}")   # `done>>/dev/null` closes a loop
     if head in GIT_PUSH_PLAIN_WORDS:
         return not any("`" in word or "$(" in word or "<(" in word or ">(" in word for word in words)
-    return not head or head in CD_WORDS or head in GIT_PUSH_INERT_WORDS or (test and head in GIT_PUSH_TEST_WORDS)
+    return not head or head in CD_WORDS or head in GIT_PUSH_INERT_WORDS
 
 
 def git_push_after_check_hit(command: str) -> str:
@@ -4834,12 +4831,12 @@ def git_push_after_check_hit(command: str) -> str:
     that start, a `;` or newline joins the command before it. A cd, `exit`, `set` or `true` (or a group
     of them) is skipped and the walk goes on over that command's own `&&` chain, which must be inert too.
     So is a lone command whose failure ends the shell under `set -e` (`_push_stops_under_errexit`). A group
-    opener is walked into, so a check inside `{ }` or `( )` refuses. The walk ends and passes at a `|| exit`,
-    at the tail of `|| { ...; exit N; }` or `if ! X; then exit N; fi` (`_push_exit_tails`), and at the
-    compound body that holds the push when its test is a check (`_push_body_head`); a `for` body, an `if`
-    on a `[` test and an `else` or `elif` body are walked past. An `exit` inside a `( )` group leaves only
-    that group, so neither it nor an exit tail inside one is a stop.
-    Any other command refuses, a subshell included.
+    opener is walked into, so a check inside `{ }` or `( )` refuses. A `|| exit`, the tail of
+    `|| { ...; exit N; }` or `if ! X; then exit N; fi` (`_push_exit_tails`), and the test of the compound that
+    holds the push (`_push_body_head`) each clear only the commands they cover: the walk goes on back past
+    them, so a `;`-joined check further back still refuses. An `exit` inside a `( )` group leaves only that
+    group, so neither it nor an exit tail inside one clears anything. Any other command refuses, a subshell
+    included. The walk ends and passes at the start of the command line.
     A `||` or `|` before the start of the push's chain is no `;` join and passes. A dry run
     (`git_write_verb`) and an unreadable segment pass."""
     ends = []
@@ -4864,7 +4861,7 @@ def git_push_after_check_hit(command: str) -> str:
                 if start < position or not _push_stops_under_errexit(segments, ends, start):
                     return "push"
             if _opens_push_body(segments, start, number):
-                head = _push_body_head(segments, ends, start)
+                head = _push_body_head(segments, start)
                 if head is None:
                     break
                 position, first = head, True
@@ -4876,11 +4873,17 @@ def git_push_after_check_hit(command: str) -> str:
                     break
                 return "push"
             before = segment_tokens(segments[start - 1])
-            if before is None or (before[:1] == ["exit"] and start > 1 and ends[start - 2] == "||"
-                                  and not subshell_depth(segments, start - 1)):
+            if before is None:
                 break
-            if start - 1 in tails and not subshell_depth(segments, start - 1):
-                break
+            covered = None
+            if (before[:1] == ["exit"] and start > 1 and ends[start - 2] == "||"
+                    and not subshell_depth(segments, start - 1)):
+                covered = start - 2
+            elif start - 1 in tails and not subshell_depth(segments, start - 1):
+                covered = tails[start - 1]
+            if covered is not None:
+                position, first = covered, True
+                continue
             position, first = start - 1, False
     return ""
 
@@ -4888,8 +4891,9 @@ def git_push_after_check_hit(command: str) -> str:
 def _push_exit_tails(segments, ends):
     """The segments that close an exit on a check's failure, past a bare `|| exit`: the `}` of
     `X || { ...; exit N; }` and the `fi` of `if ! X; then exit N; fi` (`_exits_on_failure`). The shell
-    stops when X fails, so a push after the tail runs only when X passed."""
-    tails = set()
+    stops when X fails, so a push after the tail runs only when X passed. Gives each tail's index with the
+    index of the command X it covers: the tail clears X alone, not what stands before it."""
+    tails = {}
     for at, segment in enumerate(segments[:-1]):
         tokens = segment_tokens(segment) or []
         grouped = ends[at] == "||" and (segment_tokens(segments[at + 1]) or [])[:1] == ["{"]
@@ -4901,7 +4905,7 @@ def _push_exit_tails(segments, ends):
         for close in range(at + grouped, len(segments)):
             depth += _compound_delta(segments[close], wide=True)
             if depth <= 0:
-                tails.add(close)
+                tails[close] = at
                 break
     return tails
 
@@ -4915,39 +4919,22 @@ def _opens_push_body(segments, start: int, number: int) -> bool:
     return sum(_compound_delta(part, wide=True) for part in segments[start:number]) >= 0
 
 
-def _push_body_head(segments, ends, start: int):
+def _push_body_head(segments, start: int):
     """For the body opener at `segments[start]` (`then`, `do`, `else`, `elif`): the index of the head of its
-    compound when the walk must go on past the compound, else None. The body's own test guards the push when
-    the head is an `if`, `while` or `until` on a command, so None. A `for` head, or an `if`, `while` or
-    `until` whose test is no check (`[ -n "$X" ]`), guards nothing: the push runs whatever a check before the
-    compound did. An `else` or `elif` body is guarded by no test, since it runs when its test failed, so the
-    head of its `if` is always walked past. An unreadable head ends the walk."""
+    compound (`if`, `for`, `while`, `until`), found by counting the compounds still open before it, else None
+    when the head cannot be read. The compound's test guards only the body, not what stands before the
+    compound, so the walk goes on back past the head to any earlier `;`-joined check."""
     opener = segment_tokens(segments[start])
     if start == 0 or not opener or opener[0] not in GIT_PUSH_BODY_WORDS:
         return None
-    if opener[0] in ("else", "elif"):
-        open_depth = 0
-        for head in range(start - 1, -1, -1):
-            open_depth += _compound_delta(segments[head], wide=True)
-            if open_depth >= 1:
-                words = list(segment_tokens(segments[head]) or [])
-                while words and words[0] in GIT_PUSH_BODY_WORDS:
-                    words.pop(0)
-                return head if words[:1] == ["if"] else None
-        return None
-    head = start - 1
-    while head > 0 and ends[head - 1] in ("&&", "||", "|"):
-        head -= 1
-    words = list(segment_tokens(segments[head]) or [])
-    while words and words[0] in GIT_PUSH_BODY_WORDS:
-        words.pop(0)
-    if not words:
-        return None
-    if words[0] == "for":
-        return head
-    if words[0] in ("if", "while", "until") and all(
-            _push_segment_inert(part, test=True) for part in segments[head:start]):
-        return head
+    open_depth = 0
+    for head in range(start - 1, -1, -1):
+        open_depth += _compound_delta(segments[head], wide=True)
+        if open_depth >= 1:
+            words = list(segment_tokens(segments[head]) or [])
+            while words and words[0] in GIT_PUSH_BODY_WORDS:
+                words.pop(0)
+            return head if words[:1] in (["if"], ["for"], ["while"], ["until"]) else None
     return None
 
 
