@@ -15148,7 +15148,7 @@ def _rsha_git(where, *args, date=None):
         env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = date
     done = subprocess.run([VCS, *args], cwd=where, capture_output=True, text=True, env=env)
     if done.returncode != 0:
-        sys.exit("fixture setup failed in rsha_build: git %s in %r: %s"
+        sys.exit("fixture setup failed: git %s in %r: %s"
                  % (" ".join(args), where, done.stderr.strip()))
     return done.stdout.strip()
 
@@ -15260,11 +15260,12 @@ def rsha_noted(folder, rule):
     return False
 
 
-def rsha_stand_in_sees(log, path):
-    """True when the stand-in logs a git call made on its PATH, so a count of zero means no call was made."""
+def rsha_stand_in_sees(log, path, cwd=None):
+    """True when the stand-in logs a git call made on its PATH, so a count of zero means no call was made.
+    The probe runs in RSHA_LANE unless `cwd` names another checkout."""
     if os.path.exists(log):
         os.remove(log)
-    subprocess.run([VCS, "rev-parse", "--is-inside-work-tree"], cwd=RSHA_LANE,
+    subprocess.run([VCS, "rev-parse", "--is-inside-work-tree"], cwd=cwd or RSHA_LANE,
                    env=dict(os.environ, PATH=path), capture_output=True)
     return os.path.exists(log)
 
@@ -15634,6 +15635,12 @@ exit 1
 """
 
 
+def _mrf_probe(where, *args, env=None):
+    """(return code, stdout, stderr) of one command run in `where`, for the scope checks of mrf_build."""
+    done = subprocess.run(list(args), cwd=where, capture_output=True, text=True, env=env)
+    return done.returncode, done.stdout.strip(), done.stderr.strip()
+
+
 def mrf_build():
     """The message-ref fixtures, built on first use: a repo whose origin routes to a bare repo holding
     refs/pull/7/head, a repo with no origin, a repo whose origin routes to a missing path, and the fake gh."""
@@ -15655,6 +15662,28 @@ def mrf_build():
     gh = os.path.join(MRF_GH_BIN, "gh")
     write(gh, MRF_FAKE_GH)
     os.chmod(gh, 0o755)
+    # The scope every case relies on, read before any case does (P7). A fault here names itself, not a red case.
+    rc, listed, _ = _mrf_probe(MRF_REPO, VCS, "ls-remote", "origin")
+    if rc != 0 or "refs/pull/7/head" not in listed or "refs/pull/8/head" in listed:
+        sys.exit("fixture setup failed in mrf_build: origin of MRF_REPO does not reach the bare repo "
+                 "(git exit %d)" % rc)
+    rc, _, _ = _mrf_probe(MRF_BADREMOTE, VCS, "ls-remote", "origin")
+    if rc == 0:
+        sys.exit("fixture setup failed in mrf_build: origin of MRF_BADREMOTE reads, so it does not fail")
+    rc, remotes, _ = _mrf_probe(MRF_NOORIGIN, VCS, "remote")
+    if rc != 0 or remotes:
+        sys.exit("fixture setup failed in mrf_build: MRF_NOORIGIN has a remote")
+    gh_env = dict(os.environ, PATH=MRF_PATH)
+    rc, _, _ = _mrf_probe(MRF_REPO, "gh", "api", "repos/o/r/issues/comments/111", env=gh_env)
+    if rc != 0:
+        sys.exit("fixture setup failed in mrf_build: the fake gh does not allow comment 111 (exit %d)" % rc)
+    rc, _, err = _mrf_probe(MRF_REPO, "gh", "api", "repos/o/r/issues/comments/222", env=gh_env)
+    if rc == 0 or "404" not in err:
+        sys.exit("fixture setup failed in mrf_build: the fake gh does not 404 comment 222")
+    rc, _, err = _mrf_probe(MRF_REPO, "gh", "api", "repos/o/r/issues/comments/222",
+                            env=dict(gh_env, FAKE_GH_MODE="error"))
+    if rc == 0 or "404" in err:
+        sys.exit("fixture setup failed in mrf_build: the fake gh error mode is not a non-404 failure")
 
 
 lazy_fixture([MRF_REPO, MRF_NOORIGIN, MRF_BADREMOTE, MRF_GH_BIN], mrf_build)
@@ -15714,15 +15743,6 @@ def mrf_lines(path):
     return open(path, encoding="utf-8").read().splitlines() if os.path.exists(path) else []
 
 
-def mrf_stand_in_sees(log, path):
-    """True when the stand-in logs a git call made on its PATH from MRF_REPO, so a count of zero means no call."""
-    if os.path.exists(log):
-        os.remove(log)
-    subprocess.run([VCS, "rev-parse", "--is-inside-work-tree"], cwd=MRF_REPO,
-                   env=dict(os.environ, PATH=path), capture_output=True)
-    return os.path.exists(log)
-
-
 def mrf_cost_run(message):
     """(problem, (git lines, gh lines)) for one send_message from MRF_REPO, through the stand-in git and the fake gh.
     A stand-in that sees no call makes the counts meaningless, so that is the problem instead."""
@@ -15730,7 +15750,7 @@ def mrf_cost_run(message):
     log, path = _stand_in_git("mrf_cost")
     if not path:
         return "no git on PATH, so the stand-in cannot count", None
-    if not mrf_stand_in_sees(log, path):
+    if not rsha_stand_in_sees(log, path, cwd=MRF_REPO):
         return "the stand-in git saw no call, so the counts prove nothing", None
     for name in (log, MRF_GH_LOG):
         if os.path.exists(name):
