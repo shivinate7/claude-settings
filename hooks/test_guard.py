@@ -3243,6 +3243,8 @@ AGENT_NOTED_RULING = [
     ("log: checkout -- . is allowed and noted in an agent-owned worktree", VCS + " checkout -- ."),
     ("log: checkout -q -- . is allowed and noted in an agent-owned worktree", VCS + " checkout -q -- ."),
     ("log: restore . is allowed and noted in an agent-owned worktree", VCS + " restore ."),
+    ("log: restore -- hooks/guard.py is allowed and noted in an agent-owned worktree",
+     VCS + " restore -- hooks/guard.py"),
     ("log: checkout HEAD -- . is allowed and noted in an agent-owned worktree",
      VCS + " checkout HEAD -- ."),
 ]
@@ -3250,7 +3252,7 @@ AGENT_NOTED_RULING = [
 # THE RESTORE AND CHECKOUT FORMS, one verdict per tree. The path is hooks/guard.py: _build_gitmain
 # leaves it tracked and dirty in every tree. None means the agent-owned log row above pins that cell.
 RULING_TREE_FORMS = [
-    ("restore -- hooks/guard.py", ("deny", "shared-tree"), ("allow", None), ("allow", None)),
+    ("restore -- hooks/guard.py", ("deny", "shared-tree"), ("allow", None), None),
     ("restore --staged hooks/guard.py", ("allow", None), ("allow", None), ("allow", None)),
     ("restore --staged .", ("allow", None), ("allow", None), ("allow", None)),
     ("checkout HEAD -- .", ("deny", "shared-tree"), ("ask", "shared-tree"), None),
