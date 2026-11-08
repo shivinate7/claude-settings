@@ -1,11 +1,11 @@
 {
   "title": "The gap check runs on a clean merge or rebase on the roadmap branch",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.63,
   "owner": "coordinator",
   "why": "A clean merge or rebase on the roadmap branch runs no pre-commit hook, and the README's pull --rebase then amend flow re-checks only roadmap.html, so a duplicate step can land unchecked (lane gap gap-check-skips-merge-rebase).",
-  "note": "From lane step-names-its-gap via the coordinator, 20:53 CST Nov 7. Coordinator starts a lane on the slug. Follows #1750. Filed 20:54 CST Nov 7. Started by the coordinator, 20:55 CST Nov 7, in lane session_013NEJKzanUvmhhL9K3XCNgT, stacked on #1750. Updated 20:55 CST.",
-  "updatedAt": "2026-11-07T20:55:00-06:00",
+  "note": "From lane step-names-its-gap via the coordinator, 20:53 CST Nov 7. Coordinator starts a lane on the slug. Follows #1750. Filed 20:54 CST Nov 7. Started by the coordinator, 20:55 CST Nov 7, in lane session_013NEJKzanUvmhhL9K3XCNgT, stacked on #1750. Updated 20:55 CST. Built as draft #1757 (base #1750's branch, head 22caca8): round 1 sonnet PASS. It waits on page item 383 with #1750. Follow-ups: gap-check-fetch-head, build-git-count-test (coordinator 21:13 CST; updated 21:13 CST).",
+  "updatedAt": "2026-11-07T21:13:00-06:00",
   "lane": "session_013NEJKzanUvmhhL9K3XCNgT"
 }

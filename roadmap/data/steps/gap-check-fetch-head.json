@@ -1,0 +1,10 @@
+{
+  "title": "The roadmap build's gap check falls back to FETCH_HEAD when origin/roadmap is missing",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.64,
+  "owner": "coordinator",
+  "why": "build.py's Staged(merged=True) fails open when refs/remotes/origin/roadmap is missing, as in a --single-branch clone where pull --rebase works through FETCH_HEAD, so a duplicate step passes unchecked.",
+  "note": "Done check: a red case first, where a clone with no origin/roadmap ref is checked through FETCH_HEAD. From #1757's findings (lane gap-check-merge-rebase) via the coordinator, 21:13 CST Nov 7. Coordinator starts a lane after #1757 lands. Filed 21:13 CST Nov 7.",
+  "updatedAt": "2026-11-07T21:13:00-06:00"
+}

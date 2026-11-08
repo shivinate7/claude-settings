@@ -14,3 +14,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - parent-events-read-as-child (coordinator, Nov 7 08:33 CST, step agent-model-unnamed-spawn): lane merge-runs-repo-checks read the parent session's Opus events as a child spawn's model, and reported a guard hole that was not there. A note, not a debt.
 
 - 2026-11-07: owner-feedback audit (#1008, closed by owner 334 b): six rows stayed unknown and cannot be recovered: F39, F82 (waiting page at 360-430 px, never re-checked), F84, F93, F251, F252. F82 is the only one a check could still settle.
+- gap-check-no-merge-base-wording (lane gap-check-merge-rebase, #1757, via the coordinator Nov 7 21:13 CST): the gap check's "did not run" line also prints when the two branches share no merge-base, so the wording names the wrong cause. A note, not a debt.
