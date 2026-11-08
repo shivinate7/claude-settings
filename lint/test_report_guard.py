@@ -105,8 +105,10 @@ def peer_msg(body, stamp=None, from_session="local_fixture"):
     return rec
 
 
-def tool_use_msg(name, input_=None):
+def tool_use_msg(name, input_=None, id_=None):
     block = {"type": "tool_use", "name": name, "input": input_ or {}}
+    if id_ is not None:  # the id the harness gives the call, which its tool result names
+        block["id"] = id_
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [block]}}
 
 
@@ -740,6 +742,49 @@ class ReportGuardTests(unittest.TestCase):
         self.assertEqual(json.loads(run.stdout).get("decision"), "block")
         self.assertIn("Report-shape guard", json.loads(run.stdout)["reason"])
 
+    def test_76_push_then_peer_wake_then_echo_then_no_report_blocks(self):
+        # Catches: a peer message that follows a text-only reply starts a new turn, so the push before it
+        # no longer counts. The turn after the peer wake has no commit or push, and its missing report goes
+        # unflagged. The push is still this turn's landing, so the report is owed.
+        records = [
+            human("land it"),
+            tool_use_msg("Bash", {"command": "git push origin HEAD:lane"}),
+            tool_result_msg(),
+            assistant_text("Landed."),
+            peer_msg("Lane 2 is done."),
+            tool_use_msg("Bash", {"command": "echo hi"}),
+            tool_result_msg(),
+            assistant_text("Echoed it."),
+        ]
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+        self.assertEqual(run.returncode, 0)
+        self.assertNotEqual(run.stdout.strip(), "", "the guard stayed silent on a landed turn")
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block")
+        self.assertIn("Report-shape guard", json.loads(run.stdout)["reason"])
+
+    def test_77_push_then_peer_wake_then_finished_builder_without_model_blocks(self):
+        # Catches: the model check reads the turn after a peer wake, which has no commit or push, so a finished
+        # builder named with no model goes unflagged. The push before the peer wake is still this turn's landing.
+        # The spawn carries its id and its tool result, as the harness writes a finished call.
+        records = [
+            human("land it"),
+            tool_use_msg("Bash", {"command": "git push origin HEAD:lane"}),
+            tool_result_msg(),
+            assistant_text("Landed."),
+            peer_msg("Lane 2 is done."),
+            tool_use_msg("Agent", {"subagent_type": "builder", "prompt": "build it"}, id_="tu_builder"),
+            tool_result_msg("tu_builder"),
+            assistant_text("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none"),
+        ]
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)), env=env)
+        self.assertEqual(run.returncode, 0)
+        self.assertNotEqual(run.stdout.strip(), "", "the guard stayed silent on a landed turn")
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block")
+        self.assertIn("no model named for builder", json.loads(run.stdout)["reason"])
+
 
 class DoneFormatAndCiteTests(unittest.TestCase):
     """reports-done-format and speak-cite-id-plus-gloss, both in report_guard.py's Stop hook."""
@@ -888,12 +933,12 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=(), running=()):
+    def verdict(self, reply, spawns, denied=(), running=(), ids=False):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
-        for spawn in running:  # a spawn with no result yet: the agent is still running
-            records += [tool_use_msg("Agent", spawn)]
+        for n, spawn in enumerate(running):  # a spawn with no result yet: the agent is still running
+            records += [tool_use_msg("Agent", spawn, id_="tu_run%d" % n if ids else None)]
         for spawn in denied:
             use = tool_use_msg("Agent", spawn)
             use["message"]["content"][0]["id"] = "tu_denied"
@@ -978,6 +1023,17 @@ class DoneNamesModelsTests(unittest.TestCase):
             "> **Next**\n> - builder (sonnet) is running.\n> - Unstarted: none",
             [{"subagent_type": "test-author", "model": "haiku", "prompt": "write the red cases"}],
             running=[self.BUILDER])
+        self.assertIsNone(out, "the Model-name guard blocked a builder that is still running")
+
+    def test_dm_false_alarm_running_builder_with_id_named_only_in_next_passes(self):
+        # The harness form of the same turn: the running builder's call carries an id, and no tool result
+        # names it yet, so it has built nothing and Done owes it no model.
+        out = self.verdict(
+            "> **Done**\n> - BUILT: red cases at abc1234 (test-author haiku)\n"
+            "> - OTHER: kept the lint clean (test-author haiku)\n"
+            "> **Next**\n> - builder (sonnet) is running.\n> - Unstarted: none",
+            [{"subagent_type": "test-author", "model": "haiku", "prompt": "write the red cases"}],
+            running=[self.BUILDER], ids=True)
         self.assertIsNone(out, "the Model-name guard blocked a builder that is still running")
 
     def test_dm_control_builder_named_without_model_blocks(self):
