@@ -1,0 +1,11 @@
+{
+  "title": "Check STALE010 fires on a top folder one edit or one case change from a tracked folder",
+  "why": "A cite whose top folder is a near-miss of a tracked folder is a typo the check lets pass (note stale010-top-folder-typo).",
+  "note": "Filed 09:35 CST Nov 8 (coordinator 09:34 CST). Doing in lane record-claim-cites-code; branch from #2063's head, Merge after: #2063. #2063 at 0fbe0b50c cites it as Fix: step:stale010-top-typo.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJL33wvLc6xtDnBTJDAw",
+  "status": "doing",
+  "order": 704,
+  "updatedAt": "2026-11-08T09:35:00-06:00"
+}
