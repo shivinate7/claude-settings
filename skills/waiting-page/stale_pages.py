@@ -32,7 +32,7 @@ beside this script, and needs no hooks/ folder.
 
 Single-page mode (the writer, at each wake and before each republish):
 
-    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>] [--items <file|folder>] [--answers <file|folder>]
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>] [--items <file|folder>] [--answers <file|folder>] [--asks <file|folder>]
 
 One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
 current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
@@ -61,6 +61,10 @@ the answer, or reopen the item with `lane` and `lastAnswer`). Never named: an op
 a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
+--asks names the asks the session saved with `ArtifactData list asks`, in the same two shapes. After the other lines, one `open-ask: <id> at <time>: <text>`
+line per ask with no non-blank `reply` (a root the owner dismissed is not listed; an owner reply under an answer, with `re`, waits like an ask), and, with --items, one `open-item:`
+line per open item with `lastAnswer` and no `reply`, `lane` or `waits`. Then one `FAIL:` line. A waiting ask turns exit 0 into 1; a cut-short or unreadable asks list prints `open-ask: unknown`
+and turns exit 0 into 2 (never clear). Behind (1) and unknown (2) keep their codes. Cost: one more file read at the wake already running; no process, file written, timer or log.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
@@ -545,6 +549,39 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
     return lines
 
 
+def has_text(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def open_ask_lines(asks, complete=True):
+    """One open-ask line per owner ask with no session reply, oldest first: id, time, text. A dismissed root is the owner's own
+    close and is not listed. An ask the owner wrote as a reply under an answer (`re`) waits like any other. With `complete` False
+    (that folder may be cut short) one unknown line, never a clear."""
+    if not complete:
+        return ["open-ask: unknown (the asks folder has no .complete marker, so its list may be cut short)"]
+    waiting = []
+    for doc_id, data in asks:
+        if not isinstance(data, dict) or has_text(data.get("reply")) or data.get("dismissed"):
+            continue
+        waiting.append((str(data.get("at") or ""), doc_id if doc_id is not None else data.get("id"), data.get("text")))
+    return ["open-ask: %s at %s: %s" % (ask_id, at or "unknown", " ".join(str(text or "").split()) or "(no text)")
+            for at, ask_id, text in sorted(waiting, key=lambda row: row[0])]
+
+
+def open_item_lines(items, complete=True):
+    """One open-item line per open item the owner answered (`lastAnswer`) whose `reply` is empty, with no `lane` (the lane line
+    names a routed answer) and no `waits`: the owner spoke and the writer said nothing back. An open item the owner never answered is not listed."""
+    if not complete:
+        return []
+    lines = []
+    for doc_id, item in items:
+        if (isinstance(item, dict) and item.get("status") != "closed" and isinstance(item.get("lastAnswer"), dict)
+                and not has_text(item.get("reply")) and not has_text(item.get("lane")) and "waits" not in item):
+            lines.append("open-item: item %s (%s): the owner answered at %s and the item has no reply"
+                         % (item.get("n", doc_id), doc_id if doc_id is not None else item.get("id"), item["lastAnswer"].get("at") or "unknown"))
+    return lines
+
+
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
     With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
@@ -556,6 +593,7 @@ def single_page(argv):
     ap.add_argument("--main")
     ap.add_argument("--items")
     ap.add_argument("--answers")
+    ap.add_argument("--asks")
     args = ap.parse_args(argv)
     code = page_verdict(args)
     if args.items is not None:
@@ -576,6 +614,32 @@ def single_page(argv):
             print(line)
     elif args.answers is not None:
         print("kept-answer: unknown (--answers needs --items)")
+    if args.asks is not None:
+        return open_asks_mode(args, items if args.items is not None else None, code)
+    return code
+
+
+def open_asks_mode(args, items, code):
+    """With --asks: print each owner ask with no reply (and, with --items, each answered open item with no reply), then one FAIL line
+    the writer cannot skip. A waiting ask makes a current page exit 1; a cut-short or unreadable asks list exits 2. A behind or unknown
+    page keeps its own code."""
+    try:
+        asks, complete = load_docs(args.asks, "asks", keyed=True)
+        lines = open_ask_lines(asks, complete)
+        unknown = not complete
+    except ValueError as err:
+        lines, unknown = ["open-ask: unknown (%s)" % err], True
+    if items:
+        lines += open_item_lines(items, True)
+    for line in lines:
+        print(line)
+    if unknown:
+        print("FAIL: the open asks could not be read; do not treat the page as clear")
+        return code or 2
+    if lines:
+        print("FAIL: %d owner ask%s or item%s with no reply; answer each on the page before this wake ends"
+              % (len(lines), "" if len(lines) == 1 else "s", "" if len(lines) == 1 else "s"))
+        return code or 1
     return code
 
 

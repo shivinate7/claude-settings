@@ -257,14 +257,16 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
 
 1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
    A read that gives a summary, not the raw page, is `unknown`.
-2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers>`, where
-   `<items>` and `<answers>` are what `ArtifactData list items` and `ArtifactData list answers` saved. It
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers> --asks <asks>`, where
+   `<items>`, `<answers>` and `<asks>` are what `ArtifactData list items`, `list answers` and `list asks` saved. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
-   (never an open item, an item with `waits`, an arbiter ruling or a park answer). The exit code stays the page's.
+   (never an open item, an item with `waits`, an arbiter ruling or a park answer). With `--asks`, last, one `open-ask: <id> at <time>: <text>` line per
+   owner ask with no `reply` (a dismissed root is not listed), one `open-item:` line per open item the owner answered that has no `reply`, `lane` or `waits`, and then one `FAIL:` line the writer
+   cannot skip: answer each on the page ("Route an ask") before the wake ends. A waiting ask makes a `current` page exit 1; an asks list that cannot be read or is cut short prints `open-ask: unknown` and exits 2. Without `--asks` the exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
@@ -281,7 +283,7 @@ repo's waiting page from a file behind main is refused, and its reason repeats s
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`, and with `--answers` one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
+one short read-only git process, with no fetch, and one gh call per open item with `waits`, and with `--answers` one more `ArtifactData list answers` read, and with `--asks` one more `ArtifactData list asks` read, no process added. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo

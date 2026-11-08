@@ -1271,6 +1271,79 @@ class Stale(unittest.TestCase):
                 self.assertNotIn("Traceback", r.stdout + r.stderr)
                 self.assert_page_word(r, "current", 0)
 
+    # Single-page mode with --asks <file or folder>: one open-ask line per owner ask with no reply, then a FAIL line, exit non-zero.
+    # Incident: an ask was routed to a step but never closed on the page, so the owner saw an ask with no answer.
+
+    def asks_run(self, asks, extra=(), page=None):
+        current, _ = self.current_and_behind()
+        return self.page_run(page or current, "--main", TEMPLATE, "--asks", asks, *extra)
+
+    def open_ask_lines(self, r):
+        return [line for line in r.stdout.splitlines() if line.startswith("open-ask:")]
+
+    def test_an_ask_with_no_reply_is_listed_with_id_time_and_text_and_fails(self):
+        asks = [ask_doc("ask-a1", text="push the stray branch"), ask_doc("ask-b2", text="done one", reply="handled", answered=ASK_AT)]
+        for as_folder in (False, True):
+            with self.subTest("folder" if as_folder else "list file"):
+                arg = self.docs_folder({a["id"]: a for a in asks}, "asks") if as_folder else self.list_file(asks, "asks")
+                r = self.asks_run(arg)
+                lines = self.open_ask_lines(r)
+                self.assertEqual(len(lines), 1, "want one open-ask line:\n" + r.stdout + r.stderr)
+                for part in ("ask-a1", ASK_AT, "push the stray branch"):
+                    self.assertIn(part, lines[0])
+                self.assertNotIn("ask-b2", r.stdout)
+                self.assertIn("FAIL:", r.stdout)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_only_answered_asks_print_no_line_no_fail_and_exit_0(self):
+        asks = [ask_doc("ask-b2", reply="handled", answered=ASK_AT)]
+        r = self.asks_run(self.list_file(asks, "asks"))
+        self.assertEqual(self.open_ask_lines(r), [])
+        self.assertNotIn("FAIL", r.stdout)
+        self.assert_page_word(r, "current", 0)
+
+    def test_a_blank_reply_is_no_reply_and_a_dismissed_root_is_not_listed(self):
+        asks = [ask_doc("ask-c3", reply="  "), ask_doc("ask-d4", dismissed=ASK_AT)]
+        r = self.asks_run(self.list_file(asks, "asks"))
+        lines = self.open_ask_lines(r)
+        self.assertEqual(len(lines), 1, r.stdout + r.stderr)
+        self.assertIn("ask-c3", lines[0])
+
+    def test_a_reply_from_the_owner_under_an_answer_with_no_session_reply_is_listed(self):
+        r = self.asks_run(self.list_file([ask_doc("ask-e5", re="ask-a1")], "asks"))
+        self.assertEqual(len(self.open_ask_lines(r)), 1, r.stdout + r.stderr)
+
+    def test_an_incomplete_asks_folder_is_unknown_never_clear(self):
+        folder = self.docs_folder({}, "asks")
+        os.remove(os.path.join(folder, ".complete"))
+        r = self.asks_run(folder)
+        self.assertIn("open-ask: unknown", r.stdout)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+    def test_a_behind_page_keeps_its_exit_1_and_unknown_page_keeps_2_with_asks(self):
+        _, behind = self.current_and_behind()
+        r = self.asks_run(self.list_file([ask_doc("ask-a1")], "asks"), page=behind)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(len(self.open_ask_lines(r)), 1)
+
+    def test_an_open_item_the_owner_answered_with_no_reply_is_listed_with_asks_and_items(self):
+        current, _ = self.current_and_behind()
+        quiet = decision_item(500, "quiet", status="open", lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        fresh = decision_item(501, "fresh", status="open")
+        replied = decision_item(502, "replied", status="open", reply="ok", lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        r = self.page_run(current, "--main", TEMPLATE, "--items", self.items_file([quiet, fresh, replied]),
+                          "--asks", self.list_file([], "asks"))
+        lines = [line for line in r.stdout.splitlines() if line.startswith("open-item:")]
+        self.assertEqual(len(lines), 1, r.stdout + r.stderr)
+        self.assertIn("500", lines[0])
+        self.assertIn("FAIL:", r.stdout)
+        self.assertEqual(r.returncode, 1)
+
+    def test_a_closed_run_without_asks_prints_no_fail_line(self):
+        current, _ = self.current_and_behind()
+        r = self.page_run(current, "--main", TEMPLATE, "--items", self.items_file([INCIDENT]))
+        self.assertNotIn("FAIL", r.stdout)
+
     def test_a_closed_item_with_waits_and_a_kept_answer_is_not_named(self):
         # SKILL.md, "Route and close": while an item has `waits`, steps 2 to 4 never delete answers/<id>, so the kept answer
         # is legitimate whatever the `waits` value. A closed item is never polled, so no gh call is made for it.
@@ -1429,6 +1502,16 @@ def kept_line(n, item_id):
 def kept_lines(out):
     """The lines of `out` that start as a kept-answer line does."""
     return [line for line in out.splitlines() if line.startswith("kept-answer:")]
+
+
+ASK_AT = "2026-11-08T17:05:00.000Z"
+
+
+def ask_doc(ask_id, text="a question", **extra):
+    """An ask as the page writes it at asks/<id>: id, text, at, and the `extra` fields (reply, answered, re, dismissed)."""
+    doc = {"id": ask_id, "text": text, "at": ASK_AT}
+    doc.update(extra)
+    return doc
 
 
 INCIDENT_N, INCIDENT_ID = 356, "round3-fail-holds"  # the incident: a closed decision whose answer was kept
