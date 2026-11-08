@@ -3623,9 +3623,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
     # 6b. A pull request opened without --draft.
-    for text, _in_message in _substitutions(stripped)[0]:
-        if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
-            refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+    for run_text in shell_run_texts(raw):
+        for text, _in_message in _substitutions(run_text)[0]:
+            if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
+                refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
@@ -3982,11 +3983,15 @@ def impeccable_shell_hit(segment: str) -> str:
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 
 
-def impeccable_command_hit(raw: str) -> str:
-    """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
-    and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
-    backticks it runs. The limits: a Python, Node, Perl or Ruby
-    body is not read, and a here-string body is allowed."""
+_BACKTICK_SPAN = re.compile(r"(`(?:\\.|[^`\\])*`)")
+
+
+def shell_run_texts(raw: str) -> list:
+    """The texts a shell reads from a whole command, for a rule that judges shell lines. A body a shell
+    reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
+    backticks it runs. A quoted body that an interpreter runs joins as its backtick spans alone, since perl,
+    ruby and node run those as a shell. The limits: such a body is not read as shell lines, a python body's
+    backtick span is read though python runs no shell from it, and a here-string body is allowed."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
@@ -3995,12 +4000,27 @@ def impeccable_command_hit(raw: str) -> str:
                                                           heredoc=True)[0][:-1])
             return "x"
         raw = _HERE_STRING.sub(cut, raw)
-    texts.append(strip_heredoc_bodies(raw, shells_only=True))
+    shells = strip_heredoc_bodies(raw, shells_only=True)
+    texts.append(shells)
     if "<<" in raw:
         for quote, body, _ in _split_heredocs(raw)[1]:
             if not quote:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
-    for text in texts:
+            elif "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):
+                # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
+                # backtick span as a shell, `$(` and `<(` inside the span too. Outside a span they stay
+                # text: no interpreter reads them as a shell. Python's own backtick span is read too, a
+                # rare false alarm. The split follows _substitutions' span rule (to the next unescaped backtick).
+                parts = _BACKTICK_SPAN.split(body)
+                inert = "".join(part if at % 2 else re.sub(r"([$<>])\(", r"\1 (", part)
+                                for at, part in enumerate(parts))
+                texts.extend(t for t, _ in _substitutions(inert, heredoc=True)[0][:-1])
+    return texts
+
+
+def impeccable_command_hit(raw: str) -> str:
+    """Judge a whole command for impeccable, by the texts a shell reads."""
+    for text in shell_run_texts(raw):
         for segment in split_segments(text):
             matched = impeccable_shell_hit(segment)
             if matched:
