@@ -25,7 +25,7 @@ first word, and strips from both ends to a fixed point, so the order of nesting 
 `>` strips at both ends, with the brackets; a bare `1)` or `1.` word is skipped, so the next word is the label), emphasis (`*`, `~`, `_`), backticks, quotes straight and curly, brackets, `#`, and a trailing `,` or `:`.
 A leading underscore that belongs to a name stays (`_build/run_tests.sh`, `__main__.py`, `_mutant.sh`): it goes only when
 the word closes with an underscore too, or its core is bare letters once wrappers and list markers go (`_mutant`,
-`_-mutant`). It returns three fields of that one stripped word: the word in lower case, whether a colon ended it, and
+`_-mutant`). It returns three fields of that one stripped word: the word in lower case, whether a colon was stripped from it or from a skipped token before it, and
 upper_env, True when the word before folding is an upper-case `NAME=` assignment (`- MUTATE_ONLY=x` reads True).
 `mutant_like` and `refused_word` read those three fields and nothing else. This reads the label region of the line, not
 every word: a scan of the whole line flips 15 to 26 accepted main commits, such as one that wrote
@@ -118,7 +118,7 @@ def label_word(line):
     to a fixed point from both ends, so the order of nested wrappers never matters (`_**mutant**_`, `**_mutant_**`,
     `_(none)_`). A leading underscore is stripped only when the word closes with an underscore too, or its core is bare
     letters once wrappers and list markers go (`_mutant`, `_-mutant`); a name such as `_build/run.sh` keeps it. A word
-    that strips to nothing (`-`, `>`, `1)`) is skipped, and a colon it held (`:`, `-:`) goes on to the next word, so
+    that strips to nothing (`-`, `>`) is skipped, as is a bare list number (`1)`, `1.`), and a colon it held (`:`, `-:`) goes on to the next word, so
     the label still ends in a colon. upper_env is True when the same stripped word, before it is
     folded to lower case, is an upper-case `NAME=` assignment (`- MUTATE_ONLY=x` reads True). The key is cut by its
     own match, so a near-miss key of any width (`Red-run :`, `Red-runs:`, `Red run`) does not shift the word. No key or
