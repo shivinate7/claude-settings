@@ -2406,7 +2406,7 @@ def lane_head_and_base(root, target, base):
     if c:
         raise Stop(f"git fetch origin {base} failed: {out} {LANE_LINT_CITE}")
     if not re.fullmatch(r"[0-9a-fA-F]{7,64}", target):  # a bare branch name means the pushed branch, never a local one that may differ
-        git(root, "fetch", "-q", "origin", f"+refs/heads/{target}:refs/remotes/origin/{target}")  # a name that is no branch on origin fails here, and is judged below
+        fetch_branch(root, target)  # a name that is no branch on origin fails here, and is judged below
         c, pushed = git(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{target}^{{commit}}")
         local = git(root, "rev-parse", "--verify", "-q", f"refs/heads/{target}^{{commit}}")
         if not local[0] and c:
@@ -2932,7 +2932,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             def prove(stop):
                 """Read the branch against the base tip fetched now. -> the records proof, or None off the default base.
                 stop(why) refuses. It waits on no check, so WAITS stays the bound."""
-                c, out, _ = retry_net(lambda: git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}"), getattr(host, "pause", time.sleep), what=f"the fetch of {base}")
+                c, out, _ = retry_net(lambda: fetch_branch(root, base),getattr(host, "pause", time.sleep), what=f"the fetch of {base}")
                 if is_net(c, out):  # a network error is not a refusal: the claim stays
                     raise NetStop(f"network error on the fetch of origin {base}, still failing after {NET_RETRIES} retries. The claim stays on {branch}. Run again to resume.\n{out}")
                 if c:  # never check against a stale base tip
@@ -3101,29 +3101,41 @@ def fetch_default_branch(root):
     return name
 
 def shallow_boundary(root):
-    """-> the set of commit shas whose parents this clone cut off (its `shallow` file); empty for a full clone."""
+    """-> the set of commit shas whose parents this clone cut off (its `shallow` file); empty for a full clone. Only a missing `shallow` file
+    means full history. Any other read error, or a `.git` file that names no git dir, raises Stop naming the file: reading it as full history
+    would read every unstamped record as old."""
     # A file read, not a git call: the one `git log` is the whole cost of the cutover read (a test pins it). A linked worktree's `.git` is a
     # file naming its git dir, and the `shallow` file lives in that dir's common dir.
+    path = os.path.join(root, ".git")
     try:
-        gitdir = os.path.join(root, ".git")
+        gitdir = path
         if os.path.isfile(gitdir):
             with open(gitdir, encoding="utf-8") as f:
                 gitdir = os.path.join(root, f.read().split("gitdir:", 1)[1].strip())
-            if os.path.isfile(os.path.join(gitdir, "commondir")):
-                with open(os.path.join(gitdir, "commondir"), encoding="utf-8") as f:
+            path = os.path.join(gitdir, "commondir")
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8") as f:
                     gitdir = os.path.join(gitdir, f.read().strip())
-        with open(os.path.join(gitdir, "shallow"), encoding="utf-8") as f:
+        path = os.path.normpath(os.path.join(gitdir, "shallow"))
+        with open(path, encoding="utf-8") as f:
             return set(f.read().split())
-    except (OSError, IndexError):
-        return set()
+    except FileNotFoundError:
+        if os.path.basename(path) == "shallow":
+            return set()
+        raise Stop(f"cannot read {path} to tell whether this clone is shallow: it is missing. Repair it, then run the command again. " + REVIEW_CITE)
+    except (OSError, IndexError, UnicodeDecodeError) as e:
+        why = "it names no git dir" if isinstance(e, IndexError) else f"{type(e).__name__}: {e}"
+        raise Stop(f"cannot read {os.path.normpath(path)} to tell whether this clone is shallow ({why}). Repair it, then run the command again. " + REVIEW_CITE) from e
 
 def review_stamp_since(root, base):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
     `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A read that cannot run
-    (git errors, no origin/<default branch> ref, or a shallow clone whose first salt commit is the boundary) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
+    (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, or a shallow file that cannot be read)
+    raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
     created before this time may carry no Stamp line."""
+    # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
     key = (root, base)
     if key not in _stamp_since:
         default = default_branch_once(root)

@@ -9,7 +9,7 @@ The check (incident 2026-11-01, batches 59 and 60: lane PRs #974, #979, #984, #9
 - The lane runs it before it hands its PR and head off. A red lane does not hand off.
 - The batch runner runs it on each lane head before the join. It refuses a red lane, and that lane fixes and hands off again.
 - The batch runner runs it on the batch head (`merge --lane-lint <integration branch>`) before it marks the integration PR ready. A FAIL keeps the PR a draft. A hand list of checks never stands in for this run (coordinator, 2026-11-06 15:29 CST): one missed the comment narration check in batch 36.
-- A FAIL refuses. An unknown refuses unless `--lint-unknown-ok "<reason>"` is given, and the reason is logged. A lint timeout (1200 s) is an unknown that `--lint-unknown-ok` does not lift. The lane re-runs it.
+- A FAIL refuses. An unknown refuses unless `--lint-unknown-ok "<reason>"` is given, and the reason is printed on stdout. A lint timeout (1200 s) is an unknown that `--lint-unknown-ok` does not lift. The lane re-runs it.
 
 Cost: one ci-job run (about 550 s to 660 s, 4 runs on 2026-11-01) and one worktree per call. It runs once at hand-off, once per lane at the join, and once on the batch head before ready. It writes one ci-job log, and keeps no other file.
 
