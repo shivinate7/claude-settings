@@ -239,11 +239,12 @@ def job_env(**extra):
     return env
 
 
-def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2"):
+def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2", own_group=False):
     """Run the rewritten command in the given shell, with `env` as its environment (default: job_env()).
     Return (rc or None, text, seconds, cmd).
     The mark is the shell's $0, so ps shows it on the job and reap() finds a job that no report
-    names. Text added to the command would change it, for one ending in a backslash."""
+    names. Text added to the command would change it, for one ending in a backslash.
+    own_group: start the command in a session of its own, so a case can kill that group and no other."""
     cmd, _hso = rewrite(command, quiet=quiet)
     mark = mark or new_mark()
     d = new_dir()
@@ -252,7 +253,7 @@ def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, qui
     with open(out_path, "wb") as out:
         proc = subprocess.Popen([shell, "-c", cmd, mark], cwd=d, stdin=subprocess.DEVNULL,
                                 stdout=out, stderr=subprocess.STDOUT,
-                                env=job_env() if env is None else env)
+                                env=job_env() if env is None else env, start_new_session=own_group)
         try:
             rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -1077,6 +1078,27 @@ def wait_until(cond, secs):
         time.sleep(0.2)
 
 
+def pid_ended(pid):
+    """True once pid is gone or a zombie. A job's EXIT trap runs before its process stops, so this means
+    the trap has run. A zombie counts as ended, whether or not its parent has reaped it yet."""
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return not state or state.startswith("Z")
+
+
+def stop_own_group(pid):
+    """Kill the process group of a job that run_rewritten started with own_group. The runner's own group is
+    never killed: the job's group is compared with it first."""
+    try:
+        pgid = os.getpgid(pid)
+    except ProcessLookupError:
+        return  # the job is gone
+    if pgid != os.getpgid(0):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def stall_then_end_problems(shell):
     """A1 for one shell. The job prints a line, stalls, then ends after the wrapper has returned."""
     done = os.path.join(new_dir(), "done")  # the job's last act, so the wait below has a file to see
@@ -1131,6 +1153,53 @@ def exit_code_job_leaves_no_files():
         found += expect(not os.path.exists(log), f"LOG {log} is left after the wrapper returned")
         found += expect(not os.path.exists(beat), f"BEAT {beat} is left after the wrapper returned")
         problems += ["%s: %s" % (shell, p) for p in found]
+    return problems
+
+
+@posix_case
+def stalled_job_keeps_its_log_when_it_ends():
+    """A3. a job that stalls, then ends with one last line: the STALL report names its LOG, and that LOG still
+    exists once the job has ended and holds the last line. The verdict a stalled job prints last is what the
+    owner reads, so the wrapper must not lose it"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 4; echo FINAL-VERDICT", quiet="1", own_group=True)
+    log = job = None
+    try:
+        problems = expect(rc == 3, f"exit {rc}, want 3 (the silence is a stall at 1 s)")
+        m_log = re.search(r"^Log: (/\S+\.log) ", text, re.M)
+        m_pid = PID_RE.search(text)
+        if not m_log or not m_pid:
+            return problems + ["the STALL report has no Log: path or no pid="]
+        log, job = m_log.group(1), int(m_pid.group(1))
+        # Scope: the LOG exists while the job runs, so its survival after the job ends proves something.
+        problems += expect(os.path.exists(log), f"LOG {log} is gone before the job ends")
+        problems += expect(wait_until(lambda: pid_ended(job), 30), f"job pid={job} did not end within 30 s")
+        # Subject: the job's last line is still readable after the job ends.
+        problems += expect(os.path.exists(log), f"LOG {log} was removed when the job ended, so its last line is lost")
+        if os.path.exists(log):
+            with open(log, encoding="utf-8", errors="replace") as f:
+                body = f.read()
+            problems += expect("FINAL-VERDICT" in body, f"LOG holds {body[:80]!r}, want FINAL-VERDICT")
+        return problems
+    finally:
+        if job is not None:
+            stop_own_group(job)
+        reap()
+        if log is not None and os.path.exists(log):
+            os.remove(log)  # the case keeps the LOG to read it; it is scratch, so the case removes it
+
+
+@posix_case
+def job_that_never_stalls_removes_its_log_and_beat():
+    """A3b. the control for A3: a job with the same last line and no silence past the quiet time. It exits 0,
+    relays its line, and neither LOG nor BEAT is left. It differs from A3 only by the stall"""
+    rc, text, _secs, cmd = run_rewritten("echo FINAL-VERDICT", quiet="2")
+    log, beat = job_files(cmd)
+    if log is None or beat is None:
+        return ["the rewrite names no --log or no --beat"]
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect("FINAL-VERDICT" in text.splitlines(), f"the job's line is not relayed: {text!r}")
+    problems += expect(not os.path.exists(log), f"LOG {log} is left after a job that never stalled")
+    problems += expect(not os.path.exists(beat), f"BEAT {beat} is left after a job that never stalled")
     return problems
 
 
