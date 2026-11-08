@@ -15584,9 +15584,9 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit that carries 
                          "builder edit, is allowed at commit, push and stop, and logs no builder-diff line",
                          clean_builder_case("bd-m-main-test-merge-clean")))
 
-# git's three conflict markers left in a conflicted test file of an open merge are refused by conflict-markers, and
-# builder-diff refuses that file too (page item 437 a). An unmerged file that is not staged is refused by builder-diff,
-# pinned by the bd-m-test-left row above, so these rows stage the markers before the commit.
+# git's three conflict markers left in a conflicted test file of an open merge are denied by builder-diff: a test file
+# that still holds markers is the builder's change (owner ruling 437 a, 2026-11-08 12:16 CST). An unmerged file that is
+# not staged is refused by builder-diff too, pinned by the bd-m-test-left row above, so these rows stage the markers first.
 _bd_m_markers_chain = diff_repo("bd-m-markers-chain", _f2_conflict_open)
 sh("builder-refuse: a builder's open merge that leaves git's markers in a conflicted test file, staged and committed in "
    "one call, is denied by builder-diff", VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
