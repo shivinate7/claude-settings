@@ -1,0 +1,108 @@
+name: lane-touched-tests
+
+# A lane PR is a draft, and checks.yml skips every job on a draft (decision draft-until-reviewed), so a test that
+# fails on Windows or macOS alone first shows in the batch. This workflow runs only the test files a draft touches,
+# on both systems (item 400 a, owner, 2026-11-08 06:08 CST). Every job skips on a ready PR. It is not in checks.yml,
+# not in all-jobs-passed and not a required check. The selector is .github/scripts/touched-tests.py: it names each
+# touched test it does not run, and exits non-zero on a diff it cannot read.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, converted_to_draft]
+
+permissions:
+  contents: read
+
+# The draft state is in the group, as in checks.yml: a skipped run on a ready PR must not cancel a draft run.
+concurrency:
+  group: ${{ github.workflow }}-${{ format('{0}-{1}', github.ref, github.event.pull_request.draft) }}
+  cancel-in-progress: true
+
+# Git's auto gc runs detached and writes into a test repo's .git/objects while the test deletes it (same as checks.yml).
+env:
+  GIT_CONFIG_COUNT: "2"
+  GIT_CONFIG_KEY_0: gc.auto
+  GIT_CONFIG_VALUE_0: "0"
+  GIT_CONFIG_KEY_1: maintenance.auto
+  GIT_CONFIG_VALUE_1: "false"
+
+jobs:
+  touched:
+    if: ${{ github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      any: ${{ steps.select.outputs.any }}
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Select the touched tests
+        id: select
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python .github/scripts/touched-tests.py
+
+  run:
+    name: run (${{ matrix.os }})
+    needs: touched
+    if: ${{ github.event.pull_request.draft && needs.touched.outputs.any == 'true' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60   # provisional, until 5 green runs (decision ci-job-caps)
+    # One entry per system that has tests to run: the selector leaves a system out when its list is empty.
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.touched.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      # The map skill's tests load typescript from this checkout's node_modules, as mod-tests.sh does.
+      - name: Install the map skill's packages
+        if: ${{ contains(matrix.files, 'skills/plain-english-map/') }}
+        shell: bash
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # Every file runs and keeps its exit code, so a red first file hides no other. A file with no runner here is red.
+      - name: Run the touched tests
+        shell: bash
+        env:
+          FILES: ${{ matrix.files }}
+        run: |
+          set -u
+          # buffer.write keeps the newlines LF on Windows.
+          list=$(python -c 'import json, os, sys; sys.stdout.buffer.write(("\n".join(json.loads(os.environ["FILES"])) + "\n").encode())') || { echo "cannot read the file list"; exit 1; }
+          [ -n "$list" ] || { echo "the file list is empty, but the selector said any=true"; exit 1; }
+          run_one() {
+            case "$1" in
+              mods/*.test.mjs|mods/*.test.js|mods/*/test_*.mjs) node "$1" ;;
+              skills/plain-english-map/tests/*.test.mjs) (cd skills/plain-english-map/tests && node --test "${1##*/}") ;;
+              *.test.mjs|*.test.js|*/test_*.mjs) node --test "$1" ;;
+              *.test.ps1) powershell -NoProfile -ExecutionPolicy Bypass -File "$1" ;;
+              *.py) python "$1" ;;
+              *.sh) bash "$1" ;;
+              *) echo "no runner for $1"; return 1 ;;
+            esac
+          }
+          failed=0
+          while IFS= read -r f; do
+            echo "::group::$f"
+            # No stdin from the loop: a test that reads it would eat the rest of the list.
+            if run_one "$f" < /dev/null; then rc=0; else rc=$?; fi
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then echo "PASS $f"; else echo "FAIL $f (exit $rc)"; failed=1; fi
+          done <<< "$list"
+          exit "$failed"
