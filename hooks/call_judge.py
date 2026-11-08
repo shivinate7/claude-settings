@@ -142,8 +142,8 @@ VERDICT_ADVERBS = ("probably", "still", "also", "never", "then", "definitely", "
 ACTOR_PRONOUNS = ("i", "you", "we", "they", "he", "she", "it")
 # The words that make a forecast's clause an ask: "Verify the check will pass it" asks for the run, it claims nothing.
 VERDICT_ASK_WORDS = ("whether", "if", "verify", "confirm", "prove", "probe", "find out", "unknown")
-# A wh-word asks only when it comes before the actor: "Which check will fail?" asks, while in "The check which runs
-# first will refuse it" the wh-word follows the actor and the claim stands.
+# A wh-word asks only in a sentence that ends in "?" and comes before the actor: "Which check will fail?" asks, while
+# in a statement such as "The check which fails will refuse it." the wh-word is a relative and the claim stands.
 VERDICT_WH_WORDS = ("which", "what")
 VERDICT_CLAIM_REMEDY = (
     "this message forecasts what a check will refuse, block, catch, flag, fail, allow or pass, and the turn did "
@@ -584,13 +584,13 @@ def split_clause(prefix):
     return (prefix[:ends[-1].start()], prefix[ends[-1].end():]) if ends else ("", prefix)
 
 
-def is_ask(prefix):
+def is_ask(prefix, question=False):
     """True when the forecast that ends `prefix` is asked, not claimed: its clause holds an ask word ("Verify the check
-    will pass it", "whether the check will refuse it"), a wh-word sits before the actor ("Which check will fail?"),
-    or a label "Unknown:" opens it."""
+    will pass it", "whether the check will refuse it"), `question` (the sentence ends in "?") and a wh-word sits before
+    the actor ("Which check will fail?"), or a label "Unknown:" opens it."""
     head, clause = split_clause(prefix)
     return _ASK_WORDS.search(clause) is not None or _UNKNOWN_LABEL.search(head) is not None \
-        or any(has_subject(clause[wh.end():].split()) for wh in _WH_WORDS.finditer(clause))
+        or (question and any(has_subject(clause[wh.end():].split()) for wh in _WH_WORDS.finditer(clause)))
 
 
 def actor_before(prefix):
@@ -616,12 +616,13 @@ def is_verdict_claim(sentence):
     send, a change or a PR (or a passive verb), whose actor is a check. A subject word elsewhere in the sentence, as in
     "I will block it until the check is green", is no actor. Needs lint/ on sys.path."""
     sentence = _straight(sentence)
+    question = sentence.rstrip().endswith("?")
     for modal in _FORECAST.finditer(sentence):
         verb = _PREDICATE.match(sentence, modal.end())
         if not verb:
             continue
         prefix = sentence[:modal.start()]
-        if is_ask(prefix):
+        if is_ask(prefix, question):
             continue
         if actor_after_by(sentence[verb.end():]) if verb.group("passive") else actor_before(prefix):
             return True
