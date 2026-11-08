@@ -8,6 +8,7 @@ The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+PrBody: the PR body file that CI_JOB_PR_BODY_FILE names reaches ${{ github.event.pull_request.body }} as its text; no shell runs it.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -32,9 +33,11 @@ CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
 CHECKS = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 WORKFLOWS = os.path.join(HERE, "..", ".github", "workflows")
 STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
+PR_BODY_FILE = "CI_JOB_PR_BODY_FILE"  # the env var that names the file holding the lane's PR body; merge --lane-lint sets it
 ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
+ENV.pop(PR_BODY_FILE, None)  # a case gets a PR body only through its own env
 
 
 def workflow(*steps):
@@ -477,6 +480,51 @@ class GithubBaseRef(Job):
         verdicts, seen, out = self.seen_after(step("seen", "python3 lint/seen_base_ref.py"),
                                               args=("--lint", "--base", "origin/main"))
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
+
+
+class PrBody(Job):
+    """The PR body reaches a step's ${{ github.event.pull_request.body }} as the text of the file that CI_JOB_PR_BODY_FILE
+    names (merge --lane-lint writes the lane's PR body there). With no file the expression is "", as it is today. The body
+    is data: no shell runs it. Each step writes the expression to body.txt, and the text is read back as written."""
+
+    BODY = step("body", "printf '%s' \"$PR_BODY\" > body.txt", env={"PR_BODY": "${{ github.event.pull_request.body }}"})
+
+    def body_file(self, body):
+        """A file holding `body` as UTF-8, with no newline translation, in a folder of this run's temp root."""
+        folder = tempfile.mkdtemp(prefix="prbody_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        path = os.path.join(folder, "pr-body.md")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(body)
+        return path
+
+    def test_the_pr_body_file_text_reaches_the_expression(self):
+        body = "Drops-lines: docs/old.md -- the lines are dead\nRetire-run: 12345\n"
+        verdicts, text, out = self.written_after("body.txt", self.BODY, env={PR_BODY_FILE: self.body_file(body)})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(text, body, "the PR body file did not reach the step's expression")
+
+    def test_with_no_pr_body_file_the_expression_is_empty(self):  # the control: today's behaviour
+        verdicts, text, out = self.written_after("body.txt", self.BODY)
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(text, "", "with no PR body file the expression did not read as empty")
+
+    def test_a_body_with_a_backtick_a_command_substitution_crlf_quotes_and_a_backslash_is_literal_text(self):
+        body = ("Drops-lines: docs/a.md -- `touch bq-ran` $(touch sub-ran) ${HOME}\r\n"
+                "say \"quoted\" and 'single' C:\\new\\1\n")
+        verdicts, text, out = self.written_after("body.txt", self.BODY, env={PR_BODY_FILE: self.body_file(body)})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(text, body, "the PR body did not reach the step as the literal text it is")
+        for ran in ("bq-ran", "sub-ran"):
+            self.assertFalse(os.path.exists(os.path.join(self.root, ran)), "a shell ran part of the PR body: %s" % ran)
+
+    def test_a_full_size_pr_body_reaches_the_step_whole(self):  # 65536 characters, the size GitHub allows a body
+        head, tail = "Drops-lines: docs/a.md\n", "\nEND"
+        body = head + "a" * (65536 - len(head) - len(tail)) + tail
+        verdicts, text, out = self.written_after("body.txt", self.BODY, env={PR_BODY_FILE: self.body_file(body)})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(len(text), len(body), "the step saw %d of the body's %d characters" % (len(text), len(body)))
+        self.assertTrue(text == body, "the step's copy of the full-size body differs from the body")
 
 
 def mapped(parent, body):
