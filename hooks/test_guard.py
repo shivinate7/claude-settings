@@ -19798,6 +19798,17 @@ add("brief-destructive-git: Workflow builder agent whose model is held in a vari
 add("brief-destructive-git: builder brief whose comma list of prohibitions names `git stash`, `git reset --hard` and "
     "`git clean -fd` is allowed", "allow", tool="Agent",
     prompt="Never run `git stash`, `git reset --hard`, or `git clean -fd`.", subagent_type="builder", model="sonnet")
+# A prose word that ends in x, then a comma, then a reset order. The comma-list join reads that x as a span placeholder
+# and drops the clause, so the negator before the comma reads as covering the order. Each is an order, so each is denied.
+add("brief-destructive-git: builder brief, tests fail and you can't fix, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="If the tests fail and you can't fix, `git reset --hard` and restart.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief, no need to fix, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="No need to fix, `git reset --hard` instead.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief, never leave the box, then a reset order is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Never leave the box, `git reset --hard` first.", subagent_type="builder", model="sonnet")
 # Control, green on the old code: a comma before an order is a clause break too, so the order is still denied. A
 # builder that drops the comma from the clause split would let this through.
 add("brief-destructive-git: control, a comma before the order keeps it an order and is denied", "deny",
