@@ -715,11 +715,11 @@ class ClaudeMdFlag(Env):
     def unreadable(self, fail):
         """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
         real_sh, seen = merge.sh, []
-        def stub(args, cwd=None, input=None, env=None):
+        def stub(args, *rest, **kw):  # merge.sh's options (cwd, input, env, timeout, live_stderr) pass through to the real call
             if "diff" in args and any("..." in a for a in args):
                 seen.append(args)
                 return fail(args)
-            return real_sh(args, cwd=cwd, input=input, env=env)
+            return real_sh(args, *rest, **kw)
         patch = unittest.mock.patch.object(merge, "sh", stub)
         patch.start(); self.addCleanup(patch.stop)
         return seen
@@ -6338,10 +6338,10 @@ class MemoKeyRead(Env):
     def test_a_timeout_on_the_memo_key_read_refuses_as_unknown(self):
         real_sh = merge.sh
 
-        def slow(args, cwd=None, input=None, env=None):
+        def slow(args, *rest, **kw):  # merge.sh's options (cwd, input, env, timeout, live_stderr) pass through to the real call
             if "rev-parse" in args:
                 raise subprocess.TimeoutExpired(args, 1)
-            return real_sh(args, cwd=cwd, input=input, env=env)
+            return real_sh(args, *rest, **kw)
         with unittest.mock.patch.object(merge, "sh", slow):
             with self.assertRaises(merge.Stop) as cm:
                 merge.undo_check(self.co, "origin/main")
@@ -8978,7 +8978,7 @@ class GhLockRateRetry(unittest.TestCase):
             return "base-tree" if jq == ".tree.sha" else "lock-commit-read"
         return "unhandled"
 
-    def fake_sh(self, args, cwd=None, input=None, env=None):
+    def fake_sh(self, args, *rest, **kw):  # the positional and keyword options (cwd, input, env, timeout, live_stderr) are ignored: the reply does not depend on them
         """A reply is (code, text) or (code, text, headers). With -i or --include in the args the fake prints what `gh api -i` prints (gh_i): the
         status line and the headers first, then the text. Without them it prints the text alone, as gh does."""
         step = self.step_of(args)
@@ -9698,14 +9698,14 @@ class GitLockExtendsForRateWaits(Env):
         self.token = self.glock.acquire("main", ttl)
         self.gh_calls, self.gh, self.cmds, self.lose_push = 0, [(0, "[]")], [], False  # cmds: every non-gh command after the take
         real = merge.sh
-        def fake_sh(args, cwd=None, input=None, env=None):
+        def fake_sh(args, *rest, **kw):  # merge.sh's options (cwd, input, env, timeout, live_stderr) pass through to the real call
             if args[0] != "gh":
                 self.cmds.append(list(args))
                 if self.lose_push and "push" in args and not args[-1].startswith(":"):  # the next ref update lands on origin, and its reply is lost
                     self.lose_push = False
-                    real(args, cwd=cwd, input=input, env=env)
+                    real(args, *rest, **kw)
                     return 128, NET_HOST
-                return real(args, cwd=cwd, input=input, env=env)
+                return real(args, *rest, **kw)
             self.gh_calls += 1
             return self.gh[min(self.gh_calls, len(self.gh)) - 1]
         p = unittest.mock.patch.object(merge, "sh", fake_sh)

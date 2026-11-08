@@ -7,6 +7,7 @@ fetched at depth 1.
 
     import shallow_clone
     error = shallow_clone.make(source, dest, pin)        # "" when both git calls worked
+    shallow_origin = shallow_clone.origin(source, dest)  # a bare copy of source cut at depth 1: a remote that is itself shallow
     facts = shallow_clone.facts(dest, pin)               # shallow, pin_present, ancestor_rc (1 in the bug shape)
 """
 import os
@@ -30,6 +31,14 @@ def make(source, dest, pin):
         return made.stderr.strip() or "git clone failed"
     fetched = _git(dest, "fetch", "-q", "--depth", "1", "origin", pin)
     return fetched.stderr.strip() or "git fetch failed" if fetched.returncode else ""
+
+
+def origin(source, dest):
+    """A bare copy of `source` with every branch cut at depth 1 at `dest` (a path that does not exist yet): a remote that is itself
+    shallow, so a fetch from it cannot deepen a clone past the cut. Returns `dest`; raises on a failed clone."""
+    _nowindow.run(["git", "clone", "-q", "--bare", "--depth", "1", "--no-single-branch", "--no-local", source, dest],
+                  capture_output=True, text=True, check=True)
+    return dest
 
 
 def facts(clone, pin, tip="HEAD"):

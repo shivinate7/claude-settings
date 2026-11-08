@@ -155,8 +155,16 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
-def git(cwd, *a, input=None):
-    return sh(["git", "-C", cwd, *a], input=input)
+def git(cwd, *a, input=None, timeout=None):
+    """Run git in `cwd`, reading stdout and stderr combined, so a caller parses git's answer from text. A GIT_TRACE* variable
+    (GIT_TRACE2* too) set to 1, 2, true or a file descriptor writes its trace to stderr or an open stream, where it would become
+    part of that text (a sha, a path). So the child keeps such a variable only when its value is an absolute path, a file target."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_TRACE") or os.path.isabs(v)}
+    return sh(["git", "-C", cwd, *a], input=input, env=env, timeout=timeout)
+
+def repo_root():
+    """The one home of root discovery. -> (exit code, root). Stdout only: a stderr line (GIT_TRACE) must not become part of the path; stderr passes through."""
+    return sh(["git", "rev-parse", "--show-toplevel"], live_stderr=True)
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -811,7 +819,7 @@ class Host:
             return int(m.group(1))
         branch = s
         if not branch:
-            c, out = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.cwd)
+            c, out = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.cwd, live_stderr=True)  # stdout only: a trace line is no branch
             if c or not out.strip() or out.strip() == "HEAD":
                 raise Stop("no pull request is named, and the branch of the working directory cannot be read: " + out)
             branch = out.strip()
@@ -1530,6 +1538,7 @@ CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs re
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
+UNSHALLOW_SECONDS = 600  # the bound on the lane lint's `git fetch --unshallow origin`: a full fetch of this repo over a slow link, about half of LINT_SECONDS, since the lint it gates runs 550 s to 660 s. Unmeasured; raise it on a timeout from a link that was only slow.
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
 SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
 
@@ -2467,12 +2476,40 @@ def ci_job_run(wt, *args):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+def unshallow_for_lint(root):
+    """Make `root` a full clone before the lane lint reads history: the silent-undo check reads a shallow clone as unknown (decision
+    lanes-run-no-full-ci-job). One `git fetch --unshallow origin` on a shallow clone, bounded by UNSHALLOW_SECONDS, none on a full one.
+    Any other outcome raises Stop, not Liftable: a failed or timed-out fetch, a clone still shallow after it (origin is shallow), a probe
+    that answers neither true nor false. The lint is unknown, and --lint-unknown-ok must not lift an unknown that no step named."""
+    def stop(why, remedy="Run `git fetch --unshallow origin` where origin is reachable, then run `merge --lane-lint` again."):
+        raise Stop(f"the lint is unknown, not a pass: {why}\n{remedy} {LANE_LINT_CITE}")
+    def shallow():  # stdout only: a stderr line (GIT_TRACE) must not change the answer; stderr passes through
+        c, out = sh(["git", "-C", root, "rev-parse", "--is-shallow-repository"], live_stderr=True)
+        if c or out not in ("true", "false"):
+            stop(f"git rev-parse --is-shallow-repository answered {out!r} (exit {c}), so this clone cannot be called full.")
+        return out == "true"
+    if not shallow():
+        return
+    try:
+        c, out = git(root, "fetch", "--unshallow", "origin", timeout=UNSHALLOW_SECONDS)
+    except subprocess.TimeoutExpired:
+        stop(f"this clone is shallow, so the lint cannot read the history, and `git fetch --unshallow origin` timed out: it did not finish in {UNSHALLOW_SECONDS} s.")
+    if c:
+        stop(f"this clone is shallow, so the lint cannot read the history, and `git fetch --unshallow origin` failed: {out}")
+    if shallow():
+        stop("this clone is still shallow after the fetch, so the lint cannot read the history. Two causes: origin itself is shallow and has no more history to send, "
+             "or a fetch refspec in remote.origin.fetch leaves history out (a single-branch clone's refspec names one branch).",
+             "For a shallow origin, lint from a clone whose origin has full history (a clone of the real remote, not of a shallow copy). "
+             "For a refspec, set remote.origin.fetch to `+refs/heads/*:refs/remotes/origin/*`. Then run `merge --lane-lint` again.")
+
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
+    A shallow clone is unshallowed first (unshallow_for_lint).
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
+    unshallow_for_lint(root)
     if target.isdigit():
         info = (host or Host()).pr(int(target))
         head, base = info["head"], info["base"]
@@ -3279,7 +3316,7 @@ def idle_lanes(live):
     except (Exception, SystemExit) as e:  # a build that exits at import is unloadable too
         print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
         return 1
-    c, root = sh(["git", "rev-parse", "--show-toplevel"])
+    c, root = repo_root()
     if c:
         print("merge: not in a git checkout. No list was made.", file=sys.stderr)
         return 1
@@ -3363,7 +3400,7 @@ def main(argv, host=None, lock=None):
         if a.idle_lanes:
             return idle_lanes(a.live)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
-            c, root = sh(["git", "rev-parse", "--show-toplevel"])
+            c, root = repo_root()
             if c:
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
@@ -3374,7 +3411,7 @@ def main(argv, host=None, lock=None):
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
-        c, root = sh(["git", "rev-parse", "--show-toplevel"])
+        c, root = repo_root()
         if c:
             raise Stop("not in a git checkout")
         lock = lock or default_lock(root)
