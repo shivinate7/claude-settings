@@ -12,6 +12,8 @@
 # (PINNED below). A pin this clone does not hold is reported as unknown and changes no exit code. A pin the
 # clone holds but whose history a shallow clone cut is unknown too, in its own line with the remedy
 # `git fetch --unshallow`; unlike the line above, it still exits 3, because the files differ, and that is a fact.
+# When the ste-lint pin's files differ, stdout also gets guard_ste.PIN_DRIFT after the step's lines: a FAIL keeps exit 1,
+# and rule ste-push reads that line to tell a drifted FAIL (unknown) from CI's own FAIL.
 # Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/, so it uses the clone the
 # global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
 # Exit codes: the step's own (0 pass, 1 FAIL), 3 pin drift, and 2 for a fault of this command (no checkout, no bash, a crash).
@@ -69,8 +71,8 @@ def pins():
 
 
 def pin_report():
-    """One stderr line per pinned action and commit. True when a pin's files for its action differ from this copy's."""
-    head, drift = here("rev-parse", "HEAD"), False
+    """One stderr line per pinned action and commit. The set of actions whose pinned files differ from this copy's."""
+    head, drift = here("rev-parse", "HEAD"), set()
     for (action, sha), where in pins().items():
         files, what, grant = PINNED[action]
         pin = "ste-changed: CI pins %s at %s" % (action, sha[:7])
@@ -82,7 +84,7 @@ def pin_report():
         elif _nowindow.run(["git", "-C", ROOT, "diff", "--quiet", sha, "HEAD", "--", *files]).returncode == 0:
             print("%s (%s), the same %s as this copy." % (pin, where, what), file=sys.stderr)
         else:
-            drift = True
+            drift.add(action)
             day = here("log", "-1", "--format=%cs", sha)
             older = git_reads.branch_is_ancestor(ROOT, "HEAD", sha)  # None in a shallow clone: the cut reads exit 1
             if older is None:
@@ -128,6 +130,8 @@ def main(argv):
     # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
     rc = subprocess.run([find_bash(), run], env=env).returncode
     drift = pin_report()
+    if "ste-lint" in drift:
+        print(guard_ste.PIN_DRIFT, flush=True)
     sys.exit(rc or (3 if drift else 0))
 
 

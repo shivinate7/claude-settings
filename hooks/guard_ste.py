@@ -6,7 +6,8 @@ Standard library plus `_nowindow`; the pointer and config reads are imported whe
   Scope      the `paths`, `exclude` and `changed_paths` defaults of actions/ste-lint/action.yml, with the pushed
              checkout's .ste-lint-exclude, as pathspecs that `git diff` reads the way actions/ste-lint/run.sh does.
   CI pin     a `<owner>/claude-settings/actions/ste-lint@<sha>` line in a workflow of the checkout.
-  Lint       the program `<program> <base>`, run in the checkout, with a time limit, read by its verdict line.
+  Lint       the program `<program> <base>`, run in the checkout, with a time limit, read by its verdict line
+             and by PIN_DRIFT, the line bin/ste-changed prints when the CI pin's lint files differ from its own.
 """
 import os
 import re
@@ -26,12 +27,28 @@ EXCLUDE_ENV = "STE_CHANGED_EXCLUDE"   # extra `exclude` pathspecs for bin/ste-ch
 LINT_SECONDS = 40   # under the hook's own 60 s limit; measured 1.2 s for a small push, 7.6 s for 138 files
 VERDICT = re.compile(r"^ste-lint: (PASS|FAIL),", re.M)
 FINDING = re.compile(r"^::error file=([^,]*)(?:,line=(\d+))?::(.*)$", re.M)
+# bin/ste-changed prints this line on stdout when the CI pin's lint files differ from its own. A FAIL then may not
+# be CI's verdict, so rule ste-push reads it as unknown. The exit code alone cannot say it: a FAIL keeps exit 1.
+PIN_DRIFT = "ste-changed: pin drift, the CI pin's lint files differ from this copy's, so this verdict may not be CI's"
 
 
 def action_default(text, name):
-    """The `default:` of input `name` in action.yml's text, or None when the input has none."""
-    found = re.search(r"^  %s:.*?\n    default: \"([^\"]*)\"" % re.escape(name), text, re.M | re.S)
-    return found.group(1) if found else None
+    """The `default:` of input `name` in action.yml's text, quoted or not, or None when the input has none. Only
+    the input's own block (its lines indented past `  name:`) is read."""
+    block = re.search(r"^  %s:[ \t]*\n((?:(?:[ \t]*|    .*)\n)*)" % re.escape(name), text + "\n", re.M)
+    found = re.search(r"^    default:[ \t]*(.*?)[ \t]*$", block.group(1), re.M) if block else None
+    if not found:
+        return None
+    value = found.group(1)
+    if value[:1] in ("'", '"'):
+        end = value.find(value[0], 1)
+        return value[1:end] if end > 0 else None
+    return re.split(r"[ \t]#", value, 1)[0].strip()
+
+
+def pin_drifted(out):
+    """True when the lint's stdout holds the PIN_DRIFT line."""
+    return any(line.strip() == PIN_DRIFT for line in out.splitlines())
 
 
 def lint_inputs(text):
@@ -116,23 +133,35 @@ def _unquoted(value):
     return value[1:-1] if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"" else value
 
 
+def _step_reader():
+    """lint/workflow_steps.py of the config folder, else of the checkout, loaded from that file."""
+    import importlib.util
+    path = installed_path("lint", "workflow_steps.py")
+    spec = importlib.util.spec_from_file_location("workflow_steps", path) if path else None
+    if spec is None or spec.loader is None:
+        raise FileNotFoundError("lint/workflow_steps.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def pinned_with(top):
     """{input: unquoted value} of the `with:` block of the first workflow step of the checkout at `top` that
-    pins the ste-lint action, {} when that step has none or no step pins it. The step reader is
-    lint/workflow_steps.py, beside this folder. Raises when it cannot be read."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
-    if lint not in sys.path:
-        sys.path.append(lint)
-    import workflow_steps
+    pins the ste-lint action, {} when that step has none or no line pins it. Raises when it cannot be read,
+    and when a line pins the action but no CI step that lint/workflow_steps.py parses holds it (a flow
+    mapping, say)."""
+    reader = _step_reader()
     folder = os.path.join(top, ".github", "workflows")
     for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else ():
         if not name.endswith((".yml", ".yaml")):
             continue
         with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as handle:
             text = handle.read()
-        for step in workflow_steps.step_blocks(text):
-            if LINT_PIN.search((workflow_steps.step_key(step, "uses") or "").split("#", 1)[0]):
-                return {key: _unquoted(value) for key, value in workflow_steps.step_with(step).items()}
+        for step in reader.step_blocks(text):
+            if LINT_PIN.search((reader.step_key(step, "uses") or "").split("#", 1)[0]):
+                return {key: _unquoted(value) for key, value in reader.step_with(step).items()}
+    if workflow_pins(top, LINT_PIN):
+        raise LookupError("a line pins the ste-lint action, and no CI step the reader parses holds it")
     return {}
 
 
@@ -146,7 +175,8 @@ def pinned_plan(top):
         with open(os.path.join(find_checkout(own_checkout()), LINT_ACTION), encoding="utf-8") as handle:
             action = handle.read()
     except Exception as err:
-        return "unknown", "", "the pinned step's inputs could not be read (%s)" % type(err).__name__
+        return "unknown", "", "the pinned step's inputs could not be read (%s%s)" % (
+            type(err).__name__, ": %s" % err if isinstance(err, LookupError) else "")
     for name, value in given.items():
         if "${{" in value:
             return "unknown", "", "the pinned input %s is an expression the guard cannot evaluate" % name
@@ -163,18 +193,24 @@ def pinned_plan(top):
     return "lint", exclude, ""
 
 
+def installed_path(*parts):
+    """The file at `parts` under the installed config folder, else under the claude-settings checkout. ''
+    when neither holds it."""
+    from shared_names import config_dir
+    for folder in (config_dir(), find_checkout(own_checkout())):
+        path = os.path.join(folder, *parts) if folder else ""
+        if path and os.path.isfile(path):
+            return path
+    return ""
+
+
 def program_path(top):
     """The lint program: STE_CHANGED_BIN, else bin/ste-changed of the installed config folder, else of the
     claude-settings checkout. '' when none is a file."""
     named = os.environ.get("STE_CHANGED_BIN")
     if named:
         return named if os.path.isfile(named) else ""
-    from shared_names import config_dir
-    for folder in (config_dir(), find_checkout(own_checkout())):
-        path = os.path.join(folder, "bin", "ste-changed") if folder else ""
-        if path and os.path.isfile(path):
-            return path
-    return ""
+    return installed_path("bin", "ste-changed")
 
 
 def _argv(program, base):

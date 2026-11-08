@@ -519,7 +519,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # read against HEAD with `git diff --check`; an untracked file is read against /dev/null.
 # A blind commit with a push after it in the call is refused only when the files that commit covers
 # already hold a triplet, or the chain runs a conflict-making git step (merge, pull, rebase,
-# cherry-pick, stash pop or apply, am). Otherwise it is no hit, and the push check judges what is sent.
+# cherry-pick, revert, stash pop or apply, am). Otherwise it is no hit, and the push check judges what is sent.
 # A push is judged on the commits it would send, which are real when the hook runs. For each ref it
 # names, the range runs from the merge base with the remote-tracking tip of the destination, else the
 # source's upstream, else the default base, up to the local source ref (HEAD for a bare push, and for a
@@ -553,7 +553,10 @@ CONFLICT_MARKERS_CHAIN_REASON = (
 )
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
-_CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
+# The git verbs that commit what another ref or a patch holds; rule ste-push reads them. pull fetches what it
+# brings only when it runs, and rebase replays the branch's own commits, so those two are conflict verbs only.
+_BRINGING_VERBS = ("merge", "cherry-pick", "am", "revert")
+_CONFLICT_VERBS = _BRINGING_VERBS + ("pull", "rebase")
 _UNTRACKED_CAP = 100
 _CONFLICT_FINDING = re.compile(r"^(.+):(\d+): leftover conflict marker\s*$")
 _MARKER_KINDS = {"<": "start", "=": "mid", ">": "end"}
@@ -715,7 +718,7 @@ def _continues(call):
 
 def _makes_conflict(call):
     """True for a git step that can leave conflict markers in the tree: merge, pull, rebase,
-    cherry-pick, `stash pop`, `stash apply` and am. A `--continue` or `--abort` leaves none."""
+    cherry-pick, revert, `stash pop`, `stash apply` and am. A `--continue` or `--abort` leaves none."""
     if call[0] == "stash":
         return "pop" in call[1] or "apply" in call[1]
     return call[0] in _CONFLICT_VERBS and not {"--continue", "--abort"} & set(call[1])
@@ -802,8 +805,9 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # CI runs the ste-lint step (actions/ste-lint) on a pull request; this runs the same step before the push,
 # so a failing sentence is fixed before CI spends a run. The step is bin/ste-changed (or STE_CHANGED_BIN):
 # `<program> <base>`, run in the pushed checkout, which lints HEAD against `origin/<base>`. Only the
-# `ste-lint: PASS|FAIL,` line of its stdout decides. A FAIL is a deny. Exit 3 (the pin drifted) never
-# refuses, even with a FAIL line: the pinned step is not the one that ran, so the verdict is unknown. Any
+# `ste-lint: PASS|FAIL,` line of its stdout decides. A FAIL is a deny. Pin drift never refuses, even with a
+# FAIL line: exit 3, or the guard_ste.PIN_DRIFT line that bin/ste-changed prints on stdout when the CI pin's
+# lint files differ (a FAIL keeps exit 1). The pinned CI step is not the one that ran, so the verdict is unknown. Any
 # other exit than 0, 1 and 3, no verdict line, a lint past guard_ste.LINT_SECONDS, a program that will not
 # start and a range this reader cannot lint read as unknown: the push is allowed, one guard.log line holds
 # `ste-push` and `unknown`, and stderr says so. An exit 1 with a PASS line is a failure of the stale-cites
@@ -813,7 +817,8 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # destination range (_checked_range).
 # The pinned step's `with:` block (guard_ste.pinned_plan) is read from the pushed checkout's workflow:
 # `fail: false` allows with no lint, `exclude` is applied to the scope and to the lint (EXCLUDE_ENV), and any
-# other input that is not at its default reads unknown.
+# other input that is not at its default reads unknown. A line that pins the action with no CI step the reader
+# parses (a flow mapping, say) reads unknown.
 # A push is not linted when it is a dry run, a delete, tags only, a tag, a push to `archive/*` or the record
 # branch, a push of a ref other than HEAD (unknown, noted), or a push from a checkout whose CI runs no
 # ste-lint (no pin in .github/workflows, and not claude-settings itself). It is linted only when
@@ -825,12 +830,20 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # denied, with the remedy to push in a call of its own (mirrors CONFLICT_MARKERS_CHAIN_REASON). A commit
 # with no `-a` or path that leaves an in-scope edit unstaged reads as dirty too: a false alarm that costs
 # one retry. No lint starts for it.
-# Limits: a `sh -c` script is not read; the remote is always read as origin.
+# A merge, cherry-pick, am or revert (_BRINGING_VERBS) earlier in the call makes a commit the push cannot lint
+# either. It is denied the same way when it brings an in-scope file: a merge of <ref> when both
+# `<base>...<ref>` and `HEAD...<ref>` name it (so a merge of origin/<default> brings nothing), a cherry-pick
+# when `<ref>^!` (or the range named) adds or changes it, a revert when the reverse of that diff does. An am
+# patch is not read, so an am before a push is denied: a false alarm for a code-only patch, one retry.
+# Its `--continue` is read as a commit; `--abort`, `--quit` and `--skip` bring nothing.
+# Limits: a `sh -c` script is not read; the remote is always read as origin; a pull earlier in the call is
+# not read (it fetches what it brings only when it runs).
 # Cost: per push segment, no git spawn until a pin is found (the top-folder read is the record-branch
 # check's own, cached), then one `git rev-parse --symbolic-full-name` and one `git symbolic-ref` for a
 # source other than HEAD, the default-base reads (at most four `git symbolic-ref`/`git rev-parse`), one
 # `git diff --name-only`; after a commit in the call, one more `git diff --name-only HEAD` (and one
-# `git ls-files --others` after an add). A push in scope adds one lint run (about 1.2 s for a small push),
+# `git ls-files --others` after an add), and per ref a merge, cherry-pick or revert in the call names, one
+# `git diff --name-only` (two for a merge). A push in scope adds one lint run (about 1.2 s for a small push),
 # the lint's own reads.
 STE_PUSH_REASON = (
     "Rule (STE, ste-push): this push sends prose that fails the ste-lint check CI runs on it: {detail}. "
@@ -839,8 +852,8 @@ STE_PUSH_REASON = (
     "covers bloat only, the long-sentence finding; every other finding needs a hand edit."
 )
 STE_PUSH_CHAIN_REASON = (
-    "Rule (STE, ste-push): the commit in this call adds prose the ste-lint check CI runs reads, and this push "
-    "cannot lint a commit that does not exist yet. "
+    "Rule (STE, ste-push): a commit this call makes before the push (a commit, merge, cherry-pick, am or revert) "
+    "adds prose the ste-lint check CI runs reads, and this push cannot lint a commit that does not exist yet. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
 _ARCHIVE_PREFIX = "archive/"
@@ -893,6 +906,53 @@ def _ste_dirty(top, scope, added):
     return names[0] if names else ""
 
 
+_BRING_VALUE_FLAGS = {"-m", "-F", "-X", "--mainline", "--strategy", "--strategy-option", "--file", "--message",
+                      "--into-name", "--cleanup"}   # a value flag of merge, cherry-pick or revert: its value is no ref
+_BRING_DONE_FLAGS = {"--abort", "--quit", "--skip"}   # the step ends a sequence and brings nothing
+
+
+def _bring_refs(verb, args):
+    """The refs a merge, cherry-pick or revert names. merge's `-s` takes a value (the strategy); cherry-pick's
+    and revert's is --signoff. `-` is the branch checked out before."""
+    refs, index = [], 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in _BRING_VALUE_FLAGS or (verb == "merge" and arg == "-s"):
+            index += 1
+        elif arg.startswith("-") and arg != "-":
+            continue
+        else:
+            refs.append("@{-1}" if arg == "-" else arg)
+    return refs
+
+
+def _ste_brought(top, base, scope, calls):
+    """The first in-scope file the merge, cherry-pick, am or revert `calls` ((verb, args) each) bring into HEAD,
+    '' for none, None when git could not tell. An am patch is not read: it reads as `git am`."""
+    common = ("-c", "core.quotepath=off", "diff", "--name-only", "--diff-filter=AMR")
+    for verb, args in calls:
+        if verb == "am":
+            return "git am"
+        refs = _bring_refs(verb, args) or (["@{upstream}"] if verb == "merge" else [])
+        for ref in refs:
+            if verb == "merge":   # changed on <ref> since main, and since HEAD: what the merge brings that neither has
+                reads = [(base + "..." + ref,), ("HEAD..." + ref,)]
+            else:
+                spec = ref if ".." in ref else ref + "^!"
+                reads = [("-R", spec) if verb == "revert" else (spec,)]
+            found = []
+            for read in reads:
+                done = _git(top, *common, *read, "--", *scope)
+                if done is None or done.returncode != 0:
+                    return None
+                found.append([name for name in done.stdout.splitlines() if name])
+            names = [name for name in found[0] if all(name in other for other in found[1:])]
+            if names:
+                return names[0]
+    return ""
+
+
 def ste_push_hit(stripped: str, cwd: str, record_branch_of, read_verb, note):
     """Return (matched, reason) for the first push whose lint fails, else None. `note(why)` is called once per
     push the guard could not lint; the push is allowed. `record_branch_of(root)` reads the record branch
@@ -907,12 +967,19 @@ def ste_push_hit(stripped: str, cwd: str, record_branch_of, read_verb, note):
 def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
     linted = set()
     committed, added = set(), set()   # tops where an earlier segment of this call commits / adds
+    brought = {}                      # top: [(verb, args)] of each earlier merge, cherry-pick, am or revert there
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
-        if call is not None and call[0] in ("add", "commit"):
+        resumes = call is not None and call[0] in _BRINGING_VERBS + _CONTINUE_VERBS and "--continue" in call[1]
+        if call is not None and (call[0] in ("add", "commit") or resumes):
             made = _segment_top(segment, stripped, cwd)
             if made:
                 (added if call[0] == "add" else committed).add(made)
+            continue
+        if call is not None and call[0] in _BRINGING_VERBS and not _BRING_DONE_FLAGS & set(call[1]):
+            made = _segment_top(segment, stripped, cwd)
+            if made:
+                brought.setdefault(made, []).append(call)
             continue
         if call is None or call[0] != "push" or read_verb("push", call[1]):
             continue
@@ -963,6 +1030,13 @@ def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
             if not base:
                 note(why)
                 continue
+            if top in brought:
+                fresh = _ste_brought(top, base, scope, brought[top])
+                if fresh is None:
+                    note("the files a merge, cherry-pick or revert in this call brings could not be read")
+                    continue
+                if fresh:
+                    return fresh, STE_PUSH_CHAIN_REASON
             names = _git(top, "-c", "core.quotepath=off", "diff", "--name-only", "--diff-filter=AMR",
                          base + "..." + source, "--", *scope)
             if names is None or names.returncode != 0:
@@ -997,8 +1071,8 @@ def _ste_lint(program, base, top, note, exclude=""):
         return None
     if verdict == "PASS":
         return None
-    if code == 3:
-        note("the lint exited 3 (the CI pin differs from this copy) with a FAIL verdict, so it may not be CI's")
+    if code == 3 or guard_ste.pin_drifted(out):
+        note("the lint reported pin drift (the CI pin differs from this copy) with a FAIL verdict, so it may not be CI's")
         return None
     rows = guard_ste.error_findings(out)
     detail = "; ".join("%s%s %s" % (path, ":" + line if line else "", text) for path, line, text in rows)
