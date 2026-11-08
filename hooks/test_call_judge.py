@@ -2148,12 +2148,16 @@ def case_past_ruling_owner_decision_stays_refused():
 # The four sentences item 8 must carry verbatim, so the judge is told which step lines are rulings. A row fails when its
 # sentence is missing from the item-8 text.
 ITEM8_SENTENCES = (
-    ("S1", "A step line is a ruling when it says the owner ruled, answered, picked or granted, and gives his words, "
-           "a page item, or a date."),
+    ("S1", "A step line is a ruling when it says the owner ruled, answered, picked or granted."),
     ("S2", "A line where a session made the call, such as a recommended option, a proposed pick, or a lane's call, "
            "is not a ruling."),
     ("S3", "An incident or gripe line that only tells what went wrong is not a ruling."),
     ("S4", "A ruling that mentions a risk, a defect or an incident is still a ruling."),
+)
+# Phrases item 8 must not carry. The evidence clause made a step line with no words, page item or date stop counting as
+# a ruling, so the judge refused undated owner rulings.
+ITEM8_ABSENT = (
+    ("S1 evidence clause", "and gives his words, a page item, or a date"),
 )
 
 
@@ -2178,6 +2182,8 @@ def case_item8_prompt_names_record_kinds_and_owner_markers():
     for label, sentence in ITEM8_SENTENCES:
         check("item 8 prompt: sentence %s is in the item-8 text verbatim" % label, sentence in item8,
               "missing: " + sentence)
+    for label, phrase in ITEM8_ABSENT:
+        check("item 8 prompt: %s is not in the item-8 text" % label, phrase not in item8, "present: " + phrase)
 
 
 def main():
