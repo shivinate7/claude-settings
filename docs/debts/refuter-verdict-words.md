@@ -7,3 +7,5 @@
 **Decision.** reviewer-brief-blind (a reviewer's brief holds no report or verdict).
 
 **Retire.** For a refuter role, the verdict check also reads `holds`, `revise` and `refuted` after a verdict or `Refuter` label. A case in `hooks/test_guard.py` shows that a refuter brief with `Refuter: revise` is refused, and that a reviewer brief using the word "revise" in prose passes.
+
+**Fix.** step:refuter-verdict-words
