@@ -191,8 +191,9 @@ def module_or_fail():
         raise Fail(f"{MODULE} is missing")
 
 
-def hook(command, os_name=None, quiet="2"):
-    """Run the hook on one background Bash call, with STALL_WATCH_QUIET set to quiet. Return (rc, stdout, stderr)."""
+def hook(command, os_name=None, quiet="2", tmpdir=None):
+    """Run the hook on one background Bash call, with STALL_WATCH_QUIET set to quiet. Return (rc, stdout, stderr).
+    tmpdir is the folder the hook sees as TMPDIR, and the folder it prunes (default SCRATCH)."""
     module_or_fail()
     payload = {
         "session_id": "test-stall-watch",
@@ -202,7 +203,7 @@ def hook(command, os_name=None, quiet="2"):
     }
     # TMPDIR makes the hook name its log under SCRATCH (case 7b): a stalled job's log is never
     # removed by the wrapper, so the run's cleanup must remove it. Every caller goes through here.
-    env = dict(os.environ, STALL_WATCH_QUIET=quiet, TMPDIR=SCRATCH)
+    env = dict(os.environ, STALL_WATCH_QUIET=quiet, TMPDIR=tmpdir or SCRATCH)
     if os_name is None:
         argv = [PY, MODULE, "--hook"]
     else:
@@ -1105,9 +1106,11 @@ def kill_job_group(pgid, pid):
 
 
 def stall_then_end_problems(shell):
-    """A1 for one shell. The job prints a line, stalls, then ends after the wrapper has returned."""
+    """A1 for one shell. The job prints a line, stalls, then ends after the wrapper has returned. Its BEAT is
+    removed when it ends; its LOG is kept."""
     done = os.path.join(new_dir(), "done")  # the job's last act, so the wait below has a file to see
     orig = 'echo pre-stall-line; echo x >> "$STALL_WATCH_BEAT"; sleep 4; touch %s' % shlex.quote(done)
+    log = None
     try:
         rc, text, _secs, cmd = run_rewritten(orig, shell=shell)
         log, beat = job_files(cmd)
@@ -1125,18 +1128,22 @@ def stall_then_end_problems(shell):
             problems += expect(any("pre-stall-line" in line for line in lines[header + 1:]),
                                "the pre-stall line is not in the report's tail")
         problems += expect(wait_until(lambda: os.path.exists(done), 30), "the job did not end within 30 s")
-        wait_until(lambda: not (os.path.exists(log) or os.path.exists(beat)), 5)
-        problems += expect(not os.path.exists(log), f"LOG {log} is left after the job ended")
+        # BEAT goes when the job's trap runs, so the wait on it shows the trap has run before the LOG check.
+        wait_until(lambda: not os.path.exists(beat), 5)
         problems += expect(not os.path.exists(beat), f"BEAT {beat} is left after the job ended")
+        problems += expect(os.path.exists(log), f"LOG {log} is removed when the job ends: a stalled job's log is kept")
         return problems
     finally:
         reap()
+        if log is not None and os.path.exists(log):
+            os.remove(log)  # kept after the job ends; the case removes it
 
 
 @posix_case
-def stalled_job_leaves_no_files_when_it_ends():
+def stalled_job_keeps_its_log_and_removes_its_beat_when_it_ends():
     """A1. a job that stalls, then ends: the STALL report reaches stdout with the pre-stall line in its
-    tail, and once the job ends neither LOG nor BEAT is left"""
+    tail, and once the job ends its BEAT is removed while its LOG stays. Owner ruling, 2026-11-08 06:09 CST:
+    keep a stalled job's log for 7 days."""
     problems = []
     for shell in shells():
         problems += ["%s: %s" % (shell, p) for p in stall_then_end_problems(shell)]
@@ -1205,6 +1212,40 @@ def job_that_never_stalls_removes_its_log_and_beat():
     problems += expect("FINAL-VERDICT" in text.splitlines(), f"the job's line is not relayed: {text!r}")
     problems += expect(not os.path.exists(log), f"LOG {log} is left after a job that never stalled")
     problems += expect(not os.path.exists(beat), f"BEAT {beat} is left after a job that never stalled")
+    return problems
+
+
+@posix_case
+def hook_prunes_kept_logs_older_than_seven_days():
+    """Prune. Before a background call, the hook removes a kept stall-watch log older than 7 days from its log
+    folder. A log 6 days old stays, and so does a file that is not a stall-watch log, even at 8 days old. Only
+    the hook runs here, so no job starts and no process is left to stop."""
+    folder = os.path.realpath(new_dir())  # the hook names its folder by the realpath of TMPDIR
+    now = time.time()  # fixture ages sit a day either side of the 7-day line, so clock drift cannot move one across it
+    fixtures = {
+        "old": ("stall-watch-%s.log" % ("8" * 32), 8),
+        "young": ("stall-watch-%s.log" % ("6" * 32), 6),
+        "other": ("other-job.log", 8),
+    }
+    paths = {}
+    for key, (name, days) in fixtures.items():
+        path = os.path.join(folder, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("kept\n")
+        os.utime(path, (now - days * 86400, now - days * 86400))
+        paths[key] = path
+    # Scope: every fixture exists before the hook runs, so a removal below proves something.
+    problems = expect(all(os.path.exists(p) for p in paths.values()), "a fixture is missing before the hook runs")
+    rc, out, err = hook("echo hi", tmpdir=folder)
+    problems += expect(rc == 0, f"hook exit {rc}: {err.strip()[:200]}")
+    try:
+        command = json.loads(out)["hookSpecificOutput"]["updatedInput"]["command"]
+    except (ValueError, KeyError, TypeError):
+        command = None
+    problems += expect(isinstance(command, str), "the hook printed no updatedInput command")
+    problems += expect(not os.path.exists(paths["old"]), "a kept log aged 8 days is still there after the hook ran")
+    problems += expect(os.path.exists(paths["young"]), "a kept log aged 6 days was removed; only older than 7 days go")
+    problems += expect(os.path.exists(paths["other"]), "a file that is not a stall-watch log, aged 8 days, was removed")
     return problems
 
 
