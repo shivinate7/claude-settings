@@ -63,7 +63,11 @@ Stop: stall_watch.py --stop
   output file is listed once, at the first Stop after its call. With no summary, all are listed. A job closes on a <task-notification> with status completed, failed,
   killed or stopped (a user message, or a queued_command attachment record), or on the result of
   a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
-  unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
+  unknown. A background agent (toolUseResult isAsync, status async_launched, agentId) is a job too: its
+  transcript is <session dir>/<session stem>/subagents/agent-<id>.jsonl (else the launch's outputFile),
+  and it closes as a shell does. It is not listed while a tool_use in the read window has no tool_result, read from
+  the last 64 KB of a quiet agent's transcript, widened to hold a whole last record. Cost: one stat per
+  running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
   output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
   A listed job shows the `until:` note from the description of the call that started it (Bash or
@@ -442,18 +446,20 @@ def parse_time(text):
 
 
 def scan_jobs(transcript):
-    """Return ({job id: (output path or None, until note or '', (named logs, cwd), start time or None)},
-    previous Stop time or None) for every job with no terminal task notice and no TaskStop result. The
+    """Return ({job id: (output path or None, until note or '', (named logs, cwd), start time or None,
+    is an agent)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
+    result. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
+    isAsync true, status async_launched, agentId; its path is the launch's outputFile). The
     note and the named logs come from the call that started the job, matched by tool_use_id. The
     previous Stop is the timestamp of the newest stop_hook_summary record the harness wrote after a
     Stop run that this check ran in (see below); None when there is none or its timestamp is unreadable.
     A Stop that a hook blocked is followed by a run with stop_hook_active true, where stop() prints
     nothing: the summary of that run lists nothing, so it is not a Stop."""
-    jobs, done, stops, notes, job_call, logs, began = {}, set(), set(), {}, {}, {}, {}
+    jobs, done, stops, notes, job_call, logs, began, agents = {}, set(), set(), {}, {}, {}, {}, set()
     prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary") + NOTICE_KEY):
+            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary", b"async_launched") + NOTICE_KEY):
                 continue
             try:
                 rec = json.loads(line)
@@ -476,12 +482,21 @@ def scan_jobs(transcript):
             except Exception:  # a bad or half-written line is skipped
                 continue
             tur = rec.get("toolUseResult")
+            jid = None
             if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
+                jid = tur["backgroundTaskId"]
                 m = RESULT_PATH.search(text)
-                jobs.setdefault(tur["backgroundTaskId"], m.group(1) if m else None)
-                began.setdefault(tur["backgroundTaskId"], when)
+                jobs.setdefault(jid, m.group(1) if m else None)
+            elif (isinstance(tur, dict) and tur.get("isAsync") is True and tur.get("status") == "async_launched"
+                  and isinstance(tur.get("agentId"), str)):
+                jid = tur["agentId"]
+                out = tur.get("outputFile")
+                jobs.setdefault(jid, out if isinstance(out, str) else None)
+                agents.add(jid)
+            if jid is not None:
+                began.setdefault(jid, when)
                 if isinstance(content, list):
-                    job_call.setdefault(tur["backgroundTaskId"], next(
+                    job_call.setdefault(jid, next(
                         (b.get("tool_use_id") for b in content if isinstance(b, dict)
                          and b.get("type") == "tool_result"), None))
             elif kind == "assistant" and isinstance(content, list):
@@ -501,7 +516,8 @@ def scan_jobs(transcript):
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
-    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k))
+    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k),
+                k in agents)
              for k, v in jobs.items() if k not in done}, prev_stop)
 
 
@@ -530,6 +546,61 @@ def stopped_ids(content):
     return [m.group(1)] if m else []
 
 
+AGENT_ID = re.compile(r"[\w-]+\Z")
+TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
+TAIL_MAX = 32 * 1024 * 1024
+AGENT_REMEDY = "Stop it, then resume it by name, or send a fresh reviewer the prior report."
+
+
+def agent_transcripts(session, agent, output):
+    """The paths of a background agent's transcript, in the order to try: beside the session file
+    (<dir>/<stem>/subagents/agent-<id>.jsonl), then the launch's outputFile. An id with a separator
+    has no path beside the session."""
+    paths = []
+    if AGENT_ID.match(agent):
+        stem = os.path.splitext(os.path.basename(session))[0]
+        paths.append(os.path.join(os.path.dirname(session), stem, "subagents", "agent-%s.jsonl" % agent))
+    if output and output not in paths:
+        paths.append(output)
+    return paths
+
+
+def open_call(path, size):
+    """True when any tool_use in the read window has no tool_result yet: the agent is in
+    one long call, not stalled. Reads only the end of the file: TAIL_BYTES, doubled until the window
+    holds a whole last record (the first line of a window that starts mid-file is cut and dropped).
+    An empty file, or one with every tool_use answered, is not an open call."""
+    window = TAIL_BYTES
+    with open(path, "rb") as f:
+        while True:
+            start = max(0, size - window)
+            f.seek(start)
+            lines = f.read(size - start).split(b"\n")
+            if start > 0:
+                lines = lines[1:]
+            lines = [l for l in lines if l.strip()]
+            if lines or start == 0 or window >= TAIL_MAX:
+                break
+            window *= 2
+    pending = set()
+    for line in lines:
+        try:
+            rec = json.loads(line)
+            content = rec["message"]["content"]
+            if not isinstance(content, list):
+                continue
+            for b in content:
+                if not isinstance(b, dict):
+                    continue
+                if rec.get("type") == "assistant" and b.get("type") == "tool_use":
+                    pending.add(b.get("id"))
+                elif rec.get("type") == "user" and b.get("type") == "tool_result":
+                    pending.discard(b.get("tool_use_id"))
+        except Exception:  # a bad or half-written line is skipped
+            continue
+    return bool(pending)
+
+
 def stop():
     if not TASK_NOTIFICATION_TAG:  # every finished job would look open: say nothing
         return 0
@@ -542,17 +613,35 @@ def stop():
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
         rows = []
         open_jobs, prev_stop = scan_jobs(call["transcript_path"])
-        for job, (path, note, (named, cwd), began) in open_jobs.items():
+        for job, (path, note, (named, cwd), began, agent) in open_jobs.items():
             until = " | until: " + note if note else ""
             real = path
             if path and base:
                 real = os.path.join(base, re.split(r"[\\/]", path)[-1])
-            try:
-                idle = now - os.stat(real).st_mtime
-            except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
+            st = None
+            for real in (agent_transcripts(call["transcript_path"], job, real) if agent else [real]):
+                try:
+                    st = os.stat(real)
+                    break
+                except (OSError, TypeError, ValueError):  # TypeError: no path recorded; ValueError: NUL in path
+                    continue
+            if st is None:
                 if prev_stop is not None and began is not None and began <= prev_stop:
                     continue  # started before the previous Stop, which listed it
-                rows.append("%s: unknown, output file not found: %s%s" % (job, path or "(path not recorded)", until))
+                what = "transcript" if agent else "output file"
+                rows.append("%s: unknown, %s not found: %s%s%s" % (
+                    job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
+                continue
+            idle = now - st.st_mtime
+            if agent:  # a transcript has no named logs; one long tool call is not a stall
+                if idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
+                    try:
+                        busy = open_call(real, st.st_size)
+                    except OSError:
+                        busy = False
+                    if not busy:
+                        rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
+                            job, idle, real, until, AGENT_REMEDY))
                 continue
             for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
                 if mark:  # a named log the job still writes keeps it off the list
@@ -562,7 +651,7 @@ def stop():
                     continue  # its stall crossed before the previous Stop, which listed it
                 rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
         if rows:
-            head = "Background shells still running and quiet: stop it or tell the owner."
+            head = "Background jobs still running and quiet: stop it or tell the owner."
             if "| until: " in "".join(rows):
                 head += " Say whether each until condition is met."
             print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
