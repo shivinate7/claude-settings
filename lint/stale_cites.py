@@ -69,7 +69,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             form (`file.py` `name`, (file.py name)) or as a test node id, when the .py file is absent at head or does
             not bind the name there (`names_in`; a node id is judged one segment at a time). A cite whose first folder
             is no tracked top folder at head (another repo, a library, a src-layout package) is no cite, the test STALE003
-            applies (`in_tracked_top`); the top folders come from a read of head's root tree through the one `cat-file`,
+            applies (`in_tracked_top`), unless that folder is one edit, or a case change, from a tracked one
+            (`typo_of_tracked_top`): a likely typo, checked as a normal cite. The top folders come from a read of head's root tree through the one `cat-file`,
             so it starts no process of its own. Fenced lines count as
             prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
             left, and not in --tree mode. A cite path outside the repo (`outside_repo`) is no path cite. It
@@ -567,6 +568,26 @@ def in_tracked_top(cite, tops):
     (another repo, a library, a src-layout package) names nothing this tree holds. STALE003 (`scan_tree`) and
     STALE010 (`dead_name_cites`) both apply this one test."""
     return cite.split("/", 1)[0] in tops
+
+
+def one_edit_apart(a, b):
+    """True when `a` and `b` differ by exactly one insert, delete or substitution."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    i = 0
+    while i < min(len(a), len(b)) and a[i] == b[i]:
+        i += 1
+    if len(a) == len(b):
+        return a[i + 1:] == b[i + 1:]
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    return short[i:] == long_[i + 1:]
+
+
+def typo_of_tracked_top(cite, tops):
+    """True when the first folder of a path cite is no tracked top folder but is one edit from one, or differs from one
+    only in case: a likely typo of a folder this tree holds. Only STALE010 calls it, so STALE003 keeps its verdict."""
+    first = cite.split("/", 1)[0]
+    return first not in tops and any(first.lower() == top.lower() or one_edit_apart(first, top) for top in tops)
 
 
 def cite_path(text):
@@ -1312,9 +1333,9 @@ def python_cites(text):
 def dead_name_cites(rng):
     """STALE010, a finding: {(path, line, code): [messages]} for each cite of a Python name on a line the range adds to
     governed Markdown, whose file is absent at head or does not bind the name there. A cite of a file the range removed
-    or renamed is STALE001's, and a name the range unbound is STALE002's. A cite into an untracked top folder is no
-    cite. Fenced lines count as prose, as for STALE002. The blobs and the root tree come from the one `cat-file`,
-    and only for a line that cites a .py file."""
+    or renamed is STALE001's, and a name the range unbound is STALE002's. A cite into a far untracked top folder is
+    no cite; one that is one edit or a case change from a tracked folder is a likely typo and is checked.
+    Fenced lines count as prose, as for STALE002. The blobs and the root tree come from the one `cat-file`, and only for a line that cites a .py file."""
     found, excludes = {}, exclude_patterns(".")
     gone = set(rng.removed) | set(rng.renamed)
     for md in sorted(rng.added_lines):
@@ -1329,8 +1350,8 @@ def dead_name_cites(rng):
                     continue  # no folder part, or a lead outside the repo: no path cite, the STALE003 test
                 if rng.tops is None:
                     rng.tops = rng.batch.root_folders(rng.head)
-                if not in_tracked_top(path, rng.tops):
-                    continue  # a cite into an untracked top folder, as STALE003 reads it
+                if not in_tracked_top(path, rng.tops) and not typo_of_tracked_top(path, rng.tops):
+                    continue  # a cite into a far untracked top folder, as STALE003 reads it
                 names = None if path in gone else head_names(rng, path)
                 if names is None or name in names or name in rng.removed_names.get(path, ()):
                     continue
