@@ -1,11 +1,11 @@
 {
   "title": "Decision stall-watch drops its hard-coded step count, and the beat debt note names the fetch window",
   "why": "Round 3 of lane stall-watch-quiet-lint (PR #1823) left two findings unfixed: docs/decisions/stall-watch.md says \"about 78 steps\", which will drift; debt note lane-lint-worktree-add-no-beat does not name the unshallow fetch window (lane, 01:47 CST Nov 8).",
-  "note": "Fix: replace the count with a pointer to what reads it, or drop it; name the unshallow fetch window in the note. Starts after #1823 merges. Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 02:10 CST Nov 8.",
+  "note": "Fix: replace the count with a pointer to what reads it, or drop it; name the unshallow fetch window in the note. Built in lane stall-watch-quiet-lint, stacked on #1823 (coordinator, 02:11 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 02:10 CST Nov 8.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 566,
   "owner": "triage",
-  "lane": "",
+  "lane": "session_013NEJL2LYXQpmabnoQqYgNv",
   "updatedAt": "2026-11-08T01:47:00-06:00"
 }
