@@ -20,6 +20,8 @@ ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnul
 os.environ.update({k: ENV[k] for k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")})
 
 BODY = "".join("line %d\n" % i for i in range(1, 21))
+OWN_DROP = "\n\n%s: app.txt -- the owner cut these lines" % C.TRAILER  # the excuse for a commit or merge that drops own lines
+OWN_NOTE = "ALLOWED app.txt: the owner cut these lines"
 
 
 REPOS = []
@@ -86,6 +88,12 @@ def base_repo():
     r.commit("base")
     r.push()
     return r
+
+
+def assert_finding(case, got, path, undo, earlier):
+    """One FAIL names the path, the undoing commit and the earlier commit it undoes, by their 9-char shas."""
+    case.assertTrue(any(path in p and undo[:9] in p and earlier[:9] in p for p in got),
+                    "no FAIL names %s, undoing %s and earlier %s: %r" % (path, undo[:9], earlier[:9], got))
 
 
 class Red(unittest.TestCase):
@@ -676,8 +684,11 @@ class Flips(unittest.TestCase):
 
 
 class OwnHistory(unittest.TestCase):
-    """A line the branch alone added is the branch's work. Removing it later, or in a merge, is no loss."""
+    """A line a lane commit added is the lane's work. A later lane commit or merge that removes it, with the line still
+    absent at head, is a finding. A `Drops-lines` trailer on the removing commit allows it."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
+    ALLOW = OWN_DROP
+    ALLOW_NOTE = [OWN_NOTE]
 
     def setUp(self):
         r = self.r = Repo()
@@ -685,7 +696,7 @@ class OwnHistory(unittest.TestCase):
         r.commit("base", date="2025-12-01T10:00:00", other_txt="o1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
-        r.commit("feat adds a line", date=self.T0, app_txt=BODY + "own line one\nown line two\n")
+        self.own = r.commit("feat adds six lines", date=self.T0, app_txt=BODY + "".join("own line %d\n" % i for i in range(1, 7)))
 
     def main_moves(self, n, date):
         r = self.r
@@ -694,32 +705,56 @@ class OwnHistory(unittest.TestCase):
         r.push()
         r.sh("checkout", "-q", "feat")
 
-    def merge_dropping_own_lines(self, date):
+    def merge_dropping_own_lines(self, date, msg=""):
         r = self.r
         r.sh("merge", "--no-commit", "--no-ff", "main")
         r.put("app.txt", BODY)
         r.sh("add", "-A")
-        r.sh("commit", "-q", "-m", "Merge main, drop my own lines", date=date)
+        r.sh("commit", "-q", "-m", "Merge main, drop my own lines" + msg, date=date)
+        return r.sh("rev-parse", "HEAD")
 
-    def test_a_merge_that_removes_the_branchs_own_lines_is_green(self):
+    def test_a_merge_that_removes_the_branchs_own_lines_is_red(self):
         self.main_moves(2, self.T1)
-        self.merge_dropping_own_lines(self.T2)
-        self.assertEqual(self.r.verdict(), [])
+        undo = self.merge_dropping_own_lines(self.T2)
+        assert_finding(self, self.r.verdict(), "app.txt", undo, self.own)
 
-    def test_the_same_through_a_second_in_branch_merge_of_main(self):
+    def test_a_merge_that_removes_the_branchs_own_lines_with_the_trailer_is_allowed(self):
+        self.main_moves(2, self.T1)
+        self.merge_dropping_own_lines(self.T2, self.ALLOW)
+        self.assertEqual(self.r.verdict(), [])
+        self.assertEqual(self.r.notes, self.ALLOW_NOTE)
+
+    def test_the_same_through_a_second_in_branch_merge_of_main_is_red(self):
         r = self.r
         self.main_moves(2, self.T1)
         r.sh("merge", "--no-edit", "main", date=self.T1)  # keeps the lines
         self.main_moves(3, self.T2)
-        self.merge_dropping_own_lines(self.T2)
-        self.assertEqual(r.verdict(), [])
+        undo = self.merge_dropping_own_lines(self.T2)
+        assert_finding(self, r.verdict(), "app.txt", undo, self.own)
 
-    def test_a_later_branch_commit_that_removes_them_is_green(self):
+    def test_the_same_through_a_second_in_branch_merge_of_main_with_the_trailer_is_allowed(self):
+        r = self.r
+        self.main_moves(2, self.T1)
+        r.sh("merge", "--no-edit", "main", date=self.T1)  # keeps the lines
+        self.main_moves(3, self.T2)
+        self.merge_dropping_own_lines(self.T2, self.ALLOW)
+        self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, self.ALLOW_NOTE)
+
+    def test_a_later_branch_commit_that_removes_them_is_red(self):
         self.main_moves(2, self.T1)
         r = self.r
-        r.commit("remove my lines", date=self.T2, app_txt=BODY)
+        undo = r.commit("remove my lines", date=self.T2, app_txt=BODY)
+        r.sh("merge", "--no-edit", "main", date=self.T2)
+        assert_finding(self, r.verdict(), "app.txt", undo, self.own)
+
+    def test_a_later_branch_commit_that_removes_them_with_the_trailer_is_allowed(self):
+        self.main_moves(2, self.T1)
+        r = self.r
+        r.commit("remove my lines" + self.ALLOW, date=self.T2, app_txt=BODY)
         r.sh("merge", "--no-edit", "main", date=self.T2)
         self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, self.ALLOW_NOTE)
 
     def test_a_flagged_line_is_printed_in_full_with_no_cap(self):
         r = self.r
@@ -735,6 +770,264 @@ class OwnHistory(unittest.TestCase):
         got = "\n".join(r.verdict())
         for i in range(8):
             self.assertIn("main added line number %d with a long tail %s" % (i, "x" * 150), got)
+
+
+class LaneUndo(unittest.TestCase):
+    """A lane commit that removes a line an earlier lane commit added, with the line still absent at head, is a silent
+    undo. A line the lane never added is not this read's: the lost-line and reversal reads own those. Each case reads
+    the lane's commits before its verdict (P7), so a setup that drifts fails on its scope, not on the finding."""
+    CARD = BODY + "function Card() {}\n"  # app.txt as base_repo() leaves it
+    CASE = "".join("card test case line %d\n" % i for i in range(1, 7))  # a 6-line test case the lane adds
+    BLOCK = "".join("incident test line %d\n" % i for i in range(1, 50))  # 49 lines: a full-size drop the read must flag
+    EIGHT = "".join("eight test line %d\n" % i for i in range(1, 9))  # an 8-line block the lane adds
+    TOP = "".join("line %d\n" % i for i in range(1, 7))  # the first six lines of BODY: app.txt lines main holds before the lane
+    REST = BODY[len(TOP):] + "function Card() {}\n"  # app.txt without TOP: the file after a lane commit drops those six lines
+
+    def setUp(self):
+        self.r = base_repo()
+        self.r.sh("checkout", "-q", "-b", "lane")
+
+    def lane(self):
+        """The lane's commits, oldest first: upstream..head, parents before children."""
+        return self.r.sh("rev-list", "--topo-order", "--reverse", "origin/main..HEAD").split()
+
+    def merge_main_note(self, side):
+        """Main adds a note where the lane's case ends, so the merge conflicts on app.txt. The conflict resolves to `side`."""
+        r = self.r
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds a note", app_txt=self.CARD + "main note\n")
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "main", ok=False)
+        self.assertEqual(r.sh("diff", "--name-only", "--diff-filter=U"), "app.txt")  # scope: the merge is a conflict
+        r.sh("checkout", "--%s" % side, "app.txt")
+        r.sh("add", "app.txt")
+        r.sh("commit", "-q", "--no-edit")
+        return r.sh("rev-parse", "HEAD")
+
+    def test_a_commit_that_drops_lines_an_earlier_lane_commit_added_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, b])
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_whole_file_put_back_byte_for_byte_to_its_pre_lane_blob_is_red(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:other.txt")
+        a = r.commit("A: replace other.txt with a whole block", other_txt=self.CASE)
+        b = r.commit("B: put other.txt back", other_txt="other v1\n")
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.sh("rev-parse", b + ":other.txt"), pre)  # scope: the same blob as before A
+        assert_finding(self, r.verdict(), "other.txt", b, a)
+
+    def test_a_later_commit_that_restores_the_dropped_lines_is_green(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: drop it", app_txt=self.CARD)
+        c = r.commit("C: restore it", app_txt=self.CARD + self.CASE)
+        self.assertEqual(self.lane(), [a, b, c])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_drop_with_the_drops_lines_trailer_is_allowed_and_prints_the_note(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: drop it\n\n%s: app.txt -- the owner cut the case" % C.TRAILER, app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, ["ALLOWED app.txt: the owner cut the case"])
+
+    def test_a_move_of_the_lane_lines_to_another_file_is_green(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: move the case to g.txt", app_txt=self.CARD, g_txt=self.CASE)
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_git_mv_rename_with_the_content_kept_is_green(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        r.sh("mv", "app.txt", "app2.txt")
+        b = r.commit("B: rename app.txt to app2.txt")
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_fix_that_changes_a_value_the_lane_added_is_green(self):
+        r = self.r
+        a = r.commit("A: add a timeout", app_txt=self.CARD + "timeout = 30\n")
+        b = r.commit("B: fix the value", app_txt=self.CARD + "timeout = 60\n")
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_fix_that_adds_an_argument_to_a_line_the_lane_added_is_green(self):
+        r = self.r
+        a = r.commit("A: add a call", app_txt=self.CARD + "run(a, b)\n")
+        b = r.commit("B: pass env", app_txt=self.CARD + "run(a, b, env=e)\n")
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_commit_that_removes_a_line_main_had_before_the_lane_is_silent(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: remove a line main had", app_txt=BODY.replace("line 5\n", "") + "function Card() {}\n" + self.CASE)
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_merge_of_main_that_removed_a_line_drops_nothing_the_lane_added(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        r.sh("checkout", "-q", "main")
+        r.commit("main removes line 5", app_txt=BODY.replace("line 5\n", "") + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "main")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(self.lane(), [a, m])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_merge_that_takes_mains_side_of_a_conflict_drops_the_lane_lines_and_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        m = self.merge_main_note("theirs")
+        self.assertEqual(self.lane(), [a, m])
+        assert_finding(self, r.verdict(), "app.txt", m, a)
+
+    def test_a_merge_that_drops_a_line_main_added_still_fails_with_lane_lines_present(self):  # control
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        m = self.merge_main_note("ours")
+        self.assertEqual(self.lane(), [a, m])
+        got = r.verdict()
+        self.assertTrue(any("main note" in p for p in got), "the lost-line read no longer names main's line: %r" % got)
+
+    def test_a_lane_of_one_commit_has_no_finding(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        self.assertEqual(self.lane(), [a])
+        self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, [])
+
+    def test_a_drop_of_forty_nine_lines_the_size_of_the_incident_is_red(self):
+        r = self.r
+        a = r.commit("A: add 49 test lines", app_txt=self.CARD + self.BLOCK)
+        b = r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, b])
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_one_line_reword_of_a_comment_the_lane_added_is_green(self):
+        r = self.r
+        a = r.commit("A: add a comment", app_txt=self.CARD + "# wait for the advisory lock before the first write\n")
+        b = r.commit("B: reword the comment", app_txt=self.CARD + "# wait for the lock before any write\n")  # ratio 0.76
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_commit_that_replaces_a_six_line_case_with_one_line_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", tests__card_txt=self.CASE)
+        b = r.commit("B: replace the case with one line", tests__card_txt="one new line\n")
+        self.assertEqual(self.lane(), [a, b])
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+
+    def test_a_lane_merged_with_no_ff_into_an_integration_branch_is_red(self):
+        r = self.r
+        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = r.commit("B: drop it", app_txt=self.CARD)
+        r.sh("checkout", "-q", "-B", "integ", "origin/main")
+        r.sh("merge", "--no-ff", "--no-edit", "lane")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(self.lane(), [a, b, m])  # scope: the lane's commits are off the first-parent line of integ
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_an_edit_inside_an_eight_line_block_then_a_restore_of_the_pre_block_file_is_red(self):
+        r = self.r
+        e = r.commit("E: add eight lines", app_txt=self.CARD + self.EIGHT)
+        x = r.commit("X: edit one of the eight", app_txt=self.CARD + self.EIGHT.replace("eight test line 3\n", "eight test line 3 edited\n"))
+        c = r.commit("C: restore the pre-E file", app_txt=self.CARD)
+        self.assertEqual(self.lane(), [e, x, c])  # scope: the restore is the third commit, after one edit
+        assert_finding(self, r.verdict(), "app.txt", c, e)
+
+    def test_a_drop_of_three_lines_from_an_eight_line_test_block_is_red(self):
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove three of the lines", tests__card_txt="".join(self.EIGHT.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [e, c])
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
+    def test_a_net_loss_of_one_line_from_an_eight_line_test_block_is_red(self):
+        """Owner, 2026-11-04 17:44 CST, page item 220, pick b: a net loss of one line counts, with no line-count floor."""
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove one of the lines", tests__card_txt=self.EIGHT.replace("eight test line 3\n", ""))
+        self.assertEqual(self.lane(), [e, c])  # scope: C is the second commit
+        self.assertEqual(len(r.sh("show", c + ":tests/card.txt").splitlines()), 7)  # scope: the block goes from 8 lines to 7
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
+    def test_a_net_loss_of_two_adjacent_lines_from_an_eight_line_test_block_is_red(self):
+        """Owner, 2026-11-04 17:44 CST, page item 220, pick b: the net loss has no line-count floor, so two lines count too."""
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove two adjacent lines", tests__card_txt=self.EIGHT.replace("eight test line 3\neight test line 4\n", ""))
+        self.assertEqual(self.lane(), [e, c])  # scope: C is the second commit
+        self.assertEqual(len(r.sh("show", c + ":tests/card.txt").splitlines()), 6)  # scope: the block goes from 8 lines to 6
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
+    def test_an_eight_line_test_block_moved_from_one_test_file_to_another_over_two_commits_is_green(self):
+        r = self.r
+        e = r.commit("E: add a test block to test_a", tests__test_a_txt=self.EIGHT)
+        x = r.commit("X: take the block out of test_a", tests__test_a_txt="")
+        y = r.commit("Y: put the block in test_b", tests__test_b_txt=self.EIGHT)
+        self.assertEqual(self.lane(), [e, x, y])
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_pre_lane_copy_with_one_new_line_undoes_eight_changed_lines_and_is_red(self):
+        r = self.r
+        e = r.commit("E: change eight lines", app_txt="".join("new code path %d\n" % i for i in range(1, 9)) + "function Card() {}\n")
+        c = r.commit("C: the pre-E copy plus one new line", app_txt=self.CARD + "one new line\n")
+        self.assertEqual(self.lane(), [e, c])
+        assert_finding(self, r.verdict(), "app.txt", c, e)
+
+    def test_a_lane_rename_of_a_test_file_then_a_drop_of_a_pre_lane_test_is_green(self):
+        r = self.r
+        kept = "".join("card test kept line %d\n" % i for i in range(1, 7))
+        dropped = "".join("card test dropped line %d\n" % i for i in range(1, 7))
+        third = "".join("card test third line %d\n" % i for i in range(1, 7))
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds three test blocks", tests__card_txt=kept + dropped + third)
+        r.push()
+        r.sh("checkout", "-q", "-B", "lane", "origin/main")  # the lane starts from the main that holds the file
+        r.sh("mv", "tests/card.txt", "tests/card2.txt")
+        e = r.commit("E: rename the test file")
+        d = r.commit("D: drop a test that main had before the lane", tests__card2_txt=kept + third)
+        self.assertEqual(self.lane(), [e, d])  # scope: the lane is the rename, then the drop
+        self.assertEqual(r.sh("diff", "-M", "--name-status", e + "^", e), "R100\ttests/card.txt\ttests/card2.txt")  # scope: E is a pure rename
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_block_moved_from_one_file_to_another_with_one_line_reworded_is_green(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:app.txt")
+        a = r.commit("A: add eight lines to app.txt", app_txt=self.CARD + self.EIGHT)
+        reworded = self.EIGHT.replace("eight test line 3\n", "eight test lines 3\n")
+        b = r.commit("B: move the block to g.txt, one line reworded", app_txt=self.CARD, g_txt=reworded)
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.sh("rev-parse", b + ":app.txt"), pre)  # scope: app.txt is back to its pre-lane blob, the whole-file read's trigger
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_line_main_had_before_the_lane_dropped_put_back_and_dropped_again_is_green(self):
+        r = self.r
+        a = r.commit("A: drop the first six lines of app.txt", app_txt=self.REST)
+        b = r.commit("B: put the six lines back", app_txt=self.CARD)
+        c = r.commit("C: drop the six lines again", app_txt=self.REST)
+        self.assertEqual(self.lane(), [a, b, c])  # scope: three commits, and C drops what B restored
+        self.assertEqual(r.sh("rev-parse", b + ":app.txt"), r.sh("rev-parse", "origin/main:app.txt"))  # scope: B puts main's blob back, byte for byte
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_reflow_of_two_test_lines_into_one_with_a_word_changed_is_green(self):
+        r = self.r
+        a = r.commit("A: add two test assertions", tests__card_txt="assert card renders the title\nassert card renders the footer\n")
+        b = r.commit("B: join them into one line and change a word", tests__card_txt="assert card renders the title and footer\n")
+        self.assertEqual(self.lane(), [a, b])  # scope: B reflows A's two lines into one
+        self.assertEqual(r.sh("show", b + ":tests/card.txt"), "assert card renders the title and footer")  # scope: the one line B holds
+        self.assertEqual(r.verdict(), [])
 
 
 class IntegrationBase(unittest.TestCase):
@@ -1222,9 +1515,10 @@ def scanner_lines(tag):
     return out + ["%s = `template open" % tag, "%s middle" % tag, "%s close`" % tag, "%s plain 20" % tag]
 
 
-def drop_merge(lines, own=False):
+def drop_merge(lines, own=False, drops=""):
     """A merge commit that drops `lines` from app.txt. own=False: main added them, so upstream holds
-    them. own=True: the branch added them itself and main did not. -> (repo, merge sha)."""
+    them. own=True: the branch added them itself and main did not. drops: a trailer for the merge message.
+    -> (repo, merge sha)."""
     body = BODY + "function Card() {}\n" + "".join(l + "\n" for l in lines)
     r = base_repo()
     r.sh("checkout", "-q", "-b", "feat")
@@ -1241,7 +1535,7 @@ def drop_merge(lines, own=False):
     r.sh("merge", "--no-commit", "--no-ff", "main")
     r.put("app.txt", BODY + "function Card() {}\n")
     r.sh("add", "-A")
-    r.sh("commit", "-q", "-m", "Merge main, drop the lines")
+    r.sh("commit", "-q", "-m", "Merge main, drop the lines" + drops)
     return r, r.sh("rev-parse", "HEAD")
 
 
@@ -1288,6 +1582,22 @@ class CallBound(unittest.TestCase):
         self.assertLessEqual(len(probes(c20)), 3, "probes at N=20: %d of %d git calls" % (len(probes(c20)), len(c20)))
 
 
+class LaneUndoCost(unittest.TestCase):
+    """The lane undo read's git calls grow with the lane's commits. Measured on this head: 37 calls at 10 commits on distinct
+    files, 57 at 20, 97 at 40. Only the 10-commit bound is pinned, at the measured 37, so one more git call per commit fails here."""
+
+    def test_ten_lane_commits_on_distinct_files_cost_at_most_37_git_calls(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "lane")
+        for i in range(10):
+            r.commit("L%d: add file %d" % (i, i), **{"f%d_txt" % i: "lane file %d line 1\nlane file %d line 2\n" % (i, i)})
+        head = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--no-merges", "origin/main..HEAD").split()), 10)  # scope: ten lane commits
+        (found, notes), calls = git_calls(lambda: C.check(r.dir, "origin/main", head))
+        self.assertEqual(found, [])  # scope: the ten commits undo nothing
+        self.assertLessEqual(len(calls), 37, "git calls for 10 lane commits on distinct files: %d, the bound is 37" % len(calls))
+
+
 class Scanner(unittest.TestCase):
     """Source-like lines are matched as plain text. Main-carried ones are all flagged; the branch's own are none."""
 
@@ -1297,9 +1607,11 @@ class Scanner(unittest.TestCase):
         for line in scanner_lines("m"):
             self.assertIn(" ".join(line.split()), text)
 
-    def test_none_of_the_twenty_own_lines_is_flagged(self):
-        r, _ = drop_merge(scanner_lines("o"), own=True)
+    def test_none_of_the_twenty_own_lines_is_read_as_lost(self):
+        r, m = drop_merge(scanner_lines("o"), own=True, drops=OWN_DROP)
+        self.assertEqual(C.lost_lines(r.dir, m, ["origin/main"]), [])  # the lost-line reading: none of the lines is lost
         self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, [OWN_NOTE])
 
 
 class NulLine(unittest.TestCase):
@@ -1336,7 +1648,7 @@ class OwnContentLines(unittest.TestCase):
     those by prefix, so the branch's own line never finds its adding commit and counts as lost (false FAIL).
     The old per-line `git log -G` read them as content."""
 
-    def test_branch_own_plus_plus_and_dash_dash_lines_dropped_by_the_merge_are_green(self):
+    def test_branch_own_plus_plus_and_dash_dash_lines_are_not_read_as_lost(self):
         r = base_repo()
         r.sh("checkout", "-q", "-b", "feat")
         r.commit("feat adds a ++ line and a -- note", app_txt=BODY + "function Card() {}\n++i;\n-- note\n")
@@ -1348,8 +1660,11 @@ class OwnContentLines(unittest.TestCase):
         r.sh("merge", "--no-commit", "--no-ff", "main")
         r.put("app.txt", BODY + "function Card() {}\n")
         r.sh("add", "-A")
-        r.sh("commit", "-q", "-m", "Merge main, drop my lines")
+        r.sh("commit", "-q", "-m", "Merge main, drop my lines" + OWN_DROP)
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(C.lost_lines(r.dir, m, ["origin/main"]), [])  # the lost-line reading: the ++ and -- lines are not lost
         self.assertEqual(r.verdict(), [])
+        self.assertEqual(r.notes, [OWN_NOTE])
 
 
 class BlobReads(unittest.TestCase):

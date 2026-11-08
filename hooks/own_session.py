@@ -46,12 +46,15 @@ def _record_json(body):
     return record
 
 
-def own_session_read(transcript, own_id, created=False):
+def own_session_read(transcript, own_id, created=False, own_tags=None):
     """(tags, tagged_after, parent): the tags and parent_session_id of the newest get_session result
     whose ccr.id is own_id, else None for each, and whether a set_session_tags call follows that
     result. With `created`, a create_session call whose result names own_id is a record too: its tags
     are the call's input.tags, its parent is None unless the input names parent_session_id. The newest
-    record of either kind decides. Without it, only get_session counts."""
+    record of either kind decides. Without it, only get_session counts.
+    With `own_tags` (a set the caller passes), the read also fills it with the own tags now: the newest
+    record's tags, plus each tag a later set_session_tags call on own_id adds, minus each it removes (with no
+    record, the adds minus the removes). The return value does not change."""
     uses, newest, parent, tagged_after = set(), None, None, False
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     with open(transcript, encoding="utf-8") as handle:
@@ -78,6 +81,10 @@ def own_session_read(transcript, own_id, created=False):
                     ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
                     if not isinstance(ids, list) or own_id in ids:
                         tagged_after = True
+                    if own_tags is not None and isinstance(ids, list) and own_id in ids:
+                        given = block["input"]
+                        own_tags.update(t for t in given.get("add") or () if isinstance(t, str))
+                        own_tags.difference_update(t for t in given.get("remove") or () if isinstance(t, str))
                 elif block.get("type") == "tool_result" and (block.get("tool_use_id") in uses or block.get("tool_use_id") in creates):
                     body = block.get("content")
                     if isinstance(body, list):
@@ -85,6 +92,9 @@ def own_session_read(transcript, own_id, created=False):
                     if block.get("tool_use_id") in creates:
                         if _created_session_id(body) == own_id:
                             (newest, parent), tagged_after = creates[block.get("tool_use_id")], False
+                            if own_tags is not None:
+                                own_tags.clear()
+                                own_tags.update(newest)
                         continue
                     if not isinstance(body, str):
                         continue
@@ -92,6 +102,9 @@ def own_session_read(transcript, own_id, created=False):
                         ccr = _record_json(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
                             newest, tagged_after = ccr["tags"], False
+                            if own_tags is not None:
+                                own_tags.clear()
+                                own_tags.update(t for t in newest if isinstance(t, str))
                             found = ccr.get("parent_session_id")
                             parent = found if isinstance(found, str) and found else None
                     except (ValueError, KeyError, TypeError):
