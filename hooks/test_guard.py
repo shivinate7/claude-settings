@@ -925,7 +925,8 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-FAKE_GH_PY = r'''import json, os, re, sys, time
+FAKE_GH_PY = r'''import io, json, os, re, sys, time
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")  # the bytes go out as written: a text-mode stdout on Windows turns each \n into \r\n, which real gh never does
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
 if state.get("count_file"):  # a test that counts the calls names the file: one line per call, its argv
     with open(state["count_file"], "a", encoding="utf-8") as handle:
@@ -960,8 +961,8 @@ def parse(argv):
 
 
 def api_error(code, message):
-    if "-i" in flags:  # gh api -i prints the reply's status line and headers before the body
-        print("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n" % (code, "Not Found" if code == 404 else "Internal Server Error"))
+    if "-i" in flags:  # gh api -i prints the reply's status line and headers before the body: the status line ends \n, the headers and the blank line \r\n
+        sys.stdout.write("HTTP/1.1 %d %s\nContent-Type: application/json\r\n\r\n" % (code, "Not Found" if code == 404 else "Internal Server Error"))
     print(json.dumps({"message": message, "status": str(code)}, separators=(",", ":")) + "gh: %s (HTTP %d)" % (message, code))
     sys.exit(1)
 
@@ -986,7 +987,7 @@ def listing(items, key, fields, flags, top=None, rel=""):
             parts = ["%s=%s" % kv for kv in fields.items() if kv[0] != "page"] + ["page=%d" % page]
             return "<https://api.github.com/repositories/%d/%s?%s>" % (REPO_ID, rel, "&".join(parts))
         link = '%s; rel="next", %s; rel="last"' % (url(asked + 1), url(len(pages)))
-    return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n%s\r\n%s" % ("Link: %s\r\n" % link if link else "", body)
+    return "HTTP/1.1 200 OK\nContent-Type: application/json\r\n%s\r\n%s" % ("Link: %s\r\n" % link if link else "", body)
 
 
 RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "pending": ("in_progress", None),
