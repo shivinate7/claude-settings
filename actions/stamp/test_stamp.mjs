@@ -8,6 +8,7 @@ import "../../lint/_test_git.mjs";  // test-run signing opt-out (lint/_test_git.
 import assert from "node:assert/strict";
 import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, realpathSync, openSync, closeSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2123,6 +2124,57 @@ test("watchdog, Windows: a go file that cannot be written fails the run before a
     assert.doesNotMatch(r.out, /^ok - /m, r.out); // no test ran
   });
 });
+
+// The child waits for its go file, and a go file that never appears must not release it. The watchdog
+// writes the file on Windows only, but waitForGo reads only the env, so this case runs the wait on any
+// platform. The env names are spelled here, not imported: a new export would fail the import before
+// any case ran. goChild starts the child the way watchdog() does, with no watchdog above it. HANG
+// scopes the child to the clean fixture, so the child never starts this file again.
+function goChild(dir, goFile) {
+  const env = { ...process.env, [CHILD]: "1", STAMP_SUITE_RUN: randomUUID(), STAMP_SUITE_GO: goFile,
+    STAMP_SUITE_GO_WAIT_MS: "500", [HANG]: join(dir, "pids"), [HANG_KIND]: "clean" };
+  return shSync(process.execPath, [SELF], { env, encoding: "utf8" });
+}
+
+test("watchdog, child: a go file that never appears runs no test and fails by name (STAMP_SUITE_GO_WAIT_MS=500)", () =>
+  withTempDir((dir) => {
+    const goFile = join(dir, "go-never-written");
+    assert.equal(existsSync(goFile), false, "scope: the go file must be absent, so the child waits on it");
+    const pidFile = join(dir, "pids");
+    let r, found;
+    try {
+      r = goChild(dir, goFile);
+    } finally {
+      found = leftovers(pidFile); // reaps anything the child started, whatever it did
+    }
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(r.signal, null, `the child ended on signal ${r.signal}, not on its own\n${out}`);
+    assert.notEqual(r.status, 0, `the child exited 0 with no go file: it ran its tests\n${out}`);
+    assert.match(out, /^FAIL - no go file/m, `the child printed no line starting "FAIL - no go file"\n${out}`);
+    assert.doesNotMatch(out, /^ok - /m, `the child ran a test with no go file\n${out}`);
+    assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
+  }));
+
+// The green control beside the red case: a go file that exists releases the child at once, so the
+// clean fixture runs and passes. It shows the same child start works, so the red case is the wait.
+test("watchdog, child: a go file that exists lets the child run its tests and exit 0 (control)", () =>
+  withTempDir((dir) => {
+    const goFile = join(dir, "go-written");
+    writeFileSync(goFile, "go");
+    const pidFile = join(dir, "pids");
+    let r, found;
+    try {
+      r = goChild(dir, goFile);
+    } finally {
+      found = leftovers(pidFile);
+    }
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(existsSync(goFile), true, "scope: the go file must exist for this control");
+    assert.equal(found.pids.length, 2, `the clean fixture wrote no pid file, so no test ran\n${out}`);
+    assert.match(out, /ok - hang fixture \(clean\)/, out);
+    assert.equal(r.status, 0, out);
+    assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
+  }));
 
 // ---------------------------------------------------------------- run
 // LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
