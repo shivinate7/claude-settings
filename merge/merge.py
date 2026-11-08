@@ -3088,7 +3088,7 @@ def review_stamp_since(root, base):
     if key not in _stamp_since:
         c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%ct", f"origin/{base}", "--", "merge/merge.py")
         if c:
-            raise Stop(f"could not read origin/{base} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again.")
+            raise Stop(f"could not read origin/{base} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
         first = out.split()[:1]
         _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[0]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                              if first and first[0].isdigit() else None)
