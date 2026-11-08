@@ -2874,6 +2874,15 @@ SPAWN_SCAN_SUITE = "lint/test_no_window_spawn.py"
 # This one walks every test file (`TEST_FILE`, read from the suite) and checks the workflow files in the workflows folder.
 SPLIT_SCAN_SUITE = "lint/test_windows_split.py"
 WORKFLOW_FOLDER = ".github/workflows/"
+# Folder-scan suites: each reads every file of one folder, so a new file there changes what it checks. The value is the
+# module that holds the scope (the suite itself, or the check it runs), then the function that reads it, `_scan_*` below.
+FOLDER_SCAN_SUITES = {
+    "lint/test_ci_job.py": ("lint/test_ci_job.py", "_scan_workflow_files"),
+    "lint/test_check_agent_models.py": ("lint/check_agent_models.py", "_scan_agent_files"),
+    "lint/test_rule_audit.py": ("lint/rule_audit.py", "_scan_guard_paths"),
+    "lint/test_check_landed_dirs.py": ("lint/check_landed_dirs.py", "_scan_guard_glob"),
+    "lint/test_guard_log_report.py": ("lint/test_guard_log_report.py", "_scan_guard_log_folders"),
+}
 
 
 def _load_suite(suite: str):
@@ -2922,6 +2931,61 @@ def _walks_any_file(suite: str, paths) -> bool:
     return False
 
 
+def _in_folder(path: str, folder: str) -> bool:
+    """True when `path` sits directly in `folder` (both read from the working folder, symlinks resolved). Not a subfolder."""
+    return os.path.realpath(os.path.dirname(os.path.abspath(path))) == os.path.realpath(folder)
+
+
+def _scan_workflow_files(module, paths) -> bool:
+    # The suite's WORKFLOWS is the folder its RunBodiesOfWorkflows reads. The `.yml` test is a literal in that loop.
+    return any(_in_folder(path, module.WORKFLOWS) and path.endswith(".yml") for path in paths)
+
+
+def _scan_agent_files(module, paths) -> bool:
+    # check_agent_models builds its `agents/*.md` glob inline in main(), so no constant holds it: the literal is the home.
+    return any(_in_folder(path, os.path.join(module.ROOT, "agents")) and path.endswith(".md") for path in paths)
+
+
+def _scan_guard_paths(module, paths) -> bool:
+    """Asks rule_audit.guard_paths (its glob is inline) about each path by placing an empty file there in a scratch root."""
+    import tempfile
+    named = [path for path in paths if path.startswith("hooks/") and path.count("/") == 1]
+    if not named:
+        return False
+    with tempfile.TemporaryDirectory() as root:
+        os.makedirs(os.path.join(root, "hooks"))
+        for path in named:
+            open(os.path.join(root, path), "w").close()
+        return bool(module.guard_paths(root))
+
+
+def _scan_guard_glob(module, paths) -> bool:
+    import fnmatch
+    folder, pattern = os.path.split(module.GUARD_GLOB)
+    return any(_in_folder(path, folder) and fnmatch.fnmatch(os.path.basename(path), pattern) for path in paths)
+
+
+def _scan_guard_log_folders(module, paths) -> bool:
+    # guard_log_sites reads each `.py` file that is no test in its `folders` (a default it exposes, read here).
+    import inspect
+    folders = inspect.signature(module.guard_log_sites).parameters["folders"].default
+    return any(path.endswith(".py") and not os.path.basename(path).startswith("test_")
+               and any(_in_folder(path, os.path.join(module.REPO_ROOT, folder)) for folder in folders) for path in paths)
+
+
+def _scans_folder_file(suite: str, paths) -> bool:
+    """True when the folder-scan suite `suite` (FOLDER_SCAN_SUITES) reads any of `paths`. A scope that cannot be loaded or
+    read reads True, as in `_scans_any_file`."""
+    source, reader = FOLDER_SCAN_SUITES[suite]
+    module = _load_suite(source)
+    if module is None:
+        return True
+    try:
+        return globals()[reader](module, paths)
+    except Exception:  # noqa: BLE001  same fail-safe as a suite that does not load
+        return True
+
+
 def _tracked_files():
     """(tracked paths, None), or (None, the reason) when `git ls-files` fails, in the working folder's repository."""
     done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
@@ -2940,7 +3004,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     imports (`import`, `from`, a literal `import_module`) to tracked `.py` files, each file once, so a cycle ends. A stem or
     basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
     whatever the number of paths or suites. With `chain` True it also picks each whole-tree scan suite for a diff of a file
-    it scans (TREE_SCAN_SUITES, SPAWN_SCAN_SUITE, SPLIT_SCAN_SUITE)."""
+    it scans (TREE_SCAN_SUITES, SPAWN_SCAN_SUITE, SPLIT_SCAN_SUITE, FOLDER_SCAN_SUITES)."""
     import re
     listed = dict(REPORT_TARGETS)
     names = set()
@@ -3000,6 +3064,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
             names.add(SPAWN_SCAN_SUITE)
         if SPLIT_SCAN_SUITE in on_disk and _walks_any_file(SPLIT_SCAN_SUITE, scan):
             names.add(SPLIT_SCAN_SUITE)
+        names.update(suite for suite in FOLDER_SCAN_SUITES if suite in on_disk and _scans_folder_file(suite, scan))
     return names
 
 
