@@ -20,18 +20,27 @@ that lane lint picks such a suite for a new file in its folder. They call the se
   and lint/test_check_landed_dirs.py (its fixture copies the skills folder, and repo_skills reads skills/*/SKILL.md).
 - A control: a product file outside those folders, merge/launch.py, picks none of the five folder-scan suites.
 - A control: an added hooks/*.py file that is no guard module picks not lint/test_check_landed_dirs.py.
+- A load of a folder-scan suite, for a workflow file and for a lint module, leaves no run folder of this process in the
+  temp root and no change to os.environ. That case calls `suites_for_paths` itself, since `picks_for` caches a pick and a
+  cached pick loads nothing.
 
 The probe reads are `picks_for` and `tracked_paths`, imported from hooks/test_mutate_guard_tree_scans.py, the one home
 of the selector probe. The probes read the full-size tree and copy nothing.
 """
 import os
+import re
+import shutil
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from test_mutate_guard_tree_scans import picks_for, tracked_paths  # noqa: E402  the one home of the selector probe
+sys.path.insert(0, os.path.join(REPO, "lint"))
+import _test_temp  # noqa: E402  the temp root the suites name (lint/_test_temp.py, TEMP_ROOT)
+import mutate_guard  # noqa: E402  suites_for_paths and _load_suite, the selector under test
 
 CI_JOB_SUITE = "lint/test_ci_job.py"
 AGENT_SUITE = "lint/test_check_agent_models.py"
@@ -39,6 +48,7 @@ RULE_AUDIT_SUITE = "lint/test_rule_audit.py"
 LANDED_DIRS_SUITE = "lint/test_check_landed_dirs.py"
 GUARD_LOG_SUITE = "lint/test_guard_log_report.py"
 FOLDER_SUITES = (CI_JOB_SUITE, AGENT_SUITE, RULE_AUDIT_SUITE, LANDED_DIRS_SUITE, GUARD_LOG_SUITE)
+GIT_CONFIG_KEY = re.compile(r"GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)\Z")  # the opt-out lint/_test_git.py adds at import
 
 CHANGED_WORKFLOW_PROBE = ".github/workflows/impeccable-sync.yml"  # tracked: a changed workflow file, not checks.yml
 ADDED_WORKFLOW_PROBE = ".github/workflows/new-job.yml"  # not tracked: a workflow file that a diff adds
@@ -49,6 +59,23 @@ ADDED_HOOK_PROBE = "hooks/plain_probe_family.py"  # not tracked: a hook module t
 ADDED_JUDGE_PROBE = "hooks/judge_probe.py"  # not tracked: a hook module that is no guard
 ADDED_SKILL_PROBE = "skills/new/SKILL.md"  # not tracked: a skill file that a diff adds
 PRODUCT_PROBE = "merge/launch.py"  # tracked: a product file outside every folder above
+
+
+def own_run_folders():
+    """The run folders this process made in the temp root, named `<pid>-<hex>` (lint/_test_temp.py). Other processes share
+    the root, so their folders are not counted, and a missing root reads as none."""
+    prefix = "%d-" % os.getpid()
+    try:
+        return {name for name in os.listdir(_test_temp.TEMP_ROOT) if name.startswith(prefix)}
+    except OSError:
+        return set()
+
+
+def remove_run_folders_made_since(before):
+    """Remove the run folders this process made after `before` (the set `own_run_folders` read then), so a failing case
+    leaves none in the temp root."""
+    for name in own_run_folders() - before:
+        shutil.rmtree(os.path.join(_test_temp.TEMP_ROOT, name), ignore_errors=True)
 
 
 class FolderScanPickTests(unittest.TestCase):
@@ -171,6 +198,49 @@ class FolderScanPickTests(unittest.TestCase):
         self.assertNotIn(LANDED_DIRS_SUITE, picks_for(ADDED_HOOK_PROBE),
                          "suites_for_paths must not pick %s for a diff that adds %s: it matches no hooks/guard*.py"
                          % (LANDED_DIRS_SUITE, ADDED_HOOK_PROBE))
+
+    def test_loading_a_folder_scan_suite_leaves_no_temp_folder_or_environment_change(self):
+        # Each probe starts as a fresh `--lint-suites` process does: the git opt-out is out of os.environ and
+        # lint/_test_git.py is out of sys.modules, so the import that a load makes is the one measured. The scope comes
+        # first: the probe picks the suite and the load reads a module, so the checks after it test a real load.
+        real_load = mutate_guard._load_suite
+        loaded = {}
+
+        def record(suite):
+            loaded[suite] = real_load(suite)
+            return loaded[suite]
+
+        for probe, suite in ((ADDED_WORKFLOW_PROBE, CI_JOB_SUITE), (ADDED_LINT_PROBE, GUARD_LOG_SUITE)):
+            with self.subTest(probe=probe), mock.patch.dict(os.environ):
+                for key in [key for key in os.environ if GIT_CONFIG_KEY.match(key)]:
+                    del os.environ[key]
+                cached = sys.modules.pop("_test_git", None)
+                folders_before = own_run_folders()
+                self.addCleanup(remove_run_folders_made_since, folders_before)
+                environment_before = dict(os.environ)
+                loaded.clear()
+                try:
+                    with mock.patch.object(mutate_guard, "_load_suite", new=record):
+                        picked = mutate_guard.suites_for_paths([probe], self.tracked, union=True, chain=True)
+                finally:
+                    sys.modules.pop("_test_git", None)
+                    if cached is not None:
+                        sys.modules["_test_git"] = cached
+                environment_after = dict(os.environ)
+                self.assertIn(suite, picked, "the scope: %s is picked for %s, so its load runs" % (suite, probe))
+                self.assertIsNotNone(loaded.get(suite),
+                                     "the scope: %s reads a module for %s, so the checks below test a real load"
+                                     % (suite, probe))
+                with self.subTest("temp root"):
+                    new = own_run_folders() - folders_before
+                    self.assertEqual(new, set(),
+                                     "a load of %s for %s keeps its run folder in the temp root: %s"
+                                     % (suite, probe, sorted(new)))
+                with self.subTest("environment"):
+                    changed = sorted(key for key in set(environment_before) | set(environment_after)
+                                     if environment_before.get(key) != environment_after.get(key))
+                    self.assertEqual(changed, [],
+                                     "a load of %s for %s changes these os.environ keys: %s" % (suite, probe, changed))
 
 
 if __name__ == "__main__":
