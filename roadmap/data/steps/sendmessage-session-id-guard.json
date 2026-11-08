@@ -1,0 +1,11 @@
+{
+  "title": "A guard refuses SendMessage to a session_ id and names the remote send_message tool",
+  "why": "Coordinator 12:40 CST Nov 8: lane lane-model-sonnet sent a hand-off with SendMessage to a session_ id; auto mode refused it, so a hand-off could go missing. SendMessage reaches local agents by name; a remote session needs mcp__claude-code-remote__send_message. Fix: a guard refuses SendMessage whose `to` starts with session_, and its remedy names the remote tool.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 792,
+  "updatedAt": "2026-11-08T12:41:00-06:00"
+}
