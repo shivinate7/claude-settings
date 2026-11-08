@@ -692,6 +692,7 @@ def done_models_problem(text, spawned, every=None):
 
     `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole
     transcript's spawns: Done also reports a review round that ran before the turn's window.
+    Only the models an earlier spawn resolved count; its unknown '' must not hide a window mismatch.
     """
     if not spawned:
         return ""
@@ -704,8 +705,8 @@ def done_models_problem(text, spawned, every=None):
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = (spawned if every is None else every).get(role)
-        if ran is not None and "" not in ran and model not in ran:
+        ran = set(spawned.get(role, ())) | {m for m in (every or {}).get(role, ()) if m}
+        if ran and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
