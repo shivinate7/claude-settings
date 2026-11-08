@@ -829,11 +829,44 @@ def _script_folder(path: str, cd) -> str:
     return (cd or "").replace("\\", "/").rstrip("/") if folder in ("", ".") else folder
 
 
+def _span_open(text: str) -> bool:
+    """True when `text` ends inside an unclosed `$(` or backtick span. Quotes are read by walk_quotes."""
+    depth = ticks = 0
+    for index, char, quote in walk_quotes(text):
+        if quote:
+            continue
+        if char == "`":
+            ticks ^= 1
+        elif char == "(" and (depth or text[index - 1:index] == "$"):
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+    return bool(depth or ticks)
+
+
+def _joined_span(segments, ends, at: int) -> str:
+    """Segment `at` joined with the segments after it, each behind the separator that cut it, until
+    the `$(` or backtick it leaves open closes, else ''. The splitter cuts a `&&`, `;` or `|` inside
+    a span, so `merge --reviewed --root o/a=$(cd d && pwd) --root o/b=/w/b` reaches its rules as two
+    segments and the second `--root` is lost. Only the merge call's reading joins; every other rule
+    keeps the splitter's segments, and merge_calls still reads each later segment on its own, so a
+    call after a separator inside the span stays in view. A span left open to the end of the line is
+    read as the splitter cut it. `ends` lists the first reading's separators, so a segment past it
+    (the second reading's) is never joined."""
+    text, last = segments[at], at
+    while _span_open(text):
+        if last + 1 >= len(ends):
+            return ""
+        text += ends[last] + segments[last + 1]
+        last += 1
+    return text if last > at else ""
+
+
 def _call_pieces(segment: str):
     """The calls one segment holds. The segment splitter cuts at `&&`, `||`, `;`, `|` and a newline, but not at `)` or
     a lone `&`: an unquoted `)` closes the subshell the call sits in and an unquoted `&` sends it to the background, so
     each ends a call, glued to a word or not, and the text after it is a call of its own. Quotes are read by
-    walk_quotes, so a `)` or `&` inside one ends nothing. Nor does a `&` in a redirect (`2>&1`, `&> out`), a `&&` (it reaches here only inside a `$( )`, whose span the splitter keeps whole), or a `)`
+    walk_quotes, so a `)` or `&` inside one ends nothing. Nor does a `&` in a redirect (`2>&1`, `&> out`), a `&&` (it reaches here only inside a `$( )` that `_joined_span` put back together), or a `)`
     that closes a `$(` opened after the call's first word (`--root o/a=$( pwd )`). Empty pieces are dropped."""
     pieces, start, depth = [], 0, 0
     for index, char, quote in walk_quotes(segment):
@@ -891,10 +924,12 @@ def merge_calls(stripped: str, cd=None):
     target of the segments before a segment is its folder (guard_core's `_segment_cd_target`, the reader the push and
     delete rules use); a script starts in its segment's folder. A `)` or `&` that ends a call (`_call_pieces`) starts a
     call of its own."""
-    for whole in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for at, whole in enumerate(segments):
         if not whole.strip():
             continue
-        for segment in _call_pieces(whole):
+        for segment in _call_pieces(_joined_span(segments, ends, at) or whole):
             rest = merge_args_of(segment, cd)
             if rest is not None:
                 yield segment, rest

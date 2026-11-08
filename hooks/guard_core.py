@@ -249,52 +249,6 @@ def split_segments(cmd: str, ends=None):
     return segments
 
 
-def _substitution_ends(cmd: str) -> dict:
-    """{index of an unquoted `$(` or backtick: the index after its span} for each span that
-    closes, in one linear pass. A `)` closes the innermost open `(` or `$(`, and quotes and escapes
-    inside a span are read by the quote walk. An opener that never closes is left out, so the
-    caller reads it, and all that follows, as it always did: an unbalanced opener hides no
-    separator."""
-    ends, stack, quote, at = {}, [], "", 0
-    while at < len(cmd):
-        char = cmd[at]
-        if not quote and char == "`":
-            close = _backtick_close(cmd, at)
-            if close > 0:
-                ends[at] = close
-                at = close
-                continue
-        elif not quote and char == "$" and cmd[at + 1:at + 2] == "(":
-            stack.append(at)
-            at += 2
-            continue
-        elif not quote and stack and char == "(":
-            stack.append(-1)
-        elif not quote and stack and char == ")":
-            opener = stack.pop()
-            if opener >= 0:
-                ends[opener] = at + 1
-        width, quote = quote_advance(cmd, at, quote)
-        at += width
-        if quote == BLIND:
-            break
-    return ends
-
-
-def _backtick_close(cmd: str, index: int) -> int:
-    """The index after the backtick that closes the one at `index` (a backslash escapes the next
-    character), or -1."""
-    at = index + 1
-    while at < len(cmd):
-        if cmd[at] == "\\":
-            at += 2
-        elif cmd[at] == "`":
-            return at + 1
-        else:
-            at += 1
-    return -1
-
-
 def _split_reading(cmd: str, ends, contractions_are_text: bool):
     """One reading of split_segments: (segments, the quote open at the end, whether an unquoted
     `'` has a contraction's shape). The first reading is bash's own: every unquoted `'` opens a
@@ -307,7 +261,6 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     quote = ""
     shaped = False
     powershell = is_powershell(cmd)
-    spans = None   # `_substitution_ends`, read on the first `$(` or backtick
     index = 0
     length = len(cmd)
     while index < length:
@@ -358,16 +311,6 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 current = []
                 index += 1
             continue
-        # An unquoted `$( )` or backtick span on one line is one word: a separator inside it cuts no
-        # segment. A span with a newline is read as before, so a heredoc body in it stays visible.
-        if not powershell and (char == "`" or cmd[index:index + 2] == "$("):
-            if spans is None:
-                spans = _substitution_ends(cmd)
-            end = spans.get(index, 0)
-            if end and "\n" not in cmd[index:end]:
-                current.append(cmd[index:end])
-                index = end
-                continue
         if char == "&" and cmd[index:index + 2] == "&&":
             segments.append("".join(current))
             ends is None or ends.append("&&")
