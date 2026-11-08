@@ -1662,12 +1662,13 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd, command_position)
         sed_targets = {}
-        if command_position and not closed:
-            sed_targets = _sed_script_words(scripts[number])   # the builder test check only: a script names no file but w, W, e; read with its newlines
-            data = data | set(sed_targets)
+        if command_position:
+            sed_targets = _sed_script_words(scripts[number])   # the builder test check only: a script names no file but w, W, e, with or without -i; read with its newlines
+            if not closed:
+                data = data | set(sed_targets)   # a closed segment keeps its script words as words, and still reads the targets
         if not closed:
             # A sed with no in-place option reads its script as text: an in-place flag spelled inside it is no flag.
-            data = data | {at for at in _sed_script_words(parsed[number], False)
+            data = data | {at for at in _sed_script_words(parsed[number])
                            if re.search(_SED_IN_PLACE_FLAG, _unquoted(raw[at]))}
         found = None if closed or not script_data else _inline_script_at([_unquoted(word) for word in raw])
         if found:
@@ -1691,9 +1692,6 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
                 script.append('""')
-                for target in sed_targets.get(index, ()):   # a sed script's w, W or e names a file or command
-                    words.append(target)
-                    shown.append(target)
             elif word == "&" and (raw[index + 1:index + 2] in ([">"], [">>"]) or raw[index - 1:index] == [">"]):
                 continue   # the `&` of `&>` or `>&` ends no command, so the text reads `> PATH` whole
             elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
@@ -1718,6 +1716,11 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 shown.extend(pieces)
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
+            for target in sed_targets.get(index, ()):   # a sed script's w, W or e names a file or command
+                # `>` marks the target as written, as a redirect would: a sed with no -i has no other write mark.
+                words.extend((">", target))
+                shown.extend((">", target))
+                script.extend((">", target))
         text = " ".join(shown)
         verb = _segment_command(words)[0] if predicate_command else ""
         for nested in _powershell_scripts_of(segments[number]):
@@ -1933,18 +1936,17 @@ def _sed_script_targets(script):
     return targets
 
 
-def _sed_script_words(raw, in_place_only=True):
-    """{index: names} for the words of an in-place `sed` segment that are not files it writes: its
+def _sed_script_words(raw):
+    """{index: names} for the words of a `sed` segment that are not files it writes: its
     script (the first operand, or the value of each `-e` and `--expression`) and the value of `-f`,
     `--file` and `-l`. A script is text, so `s/N/tests\\/a.py/` names no test. `names` are the files
     and commands the script's `w`, `W`, `e` and `s///w` name (`_sed_script_targets`), judged as words
-    of the segment: `sed -i 'w tests/a.py' src/app.py` writes tests/a.py. Empty when the segment is no
-    `sed -i` or `sed --in-place`; with `in_place_only` false, a sed with no in-place option gives its
-    script words too, each with no names."""
+    of the segment: `sed -i 'w tests/a.py' src/app.py` and `sed -n 'w tests/a.py' src/x.py` both write
+    tests/a.py, since `w` writes with or without an in-place option. Empty when the segment is no sed."""
     index = resolve_command(tuple(raw))
     if index is None or _name(raw[index]) not in _SED_NAMES:
         return {}
-    skip, scripts, in_place, scripted, operands, flags_over = set(), {}, False, False, [], False
+    skip, scripts, scripted, operands, flags_over = set(), {}, False, [], False
     at = index + 1
     while at < len(raw):
         word = _unquoted(raw[at])
@@ -1954,7 +1956,6 @@ def _sed_script_words(raw, in_place_only=True):
             flags_over = True
         elif word.startswith("--"):
             flag, glued, value = word.partition("=")
-            in_place = in_place or flag == "--in-place"
             if flag in ("--expression", "--file", "--line-length"):
                 scripted = scripted or flag != "--line-length"
                 where = at if glued else at + 1
@@ -1965,7 +1966,6 @@ def _sed_script_words(raw, in_place_only=True):
         else:
             for place, letter in enumerate(word[1:], 1):
                 if letter == "i":
-                    in_place = True
                     break   # the rest of the cluster is the backup suffix
                 if letter in _SED_TAKES_VALUE:
                     scripted = scripted or letter != "l"
@@ -1977,12 +1977,10 @@ def _sed_script_words(raw, in_place_only=True):
                     at = at if glued else at + 1
                     break
         at += 1
-    if not in_place and in_place_only:
-        return {}
     if not scripted and operands:
         skip.add(operands[0])
         scripts[operands[0]] = _unquoted(raw[operands[0]])
-    return {where: _sed_script_targets(scripts.get(where, "")) if in_place else [] for where in skip}
+    return {where: _sed_script_targets(scripts.get(where, "")) for where in skip}
 
 
 def _segment_command(words):
