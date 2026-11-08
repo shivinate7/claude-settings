@@ -2576,6 +2576,11 @@ ROUND3_ALLOWED = (
     ("a question, the check as the subject", "Which check will fail?", ()),
     ("a question, the test as the subject", "Which test will fail?", ()),
     ("a question, the guard in a clause", "Do you know which guard will refuse?", ()),
+    ("a question in bold marks", "**Which check will fail?**", ()),
+    ("a question in parens", "(Which check will fail?)", ()),
+    ("a question ending ?!", "Which check will fail?!", ()),
+    ("a quoted question as a subject", "'Which check will fail?' is what I asked.", ()),
+    ("a question split over two sentences", "Which check will fail. Do you know?", ()),
 )
 ROUND3_REFUSED = (
     ("an adverb between will and the verb", "the check will probably refuse it."),
@@ -2594,6 +2599,8 @@ ROUND3_REFUSED = (
     ("a relative which before the guard, after a comma", "The change edits hooks/guard.py, which means the guard will refuse it."),
     ("a statement that opens with Which, CI as the subject", "Which means CI will fail."),
     ("a relative which before the guard, after a comma and is why", "The test is in place, which is why the guard will refuse it."),
+    ("an imperative before which, no run", "Tell me which check will fail."),
+    ("don't know before which, no run", "I don't know which check will fail."),
 )
 
 
