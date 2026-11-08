@@ -1208,7 +1208,7 @@ def cd_to_an_unknown_dir_reports_the_log_as_unwatched():
 
 @case
 def blank_or_comment_line_after_and_and_keeps_the_next_list():
-    """27h. a blank or comment-only line after a trailing && does not end the list: its & still backgrounds the cd's list, and the line after that runs in the main shell"""
+    """27h. a blank or comment line after a trailing && keeps the list: its & backgrounds the cd's list; the next line runs in the main shell"""
     return read_rows_problems([
         ("cd /x &&\n\nmake > a &\nmake2 > log2", ["/x/a", "log2"], []),  # control: an empty line
         ("cd /x &&\n \nmake > a &\nmake2 > log2", ["/x/a", "log2"], []),  # a line of spaces
@@ -1231,6 +1231,28 @@ def hash_inside_a_multi_line_string_is_text():
     return read_rows_problems([
         ('cd /x && echo "a\n# b" > log', ["/x/log"], []),
         ('cd /x\necho "a\n# b" > log', ["/x/log"], []),
+    ])
+
+
+@case
+def quoted_operator_at_line_end_is_text():
+    """27k. a quoted &&, || or | at a line end is text: the list ends there, so the logs after it are read in the cd's directory"""
+    return read_rows_problems([
+        ("cd /x && echo a\n   \nmake > a &\nmake2 > log2", ["/x/a", "/x/log2"], []),  # control: a plain word
+        ('cd /x && echo "&&"\n   \nmake > a &\nmake2 > log2', ["/x/a", "/x/log2"], []),  # a line of spaces
+        ('cd /x && echo "&&"\nmake > a &\nmake2 > log2', ["/x/a", "/x/log2"], []),  # no line between
+        ('cd /x && echo "||"\n\nmake > a &\nmake2 > log2', ["/x/a", "/x/log2"], []),
+        ('cd /x && echo "|"\n\nmake > a &\nmake2 > log2', ["/x/a", "/x/log2"], []),
+        ("cd /x && echo '&&'\n\nmake > a &\nmake2 > log2", ["/x/a", "/x/log2"], []),
+    ])
+
+
+@case
+def pipe_at_line_end_runs_the_cd_in_a_subshell():
+    """27l. a `|` at a line end runs the cd in a subshell: the next line's log stays in the start folder, read bare"""
+    return read_rows_problems([
+        ("cd /x\nmake > log", ["/x/log"], []),  # control: no pipe
+        ("cd /x |\nmake > log", ["log"], []),  # bash: the pipe's cd runs in a subshell, so log is in the start folder
     ])
 
 
