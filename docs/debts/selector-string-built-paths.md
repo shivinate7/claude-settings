@@ -1,6 +1,6 @@
 # The suite selector misses a path built by string formatting
 
-**What.** `--tests-for` and `--lint-suites` read a file load only from the string constants of a path expression: an argument of `open`, `shutil.copy*`, `subprocess.run` and the like, an `os.path.join` / `Path` / `/` expression, and the names they hold. A path built by `%`, `+` or `.format` is missed, so a suite that opens `hooks/leaf.py` through `"hooks/%s.py" % name` is not selected for a diff of `hooks/leaf.py`.
+**What.** `--tests-for` and `--lint-suites` read a file load from the string constants of a path expression. Such an expression is a call to `open`, `shutil.copy*` or `subprocess.run`, an `os.path.join` or `Path` call, or a `/` expression. A path built by `%`, `+` or `.format` is missed. A suite that opens `hooks/leaf.py` through `"hooks/%s.py" % name` is not selected for a diff of `hooks/leaf.py`.
 
 **Where.** `_suite_profile` in `hooks/mutate_guard.py`.
 

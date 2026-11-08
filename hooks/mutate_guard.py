@@ -2790,8 +2790,9 @@ def _suite_profile(source: str):
     assignment binds it to, in any scope of the file (module, function or class level; one name bound in two scopes pools
     both values). A `for` or comprehension target is bound, inside its own loop only, to the strings of its own iterable: a
     tuple, list, set or dict literal, a comprehension's element, `sorted` / `reversed` / `enumerate` / `list` / `tuple` /
-    `set` / `frozenset` of one of these, or a name bound to one, through at most one more name (`B = A`). Another loop's
-    use of the same name adds nothing, and the name means nothing after its loop. A path that arrives as a function parameter is not followed (debt tests-for-misses-param-loads)."""
+    `set` / `frozenset` of one of these, or a name that an assignment in the loop's own function (else module) binds to
+    one, through at most one more name (`B = A`). Another loop's use of the same name, or the same name assigned in another
+    function, adds nothing, and the name means nothing after its loop. A path that arrives as a function parameter is not followed (debt tests-for-misses-param-loads)."""
     import ast
     try:
         tree = ast.parse(source)
@@ -2805,10 +2806,41 @@ def _suite_profile(source: str):
                     bound.setdefault(target.id, []).append(node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
+    scope_kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+    home = {}  # a node -> the module, function, lambda or class that holds it
+    outer = {}  # a function, lambda or class -> the scope it sits in
+    local = {}  # (a scope, a name) -> the expressions an assignment in that scope binds it to
+    todo = [(tree, tree)]
+    while todo:
+        node, holder = todo.pop()
+        home[node] = holder
+        if isinstance(node, scope_kinds):
+            outer[node] = holder
+            holder = node
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    local.setdefault((home[node], target.id), []).append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            local.setdefault((home[node], node.target.id), []).append(node.value)
+        todo.extend((child, holder) for child in ast.iter_child_nodes(node))
+
+    def assigned(name, holder):
+        """What assignments bind `name` to where `holder` sees it: in its own scope, else in the nearest enclosing function
+        or module that binds it (a class body is no scope for the functions in it)."""
+        while True:
+            if (holder, name) in local:
+                return local[(holder, name)]
+            if holder not in outer:
+                return []
+            holder = outer[holder]
+            while isinstance(holder, ast.ClassDef) and holder in outer:
+                holder = outer[holder]
+
     literals = (ast.Tuple, ast.List, ast.Set, ast.Dict)
     wrappers = ("sorted", "reversed", "enumerate", "list", "tuple", "set", "frozenset")
 
-    def items_of(expr, scope, hops, seen):
+    def items_of(expr, scope, holder, hops, seen):
         """The expressions whose strings a loop over `expr` yields: a literal itself, the element of a comprehension, the
         argument of a wrapper (`wrappers`), or a name's values: a loop name of `scope`, or what an assignment binds it to
         (one more hop when that is a name again, `hops`)."""
@@ -2819,20 +2851,20 @@ def _suite_profile(source: str):
         if isinstance(expr, ast.DictComp):
             return [expr.key, expr.value]
         if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id in wrappers and expr.args:
-            return items_of(expr.args[0], scope, hops, seen)
+            return items_of(expr.args[0], scope, holder, hops, seen)
         if isinstance(expr, ast.Name) and expr.id not in seen:
             seen = seen | {expr.id}
             found = list(scope.get(expr.id, ()))
-            for value in bound.get(expr.id, ()):
+            for value in assigned(expr.id, holder):
                 if not isinstance(value, ast.Name) or hops > 0:
-                    found.extend(items_of(value, {}, hops - isinstance(value, ast.Name), seen))
+                    found.extend(items_of(value, {}, holder, hops - isinstance(value, ast.Name), seen))
             return found
         return []
 
-    def loop_scope(scope, target, iterable):
+    def loop_scope(scope, target, iterable, holder):
         """`scope` with each name of a loop `target` bound to the items of this loop's own iterable, so the name means
         these strings inside the loop and nowhere else. `enumerate` gives its element to the second name of a pair."""
-        items = items_of(iterable, scope, 1, frozenset())
+        items = items_of(iterable, scope, holder, 1, frozenset())
         if isinstance(iterable, ast.Call) and getattr(iterable.func, "id", "") == "enumerate" \
                 and isinstance(target, ast.Tuple) and len(target.elts) == 2:
             target = target.elts[1]
@@ -2848,7 +2880,7 @@ def _suite_profile(source: str):
         node, scope = todo.pop()
         scopes[node] = scope
         if isinstance(node, (ast.For, ast.AsyncFor)):
-            inner = loop_scope(scope, node.target, node.iter)
+            inner = loop_scope(scope, node.target, node.iter, home[node])
             todo.append((node.iter, scope))
             todo.append((node.target, inner))
             todo.extend((child, inner) for child in node.body + node.orelse)
@@ -2856,7 +2888,7 @@ def _suite_profile(source: str):
             inner = scope
             for generator in node.generators:
                 todo.append((generator.iter, inner))
-                inner = loop_scope(inner, generator.target, generator.iter)
+                inner = loop_scope(inner, generator.target, generator.iter, home[node])
                 todo.append((generator.target, inner))
                 todo.extend((test, inner) for test in generator.ifs)
             todo.extend((part, inner) for part in ((node.key, node.value) if isinstance(node, ast.DictComp) else (node.elt,)))
