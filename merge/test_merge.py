@@ -1601,20 +1601,21 @@ LANE_HEADS_UNREAD = ("unreadable", "could not be read")  # ruling 2: the one lin
 LANE_MOVED = ("moved", "gone")  # ruling 2: the one line for a lane tip that no origin head sits at; it names the tip
 LANE_PROOF_NOT_RUN = "could not run"  # ruling 5: the kept line when the merge commit cannot be read, in place of WHY["unproven"]
 
-def lane_batch(env, *names):
-    """Cut each lane off origin/main, push it, then merge every lane into feat with a merge commit, as an integration branch does.
-    -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line."""
+def lane_batch(env, *names, cut="origin/main", into="feat", base="origin/feat"):
+    """Cut each lane off `cut` (origin/main by default), push it, then merge every lane into `into` (feat) with a merge commit, as an integration
+    branch does. `into` starts at `base` (origin/feat). -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets
+    env.tips for lane_deleted_line."""
     o, tips = env.other, {}
     for n in names:
         sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", n, "origin/main")
+        sh(o, "git", "checkout", "-q", "-B", n, cut)
         put(os.path.join(o, n.replace("/", "-") + ".txt"), n + "\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"lane {n}"); sh(o, "git", "push", "-q", "origin", n)
         tips[n] = sh(o, "git", "rev-parse", "HEAD")
-    sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+    sh(o, "git", "checkout", "-q", "-B", into, base)
     for n in names:
-        sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge remote-tracking branch 'origin/{n}' into feat", tips[n])
-    sh(o, "git", "push", "-q", "origin", "feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge remote-tracking branch 'origin/{n}' into {into}", tips[n])
+    sh(o, "git", "push", "-q", "origin", into)
     env.tips = tips
     return tips
 
@@ -14850,9 +14851,18 @@ class BuildBatchLabels(BuildEnv):
 
 BATCH_RED_JOB = "check invariants"
 
-def batch_red_line(cid, n, head, created="2026-10-02T00:00:00Z", job=BATCH_RED_JOB):
-    """A comment on pull request n that is the drop's record for `head`: `Batch: red <head> <job>`."""
-    return review_comment(cid, n, f"Batch: red {head} {job}\n", created=created)
+def batch_red_line(cid, n, head, created="2026-10-02T00:00:00Z", job=BATCH_RED_JOB, integration=False):
+    """A comment on pull request n that is the drop's record for `head`: `Batch: red <head> <job>`. `integration`: the line the drop writes on the
+    integration pull request itself, built by merge.drop_comment (the one home of that line), not the lane's line."""
+    body = merge.drop_comment(n, head, "its red job failed", [job], n) if integration else f"Batch: red {head} {job}\n"
+    return review_comment(cid, n, body, created=created)
+
+def expected_drop_line(n, head, job, int_n):
+    """The first line the drop writes on pull request n at `head`: the lane's `Batch: red <head> <job>`, or for int_n, the integration pull
+    request, merge.drop_comment's own first line (built by the one home, so a change of its form moves this line with it)."""
+    if n == int_n:
+        return merge.drop_comment(n, head, "its red job failed", [job], int_n).splitlines()[0]
+    return f"Batch: red {head} {job}"
 
 
 class BatchRedLine(BuildEnv):
@@ -15184,15 +15194,15 @@ class BatchRedWindow(Env):
         self.assertEqual(rc, 0, "a fix pushed on a dropped lane head was refused by the line on the head it replaced:\n" + out)
         self.assertTrue(getattr(host, "merged", False), "the fix on a dropped lane head did not merge:\n" + out)
 
-    def test_control_a_line_on_a_batch_head_refuses_a_fix_built_on_that_head(self):
-        """The red case's shape, with the line on the batch head the fix sits on (the integration pull request INT_PR), not on the lane head the
-        fix replaces. A head that holds a batch's head holds its line, so the fix is refused. The one difference from the red case is which
-        head carries the line."""
+    def test_control_an_integration_head_line_refuses_a_fix_built_on_that_head(self):
+        """The red case's shape, with the line on the integration head the fix sits on (the integration pull request INT_PR), not on the lane head
+        the fix replaces. A head that holds an integration head holds its line, so the fix is refused. The one difference from the red case is
+        which head carries the line."""
         head, _ = self.closed_lane_head()  # feat is the integration head, with lane1 merged in
         fix = self.commit("feat-fix", {"fix.txt": "fix\n"}, base="origin/feat")
         sh(self.co, "git", "fetch", "-q", "origin")
-        sh(self.co, "git", "merge-base", "--is-ancestor", head, fix)  # scope: the fix is built on the batch's head
-        host = CommentHost(self.co, self.other, comments=[batch_red_line(950, INT_PR, head, created=self.LINE)], branch="feat-fix",
+        sh(self.co, "git", "merge-base", "--is-ancestor", head, fix)  # scope: the fix is built on the integration head
+        host = CommentHost(self.co, self.other, comments=[batch_red_line(950, INT_PR, head, created=self.LINE, integration=True)], branch="feat-fix",
                            created=self.LANE_OPENED, pulls=[batch_pull(INT_PR, head, head_ref="feat", created_at=self.LANE_OPENED),
                                                             batch_pull(7, fix, head_ref="feat-fix", created_at=self.LANE_OPENED)])
         rc, out = self.run_merge("7", "--confirm", host=host)
@@ -15446,7 +15456,7 @@ class BatchDropRed(BuildEnv):
         self.assertEqual(sorted(n for n, _ in host.posts), sorted(expected), "the drop did not write one Batch: red line on each dropped pull request:\n" + out + err)
         for n in expected:
             (text,) = [t for num, t in host.posts if num == n]
-            self.assertEqual(text.splitlines()[0], f"Batch: red {heads[n]} {RED_JOB}", f"#{n}'s Batch: red line does not name its head and the red job:\n" + out + err)
+            self.assertEqual(text.splitlines()[0], expected_drop_line(n, heads[n], RED_JOB, INT_PR), f"#{n}'s Batch: red line does not name its head and the red job:\n" + out + err)
 
     def test_a_red_job_that_hits_a_lane_drops_it_and_its_dependents_and_rebuilds_the_rest(self):
         h7 = self.lane(7, files=HIT)
@@ -15581,7 +15591,7 @@ class BatchDropRed(BuildEnv):
         self.assertIn("left out: #7 feat7: ", out + err, "scope: the drop did not run, so no line was due:\n" + out + err)
         self.assertEqual(host.posts, [], "a drop without --push posted lines:\n" + out + err)
         for n, head in ((7, h7), (INT_PR, hi)):
-            self.assertIn(f"Batch: red {head} {RED_JOB}", out + err, f"the drop without --push does not print the line it would post on #{n}:\n" + out + err)
+            self.assertIn(expected_drop_line(n, head, RED_JOB, INT_PR), out + err, f"the drop without --push does not print the line it would post on #{n}:\n" + out + err)
 
     def test_control_with_push_the_same_drop_posts_one_line_on_each_dropped_pull_request(self):
         h7, h9, hi, host = self.hit_lane_host()
@@ -15608,7 +15618,7 @@ class BatchDropRed(BuildEnv):
         self.lane(7)
         h8 = self.lane(8)
         n_head = self.integration("int-n", ["feat7"])  # batch N, split: its drop wrote the line on its own head, and #7 has no open pull request
-        line = batch_red_line(950, INT_PR, n_head, created=self.ORPHAN_LINE)
+        line = batch_red_line(950, INT_PR, n_head, created=self.ORPHAN_LINE, integration=True)
         rc, out, err = self.build(self.done_host({8: h8}), "--on", "int-n", "--push", "on-int")
         self.assert_ran(rc, out, err, 1)
         self.assertEqual(joins_of(out), [f"joins: #8 feat8 {h8[:9]}"], "scope: the batch built on N did not join #8:\n" + out + err)
