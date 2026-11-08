@@ -1087,8 +1087,8 @@ def _head_word(segment: str) -> str:
 EXIT_BODY_PLAIN_WORDS = ("echo", "printf", "true", ":")
 
 
-# A redirect that copies one open descriptor onto another (`>&2`, `2>&1`, `>&-`): it opens no file, so it cannot fail.
-FD_COPY = re.compile(r"\d*[<>]&(?:\d+|-)(?=\s|$|[;&|)])")
+# A redirect that copies one open descriptor onto another (`>&2`, `2>&1`): it opens no file, so it cannot fail. `>&-` is no copy: it closes the descriptor, so `echo >&-` fails.
+FD_COPY = re.compile(r"\d*[<>]&\d+(?=\s|$|[;&|)])")
 
 
 def is_print_step(segment: str, redirect_ok: bool) -> bool:
