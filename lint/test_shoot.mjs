@@ -95,9 +95,14 @@ Object.assign(PAGES, {
     #top{height:1500px}#stk{position:sticky;top:0;height:40px;background:#0f0}#after{height:1000px}</style><div id="top"></div><div id="stk"></div><div id="after"></div>`,
   // A 20000 px page in bands: red at the top, yellow at 10000, green near the bottom. One colour would be a blank image.
   "/tall20k.html": `<!doctype html><style>body{margin:0}#rest{height:20000px;background:linear-gradient(#f00 0 100px,#00f 100px 10000px,#ff0 10000px 10100px,#00f 10100px 19900px,#0f0 19900px)}</style><div id="rest"></div>`,
-  // Root scroll snap, and a 3900 px page banded every 100 px in two colours.
+  // Root scroll snap with three 1000 px sections, each a snap point. 1000 is not a multiple of the 900 px tile,
+  // so a tile that snaps to a section leaves a gap unless the stitch turns snapping off.
   "/snap.html": `<!doctype html><style>html{scroll-snap-type:y mandatory}body{margin:0}
-    #rest{height:3900px;background:repeating-linear-gradient(#f00 0 100px,#00f 100px 200px)}</style><div id="rest"></div>`,
+    .sec{height:1000px;scroll-snap-align:start}#a{background:#f00}#b{background:#00f}#c{background:#ff0}</style>
+    <div class="sec" id="a"></div><div class="sec" id="b"></div><div class="sec" id="c"></div>`,
+  // A page 1200 px wide at a 390 px viewport: its far-right part is yellow, at x 600 to 1199 of row 100.
+  "/wide.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
+    #wide{width:1200px;height:200px;background:linear-gradient(to right,#0f0 0 600px,#ff0 600px 1200px)}</style><div id="wide"></div>`,
   // The touch fixture with its spacer banded every 100 px in two colours, so each band must sit at its page y.
   "/touch-banded.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
     #hero{height:100vh;background:#0f0}#rest{height:2000px;background:repeating-linear-gradient(#f00 0 100px,#00f 100px 200px)}
@@ -176,8 +181,8 @@ async function run(cfg, env = {}) {
 }
 
 // Mean luminance (0-255), the count of distinct colours, the PNG's size, and the colour runs down pixel
-// column 5 ("G@0 Y@850 R@900": each colour and the row it starts at; T for a transparent row), read through
-// the browser's canvas.
+// column 5 ("G@0 Y@850 R@900": each colour and the row it starts at; T for a transparent row), and the runs
+// across row 100 (the x each colour starts at), read through the browser's canvas.
 async function pixels(b, file) {
   const page = await b.newPage();
   try {
@@ -194,14 +199,21 @@ async function pixels(b, file) {
       let sum = 0;
       const seen = new Set();
       for (let i = 0; i < d.length; i += 4) { sum += (d[i] + d[i + 1] + d[i + 2]) / 3; seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]); }
+      const key = (i) => (d[i + 3] < 255 ? "T" : d[i] > 128 ? (d[i + 1] > 128 ? "Y" : "R") : d[i + 1] > 128 ? "G" : "B");
       const runs = [];
       let last = null;
       for (let y = 0; y < c.height; y++) {
-        const i = (y * c.width + 5) * 4;
-        const k = d[i + 3] < 255 ? "T" : d[i] > 128 ? (d[i + 1] > 128 ? "Y" : "R") : d[i + 1] > 128 ? "G" : "B";
+        const k = key((y * c.width + 5) * 4);
         if (k !== last) { runs.push(k + "@" + y); last = k; }
       }
-      return { mean: sum / (d.length / 4), colours: seen.size, width: img.width, height: img.height, column: runs.join(" ") };
+      // Row 100 across the whole width, left to right: a wide page's far-right colour shows at its own x.
+      const across = [];
+      last = null;
+      for (let x = 0; c.height > 100 && x < c.width; x++) {
+        const k = key((100 * c.width + x) * 4);
+        if (k !== last) { across.push(k + "@" + x); last = k; }
+      }
+      return { mean: sum / (d.length / 4), colours: seen.size, width: img.width, height: img.height, column: runs.join(" "), row: across.join(" ") };
     }, src);
   } finally {
     await page.close();
@@ -588,6 +600,7 @@ const STITCH_SHOTS = {
     { name: "sticky", path: "/sticky.html" },
     { name: "snap", path: "/snap.html" },
     { name: "banded", path: "/touch-banded.html" },
+    { name: "wide", path: "/wide.html" },
   ],
   sizes: [390], themes: ["light"],
 };
@@ -628,15 +641,25 @@ test("a 20000 px touch page: the full-page shot passes, the PNG is 20000 px tall
   assert.equal(px.column, "R@0 B@100 Y@10000 B@10100 G@19900", `a band is at the wrong page y in the 20000 px PNG (runs ${px.column})`);
 });
 
-test("root scroll-snap mandatory: the full-page PNG has no transparent or seam rows", async (t) => {
+test("a page wider than 390 px: the touch full-page PNG is the page's full width, with the far-right colour in it", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForStitch();
+  assert.ok(r.pngs.includes("wide-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "wide-390-light.png"));
+  assert.equal(px.width, 1200, "the touch full-page PNG is not the page's 1200 px width: the stitch is the viewport's width");
+  assert.equal(px.row, "G@0 Y@600", `the far-right colour is missing from row 100 (runs ${px.row})`);
+});
+
+test("root scroll-snap mandatory, sections at snap points: the full-page PNG has no transparent or seam rows", async (t) => {
   const b = await chromium(t);
   if (!b) return;
   const r = await shotsForStitch();
   assert.ok(r.pngs.includes("snap-390-light.png"), r.out);
   const px = await pixels(b, path.join(r.dir, "snap-390-light.png"));
-  assert.equal(px.height, 3900, "scope: the PNG is the full page");
+  assert.equal(px.height, 3000, "scope: the PNG is the full page");
   assert.doesNotMatch(px.column, /T@/, `transparent rows: a tile left a gap (runs ${px.column})`);
-  assert.equal(px.column, bandRuns(0, 39), `the 100 px bands do not line up: a tile is drawn at the wrong y (runs ${px.column})`);
+  assert.equal(px.column, "R@0 B@1000 Y@2000", `a section is missing or at the wrong y: a tile snapped off its offset (runs ${px.column})`);
 });
 
 test("tile offsets: a touch page banded every 100 px in two colours keeps every band at its page y", async (t) => {
