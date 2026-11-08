@@ -6972,22 +6972,21 @@ def retry_form_template_check():
     return True, "the push the retry form builds is the sha lease push"
 
 
-# The sha sentence is pinned whole, so a weaker sentence that only names the push still fails.
+# The sha sentences are pinned whole, so a weaker sentence that only names the push still fails.
 SHA_SENTENCE = (
-    "Right after each push, record the sha with `git rev-parse <branch>`, the tip you pushed; "
-    "never a tip read after a fetch or from a reflog that worktrees share, which would make the lease "
-    "pass over newer work.")
+    "Right after each push, record the sha with `git rev-parse <src>`, the local ref you pushed. "
+    "Never use a tip read after a fetch or from a reflog that worktrees share: the lease would pass over newer work.")
 
 
 def sha_sentence_check():
-    """The last sentence before the Remedy line is the sha sentence, string for string."""
+    """The sentences before the Remedy line end with the sha sentences, string for string."""
     text, marker, _ = push_module().PUSH_REASON.partition("Remedy:")
     if not marker:
-        return False, "PUSH_REASON has no Remedy: line to end the sha sentence before"
-    sentence = text.strip().rsplit(". ", 1)[-1]
-    if sentence != SHA_SENTENCE:
-        return False, "the sentence before the Remedy line is not the sha sentence, verbatim: %r" % sentence
-    return True, "the sentence before the Remedy line is the sha sentence, verbatim"
+        return False, "PUSH_REASON has no Remedy: line to end the sha sentences before"
+    tail = text.strip()
+    if tail != SHA_SENTENCE and not tail.endswith(" " + SHA_SENTENCE):
+        return False, "the sentences before the Remedy line are not the sha sentences, verbatim: %r" % tail[-160:]
+    return True, "the sentences before the Remedy line end with the sha sentences, verbatim"
 
 
 PUSH_REMEDY_CHECKS.extend([
