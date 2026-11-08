@@ -218,7 +218,7 @@ def email_is_no_person(found):
 
 WORD_SEGMENT = re.compile(r"[a-z]+|[A-Z]+|[A-Z][a-z]+")  # one word in lower case, upper case or capitalised
 LOWER_WORD = re.compile(r"[a-z]+")  # a hyphen part in lower case only
-CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)  # `y` counts as a consonant; known limit: real words with four in a row (`length`, `strength`) are refused
+CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)  # the words here have at most three consonants in a row; `y` counts as one
 
 
 def letters_are_words(value):
@@ -226,8 +226,7 @@ def letters_are_words(value):
     four or more consonants. A value with a hyphen whose parts are all lower case (`tight-compact`) is checked for the
     run in each part alone; any other value also needs a third or more of its letters to be vowels, and its run is
     checked across the joined letters. `REPLACE_WITH_YOUR_KEY` and `infrastructure` pass. Random letters in a mixed
-    case or with few vowels do not, except in the all-lower-case hyphen form, which skips the vowel share: its parts
-    pass with few vowels when none has a four-consonant run. Random lower-case letters with enough vowels still pass."""
+    case or with few vowels do not. Random lower-case letters with enough vowels still pass."""
     parts = [p for p in re.split(r"[_-]", value) if p]
     letters = "".join(parts)
     if not (letters and all(WORD_SEGMENT.fullmatch(p) for p in parts)):
