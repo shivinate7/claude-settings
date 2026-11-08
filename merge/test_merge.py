@@ -12162,6 +12162,13 @@ class ReviewStampForm(unittest.TestCase):
         spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
         self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces on the marker line changed what the record parses to")
 
+    def test_a_stamped_line_with_trailing_spaces_still_parses(self):
+        # The merge tool stamps each line without its trailing spaces, and parse_review reads the same way. A record the tool printed with
+        # spaces on a stamped line keeps its stamp, so it round-trips. Without the rstrip in review_stamp, the stamp covers the spaces and the parse refuses.
+        text = record_text(rounds=REVIEW_PASS, net="not owed  ")
+        self.assertIn("Net value: not owed  \n", text, "the record lost the trailing spaces the case sets")
+        self.assertEqual(parse_text(self, text)["net"], "not owed", "a stamped record with trailing spaces did not parse to its net value")
+
     def test_crlf_line_ends_still_parse_to_the_same_fields(self):
         text = record_text(rounds=REVIEW_PASS)
         self.assertEqual(parse_text(self, text.replace("\n", "\r\n")), parse_text(self, text), "CRLF line ends changed what the record parses to")
@@ -14074,13 +14081,13 @@ class ReviewStampSince(unittest.TestCase):
         subprocess.run(["git", "-C", root, "add", "merge/merge.py"], check=True, capture_output=True)
         subprocess.run(["git", "-C", root, "commit", "-q", "-m", f"commit {n}"], check=True, capture_output=True, env=env)
 
-    def repo(self, salt_at):
-        """origin/main at commit 3. Commit 1 has no salt line. Commit `salt_at` (2, or None for none) adds it, and commit 3 keeps it.
+    def repo(self, salt_at, branch="main"):
+        """origin/<branch> at commit 3. Commit 1 has no salt line. Commit `salt_at` (2, or None for none) adds it, and commit 3 keeps it.
         Committer times are fixed: commit 1, then the salt commit, then commit 3. Each author time is earlier than all of them, so a read of the author time instead of the committer time gives another cutover."""
         root = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
         self.addCleanup(shutil.rmtree, root, True)
         subprocess.run(["git", "-C", root, "init", "-q"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", root, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "symbolic-ref", "HEAD", f"refs/heads/{branch}"], check=True, capture_output=True)
         salt = 'REVIEW_STAMP_SALT = "claude-settings review record stamp v1"\n'
         dates = ["2026-10-20 10:00:00 +0000", "2026-10-21 15:04:05 +0000", "2026-10-22 09:00:00 +0000"]
         texts = ["def f():\n    return 1\n", "def f():\n    return 2\n", "def f():\n    return 3\n"]
@@ -14089,7 +14096,7 @@ class ReviewStampSince(unittest.TestCase):
                 texts[i] = salt + texts[i]
         for n, (text, date) in enumerate(zip(texts, dates), start=1):
             self.commit(root, n, text, date)
-        subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "update-ref", f"refs/remotes/origin/{branch}", "HEAD"], check=True, capture_output=True)
         return root
 
     def test_the_cutover_is_the_committer_time_of_the_first_salt_commit(self):
@@ -14100,6 +14107,43 @@ class ReviewStampSince(unittest.TestCase):
     def test_without_a_salt_commit_the_cutover_is_none(self):
         root = self.repo(salt_at=None)
         self.assertIsNone(review_fn(self, "review_stamp_since")(root, "main"), "a history with no salt commit gave a cutover")
+
+    def test_a_fix_check_run_asks_for_the_default_branch_once(self):
+        # --fix-check runs fetch_default_branch, then review_stamp_since. The cutover cache covers only the second read, so a run asks
+        # for the default branch twice today. The stub answers "fixture" and counts its asks. The branch is fixture, never main.
+        root = self.repo(salt_at=2, branch="fixture")
+        parent = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, parent, True)
+        bare = os.path.join(parent, "origin.git")
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
+        subprocess.run(["git", "-C", bare, "symbolic-ref", "HEAD", "refs/heads/fixture"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "push", "-q", bare, "fixture"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "remote", "add", "origin", bare], check=True, capture_output=True)
+        asks = []
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: asks.append(r) or "fixture"):
+            review_fn(self, "fetch_default_branch")(root)
+            review_fn(self, "review_stamp_since")(root, "fixture")
+        self.assertEqual(len(asks), 1, f"a fix-check run asked for the default branch {len(asks)} times, not once")
+
+    def test_a_shallow_clone_whose_salt_commit_is_the_boundary_stops_naming_the_shallow_history(self):
+        # A depth-2 clone cuts the history under the salt commit: that commit is the shallow boundary and its parent is absent, so the
+        # first salt commit is unknown. The read must stop naming the shallow history, not return the boundary's time as the cutover.
+        src = self.repo(salt_at=2, branch="fixture")
+        parent = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, parent, True)
+        clone = os.path.join(parent, "clone")
+        subprocess.run(["git", "clone", "-q", "--depth", "2", "file://" + src, clone], check=True, capture_output=True)
+        self.assertEqual(sh(clone, "git", "rev-parse", "--is-shallow-repository"), "true", "the depth-2 clone is not shallow")
+        self.assertIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", "HEAD~1:merge/merge.py"), "the boundary is not the salt commit")
+        self.assertNotEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", "HEAD~2^{commit}"], capture_output=True).returncode, 0,
+                            "the clone holds the parent of the salt commit")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            try:
+                got = review_fn(self, "review_stamp_since")(clone, "fixture")
+            except merge.Stop as stop:
+                self.assertIn("shallow", str(stop), "the Stop does not name the shallow history:\n" + str(stop))
+            else:
+                self.fail(f"review_stamp_since read a shallow clone as full history and returned {got!r} instead of stopping")
 
     def git_at(self, root, date, *args):
         """Run git in the temp repo with its author and committer times set to `date`."""
