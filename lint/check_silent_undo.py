@@ -573,21 +573,33 @@ def resolve_upstream(cwd, upstream, notes=None):
 def resolve_base(cwd, head):
     """(upstream, notes) for a run that names none, the one home of the choice. A pull request's base, as CI reads it:
     env GITHUB_BASE_REF (empty is unset), else the branch's gh-merge-base config, each as origin/<name>. A candidate that is
-    missing here or already holds the head is no base (a run against it reads no commit): it is named and passed over.
-    With no base, origin/main, with a note that the base is unknown."""
+    missing here, already holds the head (a run against it reads no commit), or is already merged into main (a run against
+    it would excuse what main itself forbids) is no base: it is named and passed over. A base that is used is named with
+    its source, so a reader of the verdict knows what it was read against. A squashed base cannot be told from an open
+    one, so it is used. With no base, origin/main, with a note that the base is unknown."""
     notes, cur = [], git(cwd, "symbolic-ref", "--short", "-q", "HEAD", ok=(0, 1))[1].strip()
-    cands = [os.environ.get("GITHUB_BASE_REF") or ""]
+    cands = {}
+    sources = [(os.environ.get("GITHUB_BASE_REF") or "", "env GITHUB_BASE_REF")]
     if cur:
-        cands.append(git(cwd, "config", "--get", "branch.%s.gh-merge-base" % cur, ok=(0, 1))[1].strip())
+        sources.append((git(cwd, "config", "--get", "branch.%s.gh-merge-base" % cur, ok=(0, 1))[1].strip(), "gh-merge-base"))
+    for name, source in sources:
+        if name:
+            cands.setdefault(name, source)
     h = git(cwd, "rev-parse", "--verify", "-q", head + "^{commit}", ok=(0, 1))[1].strip()
-    for name in dict.fromkeys(c for c in cands if c):
+    try:
+        main = resolve_upstream(cwd, "origin/main")
+    except Unknown:
+        main = None
+    for name, source in cands.items():
         cand = "origin/" + name
         if git(cwd, "rev-parse", "--verify", "-q", cand + "^{commit}", ok=(0, 1))[0] != 0:
-            notes.append("the PR base %s is not here, so it is not used" % cand)
+            notes.append("the PR base %s (from %s) is not here, so it is not used" % (cand, source))
         elif h and git(cwd, "merge-base", "--is-ancestor", h, cand, ok=(0, 1))[0] == 0:
-            notes.append("the PR base %s already holds the head, so it is not used" % cand)
+            notes.append("the PR base %s (from %s) already holds the head, so it is not used" % (cand, source))
+        elif main and cand != "origin/main" and git(cwd, "merge-base", "--is-ancestor", cand, main, ok=(0, 1))[0] == 0:
+            notes.append("the PR base %s (from %s) is already merged into %s, so it is not used" % (cand, source, main))
         else:
-            return cand, notes
+            return cand, notes + ["compared against the PR base %s (from %s)" % (cand, source)]
     return "origin/main", notes + ["the PR base is unknown, compared against origin/main"]
 
 
