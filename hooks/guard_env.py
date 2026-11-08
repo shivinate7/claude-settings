@@ -4,13 +4,14 @@ guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
 import fnmatch
+import glob
 import os
 import re
 import warnings
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
+    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _git, _split_heredocs, _without_message_values,
     is_powershell, norm, segment_tokens, split_segments,
 )
 
@@ -111,10 +112,17 @@ ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "ag": "Gp"}
 # The value of these letters is no path, so it is skipped: after rg `-t` or `-T` a file type name,
 # after ag `-G` a file regex, judged by `_ag_hidden_regex_refusal` instead.
 ENV_NO_PATH_SHORT_BY_COMMAND = {"rg": "tT", "ag": "G"}
-# A hidden flag makes a search read dotfiles: `--hidden`, `--unrestricted`, `-u`, and rg `-.`. rg
-# `-u` alone skips no hidden file, but it counts here: main refuses that form too.
-ENV_HIDDEN_LONG = ("--hidden", "--unrestricted")
-ENV_HIDDEN_SHORT = "u."
+# A hidden flag makes a search read dotfiles: `--hidden`, rg `-.`, and `-u` (`--unrestricted`) as often
+# as the tool needs. ag reads dotfiles at one `-u`. rg `-u` turns off the ignore rules and no more;
+# `-uu` and `-uuu` (or `-u` twice) also read dotfiles. Any `-u` turns the ignore rules off.
+ENV_HIDDEN_LONG = ("--hidden",)
+ENV_UNRESTRICTED_LONG = "--unrestricted"
+ENV_UNRESTRICTED_FOR_HIDDEN = {"rg": 2, "ag": 1}
+# Flags that turn the ignore rules (.gitignore and the like) off, apart from `-u`. rg: `--no-ignore`
+# and each `--no-ignore-...` (kept whole, so a partial one counts too). ag: `-U`, `-a` and their long forms.
+ENV_NO_IGNORE_LONG_PREFIX = "--no-ignore"
+ENV_AG_NO_IGNORE_LONG = ("--skip-vcs-ignores", "--all-types")
+ENV_AG_NO_IGNORE_SHORT = "Ua"
 # rg `-T` excludes a file type, so with a hidden flag the search still reaches the env file, and a
 # pattern that names one stays judged. `-t` searches only the named type, so its pattern is skipped.
 ENV_RG_TYPE_NOT_SHORT = "T"
@@ -461,7 +469,7 @@ def _env_parts(piece: str):
 def _pattern_words(words, position: int, command: str):
     """Read the flags of a search or script command. Return (the indexes of the words that are a
     PATTERN or a program, never a path, {index: the file name glued to a flag word}, whether a
-    hidden flag is set, the indexes of the positional words).
+    hidden flag is set, the indexes of the positional words, whether a flag turns the ignore rules off).
 
     The words after the command go flag by flag. A short cluster is read letter by letter, so `-nf`
     and `-ex` are seen. `-e` and the long pattern flags take the pattern (the word itself when it
@@ -472,7 +480,7 @@ def _pattern_words(words, position: int, command: str):
     which stays judged as a path, so an error here only ever judges a word and never hides one.
     """
     skip, glued, plain, given, ended = set(), {}, [], False, False
-    hidden, type_not = False, False
+    hidden, type_not, unrestricted, no_ignore = False, False, 0, False
     program = command in ENV_PROGRAM_COMMANDS
     value_short = (ENV_PROGRAM_VALUE_SHORT[command] if program
                    else ENV_VALUE_SHORT + ENV_VALUE_SHORT_BY_COMMAND.get(command, "")
@@ -494,6 +502,9 @@ def _pattern_words(words, position: int, command: str):
         if word.startswith("--"):
             name, attached, _ = word.partition("=")
             hidden = hidden or name in ENV_HIDDEN_LONG
+            unrestricted += name == ENV_UNRESTRICTED_LONG
+            no_ignore = no_ignore or name.startswith(ENV_NO_IGNORE_LONG_PREFIX) or (
+                command == "ag" and name in ENV_AG_NO_IGNORE_LONG)
             if name in ENV_PATTERN_LONG:
                 given = True
                 skip.update({i} if attached else {i + 1})
@@ -506,7 +517,9 @@ def _pattern_words(words, position: int, command: str):
         step = 1
         for k, letter in enumerate(word[1:], 1):
             rest = word[k + 1:]
-            hidden = hidden or letter in ENV_HIDDEN_SHORT
+            hidden = hidden or letter == "."
+            unrestricted += letter == "u"
+            no_ignore = no_ignore or (command == "ag" and letter in ENV_AG_NO_IGNORE_SHORT)
             if letter == "e" and not program:
                 given = True
                 skip.update({i} if rest else {i + 1})
@@ -527,6 +540,7 @@ def _pattern_words(words, position: int, command: str):
                 step = 1 if rest else 2
                 break
         i += step
+    hidden = hidden or unrestricted >= ENV_UNRESTRICTED_FOR_HIDDEN.get(command, 2)
     if program and not given and plain:
         # A yq subcommand leads the program, and is no path either. The program is skipped only
         # when a file word follows it: a lone word reads stdin or is the file, so it is judged.
@@ -535,7 +549,7 @@ def _pattern_words(words, position: int, command: str):
             skip.update(plain[:lead + 1])
     elif not given and plain and not (hidden and type_not):
         skip.add(plain[0])
-    return skip, glued, hidden, plain
+    return skip, glued, hidden, plain, no_ignore or unrestricted > 0
 
 
 def _git_grep_at(words, position: int, command: str) -> int:
@@ -582,8 +596,9 @@ def _shell_value(word: str) -> str:
 
 # A POSIX class inside a bracket expression, as PCRE (the regex ag runs) reads it. Python's `re`
 # reads `[[:alpha:]]` as a set of the characters `[`, `:`, `a`, `l`, `p`, `h`, then a literal `]`,
-# so the guard writes each class out as the ranges it stands for. A negated or unknown class is
-# not translated, and the regex is refused: the guard cannot tell what it matches.
+# so the guard writes each class out as the ranges it stands for. A negated class is written as the
+# ASCII characters outside the class, then every character past ASCII. An unknown class is not
+# translated, and the regex is refused: the guard cannot tell what it matches.
 POSIX_CLASS = re.compile(r"\[:(\^?)([a-z]+):\]")
 POSIX_CLASS_RANGES = {
     "alpha": "a-zA-Z", "digit": "0-9", "alnum": "a-zA-Z0-9", "upper": "A-Z", "lower": "a-z",
@@ -595,9 +610,14 @@ POSIX_CLASS_RANGES = {
 
 def _posix_classes_to_python(regex: str) -> str:
     def ranges(match):
-        if match.group(1) or match.group(2) not in POSIX_CLASS_RANGES:
+        if match.group(2) not in POSIX_CLASS_RANGES:
             raise ValueError("a POSIX class the guard does not translate")
-        return POSIX_CLASS_RANGES[match.group(2)]
+        body = POSIX_CLASS_RANGES[match.group(2)]
+        if not match.group(1):
+            return body
+        member = re.compile("[%s]" % body)
+        return "".join("\\x%02x" % code for code in range(128) if not member.match(chr(code))) + \
+            "\\x80-\\U0010ffff"
     return POSIX_CLASS.sub(ranges, regex)
 
 
@@ -605,7 +625,8 @@ def _posix_classes_to_python(regex: str) -> str:
 # ENV_SAMPLE_NAMES (`\.env\.prod$`) is still seen. Every literal is kept, a repeat runs its least
 # count and one more, and a class or a dot offers the letters of `.env` it holds, then one other
 # letter. A built string counts only when the regex really matches it (the caller searches), so a
-# name is never claimed that the regex would not pick. ACCEPTED LIMIT: a regex that names no env
+# name is never claimed that the regex would not pick. A regex with too many shapes is read again
+# in the lean form: each repeat runs its least count only and each class or dot offers one letter. ACCEPTED LIMIT: a regex that names no env
 # prefix of its own (`prod$`) is judged on ENV_SAMPLE_NAMES only. Rewriting `\.py$` as the names it
 # could pick would refuse every extension filter.
 try:
@@ -613,7 +634,7 @@ try:
 except ImportError:   # Python before 3.11
     import sre_parse as _sre_parse
 SAMPLE_PICK_FROM = ".env"
-SAMPLE_PICK_OTHER = "abcdefghijklmnopqrstuvwxyz0123456789_-/"
+SAMPLE_PICK_OTHER = "abcdefghijklmnopqrstuvwxyz0123456789_-/ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 SAMPLE_LIMIT = 2048
 SAMPLE_REPEATS = ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT")
 SAMPLE_CATEGORIES = {
@@ -624,11 +645,13 @@ SAMPLE_CATEGORIES = {
 }
 
 
-def _sample_pick(test):
-    """The letters a class or a dot offers: those of `.env` it holds, then the first other one."""
+def _sample_pick(test, lean=False):
+    """The letters a class or a dot offers: those of `.env` it holds, then the first other one.
+    The lean form offers the first of them only."""
     picks = [c for c in SAMPLE_PICK_FROM if test(c)]
     other = next((c for c in SAMPLE_PICK_OTHER if test(c)), "")
-    return picks + ([other] if other and other not in picks else [])
+    picks += [other] if other and other not in picks else []
+    return picks[:1] if lean else picks
 
 
 def _sample_class(items):
@@ -646,46 +669,48 @@ def _sample_class(items):
     return lambda c: any(test(c) for test in tests) != negate
 
 
-def _sample_seq(items):
+def _sample_seq(items, lean=False):
     out = [""]
     for op, value in items:
-        options = _sample_node(str(op), value)
+        options = _sample_node(str(op), value, lean)
         out = list(dict.fromkeys(a + b for a in out for b in options))
         if len(out) > SAMPLE_LIMIT:
             raise OverflowError("a file regex with too many shapes")
     return out
 
 
-def _sample_node(name, value):
+def _sample_node(name, value, lean=False):
     if name == "LITERAL":
         return [chr(value)]
     if name == "NOT_LITERAL":
-        return _sample_pick(lambda c: ord(c) != value)
+        return _sample_pick(lambda c: ord(c) != value, lean)
     if name == "ANY":
-        return _sample_pick(lambda c: True)
+        return _sample_pick(lambda c: True, lean)
     if name == "IN":
-        return _sample_pick(_sample_class(value))
+        return _sample_pick(_sample_class(value), lean)
     if name == "CATEGORY":
-        return _sample_pick(SAMPLE_CATEGORIES.get(str(value), lambda c: False))
+        return _sample_pick(SAMPLE_CATEGORIES.get(str(value), lambda c: False), lean)
     if name == "BRANCH":
-        return list(dict.fromkeys(s for branch in value[1] for s in _sample_seq(branch)))
+        return list(dict.fromkeys(s for branch in value[1] for s in _sample_seq(branch, lean)))
     if name == "SUBPATTERN":
-        return _sample_seq(value[-1])
+        return _sample_seq(value[-1], lean)
     if name == "ATOMIC_GROUP":
-        return _sample_seq(value)
+        return _sample_seq(value, lean)
     if name in SAMPLE_REPEATS:
         low, high, body = value
         if low > 64:
             raise OverflowError("a file regex with a long repeat")
-        counts = {low} | ({low + 1} if high > low else set())
-        return list(dict.fromkeys(s * k for s in _sample_seq(body) for k in sorted(counts)))
+        counts = {low} | ({low + 1} if high > low and not lean else set())
+        # A repeat that runs zero times adds the empty string, even when its body offers no letter.
+        shapes = _sample_seq(body, lean) if counts - {0} else []
+        return list(dict.fromkeys(s * k for k in sorted(counts) for s in (shapes if k else [""])))
     if name == "GROUPREF_EXISTS":
-        return _sample_seq(value[1]) + _sample_seq(value[2] or [])
+        return _sample_seq(value[1], lean) + _sample_seq(value[2] or [], lean)
     return [""]   # an anchor, a look-around or a back reference adds no characters
 
 
-def _regex_names(regex: str):
-    return _sample_seq(_sre_parse.parse(regex))
+def _regex_names(regex: str, lean=False):
+    return _sample_seq(_sre_parse.parse(regex), lean)
 
 
 def _ag_hidden_regex_refusal(words, position: int) -> str:
@@ -703,7 +728,7 @@ def _ag_hidden_regex_refusal(words, position: int) -> str:
             break
         if word.startswith("--"):
             name, attached, value = word.partition("=")
-            hidden = hidden or name in ENV_HIDDEN_LONG
+            hidden = hidden or name in ENV_HIDDEN_LONG or name == ENV_UNRESTRICTED_LONG
             if name == ENV_AG_REGEX_LONG:
                 if attached:
                     regexes.append(value)
@@ -735,13 +760,21 @@ def _ag_hidden_regex_refusal(words, position: int) -> str:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", FutureWarning)
                 compiled = re.compile(regex)
-            names = list(ENV_SAMPLE_NAMES) + _regex_names(regex)
+            try:
+                names = _regex_names(regex)
+            except OverflowError:
+                names = _regex_names(regex, lean=True)
+            names = list(ENV_SAMPLE_NAMES) + names
         except (re.error, ValueError, RecursionError, OverflowError):
             return "a file regex the guard cannot read"
         for name in names:
-            if names_env_file(name.rsplit("/", 1)[-1]) and (
-                    compiled.search(name) or compiled.search("./" + name)):
-                return "the file regex matches the name '%s'" % name
+            # A built name may lack the leading dot that the regex itself leaves to the file name
+            # (`env\.prod$` picks `.env.prod`), so the dotted form is tried as well.
+            base = name.rsplit("/", 1)[-1]
+            for held in (name, name[:len(name) - len(base)] + "." + base):
+                if names_env_file(held.rsplit("/", 1)[-1]) and (
+                        compiled.search(held) or compiled.search("./" + held)):
+                    return "the file regex matches the name '%s'" % held
     return ""
 
 
@@ -897,7 +930,8 @@ def _env_relay(texts):
 # ENV_WALK_COMMANDS read a folder when no path is named, and need a hidden flag to reach dotfiles.
 # ENV_GREP_COMMANDS reach them with a recursive flag, and `rgrep` is always recursive. The walk
 # stops at ENV_WALK_LIMIT entries and the search is then refused: a folder that large cannot be
-# shown clean.
+# shown clean. Entries under a `node_modules` folder count toward ENV_BULK_LIMIT instead, and a folder
+# that the ignore rules skip is not walked for rg and ag, which skip it too.
 ENV_WALK_COMMANDS = ("rg", "ag")
 ENV_GREP_COMMANDS = ("grep", "egrep", "fgrep")
 ENV_GREP_RECURSIVE_COMMAND = "rgrep"
@@ -905,31 +939,56 @@ ENV_GREP_RECURSIVE_LONG = ("--recursive", "--dereference-recursive")
 # Letters of a grep flag cluster that take a value, and so end the cluster: `-A 3`, `-e pat`, `-f file`.
 ENV_GREP_VALUE_SHORT = ENV_VALUE_SHORT + "ef"
 ENV_WALK_LIMIT = 50000
+ENV_BULK_LIMIT = 10 * ENV_WALK_LIMIT
+ENV_BULK_FOLDER = "node_modules"
+ENV_TOO_LARGE = "<too large>"
 ENV_WALK_REASON = ("this command would search a folder that holds an environment file, and a "
                    "hidden flag makes it read dotfiles")
+ENV_WALK_LARGE_REASON = (
+    "this command would search a folder too large to check, so it cannot be shown clean of "
+    "environment files. Remedy: name a smaller folder")
 ENV_GREP_WALK_REASON = (
     "this command would search a folder that holds an environment file, and a recursive grep "
     "reads dotfiles. Remedy: add --exclude with a glob that covers the environment file names, "
     "or --exclude-dir for the folder that holds it")
 
 
-def _env_file_in(folder: str, include=(), exclude=(), exclude_dir=()) -> str:
-    """The first env file under `folder`, or `<too large>` past ENV_WALK_LIMIT entries, else ''.
-    A symlink is not followed, as rg and ag do not. `.git` holds no env file and is skipped.
-    The grep globs narrow it: a file is read only when it matches an `include` glob (when any is
-    given) and no `exclude` glob, and a folder that matches an `exclude_dir` glob is not entered."""
-    seen = 0
+def _ignored_paths(folder: str):
+    """The paths under `folder` that the ignore rules skip, as the checkout's own tool prints them:
+    relative to `folder`, with `/` as the separator, an ignored folder as one name that ends in `/`.
+    A tracked file is never in it. Empty when `folder` is in no checkout or the call failed, so
+    nothing is then skipped."""
+    answer = _git(folder, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+    if answer is None or answer.returncode != 0:
+        return frozenset()
+    return frozenset(p for p in answer.stdout.split("\0") if p)
+
+
+def _env_file_in(folder: str, include=(), exclude=(), exclude_dir=(), ignored=frozenset()) -> str:
+    """The first env file under `folder`, or ENV_TOO_LARGE past ENV_WALK_LIMIT entries (ENV_BULK_LIMIT
+    for those under a `node_modules` folder), else ''. A symlink is not followed, as rg and ag do not.
+    `.git` holds no env file and is skipped. The grep globs narrow it: a file is read only when it
+    matches an `include` glob (when any is given) and no `exclude` glob, and a folder that matches an
+    `exclude_dir` glob is not entered. `ignored` is `_ignored_paths`: a file or folder in it is skipped."""
+    seen = bulk = 0
     for top, dirs, files in os.walk(folder):
+        relative = os.path.relpath(top, folder).replace(os.sep, "/")
+        prefix = "" if relative == "." else relative + "/"
         dirs[:] = [d for d in dirs if d != ".git"
-                   and not any(fnmatch.fnmatchcase(d, g) for g in exclude_dir)]
-        seen += len(dirs) + len(files)
+                   and not any(fnmatch.fnmatchcase(d, g) for g in exclude_dir)
+                   and prefix + d + "/" not in ignored]
+        if ENV_BULK_FOLDER in relative.split("/"):
+            bulk += len(dirs) + len(files)
+        else:
+            seen += len(dirs) + len(files)
         for name in files:
             if (names_env_file(name)
                     and (not include or any(fnmatch.fnmatchcase(name, g) for g in include))
-                    and not any(fnmatch.fnmatchcase(name, g) for g in exclude)):
+                    and not any(fnmatch.fnmatchcase(name, g) for g in exclude)
+                    and prefix + name not in ignored):
                 return os.path.join(top, name)
-        if seen > ENV_WALK_LIMIT:
-            return "<too large>"
+        if seen > ENV_WALK_LIMIT or bulk > ENV_BULK_LIMIT:
+            return ENV_TOO_LARGE
     return ""
 
 
@@ -981,10 +1040,14 @@ def _env_walk(texts, cwd: str):
     grep walks `cwd` whatever feeds it. `rg --files` lists names and reads no contents. A grep
     `--include`, `--exclude` or `--exclude-dir` glob that skips the env file clears it.
 
-    ACCEPTED LIMITS: a word that holds a variable, a glob or a substitution is not resolved, a
-    `cd` earlier in the command is not followed (a path reads against `cwd`), a search in the body
-    of a heredoc is not walked, and a `.gitignore` or `-g '!...'` that skips the file is not read,
-    so such a search of a folder with an env file is refused.
+    A glob word is expanded against `cwd` as the shell does (no dotfile). For rg and ag with no flag
+    that turns the ignore rules off, a file or folder that the checkout ignores is not read, so it is
+    skipped (`_ignored_paths`, one call, made only when the first walk found a file or ran past the cap).
+
+    ACCEPTED LIMITS: a word that holds a variable or a substitution is not resolved, a `cd` earlier
+    in the command is not followed (a path reads against `cwd`), a search in the body of a heredoc is
+    not walked, and a `-g '!...'` or an ignore file other than the checkout's own that skips the file
+    is not read, so such a search of a folder with an env file is refused.
     """
     for text, _ in texts:
         ends = []
@@ -995,7 +1058,7 @@ def _env_walk(texts, cwd: str):
                 grep = command in ENV_GREP_COMMANDS + (ENV_GREP_RECURSIVE_COMMAND,)
                 if not (command in ENV_WALK_COMMANDS or grep) or "--files" in words:
                     continue
-                skip, _, hidden, plain = _pattern_words(
+                skip, _, hidden, plain, no_ignore = _pattern_words(
                     words, position, "grep" if grep else command)
                 if grep:
                     if command != ENV_GREP_RECURSIVE_COMMAND and not _grep_recursive(words, position):
@@ -1003,14 +1066,27 @@ def _env_walk(texts, cwd: str):
                 elif not hidden:
                     continue
                 paths = [re.sub(r"[\\\"']", "", words[i]) for i in plain if i not in skip]
-                folders = [os.path.join(cwd, os.path.expanduser(w)) for w in paths
-                           if not re.search(r"[$`*?\[]", w)]
-                folders = [f for f in folders if os.path.isdir(f)]
+                folders = []
+                for i in (i for i in plain if i not in skip):
+                    word = re.sub(r"[\\\"']", "", words[i])
+                    if re.search(r"[$`]", word):
+                        continue
+                    target = os.path.join(cwd, os.path.expanduser(word))
+                    # A quoted glob is no glob to the shell, so it is not expanded.
+                    expand = re.search(r"[*?\[]", word) and words[i] == word
+                    folders += [f for f in (glob.glob(target) if expand else [target])
+                                if os.path.isdir(f) and f not in folders]
                 if not paths and (grep or not ((fed and part == 0) or "<" in words)):
                     folders = [cwd]
                 globs = _grep_globs(words, position) if grep else ((), (), ())
                 for folder in folders:
                     found = _env_file_in(folder, *globs)
+                    if found and not grep and not no_ignore:
+                        found = _env_file_in(folder, *globs, ignored=_ignored_paths(folder))
+                    if found == ENV_TOO_LARGE:
+                        return (ENV_WALK_LARGE_REASON,
+                                "'%s' %s walks '%s', which is past the walk cap"
+                                % (command, "recursive" if grep else "with a hidden flag", folder))
                     if found:
                         return (ENV_GREP_WALK_REASON if grep else ENV_WALK_REASON,
                                 "'%s' %s walks '%s', which holds '%s'"
