@@ -591,7 +591,7 @@ def _copy_reads(raw, predicate, cwd, keywords=False):
 
 
 _TARGET_COMMANDS = ("cp", "mv", "install")   # the commands that take `-tDIR`, glued, as `cp` does
-_CP_GLUED_TARGET = re.compile(r"-[RrfiaHLPpnvuxTS]*t(.+)")
+_CP_GLUED_TARGET = re.compile(r"-[RrfiaHLPpnvuxTSD]*t(.+)")   # D is `install`'s flag
 _WALK_SKIP = frozenset((".git", "node_modules", ".venv", "venv", "__pycache__"))
 _WALK_LIMIT = 5000
 _LIST_LIMIT = 10 * _WALK_LIMIT   # entries listed, judged or not: a filtered walk of a whole disk stops here
@@ -617,6 +617,34 @@ _TOO_LARGE_NOTE = " (the folder is too large to check for a test; name a narrowe
 _TOO_LARGE_FILTERED_NOTE = " (the folder is too large to check for a test even through the find's name filter; name a narrower path)"
 
 
+_TOO_LARGE_NOTES = {_TOO_LARGE: _TOO_LARGE_NOTE, _TOO_LARGE_FILTERED: _TOO_LARGE_FILTERED_NOTE}
+
+
+def _copy_written_hit(raw, cwd, predicate, fed, filters) -> str:
+    """The path a `cp` segment writes that `predicate(path, cwd)` accepts, else ''. A copy writes
+    `DEST/<basename of each source>`, so a test-named source copied into any folder writes a test there; this
+    judges that written path, for the direct form and the fed form alike. A fed source that is a folder is a
+    find root (`_fed_segments`): it is walked, as `filters` narrows it, and each file under it is judged.
+    A DEST that holds a glob or a variable is not judged (it stays a root, which fails closed)."""
+    parts = _copy_parts(raw, fed)
+    if parts is None:
+        return ""
+    operands, at = parts
+    dest = _copy_target(raw[at])
+    if not operands or not dest or _CP_DEST_UNSAFE.search(dest):
+        return ""
+    for index in operands:
+        source = _unquoted(raw[index])
+        base = re.split(r"[/\\]", source.rstrip("/\\"))[-1]
+        if base and predicate(os.path.join(dest, base), cwd):
+            return os.path.join(dest, base)
+        if fed and _may_hold_a_test(dest, cwd, predicate):
+            walked = _first_test_under(source, cwd, predicate, (filters or {}).get(source), dest)
+            if walked:
+                return source + _TOO_LARGE_NOTES[walked] if walked in _TOO_LARGE_NOTES else walked
+    return ""
+
+
 def _name_matches(names, base: str) -> bool:
     """True when a `find` name filter (`_find_name_filter`) accepts the file name `base`: some branch
     has an include that matches it and no exclude that matches it."""
@@ -638,7 +666,7 @@ def _may_hold_a_test(top: str, cwd: str, predicate) -> bool:
         return True
 
 
-def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
+def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None) -> str:
     """The first path under the folder `path`, at any depth, that `predicate` accepts, else ''. A
     folder that `predicate` accepts as `DIR/_` counts. `.git`, `node_modules` and the virtualenv and
     bytecode folders are not entered. An empty path names no folder.
@@ -650,6 +678,8 @@ def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
     when a name filter was in effect), as a walk that
     stops there would let a test past it through. A tree where no test can sit (`_may_hold_a_test`) gives
     '' there instead: nothing past the cap is a test.
+    `dest` is the folder a copy writes into: each file is then judged as `dest/<its name>`, the path the copy
+    writes, and that path is the answer. A folder entry is not judged.
     ponytail: a checkout nested in a tree outside every checkout, past the cap, is not read.
     ponytail: the walk costs one pass over the tree, once per fed writer word that is a folder."""
     if not _unquoted(path).strip():
@@ -668,17 +698,19 @@ def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
     for folder, folders, files in walk:
         folders[:] = [name for name in folders if name not in _WALK_SKIP]
         if names is None:
-            found_in = [os.path.join(folder, "_")] + [os.path.join(folder, name) for name in files]
+            found_in = [] if dest else [os.path.join(folder, "_")]
+            found_in += [os.path.join(folder, name) for name in files]
         else:
             found_in = [os.path.join(folder, name) for name in files if _name_matches(names, name)]
             for name in folders:
                 if _name_matches(names, name):
-                    whole = _first_test_under(os.path.join(folder, name), cwd, predicate)
+                    whole = _first_test_under(os.path.join(folder, name), cwd, predicate, None, dest)
                     if whole:
                         return _TOO_LARGE_FILTERED if whole == _TOO_LARGE else whole
         for found in found_in:
-            if predicate(found, cwd):
-                return found
+            written = os.path.join(dest, os.path.basename(found)) if dest else found
+            if predicate(written, cwd):
+                return written
         judged += len(folders) + len(found_in)
         listed += len(folders) + len(files)
         if (judged > _WALK_LIMIT or listed > _LIST_LIMIT) and next(walk, None) is not None:
@@ -1145,7 +1177,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     no other caller's verdict moves."""
     def scan(text, fed=None, copy_outer=False, filters=None):
         return _shell_write_scan(text, cwd, predicate, holds, follow_cd, command_position,
-                                 predicate_command, fed, copy_outer, filters)
+                                 predicate_command, fed, copy_outer, filters, read_fed)
 
     if not read_fed:
         return scan(cmd)
@@ -1192,9 +1224,10 @@ def _takes_target(word) -> bool:
 
 
 def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, predicate_command,
-                      fed=None, copy_outer=False, filters=None):
+                      fed=None, copy_outer=False, filters=None, written=False):
     """`_shell_write_hit` for one text. `fed` is the (segments, ends) that `_fed_command` made of it.
-    `filters` is `_walk_filters` of the command: the name filter of each fed root's find."""
+    `filters` is `_walk_filters` of the command: the name filter of each fed root's find.
+    `written` also judges the path each `cp` writes (`_copy_written_hit`)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     if fed:
         segments, ends = fed
@@ -1285,8 +1318,11 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                     walked = _first_test_under(word, at, predicate, (filters or {}).get(_unquoted(word)))
                     hit = bool(walked)
             if hit and writes_to(word, text, *(_segment_command(script) if command_position else ())):
-                notes = {_TOO_LARGE: _TOO_LARGE_NOTE, _TOO_LARGE_FILTERED: _TOO_LARGE_FILTERED_NOTE}
-                return word + notes.get(walked, "")
+                return word + _TOO_LARGE_NOTES.get(walked, "")
+        if written and not closed and not predicate_command:
+            wrote = _copy_written_hit(raw, at, predicate, bool(fed), filters)
+            if wrote:
+                return wrote
     return ""
 
 
