@@ -20220,17 +20220,19 @@ def session_is_live_backwards_clock_step_case():
     return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
 
 
-def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, temp=None, **tool_input):
+def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, temp=None, config=None,
+                 **tool_input):
     """`decide`, but for a hand-built payload naming every key `decide` reads by index.
 
     `process_cwd` sets the GUARD PROCESS's own cwd, distinct from the payload `cwd` above: a
     relative `file_path` must resolve against the payload `cwd`, never against wherever the
     guard subprocess happens to run from. `session` is the payload's session_id. `temp` is the
     temp folder the guard run reads as its own (see TEMP_DIR), or None for the system temp.
+    `config` is the config folder the guard run writes its guard.log to, or None for the shared one.
     """
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
-        "config": None, "agent_id": agent_id, "process_cwd": process_cwd, "temp": temp,
+        "config": config, "agent_id": agent_id, "process_cwd": process_cwd, "temp": temp,
         "tool_input": tool_input,
     })
 
@@ -21150,11 +21152,13 @@ def _home_fixture(agent_id):
 
 
 def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=None, temp=None,
-                 any_of=(), unnamed=()):
+                 any_of=(), unnamed=(), config=None, detail=""):
     """Run one call. A problem is recorded unless it gets `expect`, and a deny must name `rule`.
     `temp` is the temp folder the guard run reads. `any_of` names rules, one of which a deny must name,
-    for a call an earlier rule may already refuse. A deny must also name none of `unnamed`."""
-    got, reason = _decide_full(tool, cwd, agent_id=agent_id, temp=temp, command=command)
+    for a call an earlier rule may already refuse. A deny must also name none of `unnamed`. `config` is the
+    config folder the run logs to, and `detail` the text a logged deny's matched field must start with: the
+    printed reason names only the rule, so the detail is the one check of the cause."""
+    got, reason = _decide_full(tool, cwd, agent_id=agent_id, temp=temp, command=command, config=config)
     if got != expect:
         problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
     elif rule and rule not in reason:
@@ -21163,6 +21167,19 @@ def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=Non
         problems.append("%s: the deny names none of %s (%s)" % (label, ", ".join(any_of), reason[:120]))
     elif got == "deny" and any(text in reason for text in unnamed):
         problems.append("%s: the refusal names a path (%s)" % (label, reason[:120]))
+    elif got == "deny" and detail and not _logged_deny_detail(config, detail):
+        problems.append("%s: no logged deny carries the detail %r" % (label, detail))
+
+
+def _logged_deny_detail(folder, detail):
+    """True when guard.log in FOLDER holds a deny whose matched field (field 4) starts with DETAIL."""
+    if not folder:
+        return False
+    for line in _guard_log_lines(folder):
+        fields = line.split("\t")
+        if len(fields) >= 5 and fields[2] == "deny" and fields[4].startswith(detail):
+            return True
+    return False
 
 
 # (shell, command template): the lone command that moves into a directory.
@@ -21852,14 +21869,17 @@ def _relesc_fixture():
             os.makedirs(os.path.join(home, "sub"), exist_ok=True)
             write(os.path.join(home, "t.py"), "print(1)\n")
             sh_add_lane(primary, "agent-" + RELESC_AGENT + "-red")
+            sh_add_lane(primary, "agent-wthomew3-red")   # another agent's red-run folder, in the same clone
         free = os.path.join(ROOT, "wthomew_free_primary")
         make_repo(free, {"src/app.py": "print(1)\n"})
         free_lane, _branch = sh_add_lane(free, "wthomew_lane")   # a linked checkout the no-record agent stands in
+        sh_add_lane(free, "agent-" + RELESC_FREE + "-red")       # the no-record agent's own red-run folder
         nogit = os.path.join(ROOT, "wthomew_nogit")
         os.makedirs(nogit, exist_ok=True)
         # A `cd` into a folder that does not exist is not followed, so the scratch folder must exist.
         scratch = os.path.join(ROOT, "relesc_scratch")
         os.makedirs(scratch, exist_ok=True)
+        red = os.path.join(primary, ".claude", "worktrees", "agent-" + RELESC_AGENT + "-red")
         folders = {
             "primary": primary, "home": home, "sub": os.path.join(home, "sub"),
             "free": free, "free_src": os.path.join(free, "src"), "nogit": nogit, "free_lane": free_lane,
@@ -21867,6 +21887,11 @@ def _relesc_fixture():
             "abs_outside": os.path.join(ROOT, "relesc_outside"),
             # The home as a relative path from the scratch folder: a cd along it lands back in the home.
             "home_from_scratch": os.path.relpath(home, scratch),
+            # The agent's red-run folder, the one a restore meant for it must name; by a relative path from the home too.
+            "red": red, "red_from_home": os.path.relpath(red, home),
+            # Another agent's red-run folder in the same clone, and the no-record agent's own red-run folder.
+            "other_red": os.path.join(primary, ".claude", "worktrees", "agent-wthomew3-red"),
+            "free_red": os.path.join(free, ".claude", "worktrees", "agent-" + RELESC_FREE + "-red"),
         }
         # A link in the scratch folder to the home. Where symlinks fail (Windows without the privilege) the key
         # is left out, and each row that names it skips.
@@ -21894,10 +21919,11 @@ def _relesc_scope(agent, folders):
 
 
 def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, any_of=(), tool="Bash",
-                needs=()):
+                needs=(), detail=""):
     """Register one row: `command` as a call of `tool` from folders[cwd_key], as `agent`, judged `expect`.
     `command` takes the folder paths as %(name)s keys. The row asserts its scope first. `needs` names the
-    folder keys the fixture may not make on this platform (a symlink); a row missing one skips."""
+    folder keys the fixture may not make on this platform (a symlink); a row missing one skips. `detail`, a
+    deny's matched-field prefix, is read from the run's own guard.log, in a config folder of the row's own."""
     def check():
         folders, problems = _relesc_fixture()
         if problems:
@@ -21910,8 +21936,9 @@ def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, 
             return False, scope
         shell = {key: slash(value) for key, value in folders.items()}
         found = []
+        config = tempfile.mkdtemp(prefix="relesc-cfg-", dir=ROOT) if detail else None
         _expect_call(found, label, expect, tool, folders[cwd_key], agent, command % shell, rule=rule,
-                     temp=RELESC_TMP, any_of=any_of, unnamed=(ROOT, slash(ROOT)))
+                     temp=RELESC_TMP, any_of=any_of, unnamed=(ROOT, slash(ROOT)), config=config, detail=detail)
         return (not found), ("; ".join(found) if found else "as the row names")
 
     FIXTURELESS_CHECKS.add(check)
@@ -22073,6 +22100,80 @@ _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x 
             "lands in its own checkout and is allowed", "allow", "mkdir ../x", "free_src", agent=RELESC_FREE)
 
 
+# --------------------------------------------------------------------------- red restore
+# worktree-home, the restore act: `git restore <path>` or `git checkout [<rev>] -- <path>` with a RELATIVE path, in a
+# command that also names the agent's own red-run folder, resolves in the agent's own worktree, not in the red-run
+# folder. The incident: an agent meant the restore for its red checkout, typed the path relative, and overwrote its
+# own edit. The clause refuses that. The folder is named by an absolute path (`%(red)s`), by a relative one
+# (`%(red_from_home)s`), or by a cd, pushd or -C. A restore that names red in its own segment, or runs in red after a
+# chained cd, resolves in red, and passes. Each deny checks its logged detail, which the printed reason does not carry.
+# Decision: an-agent-outside-its-home-tree-must-stop.
+RED_RESTORE_DETAIL = "relative restore meant for the red-run folder"
+
+# Deny, from the recorded home: a relative restore whose command names the agent's own red-run folder in another segment.
+_relesc_add("worktree-home red restore: git -C <red> status && git restore src/app.py, a relative restore after a "
+            "red folder named by -C, is refused", "deny", "git -C %(red)s status && git restore src/app.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: (cd <red>) ; git restore src/app.py, a cd in a subshell does not move the "
+            "restore, is refused", "deny", "(cd %(red)s) ; git restore src/app.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: ls <red>/src ; git checkout -- src/app.py, a checkout with no rev, is refused",
+            "deny", "ls %(red)s/src ; git checkout -- src/app.py", "home", rule="worktree-home",
+            detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: git -C <red> diff --quiet || git checkout HEAD -- src/app.py, a checkout "
+            "with a rev, is refused", "deny", "git -C %(red)s diff --quiet || git checkout HEAD -- src/app.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: git -C <red> log -1 && git restore --source=HEAD src/app.py, the --source "
+            "form, is refused", "deny", "git -C %(red)s log -1 && git restore --source=HEAD src/app.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: git -C <red by a relative path> status && git restore src/app.py, a red "
+            "folder named by a relative path, is refused", "deny", "git -C %(red_from_home)s status && git restore "
+            "src/app.py", "home", rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: (cd <red> && git status) && git restore src/app.py, a subshell that ends at "
+            "its paren, is refused", "deny", "(cd %(red)s && git status) && git restore src/app.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: git restore src/app.py && git -C <red> status, a red folder named after the "
+            "restore, is refused", "deny", "git restore src/app.py && git -C %(red)s status", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: a newline between git -C <red> status and git restore src/app.py is a chain, "
+            "and is refused", "deny", "git -C %(red)s status\ngit restore src/app.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: echo don't; git -C <red> status; git restore src/app.py, a lone quote in "
+            "text, is refused", "deny", "echo don't; git -C %(red)s status; git restore src/app.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: echo \"# not a comment\" && git -C <red> status && git restore src/app.py, a "
+            "comment opener in quotes does not end the chain, is refused", "deny",
+            'echo "# not a comment" && git -C %(red)s status && git restore src/app.py', "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+
+# Allow, from the recorded home: each names the red folder or none, and the restore resolves outside the red folder
+# only where it must. The first two are the legitimate recovery and the restore that runs in red.
+_relesc_add("worktree-home red restore: git -C <red> restore src/app.py, the restore resolves in the red folder, is "
+            "allowed", "allow", "git -C %(red)s restore src/app.py", "home")
+_relesc_add("worktree-home red restore: cp <red>/src/app.py src/app.py, the copy back from the red folder, is allowed",
+            "allow", "cp %(red)s/src/app.py src/app.py", "home")
+_relesc_add("worktree-home red restore: cd <red> && git restore src/app.py, the restore runs in the red folder after a "
+            "chained cd, is allowed", "allow", "cd %(red)s && git restore src/app.py", "home")
+_relesc_add("worktree-home red restore: git -C <red> status && git restore <home>/src/app.py, an absolute target is "
+            "not judged here, is allowed", "allow", "git -C %(red)s status && git restore %(home)s/src/app.py", "home")
+_relesc_add("worktree-home red restore: git restore src/app.py, with no red folder named, is allowed", "allow",
+            "git restore src/app.py", "home")
+_relesc_add("worktree-home red restore: git -C <another agent's red> status && git restore src/app.py, a red folder "
+            "of another agent is not this agent's, is allowed", "allow",
+            "git -C %(other_red)s status && git restore src/app.py", "home")
+_relesc_add("worktree-home red restore: git -C <no-record agent's red> status && git restore src/app.py, from the "
+            "no-record agent's own checkout, is allowed", "allow",
+            "git -C %(free_red)s status && git restore src/app.py", "free_lane", agent=RELESC_FREE)
+_relesc_add("worktree-home red restore: git -C <red> status && git restore src/app.py, with no agent_id, the "
+            "orchestrator, is allowed", "allow", "git -C %(red)s status && git restore src/app.py", "home", agent=None)
+_relesc_add("worktree-home red restore: git restore src/app.py # <red>, a comment that names the red folder, is "
+            "allowed", "allow", "git restore src/app.py # %(red)s", "home")
+_relesc_add("worktree-home red restore: git restore src/app.py && cat <<'EOF' with the red folder in the body, the body "
+            "is text, is allowed", "allow", "git restore src/app.py && cat <<'EOF'\n%(red)s\nEOF", "home")
+_relesc_add("worktree-home red restore: git -C <red> status && echo \"git restore src/app.py\", the restore is text in "
+            "quotes, is allowed", "allow", 'git -C %(red)s status && echo "git restore src/app.py"', "home")
+
+
 # The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes
 # today. The new clause may not add to either; a count above its pin fails. Rows: label, agent, cwd key,
 # command, most spawns, most worktree lists.
@@ -22083,6 +22184,8 @@ RELESC_COST = (
     ("cd sub && mkdir ../../x from the home", RELESC_AGENT, "home", "cd sub && mkdir ../../x", 4, 0),
     ("mkdir ../tmp from the primary, no record", RELESC_FREE, "free", "mkdir ../tmp", 4, 0),
     ("mkdir fresh from the home, allowed", RELESC_AGENT, "home", "mkdir fresh", 4, 0),
+    ("git -C red status && git restore src/app.py from the home", RELESC_AGENT, "home",
+     "git -C %(red)s status && git restore src/app.py", 6, 0),
 )
 
 
