@@ -79,7 +79,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
-from workflow_steps import NOT_RUN_JOB, SUITE_LINE, job_block, run_body, run_lines, step_blocks, step_env, step_key, step_with, suite_paths  # noqa: E402  the one home of the step parser
+from workflow_steps import MISSING_INSTALL, NOT_RUN_JOB, SUITE_LINE, job_block, run_body, run_lines, step_blocks, step_env, step_key, step_with, suite_paths  # noqa: E402  the one home of the step parser
 
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 7 s on this repo's 118 suites) before it reads unknown
 NO_VERDICT_LINE = "(verdict printed no verdict line)"  # the verdict line's default, when verdict printed none
@@ -336,8 +336,7 @@ def plan(step, pr, values, top):
         return "unknown", "run: holds an expression this runner cannot read", None, None, None
     for entry in filter(None, env.get("NODE_PATH", "").split(os.pathsep)):  # a node install that a skipped uses: step makes: absent here, the suite cannot run
         if not os.path.isdir(os.path.join(top, step_key(step, "working-directory") or "", entry)):
-            return "unknown", ("env NODE_PATH names %s, which is not installed here: the step that installs it (a uses: action) is not run locally, "
-                               "so the suite cannot run" % entry), None, None, None
+            return "unknown", MISSING_INSTALL.format(entry=entry), None, None, None
     shell = step_key(step, "shell")
     if shell not in SHELLS:
         return "unknown", "shell %s is not one this runner knows" % shell, None, None, None
