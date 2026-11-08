@@ -5,7 +5,7 @@
   "status": "todo",
   "title": "The question form refuses a command line that ends in a backslash after git, gh or npm",
   "why": "A command block line ending `origin\\` passes today, so the owner gets a block that breaks when pasted.",
-  "note": "Filed 09:23 CST Nov 8 from lane notes-fix-page (review note 49, measured by #2074's round-1 reviewer on main e2703c611). hooks/question_form.py:407; #1785 at ad6274e3d pins it as passing (test_question_form.py:1110-1112). Fix: refuse a backslash line end only after git, gh or npm; `cd C:\\repo\\` keeps passing. Red case first. Lane notes-fix-page takes it (09:26 CST): a follow-up PR with Merge after: #1785, started when its machine's load allows. Widened 10:25 CST Nov 8 (lane notes-fix-page, #1785 round 1): also `docker \\` plus newline, which the lone-backslash rule (hooks/question_form.py near 685-686) passes because it counts any one-word line.",
+  "note": "Filed 09:23 CST Nov 8 from lane notes-fix-page (review note 49, measured by #2074's round-1 reviewer on main e2703c611). hooks/question_form.py:407; #1785 at ad6274e3d pins it as passing (test_question_form.py:1110-1112). Fix: refuse a backslash line end only after git, gh or npm; `cd C:\\repo\\` keeps passing. Red case first. Lane notes-fix-page takes it (09:26 CST): a follow-up PR with Merge after: #1785, started when its machine's load allows. Widened 10:25 CST Nov 8 (lane notes-fix-page, #1785 round 1): also `docker \\` plus newline, which the lone-backslash rule (hooks/question_form.py near 685-686) passes because it counts any one-word line. Coordinator 14:45 CST Nov 8, on #2074 (push-new-branch): the coordinator withdrew its 09:20 HEAD-source pick; the lane judges only sha and remote-ref sources.",
   "order": 697,
-  "updatedAt": "2026-11-08T10:25:00-06:00"
+  "updatedAt": "2026-11-08T14:47:00-06:00"
 }

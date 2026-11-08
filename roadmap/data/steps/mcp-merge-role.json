@@ -1,11 +1,11 @@
 {
   "title": "The GitHub MCP merge tool gets the same merge-role judgment as a gh pr merge",
   "phase": "now",
-  "status": "todo",
+  "status": "ready",
   "order": 267.41,
   "owner": "coordinator",
   "lane": "session_013NEJL1PAG3NhmQAbveNQLo",
   "why": "#1742 judges the merge role for the gh pr merge form only, so the MCP merge tool can merge with no role check.",
-  "note": "One home: merge.py read_merge_role, called through guard_merge.raw_role_hit. Tests red first. Stacked on #1742; starts after the #1601 stack (#1665, #1687) lands. Debt mcp-merge-role-unjudged (branch notes-reverify-findings). Related: mcp-merge-unguarded (the MCP merge tool skips the merge checks). Coordinator ruling 20:32 CST Nov 7, relayed by lane notes-reverify-flags; filed 20:32 CST Nov 7.",
-  "updatedAt": "2026-11-07T20:32:00-06:00"
+  "note": "One home: merge.py read_merge_role, called through guard_merge.raw_role_hit. Tests red first. Stacked on #1742; starts after the #1601 stack (#1665, #1687) lands. Debt mcp-merge-role-unjudged (branch notes-reverify-findings). Related: mcp-merge-unguarded (the MCP merge tool skips the merge checks). Coordinator ruling 20:32 CST Nov 7, relayed by lane notes-reverify-flags; filed 20:32 CST Nov 7. Coordinator 14:45 CST Nov 8: the MCP guard stack (#1601, #1665, #1680, #1700, #1693, #1687, #1694) is with runner 8.",
+  "updatedAt": "2026-11-08T14:47:00-06:00"
 }

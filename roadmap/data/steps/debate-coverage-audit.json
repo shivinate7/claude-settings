@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.3575,
   "why": "Owner ask ask-mw5b1v54gc (12:25 CST): the audit he meant was debate and adversarial coverage in the code flow.",
-  "note": "Nov 6 12:40 CST (coordinator): DONE (Opus Explore). No hook that calls a model has an independent agent arguing back. Only design-review (two blind reviewers) and mutation CI are both blind and adversarial. A false allow has no reader. Five steps filed; the owner picks which to adopt on page item 279.\nOpus agent (an Explore agent with the Audit: marker). Rank the places that have no second voice. It follows checks-and-balances-audit, which looked at other gaps.",
-  "updatedAt": "2026-11-06T18:43:00Z"
+  "note": "Nov 6 12:40 CST (coordinator): DONE (Opus Explore). No hook that calls a model has an independent agent arguing back. Only design-review (two blind reviewers) and mutation CI are both blind and adversarial. A false allow has no reader. Five steps filed; the owner picks which to adopt on page item 279.\nOpus agent (an Explore agent with the Audit: marker). Rank the places that have no second voice. It follows checks-and-balances-audit, which looked at other gaps. Triage 14:50 CST Nov 8: #1336 (lane blind-plan-refuter, session_013NEJKzkPg5RdSvbrCJQ8kf, idle, \"no work left\") adds the refuter role under item 279 d; it is a draft at 83fddba, unchanged since Nov 6, and #1317 (step-done-needs-check) stacks on it. No step file named blind-plan-refuter exists; this step holds item 279. Check #1336 against the owner's later note on 279 before it batches.",
+  "updatedAt": "2026-11-08T14:47:00-06:00"
 }
