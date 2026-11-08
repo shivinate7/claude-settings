@@ -23143,6 +23143,32 @@ def session_home_lane_make_case():
     return sh_lane_then_visit_case("make", "make")
 
 
+# ANY ALLOWED SHELL CALL IN THE LANE MARKS IT LIVED. The rule takes no list of commands: a call that makes a
+# folder, builds, runs a script, unpacks an archive or stages a file is the session's own act in the lane.
+def session_home_lane_mkdir_case():
+    return sh_lane_then_visit_case("mkdir", "mkdir d")
+
+
+def session_home_lane_cargo_build_case():
+    return sh_lane_then_visit_case("cargo-build", "cargo build")
+
+
+def session_home_lane_npm_run_case():
+    return sh_lane_then_visit_case("npm-run", "npm run build")
+
+
+def session_home_lane_python_script_case():
+    return sh_lane_then_visit_case("python-script", "python3 script.py")
+
+
+def session_home_lane_tar_extract_case():
+    return sh_lane_then_visit_case("tar-extract", "tar xf a.tar")
+
+
+def session_home_lane_git_add_case():
+    return sh_lane_then_visit_case("git-add", VCS + " add f")
+
+
 def session_home_primary_shell_lived_case():
     """Rule session-home: a shell write from the primary checkout whose target sits inside the recorded
     lane marks the lane lived, once the write is allowed. other-checkout refuses that write unless the
@@ -23298,6 +23324,18 @@ LOG_CHECKS_EXTRA.append(("session-home: a lane touch makes the lane home, so a p
                          "the lane is removed", session_home_lane_touch_case))
 LOG_CHECKS_EXTRA.append(("session-home: a lane make makes the lane home, so a primary Write is refused once "
                          "the lane is removed", session_home_lane_make_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane mkdir makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_mkdir_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane cargo build makes the lane home, so a primary Write is refused "
+                         "once the lane is removed", session_home_lane_cargo_build_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane npm run makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_npm_run_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane python script makes the lane home, so a primary Write is refused "
+                         "once the lane is removed", session_home_lane_python_script_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane tar extract makes the lane home, so a primary Write is refused "
+                         "once the lane is removed", session_home_lane_tar_extract_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane git add makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_git_add_case))
 LOG_CHECKS_EXTRA.append(("session-home: an allowed shell write from the primary whose target is inside the "
                          "recorded lane marks the lane lived", session_home_primary_shell_lived_case))
 LOG_CHECKS_EXTRA.append(("session-home: a Write from the primary into the recorded lane, refused by "
