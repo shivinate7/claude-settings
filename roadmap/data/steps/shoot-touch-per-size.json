@@ -1,0 +1,11 @@
+{
+  "title": "bin/shoot sets hasTouch for each size, and a full-page shot keeps it",
+  "phase": "guards",
+  "status": "todo",
+  "order": 662,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "bin/shoot sets no hasTouch per size, and a full-page shot drops it (#2028, review note 10; lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8). A phone-size shot without touch can hide a touch-only layout defect.",
+  "note": "Done check: a red test where a phone-size shot, full-page included, reports hasTouch true. A check's verdict changes, so this is a build lane. Filed by triage 08:14 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:14:00-06:00"
+}

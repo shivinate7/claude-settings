@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzPiiVLh3Sr1Jdoj76",
   "why": "A round-3 reviewer on #1186 stalled 1 h 54 min unseen, because stall_watch reads Bash jobs only.",
-  "note": "Done check: a red test where --stop lists a running agent with a quiet transcript. Filed from coordinator 17:58 CST Nov 7. Built as #1682, with runner 8 (coordinator 18:38 CST). Follow-ups stall-watch-cases-run, stall-watch-open-call-cap and stall-watch-resume go to the same lane; the lane sends their details. Coordinator pick, 18:38 CST, can be undone: an agent's open foreground tool call older than 900 s lists as stalled, and background calls are skipped.",
-  "updatedAt": "2026-11-07T18:38:00-06:00"
+  "note": "Done check: a red test where --stop lists a running agent with a quiet transcript. Filed from coordinator 17:58 CST Nov 7. Built as #1682, with runner 8 (coordinator 18:38 CST). Follow-ups stall-watch-cases-run, stall-watch-open-call-cap and stall-watch-resume go to the same lane; the lane sends their details. Coordinator pick, 18:38 CST, can be undone: an agent's open foreground tool call older than 900 s lists as stalled, and background calls are skipped. Folded in proposed step idle-agent-check (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8, review note 59 on L3): no check flags an idle agent; stall_watch covers background Bash only.",
+  "updatedAt": "2026-11-08T08:14:00-06:00"
 }

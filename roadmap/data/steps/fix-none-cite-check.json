@@ -1,0 +1,11 @@
+{
+  "title": "A `Fix: none` reason that names a commit or a cost shows the check that ran",
+  "phase": "guards",
+  "status": "todo",
+  "order": 666,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "Four false `Fix: none` reasons on #2021 and #2024 named a commit or a cost with no check behind them (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8).",
+  "note": "Extends the Fix-line check of step notes-name-their-fix, one home. Done check: a red test where a `Fix: none` reason that names a commit or a cost with no check output is refused. Build lane. Filed by triage 08:14 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:14:00-06:00"
+}

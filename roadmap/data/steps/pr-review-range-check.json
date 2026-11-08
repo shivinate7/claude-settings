@@ -1,0 +1,11 @@
+{
+  "title": "A PR body's review range starts at the parent head",
+  "phase": "guards",
+  "status": "todo",
+  "order": 663,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "A review range in #1969's body did not start at the parent head (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8). A wrong range lets a reviewer skip commits.",
+  "note": "Done check: a red test where a PR body whose review range starts below or above the parent head is refused. Extends the lane lint's PR-body read (step lane-lint-reads-pr-body, #1969) rather than a second reader. Build lane. Filed by triage 08:14 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:14:00-06:00"
+}
