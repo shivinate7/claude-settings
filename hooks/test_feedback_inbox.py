@@ -360,10 +360,11 @@ def git(where, *args, env=None, stdin=None):
     return cp.stdout.decode("utf-8", "replace")
 
 
-def make_repo(name, tracked=(), untracked=(), extras=None):
+def make_repo(name, tracked=(), untracked=(), extras=None, unreadable=False):
     """A git repo under this run's scratch folder. `tracked` files are committed on main, with
     the text "x"; `untracked` files are written and never added. `extras` (a string) is the
-    repo's .claude/layout-extras.json, committed."""
+    repo's .claude/layout-extras.json, committed. `unreadable` writes a packed-refs file git cannot
+    parse: rev-parse still names the repo, and for-each-ref, the repo-wide ref listing, exits 128."""
     root = os.path.join(ROOT, "repos", name)
     os.makedirs(root)
     git(root, "init", "-q")
@@ -376,6 +377,8 @@ def make_repo(name, tracked=(), untracked=(), extras=None):
     git(root, "commit", "-q", "-m", "fixture")
     for rel in untracked:
         write_file(os.path.join(root, *rel.split("/")), "x\n")
+    if unreadable:
+        write_file(os.path.join(root, ".git", "packed-refs"), "garbage line here\n")
     return root
 
 
@@ -3839,6 +3842,82 @@ def case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo():
                  guard(cfg, sid, cwd=cwd), named=("fb-9",))
 
 
+def unreadable_sidecar_repo():
+    """The sidecar repo git cannot read: its packed-refs file is garbage, so for-each-ref fails there and a home
+    judged in it raises _GitFailure. The one home of this fixture; the cases that name it share it."""
+    return shared_repo("unreadable-sidecar", lambda: make_repo(
+        "unreadable-sidecar", tracked=("decisions/b-ruling.md",), unreadable=True))
+
+
+def expect_unreadable_sidecar(bad):
+    """Scope of the unreadable-sidecar cases: git must fail to list the refs of the sidecar repo. If a git version
+    parsed the garbage file, the cases would pass on head and stop guarding the read."""
+    rc = subprocess.run(["git", "-C", bad, "for-each-ref"], capture_output=True).returncode
+    check("unreadable sidecar repo: git for-each-ref fails there", rc != 0, "rc=%s" % rc)
+
+
+def case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo():
+    """The sidecar names a repo git cannot read, so judging its home raises _GitFailure. That error must not stand
+    the whole home check down: the Stop's repo still judges the home, and an untracked home there blocks. The
+    control, the same unreadable sidecar with a home tracked in the Stop's repo, passes."""
+    cwd = make_repo("unreadable-sidecar-stop", tracked=("decisions/a-ruling.md",))
+    bad = unreadable_sidecar_repo()
+    text = "the rule is settled\nkeep it\nthanks"
+    cfg, sid = new_cfg(), "r-unreadable-sidecar"
+    write_file(sidecar_of(cfg, sid), bad)
+    write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-12 [ruling] -> decisions/untracked.md",)))
+    expect_block("unreadable sidecar repo: an untracked home in the Stop's repo still blocks",
+                 guard(cfg, sid, cwd=cwd), named=("fb-12",))
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-control"
+    write_file(sidecar_of(cfg, sid), bad)
+    write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-13 [ruling] -> decisions/a-ruling.md",)))
+    p = guard(cfg, sid, cwd=cwd)
+    check("unreadable sidecar repo, control: a home tracked in the Stop's repo passes",
+          p.code == 0 and block_reason(p) is None, p.desc())
+
+
+def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_step_home():
+    """The sidecar names a repo git cannot read, so a read of its refs raises _GitFailure. A task homed to
+    `step:<slug>` with no step file on any branch of the Stop's repo still blocks. The control, the same sidecar
+    with the step file on a lane branch of the Stop's repo, passes. Red on the base `Homes._held`: the unreadable
+    repo's error stands the step check down, so the untracked step home passes."""
+    cwd = step_repo()
+    bad = unreadable_sidecar_repo()
+    expect_unreadable_sidecar(bad)
+    expect_step_on_lane_only("unreadable sidecar step home", cwd)
+    text = "the rule is settled\nkeep it\nthanks"
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-step"
+    write_file(sidecar_of(cfg, sid), bad)
+    p = homed(cfg, sid, ("- fb-14 [task] -> step:no-such-step",), cwd=cwd, text=text)
+    expect_block("unreadable sidecar repo: a task homed to a step with no file on any branch still blocks", p,
+                 named=("fb-14",))
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-step-control"
+    write_file(sidecar_of(cfg, sid), bad)
+    p = homed(cfg, sid, ("- fb-15 [task] -> step:%s" % STEP_SLUG,), cwd=cwd, text=text)
+    check("unreadable sidecar repo, step control: a task homed to a step on a lane branch of the Stop's repo passes",
+          p.code == 0 and block_reason(p) is None, p.desc())
+
+
+def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_closed_note_home():
+    """The sidecar names a repo git cannot read. A closed note homed to `decisions/nowhere.md`, a file no branch
+    tracks, still blocks: the Stop's repo judges it. The control, a closed note homed to the file the Stop's repo
+    tracks, passes. Red on the base `Homes._held`: the unreadable repo's error stands the closed-note check down,
+    so the untracked home passes."""
+    cwd = step_repo()
+    bad = unreadable_sidecar_repo()
+    expect_unreadable_sidecar(bad)
+    text = "the rule is settled\nkeep it\nthanks"
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-close"
+    write_file(sidecar_of(cfg, sid), bad)
+    p = homed(cfg, sid, ("- fb-16 [note] -> decisions/nowhere.md [closed]",), cwd=cwd, text=text)
+    expect_block("unreadable sidecar repo: a closed note homed to an untracked file still blocks", p, named=("fb-16",))
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-close-control"
+    write_file(sidecar_of(cfg, sid), bad)
+    p = homed(cfg, sid, ("- fb-17 [note] -> decisions/a-ruling.md [closed]",), cwd=cwd, text=text)
+    check("unreadable sidecar repo, closed-note control: a closed note homed to a tracked file passes",
+          p.code == 0 and block_reason(p) is None, p.desc())
+
+
 UNCOVERED_STANDING_TEXTS = (  # standing grants, with no standing word from ACT's list
     "approved to merge PRs whenever green, going forward",
     "approved, merge it. Do this each time.",
@@ -4077,6 +4156,9 @@ CASES = (
     case_closed_once_note_is_no_home_for_a_grant,
     case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another,
     case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo,
+    case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo,
+    case_guard_unreadable_sidecar_repo_does_not_stand_down_a_step_home,
+    case_guard_unreadable_sidecar_repo_does_not_stand_down_a_closed_note_home,
     case_once_home_does_not_pass_a_standing_grant_however_worded,
     case_standing_grant_reason_names_the_once_bar,
     case_one_shot_grant_reason_offers_the_once_home,
