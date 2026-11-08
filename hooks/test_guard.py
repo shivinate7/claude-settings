@@ -29452,7 +29452,7 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
     FIXTURELESS_CHECKS.add(_check)
 
 
-# ---- B4: the fix check marker (owner item 444 a, 2026-11-08 15:04 CST). A reviewer's fix check carries no round, so it
+# ---- B4: the fix check marker (owner item 444 a). A reviewer's fix check carries no round, so it
 # lifts to Sonnet on FIX_CHECK_MARKER. The marker counts only when the brief's first non-blank line starts with it, leading
 # spaces and tabs aside, and it is case-sensitive: text ahead of it on that line does not count. It lifts a reviewer on
 # Sonnet only: Haiku passes on its own row, Opus stays under the ceiling, and a builder, a test-author or an Explore gets no
