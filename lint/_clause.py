@@ -12,7 +12,7 @@ opens it (and, but, or, so, yet, then, because) is its `join`. `lead` and `term`
 `lead_at` and `lead_end` are where the separator before it starts and ends; `hard_end` is where the nearest hard stop (. ; : ! ? a dash) at or
 after its start sits, and `sent_end` the nearest of . ; : ! ? (a dot inside a token counts); all are offsets into the
 sentence. A clause's other fields are read from its words alone. The helpers below the clauses (conditional,
-negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, is_reason, form_pattern) read the grammar of the cannot-claim
+veil, negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, is_reason, form_pattern) read the grammar of the cannot-claim
 check from the same lexicons.
 """
 import bisect
@@ -162,6 +162,12 @@ _REASON_LEADS = (":", ";", ",", "—", "–", "-", "--")
 def conditional(text):
     """True when `text` holds a word of CONDITIONALS."""
     return bool(_COND_RE.search(text))
+
+
+def veil(text, shadow):
+    """`text` with each character that `shadow` blanks read as `_`: a masked span keeps its length and its word count, and
+    none of its words is a lexicon word. `shadow` is `text` with its masked characters blanked to spaces."""
+    return "".join("_" if char != blank else char for char, blank in zip(text, shadow))
 
 
 def negated_near(text, gap=NEGATOR_GAP):
@@ -390,7 +396,7 @@ def clauses(sentence, mask):
         if hi > lo:
             found.append((lo, hi, lead, lead_at, lead_end, sep))
             lead, lead_at, lead_end = sep, begin, stop
-        elif sep and not lead:
+        elif sep and (not lead or sentence[cur:begin].strip()):  # a masked-only gap: the later separator leads
             lead, lead_at, lead_end = sep, begin, stop
         cur = begin if is_word else stop
     out = []

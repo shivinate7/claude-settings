@@ -1848,7 +1848,8 @@ def _claim(body, mask, hit, floor, scan):
                 floor)
     end = parts[at].hard_end
     before, after = body[start:hit.start()], body[hit.end():end]
-    if _clause.conditional(before) or _clause.negated_near(before):
+    shown = _clause.veil(before, mask[start:hit.start()])  # a code span or quote negates and conditions nothing
+    if _clause.conditional(shown) or _clause.negated_near(shown):
         return None
     words = after.split()
     if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after):
