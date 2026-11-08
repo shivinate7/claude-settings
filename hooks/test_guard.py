@@ -13473,8 +13473,8 @@ add("builder-test: MultiEdit of hooks/mutate_guard.py, two inserts and no change
     edits=[{"old_string": MUTANT_ONE, "new_string": MUTANT_ONE + MUTANT_NEW},
            {"old_string": MUTANT_TWO, "new_string": MUTANT_TWO + MUTANT_NEW}], **BM)
 
-# A line of hooks/mutate_guard.py is existing when HEAD holds it, not when only the disk does (coordinator pick,
-# 2026-11-07 18:27 CST). HEAD holds the first entry. The disk also holds an uncommitted third entry, the builder's
+# A line of hooks/mutate_guard.py is existing when HEAD holds it, not when only the disk does (coordinator pick).
+# HEAD holds the first entry. The disk also holds an uncommitted third entry, the builder's
 # own add, which the builder may change. It may not change the first entry, though the disk holds that too.
 _own_add = diff_repo("g-builder-own-add", _put(MUTATE_PATH, "MUTATIONS = [\n" + MUTANT_ONE + MUTANT_NEW + "]\n"),
                      files={**BASE_FILES, MUTATE_PATH: "MUTATIONS = [\n" + MUTANT_ONE + "]\n"})
@@ -13610,7 +13610,7 @@ add("builder-diff: stop after a change that only adds to hooks/mutate_guard.py i
 
 # ---- the mutation-test set: hooks/guard.py's AUTHOR_MUTATION_TESTS. A builder may ADD a name to the set and may not
 # remove or change one. Every file the set lists is add-only for a builder, as hooks/mutate_guard.py is (coordinator
-# rulings 2026-11-07 18:44 and 18:54 CST). The names come from this repository's hooks/guard.py, the constant the code
+# rulings). The names come from this repository's hooks/guard.py, the constant the code
 # emits, so a mutant copy that drops a name still meets that name's case.
 def _author_mutation_names():
     with open(os.path.join(HERE, "guard.py"), encoding="utf-8") as handle:
