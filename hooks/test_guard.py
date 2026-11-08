@@ -340,6 +340,13 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
     })
 
 
+def add_call(name, expected, tool_input, **kwargs):
+    """add() for a call whose input carries a `name` key. add() takes its own `name` argument, so the input cannot be
+    passed as keywords: the case is registered with the call's other fields, and its input is set on the case after."""
+    add(name, expected, **kwargs)
+    CASES[-1]["tool_input"] = dict(tool_input)
+
+
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
        carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
        agent_type=None, transcript=None, env=None):
@@ -10120,10 +10127,13 @@ RR_AGENT = "agent-RR0001"
 RR_DIR = os.path.join(ROOT, "reviewrec")
 RR_MARK = "@@MARKER@@"   # the writer puts the merge tool's record marker here, so the marker is read from one home
 ADD_COMMENT = "mcp__github__add_issue_comment"
-RR_BUILDER = {"subagent_type": "builder", "prompt": "Fix the review findings on PR #12.", "model": "sonnet"}
-RR_TEST_AUTHOR = {"subagent_type": "test-author", "prompt": "Add the cases for PR #12.", "model": "sonnet"}
-RR_EXPLORE = {"subagent_type": "Explore", "prompt": "Find where PR #12 reads the record.", "model": "sonnet"}
-RR_PLAN = {"subagent_type": "Plan", "prompt": "Plan the fix for PR #12.", "model": "sonnet"}
+RR_BUILDER = {"subagent_type": "builder", "prompt": "Fix the review findings on PR #12.", "model": "sonnet",
+              "name": "fix-pr12"}
+RR_TEST_AUTHOR = {"subagent_type": "test-author", "prompt": "Add the cases for PR #12.", "model": "sonnet",
+                  "name": "cases-pr12"}
+RR_EXPLORE = {"subagent_type": "Explore", "prompt": "Find where PR #12 reads the record.", "model": "sonnet",
+              "name": "explore-pr12"}
+RR_PLAN = {"subagent_type": "Plan", "prompt": "Plan the fix for PR #12.", "model": "sonnet", "name": "plan-pr12"}
 RR_SEND = {"session_id": RR_TARGET, "message": "Handoff: PR #12 is ready for the batch."}
 RR_BASH_RECORD = "printf '%s\\n' '" + RR_MARK + "' 'PR: #12' | gh api repos/owner/repo/issues/12/comments -F body=@-"
 RR_HUMAN = json.dumps({"type": "user", "message": {"role": "user", "content": "Review PR #12 and report the verdict."}})
@@ -10229,14 +10239,14 @@ lazy_fixture([rr_path(name) for name in RR_TRANSCRIPTS] + [rr_path("unreadable")
 
 def rr_refuse(name, tool, tool_input, transcript, agent_id=None, carries=RR_CARRIES):
     """A call the guard refuses for the rule: the reason names the rule, the remedy and the decision, and `carries`."""
-    add("review-record-after-round: " + name, "deny", rule=RR_RULE, tool=tool, cwd=NOGIT, transcript=transcript,
-        carries=carries, agent_id=agent_id, env=ROLE_ENV, **tool_input)
+    add_call("review-record-after-round: " + name, "deny", tool_input, rule=RR_RULE, tool=tool, cwd=NOGIT,
+             transcript=transcript, carries=carries, agent_id=agent_id, env=ROLE_ENV)
 
 
 def rr_allow(name, tool, tool_input, transcript, agent_id=None):
     """A call the guard lets through silently."""
-    add("review-record-after-round: " + name, "allow", tool=tool, cwd=NOGIT, transcript=transcript, silent=True,
-        agent_id=agent_id, env=ROLE_ENV, **tool_input)
+    add_call("review-record-after-round: " + name, "allow", tool_input, tool=tool, cwd=NOGIT, transcript=transcript,
+             silent=True, agent_id=agent_id, env=ROLE_ENV)
 
 
 # Refused: a builder, test-author or handoff after a reviewer spawn that has no record after it.
@@ -10755,11 +10765,9 @@ lazy_fixture([an_path(name) for name in AN_TRANSCRIPTS] + [an_path("unreadable")
 
 def an_call(name, expected, tool, tool_input, transcript, rule=None, carries=(), lacks=(), env=ROLE_ENV,
             silent=False, agent_id=None):
-    """Register one call the guard judges over `transcript`. add() takes its own `name` argument, so the call's input
-    is set on the case after it is made: an Agent spawn's `name` key is one of its input fields."""
-    add("agent-name-on-spawn: " + name, expected, rule=rule, tool=tool, cwd=NOGIT, transcript=transcript,
-        carries=carries, lacks=lacks, env=env, silent=silent, agent_id=agent_id)
-    CASES[-1]["tool_input"] = dict(tool_input)
+    """Register one call the guard judges over `transcript`. An Agent spawn's `name` key is one of its input fields."""
+    add_call("agent-name-on-spawn: " + name, expected, tool_input, rule=rule, tool=tool, cwd=NOGIT,
+             transcript=transcript, carries=carries, lacks=lacks, env=env, silent=silent, agent_id=agent_id)
 
 
 # Refused: a send to the agent id of a spawn that had a name. The reason names the rule and the name given at spawn, and
