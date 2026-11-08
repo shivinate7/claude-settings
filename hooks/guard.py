@@ -3519,9 +3519,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif subcommand == "push" and not read_verb("push", args):
                 # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
                 # implied destination off the branch's upstream. A dry run writes nothing.
-                matched, reason = review_record_hit(transcript, lambda: push_destinations(args, where, overrides))
-                if matched:
-                    refuse(tool, "deny", "push-needs-review-record", reason, matched)
+                record_hit, record_reason = review_record_hit(transcript, lambda: push_destinations(args, where, overrides))
+                if record_hit:
+                    refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
