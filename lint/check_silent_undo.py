@@ -669,6 +669,22 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
     return ok, [note(os.path.basename(p)[:-3], w) for p, w in sorted(why.items())]
 
 
+def main_state(cwd, head, upstream, new, defaults):
+    """Paths whose content in `new` is exactly the default branch's own: main changed them since the fork and
+    the branch added nothing on top. Main's commits passed main's own merge gate, so what they brought in
+    is the baseline, not the branch's undo. Empty when the branch holds no main commit past upstream."""
+    for r in defaults:
+        rc, tip = git(cwd, "merge-base", head, r, ok=(0, 1))
+        tip = tip.strip()
+        if rc != 0 or not tip or git(cwd, "merge-base", "--is-ancestor", tip, upstream, ok=(0, 1))[0] == 0:
+            continue
+        fork = git(cwd, "merge-base", upstream, tip)[1].strip()
+        moved = set(git(cwd, "log", "-m", "--format=", "--name-only", "-z", "%s..%s" % (fork, tip))[1].split("\0"))  # touched at all: a line main added and took out nets to no diff
+        added = set(git(cwd, "diff-tree", "-r", "--name-only", "-z", new, tip)[1].split("\0"))
+        return moved - added
+    return set()
+
+
 def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
@@ -685,6 +701,8 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
     items = []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
+        if any(git(cwd, "merge-base", "--is-ancestor", m, r, ok=(0, 1))[0] == 0 for r in refs[1:]):
+            continue  # main's own merge, already gated when it landed on main
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
@@ -692,7 +710,9 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     else:  # a conflict leaves no result to read: the branch's own diff off the merge base
         old, new = git(cwd, "merge-base", upstream, h)[1].strip(), h
     files = raw_files(cwd, old, new)
-    base = git(cwd, "merge-base", upstream, h)[1].strip()
+    held = main_state(cwd, h, upstream, new, refs[1:])
+    files = {p: v for p, v in files.items() if p not in held}
+    base =git(cwd, "merge-base", upstream, h)[1].strip()
     own = git(cwd, "rev-list", "--first-parent", "%s..%s" % (upstream, h))[1].split()
     if own:  # the fork point is where the branch's own first-parent line left main, even after it merged main back in
         rc, fork = git(cwd, "merge-base", upstream, own[-1] + "^", ok=(0, 1))
