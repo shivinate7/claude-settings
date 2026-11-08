@@ -70,12 +70,19 @@ ENV_LOADER_COMMANDS = (
 ENV_LOADER_FLAGS = ("--env-file", "--env-file-if-exists")
 
 # A node-family runner that runs a script given on the command line prints process.env when that script
-# logs it, so the loader flag beside one of these flags is no longer a quiet load. (`docker -e` sets a
+# logs it, so the loader flag beside one of these flags is a loud load. (`docker -e` sets a
 # variable and `npm -p` is not an eval flag, so only these two runners are judged.) The words after the
-# script name are the script's own arguments, so the read stops at the first plain word.
+# script name are the script's own arguments, so the read stops at the first plain word. A valued flag
+# takes the next word, so the scan steps past it to reach the eval flag.
 ENV_EVAL_COMMANDS = ("node", "node.exe", "bun", "bun.exe")
 ENV_EVAL_FLAG = re.compile(r"-(?:pe|ep|e|p)|--(?:eval|print)(?:=.*)?")
-ENV_RUNNER_VALUE_FLAGS = ("-r", "--require", "--import", "--loader", "--experimental-loader")
+ENV_RUNNER_VALUE_FLAGS = (
+    "-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions",
+    "--input-type", "--title", "--stack-trace-limit", "--max-old-space-size", "--disable-warning",
+    "--redirect-warnings", "--openssl-config", "--icu-data-dir", "--inspect-port", "--report-dir",
+    "--watch-path", "--experimental-default-type", "--dns-result-order",
+    "--unhandled-rejections", "--secure-heap", "--tls-cipher-list", "--diagnostic-dir", "--cpu-prof-dir",
+)
 
 
 def _runner_evals(words, position: int) -> bool:

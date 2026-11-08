@@ -681,6 +681,17 @@ def fetch_moves_branch(args) -> bool:
     return False
 
 
+def inner_silent_hits(text: str):
+    """Yield `silent_write_hit` for each part of an inner command, with the pipe tail the bare path passes."""
+    ends = []
+    parts = split_segments(text, ends)
+    for number, part in enumerate(parts):
+        last = number
+        while last < len(parts) - 1 and ends[last] == "|":
+            last += 1
+        yield silent_write_hit(part, parts[last] if last > number else "")
+
+
 def silent_write_hit(segment: str, tail: str = ""):
     """Return (matched text, mechanism, kind) for a write whose own trace is silenced, else
     ("", "", "").
@@ -3365,8 +3376,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")
         if not matched:   # a write inside `bash -c`, `eval` or a runner is the same write
             matched, mechanism, kind = next(
-                (hit for text in inner_commands(segment_tokens(segment) or []) for part in split_segments(text)
-                 if (hit := silent_write_hit(part))[0]), ("", "", ""))
+                (hit for text in inner_commands(segment_tokens(segment) or []) for hit in inner_silent_hits(text)
+                 if hit[0]), ("", "", ""))
         if matched and not in_throwaway(segments, number, cwd, ends):
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
