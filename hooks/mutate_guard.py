@@ -2524,13 +2524,17 @@ MUTATIONS = [
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
     # shell_run_texts (hooks/guard.py) is the one home of the texts a shell reads: check 6b and impeccable use it.
     ("draft-pr: a quoted interpreter body holding a backtick is not read, so a span in it goes unseen",
-     '            elif "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):',
-     '            elif False and "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):',
+     '            elif ("`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw)\n',
+     '            elif (False and "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw)\n',
      "guard", "draft-pr: a node file with a stray backtick in a single-quoted string, then an execSync gh pr create span, is refused"),
     ("draft-pr: check 6b reads the stripped text, not the shell-run texts, so a written file's bare line is refused",
      '    for run_text in shell_run_texts(raw):\n        for text, _in_message in _substitutions(run_text)[0]:\n            if any(undrafted_pr_create',
      '    for run_text in [stripped]:\n        for text, _in_message in _substitutions(run_text)[0]:\n            if any(undrafted_pr_create',
      "guard", "draft-pr: a python file from a quoted heredoc, with a bare gh pr create line, is allowed"),
+    ("draft-pr: a body that python alone runs is read like any interpreter body, so its backtick text is refused",
+     '                  and not python_runs_body(raw, header, nth)):',
+     '                  and True):',
+     "guard", "draft-pr: a python body with a backtick gh pr create span, fed to python3, is allowed"),
 ]
 
 
