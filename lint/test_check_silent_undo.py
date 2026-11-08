@@ -85,8 +85,10 @@ class Repo:
         return got
 
 
-def base_repo():
+def base_repo(attrs=None):
     r = Repo()
+    if attrs is not None:  # main's .gitattributes text: a union rule, or none
+        r.put(".gitattributes", attrs)
     r.put("app.txt", BODY + "function Card() {}\n")
     r.put("other.txt", "other v1\n")
     r.commit("base")
@@ -1228,11 +1230,12 @@ def scanner_lines(tag):
     return out + ["%s = `template open" % tag, "%s middle" % tag, "%s close`" % tag, "%s plain 20" % tag]
 
 
-def drop_merge(lines, own=False):
+def drop_merge(lines, own=False, attrs=None):
     """A merge commit that drops `lines` from app.txt. own=False: main added them, so upstream holds
-    them. own=True: the branch added them itself and main did not. -> (repo, merge sha)."""
+    them. own=True: the branch added them itself and main did not. attrs: main's .gitattributes text, see base_repo.
+    -> (repo, merge sha)."""
     body = BODY + "function Card() {}\n" + "".join(l + "\n" for l in lines)
-    r = base_repo()
+    r = base_repo(attrs)
     r.sh("checkout", "-q", "-b", "feat")
     if own:
         r.commit("feat adds lines", app_txt=body)
@@ -2658,7 +2661,9 @@ class NotesUnionRevival(unittest.TestCase):
         """A git below 2.40 refuses check-attr --source, so the union read is UNKNOWN. The UNKNOWN is printed beside the
         other findings, never in place of them: a lost line in the same run still FAILs. Exit is 1 under --strict. With no
         other finding, the UNKNOWN alone exits 1. No run passes the unread union."""
-        lost_r, lost_head = drop_merge(["lost line: keep the probe"])
+        # main's union rule makes the union read ask git for app.txt: the call a git below 2.40 refuses.
+        lost_r, lost_head = drop_merge(["lost line: keep the probe"], attrs="app.txt merge=union\n")
+        self.assertIn("merge=union", lost_r.sh("show", "origin/main:.gitattributes"), "premise: main holds the union rule")
         self.assertIn("lost line", lost_r.sh("show", "origin/main:app.txt"), "premise: main holds the line")
         self.assertNotIn("lost line", lost_r.sh("show", "%s:app.txt" % lost_head), "premise: the merge drops the line")
         with self.git_below_240() as hits:
