@@ -2065,6 +2065,20 @@ def merge_tree(root: str, ours: str, theirs: str):
     return answer.stdout.split("\0", 1)[0].strip() or None
 
 
+CONFLICT_LABEL = re.compile(r"^([<=>|])\1{6}(?: [^\r\n]*)?(?=\r?$)", re.M)
+
+
+def merge_resolved(root: str, old: str, new, paths):
+    """The paths among `paths` that differ from git's merge tree `old` in more than conflict-marker
+    labels. `git merge-tree` labels its markers by commit (`>>>>>>> main`), `git merge` by branch, so a
+    conflicted file left as git wrote it differs in those labels alone. Compare each marker line by its
+    kind only (7 of `<`, `=`, `>` or `|`, then an optional label); every other byte must match.
+    Cost: two file reads (a git call for each commit side) per differing path, in a merge only."""
+    def bare(text):
+        return CONFLICT_LABEL.sub(lambda m: m.group(1) * 7, text)
+    return [rel for rel in paths if bare(text_at(root, old, rel)) != bare(text_at(root, new, rel))]
+
+
 def upstream_kept(root: str, orig: str, onto: str):
     """The paths a rebase of `orig` onto `onto` replayed that hold `onto`'s bytes again in the working
     tree: the agent kept the upstream side. Empty when HEAD no longer holds `onto`; None when git
@@ -2134,6 +2148,8 @@ def own_changes(root: str):
                            "--no-renames", sha))
         if paths is None:
             return None
+        if len(parents) == 2:
+            paths = merge_resolved(root, old, sha, paths)
         changes.append((old, sha, paths, kind))
     old = "HEAD"
     if merging.returncode == 0:
@@ -2143,6 +2159,8 @@ def own_changes(root: str):
     paths = changed_paths(root, old)
     if paths is None:
         return None
+    if merging.returncode == 0:
+        paths = merge_resolved(root, old, None, paths)
     replaying = merging.returncode != 0 and any(
         os.path.exists(os.path.join(gitdir.stdout.strip(), mark)) for mark in REPLAY_MARKS)
     changes.append((old, None, paths, NOTED if replaying else OWN))
