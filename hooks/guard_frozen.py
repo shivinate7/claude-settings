@@ -226,9 +226,11 @@ MUTATING_COMMAND = r"\b(?:" + _MUTATING_ANYWHERE + "|" + _ALIAS_COMMAND + r")\b"
 _MUTATING_ANYWHERE_RE = r"\b" + _MUTATING_ANYWHERE + r"\b"
 # Where an alias is a command: first in the segment, or the first word of a `{`, `(` or `$(` block, or after a
 # dot-source (`.`) or call (`&`) word. In `grep -n ac F` or `diff ni F` it is only a word.
-# An assignment (`$f = ni`), a cast (`[void] ni`) and a closing paren (`param($p) ni`) leave it in command position.
-_ALIAS_POSITION = (r"(?:^\s*|[{()]\s*|\]\s*|(?:^|\s)[.&]\s+|\$[\w:.]+(?:\[[^\]]*\])?\s*[-+*]?=\s*)"
-                   + _ALIAS_COMMAND + r"\b")
+# An assignment (`$f = ni`), a cast (`[void] ni`), a closing paren (`param($p) ni`) and `return ni` leave it in
+# command position. `_COMMAND_POSITION` is the text before such a command, for the alias and for `_lead_command`.
+_COMMAND_POSITION = (r"(?:^\s*|[{()]\s*|\]\s*|(?:^|\s)[.&]\s+|(?i:\breturn)\s+"
+                     r"|\$[\w:.]+(?:\[[^\]]*\])?\s*[-+*]?=\s*)")
+_ALIAS_POSITION = _COMMAND_POSITION + _ALIAS_COMMAND + r"\b"
 
 
 # A command that hands its arguments to another program, so a mutating word in them may run.
@@ -564,30 +566,37 @@ _PS_CONTENT = frozenset(("add-content", "set-content", "ac", "sc"))
 _PS_SWITCH = re.compile(r"-(?i:recurse|force|container|passthru|verbose|confirm|whatif|nonewline)")
 
 
+def _is_folder(target, cwd) -> bool:
+    """True when a copy's destination is a folder: a trailing slash, or a folder that exists."""
+    try:
+        return target.endswith(("/", "\\")) or os.path.isdir(_expanded(target, cwd))
+    except (OSError, ValueError):
+        return False
+
+
 def _only_read(operands, words, target, predicate, cwd, is_folder=False):
     """The copy operands (indexes into `words`) that are only read. A copy into a folder (`is_folder`, a
     trailing slash, or a folder that exists) writes `FOLDER/<each source's name>`, so a source whose
     name that folder path makes a hit is written, not read."""
-    if not is_folder:
-        try:
-            is_folder = target.endswith(("/", "\\")) or os.path.isdir(_expanded(target, cwd))
-        except (OSError, ValueError):
-            is_folder = False
-    if not is_folder:
+    if not (is_folder or _is_folder(target, cwd)):
         return set(operands)
     head = target.rstrip("/\\")
     return {i for i in operands
             if not predicate(head + "/" + re.split(r"[/\\]", words[i].rstrip("/\\"))[-1], cwd)}
 
 
+def _outside_quotes(word: str) -> str:
+    """The word with each quoted span removed, so a comma inside quotes is text and one outside is syntax."""
+    return re.sub(r"'[^']*'|\"[^\"]*\"", "", _straight(word))
+
+
 def _comma_joined(words, raw, index, start) -> bool:
     """True when the word at `index` belongs to a comma list: it ends with a comma, starts with one, or
-    follows a word that ends with one. A quoted word is text, whose comma joins nothing."""
-    if _has_quote(raw[index]):
-        return False
-    word = words[index]
-    return word.endswith(",") or (index > start + 1 and (word.startswith(",") or (
-        words[index - 1].endswith(",") and not _has_quote(raw[index - 1]))))
+    follows a word that ends with one. Only a comma outside quotes joins (`"a.md", "b"` joins, `"a,b"`
+    is one path)."""
+    here = _outside_quotes(raw[index])
+    return here.endswith(",") or (index > start + 1 and (
+        here.startswith(",") or _outside_quotes(raw[index - 1]).endswith(",")))
 
 
 def _ps_reads(name, raw, words, start, predicate, cwd, plain):
@@ -803,6 +812,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if hit:
                 return hit
         command_args = _segment_command(script) if command_position else ()
+        if command_args and not _mutates_as_command(*command_args):
+            command_args = _lead_command(segments[number]) or command_args
         if command_args and scripts_run and command_args[0] in _PS_SHELLS:
             # the script this shell runs was judged above by PowerShell's own rules; only a redirect on the shell is left
             command_args = ("", ())
@@ -821,16 +832,18 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                                        predicate_command, current)
                 if hit:
                     return hit
-        pipe_target = _pipe_variable_target(command_args, current) if current is not None else None
+        pipe_hit = _pipe_variable_hit(command_args, current, at, predicate, holds) if current is not None else ""
+        if pipe_hit:
+            return pipe_hit
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if word == pipe_target and holds(current, at):
-                return word
             # A PowerShell comma joins paths into one argument: each piece is a path of its own.
             pieces = [word] + ([piece for piece in word.split(",") if piece] if powershell and "," in word else [])
+            if powershell and word.endswith((")", "}")):
+                pieces.append(word.rstrip(")}"))   # the paren or brace that closes the command's group
             for piece in pieces:
                 if (predicate(piece, at, verb) if predicate_command else predicate(piece, at)) and \
                         writes_to(piece, text, *command_args):
@@ -839,43 +852,149 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
 
 
 _LISTERS = frozenset(("ls", "dir", "gci", "get-childitem"))
-_PIPE_VARIABLE = re.compile(r"\$(?:_|psitem)(?:\.\w+)*", re.IGNORECASE)
+# A stage between a listing and the block that passes each listed item on unchanged or in part.
+_LIST_FILTERS = frozenset(("where-object", "where", "?", "select-object", "select", "sort-object", "sort"))
+# `$_` or `$PSItem` as a path word: bare, with a member (`$_.FullName`), in parentheses, in a `$(...)`, or bound
+# to a parameter by a colon (`-Path:$_`).
+_PIPE_VARIABLE = re.compile(r"(?:-\w+:)?\(*(?:\$\(+)?\$(?:_|psitem)(?:\.\w+)*\)*", re.IGNORECASE)
+# What a `Get-ChildItem` parameter takes: a value that is the listed folder, a value that only filters it, or
+# nothing. Matching is by prefix, as PowerShell does.
+_LIST_PATH_FLAGS = ("path", "literalpath")
+_LIST_FILTER_FLAGS = ("filter", "include", "exclude", "depth", "attributes")
+
+
+def _flag_is(name: str, full_names, shortest: int = 1) -> bool:
+    """True when the parameter `name` (no dash) is a prefix of one of `full_names`, as PowerShell abbreviates."""
+    return len(name) >= shortest and any(full.startswith(name) for full in full_names)
 
 
 def _listed_folder(parsed, ends, number):
     """The folder a listing (`ls`, `dir`, `gci`, `Get-ChildItem`) hands to segment `number` through a pipe, else
-    None. Its first plain argument, or `.` when it has none."""
-    if number == 0 or ends[number - 1] != "|":
-        return None
-    words = [_unquoted(word) for word in parsed[number - 1]]
-    command, rest = _segment_command(words)
-    if command not in _LISTERS:
-        return None
-    return next((word for word in rest if not word.startswith("-")), ".")
+    None. A `Where-Object` or `Select-Object` stage between them passes the listing on. The folder is the
+    `-Path` value or the first plain word; a filtering parameter's value (`-Filter *.py`) is not it. `.` when
+    the listing names none."""
+    stage = number - 1
+    while stage >= 0 and ends[stage] == "|":
+        words = [_unquoted(word) for word in parsed[stage]]
+        command, rest = _segment_command(words)
+        if command in _LISTERS:
+            return _listed_path(rest)
+        if command not in _LIST_FILTERS:
+            return None
+        stage -= 1
+    return None
 
 
-def _pipe_variable_target(command_args, folder):
-    """The word that is the pipeline variable (`$_`, `$PSItem`) as the path a mutating command writes, else None.
-    `Set-Content` and `Add-Content` write their path (`-Path`, `-LiteralPath`, or the first positional word);
-    the word after it is text. Any other mutating command writes each word."""
+def _listed_path(rest) -> str:
+    """The folder a listing's arguments name, else `.`."""
+    plain, index = None, 0
+    while index < len(rest):
+        word = rest[index]
+        if not word.startswith("-"):
+            plain = plain or word
+        else:
+            name, colon, value = word[1:].partition(":")
+            name = name.lower()
+            if _flag_is(name, _LIST_PATH_FLAGS):
+                if colon and value:
+                    return value
+                if index + 1 < len(rest):
+                    return rest[index + 1]
+            elif not colon and _flag_is(name, _LIST_FILTER_FLAGS, 2):
+                index += 1   # its value filters the listing; it is no folder
+        index += 1
+    return plain or "."
+
+
+# What a mutating command's parameters take, for `_pipe_variable_hit`: the path it writes (or the destination
+# of a copy), the path a copy reads, a value that is neither a path nor written (a filter, text), or nothing.
+_PS_TARGET_FLAGS = ("path", "literalpath", "destination", "name", "newname", "target", "filepath", "pspath")
+_PS_VALUE_FLAGS = ("include", "exclude", "filter", "inputobject", "value", "itemtype", "encoding", "stream",
+                   "credential", "width", "depth", "attributes")
+# These take a path in their first plain word only; the words after it are text or a type.
+_FIRST_WORD_ONLY = _PS_CONTENT | {"out-file", "new-item", "ni", "remove-item"}
+
+
+def _ps_argument_slots(command, rest):
+    """The `(role, word)` pairs of a PowerShell command's arguments. A role is `write` (a path the command
+    writes), `source` (the path a copy reads) or `destination` (where a copy writes). A value of a filtering or
+    text parameter has no role and is left out, and so is a switch. Where PowerShell would bind a word by
+    position, the command's own order decides it. An unknown parameter is read as a switch, so the word after
+    it still counts as a path."""
+    copies = command in _PS_COPY
+    slots, positional, index = [], 0, 0
+    while index < len(rest):
+        word = rest[index]
+        if word.startswith("-") and len(word) > 1:
+            name, colon, value = word[1:].partition(":")
+            name = name.lower()
+            takes_value = _flag_is(name, _PS_TARGET_FLAGS) or _flag_is(name, _PS_VALUE_FLAGS, 2)
+            if not colon and takes_value and index + 1 < len(rest):
+                value = rest[index + 1]
+                index += 1
+            if value and _flag_is(name, _PS_TARGET_FLAGS):
+                if copies and _flag_is(name, ("path", "literalpath")):
+                    role = "source"
+                elif copies and _flag_is(name, ("destination",)):
+                    role = "destination"
+                else:
+                    role = "write"
+                slots.append((role, value))
+        else:
+            if command in _FIRST_WORD_ONLY and positional >= 1:
+                pass
+            elif copies:
+                taken = {role for role, _word in slots}
+                role = "source" if "source" not in taken and positional == 0 else "destination"
+                slots.append((role, word))
+            else:
+                slots.append(("write", word))
+            positional += 1
+        index += 1
+    return slots
+
+
+def _pipe_variable_hit(command_args, folder, at, predicate, holds) -> str:
+    """The word that is the pipeline variable (`$_`, `$PSItem`) as a path the command writes into a place that
+    `predicate` accepts, else ''. `folder` is the listing the variable comes from: a write of `$_` lands on a
+    path in it, so it counts when `holds(folder, at)`. A copy's source is only read; it is written when the
+    destination is a folder, as `FOLDER/<listed name>`, so it counts when that path is accepted for any
+    name the listing holds."""
     command, rest = command_args if command_args else ("", ())
     if not _mutates_as_command(command, rest):
-        return None
-    if command in _PS_CONTENT:
-        named, positional, index = None, None, 0
-        while index < len(rest):
-            word = rest[index]
-            if re.fullmatch(r"-(?i:path|literalpath|filepath)", word):
-                named = rest[index + 1] if index + 1 < len(rest) else None
-                index += 1
-            elif word.startswith("-"):
-                index += 0 if _PS_SWITCH.fullmatch(word) else 1
-            elif positional is None:
-                positional = word
-            index += 1
-        target = named or positional
-        return target if target and _PIPE_VARIABLE.fullmatch(target) else None
-    return next((word for word in rest if _PIPE_VARIABLE.fullmatch(word)), None)
+        return ""
+    slots = _ps_argument_slots(command, rest)
+    for role, word in slots:
+        if role != "source" and _PIPE_VARIABLE.fullmatch(word) and holds(folder, at):
+            return word
+    sources = [word for role, word in slots if role == "source" and _PIPE_VARIABLE.fullmatch(word)]
+    destinations = [word for role, word in slots if role == "destination"]
+    if sources and destinations and _is_folder(destinations[0], at):
+        try:
+            names = os.listdir(_expanded(folder, at))
+        except (OSError, ValueError):
+            return sources[0] if holds(folder, at) else ""
+        head = destinations[0].rstrip("/\\")
+        if any(predicate(head + "/" + name, at) for name in names):
+            return sources[0]
+    return ""
+
+
+def _lead_command(segment):
+    """(command, words after it) for the first mutating command a segment holds at a command position past its
+    first word (`[void] New-Item x`, `[void](New-Item x)`, `return Set-Content x y`), else None. It reads the
+    segment text: text inside quotes or a here-string holds no command. A position is the text
+    `_COMMAND_POSITION` reads, so this and the alias rule share one idea of where a command starts."""
+    text = _straight(segment)
+    masked = re.sub(r"@(['\"])[ \t]*\r?\n.*?\r?\n[ \t]*\1@|'[^']*'|\"[^\"]*\"",
+                    lambda quoted: "Q" * len(quoted.group()), text, flags=re.DOTALL)
+    for match in re.finditer(r"[^\s(){}\[\];]+", masked):
+        if not re.search(_COMMAND_POSITION + r"\Z", masked[:match.start()]):
+            continue
+        command, rest = _segment_command([_unquoted(word) for word in _quoted_words(text[match.start():])])
+        if _mutates_as_command(command, rest):
+            return command, rest
+    return None
 
 
 def _ps_blocks(segment: str):
