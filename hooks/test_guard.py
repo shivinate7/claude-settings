@@ -5436,6 +5436,28 @@ sh("git-after-cd: an if ! check whose then body is echo to an fd copy 2>&1 && ex
    "if ! pytest -q; then echo bad 2>&1 && exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 
 
+# A `||` CHAIN THAT A LATER `&&` STEP CANNOT STOP. `pytest -q || echo x` succeeds on a failed check, so the `&&`
+# steps after it run, and the push at the end runs too. The steps here, git add -A and sleep 0, both succeed.
+sh("git-after-cd: a check || an echo then && a git add -A then && a git push -u, is refused",
+   "pytest -q || echo x && %s add -A && %s push -u origin b" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check || an echo then && a sleep 0 then && a git push -u, is refused",
+   "pytest -q || echo x && sleep 0 && %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+# A SUBSTITUTION WITH NO CHECK BEFORE IT. echo succeeds whatever make did, so the `|| exit 1` never fires for a
+# failed make. The substitution is the only check, and the push after `;` runs whatever it did.
+sh("git-after-cd: an echo of a make substitution with no check before it, then || exit 1 and ; a git push -u, is refused",
+   "echo $(make x) || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+# AN FD COPY OR A PRINT THAT CAN FAIL. `>&3` copies fd 3, which a plain shell leaves closed, so the echo fails and
+# its `&& exit 1` is skipped. `printf '%d' abc` prints 0 and returns 1 on a non-number, so its `&& exit 1` is skipped
+# the same way. In both, the push after the `fi` runs when the check fails.
+sh("git-after-cd: an if ! check whose then body is echo to fd 3 && exit 1, then ; a git push -u, is refused",
+   "if ! pytest -q; then echo bad >&3 && exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an if ! check whose then body is printf of a non-number && exit 1, then ; a git push -u, is refused",
+   "if ! pytest -q; then printf '%%d' abc && exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
