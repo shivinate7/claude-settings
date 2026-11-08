@@ -16,7 +16,7 @@ Three parts, one file:
   3. The page's own copy of the star and the answer label is tested in skills/waiting-page/tests/page.test.mjs.
      page_grant.py's ignoring of the answer `label` is tested in skills/waiting-page/test_page_grant_label.py.
 
-Red on the old code (422cbbdfe): every wire: case that expects a refusal, and the recommended and field cases,
+Red on the base commit, before the builder's change: every wire: case that expects a refusal, and the recommended and field cases,
 fail on an assert about the verdict (the check is not wired, the field is not drawn). The fn: cases cannot run
 there, because chat_page_label_hit is not built yet: they report "not built", which is not a red (P3). Run with the
 argument `behaviour` to skip them, which is the red-run form. Without it, every case runs.
@@ -134,7 +134,7 @@ def case_fn_prefix_either_way_passes():
 
 def case_fn_differing_label_refuses_naming_the_letter():
     fn_refuse("fn: a chat line for b that differs from its label is refused, naming b",
-              fn_label(ITEM, OPTIONS, "\n".join((CHAT_A, CHAT_B_MISMATCH))), "b")
+              fn_label(ITEM, OPTIONS, chat_question((CHAT_A, CHAT_B_MISMATCH))), "b")
 
 
 def case_fn_no_cited_id_passes():
@@ -156,7 +156,7 @@ def case_fn_letter_missing_from_chat_passes():
 def case_fn_letter_is_position():
     options = copy.deepcopy(OPTIONS) + [{"key": "c", "label": "Wait a day", "gain": "g", "lose": "l"}]
     fn_refuse("fn: letter c is the third option's position, so a differing c is refused",
-              fn_label(ITEM, options, "\n".join((CHAT_A, CHAT_B, "c) Hold for a day"))), "c")
+              fn_label(ITEM, options, chat_question((CHAT_A, CHAT_B, "c) Hold for a day"))), "c")
 
 
 # ------------------------------------------------------------------ 1. the page-item write path (wire:)
