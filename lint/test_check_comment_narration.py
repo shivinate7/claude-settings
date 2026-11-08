@@ -1396,6 +1396,18 @@ class RuleQuotes(Case):
         self.assertHit(out, "x.py", 1)
         self.assertEqual(rc, 1, out)
 
+    def test_bare_id_before_round_parentheses_still_flags_the_round(self):
+        rc, out = self.scan({"x.py": "# hold-unsafe-after-round-3 (added in round 3)\nx = 1\n"})
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, "docs", "decisions", "hold-unsafe-after-round-3.md")))
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_rule_name_before_bare_id_round_parentheses_still_flags_the_round(self):
+        rc, out = self.scan({"x.py": "# Rule hold-unsafe-after-round-3 (fixed in round 3)\nx = 1\n"})
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, "docs", "decisions", "hold-unsafe-after-round-3.md")))
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
     def home_tree(self, files):
         """A checker tree that is its own git repo, holding the given files. Returns its root."""
         root = tempfile.mkdtemp(prefix="cnl_", dir=RUN_FOLDER)
