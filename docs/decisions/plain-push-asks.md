@@ -8,11 +8,14 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 | Push | Outcome | Rule id |
 |---|---|---|
 | A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all`, `--branches`) | ask | `push-main` |
+| MCP `push_files`, `create_or_update_file` or `delete_file` whose `branch` is `main` or `master` (`refs/heads/` prefix too) | ask | `push-main` |
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote | ask | `push-stray-branch` |
 | Any other plain push | allow | |
 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
-  literal, `main` and `master`. The remote's HEAD is not read.
+  literal, `main` and `master`. The remote's HEAD is not read. The MCP forms come from the
+  coordinator's relay of form parity, lane mcp-tools-in-guard-matcher, and read their `branch`
+  the same way.
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.
@@ -39,7 +42,7 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
   itself.
 
 Cost: no new process or file. The reads run per push, in the guard's own run. A literal
-destination reads nothing new. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
+destination, and an MCP file write's `branch`, reads nothing new. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
 A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. `record_push_cost_case` in
 `hooks/test_guard.py` proves the counts.
 
@@ -51,4 +54,4 @@ A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. `record_p
 Risk: incident (banchi, 2026-09-12).
 
 Kind: process
-Home: hooks/guard_push_delete.py
+Home: hooks/guard_push_delete.py (`names_default_branch`); hooks/guard.py for the MCP file writes.
