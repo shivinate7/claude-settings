@@ -63,7 +63,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
   - A check that cannot read its input fails (owner, 2026-11-06 12:39 CST, page item 276 (unknown-read-one-rule), pick a). A follow-up PR that 404s is not done, and the line names it. Any other read failure is unknown, and it holds the record. `--findings-unknown-ok "<reason>"` lifts that hold, and the tool prints the lift.
   - A layout that cannot be read makes the record `findings unknown`. It holds the record, like other unknowns (owner item 276 a, 2026-11-06 12:39 CST).
   - Owner item 394 a, 2026-11-08 06:08 CST: a fix check may pass a push that only files this PR's findings (record `hold-unsafe-after-round-3`). The fix-check reviewer judges that push; it passes only when the reviewed record's Findings is `<n>, this PR`. The tool does not check it.
-- A record with no Findings line, created at or after the cut-off (2026-11-08 04:25:00Z, owner item 386 b, 2026-11-07 22:25 CST), is not done. `merge --reviewed` reads it as `lane: review record lacks Findings`, at the lane round age limit. A record created before the cut-off keeps its legacy verdict.
+- The cut-off is `FINDINGS_REQUIRED_FROM` (merge/merge.py), the moment `--findings` reached main. It is never earlier than owner item 386 b's ruling time (2026-11-07 22:25 CST). A record with no Findings line, created at or after the cut-off, is not done. `merge --reviewed` reads it as `lane: review record lacks Findings`, at the lane round age limit. A record created before the cut-off keeps its legacy verdict.
 
 ## The cost
 
