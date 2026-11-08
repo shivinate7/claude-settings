@@ -205,7 +205,22 @@ LABEL_FORMS = (
     # marker with no colon is skipped, so the word after it reads and the line passes.
     ("Red-run: : runner x -> 1 failed on SHA", "refused", "colon-only token keeps its colon"),
     ("Red-run: -: x -> 1 failed on SHA", "refused", "colon-only token keeps its colon"),
+    # A colon carried from such a token is the label's own colon, so an assignment word does not exempt it. No `mut` in
+    # these rows: LabelFormHints would read each one as a mutant form and demand its hint.
+    ("Red-run: : PYTEST_ADDOPTS=-q python3 t.py -> 1 failed on SHA", "refused", "carried colon on an assignment word"),
+    ("Red-run: -: lint_mode=on python3 t.py -> 1 failed on SHA", "refused", "carried colon on an assignment word"),
     ("Red-run: - python3 t.py -> 1 failed on SHA", "valid", "control: bare list marker"),
+    # The mutant form takes any whitespace after `Red-run:`, and it needs a space after its colon. The failed and none forms
+    # need a literal space after `Red-run:` (decision red-run-trailer-on-test-commits, item 3).
+    ("Red-run:mutant: drop the guard -> 1 failed on SHA", "valid", "mutant form with no space after Red-run:"),
+    ("Red-run:\tmutant: drop the guard -> 1 failed on SHA", "valid", "mutant form with a tab after Red-run:"),
+    ("Red-run:\tpython3 lint/test_x.py -> 1 failed on SHA", "refused", "failed form with a tab after Red-run:"),
+    ("Red-run:\tnone: ok", "refused", "none form with a tab after Red-run:"),
+    ("Red-run: mutant:x drop the guard -> 1 failed on SHA", "refused", "mutant form with no space after its colon"),
+    ("Red-run: mutant:\tdrop the guard -> 1 failed on SHA", "refused", "mutant form with a tab after its colon"),
+    # A bare `-` and an arrow each strip to nothing and are skipped, so the bare number after them is the label. The decision's
+    # known limits hold this kind of label: a number reads as the word and the line passes.
+    ("Red-run: - -> 1 failed on SHA", "valid", "known limit: the bare number reads as the label"),
     # A key with no colon is a Red-run line when it ends in the failed tail. Its FAIL line holds the mutant hint.
     ("Red run mutant A (x) python3 t.py -> 1 failed on SHA", "refused", "no-colon key with a mutant word"),
     # Real commands pass as the failed form. These are the must-pass rows.
@@ -296,6 +311,8 @@ LABEL_WORDS = (
     ("Red-run: ./mutant x -> 1 failed on SHA", "./mutant", False),
     ("Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA", "python3", False),
     ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "mutant", False),
+    # A bare `-` and an arrow strip to nothing and are skipped, so the bare number after them reads as the label.
+    ("Red-run: - -> 1 failed on SHA", "1", False),
     # An upper-case assignment behind a list marker, a number or a wrapper reads as its word.
     ("Red-run: - MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
     ("Red-run: `MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
@@ -1019,9 +1036,21 @@ class LabelForms(unittest.TestCase):
                                       % (got, line))
                 self.assertEqual(got, triple, "label_word(%r) must be %r" % (line, triple))
 
-    def test_label_parts_is_not_a_second_home(self):
-        self.assertFalse(hasattr(self.check, "_label_parts"),
-                         "_label_parts is a second home for the label: label_word must hold the parse itself")
+    def test_refusals_read_the_label_only_through_label_word(self):
+        """The label refusals take their label from label_word and from no other parse. A fresh module takes the stub, so no
+        other case sees it. The real verdicts come first. Then label_word is stubbed to read a benign word for a mutant
+        line, which must pass, and a mutant word for a benign line, which must be refused."""
+        check = load_module("check_red_run_label_stub", MODULE)
+        benign = filled(["Red-run: python3 lint/test_x.py -> 1 failed on SHA"], LABEL_SHA)[0]
+        mutant = filled(["Red-run: mutant A (...) -> 1 failed on SHA"], LABEL_SHA)[0]
+        self.assertTrue(check.valid_line(benign), "the benign line must pass before any stub: " + benign)
+        self.assertFalse(check.valid_line(mutant), "the mutant line must be refused before any stub: " + mutant)
+        check.label_word = lambda line: ("python3", False, False)
+        self.assertTrue(check.valid_line(mutant),
+                        "label_word reads a benign word, yet the mutant line is refused: a refusal parses the label itself")
+        check.label_word = lambda line: ("mutant", False, False)
+        self.assertFalse(check.valid_line(benign),
+                         "label_word reads a mutant word, yet the benign line passes: a refusal parses the label itself")
 
 
 class LabelFormHints(Fixture):
