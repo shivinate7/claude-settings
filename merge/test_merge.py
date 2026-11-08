@@ -14720,6 +14720,44 @@ class BuildBatchCandidates(BuildEnv):
         self.assertEqual(joins_of(out) + left_of(out), [], out)
 
 
+class BuildBatchFindingsUnknown(BuildEnv):
+    """A done record whose Findings read could not run (findings unknown) is out of the batch. The reason flag --findings-unknown-ok "<reason>"
+    lets it join, and the lift is printed with its reason, as the other reason flags print theirs. Without the flag, or with a blank reason, it
+    stays out and its line names the flag. The read here is a follow-up that cannot be reached (a 502, not a 404), so it is unknown, not open."""
+
+    def unknown_host(self, head):
+        """Pull request 7 at `head`, with a done record that names follow-up #8, which the read cannot reach."""
+        comment = review_comment(901, 7, record_text(head=head, rounds=REVIEW_PASS, findings="2, follow-up #8"))
+        return PullsHost([batch_pull(7, head)], {}, comments=[comment], pull_errors={8: "gh: Server Error (HTTP 502)"})
+
+    def test_without_the_flag_the_pr_stays_out_and_the_line_names_the_flag(self):
+        head = self.lane(7)
+        rc, out, err = self.build(self.unknown_host(head))
+        self.assert_ran(rc, out, err, 0)
+        self.assertEqual(joins_of(out), [], out)
+        self.assertNotIn("feat7", self.linted(), "a PR whose Findings read is unknown was linted without the flag")
+        self.assertIn("--findings-unknown-ok", out, "the line does not name the reason flag")
+
+    def test_a_reason_lets_the_pr_join_and_the_lift_is_printed_with_it(self):
+        head = self.lane(7)
+        reason = "GitHub answered 502 for #8, which is open"
+        rc, out, err = self.build(self.unknown_host(head), "--findings-unknown-ok", reason)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {head[:9]}"], out)
+        self.assertIn("feat7", self.linted(), "the lifted pull request was not linted before it joined")
+        self.assertIn(f"--findings-unknown-ok, reason: {reason}", out, "the lift is not printed with its reason")
+
+    def test_a_blank_reason_does_not_lift(self):
+        head = self.lane(7)
+        for reason in ("", "   "):
+            with self.subTest(reason=reason):
+                rc, out, err = self.build(self.unknown_host(head), "--findings-unknown-ok", reason)
+                self.assert_ran(rc, out, err, 0)
+                self.assertEqual(joins_of(out), [], out)
+                self.assertIn("--findings-unknown-ok", out, "a blank reason does not name the reason flag")
+        self.assertNotIn("feat7", self.linted(), "a blank reason lifted the unknown read and linted the pull request")
+
+
 class BuildBatchStacks(BuildEnv):
     """A stacked PR (its base is another open PR's head) is tried only after its base has joined."""
 
