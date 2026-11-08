@@ -1983,6 +1983,36 @@ class RouteClaimTests(StaleCase):
         self.assertIn("hooks/gone.py", texts.get(flagged[0], ""), out)  # the report names the file it cannot find
         self.assertIn("lint/test_gone.py", texts.get(flagged[1], ""), out)
 
+    def assert_outside_backing_unknown(self, rng, numbers, path):
+        """Scope first: the range touched the page. Then the run neither stops nor exits 2: the exit is 0, the verdict is
+        PASS, no finding prints and no STALE005 line names the page, since the backing is backed. Each line in `numbers`
+        prints one unknown line that names `path`, and no other unknown line prints."""
+        self.assertIn(NOTES, touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertNotIn("stale-cites: UNKNOWN", out, "a backing led outside the repo stopped the run\n%s" % out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(stale005_lines(out, NOTES), [],
+                         "a backing led outside the repo is backed, so it prints no STALE005 report\n%s" % out)
+        unknowns = unknown_lines(out)
+        self.assertEqual(len(unknowns), len(numbers), "one unknown line per backing led outside the repo\n%s" % out)
+        for number in numbers:
+            named = [line for line in unknowns if "%s:%d: " % (NOTES, number) in line and path in line]
+            self.assertEqual(len(named), 1, "line %d must print one unknown line that names %s\n%s" % (number, path, out))
+
+    def test_a_read_backing_led_by_dotdot_or_tilde_prints_one_unknown_line_and_no_stop(self):
+        for path in ("../x.py", "~/x.py"):
+            with self.subTest(path=path):
+                rng, _ = self.route_range([("- The cloud cannot push to main (read %s:12)." % path, False)])
+                self.assert_outside_backing_unknown(rng, [1], path)
+
+    def test_a_test_backing_led_by_dotdot_or_tilde_prints_one_unknown_line_and_no_stop(self):
+        for path in ("../x.py", "~/x.py"):
+            with self.subTest(path=path):
+                rng, _ = self.route_range([("- The cloud cannot push to main (test %s::keep)." % path, False)])
+                self.assert_outside_backing_unknown(rng, [1], path)
+
     def test_route_claim_cites_a_route_id_that_is_a_row_at_head_and_names_a_dead_one(self):
         rows = [
             ("- The cloud cannot push to main (route cloud-push).", False),
@@ -2542,6 +2572,21 @@ class ValueCiteTests(StaleCase):
         expected = sorted((NOTES, 3 + k, "STALE008") for k in range(len(cites)))
         self.assertEqual(found, expected, "each added cite whose value is no JSON literal must print one STALE008 on its line\n%s" % out)
         self.assertEqual(rc, 1, out)
+
+    def test_an_added_value_cite_led_outside_the_repo_prints_one_unknown_line_and_no_stop(self):
+        """A value cite whose path leads with `../`, `~/` or `/` names a file outside the repo. No reader asks git for it,
+        so the added line prints one unknown line: the run neither stops nor flags the line, and the exit is 0."""
+        for path in ("../x.py", "~/x.py", "/x.py"):
+            with self.subTest(path=path):
+                rng = self.added_cite_range(LIMIT_BASE, "%s: LIMIT = 4" % path)  # scope: the cite is an added line
+                rc, out = self.run_check(rng)
+                self.assertNotIn("stale-cites: UNKNOWN", out, "a value cite led by %s stopped the run\n%s" % (path, out))
+                self.assertEqual(parse(out), [], "a value cite led by %s was read as a repo path and flagged\n%s" % (path, out))
+                self.assertEqual(rc, 0, out)
+                unknowns = unknown_lines(out)
+                self.assertEqual(len(unknowns), 1, "a value cite led by %s must print one unknown line\n%s" % (path, out))
+                self.assertIn("%s:3: " % NOTES, unknowns[0], out)
+                self.assertIn(path, unknowns[0], out)
 
     def test_an_added_python_cite_naming_no_tracked_file_is_flagged_on_its_own_line(self):
         for path in UNTRACKED_CITES:  # scope: no tracked file has the path
@@ -3245,6 +3290,38 @@ class NameCiteTests(StaleCase):
         self.assertNotIn("stale-cites: UNKNOWN, git cat-file ended early", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, flagged[0], "STALE010")], out)
+
+    def test_a_tilde_led_cite_is_no_path_cite_so_stale010_stays_silent_at_exit_zero(self):
+        """A cite path led by `~` names a file outside the repo. Read as a repo path it is a file absent at head, which
+        is a finding. As no path cite it is silent, and the exit is 0."""
+        rng, _ = self.route_range([("- (~/.claude/hooks/x.py missing_name)", False)])
+        self.assertIn(NOTES, touched(rng))  # scope: the range adds the cite on a Markdown line
+        self.assertNotIn(".claude/hooks/x.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope
+        rc, out = self.run_check(rng)
+        self.assertNotIn("stale-cites: UNKNOWN", out, "the `~` cite stopped the run\n%s" % out)
+        self.assertEqual(parse(out), [], "a `~`-led cite was read as a repo path and flagged\n%s" % out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+
+    def test_a_cite_that_normalizes_outside_the_repo_is_no_path_cite_and_a_dead_twin_in_the_range_still_prints(self):
+        """`lint/../../x.py` normalizes to `../x.py`, a path outside the repo. It is no path cite, so the run does not
+        stop and STALE010 stays silent. The twin in the same range is a dead cite that still prints its finding."""
+        rng, _ = self.route_range([("- (lint/../../x.py missing_name)", False)])
+        self.assertIn(NOTES, touched(rng))  # scope: the range adds the cite on a Markdown line
+        self.assertNotIn("x.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope: no root x.py
+        self.assertIsNone(binding_kind(CODE["lint/x.py"], "missing_name"))  # scope: lint/x.py does not bind the name
+        rc, out = self.run_check(rng)
+        self.assertNotIn("stale-cites: UNKNOWN", out, "the normalized `..` cite stopped the run\n%s" % out)
+        self.assertEqual(parse(out), [], "a cite that normalizes outside the repo was read as a repo path\n%s" % out)
+        self.assertEqual(rc, 0, out)
+
+        rng, flagged = self.route_range([("- (lint/../../x.py missing_name)", False),
+                                         ("- (lint/x.py missing_name)", True)])  # the twin: a dead cite, same range
+        self.assertIsNone(binding_kind(CODE["lint/x.py"], "missing_name"))  # scope: the twin's name is unbound at head
+        rc, out = self.run_check(rng)
+        self.assertNotIn("stale-cites: UNKNOWN", out, "the normalized `..` cite stopped the run beside its twin\n%s" % out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, flagged[0], "STALE010")], out)
+        self.assertEqual(rc, 1, out)
 
     def test_a_range_that_adds_one_py_name_cite_and_removes_nothing_starts_exactly_four_git_processes_with_one_cat_file(self):
         rng, _ = self.route_range([("- (lint/x.py check)", False)])
