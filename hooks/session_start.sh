@@ -21,7 +21,7 @@ tier_line() {
   fi
 }
 
-# Cloud containers leave TMPDIR unset, so `$TMPDIR/x` lands at `/x` (incident 2026-11-07, /base_run.txt).
+# Cloud containers leave TMPDIR unset, so `$TMPDIR/x` lands at `/x`.
 # The written lines are conditional, so a shell that already has TMPDIR keeps it.
 # CLAUDE_SETTINGS_TMP_CANDIDATE is the seam for the /tmp default.
 # On Windows (MINGW, MSYS, CYGWIN) /tmp always exists, so nothing is written.
