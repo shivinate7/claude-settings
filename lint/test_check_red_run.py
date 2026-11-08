@@ -160,8 +160,8 @@ class CheckCase(Fixture):
         return out
 
     def scratch_repo_test_commit(self, red=None):
-        """One test commit in a repo that lacks the gate file at HEAD, the shape of any repo but claude-settings.
-        The tree's disk copy of the script is untracked, so the case also rejects a gate read from disk."""
+        """One test commit in a repo that lacks the check file at HEAD, the shape of any repo but claude-settings.
+        The tree's disk copy of the script is untracked, so the case also rejects a check read from disk."""
         self.base(check=False)
         rel = self.new_test_path()
         sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=red)

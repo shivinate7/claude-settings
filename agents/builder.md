@@ -53,6 +53,7 @@ Prove your change once: show the test-author's new cases green on your code. Run
 suites your change touches. Never run the full suites locally. When your lane changes a file a
 mutation test targets, run that mutation test once through `verdict` before pushing.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
+When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
 another agent. The orchestrator reads the run. A command that only waits, such as `gh run

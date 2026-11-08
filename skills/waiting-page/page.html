@@ -84,6 +84,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
 .ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
 .ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+@media (pointer: coarse) { .ov-head { min-height: 44px; } }
 .chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
 .nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .nchip:hover { border-color: var(--acc); }
@@ -105,6 +106,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
   .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
   .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
 }
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
 
 .list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
@@ -247,7 +249,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .btn.alt { background: transparent; color: var(--acc); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
-.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
 .btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
 .btn:disabled { opacity: .45; cursor: default; }
 .note { display: grid; gap: 6px; }
@@ -342,12 +344,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .pkb .on, .pkb[aria-pressed="true"] .off { visibility: hidden; }
 .pkb[aria-pressed="true"] .on { visibility: visible; }
 .btn.alt.pkb[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); }
-/* Drop's dashed edge reads at 3:1 (a11y.md, control edge): --faint, where .btn.dash elsewhere uses --line. */
-.btn.dash.pkb { border-color: var(--faint); }
-.btn.dash.pkb[aria-pressed="true"] { border-color: var(--ink); }
 /* Off: still focusable, with a solid --faint edge (3:1, a11y.md state cue) and a struck label, so an off act never rests on colour alone.
    This strike marks an off button. A staged Drop strikes the line text, never its button. The reason shows as .pk-why under the line.
-   This rule stays after .btn.dash.pkb: both have the same weight, so the source order decides. */
+   This rule stays after .btn.dash[aria-pressed="true"]: both have the same weight, so the source order decides. */
 .btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
 .btn.pkb[aria-disabled="true"] .off { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 /* The Sent panel names a parked act by its act, where an item shows "No. n". */
@@ -464,6 +463,33 @@ body.sheet-open { overflow: hidden; }
 .live a { color: var(--acc); text-decoration: none; }
 .live a:hover { text-decoration: underline; }
 @container (max-width: 559px) { .live li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+/* The stalled band: the same box, head and row grid as Live work, so the two read as one family. Red edge only while something is stalled. */
+.stall { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.stall.hot { box-shadow: inset 4px 0 0 var(--holds); }
+.stall .sth { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
+.stall .sth h3 { display: inline-flex; align-items: center; gap: 6px; font: 700 14.5px/1.3 var(--body); }
+.stall .sth .lead { color: var(--muted); font-size: 14px; flex: 1 1 24ch; min-width: 0; }
+.stall .sth.calm h3 { font-weight: 600; color: var(--muted); }
+.stall h4 { margin: 0; padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
+.stall ul { list-style: none; margin: 0; padding: 0; }
+.stall li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 14px; border-top: 1px solid var(--line); font-size: 14px; }
+.stall h4 + ul > li:first-child { border-top: 0; }
+.stall li .k { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.stall li .tx { min-height: 32px; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.stall li .tx:hover { text-decoration: underline; }
+.stall li .fx { display: block; font-size: 13.5px; color: var(--muted); }
+.stall li .fx.land { color: var(--good); font-weight: 600; }
+.stall li .fx.bad { color: var(--due); }
+.stall li .fx.why { color: var(--ink); }
+.stall li .ln { font: 13px var(--mono); overflow-wrap: anywhere; }
+.stall li.unkrow { grid-template-columns: minmax(0, 1fr); }
+.stall li.unkrow details { font-size: 14px; color: var(--muted); }
+.stall li.unkrow summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.stall li.unkrow pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.stall .pz { border-top: 1px solid var(--line); }
+.stall .pz > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+@container (max-width: 559px) { .stall li { grid-template-columns: 40px minmax(0, 1fr); gap: 0 8px; padding-inline: 10px; } .stall li.it, .stall li.unkrow { grid-template-columns: minmax(0, 1fr); } .stall .sth { padding-inline: 10px; } .stall .sth .lead { flex-basis: 100%; } }
+@media (pointer: coarse) { .stall li .tx { min-height: 44px; } }
 .tag { font-size: 12.5px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid currentColor; line-height: 19px; white-space: nowrap; }
 .tag.st-working { color: var(--acc); }
 .tag.st-blocked, .tag.blk { color: var(--holds); }
@@ -471,6 +497,10 @@ body.sheet-open { overflow: hidden; }
 .tag.st-failed, .tag.st-stopped { color: var(--due); }
 .tag.st-done { color: var(--muted); }
 .tag.next { color: var(--muted); border-style: dashed; }
+.tag.stl { color: var(--holds); }
+.tag.pzd { color: var(--muted); }
+.tag.ic { display: inline-grid; place-items: center; min-width: 26px; padding: 0 4px; }
+.tag.ic svg { width: 12px; height: 12px; }
 
 .now { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .now > div { background: var(--surface); padding: 12px 14px; min-width: 0; display: grid; gap: 6px; align-content: start; }
@@ -571,6 +601,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
 .rsteps .active .ttl { font-weight: 700; }
 .rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .stl-row > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
 .rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
 .rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
 .rsteps li.open .rbody { display: block; }
@@ -798,7 +829,17 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .atext { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; font-size: 16px; }
 .astate { margin: 0; font-size: 14.5px; color: var(--ink); font-weight: 600; }
 .astate .t { color: var(--muted); font-weight: 400; }
-.newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; }
+/* The one "new since your baseline" mark: an ask's New answer, a card's New reply, a step's Updated. Green, the answered colour. */
+.newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; white-space: nowrap; }
+/* Each later mark on a screen: a filled dot in an outline pill wider than tall, so it never reads as a radio button beside the options.
+   The chart legend's .dot (a filled square, 8px high) shares the class name, so this rule resets its ground, height and corner. */
+.newmark.dot { padding: 0; width: 34px; height: 22px; border-radius: 12px; background: none; justify-content: center; }
+.newmark.dot::before, .newmark.ct::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+/* A count of updated steps, on the phase rail and the done fold: the dot, then the number. */
+.newmark.ct { padding: 0 7px; gap: 5px; font: 600 12px/20px var(--mono); }
+.rrow .meta .newmark { font-size: 12.5px; line-height: 19px; min-height: 0; }
+.prail .nm .newmark, .fold .newmark { min-height: 0; }
+.prail .nmr { display: inline-flex; align-items: center; gap: 6px; }
 .askc .thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
 .askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
@@ -834,6 +875,32 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .askc.folded .fwait .astate { grid-column: 2; }
 @media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+/* Dismiss: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
+.replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
+.replyend .endrow > .btn { min-height: 44px; }
+.btn.dismiss, .btn.restore { min-height: 44px; }
+.btn.dismiss[aria-disabled="true"] { border: 1.5px dashed var(--faint); color: var(--muted); cursor: default; }
+.endrow .dwhy { font-size: 14px; color: var(--muted); min-width: 0; }
+/* A folded row with a side press: the row button and Dismiss (or Restore) are siblings, never one inside the other. */
+.askc.folded.withd { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 4px; padding-inline-end: 8px; }
+.askc.folded.withd > .fwait { grid-column: 1 / -1; }
+.askc.folded.withd > .sline, .askc.folded > .sline.dline { grid-column: 1 / -1; padding: 0 16px 8px; }
+/* The Dismissed line keeps the row's place until the next load, at the folded row's height. */
+.askc.dropped { padding: 2px 8px 2px 16px; background: transparent; border-style: dashed; border-color: var(--faint); }
+.askc.dropped:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.askc.dropped .sline { min-height: 44px; }
+.askc.dropped .sline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.dropped .sline .dt { color: var(--muted); }
+.asklist.dlist .askc.folded { background: transparent; border-style: dashed; border-color: var(--faint); }
+@media (max-width: 520px) {
+  /* With a side press, the row has no room for "Show answer" on a phone: the words stay in the row button's name, and the row is the press. */
+  .askc.folded.withd .frow { grid-template-columns: auto minmax(0, 1fr); padding-inline-end: 4px; }
+  .askc.folded.withd .frow .fwhen { grid-column: 2; grid-row: 2; }
+  .askc.folded.withd .frow .fgo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+  .askc.dropped .sline > span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .askc.dropped .sline .btn { grid-column: 3; grid-row: 1; }
+  .askc.dropped .sline { grid-template-columns: auto minmax(0, 1fr) auto; }
+}
 .reline { margin: 0; font-size: 14.5px; color: var(--muted); overflow-wrap: anywhere; }
 .asks .empty.unk { color: var(--due); border-color: var(--due); }
 /* The rail row for asks: the head of an overview tier, no chips. With no waiting ask it is grey, as an empty tier is. */
@@ -898,7 +965,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "lastAnswer", "lane", "waits"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -906,7 +973,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -1063,6 +1130,9 @@ const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(
 /* ---------- Tiers: what holds up work, then what has a deadline, then the rest by age ---------- */
 const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }, { k: "stands", name: "Pick stands" }];
 const RANK = { holds: 0, due: 1, calm: 2, stands: 3 };
+// What a Send does to the card it sends (owner, page item 311; one switch). "sink": the card moves to the Answered section, folded, and the next open card takes its place.
+// "stay": the card keeps its place in its tier until reload.
+const SENT_MOVE = "sink";
 const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t; };
 // A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
 const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && !!pickKeys(it);
@@ -1070,8 +1140,20 @@ const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by &&
 const mates = (it) => (it.group && !isRuling(it) ? state.items.filter((x) => x.group === it.group) : [it]);
 // A group sits in the most urgent tier of any member, so its items never split across tiers.
 const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
+// One home for a viewer's time stamp in local storage (an ISO time): the asks' seen mark and the visit. A blocked store reads as no stamp and drops the write.
+const readStamp = (key) => { try { const t = Date.parse(localStorage.getItem(key)); return isNaN(t) ? null : t; } catch (e) { return null; } };
+const writeStamp = (key) => { try { localStorage.setItem(key, new Date().toISOString()); } catch (e) {} };
+// The owner's last visit, read once and kept, so a mark lasts the whole visit. With no stamp (a first visit, or a blocked store) no step is marked, and an item is new by the last Send alone.
+// The load's own time is written after the read, so the next load marks only what came later.
+const VISIT = readStamp("waiting.visit");
+writeStamp("waiting.visit");
+// A reply is new when the writer's `replied` time is later than the last Send (state.sendAt, kept by freezeSeen) and than the last visit. It reads no set, so a reply
+// that arrives on the open page is new too, and a Send moves no mark.
+const newReply = (it) => state.sendAt !== null && !isRuling(it) && Date.parse(it.replied) > Math.max(state.sendAt, VISIT ?? -Infinity);
+// A folded card of a new reply opens in place; a press on its fold wins for the rest of the visit.
+const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newReply(it));
 // Seen, worked out once (freezeSeen) and kept: an open item with no saved answer that was added before the owner's last Send. A later item is new,
-// and a Send on the open page re-sorts nothing (ux-order-holds-still). A reload works it out again.
+// and a Send on the open page re-sorts no tier. A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
 // feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it.
@@ -1081,11 +1163,15 @@ function freezeSeen() {
   // The last Send is the newest answer anywhere, a closed item's last answer included.
   const times = [...Object.values(state.answers).map((a) => a && a.at), ...feed.all.map((i) => i && lastOf(i) && lastOf(i).at)].map(ts).filter(Number.isFinite);
   const last = times.length ? Math.max(...times) : -Infinity;
+  state.sendAt = last;
   const old = (it) => !isRuling(it) && !state.answers[it.id] && !answeredByWait(it) && ts(it.added) < last;
   state.seen = new Set(state.items.filter(old).map((it) => it.id));
+  // Known, kept beside seen: every item present at load. An item outside it arrived later and sorts first in its tier; a group is known only while every member is.
+  state.known = new Set(state.items.map((it) => it.id));
 }
+const isArrival = (it) => !!state.known && !mates(it).every((x) => state.known.has(x.id));
 // Sunk, worked out once and kept like seen: an item with a saved answer when the items and answers loaded (isSaved reads no receipts).
-// A Send on the open page, or a receipt that arrives later, moves no card (ux-order-holds-still); a reload works it out again.
+// A receipt that arrives later moves no card. A Send moves the sent card into this set under SENT_MOVE "sink" (sinkSent; Undo takes it out) and moves nothing under "stay". A reload works it out again.
 // A Change keeps the card in the section (isSaved turns false under it), so membership never reads isSaved after this.
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
@@ -1093,6 +1179,12 @@ function freezeSunk() {
   if (state.sunk || !feed.items || !feed.answers) return;
   state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
 }
+// A card sent on this visit joins the set under "sink", and the write records it, so Undo leaves a card that was already sunk where it is.
+function sinkSent(it) {
+  if (SENT_MOVE !== "sink" || !state.sunk || it.park || isRuling(it) || state.sunk.has(it.id)) return false;
+  state.sunk.add(it.id); return true;
+}
+const unsinkSent = (w) => { if (w.sank && state.sunk) state.sunk.delete(w.it.id); };
 function sorted() {
   const by = { holds: [], due: [], calm: [], stands: [], answered: [] };
   state.items.forEach((it) => by[isSunk(it) ? "answered" : tierOf(it)].push(it));
@@ -1105,8 +1197,8 @@ function sorted() {
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
   const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
   const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
-  // Inside a tier, new items come before seen ones; each part keeps the order above.
-  const part = (f) => (a, b) => (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
+  // Inside a tier, an arrival after load comes first, then new items before seen ones; each part keeps the order above.
+  const part = (f) => (a, b) => (isArrival(a) ? 0 : 1) - (isArrival(b) ? 0 : 1) || (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
   by.holds.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
   by.due.sort(part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)));
   by.calm.sort(part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)));
@@ -1559,11 +1651,24 @@ function unfoldBtn(it, open, locked, ncmd, words) {
     h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, show), h("span", { class: "uf-hide" }, hide), h("span", { class: "uf-lock" }, "Stays open: your answer is ready")),
     h("span", { class: "sr" }, " for No. " + it.n));
 }
-// The fold of a seen card and of a sunk one: the control, then the body. One home for the lock, so a draft on either keeps the fold open.
+// The fold of a sunk card: the control, then the body. One home for the lock, so a draft keeps the fold open.
 function foldEls(it, parts, ncmd, words) {
   const locked = foldLocked(it);
   if (locked) state.unfold[it.id] = true;
-  return [unfoldBtn(it, !!state.unfold[it.id], locked, ncmd, words), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !state.unfold[it.id] }, ...parts)];
+  const open = foldOpen(it);
+  return [unfoldBtn(it, open, locked, ncmd, words), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !open }, ...parts)];
+}
+// The New reply mark of a card. Its words show once on a screen, on the first new card in page order; each later mark is the dot with the words hidden (ux-label-once).
+const REPLY_WORDS = ["New reply", " since your last Send"];
+function replyFirst(it) {
+  if (!newReply(it)) return false;
+  const by = sorted(), first = [...TIERS.map((T) => T.k), "answered"].map((k) => by[k].find(newReply)).find(Boolean);
+  return !!first && first.id === it.id;
+}
+function replyMark(it) {
+  const full = REPLY_WORDS.join("");
+  return replyFirst(it) ? h("span", { class: "newmark" }, REPLY_WORDS[0], h("span", { class: "sr" }, REPLY_WORDS[1]))
+    : h("span", { class: "newmark dot", title: full }, h("span", { class: "sr" }, full));
 }
 const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
 function buildCard(it) {
@@ -1575,6 +1680,7 @@ function buildCard(it) {
     // The section head says "Answered", so its pill drops the word: the ring or tick carries it.
     byWait ? h("span", { class: "ans" }, (sunk ? "" : "Answered, "), h("span", { class: "t" }, "Sent" + (fmt(lastOf(it).at) ? " " + fmt(lastOf(it).at) : "")))
     : saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
+  if (newReply(it)) top.children[0].after(replyMark(it));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   // A lane and a wait share one span, so "waits on" is said once. The link is the wait only.
@@ -1615,8 +1721,8 @@ function buildCard(it) {
   if (ctxText.length > 220) card.append(h("button", { class: "morebtn", type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
-  // A seen card, or a sunk one changed on the page (a Change keeps it in the Answered section), folds every part the owner answers with, behind one control. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
-  let ncmd = 0; const fold = isSeen(it) || sunk ? [] : null, put = (...n) => (fold ? fold.push(...n) : card.append(...n));
+  // A sunk card changed on the page (a Change keeps it in the Answered section) folds every part the owner answers with, behind one control. An item the owner still owes never folds. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
+  let ncmd = 0; const fold = sunk ? [] : null, put = (...n) => (fold ? fold.push(...n) : card.append(...n));
   const multi = isMulti(it);
   const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
@@ -1705,10 +1811,38 @@ function releaseSent() {
   held.forEach((el) => { el.style.minHeight = ""; heldWatch.unobserve(el); });
   if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - before);
 }
+// One home for holding the cards in view still across a render that moves cards (Send, Undo) or changes the rail above the list. It works with the browser's scroll anchoring on or off:
+// it measures one anchor before the render and scrolls by the anchor's viewport-top change after it, and the forced layout of that read has already taken any scroll the browser made.
+// The anchor is the list's top, which moves only with the rail (the Answered row appears or goes). If the first card to move starts above the viewport, its leaving would shift the
+// cards in view, so the anchor is the first card after it that is in view. A card wholly below the view is no anchor: a sent card taller than the view leaves the list top as
+// the anchor, so the next card takes the sent card's top. `ids` are the cards that move. The returned function carries `tops`: each moving card's viewport top now, kept by a Send.
+// `back` (Undo) is that map from the Send. A card that left from above the band comes back to its old top: the first such card in page order is the anchor.
+// It holds nothing under SENT_MOVE "stay" (no card moves), and not while the rail is in view above the list: the owner sees the rail change, so the list below it follows.
+function holdView(ids, back) {
+  const tops = new Map(), none = Object.assign(() => {}, { tops });
+  if (SENT_MOVE !== "sink") return none;
+  const band0 = document.querySelector(".hdr").getBoundingClientRect().bottom, el = (id) => document.getElementById("item-" + id);
+  const rail = $("rail").getBoundingClientRect();
+  const cardsNow = [...document.querySelectorAll("#list article.card")], movers = cardsNow.filter((c) => ids.includes(c.id.slice(5)));
+  movers.forEach((c) => tops.set(c.id.slice(5), c.getBoundingClientRect().top));
+  const returns = back ? ids.filter((id) => back.has(id) && back.get(id) < band0) : [];
+  let key = null, a0 = $("list").getBoundingClientRect().top;
+  const first = movers[0];
+  if (!returns.length && first && !first.closest("#tier-answered") && first.getBoundingClientRect().top < band0) {
+    const c = cardsNow.find((x) => { const r = x.getBoundingClientRect(); return !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING && r.bottom > band0 && r.top < innerHeight; });
+    if (c) { key = c.id.slice(5); a0 = c.getBoundingClientRect().top; }
+  }
+  if (!returns.length && !key && rail.bottom <= a0 + 1 && rail.bottom > band0) return none;
+  return Object.assign(() => {
+    const ret = returns.map(el).filter(Boolean).sort((x, y) => x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)[0];
+    const a = ret || (key && el(key)) || $("list"), d = a.getBoundingClientRect().top - (ret ? back.get(ret.id.slice(5)) : a0);
+    if (Math.abs(d) > 0.5) window.scrollBy(0, d);
+  }, { tops });
+}
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1754,9 +1888,12 @@ function cardFor(it) {
   patch(rec.el, nu); rec.sig = sig; return rec.el;
 }
 function repaint() { render(); }
+// A child that stays is never detached: leavers go first, so the kept children are already in order and the loop inserts only the new ones.
+// A move would drop the focus inside a card and reload a live design preview.
 function reconcile(parent, want) {
+  const keep = new Set(want);
+  [...parent.children].forEach((c) => { if (!keep.has(c)) c.remove(); });
   want.forEach((n, i) => { if (parent.children[i] !== n) parent.insertBefore(n, parent.children[i] || null); });
-  while (parent.children.length > want.length) parent.lastElementChild.remove();
 }
 const tierEls = {}, bundleEls = {}, seenHeads = {};
 // Not "not answered": a seen card answered by a Send stays below the divider until reload.
@@ -1815,14 +1952,14 @@ function rulingsEl() {
     toggle: () => { state.rulingsOpen = !state.rulingsOpen; render(); },
     sub: "Each stands unless you overturn it." + (on || !ruledAt(list[0]) ? "" : " Newest " + fmt(list[0].ruled) + ".") });
 }
-// The items answered before this visit (isSunk), newest first. Open on load, each card folded.
+// The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Open on load, each card folded.
 function answeredEl(items, place) {
   const on = state.answeredOpen, stamps = items.map((i) => Date.parse(sentOf(i).at)).filter(Number.isFinite);
   const body = [], done = new Set();
   items.forEach((it) => { if (!done.has(it.id)) place(items, it, done, body); });
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body,
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
-    sub: "Sent before this visit, newest first." + (on ? " Each leaves the page once its session closes it." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
+    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " Each leaves the page once its session closes it." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
 }
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
@@ -1969,9 +2106,11 @@ function renderBar() {
 // record's `read` confirms a read. The writer reads asks/ at each wake and turn start (SKILL.md), so the unsent case says that.
 // SKILL.md forbids a session to reply in a comment thread, so neither line sends the owner there.
 const TOLD = "A wake was sent.";
-const NOT_TOLD = () => "No session was told. It waits for " + askWriter() + "'s next wake or turn start.";
+const NOT_TOLD = (code) => withCode("No session was told. It waits for " + askWriter() + "'s next wake or turn start.", code);
 // An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
-const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
+const ANSWER_NOT_TOLD = (code) => withCode("No session was told. Each owner reads its answer at its next wake or turn start.", code);
+// notifyClaude gives true, a failing error code, or false when no send was tried. A code goes into the status line in words.
+function withCode(line, code) { return typeof code === "string" ? line.replace("No session was told.", "No session was told (" + code + ")." ) : line; }
 const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
@@ -1998,23 +2137,29 @@ async function canTell() {
     return await Promise.race([state.comments.canSendToClaude().then((v) => v === "available"), give]);
   } catch (e) { return false; }
 }
-// One comment per Send or Undo, into the viewer's stored thread.
-// Any failure only means "no session was told"; the answers stand and nothing retries.
+// One comment per Send or Undo, into the viewer's stored thread. The platform caps a thread's comments and answers a full thread
+// with upstream_error, so a failure on the stored thread starts one new anchored thread, unless the code says a second send
+// cannot help (NO_FALLBACK) or would repeat the same refusal. Returns true, the failing code (a code outside the contract's
+// list reads as upstream_error, as the contract says, so a status line never shows a stray word), or false when no send was
+// tried. The answers stand either way and nothing else retries.
+const NO_FALLBACK = ["rate_limited", "claude_unavailable", "consent_required", "invalid", "unavailable", "forbidden", "not_granted", "capability_disabled", "capability_removed", "transform_error"];
+const KNOWN_CODES = [...NO_FALLBACK, "not_found", "upstream_error"];
 async function notifyClaude(text, can) {
+  const cm = state.comments;
+  if (!cm || !can) return false;
+  const codeOf = (e) => KNOWN_CODES.includes(e && e.code) ? e.code : "upstream_error";
   try {
-    const cm = state.comments;
-    if (!cm || !can) return false;
     let id = null;
     try { id = localStorage.getItem("waiting.thread"); } catch (e) {}
     let res = null;
     if (id) {
       try { res = await cm.sendToClaude({ threadId: id, text }); }
-      catch (e) { if (!e || e.code !== "not_found") throw e; }
+      catch (e) { if (NO_FALLBACK.includes(codeOf(e))) return codeOf(e); }
     }
     if (!res) res = await cm.sendToClaude({ anchor: await cm.anchorFor(document.querySelector("h1")), text });
     try { localStorage.setItem("waiting.thread", res.threadId); } catch (e) {}
     return true;
-  } catch (e) { return false; }
+  } catch (e) { return codeOf(e); }
 }
 
 async function sendAll() {
@@ -2032,17 +2177,20 @@ async function sendAll() {
       const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
       try { await state.db.collection("answers").doc(it.id).set(body); }
       catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and paste them in chat."; state.copyOffer = true; break; }
-      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
+      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act, sank: sinkSent(it) });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
       entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, act: body.act, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
     }
     saveDraft();
     if (wrote.length) openSent(wrote, at);
     sentNow = wrote.filter((w) => !w.withdrawn).map((w) => w.it.id);
+    const hold = holdView(wrote.map((w) => w.it.id));
+    wrote.forEach((w) => { if (w.sank && hold.tops.has(w.it.id)) w.top = hold.tops.get(w.it.id); });
     render();
+    hold();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
-      setSentStatus(told ? TOLD : ANSWER_NOT_TOLD);
+      setSentStatus(told === true ? TOLD : ANSWER_NOT_TOLD(told));
     }
   } finally { state.sending = false; renderBar(); }
 }
@@ -2097,7 +2245,10 @@ async function undoSend() {
     if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); } catch (e) {} delete state.receipts[w.it.id]; }
   }
   if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + nList(late) + "."; }
+  undone.forEach(unsinkSent);
+  const hold = holdView(undone.map((w) => w.it.id), new Map(undone.filter((w) => w.top != null).map((w) => [w.it.id, w.top])));
   saveDraft(); closeSent(); render();
+  hold();
   const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
   if (told.length) {
     const can = await canTell();
@@ -2140,13 +2291,15 @@ $("copy").addEventListener("click", async () => {
 $("send").addEventListener("click", sendAll);
 
 /* ---------- Ask box: the owner's free text; a session answers under it (asks/<id>). Never mixed with Send answers. ---------- */
-// The page writes id, text and at once, at Send, and `re` with them when the ask is a reply to an answer. Sessions write only owner, read, reply, answered, home, filed (SKILL.md, "The database").
+// The page writes id, text and at once, at Send, and `re` with them when the ask is a reply to an answer. Later, at the owner's press, it writes `dismissed` on a thread's root ask with update (Dismiss: an ISO time; Restore: null). Sessions write only owner, read, reply, answered, home, filed (SKILL.md, "The database").
 const ASK_MAX = 4000, ASK_NOTICE = 500, ASK_SHOWN = 3, ASK_NEW_MS = 864e5;
 // sent: the batch the Undo covers. line: what the line under the buttons says in place of it (undone, allfail, undofail).
 // Each has `where`: "box" for the Ask box, or the id of the thread's root ask when a reply was sent from there. busyAt is the same for a send under way.
 // stack: the asks not sent yet, each { k, text, edit?, editErr?, gone?, state?, err? }. copyBox: words a refused clipboard leaves to select.
 // rep: the reply box of each thread by its root ask id, { open, text, err, note }.
-const askState = { map: null, bad: false, sent: null, line: null, note: "", copyBox: "", keepFail: false, busy: false, busyN: 0, busyAt: "box", stack: [], focus: null, open: {}, older: false, rep: {} };
+// gone: this visit's Dismiss or Restore by root ask id, { kind: "dismiss"|"restore", state: "busy"|"done"|"fail", code, back }. back: Dismiss pressed on a restored row.
+// hid: the root ids dismissed at load, read once. They sit under "Show N dismissed asks"; showGone opens that list.
+const askState = { map: null, bad: false, sent: null, line: null, note: "", copyBox: "", keepFail: false, busy: false, busyN: 0, busyAt: "box", stack: [], focus: null, open: {}, older: false, rep: {}, gone: {}, hid: null, showGone: false };
 let askTimer, askStamp = 0, askRowN = 0;
 // Ids made in one batch rise in the order made: askAll breaks the tie of a shared `at` by id, so the last-typed ask sorts on top.
 const askId = () => { askStamp = Math.max(Date.now(), askStamp + 1); return "ask-" + askStamp.toString(36) + Math.random().toString(36).slice(2, 4).padEnd(2, "0"); };
@@ -2175,15 +2328,18 @@ function askThreads() {
 const askWaiting = () => (askKnown() ? askAll().filter((a) => !askReply(a)).length : null);
 const askMembers = (t) => [t, ...t.reps];
 const askWaitsIn = (t) => askMembers(t).some((a) => !askReply(a));
+// A thread is dismissed when its root has a valid ISO `dismissed`, no record in it waits, and no answer in it is later than the dismiss. So an answer never lands hidden.
+const askDismissed = (t) => { const d = typeof t.dismissed === "string" ? Date.parse(t.dismissed) : NaN; return !isNaN(d) && !askWaitsIn(t) && !askMembers(t).some((a) => (Date.parse(a.answered) || -Infinity) > d); };
+const ASK_DIS_OFF = "Dismiss turns on once your reply has its answer.", ASK_EMPTY_DIS = "No ask on the list. Type above, and a session answers here.";
+const askShort = (x) => (x.length > 60 ? x.slice(0, 59) + "…" : x);
 // The newest answered record of a thread: a reply follows its answer, and its time says whether the thread has a new answer. A tie goes to the later record.
 const askLatest = (t) => askMembers(t).filter((a) => askReply(a)).reduce((best, a) => (!best || (Date.parse(a.answered) || -Infinity) >= (Date.parse(best.answered) || -Infinity) ? a : best), null);
 // An answer is new while it is later than the seen mark of this viewer, read once at load. With no mark, the last 24 hours are new.
-let ASK_SEEN = null;
-try { const t = Date.parse(localStorage.getItem("waiting.askSeen")); if (!isNaN(t)) ASK_SEEN = t; } catch (e) {}
+const ASK_SEEN = readStamp("waiting.askSeen");
 const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
 const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
-const markAsksSeen = () => { try { localStorage.setItem("waiting.askSeen", new Date().toISOString()); } catch (e) {} };
+const markAsksSeen = () => writeStamp("waiting.askSeen");
 document.addEventListener("visibilitychange", () => { if (document.hidden) markAsksSeen(); });
 window.addEventListener("pagehide", markAsksSeen);
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
@@ -2317,7 +2473,7 @@ function paintLine(box, sp, reply) {
   if (box.dataset.sig === sig) return;
   const fa = document.activeElement, hadUndo = fa && fa.id === "askUndo";
   box.dataset.sig = sig;
-  const old = box.querySelector(".sline"); if (old) old.remove();
+  const old = box.querySelector(":scope > .sline:not(.dline)"); if (old) old.remove();
   if (sp) box.prepend(h("p", { class: "sline", ...(reply ? { role: "status" } : {}) }, glyph(sp.g), h("span", { class: sp.cls }, ...sp.words), sp.undo ? h("button", { class: "btn alt", type: "button", id: "askUndo", onclick: undoAsk }, "") : null));
   if (hadUndo && $("askUndo")) $("askUndo").focus({ preventScroll: true });
 }
@@ -2404,14 +2560,19 @@ function renderAskList() {
   if (state.db === false || s.bad) root.replaceChildren(h("p", { class: "empty unk" }, "Your asks cannot be read in this view."));
   else if (!askKnown()) root.replaceChildren(h("p", { class: "empty" }, "Loading your asks…"));
   else {
-    const all = askThreads();
-    if (!all.length) root.replaceChildren(h("p", { class: "empty" }, "Nothing asked yet. Type above, and a session answers here."));
+    const threads = askThreads();
+    // The dismissed threads are read once per load. A dismiss this visit keeps its row as a Dismissed line, so no row comes up from behind "Show N older asks".
+    if (s.hid === null) s.hid = new Set(threads.filter(askDismissed).map((t) => t.id));
+    const away = (t) => s.hid.has(t.id) && (askDismissed(t) || (!!s.gone[t.id] && !askWaitsIn(t))), all = threads.filter((t) => !away(t)), set = threads.filter(away);
+    if (!threads.length) root.replaceChildren(h("p", { class: "empty" }, "Nothing asked yet. Type above, and a session answers here."));
     else {
       // Each thread with a waiting ask or reply, and each new answer, shows whatever its age. Of the answers already seen, the newest ASK_SHOWN show. The rest wait behind one button. A reply never moves a row.
       let seen = 0;
       const shown = all.filter((t) => askWaitsIn(t) || s.older || askFresh(askLatest(t)) || ++seen <= ASK_SHOWN), hidden = all.length - shown.length;
-      root.replaceChildren(...[h("ol", { class: "asklist", "aria-label": "Your asks, newest first" }, shown.map(askItem)),
-        hidden ? h("button", { class: "unfold older", type: "button", id: "askOlder", "aria-expanded": "false", onclick: () => { s.older = true; renderAskList(); const n = $("askList").querySelector("li:last-child [data-ask]"); if (n) n.focus({ preventScroll: true }); } }, h("span", { class: "chev", "aria-hidden": "true" }), h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, "Show " + hidden + " older " + (hidden === 1 ? "ask" : "asks")))) : null].filter(Boolean));
+      root.replaceChildren(...[all.length ? h("ol", { class: "asklist", "aria-label": "Your asks, newest first" }, shown.map((t) => askItem(t))) : h("p", { class: "empty" }, ASK_EMPTY_DIS),
+        hidden ? h("button", { class: "unfold older", type: "button", id: "askOlder", "aria-expanded": "false", onclick: () => { s.older = true; renderAskList(); const n = $("askList").querySelector("li:last-child [data-ask]"); if (n) n.focus({ preventScroll: true }); } }, h("span", { class: "chev", "aria-hidden": "true" }), h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, "Show " + hidden + " older " + (hidden === 1 ? "ask" : "asks")))) : null,
+        set.length ? h("button", { class: "unfold older", type: "button", id: "askDismissed", "aria-expanded": String(s.showGone), onclick: () => { s.showGone = !s.showGone; renderAskList(); } }, h("span", { class: "chev", "aria-hidden": "true" }), h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, "Show " + set.length + " dismissed " + (set.length === 1 ? "ask" : "asks")), h("span", { class: "uf-hide" }, "Hide dismissed asks"))) : null,
+        set.length && s.showGone ? h("ol", { class: "asklist dlist", id: "askDList", "aria-label": "Dismissed asks, newest first" }, set.map((t) => askItem(t, true))) : null].filter(Boolean));
     }
   }
   const n = askWaiting(), ct = $("askCount");
@@ -2447,29 +2608,77 @@ function askFoldedMine(r) {
   return h("p", { class: "fwait" }, glyph(answered ? "done" : "wait"), h("span", { class: "ftext" }, "Your reply: " + r.text),
     h("span", { class: "astate" }, ...(answered ? ["Answer from " + askOwner(r) + (fmt(r.answered) ? ", " + fmt(r.answered) : "") + ". Show answer to read it."] : askWaitWords(r))));
 }
-// The thread's end: Reply, or the reply box. It shows where the line of Send reply and Undo goes.
-function askReplyEnd(t) {
-  const k = t.id;
-  return h("div", { class: "replyend", "data-end": k }, repOf(k).open ? replyForm(k)
-    : h("button", { class: "btn alt replybtn", type: "button", id: "reply-" + k, "aria-expanded": "false", "aria-controls": "rf-" + k, "data-ask": k, onclick: () => openReply(k) }, "Reply"));
+/* Dismiss and Restore: one write of `dismissed` on the thread's root ask, with update. It never sets, deletes or touches the text or a reply (SKILL.md, "The database"). */
+// The label of a press that waits for its write sits in the box of the widest label, so the button does not move.
+const askPress = (cls, id, k, t, verb, busy, busyWord, onclick) => h("button", { class: "btn " + cls + " fixw", type: "button", id: id + k, "data-ask": k, "aria-label": verb + ": " + askShort(t.text), onclick },
+  h("span", {}, busy ? busyWord : verb), h("span", { class: "sz", "aria-hidden": "true" }, busyWord));
+const gonePress = (k, kind) => { const g = askState.gone[k]; return !!g && g.kind === kind && g.state === "busy"; };
+const restoreBtn = (t) => { const k = t.id; return askPress("alt restore", "res-", k, t, "Restore", gonePress(k, "restore"), "Restoring…", () => restoreAsk(k)); };
+// Off while a record in the thread waits: a dismissed thread would hide the answer the owner waits for. Off, not absent, so the reason sits beside it.
+function dismissBtns(t) {
+  const k = t.id, off = askWaitsIn(t), b = askPress("quiet dismiss", "dis-", k, t, "Dismiss", gonePress(k, "dismiss"), "Dismissing…", () => dismissAsk(k));
+  if (off) { b.setAttribute("aria-disabled", "true"); b.setAttribute("aria-describedby", "dw-" + k); b.removeAttribute("data-ask"); }
+  return off ? [b, h("span", { class: "dwhy", id: "dw-" + k }, ASK_DIS_OFF)] : [b];
 }
-function askItem(t) {
-  const s = askState, press = () => { s.open[t.id] = !askIsOpen(t); renderAskList(); const c = $("askList").querySelector('[data-ask="' + CSS.escape(t.id) + '"]'); if (c) c.focus({ preventScroll: true }); };
+// The answer to a press on a thread: where it failed, or that a restore is done. It sits in the row, outside the row button.
+function askRowLine(t) {
+  const g = askState.gone[t.id];
+  if (!g || (g.state !== "fail" && !(g.kind === "restore" && g.state === "done"))) return null;
+  const bad = g.state === "fail";
+  return h("p", { class: "sline dline", role: "status" }, glyph(bad ? "due" : "done"), h("span", { class: bad ? "bad" : "" },
+    ...(bad ? [g.kind === "dismiss" ? "Not dismissed (" + g.code + "). The ask stays on the list." : "Not restored (" + g.code + "). It stays dismissed."] : [h("b", {}, "Restored."), " It joins the list at the next load."])));
+}
+async function writeDismissed(k, to) {
+  const s = askState, g = s.gone[k], kind = to ? "dismiss" : "restore";
+  if (!state.db || (g && g.state === "busy")) return;
+  if (to) { const t = threadOf(k); if (!t || askWaitsIn(t)) return; }
+  const back = !!g && (g.back || (g.kind === "restore" && g.state === "done"));
+  s.gone[k] = { kind, state: "busy", back }; renderAskList();
+  let code = "";
+  try { await state.db.collection("asks").doc(k).update({ dismissed: to }); } catch (e) { code = (e && e.code) || "error"; }
+  if (code) s.gone[k] = { kind, state: "fail", code, back };
+  else { s.gone[k] = { kind, state: "done", back }; if (s.map && s.map[k]) s.map[k] = { ...s.map[k], dismissed: to }; }
+  renderAskList();
+  // The press was rebuilt under the focus: focus goes to the Dismissed line, to Dismiss after a Restore, or stays on the press that failed.
+  const f = code ? $((to ? "dis-" : "res-") + k) : to ? $("row-" + k) : $("dis-" + k);
+  if (f) f.focus({ preventScroll: true });
+}
+const dismissAsk = (k) => writeDismissed(k, new Date().toISOString());
+const restoreAsk = (k) => writeDismissed(k, null);
+// The thread's end: Reply and Dismiss in one row, or the reply box. It shows where the line of Send reply and Undo goes.
+// dl: the thread is in the dismissed list, where Restore stands in place of Dismiss.
+function askReplyEnd(t, dl) {
+  const k = t.id;
+  return h("div", { class: "replyend", "data-end": k }, askRowLine(t), repOf(k).open ? replyForm(k)
+    : h("div", { class: "endrow" }, h("button", { class: "btn alt replybtn", type: "button", id: "reply-" + k, "aria-expanded": "false", "aria-controls": "rf-" + k, "data-ask": k, onclick: () => openReply(k) }, "Reply"),
+      ...(dl && askDismissed(t) ? [restoreBtn(t)] : dismissBtns(t))));
+}
+// dl: the row is drawn in the dismissed list. It stays folded until pressed, and its side press is Restore.
+function askItem(t, dl) {
+  const s = askState, k = t.id, g = s.gone[k], isOpen = () => (dl ? s.open[k] === true : askIsOpen(t));
+  // A restored row keeps its place until the next load, and Show answer on it opens the thread as an ordinary row.
+  const restored = !dl && !!g && ((g.kind === "restore" && g.state === "done") || (g.kind === "dismiss" && g.state !== "done" && g.back));
+  const dropped = !dl && !restored && !askWaitsIn(t) && (g ? g.kind === "restore" || g.state === "done" : askDismissed(t));
+  const press = () => { const op = restored || !isOpen(); if (restored) delete s.gone[k]; s.open[k] = op; renderAskList(); const c = $("askList").querySelector('[data-ask="' + CSS.escape(k) + '"]'); if (c) c.focus({ preventScroll: true }); };
   const answered = askReply(t), when = fmt(t.answered) || "", latest = askLatest(t);
-  if (answered && !askIsOpen(t)) {
+  if (dropped) return h("li", { class: "askc dropped", id: "row-" + k, tabindex: "-1" },
+    h("p", { class: "sline", role: "status" }, glyph("done"), h("span", {}, h("b", {}, "Dismissed."), " ", h("span", { class: "dt" }, t.text)), restoreBtn(t)), askRowLine(t));
+  if (answered && (restored || !isOpen())) {
     // A fold changes only at a load or a press, so a thread with replies keeps the fold it first drew, and a new answer to a reply does not unfold it.
-    if (t.reps.length && !(t.id in s.open)) s.open[t.id] = false;
-    return h("li", { class: "askc folded" }, h("button", { class: "frow", type: "button", "aria-expanded": "false", "data-ask": t.id, onclick: press },
+    if (t.reps.length && !(k in s.open) && !dl) s.open[k] = false;
+    // A row with a waiting reply has no Dismiss: it has no room for the reason, and Show answer leads to it.
+    const side = dl ? (askDismissed(t) ? restoreBtn(t) : dismissBtns(t)[0]) : askWaitsIn(t) ? null : dismissBtns(t)[0];
+    return h("li", { class: "askc folded" + (side ? " withd" : ""), id: "row-" + k }, h("button", { class: "frow", type: "button", "aria-expanded": "false", "data-ask": k, onclick: press },
       glyph("done"), h("span", { class: "ftext" }, t.text), h("span", { class: "fwhen" }, "Answered" + (when ? " " + when : "")), h("span", { class: "fgo" }, "Show answer")),
-      ...t.reps.map(askFoldedMine));
+      side, ...t.reps.map(askFoldedMine), askRowLine(t));
   }
   const head = h("div", { class: "ahead" }, glyph(askWaitsIn(t) ? "wait" : "done"), h("span", { class: "aby" }, "You asked" + (fmt(t.at) ? ", " + fmt(t.at) : "")),
     answered ? null : (validT(t.at) ? h("span", {}, waited(t.at)) : null),
     latest && askFresh(latest) ? h("span", { class: "newmark" }, "New answer") : null,
     answered ? h("button", { class: "morebtn", type: "button", "aria-expanded": "true", "data-ask": t.id, onclick: press }, "Fold") : null);
   const body = [...(answered ? askAnswer(t) : []), ...t.reps.flatMap(askMine)];
-  return h("li", { class: "askc" }, head, t.orphan ? h("p", { class: "reline" }, "Re: an ask not on this page") : null, h("p", { class: "atext" }, t.text),
-    answered ? null : h("p", { class: "astate" }, ...askWaitWords(t)), body.length ? h("div", { class: "thread" }, body) : null, latest ? askReplyEnd(t) : null);
+  return h("li", { class: "askc", id: "row-" + k }, head, t.orphan ? h("p", { class: "reline" }, "Re: an ask not on this page") : null, h("p", { class: "atext" }, t.text),
+    answered ? null : h("p", { class: "astate" }, ...askWaitWords(t)), body.length ? h("div", { class: "thread" }, body) : null, latest ? askReplyEnd(t, dl) : null);
 }
 function renderAsks() { renderAskForm(); renderStack(); renderAskList(); renderRail(); }
 
@@ -2544,7 +2753,7 @@ async function sendAsk(rk) {
   const note = rp ? "Replied on the waiting page. Writer: " + askWriter() + ". Ask " + w0.id + " re " + w0.re + ", answered by " + plain(w0.by) + ": " + cut(w0.text) + "."
     : "Asked on the waiting page. Writer: " + askWriter() + ". " + (wrote.length === 1 ? "Ask " + w0.id + ": " + cut(w0.text) + "." : wrote.length + " asks: " + wrote.map((w) => w.id + ": " + cut(w.text)).join("; ") + ".");
   const told = await notifyClaude(fitBytes(note), can);
-  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderLine(); }
+  if (s.sent === sent) { sent.told = told === true ? TOLD : NOT_TOLD(told); renderLine(); }
 }
 // Undo deletes each record of the batch and puts the asks back in the list, in their order, ahead of any stacked since. The box is never written.
 // Each ask goes into the kept list before its delete, so a reload between the two loses none. The window is read from the clock before each delete, as undoLeft does.
@@ -2819,7 +3028,7 @@ const LATER_PH = { k: "later", n: "Later" };
    collide with it, and it survives an HTML attribute (a NUL would not). */
 const NO_PHASE = "\u2400none";
 const ORDER = ["todo", "active", "done", "blocked"];
-const LBL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked" };
+const LBL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked", stalled: "Stalled", paused: "Paused" };
 const CULL_KEYS = [{ k: "debts", n: "Debt files" }, { k: "decisions", n: "Decision files" }, { k: "hooks", n: "Hook lines" }, { k: "words", n: "CLAUDE.md words" }];
 /* Which step each clean-up warning points to. A link is left out when that step no longer exists. */
 const OFF_TRACK_LINKS = { hooks: "c18", debts: "c10", stop: "c2" };
@@ -2852,6 +3061,9 @@ const GLY = {
   active: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--acc)" stroke-width="1.6"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="var(--acc)"/></svg>',
   todo: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>',
   blocked: '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--holds)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>',
+  // Stalled: a ring broken off part way, red. Paused: a ring with two bars, grey. Shape and colour together.
+  stalled: '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5a5.5 5.5 0 1 1-5.2 3.7" fill="none" stroke="var(--holds)" stroke-width="1.8" stroke-linecap="round"/><circle cx="7" cy="7" r="1.7" fill="var(--holds)"/></svg>',
+  paused: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M5.6 4.7v4.6M8.4 4.7v4.6" stroke="var(--muted)" stroke-width="1.6"/></svg>',
 };
 const rg = (s) => `<span class="rg">${GLY[s] || GLY.todo}</span>`;
 // Where the mark alone carries the state, it names the state for a screen reader, so the word shows once.
@@ -2861,7 +3073,9 @@ const rgl = (s) => `<span class="rg" role="img" aria-label="${LBL[s] || LBL.todo
 const byOrder = (a, b) => (isNum(a.order) ? a.order : 1e9) - (isNum(b.order) ? b.order : 1e9) || String(a.id).localeCompare(String(b.id));
 const bag = (k) => (hasData && D[k] && typeof D[k] === "object" ? D[k] : {});
 const listOf = (k) => Object.entries(bag(k)).map(([id, v]) => ({ id, ...v })).sort(byOrder);
-const steps = listOf("steps").map((s) => ({ ...s, status: ORDER.includes(s.status) ? s.status : "todo" }));
+// The roadmap writes a step in progress as `doing` or `active`: one state in the data. A step with no live lane keeps it,
+// but stepRow and renderNow draw it Stalled or Paused (stall below), so only a live doing step reads In progress.
+const steps = listOf("steps").map((s) => ({ ...s, status: s.status === "doing" ? "active" : ORDER.includes(s.status) ? s.status : "todo" }));
 const topics = hasData ? listOf("topics") : null;
 const meta = bag("meta");
 const phases = meta.phases && typeof meta.phases === "object" ? meta.phases : null;
@@ -2963,6 +3177,19 @@ function delta(cur, ref, { downGood = true, pctMode = false, neutral = false } =
   return `<span class="dl ${cls}">${pctMode ? pctS(pct(cur, ref)) : (d > 0 ? "▲" : "▼") + num(Math.abs(d))}</span>`;
 }
 
+/* ---------- the stalled read: window.ROADMAP_BUILD.stalled, written by the build; the page only draws it ---------- */
+const DECIDES = { owner: "Owner", coordinator: "Coordinator", triage: "Triage" };
+const stall = (() => {
+  const r = B && B.stalled && typeof B.stalled === "object" ? B.stalled : null;
+  if (!r) return { steps: null, why: "unknown (this page's build holds no stalled read)", plain: "this page holds no stalled read" };
+  if (!Array.isArray(r.steps)) return { steps: null, why: typeof r.why === "string" && r.why ? r.why : "unknown (the build gave no reason)", plain: "the build could not read the steps" };
+  const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+  const rows = r.steps.filter((x) => x && typeof x.id === "string");
+  const bad = Object.fromEntries((Array.isArray(r.badPause) ? r.badPause : []).filter((b) => b && typeof b.id === "string").map((b) => [b.id, String(b.why == null ? "" : b.why)]));
+  return { steps: rows, paused: ids(r.paused), bad, items: Array.isArray(r.items) ? r.items.filter((x) => x && x.n != null) : null, itemsWhy: typeof r.itemsWhy === "string" ? r.itemsWhy : "" };
+})();
+const stalledIds = new Set(stall.steps ? stall.steps.map((x) => x.id) : []), pausedIds = new Set(stall.paused || []);
+
 /* ---------- read-at stamps and live work ---------- */
 function readAt() {
   const panels = B && Array.isArray(B.panels) ? B.panels : null;
@@ -2995,6 +3222,40 @@ function liveWork() {
     + (w.skipped && w.skipped.length ? `<p class="asof unk" style="padding:4px 14px">Skipped, wrong shape in the live file: ${esc(w.skipped.join(", "))}</p>` : "") + "</details>";
 }
 
+/* The stalled band: a step marked in progress with no live lane and no open pull request, or a waiting item routed to a lane
+   that is gone. The action is said once, here; a step row carries a mark only (renderNow, stepRow). Unknown is a line, never none. */
+function stalledBand() {
+  if (!stall.steps) {
+    return `<div class="livenone" id="stBand"><p><span class="lh">Stalled steps</span> <span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${esc(stall.plain)}</span></p>`
+      + `<details><summary>What the build said</summary><pre>${esc(reason(stall.why))}</pre></details></div>`;
+  }
+  const items = stall.items, n = stall.steps.length + (items ? items.length : 0);
+  const title = (id) => { const s = steps.find((x) => x.id === id); return s && s.title ? s.title : "Untitled step"; };
+  const head = n
+    ? `<div class="sth"><h3>${rg("stalled")}Stalled: <span class="num">${n}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>`
+    : items ? `<div class="sth calm"><h3>${rg("done")}No stalled step</h3></div>`
+    : `<div class="sth calm"><h3>No step is stalled</h3></div>`;
+  const fix = (x) => {
+    const marks = Array.isArray(x.fix) ? x.fix.filter((m) => typeof m === "string" && m) : typeof x.fix === "string" && x.fix !== "todo" ? [x.fix] : [];
+    if (marks.length) return `<span class="fx land">done: landed in ${esc(marks.join(", "))}</span>`;
+    return Object.prototype.hasOwnProperty.call(stall.bad, x.id) ? `<span class="fx bad">Pause not counted: ${esc(stall.bad[x.id])}.</span>` : "";
+  };
+  const stepRows = stall.steps.map((x) => `<li><span class="k"><span class="id">${esc(x.id)}</span></span><span><button type="button" class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join("");
+  const itemPart = !items
+    ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: no item carries its lane yet</span>`
+      + (reason(stall.itemsWhy) ? `<details><summary>What the build said</summary><pre>${esc(reason(stall.itemsWhy))}</pre></details>` : "") + "</li></ul>"
+    : items.length ? `<h4>Waiting items</h4><ul>${items.map((it) => `<li class="it"><span class="k"><span>Item <span class="num">${esc(it.n)}</span></span></span><span>Answer routed to <span class="ln">${esc(it.lane)}</span>; lane gone</span></li>`).join("")}</ul>` : "";
+  const stepPart = stall.steps.length ? (items && !items.length ? `<ul>${stepRows}</ul>` : `<h4>Steps</h4><ul>${stepRows}</ul>`) : "";
+  const pz = stall.paused.length
+    ? `<details class="pz"${n ? "" : " open"}><summary>${rg("paused")}Paused: <span class="num">${stall.paused.length}</span></summary><ul>${stall.paused.map((id) => {
+      const p = (steps.find((x) => x.id === id) || {}).paused || {}, at = when(p.at), who = DECIDES[p.decides];
+      const line = [who ? who + " decides" : "", at ? `paused <span class="num">${esc(fmt(at.toISOString()))}</span>` : ""].filter(Boolean).join("; ");
+      return `<li><span class="k"><span class="id">${esc(id)}</span></span><span><button type="button" class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ""}${line ? `<span class="fx">${line}</span>` : ""}</span></li>`;
+    }).join("")}</ul></details>`
+    : "";
+  return `<section class="stall${n ? " hot" : ""}" id="stBand" aria-label="Stalled steps">${head}${stepPart}${n || !items ? itemPart : ""}${pz}</section>`;
+}
+
 /* ---------- where you are ---------- */
 function renderNow() {
   const cur = curPhase(), ss = byPhase(cur.k), done = ss.filter((s) => s.status === "done").length, act = ss.filter((s) => s.status === "active").length;
@@ -3005,7 +3266,7 @@ function renderNow() {
     <div class="lead"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act ? `, <span class="num">${act}</span> in progress` : ""}</div>
     <div class="segbar" aria-hidden="true">${segs(done, act, 0, ss.length)}</div>
     <div class="lead">Whole plan <span class="num">${tdone}/${tot}</span> done</div></div>
-  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
+  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${stalledIds.has(s.id) ? rgl("stalled") : pausedIds.has(s.id) ? rgl("paused") : rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
   <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing left to start in this phase.</li>'}</ol></div>
   <div class="offt"><h3>Off track <span class="num" style="color:${off.length ? "var(--holds)" : "var(--muted)"}">${off.length}</span></h3><ul>${off.map((o) => {
     const s = steps.find((x) => x.id === o.id);
@@ -3018,7 +3279,8 @@ function renderRail() {
   const cur = curPhase(), shown = shownPhase();
   $("svRail").innerHTML = PH.map((p) => {
     const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
-    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="num" aria-hidden="true">${d}/${ss.length}</span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
+    const u = ss.filter(stepNew).length;
+    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}${u ? ", " + u + " updated since your last visit" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="nmr">${u ? countMark(u) : ""}<span class="num" aria-hidden="true">${d}/${ss.length}</span></span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
   }).join("");
 }
 
@@ -3064,14 +3326,27 @@ function metaTiles(k) {
 }
 
 /* ---------- steps ---------- */
+// A step is new when its updatedAt is later than the owner's last visit (VISIT, read once at load). The words show on the first marked row of a drawing; each later one is the dot.
+const stepNew = (s) => VISIT !== null && Date.parse(s.updatedAt) > VISIT;
+let stepWords = true;
+function stepMark(s) {
+  const full = "Updated since your last visit", first = stepWords;
+  stepWords = false;
+  return first ? '<span class="newmark" aria-hidden="true">Updated</span>' : `<span class="newmark dot" aria-hidden="true" title="${full}"></span>`;
+}
+// A step updated since the last visit draws open, and the done fold of its phase opens with it (the done list sorts the newest first, so it is at the top).
+// A press after that wins; a marked step in another phase shows when the owner opens that phase, and the phase rail counts it.
+steps.filter(stepNew).forEach((s) => { ui.open.add(s.id); if (s.status === "done") ui.folds.add(phaseKey(s)); });
+const countMark = (n) => `<span class="newmark ct" aria-hidden="true" title="${n} updated since your last visit">${n}</span>`;
 const landed = (id) => { const w = B && B.landed && B.landed[id]; return Array.isArray(w) && w.length ? w : null; };
 function stepRow(s, nextIds) {
   const ni = nextIds.indexOf(s.id), lw = landed(s.id);
-  const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : ""];
-  const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = LBL[s.status] || LBL.todo;
-  return `<li class="${s.status}${open ? " open" : ""}" id="s-${esc(s.id)}">
-    <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
-      <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
+  const stl = stalledIds.has(s.id), pzd = pausedIds.has(s.id), isNew = stepNew(s);
+  const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : "", stl ? "Stalled" : "", pzd ? "Paused" : "", isNew ? "Updated since your last visit" : ""];
+  const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = stl ? LBL.stalled : pzd ? LBL.paused : LBL[s.status] || LBL.todo;
+  return `<li class="${s.status}${stl ? " stl-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
+    <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(stl ? "stalled" : pzd ? "paused" : s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
+      <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}${stl ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLY.stalled}</span>` : ""}${pzd ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused: ${esc((s.paused || {}).why || "")}">${GLY.paused}</span>` : ""}${isNew ? stepMark(s) : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
     <div class="rbody"><dl>
       <dt>Status</dt><dd>${lbl}</dd>
       ${s.why ? `<dt>Why</dt><dd>${esc(s.why)}</dd>` : ""}
@@ -3090,13 +3365,14 @@ const clampPage = (p, pages) => Math.max(0, Math.min(p, pages - 1));
 const defaultPage = (list) => { const ix = list.findIndex((s) => s.status !== "done"); return ix < 0 ? 0 : Math.floor(ix / pageSize()); };
 
 function renderPhase() {
+  stepWords = true;
   const k = shownPhase(), p = PH.find((x) => x.k === k), ss = byPhase(k);
   const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
   const nextIds = nextUp().map((s) => s.id), size = pageSize();
   const pages = Math.max(1, Math.ceil(open.length / size));
   if (ui.page[k] == null) ui.page[k] = defaultPage(open);
   const pg = ui.page[k] = clampPage(ui.page[k], pages);
-  const dPages = Math.max(1, Math.ceil(d / size)), dpg = ui.donePage[k] = clampPage(ui.donePage[k] || 0, dPages);
+  const du = done.filter(stepNew).length, dPages = Math.max(1, Math.ceil(d / size)), dpg = ui.donePage[k] = clampPage(ui.donePage[k] || 0, dPages);
   let asof = "", foot = "", tiles = "";
   if (k === "cleanup") {
     const ci = cullInfo(); tiles = cullTiles(ci);
@@ -3116,7 +3392,7 @@ function renderPhase() {
     <div class="hint"><span>${open.length} open step${open.length === 1 ? "" : "s"}, in work order</span><span>Read only</span></div>
     <ul class="rsteps">${open.slice(pg * size, (pg + 1) * size).map((s) => stepRow(s, nextIds)).join("") || `<li class="noneyet">${ss.length ? "Every step in this phase is done." : "No steps in this phase yet."}</li>`}</ul>
     ${pager("open", pg, pages, open.length, "open steps")}
-    ${d ? `<div class="donefold${ui.folds.has(k) ? " open" : ""}"><button type="button" class="fold" data-fold="${esc(k)}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done</span></button>
+    ${d ? `<div class="donefold${ui.folds.has(k) ? " open" : ""}"><button type="button" class="fold" data-fold="${esc(k)}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done${du ? `<span class="sr">, ${du} updated since your last visit</span>` : ""}</span>${du ? countMark(du) : ""}</button>
       <div class="fb"><ul class="rsteps">${done.slice(dpg * size, (dpg + 1) * size).map((s) => stepRow(s, nextIds)).join("")}</ul>${pager("done", dpg, dPages, d, "done")}</div></div>` : ""}
   </section>`;
 }
@@ -3249,7 +3525,7 @@ function setView(v) {
   saveView();
 }
 function build() {
-  root.innerHTML = `<div class="sv-head">${readAt()}</div>${liveWork()}${hasData ? '<section class="now" id="svNow" aria-label="Where the plan stands"></section>' : ""}
+  root.innerHTML = `<div class="sv-head">${readAt()}</div>${stalledBand()}${liveWork()}${hasData ? '<section class="now" id="svNow" aria-label="Where the plan stands"></section>' : ""}
     <div class="views" role="tablist" aria-label="Status views">${VIEWS.map(([k, n]) => `<button type="button" role="tab" id="vt-${k}" data-view="${k}" aria-controls="v-${k}" aria-selected="false">${n}</button>`).join("")}</div>
     <div class="sview" id="v-plan" role="tabpanel" aria-labelledby="vt-plan">${hasData ? '<nav class="prail" id="svRail" aria-label="Phases"></nav><div class="cols"><div id="svPhases"></div><aside class="side" id="svSide"></aside></div>' : noRoadmap()}</div>
     <div class="sview" id="v-log" role="tabpanel" aria-labelledby="vt-log" hidden>${hasData ? '<div class="cols"><div id="svDays"></div><aside class="side" id="svSide2"></aside></div>' : NOPLAN("Changes")}</div>

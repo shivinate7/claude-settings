@@ -44,7 +44,8 @@ words: each retired word in a checked repo, one item per line: `  <word>: <file>
   files. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
   parse, makes the group unknown. It prints the claude-settings commit whose glossary it read. A term of
   the child's own GLOSSARY.md, at its root, spans a retired word, as a claude-settings term does. A child
-  term that repeats a claude-settings term, or is the retired word itself, does not. After WORDS_DEADLINE
+  term that repeats a claude-settings term, or is the retired word itself, does not. It is an item at its
+  GLOSSARY.md line, unless the word is tagged (this sense). An unreadable child GLOSSARY.md makes the group unknown. After WORDS_DEADLINE
   seconds the group is `unknown - stopped at <file>, N of M read`. That limit is a bandaid for file shapes
   the read is not yet fast on.
 supersede: text in the child that departs from a shared rule and names no known exemption. It reads the tracked
@@ -750,18 +751,33 @@ def shell_words(line):
 
 def xcodebuild_runs(text):
     """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
-    ends at a COMMAND_MARKS mark or the line end."""
+    ends at a COMMAND_MARKS mark or the line end. A `$(` or a backtick opens an inner command and keeps the outer group
+    aside, restored at the close, so an action after a substitution in an argument stays in the run."""
     runs = []
+
+    def end(group):
+        names = [w.rsplit("/", 1)[-1] for w in group]
+        if "xcodebuild" in names:
+            runs.append(group[names.index("xcodebuild") + 1:])
+
     for line in text.splitlines():
-        group = []
-        for word in shell_words(line) + [";"]:
-            if word in COMMAND_MARKS:
-                names = [w.rsplit("/", 1)[-1] for w in group]
-                if "xcodebuild" in names:
-                    runs.append(group[names.index("xcodebuild") + 1:])
+        group, outer = [], []  # `outer`: (opener, the group set aside at it), innermost last
+        for word in shell_words(line):
+            if word in ("$(", "(") or (word == "`" and not (outer and outer[-1][0] == "`")):
+                outer.append((word, group))
+                group = []
+            elif word in (")", "`"):
+                end(group)
+                opener, held = outer.pop() if outer else (None, [])
+                group = held if opener in ("$(", "`") else []
+            elif word in COMMAND_MARKS:
+                end(group)
                 group = []
             else:
                 group.append(word)
+        end(group)
+        for _opener, held in reversed(outer):  # a substitution left open at the line end
+            end(held)
     return runs
 
 
@@ -1035,7 +1051,10 @@ def probe_words(root):
         raise CannotRun("%s has no rows under '%s'" % (check_glossary.GLOSSARY, check_glossary.SECTION))
     found, unread, files = [], [], tracked(root)
     child = read(root, "GLOSSARY.md") if "GLOSSARY.md" in files else None  # the child's own domain terms, in its root
+    if "GLOSSARY.md" in files and child is None:  # an unread child glossary hides each clash: unknown, not clean
+        raise CannotRun("the child's GLOSSARY.md cannot be read as UTF-8")
     spans = check_glossary.child_spans(check_glossary.rows(child.lstrip("\ufeff")), table) if child else []
+    clashes = check_glossary.child_clashes(child.lstrip("\ufeff"), table) if child else []
 
     def add(rel, line, problem, detail):
         word = WORD_HIT.search(problem)
@@ -1043,6 +1062,8 @@ def probe_words(root):
         if item not in found:
             found.append(item)
 
+    for line, term, problem in clashes:  # a child term that defines a claude-settings term again
+        found.append((term, "GLOSSARY.md", line, problem))
     deadline = time.monotonic() + WORDS_DEADLINE
 
     def tick():

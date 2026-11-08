@@ -25,7 +25,7 @@ Every republish of a waiting page is main's `skills/waiting-page/page.html` with
 - Known limit: the stamp is written at PreToolUse, so a publish that then fails still stamps. A stamp write that fails logs one `noted` line under `page-stale`.
 - Known limit: the session-start line compares blob shas, not `matches`. A `page.html` edit that `matches` ignores (title text, white space) prints the line until the page is republished.
 - Known limit: the rule never fetches. A stale local `origin/main` makes an old page read as current, and a newer page as behind.
-- Known limit: an `ArtifactData` write is not gated here. It writes items, not page code.
+- Known limit: an `ArtifactData` write is not judged by this guard. It writes items, not page code.
 - Known limit: a fresh cloud container has no stamp, so its session start prints no line.
 - Known limit: the stamp records the last allowed publish from this clone, not the live page. A publish from another machine, or by hand, moves the page without moving the stamp.
 

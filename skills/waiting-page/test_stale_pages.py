@@ -779,14 +779,22 @@ class Stale(unittest.TestCase):
 
     def items_file(self, items):
         """The items as a JSON list: the first shape --items takes."""
-        path = os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="items-"), "items.json")
-        return write_text(path, json.dumps(items))
+        return self.list_file(items, "items")
+
+    def list_file(self, docs, name):
+        """`docs` as a JSON list in <name>.json, in a folder of its own: the list shape --items and --answers take."""
+        path = os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix=name + "-"), name + ".json")
+        return write_text(path, json.dumps(docs))
 
     def items_folder(self, items):
         """The items as the folder `ArtifactData list` saves: one <id>.json per item, and the .complete marker it leaves."""
-        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix="items-")
-        for item in items:
-            write_text(os.path.join(folder, item["id"] + ".json"), json.dumps(item))
+        return self.docs_folder({item["id"]: item for item in items}, "items")
+
+    def docs_folder(self, docs, name):
+        """The folder `ArtifactData list` saves: one <doc id>.json per entry of `docs` ({doc id: data}), and the .complete marker it leaves."""
+        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix=name + "-")
+        for doc_id, data in docs.items():
+            write_text(os.path.join(folder, doc_id + ".json"), json.dumps(data))
         write_text(os.path.join(folder, ".complete"), "")
         return folder
 
@@ -795,8 +803,9 @@ class Stale(unittest.TestCase):
         return (write_text(os.path.join(self.fetched, "current.html"), PAGE),
                 write_text(os.path.join(self.fetched, "behind.html"), set_body(ALTERED, STALE_BODY)))
 
-    def items_run(self, page, items, env):
-        return self.page_run(page, "--main", TEMPLATE, "--items", items, env=env)
+    def items_run(self, page, items, env, answers=None):
+        extra = [] if answers is None else ["--answers", answers]
+        return self.page_run(page, "--main", TEMPLATE, "--items", items, *extra, env=env)
 
     def page_line(self, r):
         """The page's verdict line: the first stdout line."""
@@ -1089,8 +1098,248 @@ class Stale(unittest.TestCase):
                                  "the lane line for item 154 with %s is not the unknown line:\n%s" % (label, r.stdout + r.stderr))
                 self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with %s" % label)
 
+    # Single-page mode with --answers <file or folder>, with --items: one kept-answer line per answer kept on a closed item.
+    # Each do-not-flag case also holds the incident item (item 356), so the run's own incident line shows the answers were
+    # read before the negative is checked. An open item, an arbiter ruling and a park answer are legitimate states: never named.
 
-# Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run gated.
+    def shaped(self, items, answers, as_folder):
+        """(--items arg, --answers arg) in one shape: a list file each, or a folder each. `answers` is (doc id, data) pairs. The list
+        file holds each doc's data alone, as a list gives it; the folder names each doc by its id."""
+        if as_folder:
+            return self.items_folder(items), self.docs_folder(dict(answers), "answers")
+        return self.items_file(items), self.list_file([data for _, data in answers], "answers")
+
+    def paired_run(self, extra_items, extra_answers, as_folder):
+        """A run with the incident item and its kept answer, plus `extra_items` and `extra_answers` ((doc id, data) pairs)."""
+        current, _ = self.current_and_behind()
+        items, answers = self.shaped([INCIDENT, *extra_items], [(INCIDENT_ID, INCIDENT_ANSWER), *extra_answers], as_folder)
+        return self.items_run(current, items, {}, answers=answers)
+
+    def assert_kept_line(self, r, n, item_id):
+        """Exactly one kept-answer line names item `n` (id `item_id`), and it starts with the line the flag prints."""
+        named = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: item %d (%s)" % (n, item_id))]
+        self.assertEqual(len(named), 1, "want one kept-answer line for item %d (%s), got %d:\n%s"
+                         % (n, item_id, len(named), r.stdout + r.stderr))
+        self.assertTrue(named[0].startswith(kept_line(n, item_id)), "the kept-answer line for item %d differs:\n%s" % (n, named[0]))
+
+    def assert_not_named(self, r, item_id, case):
+        """The run read the incident's answer first (the scope), and no kept-answer line names `item_id`, which is `case`."""
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        named = [line for line in kept_lines(r.stdout) if item_id in line]
+        self.assertEqual(named, [], "%s is named as a kept answer:\n%s" % (case, r.stdout + r.stderr))
+
+    def test_a_kept_answer_on_a_closed_item_is_named_in_both_shapes(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items, answers = self.shaped([INCIDENT], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder)
+                r = self.items_run(current, items, {}, answers=answers)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assert_page_word(r, "current", 0)
+
+    def test_a_closed_item_with_a_last_answer_and_a_kept_answer_is_named(self):
+        # Route and close, step 2, deletes the answer when it closes the item. A kept answer on a closed item is a missed delete,
+        # whether or not the close also wrote lastAnswer.
+        current, _ = self.current_and_behind()
+        item = decision_item(INCIDENT_N, INCIDENT_ID, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items, answers = self.shaped([item], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder)
+                r = self.items_run(current, items, {}, answers=answers)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assert_page_word(r, "current", 0)
+
+    def assert_not_named_in_both_shapes(self, extra_items, extra_answers, item_id, case):
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file", case=case):
+                r = self.paired_run(extra_items, extra_answers, as_folder)
+                self.assert_not_named(r, item_id, case)
+
+    def test_an_open_item_with_a_kept_answer_is_not_named(self):
+        self.assert_not_named_in_both_shapes([decision_item(357, "open-answer", status="open")],
+                                             [("open-answer", answer_for("open-answer", 357))],
+                                             "open-answer", "an open item (status open) with a kept answer")
+
+    def test_an_item_with_no_status_key_and_a_kept_answer_is_not_named(self):
+        self.assert_not_named_in_both_shapes([decision_item(358, "no-status-answer", status=None)],
+                                             [("no-status-answer", answer_for("no-status-answer", 358))],
+                                             "no-status-answer", "an item with no status key and a kept answer")
+
+    def test_an_open_busy_lane_item_with_a_last_answer_and_a_kept_answer_is_not_named(self):
+        item = decision_item(359, "lane-answer", status="open", lane=LANE, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        self.assert_not_named_in_both_shapes([item], [("lane-answer", answer_for("lane-answer", 359))],
+                                             "lane-answer", "an open busy-lane item with a last answer and a kept answer")
+
+    def test_a_closed_arbiter_ruling_with_an_overturn_answer_is_not_named(self):
+        self.assert_not_named_in_both_shapes([decision_item(360, "ruling-answer", arbiter=True, pick="a")],
+                                             [("ruling-answer", answer_for("ruling-answer", 360, choice="overturn", note="reopen"))],
+                                             "ruling-answer", "a closed arbiter ruling with an overturn answer")
+
+    def test_a_park_line_answer_under_park_dot_id_on_a_closed_item_is_not_named(self):
+        # The list shape holds no key, so the park line's `id` equals the closed item's id: only its `parked` field keeps it unnamed.
+        park = {"parked": True, "id": "parked-entry", "act": "unpark", "ref": "Round 2: the parked line", "note": "back to work", "at": ANSWER_AT}
+        self.assert_not_named_in_both_shapes([decision_item(361, "parked-entry")], [("park.parked-entry", park)],
+                                             "parked-entry", "a park.<id> answer on a closed item")
+
+    def test_an_item_park_answer_on_a_closed_item_is_not_named(self):
+        item = decision_item(362, "parked-item", lastAnswer={"act": "park", "note": "later", "at": ANSWER_AT})
+        park = {"item": "parked-item", "n": 362, "act": "park", "note": "later", "at": ANSWER_AT}
+        self.assert_not_named_in_both_shapes([item], [("parked-item", park)], "parked-item", "an item park answer on a closed item")
+
+    def test_an_answer_with_no_matching_item_is_not_named(self):
+        self.assert_not_named_in_both_shapes([], [("orphan-answer", answer_for("orphan-answer", 363))],
+                                             "orphan-answer", "an answer with no matching item")
+
+    def test_the_kept_answer_line_comes_after_the_wait_and_lane_lines(self):
+        current, _ = self.current_and_behind()
+        env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+        items, answers = self.shaped([INCIDENT, wait_item(154, {"repo": REPO, "run": RUN}), self.lane_item(155)],
+                                     [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder=False)
+        r = self.items_run(current, items, env, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 4, "want the verdict, the wait line, the lane line and the kept-answer line:\n" + r.stdout + r.stderr)
+        self.assertTrue(lines[1].startswith("wait: item 154 ") and lines[2].startswith("wait: item 155 "),
+                        "the wait and lane lines are not right after the verdict line:\n" + r.stdout)
+        self.assert_page_word(r, "current", 0)
+
+    def test_a_behind_page_keeps_exit_1_and_still_prints_the_kept_answer_line(self):
+        _, behind = self.current_and_behind()
+        items, answers = self.shaped([INCIDENT], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder=False)
+        r = self.items_run(behind, items, {}, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        self.assert_page_word(r, "behind", 1)
+
+    def test_without_answers_the_output_is_the_verdict_line_alone(self):
+        # Control: the answer is kept on disk, but the run is not given --answers, so it must print no kept-answer line.
+        current, _ = self.current_and_behind()
+        self.list_file([INCIDENT_ANSWER], "answers")
+        r = self.items_run(current, self.items_file([INCIDENT]), {})
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(r.stdout.splitlines(), [self.page_line(r)], "a run without --answers printed lines past the verdict:\n" + r.stdout)
+
+    def test_full_size_kept_answers_name_only_the_closed_items_in_order(self):
+        current, _ = self.current_and_behind()
+        items, answers, want = [], [], []
+        for i in range(40):  # closed, answer kept: named, in item order
+            item_id = "incident-%03d" % i
+            items.append(decision_item(1000 + i, item_id))
+            answers.append((item_id, answer_for(item_id, 1000 + i)))
+            want.append(kept_line(1000 + i, item_id))
+        for i in range(40):  # open, answer kept: not named
+            item_id = "open-%03d" % i
+            items.append(decision_item(1100 + i, item_id, status="open"))
+            answers.append((item_id, answer_for(item_id, 1100 + i)))
+        for i in range(40):  # arbiter ruling, overturn kept: not named
+            item_id = "ruling-%03d" % i
+            items.append(decision_item(1200 + i, item_id, arbiter=True))
+            answers.append((item_id, answer_for(item_id, 1200 + i, choice="overturn")))
+        for i in range(40):  # closed, no answer: not named
+            items.append(decision_item(1300 + i, "quiet-%03d" % i))
+        self.assertEqual(len(items), 160)
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items_arg, answers_arg = self.shaped(items, answers, as_folder)
+                r = self.items_run(current, items_arg, {}, answers=answers_arg)
+                got = kept_lines(r.stdout)
+                self.assertEqual(len(got), 40, "want 40 kept-answer lines, one per closed item with a kept answer, got %d:\n%s"
+                                 % (len(got), r.stdout + r.stderr))
+                for line, prefix in zip(got, want):
+                    self.assertTrue(line.startswith(prefix), "a kept-answer line is not the one for its item, in item order:\n" + line)
+                self.assert_page_word(r, "current", 0)
+
+    def test_an_empty_answers_list_or_folder_prints_no_kept_answer_line(self):
+        current, _ = self.current_and_behind()
+        items = self.items_file([INCIDENT])  # closed, no answer on file
+        cases = (("empty list file", self.list_file([], "answers")), ("folder with only the marker", self.docs_folder({}, "answers")))
+        for label, answers in cases:
+            with self.subTest(label):
+                r = self.items_run(current, items, {}, answers=answers)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(kept_lines(r.stdout), [], "an empty --answers printed a kept-answer line:\n" + r.stdout)
+
+    def test_an_unreadable_answers_file_prints_one_unknown_line_and_keeps_the_exit_code(self):
+        current, _ = self.current_and_behind()
+        items = self.items_file([INCIDENT])
+        cases = (("malformed JSON", "[{"), ("a JSON object, not a list", "{}"))
+        for label, text in cases:
+            with self.subTest(label):
+                path = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="answers-"), "answers.json"), text)
+                r = self.items_run(current, items, {}, answers=path)
+                unknown = [line for line in r.stdout.splitlines()[1:] if "unknown" in line]
+                self.assertEqual(len(unknown), 1, "an unreadable --answers file prints no single unknown line:\n" + r.stdout + r.stderr)
+                self.assertNotIn("Traceback", r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 0)
+
+    def test_a_closed_item_with_waits_and_a_kept_answer_is_not_named(self):
+        # SKILL.md, "Route and close": while an item has `waits`, steps 2 to 4 never delete answers/<id>, so the kept answer
+        # is legitimate whatever the `waits` value. A closed item is never polled, so no gh call is made for it.
+        for label, waits in (("a run", {"repo": REPO, "run": RUN}), ("a PR", {"repo": REPO, "pr": PR}), ("a malformed value", "soon")):
+            with self.subTest(label):
+                self.assert_not_named_in_both_shapes([decision_item(364, "waits-closed", waits=waits)],
+                                                     [("waits-closed", answer_for("waits-closed", 364))],
+                                                     "waits-closed", "a closed item with waits (%s) and a kept answer" % label)
+
+    def test_an_items_folder_with_no_complete_marker_prints_one_unknown_kept_answer_line_and_no_item_line(self):
+        # The items list may be cut short, so a closed status in it is not proof: one unknown line, and no item line.
+        current, _ = self.current_and_behind()
+        items = self.docs_folder({INCIDENT_ID: INCIDENT}, "items")
+        os.remove(os.path.join(items, ".complete"))
+        answer_shapes = (("list file", self.list_file([INCIDENT_ANSWER], "answers")),
+                         ("folder of <id>.json files", self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")))
+        for label, answers in answer_shapes:
+            with self.subTest(label):
+                r = self.items_run(current, items, {}, answers=answers)
+                unknown = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: unknown")]
+                self.assertEqual(len(unknown), 1, "want one kept-answer: unknown line for an items folder with no marker, got %d:\n%s"
+                                 % (len(unknown), r.stdout + r.stderr))
+                named = [line for line in kept_lines(r.stdout) if not line.startswith("kept-answer: unknown")]
+                self.assertEqual(named, [], "an items folder with no marker still names an item:\n" + r.stdout)
+                self.assert_page_word(r, "current", 0)
+
+    def test_pin_an_answers_folder_with_no_complete_marker_prints_one_unknown_kept_answer_line(self):
+        # Pin: an answers folder with no marker may be cut short, so it reads as one unknown kept-answer line and names no item.
+        current, _ = self.current_and_behind()
+        items = self.items_file([INCIDENT])
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        os.remove(os.path.join(answers, ".complete"))
+        r = self.items_run(current, items, {}, answers=answers)
+        kept = kept_lines(r.stdout)
+        self.assertEqual(len(kept), 1, "want exactly one kept-answer line for an answers folder with no marker, got %d:\n%s"
+                         % (len(kept), r.stdout + r.stderr))
+        self.assertTrue(kept[0].startswith("kept-answer: unknown"), "the one kept-answer line is not the unknown line:\n" + kept[0])
+        self.assert_page_word(r, "current", 0)
+
+    def test_the_unknown_kept_answer_line_names_the_folder_with_no_marker(self):
+        # The unknown line says which folder may be cut short: "items" for an items folder, "answers" for an answers folder.
+        current, _ = self.current_and_behind()
+        items = self.docs_folder({INCIDENT_ID: INCIDENT}, "items")
+        os.remove(os.path.join(items, ".complete"))
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        os.remove(os.path.join(answers, ".complete"))
+        cases = (("items folder with no marker", items, self.list_file([INCIDENT_ANSWER], "answers"), "items"),
+                 ("answers folder with no marker", self.items_file([INCIDENT]), answers, "answers"))
+        for label, items_arg, answers_arg, folder in cases:
+            with self.subTest(label):
+                r = self.items_run(current, items_arg, {}, answers=answers_arg)
+                self.assert_page_word(r, "current", 0)
+                unknown = kept_lines(r.stdout)
+                self.assertEqual(len(unknown), 1, "want one kept-answer line:\n" + r.stdout + r.stderr)
+                self.assertIn("the %s folder" % folder, unknown[0],
+                              "the unknown line does not name the %s folder:\n%s" % (folder, unknown[0]))
+
+    def test_an_items_folder_doc_with_no_id_field_is_matched_by_its_file_name_and_still_flagged(self):
+        # export_page.docs_in keys each folder doc by its file name without .json, so the file name is the doc id.
+        current, _ = self.current_and_behind()
+        no_id = {key: value for key, value in INCIDENT.items() if key != "id"}
+        items = self.docs_folder({INCIDENT_ID: no_id}, "items")
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        r = self.items_run(current, items, {}, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        self.assert_page_word(r, "current", 0)
+
+
+# Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
 RUN_ARGV = "run view %s --repo %s --json status,conclusion" % (RUN, REPO)
 
@@ -1149,6 +1398,42 @@ def lane_line(n):
 def lane_line_unknown(n):
     """The line an open item on a lane prints when its lastAnswer has no usable `at`: the same line, `answered at unknown`."""
     return "wait: item %d (lane %s): waiting (answered at unknown)" % (n, LANE)
+
+
+# Fixtures for the --answers cases. An answer doc names its item in `item` (the list shape has no doc id), and a park line
+# names its entry in `id`. A line is the one the flag prints for a kept answer on a closed item.
+ANSWER_AT, ITEM_ADDED = "2026-11-07T19:41:50.035Z", "2026-11-07T19:33:00Z"
+
+
+def decision_item(n, item_id, status="closed", **extra):
+    """A decision item as the page holds it: `status` (None: no status key), and the `extra` fields added."""
+    item = {"id": item_id, "n": n, "kind": "decision", "added": ITEM_ADDED, "options": [{"key": "a"}, {"key": "b"}]}
+    if status is not None:
+        item["status"] = status
+    item.update(extra)
+    return item
+
+
+def answer_for(item_id, n, **extra):
+    """The answer doc the page writes at answers/<item id>: a choice and a note, with the `extra` fields replacing any."""
+    doc = {"item": item_id, "n": n, "choice": "a", "at": ANSWER_AT, "note": "x"}
+    doc.update(extra)
+    return doc
+
+
+def kept_line(n, item_id):
+    """The line the flag prints for a kept answer on closed item `n` (id `item_id`). A remedy may follow it."""
+    return "kept-answer: item %d (%s) is closed and answers/%s is kept" % (n, item_id, item_id)
+
+
+def kept_lines(out):
+    """The lines of `out` that start as a kept-answer line does."""
+    return [line for line in out.splitlines() if line.startswith("kept-answer:")]
+
+
+INCIDENT_N, INCIDENT_ID = 356, "round3-fail-holds"  # the incident: a closed decision whose answer was kept
+INCIDENT = decision_item(INCIDENT_N, INCIDENT_ID)
+INCIDENT_ANSWER = answer_for(INCIDENT_ID, INCIDENT_N)
 
 
 def load_stale_pages():

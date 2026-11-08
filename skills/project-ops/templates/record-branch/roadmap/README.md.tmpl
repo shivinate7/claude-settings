@@ -1,8 +1,11 @@
 # Roadmap
 
 `data/` holds one JSON file per document: `data/steps/<id>.json`, `data/topics/<id>.json` and
-`data/meta/<name>.json`. A step file holds the fields `title`, `status` (`todo`, `active`, `done`),
-`phase`, `order`, `why`, `note`, `ask` and `updatedAt`. Two more fields serve the guard: `lane`
+`data/meta/<name>.json`. A step file holds the fields `title`, `status` (`todo`, `doing`, `active`, `done`),
+`phase`, `order`, `why`, `note`, `ask` and `updatedAt`. A `doing` or `active` step with no live lane and no open
+PR is stalled: the build exits 1 until triage sets it `todo` or `done`, or writes `paused`
+(`{"why", "decides": "owner" | "coordinator" | "triage", "at": ISO time with a zone, "by": "triage"}`; triage
+writes it only). Two more fields serve the guard: `lane`
 (`"session_<id>"`, the lane bound to the step; the coordinator writes it) and `grants` (step grants,
 each `{"words", "at", "role", "by": "triage"}`; triage writes them only). The skill gives their shape.
 

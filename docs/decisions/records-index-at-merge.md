@@ -8,8 +8,8 @@ debt with a one-line gist. Only the merge tool rebuilds the page. A branch never
 The tool rebuilds the page on the integration branch before the branch goes ready. `merge <pr> --confirm`
 on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip, as
 `--confirm` does, and a head that carries a claim. It commits the page alone, pushes it, and stops: mark
-the PR ready, then run `--confirm` again. The tool sends no GraphQL (a cloud session's `gh` gets 403 on
-it), so the batch runner marks the PR ready, after the draft run of the pushed head shows (skill
+the PR ready, then run `--confirm` again. The tool sends no GraphQL, so the batch runner marks the PR ready
+by its session's route (route pr-ready-mcp-cloud), after the draft run of the pushed head shows (skill
 ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
 record numbers. It takes no merge lock. A PR that turns draft after the first read is the one case: the step runs
 under the lock that confirm already took, and releases it.
@@ -17,7 +17,7 @@ The same two allow rules cover both steps, so no new rule is needed.
 
 Take a ready PR on the default branch with no record number to claim or resume. When its rebuilt page would
 change the tree, `--confirm` refuses before any wait, claim or push. The refusal and the preview name
-the remedy: return the PR to draft (GraphQL only, so a session on the owner's computer does it), run
+the remedy: return the PR to draft (route pr-draft-mcp-cloud), run
 `merge <n> --confirm` on the draft, then mark it ready after its draft run shows. A head that holds a
 Record-claim on a base with no stamp kinds first reverts that claim commit, since the draft step refuses a
 claim head. A current page makes no

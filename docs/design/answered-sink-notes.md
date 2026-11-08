@@ -87,7 +87,7 @@ Settled by the brief, not options here:
 ## Just sent, still in place
 
 - `#s=just-sent`: No. 36, sent at 16:02 after a load at 15:55, keeps today's answered card in its tier
-  until reload (ux-order-holds-still, `freezeSeen`). Its chip stays in its tier row as sent; the tier
+  until reload (`freezeSeen`). Its chip stays in its tier row as sent; the tier
   count excludes it; the section count excludes it. No. 40, sent before the load, sits in the section.
 
 ## Groups

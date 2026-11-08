@@ -16,7 +16,7 @@ A field on a waiting item is for the owner to read. A field the page does not dr
   - It is built against a named incident, below. It landed 2026-10-30.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. For a call to the waiting page it reads `page.html` once per write (about 2,200 lines). It writes no file unless it denies.
   - Known limit: the guard sees that a field is listed, not that the page draws it well. A name added to the block with no drawing passes. Review catches it.
-  - Known limit: the guard reads the template `page.html`, not the live page. A page published before this change lacks the block, so the stale-page gate (`stale_pages.py`) is the backstop.
+  - Known limit: the guard reads the template `page.html`, not the live page. A page published before this change lacks the block, so the stale-page check (`stale_pages.py`) is the backstop.
   - Known limit: it cannot see a stored field. An item written before the rule keeps its fields, and the page warns on them.
 - The fields `reply`, `lastAnswer` and `lane` are listed, and the page draws each on an open item (`docs/design/last-answer-notes.md`).
 
