@@ -2180,3 +2180,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- guard-line-any-debt-word: PR #2183 (branch habit-is-not-a-guard): a guard line clears on any non-negated clause that holds the word debt, so "Guard: briefs run the check; the tech debt sits elsewhere" passes (lint/report_guard.py `_debt_named`). Claude is unlikely to write it by mistake. Decision: mistake-means-missing-guard.
