@@ -478,6 +478,14 @@ AGENTWT = os.path.join(GITMAIN, ".claude", "worktrees", "agent-x")
 FARWT = os.path.join(ROOT, "worktrees", "stray")
 SYMWT = os.path.join(GITMAIN, ".claude", "worktrees", "linked-agent")
 DECOYMAIN = os.path.join(ROOT, "decoyhost", ".claude", "worktrees", "decoy")
+# The records the Monitor cases of worktree-home and session-home read (see the Monitor block below). A
+# call reads a record, and the first call of an agent or a session is what writes it, so _build_gitmain
+# seeds both: MON_HOME is the recorded home of MON_AGENT, a folder GITMAIN is not inside, and MON_LOST is
+# the worktree MON_SESSION recorded, which is gone.
+MON_AGENT = "monhome1"
+MON_HOME = os.path.join(GITMAIN, ".claude", "worktrees", "agent-" + MON_AGENT)
+MON_SESSION = "monlost-session-1"
+MON_LOST = os.path.join(GITMAIN, ".claude", "worktrees", "lost-monitor")
 CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
@@ -1531,6 +1539,8 @@ def _build_gitmain():
     # path's PREFIX, not just test for the substring.
     run_vcs(GITMAIN, "worktree", "add", "-q", AGENTWT, "-b", "agent-x-branch")
     run_vcs(GITMAIN, "worktree", "add", "-q", FARWT, "-b", "stray-branch")
+    write(os.path.join(GITMAIN, ".git", "agent-homes", MON_AGENT), MON_HOME + "\n")
+    write(os.path.join(GITMAIN, ".git", "session-homes", MON_SESSION), MON_LOST + "\n")
     for _tree in (GITMAIN, GITWT, AGENTWT, FARWT):
         write(os.path.join(_tree, "docs", "DEBTS.md"), "uncommitted\n")
         write(os.path.join(_tree, "f.txt"), "uncommitted\n")
@@ -6369,6 +6379,16 @@ monitor("Monitor: a cd from a worktree into the primary checkout, then a write, 
         MON_CD_OUT, "deny", "other-checkout", cwd=AGENTWT)
 sh("Bash twin of the Monitor case: a cd from a worktree into the primary checkout, then a write, is refused",
    MON_CD_OUT, "deny", "other-checkout", cwd=AGENTWT)
+# worktree_home_hit and session_home_hit each gate a shell call on SHELL_COMMAND_TOOLS. Each case reads the
+# record _build_gitmain seeded, so one call is the whole case.
+monitor("Monitor: an agent's command from outside its recorded home is refused as worktree-home",
+        "echo hi", "deny", "worktree-home", cwd=GITMAIN, agent_id=MON_AGENT)
+sh("Bash twin of the Monitor case: an agent's command from outside its recorded home is refused as worktree-home",
+   "echo hi", "deny", "worktree-home", cwd=GITMAIN, agent_id=MON_AGENT)
+monitor("Monitor: a lost session's write into the primary checkout is refused as session-home",
+        "echo x > f.txt", "deny", "session-home", cwd=GITMAIN, session=MON_SESSION)
+sh("Bash twin of the Monitor case: a lost session's write into the primary checkout is refused as session-home",
+   "echo x > f.txt", "deny", "session-home", cwd=GITMAIN, session=MON_SESSION)
 
 
 # =========================================================================== 2c-bis. the WSL launch allow list
