@@ -12177,6 +12177,11 @@ class CloudSession(Env):
                 rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
+    def runner_confirm(self):
+        """-> run_main of `merge 7 --confirm --head <live head>`: a batch runner's confirm, which names the head its CI ran on
+        (coordinator ruling 2026-11-08 12:55 CST, option (a)). The head is read when the call is made, so a case that moves feat first reads the moved head."""
+        return self.run_main("7", "--confirm", "--head", self.head())
+
 class MergeRoleCheck(CloudSession):
     """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is batch-runner (decision session-tiers: the coordinator never merges).
     The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
@@ -12332,7 +12337,7 @@ class MergeRoleCheck(CloudSession):
 
     def test_a_batch_runner_session_merges(self):
         self.put_role("batch-runner")
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # coordinator ruling 2026-11-08 12:55 CST, option (a): the runner's confirm names its head
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
@@ -12391,7 +12396,7 @@ class MergeRoleCheck(CloudSession):
         # decision session-tiers: re-pointed from coordinator to batch-runner
         rc, out, err = self.run_main("--role", "batch-runner")
         self.assertEqual(rc, 0, out + err)
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # coordinator ruling 2026-11-08 12:55 CST, option (a): the runner's confirm names its head
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
@@ -12494,14 +12499,14 @@ class StandingGrantSwitch(CloudSession):
         """`merge 7 --confirm` in a cloud session as `role`, after a false grant on the base: the grant refusal, and nothing merged."""
         self.put_role(role)
         refs = self.refs()
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())  # coordinator ruling 2026-11-08 12:55 CST, option (a)
         self.assert_grant_refused(rc, out, err, refs)
 
     # ---- the key is optional: absent is today's behaviour, and no notice names it
     # decision session-tiers: re-pointed from coordinator to batch-runner
     def test_an_absent_key_proceeds_for_a_batch_runner_and_no_notice_names_it(self):
         self.put_role("batch-runner")  # the fixture's base is CONFIG, which leaves out requiredChecks: the defaults notice prints
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # coordinator ruling 2026-11-08 12:55 CST, option (a)
         self.assert_merged(rc, out, err)
         self.assertIn("leaves out", out)  # the notice is there, so the check below reads a real one
         self.assertNotRegex(out + err, r"(?i)standinggrant")
@@ -12510,7 +12515,7 @@ class StandingGrantSwitch(CloudSession):
         drop_config(self)
         self.put_role("batch-runner")
         with unittest.mock.patch.object(merge, "host_default_branch", return_value="main"):
-            rc, out, err = self.run_main("7", "--confirm")
+            rc, out, err = self.runner_confirm()  # coordinator ruling 2026-11-08 12:55 CST, option (a)
         self.assert_merged(rc, out, err)
         self.assertNotRegex(out + err, r"(?i)standinggrant")
 
@@ -12526,7 +12531,7 @@ class StandingGrantSwitch(CloudSession):
     def test_true_proceeds_for_a_batch_runner_in_the_cloud(self):
         self.grant_config(standingGrant=True)
         self.put_role("batch-runner")
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # coordinator ruling 2026-11-08 12:55 CST, option (a)
         self.assert_merged(rc, out, err)
 
     def test_true_proceeds_outside_the_cloud(self):
@@ -12597,7 +12602,7 @@ class StandingGrantSwitch(CloudSession):
         self.grant_config()
         self.put_pr_tree(self.grant_text(standingGrant=False))
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # coordinator ruling 2026-11-08 12:55 CST, option (a)
         self.assert_merged(rc, out, err)
 
 
