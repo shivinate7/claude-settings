@@ -6284,9 +6284,9 @@ test("a stalled or paused row reads Stalled or Paused in its status, label and m
 // ---------------------------------------------------------------- the row tint: a stalled row takes the stalled colour, a paused row none (lane nfp-stalled-row-tint)
 // The tint and the edge are on the row's .rrow. A stalled row takes the page's own red tint, --holds mixed 14% into --surface as .dl.bad
 // draws it, and a 3px left edge in --holds. A paused row takes no tint and a 3px left edge in --muted. The in-progress row (a4, with a live
-// lane) keeps --acc-soft and --acc. Each expected value is computed on the row, in each scheme. Each row's mark is checked first, so a red
-// names the tint or the edge and not the label.
-// The probe helpers are copies of the roadmap test file's: the two pages' test files keep their own, as their colour helpers already do.
+// lane) keeps --acc-soft and --acc. A to-do row takes neither. Each expected value is computed on the row, in each scheme. Each row's mark is
+// checked first, so a red names the tint or the edge and not the label.
+// The probe helpers are copied from the roadmap test file, which does not export its own, and no shared test module holds one yet, so this file keeps a copy.
 const probeOf = (loc, prop, value) => loc.evaluate((el, [p, v]) => {
   const s = document.createElement("span");
   s.style[p] = v;
@@ -6335,6 +6335,36 @@ test("control: the row tint: an in-progress row keeps the --acc-soft tint and it
     const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "inset 3px 0 0 var(--acc)");
     assert.equal(edge, wantEdge, `in ${scheme} the in-progress row's left edge is ${edge}, not the 3px --acc edge ${wantEdge}`);
   }
+});
+
+// The stalled fixture has no to-do step, so the to-do control adds one (t7) to it, in the same phase.
+const stalledWithTodoPage = () => {
+  const steps = stalledFixture();
+  Object.assign(steps, stepsOf([["t7", "cleanup", 7, "todo"]]));
+  return withStalled(phasePage(steps), STALLED);
+};
+test("control: the row tint: a to-do row beside a stalled one keeps no tint and no stalled edge, in light and dark", async (t) => {
+  const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-c1 [aria-label="Stalled"]').count(), 1, "step c1 is not marked Stalled: there is no stalled row beside the to-do row");
+  assert.match(await page.locator("#s-t7 .rrow").getAttribute("aria-label"), /To do/, "step t7 does not read To do");
+  const row = page.locator("#s-t7 .rrow");
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bg = await computedOf(row, "backgroundColor"), wantBg = await probeOf(row, "backgroundColor", "transparent");
+    assert.equal(bg, wantBg, `in ${scheme} the to-do row takes a tint: its background is ${bg}, not none`);
+    const edge = await computedOf(row, "boxShadow"), wantEdge = await probeOf(row, "boxShadow", "none");
+    assert.equal(edge, wantEdge, `in ${scheme} the to-do row has a left edge ${edge}, not none`);
+  }
+});
+// A paused title keeps the in-progress title's weight: it is read against that title, not against a literal.
+test("the row tint: a paused row's title has the in-progress title's font weight", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "step a3 is not marked Paused: there is no paused title to compare");
+  assert.match(await page.locator("#s-a4 .rrow").getAttribute("aria-label"), /In progress/, "step a4 does not read In progress: there is no in-progress title to compare with");
+  const paused = await computedOf(page.locator("#s-a3 .rrow .ttl"), "fontWeight"), active = await computedOf(page.locator("#s-a4 .rrow .ttl"), "fontWeight");
+  assert.equal(paused, active, `the paused step's title is weight ${paused}, not the in-progress title's ${active}`);
 });
 
 test("merged_page.py --live hands its JSON to the build as the live file", () => {
