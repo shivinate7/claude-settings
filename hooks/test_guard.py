@@ -100,7 +100,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "lane-brief-roles": "one lane, three roles: a send_message brief whose first non-blank line is the lane-brief marker, sent to a lane that passes lane-one-topic, is refused unless its text names a session id for each of Coordinator, Triage and Batch runner; a brief to a target that is no lane, and a message without the marker, pass; the brief template's placeholders, filled, pass and, unfilled, are refused",
+    "lane-brief-roles": "one lane, three roles: a send_message brief whose first non-blank line is the lane-brief marker, sent to a lane that passes lane-one-topic, is refused unless its text names a session id for each of Coordinator, Triage and Batch runner; a brief to a target that is no lane, and a message without the marker, pass; an owner's timed override lifts it; the brief template's placeholders, filled, pass and, unfilled, are refused",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10219,7 +10219,7 @@ FAMILY = "lane-brief-roles"
 # Rule lane-brief-roles. A lane brief is a send_message whose first non-blank line starts with the marker `Lane brief:`.
 # Sent to a lane that passes lane-one-topic, the brief must name a session id for each of three roles: Coordinator,
 # Triage and Batch runner. A role is named when its label, in any case, is followed by an optional number (as in
-# `Batch runner 8`), an optional colon, optional markdown (`*`, `_`, a backtick) and whitespace, then `session_<id>`.
+# `Batch runner 8`), markdown (`*`, `_`, a backtick), an optional colon, markdown again, and whitespace, then `session_<id>`.
 # An id names a role only beside its label, and the whole message is read, not only its first line. lane-one-topic
 # runs first, so a brief it refuses keeps its own reason. A target that is no lane, and a message without the marker,
 # pass. Presence and format only: no id is matched to a roster.
@@ -10279,6 +10279,11 @@ step_allow("role labels in lower case are allowed: a label is read in any case",
            role_path("step-topic-lane"),
            "Lane brief: icon-b. Topic: icons. coordinator session_BRIEFCOORD01; triage session_BRIEFTRIAGE01; "
            "batch runner 8 session_BRIEFRUNNER01.", rule=LANE_BRIEF_ROLES)
+# Passes: the Triage label in bold, its colon after the bold. Ruled an allow by the coordinator, 2026-11-08, by 12:27 UTC.
+step_allow("a Triage label in bold, with its colon after the bold, is allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nCoordinator: session_BRIEFCOORD01\n**Triage**: session_BRIEFTRIAGE01\n"
+           "Batch runner 8: session_BRIEFRUNNER01", rule=LANE_BRIEF_ROLES)
 # Passes: a brief to a target that is no lane (cs-build:triage) is not judged for roles.
 step_allow("a brief with no roles to a target that is no lane is allowed",
            role_path("step-triage"), "Lane brief: icon-b. Topic: colors.", rule=LANE_BRIEF_ROLES)
@@ -14026,6 +14031,36 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The lane-brief-roles override story is appended here, as the base-copy check is, because LOG_CHECKS_EXTRA is defined
+# here, and its family is set by hand. An owner's timed override lifts a brief refused for its roles, as it lifts any
+# refusal (decision owner-override): refused with no override, allowed after `override 15m`, refused at the end instant.
+LBR_OVERRIDE_LABEL = ("lane-brief-roles: an owner's timed override lets through a brief refused for its roles "
+                      "until it ends")
+
+
+def lbr_override_check():
+    config, session = ov_config("timed-lane-brief-roles"), "ov-timed-lane-brief-roles"
+    transcript = role_path("step-topic-lane")
+
+    def call(seconds):
+        return lambda: ov_call(SEND_MESSAGE, {"session_id": ROLE_OTHER, "message": "Lane brief: icon-b. Topic: icons."},
+                               NOGIT, config, session, seconds, env=ROLE_ENV, transcript=transcript)
+
+    ok, why = ov_story([("with no override", call(0), "deny", LANE_BRIEF_ROLES)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override 15m")
+    steps = [("first call", call(60), "allow", LANE_BRIEF_ROLES),
+             ("call just before the end", call(OV_TIMED_SECONDS - 1), "allow", LANE_BRIEF_ROLES),
+             ("call at the end instant", call(OV_TIMED_SECONDS), "deny", LANE_BRIEF_ROLES)]
+    ok, why = ov_story(steps, note)
+    if not ok:
+        return False, why
+    return True, "a brief refused for its roles is allowed until a timed override ends, then refused again"
+
+
+LOG_CHECKS_EXTRA.append((LBR_OVERRIDE_LABEL, lbr_override_check))
+LOG_FAMILY[LBR_OVERRIDE_LABEL] = "lane-brief-roles"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -24066,17 +24101,18 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None, load=None, env_path=None):
+            temp=None, env=None, load=None, env_path=None, transcript=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a start call meets
-    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
+    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's).
+    `transcript` is the transcript the guard reads, for a call that reads one (a lane brief)."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": env_path,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
-        "env": fixed, "tool_input": tool_input, "load": load,
+        "env": fixed, "tool_input": tool_input, "load": load, "transcript": transcript,
     })
 
 
