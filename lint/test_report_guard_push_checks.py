@@ -967,7 +967,7 @@ class PushCheckTests(unittest.TestCase):
             ("the remote-tracking ref names the head", 1, lambda folder: git_commit(folder, remote_branch=FEAT),
              lambda head: [head[:7]]),
             ("a local branch with no remote-tracking ref", 3,
-             lambda folder: git_commit(folder, remote_branch=None, on_branch=FEAT), lambda head: [FEAT]),
+             lambda folder: git_commit(folder, remote_branch=None, on_branch=FEAT), lambda head: [head[:7]]),
             ("no ref of the name", 3, lambda folder: git_commit(folder, remote_branch=None), lambda head: []),
         )
         for label, bound, setup, names_of in cases:
