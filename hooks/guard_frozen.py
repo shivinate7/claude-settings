@@ -365,8 +365,8 @@ def _resolve_vars(cmd: str) -> str:
 # A word in view that holds a quote is read in whole: the text of each quote is its own words, so
 # `system("sh", "-c", "tee P")` shows its `tee P`.
 # RESIDUAL GAPS: a write made by a program's own code;
-# `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"`; `sort -o P`,
-# `git diff --output=P`, `git config --file P`, `>| P` and a quoted redirect target with a space.
+# `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"`; `sort -o P`
+# (the builder test check reads it: `_output_targets`), `git diff --output=P`, `git config --file P`, `>| P` and a quoted redirect target with a space.
 # Main missed these too.
 _PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
 _QUIET = _PRINTERS | {"cd", "set-location"}
@@ -375,6 +375,59 @@ _QUIET = _PRINTERS | {"cd", "set-location"}
 # the forms of each tool that write.
 _READ_ONLY_TOOLS = frozenset(("head", "tail", "ls", "less", "sort", "uniq", "diff", "stat", "file", "find"))
 _FIND_WRITERS = frozenset(("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"))
+
+
+# The short flags of `sort` that take a value: what follows one in its cluster is that value, never a flag.
+_SORT_VALUE_SHORTS = "kStT"
+
+
+def _output_flag_value(command: str, word: str):
+    """The one home of the flags that name the file a command writes. None when `word` is no such flag of
+    `command`; else the file glued to it (`-ofile`, `--output=file`), or '' when the next word is the file
+    (`-o file`, `--output file`). `sort` only: `-o` in a short cluster, and `--output` or any prefix of it
+    (`--o`, `--out`), as GNU sort reads them."""
+    if command != "sort" or not word.startswith("-") or word == "-":
+        return None
+    if word.startswith("--"):
+        flag, equals, value = word.partition("=")
+        if len(flag) < 3 or not "output".startswith(flag[2:]):
+            return None
+        return value if equals else ""
+    for place, letter in enumerate(word[1:], 1):
+        if letter == "o":
+            return word[place + 1:]
+        if letter in _SORT_VALUE_SHORTS:
+            return None
+    return None
+
+
+def _output_targets(words):
+    """The files that the output flags in one segment's unquoted `words` name (`_output_flag_value`)."""
+    command, rest = _segment_command(words)
+    targets = []
+    for at, word in enumerate(rest):
+        value = _output_flag_value(command, word)
+        if value:
+            targets.append(value)
+        elif value == "" and at + 1 < len(rest):
+            targets.append(rest[at + 1])
+    return targets
+
+
+def _split_background(segment):
+    """`segment` cut at each lone, unquoted `&` (a background job ends there, so the next word starts a
+    command, as after `;`). `&&`, `|&`, `>&`, `<&` and `&>` hold an `&` that is no break. A quoted or escaped
+    `&` is text. `split_segments` keeps a lone `&` inside its segment, for callers that read a job as one."""
+    parts, start = [], 0
+    for at, char, quote in guard_core.walk_quotes(segment):
+        if char != "&" or quote:
+            continue
+        if (segment[at - 1:at] if at else "") in ("&", "|", ">", "<") or segment[at + 1:at + 2] in ("&", ">"):
+            continue
+        parts.append(segment[start:at])
+        start = at + 1
+    parts.append(segment[start:])
+    return [type(segment)(part) for part in parts]
 
 
 def _command_reads(command: str, args) -> bool:
@@ -391,8 +444,9 @@ def _command_reads(command: str, args) -> bool:
     if command == "find":
         return not _FIND_WRITERS.intersection(args)
     if command == "sort":
-        return not any("o" in word or "T" in word for word in shorts) and not any(
-            word.startswith(("--o", "--c", "--t")) for word in longs)
+        return not any("T" in word for word in shorts) and not any(
+            _output_flag_value("sort", word) is not None for word in args) and not any(
+            word.startswith(("--c", "--t")) for word in longs)
     if command == "uniq":
         return sum(1 for word in args if not word.startswith("-")) <= 1
     if command == "less":
@@ -1382,6 +1436,11 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 words.extend((">", target))
                 shown.extend((">", target))
                 script.extend((">", target))
+        if command_position:   # the builder test check only: the file an output flag names (`sort -otests/x`) is written
+            for target in _output_targets([_unquoted(word) for word in raw]):
+                words.extend((">", target))
+                shown.extend((">", target))
+                script.extend((">", target))
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         for _files, commands in sed_targets.values():
@@ -1556,14 +1615,17 @@ def _sed_script_targets(script):
 def _sed_command_words(command):
     """The words of a sed `e` command that count as written: none when each command in it only reads
     (`_command_reads`: a printer or a read-only tool), else every word, since a printer can feed a writer (`e echo tests/x | xargs rm`). So
-    `e cat tests/x` reads and `e touch tests/x` writes. A command with text the segment split cannot see
+    `e cat tests/x` reads and `e touch tests/x` writes. A lone `&` ends a command as `;` does
+    (`_split_background`), so `e head a & tee tests/x` writes. The file an output flag names (`sort -otests/x`)
+    counts as written beside the words (`_output_targets`). A command with text the segment split cannot see
     (`_SCRIPT_RUNS_HIDDEN`) counts every word. Its redirects are read apart, by the shell scan of the
     whole command (`_shell_write_scan`)."""
+    commands = [[_unquoted(word) for word in _quoted_words(part, True)]
+                for segment in split_segments(command) for part in _split_background(segment)]
     if not _SCRIPT_RUNS_HIDDEN.search(command):
-        commands = [[_unquoted(word) for word in _quoted_words(segment, True)] for segment in split_segments(command)]
         if all(_command_reads(*_segment_command(words)) for words in commands if words):
             return []
-    return command.split()
+    return [*command.split(), *(target for words in commands for target in _output_targets(words))]
 
 
 def _sed_script_words(raw):
