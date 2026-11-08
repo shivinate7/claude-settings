@@ -524,11 +524,15 @@ class PrBodyEscape(unittest.TestCase):
             env["GITHUB_EVENT_PATH"] = self.event_file(body)
         return PrintedFindings.run_main(self, ["--repo", self.r.dir, "--upstream", "origin/main", "--strict", *argv], "utf-8", env=env)
 
-    def event_file(self, body):
-        """An event file of the kind CI writes for a pull request, holding `body` as its body. Its path is in this run's folder."""
+    def event_file(self, body, text=None):
+        """An event file of the kind CI writes for a pull request, holding `body` as its body. Its path is in this run's folder.
+        `text`, when given, is the file's exact text instead (a file that is not a pull request event)."""
         fd, path = tempfile.mkstemp(prefix="event-", suffix=".json", dir=RUN)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"pull_request": {"body": body}}, f)
+            if text is None:
+                json.dump({"pull_request": {"body": body}}, f)
+            else:
+                f.write(text)
         return path
 
     def assert_fails_on_app(self, rc, text):
@@ -566,6 +570,21 @@ class PrBodyEscape(unittest.TestCase):
             with self.subTest(body=body):
                 rc, text = self.run_cli([], body=body)
                 self.assert_fails_on_app(rc, text)
+
+    def assert_unknown_on_the_cli(self, text):
+        """An event file that gives no readable body reads UNKNOWN: exit 1 under --strict, never a FAIL on an empty body."""
+        rc, out = self.run_cli([], env={"GITHUB_EVENT_PATH": self.event_file(None, text=text)})
+        self.assertIn("UNKNOWN", out, "an event file with no readable body did not read UNKNOWN (exit %s):\n%s" % (rc, out))
+        self.assertEqual(rc, 1, out)
+
+    def test_an_event_file_with_no_pull_request_reads_unknown_on_the_cli(self):
+        self.assert_unknown_on_the_cli("{}")
+
+    def test_an_event_file_that_is_not_json_reads_unknown_on_the_cli(self):
+        self.assert_unknown_on_the_cli("not json")
+
+    def test_an_event_file_whose_body_is_not_text_reads_unknown_on_the_cli(self):
+        self.assert_unknown_on_the_cli(json.dumps({"pull_request": {"body": 5}}))
 
     def test_a_pr_body_starts_no_process_a_run_without_one_does_not(self):  # cost pin: decision silent-undo-check-design
         """The body costs one string read: no process starts for it. Its one line names a path this change does not touch, so
