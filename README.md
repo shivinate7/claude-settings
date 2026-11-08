@@ -153,7 +153,7 @@ merge --build-batch [--base BRANCH] [--push BRANCH] [--drop-red PR] [--on BRANCH
                         (a PR with a held, parked or replaced label is left out), merged in PR order, a stack whole or not at all, each lane-linted
                         in parallel unless its merge base holds main's newest lint change. A lint that fails is run once more; a second fail leaves the PR out and posts `Lint: red <head> <steps>`.
                         `--drop-red PR` splits a red batch: it reads the newest run of the integration PR, finds the lanes of its batch whose changed files hit a suite, and
-                        drops each with its dependents (a stacked PR, a `Merge after #n` PR). Each gets one `Batch: red <head> <job>` comment, and the rest is rebuilt from
+                        drops each with its dependents (a stacked PR, a `Merge after #n` PR). Each gets one `Batch: red <head> <job>` comment, as does the integration PR itself (a later merge of that batch is refused), and the rest is rebuilt from
                         main by merges, never a revert. No lane hit: nothing is dropped and the exit is 1. `--on BRANCH` builds the next batch on the head of the batch whose CI is
                         running; that batch's own lanes are no candidates. The two flags exclude each other.
                         Prints `joins:`, `left out:` and `batch: N PRs`. Only --push moves a ref, to a new branch.

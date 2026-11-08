@@ -14,8 +14,11 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-                          A head that carries a `Batch: red <head> <job>` comment for itself, or holds a lane head that does, is refused before any
-                          push (preview and --confirm alike), and no flag lifts it. Cost: one read of the repo's issue comments since the PR opened.
+                          A head that carries a `Batch: red <head> <job>` comment for itself, or holds a lane head that does, is refused in the preview
+                          and in a ready PR's --confirm, before any claim or push, and no flag lifts it; an unreadable lane list, open-pull list or comment
+                          list refuses too. A draft's --confirm is the records step: it does not run this check and pushes the records page, so only the
+                          draft's preview shows the refusal. Cost: one read of the repo's issue comments, since the oldest open PR (the ledger's window)
+                          when the head holds a lane, which adds one open-pull list read, else since the PR opened.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -64,7 +67,8 @@
                           `Batch: red <head> <job>` comment (the drop's record) reads `lane batch red` and is left out. --drop-red PR (the red
                           integration PR's number) reads PR's newest run, takes its failing jobs less all-jobs-passed, finds the lanes of its batch
                           (its merge commits) whose changed files hit a suite, and drops each with its dependents (a stacked PR, a `Merge after #n`
-                          PR): one `Batch: red <head> <job>` comment on each, then a rebuild from the base by merges, never a revert, from the
+                          PR): one `Batch: red <head> <job>` comment on each, and one on the integration PR itself (so a later merge of that
+                          batch is refused, even when a hit lane has no open PR), then a rebuild from the base by merges, never a revert, from the
                           batch's other lanes alone. No lane hit: nothing is dropped, posted or built, the job is named and the exit is 1. --on
                           BRANCH builds on BRANCH's head, the batch whose CI is running, not on the base: its own lanes are no candidates and a PR
                           based on the base joins. If a split drops a lane from BRANCH, merge refuses the batch built on it, as that batch holds the
@@ -80,7 +84,7 @@
                           that conflicts only on the records page runs the records generator once, and again when the merge is replayed because
                           a PR was left out. --drop-red adds one fetch of the base and one of the integration branch, one `gh run list` for its
                           head, one `actions/runs/<id>/jobs` read per run that did not pass, one worktree at that head, one `git log` and a merge-base
-                          per lane, one `git diff` and at most one `hit_suites` call per lane, and one comment POST per dropped PR with no line for
+                          per lane, one `git diff` and at most one `hit_suites` call per lane, one more comment list read (the integration PR's own line), and one comment POST per dropped PR and one on the integration PR, each only when it has no line for
                           its head; the rebuild costs what a build costs, for the batch's lanes alone. --on adds one fetch of BRANCH, one `git log`
                           and a merge-base per lane of BRANCH, and one more worktree. No timer, file or log of its own.
   merge --idle-lanes --live FILE
@@ -3031,7 +3035,8 @@ def build_batch(root, h, base, push="", drop_red=None, on=None):
     fail, and gets one `Lint: red <head> <steps>` comment. Only --push moves a ref: it makes the new branch `push`, and refuses the base or a branch that exists.
     `drop_red` (--drop-red PR) splits a red batch: PR is the integration pull request whose newest run ran red (red_jobs: the failing jobs, less the
     required aggregate). The lanes of its batch come from its merge commits (read_lanes); a lane whose changed files hit a suite (hit_suites, no log is
-    read) is dropped with its dependents (red_drop), each gets one `Batch: red <head> <job>` comment (record_drops), and the batch is rebuilt from the
+    read) is dropped with its dependents (red_drop), each gets one `Batch: red <head> <job>` comment (record_drops), as does the integration PR itself (a hit lane with no open PR is
+    still in its tree, so a later merge of it is refused), and the batch is rebuilt from the
     base by merges, never a revert, from the batch's own other lanes alone (a lane that joined the candidates since waits for the next batch). It is
     built only to a new --push branch. When no lane is hit it drops, posts and builds nothing, names the job on stderr and returns 1. A failed read,
     a run still going and a failed POST are unknown: 2 (a POST that failed leaves the lines that did post, and a run again posts the rest).
@@ -3052,7 +3057,8 @@ def build_batch(root, h, base, push="", drop_red=None, on=None):
     the records page runs the records generator once (heal_records_page), and again when rebuild replays it. --drop-red adds: one fetch of the base
     and one of the integration branch, one `gh run list` for its head (runs), one `actions/runs/<id>/jobs` read per run that did not pass, one
     worktree at the integration head, one `git log` (read_lanes) with a merge-base per lane, one `git diff` and at most one hit_suites call per lane,
-    and one comment POST per dropped PR that has no line for its head; the rebuild then costs what the build above does, for the batch's lanes alone.
+    one more comment list read (the integration PR's own line), and one comment POST per dropped PR and one on the integration PR, each only when it has
+    no line for its head; the rebuild then costs what the build above does, for the batch's lanes alone.
     --on adds one fetch of BRANCH, one `git log` and a merge-base per lane of BRANCH (read_lanes), and one more worktree (the trial tree at BRANCH's
     head). No timer, file or log of its own."""
     if push:
@@ -3087,8 +3093,13 @@ def build_batch(root, h, base, push="", drop_red=None, on=None):
         stacks = stack_heads(pulls)
         bases = {n: stacks[by_num[n]["base"]["ref"]] for n in cands if stacks.get(by_num[n]["base"]["ref"], n) != n}
         wrong_base = {n for n in cands if by_num[n]["base"]["ref"] != base and n not in bases}
-        if drops:  # last, so a read that failed above leaves no comment behind; a PR that already carries its line for this head is not written to again
-            record_drops(h, {n: (by_num[n]["head"]["sha"], why) for n, why in drops.items() if acts[n][2] != "lane batch red"}, drop_red, jobs)
+        if drops or orphans:  # last, so a read that failed above leaves no comment behind; a PR that already carries its line for this head is not written to again
+            lines = {n: (by_num[n]["head"]["sha"], why) for n, why in drops.items() if acts[n][2] != "lane batch red"}
+            int_head = by_num[drop_red]["head"]["sha"]
+            # the integration PR's own line: its tree holds every hit lane, even one no open PR has (orphans), and refuse_batch_red refuses a merge of it
+            if int_head not in batch_red_lines(h.issue_comments(open_pr_window(pulls))):
+                lines[drop_red] = (int_head, "this is that batch: its tree holds the lanes the red job hit, so it must not merge")
+            record_drops(h, lines, drop_red, jobs)
     except Stop as e:  # a failed read lists nothing and exits 2: unknown, never an empty batch
         print(f"merge: {e}", file=sys.stderr)
         return 2
@@ -3386,21 +3397,45 @@ def comments_since(host, since):
     except Stop as e:
         raise Stop(f"{e} The check for a `{BATCH_RED_WORD}` line could not read the comments. {READ_CITE}")
 
+def open_pr_window(pulls, *also):
+    """-> the `since` of the one comment read that covers every open pull request in `pulls` (and each time in `also`, a pull request's own open time):
+    the oldest created_at. The ledger (pr_acts), refuse_batch_red and the drop read the same window, so a line posted on a lane before a later pull
+    request opened is in all three. A row with no created_at adds no time, and no time at all reads from the epoch: more comments, never fewer."""
+    return min([d.get("created_at") for d in pulls if d.get("created_at")] + [t for t in also if t] or ["1970-01-01T00:00:00Z"])
+
+def batch_red_lines(comments):
+    """-> {head sha: job} of the `Batch: red <head> <job>` lines in `comments`, a line being the whole first line of a comment. The newest line
+    of a head wins. The one home of the line's parse for the refusal and the drop."""
+    red = {}
+    for c in comments:
+        m = BATCH_RED.fullmatch(((c.get("body") or "").splitlines() or [""])[0])
+        if m:
+            red[m.group(1)] = m.group(2)
+    return red
+
 def refuse_batch_red(host, wt, base_ref, info):
     """A `Batch: red <head> <job>` comment says the batch at <head> ran red and its lane was dropped. A head that carries such a line for itself, or
     holds a lane head that does, is the red batch: refuse it before anything is claimed. No reason flag lifts it, because only a rebuild without the
-    lane clears the red. The comments are read since the pull request opened, one list read. A failed read is a Stop (unknown is red), and an
-    unreadable lane list leaves the head's own line as the check (refuse_dropped_lane reads the same list and has refused on its failure)."""
-    heads = {info["head"]}
+    lane clears the red. A head that holds a lane reads the comments since the oldest open pull request (open_pr_window, the ledger's window), not since
+    this pull request opened: a lane's line can be older than an integration pull request built on a split batch. Every failed read refuses with a plain Stop (unknown
+    is red): the lane list, the open-pull list and the comments, so no reason flag lifts an unreadable lane list.
+    Cost: one comment list read per preview or confirm, and the lane list's one `git log` and a merge-base per lane. A head that holds a lane adds
+    one open-pull list read; a head with no lane reads none. No file, timer or log."""
     try:
-        heads |= set(read_lanes(wt, base_ref, info["head"])[0])
-    except Exception:
-        pass
-    red = {}
-    for c in comments_since(host, info.get("created") or "1970-01-01T00:00:00Z"):
-        m = BATCH_RED.fullmatch(((c.get("body") or "").splitlines() or [""])[0])
-        if m and m.group(1) in heads:
-            red[m.group(1)] = m.group(2)
+        heads = {info["head"]} | set(read_lanes(wt, base_ref, info["head"])[0])
+    except ValueError as e:
+        raise Stop(f"the lanes of {info['head'][:9]} cannot be read ({e}), so whether this tree holds a lane with a `{BATCH_RED_WORD}` line is unknown. "
+                   f"Nothing was claimed or pushed. {READ_CITE}")
+    try:
+        # a line on the head's own pull request cannot predate it, so only a head that holds lanes needs the wider window (a lane's pull request
+        # can be older). A host with no list read (the fixture FakeHost) has only this pull request's own open time; Host always has `pages`.
+        lanes = len(heads) > 1 and hasattr(host, "pages")
+        since = open_pr_window(host.pages("pulls", fields={"state": "open"}) if lanes else [], info.get("created"))
+    except Stop as e:
+        raise Stop(f"{e} The check for a `{BATCH_RED_WORD}` line could not read the open pull requests. {READ_CITE}")
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        raise Stop(f"an open pull request read from GitHub is malformed ({type(e).__name__}: {e}), so the check for a `{BATCH_RED_WORD}` line is unknown. {READ_CITE}")
+    red = {sha: job for sha, job in batch_red_lines(comments_since(host, since)).items() if sha in heads}
     if red:
         raise Dropped("the batch ran red: " + "; ".join(f"{sha[:9]} ({job})" for sha, job in sorted(red.items())) + " carries a `" + BATCH_RED_WORD
                       + " <head> <job>` line, and this tree still holds that lane.\n"
@@ -3922,7 +3957,7 @@ def pr_acts(h, pulls, holds=True):
     record reads as blocked, the first `lane round` (a draft) or NO NEXT ACT. One with a done record still reads `batch`, because the record rule runs first:
     a caller that wants no held pull request checks the labels itself (build_batch does)."""
     records, plain = {}, {}  # PR number -> [(time, body)], oldest first: its review records, and all its comments
-    for c in h.issue_comments(min(d["created_at"] for d in pulls)):
+    for c in h.issue_comments(open_pr_window(pulls)):
         m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
         if m:
             body, row = c.get("body") or "", (github_epoch(c["created_at"]), c.get("body") or "")
