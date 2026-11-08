@@ -1888,7 +1888,7 @@ test("a timed-out call names its command, and on Windows leaves no orphan behind
 const orphanEndsOnItsOwn = (kind) => kind === "orphan" && !POSIX;
 
 for (const kind of ["hold", "orphan"]) {
-  test(`watchdog: a command whose child holds its pipe (${kind}) is stopped at the cap the watchdog armed; a hang reads red, named, with no process left`, () =>
+  test(`watchdog: a command whose child holds its pipe (${kind}) arms the cap it was given, and the marker records the armed delay`, () =>
     withTempDir((dir) => {
       const pidFile = join(dir, "pids");
       const marker = join(dir, "armed"); // the watchdog writes its armed delay, in ms, to this file
@@ -1907,6 +1907,10 @@ for (const kind of ["hold", "orphan"]) {
       }
       const out = readFileSync(outFile, "utf8");
       assert.equal(found.pids.length, 2, out);
+      // The watchdog arms the same way on every platform, so the marker is checked before the orphan return.
+      assert.ok(existsSync(marker), `the watchdog wrote no armed-delay marker at ${marker}\n${out}`);
+      assert.equal(readFileSync(marker, "utf8").trim(), String(Number(env.STAMP_SUITE_CAP_S) * 1000),
+        `the watchdog armed a delay other than the ${env.STAMP_SUITE_CAP_S} s cap\n${out}`);
       if (orphanEndsOnItsOwn(kind)) {
         assert.equal(r.status, 0, out);
         assert.match(out, /ok - hang fixture \(orphan\)/, out);
@@ -1915,9 +1919,6 @@ for (const kind of ["hold", "orphan"]) {
       assert.equal(r.status, 1, out);
       assert.match(out, new RegExp(`FAIL - hang fixture \\(${kind}\\)`), out);
       assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
-      assert.ok(existsSync(marker), `the watchdog wrote no armed-delay marker at ${marker}\n${out}`);
-      assert.equal(readFileSync(marker, "utf8").trim(), String(Number(env.STAMP_SUITE_CAP_S) * 1000),
-        `the watchdog armed a delay other than the ${env.STAMP_SUITE_CAP_S} s cap\n${out}`);
     }));
 }
 
