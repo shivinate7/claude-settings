@@ -1,0 +1,11 @@
+{
+  "title": "Plan time-pinned-tests and test-practices state the finder's current state",
+  "phase": "guards",
+  "status": "todo",
+  "order": 687,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "Plan time-pinned-tests has no calendar column, and its Total counts hang guards. test-practices calls the P5 lint \"not built\" (timing-tests lane (session_013NEJL1jPC89ae6X6Pa4jmf), cited by Fix: lines in #2002's notes, 09:00 CST Nov 8).",
+  "note": "A docs-only change. Done check: the plan has the calendar column, Total leaves out hang guards, and test-practices names the built finder. Filed by triage 09:02 CST Nov 8.",
+  "updatedAt": "2026-11-08T09:02:00-06:00"
+}

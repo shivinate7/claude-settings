@@ -1,0 +1,11 @@
+{
+  "title": "The time-pinned finder lists fixed-time zone reads and Swift clock reads, and treats Playwright page.clock as fake",
+  "phase": "guards",
+  "status": "doing",
+  "order": 688,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1jPC89ae6X6Pa4jmf",
+  "why": "The finder misses fixed-time zone reads and Swift Calendar.current, TimeZone.current and Date(), and it does not treat Playwright page.clock as a fake clock (timing-tests lane (session_013NEJL1jPC89ae6X6Pa4jmf), cited by Fix: lines in #2002's notes, 09:00 CST Nov 8).",
+  "note": "Doing in the timing-tests lane; its PR merges after #2002. Filed by triage 09:02 CST Nov 8.",
+  "updatedAt": "2026-11-08T09:02:00-06:00"
+}

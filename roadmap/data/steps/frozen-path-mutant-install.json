@@ -1,11 +1,11 @@
 {
   "title": "A read-only red run under verdict, with a mutant install.sh, is not refused as a frozen-path write unless it writes the installed config",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 682,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL3ZjZdzrS8tBezxY85",
   "why": "guard.log 2026-11-08T14:51:34Z denied frozen-path on the installed verdict wrapper in a test-author's red run of hooks/test_install_src_red.sh, with INSTALL_SH_UNDER_TEST set to a mutant install.sh in the scratchpad (lane bg-tail-loses-verdict, session_013NEJL3ZjZdzrS8tBezxY85, 08:58 CST Nov 8). The reader that fired is not traced. #1931's install pins landed with `Red-run: none` because of it.",
-  "note": "First act: trace which reader fired, and whether the mutant writes the real installed config. The test is meant to use its own temp HOME. If it does write the real config, the guard is right and the test is the defect. Done check: a red test where that red run passes, while a run that writes the installed config is still refused. Not part of frozen-path-verdict-wrapper (#2060 fixes a quoted leading assignment; that lane declined, 08:58 CST). Filed by triage 09:00 CST Nov 8.",
-  "updatedAt": "2026-11-08T09:00:00-06:00"
+  "note": "First act: trace which reader fired, and whether the mutant writes the real installed config. The test is meant to use its own temp HOME. If it does write the real config, the guard is right and the test is the defect. Done check: a red test where that red run passes, while a run that writes the installed config is still refused. Not part of frozen-path-verdict-wrapper (#2060 fixes a quoted leading assignment; that lane declined, 08:58 CST). Filed by triage 09:00 CST Nov 8. Sent by the coordinator 09:01 CST Nov 8 to lane bg-tail-loses-verdict, which hit it.",
+  "updatedAt": "2026-11-08T09:02:00-06:00"
 }
