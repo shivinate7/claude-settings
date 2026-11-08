@@ -24,7 +24,7 @@ M5. Keep the output of every push that takes or releases a lock.
 - q_max, 2026-11-04 — a released merge lock blocked every later merge. The lock code read each failed push as a rival run and dropped its output, so the cause is unmeasured (note `cloud-released-lock-stuck`, rule `git-never-discard-output`).
 Applies to: the merge lock and any ref write the merge tool makes.
 
-M6. A small fix to a review finding gets a fix check on its own diff, then merges on green.
+M6. A small fix to a review finding gets a fix check on its own diff, then merges on green when Guard or check is `no`. Decision `pr-review-record` holds the done rules for `yes`.
 - degen page item 83 — five PRs were held about 2 hours for new rounds (decision `hold-unsafe-after-round-3`).
 Applies to: a fix that answers one named finding.
 

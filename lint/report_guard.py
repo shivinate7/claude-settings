@@ -132,8 +132,8 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
 the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
-PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
-record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
+PR on its line is refused and asks for the PR. With no record for the live head, the remedy names the act (`merge <pr> --review-record ...`, then post the
+record) and never the live head; a record review_state reads open or held is refused with that state and its why, and no post act. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
@@ -1601,6 +1601,12 @@ REVIEW_NO_RECORD = (
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
     "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
 )
+# The record for the live head is posted, but merge's review_state reads it open or held: name that state and its why.
+REVIEW_NOT_DONE = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, but merge reads its review record for the live head "
+    "as %s: %s. Review is not done, so no PASS claim yet. Report the review state as it stands, and claim PASS once the "
+    "record reads done."
+)
 
 
 def review_claims(text):
@@ -1674,7 +1680,10 @@ def review_record_problem(hook, text):
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
-        if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
+        state, why = merge_mod.review_state(rec, live) if rec and rec["n"] == n else ("bad", "")
+        if state in ("open", "held"):
+            reasons.append(REVIEW_NOT_DONE % (n, state, why))
+        elif state != "done":
             reasons.append(REVIEW_NO_RECORD % (n, n, n))
     return " ".join(reasons), " ".join(notes)
 
