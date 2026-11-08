@@ -67,7 +67,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   cite-by-id          deny. A commit message or PR body that cites a record by its path.
   lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
                        (lane-by-slug)
-  machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
+  scratchpad-commit-msg-owner  deny. A commit from an agent's call whose -F message file resolves
+                       into any session's scratchpad. `-F -`, `-m`, an orchestrator's call and a file
+                       elsewhere pass. (scratchpad-commit-msg-owner)
+  machine-wide-kill   deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
@@ -1386,6 +1389,27 @@ UNREAD_REASON = (
     "Remedy: pass the message inline, or name a file this directory can read. "
     "(decision cite-by-id-refuses-unread-file, an unread message file is refused, not passed)"
 )
+
+
+SCRATCH_MSG_REASON = (
+    "Rule (Git): this commit takes its message from a file in a folder that every agent of the session "
+    "shares, so the file may hold another agent's message and the commit would carry it. "
+    "Remedy: pass your own message with `-F -` and a heredoc, or with `-m`. "
+    "(decision scratchpad-commit-msg-owner, an agent commits the message it wrote itself)"
+)
+
+
+def scratchpad_message_file(segment: str, where: str) -> str:
+    """Return the first message file of this commit segment that resolves into any session's
+    scratchpad, else ''. The path alone decides, never the file's text, and a link is judged by the
+    file it resolves to."""
+    call = git_call_of(segment)
+    if call is None or call[0] != "commit":
+        return ""
+    for name in message_sources(call[1], "commit")[1]:
+        if in_any_session_scratchpad(os.path.normpath(_absolute(name, where))):
+            return name
+    return ""
 
 
 def heredoc_offsets(segments, ends, bodies_kept=True):
@@ -3669,6 +3693,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for segment, before in zip(segments, heredoc_offsets(segments, ends, stripped == raw)):
         if not segment.strip():
             continue
+        matched = agent and scratchpad_message_file(segment, cite_where)
+        if matched:
+            refuse(tool, "deny", "scratchpad-commit-msg-owner", SCRATCH_MSG_REASON, matched)
         matched = cited_record_path(segment, raw, cite_where, before)
         if matched.startswith(UNREAD_MARK):
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
