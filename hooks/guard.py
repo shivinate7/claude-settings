@@ -2629,11 +2629,11 @@ BRIEF_REPORT_LABELS = (BRIEF_DONE_LABEL, "Deviations", "Input Needed", "Next")
 BRIEF_BLIND_OPEN = r"^[ \t]*(?:[-*+#>_][ \t]*)*"
 BRIEF_BLIND_VERDICT_WORDS = "|".join(REVIEWER_VERDICT_WORDS)
 BRIEF_BLIND_LABELS = re.compile(BRIEF_BLIND_OPEN + r"(%s)[*_]*[ \t]*(?::|$)" % "|".join(BRIEF_REPORT_LABELS), re.M)
-# An item may follow a one-label report's `Done:`, as in `Done: BUILT c204a1f ...`.
+# An item may follow a one-label report's `Done:`, as in `Done: BUILT <id> ...`.
 BRIEF_BLIND_DONE = r"(?:%s[*_]*[ \t]*:[*_]*[ \t]*)?" % BRIEF_DONE_LABEL
 BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|RECORDED)(?![\w-])", re.M)
 # A verdict line is one of two. A line with `verdict`, or a round label with or without `result`, before its colon, and the
-# verdict word right after the colon. Or a report's leading verdict, `FAIL, round 1 of 3, ...`. A line that opens with a
+# verdict word right after the colon. Or a report's leading verdict, `FAIL, round <n> of 3, ...`. A line that opens with a
 # verdict word and a colon (`FAIL: test_x`) is a quote.
 BRIEF_BLIND_VERDICT = re.compile(
     BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
