@@ -22,13 +22,15 @@ repo's GitHub name, rolled out or not, and that repo's extras file may repeat it
 Cause: each repo moves its own files in its own roll-out (owner, Oct 17). The last roll-out deletes
 "legacy", "legacy-repos", `legacy()`, `legacy_repos()`, `unmoved()`, `candidates()` and the branches in `path()`.
 
-Standard library only, and safe to import: it reads files only when a function is called.
+Safe to import: it reads files only when a function is called. It needs the standard library and
+hooks/git_reads.py, which `repo_name` imports on first use.
 """
 import json
 import ntpath
 import os
 import posixpath
 import re
+import sys
 
 LAYOUT_FILE = "lint/layout.json"  # relative to the claude-settings root; hooks/guard.py holds the same literal
 LAYOUT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.path.basename(LAYOUT_FILE))
@@ -141,8 +143,20 @@ def record_paths(data, root=None):
     return folders | files
 
 
-# github.com in https, ssh and scp form, and the /git/<owner>/<name> path of a cloud session's git proxy.
-GITHUB = re.compile(r"(?:^|[/@])github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$|/git/([^/\s]+/[^/\s]+?)(?:\.git)?/*$")
+# An origin repo_name may read: github.com in https, ssh and scp form, a port after the host allowed, or the
+# /git/<owner>/<name> path of a cloud session's git proxy. The path is exactly owner/name, `.git` and trailing
+# slashes optional; git_reads.origin_slug reads the owner/name.
+GITHUB = re.compile(
+    r"(?:^|[/@])github\.com(?::\d+)?[:/]+[^/\s]+/[^/\s]+?(?:\.git)?/*$|/git/[^/\s]+/[^/\s]+?(?:\.git)?/*$")
+
+
+def _origin_slug(url):
+    """git_reads.origin_slug, the one origin parser; imported on first use so this module stays safe to import."""
+    hooks = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks")
+    if hooks not in sys.path:
+        sys.path.append(hooks)
+    from git_reads import origin_slug
+    return origin_slug(url)
 
 
 def _common_dir(root):
@@ -179,8 +193,9 @@ def repo_name(root):
         if line.startswith("["):
             section = line
         elif section == '[remote "origin"]' and re.match(r"url\s*=", line):
-            hit = GITHUB.search(line.split("=", 1)[1].strip())
-            return (hit.group(1) or hit.group(2)).lower() if hit else None
+            url = line.split("=", 1)[1].strip()
+            slug = _origin_slug(url) if GITHUB.search(url) else None
+            return slug.lower() if slug else None
     return None
 
 

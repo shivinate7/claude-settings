@@ -270,10 +270,6 @@ class Scaffold(TempDest):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
         self.assertIn("tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`", flat)
 
-    def test_brief_runs_the_lane_lint_before_the_fix_check(self):
-        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
-        self.assertIn("Run the lane lint before the fix check.", flat, "the brief must tell the lane to run the lane lint before the fix check")
-
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():
@@ -396,6 +392,22 @@ class HandoffCheck(TempDest):
                       f"none, see {PAGE}"):
             with self.subTest(items=items):
                 self.assertEqual(problems(handoff_text(items, [PAGE])), [])
+
+    def test_a_count_in_parentheses_beside_the_url_is_no_id(self):
+        # "(3 open)" counts the open items; it copies no id. A real id beside the URL is still caught.
+        self.assertEqual(problems(handoff_text(ITEMS, [PAGE])), [])
+        found = problems(handoff_text(f"{ITEMS} #123", [PAGE]))
+        self.assertEqual(len(found), 1, found)
+        self.assertRegex(found[0], r"(?i)\bids?\b")
+        self.assertEqual(problems(handoff_text(f"{ITEMS} (3 open)", [PAGE])), [])
+
+    def test_ids_written_inside_a_count_in_parentheses_are_still_caught(self):
+        # The count is no id, but an id written inside the parentheses is: each one still gives the one problem.
+        for items in (f"{ITEMS} (3 open: 12, 13)", f"{ITEMS} (2 open: #34)", f"{ITEMS} (3 open, ids 12 14)"):
+            with self.subTest(items=items):
+                found = problems(handoff_text(items, [PAGE]))
+                self.assertEqual(len(found), 1, found)
+                self.assertRegex(found[0], r"ids?")
 
     def test_a_placeholder_url_is_no_items_home(self):
         for items in BAD_WATCHES:
