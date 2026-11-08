@@ -84,9 +84,10 @@ LIVE_STREAM_REASON = (
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
-# The lone writer stage the check rule lets through: `tee`, `tee.exe`, `Tee-Object` and `Out-File`. Each
-# keeps the whole stream, so no filter cuts it: `tee`, `Tee-Object -FilePath` and `Out-File` write it to a
-# file the agent reads back, and `Tee-Object -Variable` writes no file but prints the stream in full.
+# The lone writer stage the check rule lets through: `tee`, `tee.exe`, `Tee-Object` and `Out-File`. No filter
+# cuts what it keeps. `tee` and `Tee-Object -FilePath` print the whole stream and write it to a file the agent
+# reads back. `Tee-Object -Variable` writes no file but prints the stream in full. `Out-File` prints nothing, so
+# its file is the only copy of the stream, as with `> file`.
 # Compared on the word `basename` gives, with `.exe` stripped as in `_roster_word`.
 FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")
 SCRIPT_INTERPRETERS = ("python", "python3", "py")
@@ -108,13 +109,14 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
     NARRATING_SCRIPT_TAILS. By default a word carrying a script path counts, so `python3.11` and
     `uv run python` both match. `interpreter_only` (the check rule) keeps the word to python, python3
-    or py, so `grep -n x merge/merge.py` is no run of the script, and `python3.11` and `uv run`
+    or py, or the script run by its own path, so `grep -n x merge/merge.py` is no run of the script, and `python3.11` and `uv run`
     do not match. The follow-up branch check-tail-wrapper-forms adds both."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
     if interpreter_only and word.removesuffix(".exe") not in SCRIPT_INTERPRETERS:
-        return ""
+        # A script run by its own path (`./merge/merge.py`) is the same run as `python merge/merge.py`.
+        return word if tokens[index].replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS) else ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(token)
@@ -124,7 +126,7 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
 def narrated_tail_hit(stripped: str) -> str:
     """Return the matched text when a narrating stage reaches `tail`/`head`, directly or through a
     `tee` or other filters. Same pipeline walk as `check_tail_hit`."""
-    return _walk_pipelines(stripped, lambda segment: narrating_stage(segment))
+    return _walk_pipelines(stripped, lambda segment, backgrounded: narrating_stage(segment))
 
 
 NARRATED_TAIL_REASON = (
@@ -144,14 +146,14 @@ NARRATED_TAIL_REASON = (
 # cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
 # (`--lane-lint`, `--review-record`, in each spelling of the roster above) are refused in the
 # foreground too. `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused
-# twice. `ci-job` is refused in the background only.
+# twice. `ci-job` is refused in the background only, and a trailing `&` is the background.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record")
 
 
 def check_stage(segment: str, background: bool) -> str:
     """The command word when one segment runs a named check, else ''. `ci-job` counts
-    only in the background."""
+    only in the background, which a trailing `&` makes it (the caller passes that in `background`)."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
@@ -165,15 +167,24 @@ def check_stage(segment: str, background: bool) -> str:
     return _roster_word(tokens, index, interpreter_only=True)
 
 
+def _ends_in_ampersand(stages, first: int) -> bool:
+    """Whether the pipeline is backgrounded by a lone `&` word in the stage at `first` or a later one."""
+    for segment in stages[first:]:
+        tokens = segment_tokens(segment)
+        if tokens and "&" in tokens:
+            return True
+    return False
+
+
 def _pipeline_hit(stages, find_stage, any_filter: bool = False) -> str:
-    """The matched text when a stage that `find_stage` names in one pipeline's stages reaches
+    """The matched text when a stage that `find_stage(segment, backgrounded)` names in one pipeline's stages reaches
     `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
     what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk for the
     narrated rule and the check rule. `any_filter` (the check rule, coordinator ruling 2026-11-08
     07:16 CST) widens the reach to every later stage but a file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`), since `sed -n`, `grep -m1` and `awk`
     cut what the agent reads as `tail` does."""
     for first, segment in enumerate(stages):
-        stage = find_stage(segment)
+        stage = find_stage(segment, _ends_in_ampersand(stages, first))
         if not stage:
             continue
         for later in stages[first + 1:]:
@@ -200,13 +211,13 @@ def _walk_pipelines(stripped: str, find_stage, any_filter: bool = False) -> str:
             if hit:
                 return hit
             stages = []
-    return _pipeline_hit(stages, find_stage)
+    return _pipeline_hit(stages, find_stage, any_filter)
 
 
 def check_tail_hit(stripped: str, background: bool) -> str:
     """The matched text when a call pipes a named check into any filter but a lone `tee`, `tee.exe`,
     `Tee-Object` or `Out-File`, directly or through other filters."""
-    return _walk_pipelines(stripped, lambda segment: check_stage(segment, background), any_filter=True)
+    return _walk_pipelines(stripped, lambda segment, backgrounded: check_stage(segment, background or backgrounded), any_filter=True)
 
 
 CHECK_TAIL_REASON = (
