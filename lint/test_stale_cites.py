@@ -18,6 +18,7 @@ STALE009 (range mode only) reports an added decision line that states what code 
 and a behaviour verb) with no cite. It is report only too (CodeClaimTests).
 STALE010 (range mode) is a finding: an added line that cites a Python name the head does not bind, or a file absent
 at head, in a STALE002 form or a node id. A dead cite is STALE010 and never STALE009 (NameCiteTests).
+STALE011 (range mode and --tree) is a finding: a line anchor `file.py:N` or `file.py:N-M` whose sentence names a symbol the cited lines do not hold (AnchorNameTests).
 
 
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
@@ -75,7 +76,7 @@ CODE = {
     "lint/x.py": "def check():\n    return 3\n",
 }
 Range = collections.namedtuple("Range", "case repo base head")
-FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-48]|STALE010) (?P<text>.*)$")  # not STALE005: a report line
+FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-48]|STALE01[01]) (?P<text>.*)$")  # not STALE005: a report line
 
 
 def base_files(notes="# Notes\n", extra=None):
@@ -921,7 +922,8 @@ class CostTests(StaleCase):
     the rule files, starts three git processes and reads no blob, unless an added line needs a read. One such line
     starts one more, a cat-file: a line holding a verb or route word a reader judges (STALE005's list on any governed
     page, and STALE009's looser list, CODE_VERB_WORD, where `check`, `run` and `read` count, on an added decision
-    record), a folder .py name cite (STALE010, which NameCiteTests pins at four starts), or a value cite of a code
+    record), a folder .py name cite (STALE010, which NameCiteTests pins at four starts), an anchor cite whose sentence
+    names a symbol the file binds (STALE011, which AnchorNameTests pins at four starts), or a value cite of a code
     file (STALE008). A removed or renamed path makes the check read the tracked Markdown files. So does a name that a
     touched .py no longer defines. A changed file that is not Markdown also reads the repo's decision records for its
     Home line, even when nothing was removed. No run writes a file."""
@@ -1149,6 +1151,41 @@ class CostTests(StaleCase):
         rc, out, before, after = self.run_copy_of_script(rng, ["--tree"])
         self.assertIn("stale-cites: FAIL, 1 finding(s)", out)
         self.assertEqual(after, before, out)
+
+
+    def test_a_markdown_only_range_that_adds_an_anchor_with_a_bound_name_starts_exactly_four_git_processes(self):
+        """STALE011 reads the cited file's blob for such a line, as STALE010 does for its pinned case (NameCiteTests). So
+        the range starts the same four: the three of a Markdown-only range, and one cat-file."""
+        line = "- `check_it` holds at `lint/far.py:30`."
+        module = load_module_under_test()
+        self.assertEqual(module.python_cites(line), [])  # scope: no STALE002 cite, so STALE010 reads no blob here
+        self.assertIsNone(module.VERB.search(line))  # scope: no STALE005 verb, which would read a blob too
+        self.assertIsNone(module.ROUTE_WORD.search(line))  # scope: no route word
+        self.assertIsNone(module.CODE_VERB_WORD.search(line))  # scope: no STALE009 verb
+
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n" + line + "\n")
+            commit(repo)
+        rng = self.make_range(base_files(extra={FAR: FAR_TEXT}), change)
+        self.assertEqual(touched(rng), {NOTES})  # scope: a Markdown-only range
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)  # the cost contract
+        self.assertEqual(rc, 1, out)  # and the line is judged: the name is not in the cited lines
+
+    def test_a_markdown_only_range_whose_added_line_cites_no_anchored_py_keeps_three_git_processes(self):
+        line = "- See `lint/far.py` for the layout."
+        module = load_module_under_test()
+        self.assertEqual(module.python_cites(line), [])  # scope: no cite of any kind
+        self.assertNotRegex(line, r"\.py:\d")  # scope: no anchor on the line
+
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n" + line + "\n")
+            commit(repo)
+        rng = self.make_range(base_files(extra={FAR: FAR_TEXT}), change)
+        self.assertEqual(touched(rng), {NOTES})  # scope: a Markdown-only range
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sorted(subs), ["diff", "merge-base", "rev-parse"], subs)
 
 
 class ForeignFileTests(StaleCase):
@@ -3851,6 +3888,244 @@ class NameCiteTests(StaleCase):
         self.assertIn("lint/x.py", touched(rng))
         self.assert_findings_first(rng, [(NOTES, n, "STALE002") for n in flagged],
                                    "a dotted cite of a removed first part is not STALE002, or a kept one is flagged")
+
+
+def numbered_source(total, placed):
+    """A Python file of `total` lines: `placed` ({line number: text}) gives each named line, and each other line is blank."""
+    return "".join(placed.get(n, "") + "\n" for n in range(1, total + 1))
+
+
+def def_spans(source, name):
+    """(first, last) line of each def or class that binds `name` at any depth of a Python source. Read with ast, never run."""
+    return [(node.lineno, node.end_lineno) for node in ast.walk(ast.parse(source))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name]
+
+
+def holds_word(text, name):
+    """True when `text` holds `name` as a whole word."""
+    return re.search(r"(?<!\w)%s(?!\w)" % re.escape(name), text) is not None
+
+
+def window_holds(source, first, last, name):
+    """True when a line of first-3 .. last+3, clipped to the file, holds `name` as a whole word. A case asserts this
+    False before it probes a cite, so the pass or the finding comes from the def span alone or from the window alone."""
+    lines = source.split("\n")
+    return any(holds_word(lines[n - 1], name) for n in range(max(1, first - 3), min(len(lines), last + 3) + 1))
+
+
+FAR = "lint/far.py"  # the .py the anchor cases cite
+FAR_TEXT = numbered_source(44, {1: "def check_it(lane):", 2: "    return lane", 33: "def other(lane):", 34: "    return lane"})
+
+
+class AnchorNameTests(StaleCase):
+    """STALE011, a finding. An ADDED line of governed Markdown that cites a line anchor (`file.py:N` or `file.py:N-M`, the
+    colon glued to the path) and names a symbol in the same sentence is flagged when the cited lines do not hold it: no def
+    or class span of the name overlaps N-3..M+3, and no line of N-3..M+3 holds it as a whole word. A name counts when the
+    .py at head binds it anywhere. `--tree` judges every line, and an anchor past the file's end is STALE004 only."""
+
+    def test_a_name_defined_far_from_its_anchor_is_flagged_and_the_finding_names_the_cite_and_the_definition(self):
+        src = numbered_source(41, {40: "def check_it(lane):", 41: "    return lane"})
+        rng, _ = self.route_range([("- `check_it` holds at `lint/far.py:10`.", True)], extra={FAR: src})
+        self.assertIn(NOTES, touched(rng))  # scope: a Markdown-only range
+        self.assertEqual(def_spans(src, "check_it"), [(40, 41)])  # scope: the def is at line 40
+        self.assertFalse(window_holds(src, 10, 10, "check_it"))  # scope: lines 7 to 13 do not hold the name
+        found = self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+        self.assertIn("lint/far.py:10", found[0][3])  # the message names the cite
+        self.assertRegex(found[0][3], r"(?<!\d)40(?!\d)")  # and the line where the name is defined
+
+    def test_a_cite_inside_a_def_span_passes_and_one_past_the_slack_is_flagged(self):
+        src = numbered_source(24, {1: "def check_it(lane):", **{n: "    step = %d" % n for n in range(2, 10)},
+                                   10: "    return lane"})
+        rows = [("- `check_it` holds at `lint/far.py:5`.", False), ("- `check_it` holds at `lint/far.py:20`.", True)]
+        rng, _ = self.route_range(rows, extra={FAR: src})
+        self.assertEqual(def_spans(src, "check_it"), [(1, 10)])  # scope: the def spans lines 1 to 10
+        self.assertFalse(window_holds(src, 5, 5, "check_it"))  # scope: only the span can pass :5
+        self.assertFalse(window_holds(src, 20, 20, "check_it"))  # scope: nothing near line 20 holds the name
+        self.assert_flags(rng, [(NOTES, 2, "STALE011")])
+
+    def test_a_cite_on_a_call_site_that_holds_the_name_passes_and_a_near_miss_word_does_not(self):
+        src = numbered_source(62, {1: "def check_it(lane):", 2: "    return lane", 40: "def caller():",
+                                   41: "    return check_it(2)", 60: "def caller_two():", 61: "    return check_items(2)"})
+        rows = [("- `check_it` holds at `lint/far.py:41`.", False), ("- `check_it` holds at `lint/far.py:61`.", True)]
+        rng, _ = self.route_range(rows, extra={FAR: src})
+        self.assertEqual(def_spans(src, "check_it"), [(1, 2)])  # scope: the def is far from both cites
+        self.assertTrue(window_holds(src, 41, 41, "check_it"))  # scope: line 41 is a call site of the name
+        self.assertFalse(window_holds(src, 61, 61, "check_it"))  # scope: line 61 holds check_items, which is no whole word
+        self.assert_flags(rng, [(NOTES, 2, "STALE011")])
+
+    def test_the_slack_is_three_lines_either_side_so_a_cite_at_thirteen_passes_and_at_fourteen_fails(self):
+        src = numbered_source(20, {1: "def check_it(lane):", **{n: "    step = %d" % n for n in range(2, 10)},
+                                   10: "    return lane"})
+        rows = [("- `check_it` holds at `lint/far.py:13`.", False), ("- `check_it` holds at `lint/far.py:14`.", True)]
+        rng, _ = self.route_range(rows, extra={FAR: src})
+        self.assertEqual(def_spans(src, "check_it"), [(1, 10)])  # scope: the def ends at line 10
+        self.assertFalse(window_holds(src, 13, 13, "check_it"))  # scope: only the span, which ends at line 10, can pass :13
+        self.assertFalse(window_holds(src, 14, 14, "check_it"))  # scope: lines 11 to 17 hold the name nowhere
+        self.assert_flags(rng, [(NOTES, 2, "STALE011")])
+
+    def test_a_range_cite_is_judged_from_its_first_line_minus_three_to_its_last_line_plus_three(self):
+        src = numbered_source(18, {14: "def check_it(lane):", 15: "    step = 1", 16: "    return lane"})
+        rows = [("- `check_it` holds at `lint/far.py:5-12`.", False), ("- `check_it` holds at `lint/far.py:5-10`.", True)]
+        rng, _ = self.route_range(rows, extra={FAR: src})
+        self.assertEqual(def_spans(src, "check_it"), [(14, 16)])  # scope: the def spans lines 14 to 16
+        self.assertFalse(window_holds(src, 5, 10, "check_it"))  # scope: lines 2 to 13 hold the name nowhere
+        self.assert_flags(rng, [(NOTES, 2, "STALE011")])
+
+    def test_a_bare_word_with_no_underscore_or_an_unbound_word_is_no_name_and_a_bound_one_is_judged(self):
+        src = numbered_source(41, {1: "def run(lane):", 2: "    return lane", 40: "def check_it(lane):", 41: "    return lane"})
+        rows = [
+            ("The loop run holds at `lint/far.py:30`.", False),  # a bare word with no underscore is no name
+            ("`run()` holds at `lint/far.py:30`.", True),  # a backticked name, bound at line 1
+            ("The check_it step holds at `lint/far.py:30`.", True),  # a bare snake_case word the file binds
+            ("The never_bound word holds at `lint/far.py:30`.", False),  # a bare snake_case word the file does not bind
+            ("`never_bound` holds at `lint/far.py:30`.", False),  # a backticked word the file does not bind is no name
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: src})
+        self.assertEqual(binding_kind(src, "run"), "def")  # scope: the file binds run at module level
+        self.assertEqual(binding_kind(src, "check_it"), "def")  # scope: and binds check_it
+        self.assertIsNone(binding_kind(src, "never_bound"))  # scope: nothing binds it
+        self.assertFalse(window_holds(src, 30, 30, "run"))  # scope: the window of line 30 holds neither bound name
+        self.assertFalse(window_holds(src, 30, 30, "check_it"))
+        self.assert_flags(rng, [(NOTES, 2, "STALE011"), (NOTES, 3, "STALE011")])
+
+    def test_two_cites_in_one_sentence_pair_the_name_with_the_nearest_and_the_farther_is_not_judged(self):
+        line = "The cite `lint/far.py:20` names `check_it`, and `lint/far.py:40` is also far."
+        rng, _ = self.route_range([(line, True)], extra={FAR: FAR_TEXT})
+        self.assertEqual(def_spans(FAR_TEXT, "check_it"), [(1, 2)])  # scope: the def is at the top of the file
+        self.assertFalse(window_holds(FAR_TEXT, 20, 20, "check_it"))  # scope: the nearer cite is drifted
+        self.assertFalse(window_holds(FAR_TEXT, 40, 40, "check_it"))  # scope: the farther cite would be drifted too
+        found = self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+        self.assertIn("lint/far.py:20", found[0][3])  # the nearest cite is the one judged
+        self.assertNotIn("lint/far.py:40", found[0][3])  # the farther cite is not
+
+    def test_a_name_and_a_cite_in_different_sentences_of_one_line_are_not_paired_and_one_sentence_is(self):
+        rows = [
+            ("`check_it` holds the step. The cite `lint/far.py:30` is far.", False),
+            ("`check_it` holds at `lint/far.py:30`.", True),  # the same pair in one sentence
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: FAR_TEXT})
+        self.assertEqual(def_spans(FAR_TEXT, "check_it"), [(1, 2)])  # scope
+        self.assertFalse(window_holds(FAR_TEXT, 30, 30, "check_it"))  # scope: the cite is drifted
+        self.assert_flags(rng, [(NOTES, 2, "STALE011")])
+
+    def test_a_drifted_line_the_range_does_not_add_is_silent_and_an_added_drifted_copy_is_flagged(self):
+        base_src = numbered_source(2, {1: "def check_it(lane):", 2: "    return lane"})
+        head_src = numbered_source(42, {41: "def check_it(lane):", 42: "    return lane"})
+        base_notes = "# Notes\n\n- `check_it` holds at `lint/far.py:2`.\n"
+        rows = [("# Notes", False), ("", False), ("- `check_it` holds at `lint/far.py:2`.", False),
+                ("- `check_it` holds at `lint/far.py:3`.", True)]
+
+        def move_def(repo):
+            write(repo, FAR, head_src)
+        rng, _ = self.route_range(rows, extra={FAR: base_src}, base_notes=base_notes, head_change=move_def)
+        self.assertEqual(def_spans(base_src, "check_it"), [(1, 2)])  # scope: at base the cite at line 2 holds the def
+        self.assertEqual(def_spans(head_src, "check_it"), [(41, 42)])  # scope: at head the def has moved away
+        self.assertEqual(git(rng.repo, "show", "%s:%s" % (rng.base, NOTES)).split("\n")[2],
+                         "- `check_it` holds at `lint/far.py:2`.")  # scope: line 3 is the same at base and head
+        self.assertIn(FAR, touched(rng))  # scope: the range changes the .py the cite names
+        self.assert_flags(rng, [(NOTES, 4, "STALE011")])
+
+    def test_a_line_marked_ste_disable_line_stale011_is_left_out_and_a_mark_for_another_code_is_not(self):
+        rows = [
+            ("- `check_it` holds at `lint/far.py:30`. <!-- ste-disable-line STALE011 -->", False),
+            ("- `check_it` holds at `lint/far.py:30`. <!-- ste-disable-line STALE010 -->", True),
+            ("- `check_it` holds at `lint/far.py:30`.", True),
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: FAR_TEXT})
+        self.assertEqual(def_spans(FAR_TEXT, "check_it"), [(1, 2)])  # scope
+        self.assertFalse(window_holds(FAR_TEXT, 30, 30, "check_it"))  # scope: both marked lines are drifted
+        self.assert_flags(rng, [(NOTES, 2, "STALE011"), (NOTES, 3, "STALE011")])
+
+    def test_a_lone_apostrophe_a_hash_or_slashes_in_a_code_span_and_a_fenced_line_do_not_hide_the_cite(self):
+        rows = [
+            ("- Don't rely on `check_it` at `lint/far.py:30`.", True),
+            ("- The `#` and `//` spans sit by `lint/far.py:30`, which holds `check_it`.", True),
+            ("- `check_it` holds at `lint/far.py:30`, after `#` and `//`.", True),
+            ("```", False),
+            ("`check_it` holds at `lint/far.py:30`.", True),  # a fenced line is prose, as STALE002 reads it
+            ("```", False),
+        ]
+        rng, flagged = self.route_range(rows, extra={FAR: FAR_TEXT})
+        self.assertEqual(def_spans(FAR_TEXT, "check_it"), [(1, 2)])  # scope
+        self.assertFalse(window_holds(FAR_TEXT, 30, 30, "check_it"))  # scope: every flagged line's cite is drifted
+        self.assertEqual(flagged, [1, 2, 3, 5])
+        self.assert_flags(rng, [(NOTES, n, "STALE011") for n in flagged])
+
+    def test_a_py_that_does_not_parse_at_head_is_one_unknown_line_and_exit_zero_and_the_run_goes_on(self):
+        broken = "def check_it(lane:\n    return lane\n"
+        rows = [("- `check_it` holds at `lint/broken.py:2`.", False), ("- `check_it` holds at `lint/broken.py:2`, too.", False)]
+        rng, _ = self.route_range(rows, extra={"lint/broken.py": broken})
+        with self.assertRaises(SyntaxError):
+            ast.parse(broken)  # scope: the file does not parse
+        self.assertIn(NOTES, touched(rng))  # scope: the range does not touch the .py
+        self.assertNotIn("lint/broken.py", touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(len(unknown_lines(out)), 1, out)
+        self.assertIn("lint/broken.py", unknown_lines(out)[0])
+
+        rows.append(("- `check_it` holds at `lint/far.py:30`.", True))  # a judged cite beside it: the run goes on
+        rng, _ = self.route_range(rows, extra={"lint/broken.py": broken, FAR: FAR_TEXT})
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, 3, "STALE011")], out)
+        self.assertEqual(len(unknown_lines(out)), 1, out)
+
+    def test_a_name_cited_in_an_empty_py_is_not_judged_and_one_cited_in_a_full_size_py_is_judged_by_its_def(self):
+        big = "".join("def f%d():\n    return %d\n\n\n" % (i, i) for i in range(300))
+        rows = [
+            ("- `f299` holds at `lint/empty.py:1`.", False),  # an empty file binds no name
+            ("- `f299` holds at `lint/big.py:1100`.", True),
+            ("- `f299` holds at `lint/big.py:1198`.", False),  # inside the def's span
+        ]
+        rng, _ = self.route_range(rows, extra={"lint/empty.py": "", "lint/big.py": big})
+        self.assertGreater(len(big), 8192)  # scope: the full-size file
+        self.assertEqual(def_spans(big, "f299"), [(1197, 1198)])  # scope: the def sits near the end of the file
+        self.assertIsNone(binding_kind("", "f299"))  # scope: the empty file binds nothing
+        self.assertFalse(window_holds(big, 1100, 1100, "f299"))  # scope: the cited window holds another def
+        self.assert_flags(rng, [(NOTES, 2, "STALE011")])
+
+    def test_a_name_bound_as_a_method_at_depth_an_assignment_or_a_class_is_judged_by_its_own_span_or_line(self):
+        src = numbered_source(40, {1: "class Holder:", 2: "    def run_all(self):", 3: "        return 1", 30: "LIMIT_STEPS = 4"})
+        rows = [
+            ("- `run_all()` holds at `lint/far.py:20`.", True),  # a method at depth two, far from the cite
+            ("- `run_all()` holds at `lint/far.py:3`.", False),  # inside the method's span
+            ("- `LIMIT_STEPS` is set at `lint/far.py:20`.", True),  # an assigned name, far from the cite
+            ("- `LIMIT_STEPS` is set at `lint/far.py:30`.", False),  # on the assignment's own line
+            ("- `Holder` holds at `lint/far.py:20`.", True),  # a class, far from the cite
+            ("- `Holder` holds at `lint/far.py:5`.", False),  # inside the class span
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: src})
+        self.assertEqual(def_spans(src, "run_all"), [(2, 3)])  # scope: the method at depth two
+        self.assertIsNone(binding_kind(src, "run_all"))  # scope: no module-level binding, so only a walk finds it
+        self.assertEqual(def_spans(src, "Holder"), [(1, 3)])  # scope: the class spans lines 1 to 3
+        self.assertEqual(module_value(src, "LIMIT_STEPS"), 4)  # scope: the module assigns the name
+        for name in ("run_all", "LIMIT_STEPS", "Holder"):
+            self.assertFalse(window_holds(src, 20, 20, name))  # scope: the far cites hold no name in their windows
+        self.assert_flags(rng, [(NOTES, 1, "STALE011"), (NOTES, 3, "STALE011"), (NOTES, 5, "STALE011")])
+
+    def test_only_the_glued_anchor_form_is_judged_and_a_space_beside_the_colon_is_no_anchor(self):
+        rows = [
+            ("- `check_it` holds at `lint/far.py : 30`.", False),  # a space before the colon: no anchor
+            ("- `check_it` holds at `lint/far.py: 30`.", False),  # a space after the colon: no anchor
+            ("- `check_it` holds at `lint/far.py:30`.", True),  # the glued form
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: FAR_TEXT})
+        self.assertFalse(window_holds(FAR_TEXT, 30, 30, "check_it"))  # scope: the glued cite is drifted
+        self.assert_flags(rng, [(NOTES, 3, "STALE011")])
+
+    def test_tree_mode_judges_every_line_and_an_anchor_past_the_end_is_stale004_only(self):
+        notes = ("# Notes\n\n"
+                 "- `check_it` holds at `lint/far.py:30`.\n"  # drifted: STALE011
+                 "- `check_it` holds at `lint/far.py:99`.\n"  # past the file's end: STALE004 only
+                 "- `check_it` holds at `lint/far.py:2`.\n"  # holds the name
+                 "- `check_it` holds at `lint/far.py:30`. <!-- ste-disable-line STALE011 -->\n")  # marked
+        rng = self.tree(notes, extra={FAR: FAR_TEXT})
+        self.assertEqual(def_spans(FAR_TEXT, "check_it"), [(1, 2)])  # scope
+        self.assertEqual(len(FAR_TEXT.split("\n")) - 1, 44)  # scope: the file has 44 lines, so :99 is past its end
+        self.assertFalse(window_holds(FAR_TEXT, 30, 30, "check_it"))  # scope: the drifted cite is drifted
+        self.assert_tree_flags(rng, [(NOTES, 3, "STALE011"), (NOTES, 4, "STALE004")])
 
 
 if __name__ == "__main__":
