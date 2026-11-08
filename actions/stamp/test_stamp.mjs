@@ -2051,8 +2051,7 @@ test("watchdog: a detached child that exits inside the 3 s grace is no leftover,
 
 // Windows only: the Job Object is the kill guarantee there. On CI a run without one must fail by name,
 // not pass on the tree walk alone. STAMP_SUITE_NO_JOB=1 makes the job assignment fail: the builder must
-// honour it. GITHUB_ACTIONS=true is the CI flag the watchdog reads. Windows red: unmeasured. On Linux
-// this case returns at once, so its ok line is no evidence of anything.
+// honour it. GITHUB_ACTIONS=true is the CI flag the watchdog reads. On Linux this case returns at once.
 test("watchdog, CI on Windows: no Job Object fails the run with a line starting FAIL - no job object", () => {
   if (POSIX) return;
   withTempDir((dir) => {
@@ -2072,8 +2071,7 @@ test("watchdog, CI on Windows: no Job Object fails the run with a line starting 
 });
 
 // The sweep seam. STAMP_SUITE_SWEEP_FAULT makes the sweep report a fault the clean fixture cannot
-// produce, so only the knob can make the run red. Each case runs the real watchdog. Red today: the
-// knob is not read yet, so the run exits 0.
+// produce, so only the knob can make the run red. Each case runs the real watchdog.
 function faultedCleanRun(extra, dir) {
   const pidFile = join(dir, "pids");
   const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "clean", ...extra };
@@ -2104,8 +2102,10 @@ test("watchdog, CI: a sweep that cannot read fails the run by name (STAMP_SUITE_
     assert.match(r.out, /^unknown - leftover sweep could not read/m, r.out);
   }));
 
-// Windows only: the go file is written on the Job Object path alone, so the knob means nothing on Linux.
-// STAMP_SUITE_GO_FAIL=1 makes that write fail. Windows red: unmeasured.
+// Windows only: the go file is written on the Job Object path, which Linux lacks, so the knob means
+// nothing there. STAMP_SUITE_GO_FAIL=1 makes the write fail. A write that fails fails the run before
+// any test, on CI and off it. On CI the child never runs a test outside the job. Off CI with no job,
+// the fallback releases the child anyway, with a printed note.
 test("watchdog, Windows: a go file that cannot be written fails the run before any test (STAMP_SUITE_GO_FAIL=1)", () => {
   if (POSIX) return;
   withTempDir((dir) => {
