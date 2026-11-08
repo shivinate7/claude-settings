@@ -33,6 +33,11 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
 
+# A reviewer may run Sonnet, above its Haiku row, on any round when a line of its brief starts with this text (rule
+# agent-role-model). It is the review record's field line for a guard or check change, which merge/merge.py review_body
+# writes, so the record and the brief carry one text.
+REVIEW_GUARD_MARKER = "Guard or check: yes"
+
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
 # marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
 # brief text, no I/O, no process, no file. Its position decides where the row reads:

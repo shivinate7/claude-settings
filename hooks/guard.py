@@ -2673,11 +2673,13 @@ ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
 ROLE_DEFAULT = "general-purpose"
-# One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
-# ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
+# A reviewer brief with a `Round N of 3` marker, N in ROLE_REVIEWER_FREE_ROUNDS, may run above its row. The first round
+# runs above its row only with REVIEW_GUARD_MARKER (page item 359 a); never add "1" to that tuple.
+# A reviewer brief with a line that starts with REVIEW_GUARD_MARKER (a guard or check diff) may run Sonnet on any round,
+# the first round included, with no `Round N of 3` line (page item 359, pick a); Opus stays refused.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
-from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import EXPLORE_AUDIT_MARKER, REVIEW_GUARD_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
@@ -2687,7 +2689,8 @@ ROLE_MODEL_REASON = (
     "field, or name the role's model%s. (decision agent-model-cap)"
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
-ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
+ROLE_REVIEWER_ROUND_REMEDY = (", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
+                              ", or, when it is for a guard or check diff, start a line with `%s`")
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
 # does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
@@ -2893,6 +2896,23 @@ def role_model_check(tool: str, tool_input):
     return unread
 
 
+def review_guard_marked(brief) -> bool:
+    """True when a line of the brief starts with REVIEW_GUARD_MARKER, case-sensitive, so mid-line text does not count.
+    A line inside a ``` fence does not count: a quoted brief or example is not the brief's own marker.
+    The marker ends at the end of the line, whitespace or a full stop: a pasted template line `yes|no`, `yesterday`
+    or `yes-ish` is not a choice of yes."""
+    if not isinstance(brief, str):
+        return False
+    fenced = False
+    for line in brief.split("\n"):
+        if line.strip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and line.startswith(REVIEW_GUARD_MARKER):
+            if (line[len(REVIEW_GUARD_MARKER):] or " ")[0] in " \t\r.":
+                return True
+    return False
+
+
 def role_model_one(tool_input):
     """(reason, matched, unread) for one spawn against its role's row. `reason` is the deny, or "".
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
@@ -2919,8 +2939,10 @@ def role_model_one(tool_input):
             return "", "", False
         if role == EXPLORE_ROLE and named < top and ("audit", None) in marker_hits(tool_input.get("prompt")):
             return "", "", False
-        if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
-                                                      for kind, n in brief_markers(tool_input.get("prompt"))):
+        if role == "reviewer" and named < top and (
+                review_guard_marked(tool_input.get("prompt"))
+                or any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
+                       for kind, n in brief_markers(tool_input.get("prompt")))):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
@@ -2928,7 +2950,8 @@ def role_model_one(tool_input):
                 extra = ROLE_EXPLORE_AUDIT_REMEDY % EXPLORE_AUDIT_MARKER
             if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
-                                                    ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
+                                                    ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS),
+                                                    REVIEW_GUARD_MARKER)
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
             return ROLE_MODEL_REASON % extra, model, False
