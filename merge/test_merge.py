@@ -1605,6 +1605,12 @@ def lane_batch(env, *names):
     env.tips = tips
     return tips
 
+def git_date(iso):
+    """A commit date for GIT_AUTHOR_DATE and GIT_COMMITTER_DATE: the UTC instant `iso` (a GitHub time), in git's own form. A case dates the commits
+    it makes with it, so their age is fixed, never read from the clock."""
+    when = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return f"{int(when.timestamp())} +0000"
+
 def unreadable_lane_log_patch(exc=None):
     """A context manager: the one git log that reads a branch's merge commits (read_lanes) fails, and every other git call runs. `exc`: that log
     raises this exception (an OSError, a TimeoutExpired) instead of exiting non-zero."""
@@ -14992,13 +14998,22 @@ class BatchRedWindow(Env):
         tips = lane_batch(self, "lane1")
         return self.head(), tips["lane1"]
 
-    def window_host(self, lane, line_at, opened=HEAD_OPENED):
-        """The merge host of feat: lane1's pull request (#7) open since LANE_OPENED, the head's pull request (#1) open since `opened`, and one
-        Batch: red line on the lane, at `line_at`."""
-        pulls = [batch_pull(7, lane, head_ref="lane1", created_at=self.LANE_OPENED),
-                 batch_pull(1, self.head(), head_ref="feat", created_at=opened)]
-        return CommentHost(self.co, self.other, comments=[batch_red_line(950, 7, lane, created=line_at)], branch="feat", created=opened,
-                           pulls=pulls)
+    def closed_lane_head(self):
+        """feat with lane1 merged in, lane1's commits dated LANE_OPENED: the lane was made before its line, and its pull request has since closed.
+        -> (feat's head, lane1's tip)."""
+        dated = {"GIT_AUTHOR_DATE": git_date(self.LANE_OPENED), "GIT_COMMITTER_DATE": git_date(self.LANE_OPENED)}
+        with unittest.mock.patch.dict(os.environ, dated):
+            tips = lane_batch(self, "lane1")
+        return self.head(), tips["lane1"]
+
+    def window_host(self, lane, line_at, opened=HEAD_OPENED, lane_open=True, pulls_error=None):
+        """The merge host of feat: lane1's pull request (#7) open since LANE_OPENED unless `lane_open` is False (it closed), the head's pull request
+        (#1) open since `opened`, and one Batch: red line on the lane at `line_at` (none when `line_at` is None). `pulls_error`: the open pull list read fails."""
+        pulls = [batch_pull(1, self.head(), head_ref="feat", created_at=opened)]
+        if lane_open:
+            pulls.insert(0, batch_pull(7, lane, head_ref="lane1", created_at=self.LANE_OPENED))
+        comments = [batch_red_line(950, 7, lane, created=line_at)] if line_at else []
+        return CommentHost(self.co, self.other, comments=comments, branch="feat", created=opened, pulls=pulls, pulls_error=pulls_error)
 
     def test_a_batch_red_line_posted_before_the_head_opened_still_refuses_its_merge(self):
         _, lane = self.lane_head()
@@ -15035,6 +15050,81 @@ class BatchRedWindow(Env):
         self.assertNotEqual(rc, 0, "a readable lane log with the reason flag did not refuse on the lane's Batch: red line:\n" + out)
         self.assertIn(merge.BATCH_RED_WORD, out, "the refusal does not name the Batch: red line:\n" + out)
         self.assertFalse(getattr(host, "merged", False), "the head was merged past its lane's Batch: red line:\n" + out)
+
+    def test_a_batch_red_line_on_a_closed_lane_refuses_the_batch_that_holds_that_lane(self):
+        head, lane = self.closed_lane_head()
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "merge-base", "--is-ancestor", lane, head)  # scope: the head holds the lane, and the lane's pull request is not open
+        host = self.window_host(lane, self.LINE, lane_open=False)
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertNotEqual(rc, 0, "a merge went through a Batch: red line on a lane its batch holds, whose pull request had closed:\n" + out)
+        self.assertFalse(getattr(host, "merged", False), "the head was merged past a Batch: red line on a closed lane it holds:\n" + out)
+
+    def test_control_a_batch_red_line_on_a_closed_lane_posted_after_the_head_opened_refuses_its_merge(self):
+        _, lane = self.closed_lane_head()
+        host = self.window_host(lane, self.LATER, lane_open=False)
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertNotEqual(rc, 0, "a Batch: red line on a closed lane, posted after the head opened, did not refuse the merge:\n" + out)
+        self.assertIn(merge.BATCH_RED_WORD, out, "the refusal does not name the Batch: red line:\n" + out)
+        self.assertFalse(getattr(host, "merged", False), "the head was merged past its closed lane's Batch: red line:\n" + out)
+
+    def test_a_failed_open_pull_read_refuses_the_head_and_names_the_read(self):
+        _, lane = self.lane_head()
+        host = self.window_host(lane, None, pulls_error="reading pulls failed")
+        before = self.refs()
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertIn("pulls", host.reads, "the open pull list was never read, so its failed read was never reached:\n" + out)
+        self.assertNotEqual(rc, 0, "a failed open pull list read let the head through:\n" + out)
+        self.assertFalse(getattr(host, "merged", False), "the head was merged after its open pull list read failed:\n" + out)
+        self.assertEqual(self.refs(), before, "a refused merge moved a ref on origin")
+        self.assertIn("could not read the open pull requests", out, "the refusal does not name the failed open pull request read:\n" + out)
+
+    def test_control_an_open_pull_read_that_succeeds_lets_a_head_with_no_line_through(self):
+        _, lane = self.lane_head()
+        host = self.window_host(lane, None)
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(host, "merged", False), out)
+
+    def lane_read_refusal(self, host, exc, flag=True):
+        """-> (rc, out, err) of `merge --confirm` on pull request 1 when the lane log read raises `exc`. With `flag`, the reason flag lifts the
+        dropped-lane read, so the batch-red read is the one that fails. An exception that escapes the run is a failed case."""
+        out, err = io.StringIO(), io.StringIO()
+        argv = ["1", "--confirm", *(["--undo-check-unknown-ok", "octopus read it"] if flag else [])]
+        with unreadable_lane_log_patch(exc):
+            try:
+                rc = self.run_merge(*argv, host=host, stdout=out, stderr=err)[0]
+            except Exception as e:  # a traceback is the failure this case names
+                self.fail(f"the lane read's {type(exc).__name__} escaped the refusal as {type(e).__name__}: {e}. The refusal must print an unknown line.")
+        return rc, out.getvalue(), err.getvalue()
+
+    def assert_lane_read_unknown(self, host, exc):
+        """A lane read that raises `exc` refuses the head, with a printed unknown line for the Batch: red check and no traceback."""
+        rc, out, err = self.lane_read_refusal(host, exc)
+        self.assertIn("dropped-lane check UNKNOWN", out + err, "scope: the reason flag did not lift the dropped-lane read, so the batch-red read never ran:\n" + out + err)
+        self.assertNotIn("Traceback", err, "the lane read's exception printed a traceback:\n" + err)
+        self.assertNotEqual(rc, 0, "a failed lane read let the head through:\n" + out + err)
+        self.assertFalse(getattr(host, "merged", False), "the head was merged after its lane read failed, under the reason flag:\n" + out + err)
+        self.assertRegex(out + err, r"Batch: red[^\n]*unknown|unknown[^\n]*Batch: red", "the refusal prints no unknown line for the Batch: red check:\n" + out + err)
+
+    def test_an_os_error_from_the_lane_read_refuses_with_an_unknown_line_and_no_traceback(self):
+        _, lane = self.lane_head()
+        host = self.window_host(lane, self.LINE, opened=self.LANE_OPENED)  # the line is inside the window, so only the failed read can let it through
+        self.assert_lane_read_unknown(host, OSError("the git program cannot be started"))
+
+    def test_a_timed_out_lane_read_refuses_with_an_unknown_line_and_no_traceback(self):
+        _, lane = self.lane_head()
+        host = self.window_host(lane, self.LINE, opened=self.LANE_OPENED)
+        self.assert_lane_read_unknown(host, subprocess.TimeoutExpired(["git", "log"], 30))
+
+    def test_control_without_the_reason_flag_the_dropped_lane_read_refuses_before_the_batch_read(self):
+        _, lane = self.lane_head()
+        host = self.window_host(lane, self.LINE, opened=self.LANE_OPENED)
+        rc, out, err = self.lane_read_refusal(host, OSError("the git program cannot be started"), flag=False)
+        self.assertNotIn("Traceback", err, "the dropped-lane read's OSError printed a traceback:\n" + err)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertFalse(getattr(host, "merged", False), "the head was merged after its lane read failed:\n" + out + err)
+        self.assertIn("dropped-lane check could not read", out + err, "the refusal is not the dropped-lane read's:\n" + out + err)
 
 
 class BuildBatchLintRerun(BuildEnv):
@@ -15139,6 +15229,69 @@ class BatchDropRed(BuildEnv):
     """--drop-red names the integration pull request whose newest run ran red. Each lane's changed files are matched to the red job's suite: a lane
     that hits it is dropped with its dependents, and each dropped pull request gets one `Batch: red` line. The rebuilt batch holds none of them."""
 
+    BASE_RUN = 901  # the id of main's one run, in the cases that give main a run
+    SUITE_RED_JOB = "checks-merge-install"  # a job of CHECKS_SUITE_JOBS: the suite cases' red job, whose suite the real suite read reaches
+    SUITE_RED_JOBS = [(SUITE_RED_JOB, "failure"), ("all-jobs-passed", "failure"), ("checks", "success")]  # the integration run's jobs
+    ALPHA, BETA = "data/alpha.txt", "data/beta.txt"  # what the suites read: lane #7 changes ALPHA (the fast job's suite), lane #9 changes BETA (the merge job's)
+    WORKFLOW = "\n".join(["name: checks", "on: push", "jobs:", "  checks:", "    runs-on: ubuntu-latest", "    steps:", "      - name: fast suite",
+                          "        run: bash tests/fast.sh", "  checks-merge-install:", "    runs-on: ubuntu-latest", "    steps:",
+                          "      - name: merge suite", "        run: bash tests/merge.sh"]) + "\n"  # no `name:` key on a job: its id is its job name
+    ORPHAN_N_OPENED, ORPHAN_LINE, ORPHAN_HEAD_OPENED = "2026-10-02T00:00:00Z", "2026-10-02T02:00:00Z", "2026-10-02T03:00:00Z"  # batch N's pull request opens; its line; the batch on N opens
+
+    def suite_main(self):
+        """Commit the checks workflow and its two suites to main: job `checks` runs tests/fast.sh, which reads ALPHA, and job `checks-merge-install`
+        runs tests/merge.sh, which reads BETA. -> main's head."""
+        return self.main_commit({CHECKS_PATH: self.WORKFLOW, "tests/fast.sh": f"# the fast suite\ncat {self.ALPHA}\n",
+                                 "tests/merge.sh": f"# the merge suite\ncat {self.BETA}\n"})
+
+    def suite_lanes(self, main=None):
+        """Main with the suites; lane #7, whose file the fast job's suite reads; lane #9, whose file the merge job's suite reads; and their
+        integration pull request INT_PR, whose newest run failed on SUITE_RED_JOB. `main`: see red_host. -> (h7, h9, hi, host)."""
+        self.suite_main()
+        self.real_hits = True  # the real suite read, over the checks workflow of the tree
+        h7, h9 = self.lane(7, files={self.ALPHA: "alpha\n"}), self.lane(9, files={self.BETA: "beta\n"})
+        hi = self.integration("int-red", ["feat7", "feat9"])
+        pulls = [batch_pull(7, h7), batch_pull(9, h9), batch_pull(INT_PR, hi, head_ref="int-red", labels=(BATCH_LABEL,))]
+        return h7, h9, hi, self.red_host(pulls, [(7, h7), (9, h9)], hi, self.SUITE_RED_JOBS, main=main)
+
+    def hit_lane_host(self):
+        """Lane #7 hits the red job's suite (the stub reads HIT as a hit), lane #9 hits nothing, and their integration pull request INT_PR runs red
+        on RED_JOB. -> (h7, h9, hi, host)."""
+        h7, h9 = self.lane(7, files=HIT), self.lane(9)
+        hi = self.integration("int-red", ["feat7", "feat9"])
+        pulls = [batch_pull(7, h7), batch_pull(9, h9), batch_pull(INT_PR, hi, head_ref="int-red", labels=(BATCH_LABEL,))]
+        return h7, h9, hi, self.red_host(pulls, [(7, h7), (9, h9)], hi, self.red_jobs())
+
+    def lane_paths_of(self, sha):
+        """The paths lane `sha` changes since origin/main."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return merge.lane_paths(self.co, "origin/main", sha)
+
+    def real_hits_at(self, sha, paths):
+        """The real suite read of `paths` in a tree at `sha`, over every suite job: the hits a drop sees with no job filter. The tree is a worktree
+        in this case's own folder, so it is removed with the case's folder."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        tree = os.path.join(self.t, "scope-tree")
+        sh(self.co, "git", "worktree", "add", "-q", "--detach", tree, sha)
+        try:
+            return REAL_HIT_SUITES(tree, paths, set())
+        finally:
+            sh(self.co, "git", "worktree", "remove", "--force", tree)
+
+    def base_read(self, host):
+        """The red-main check's read of main, as a drop makes it: (verdict, detail)."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return merge.base_verdict(self.co, host, "main")
+
+    def merge_on_int(self, n_head, h2, comments):
+        """Pull request 21, the batch on-int at h2, merged over `comments`. Batch N's pull request INT_PR is open at its head `n_head`.
+        -> (rc, out, host)."""
+        pulls = [batch_pull(INT_PR, n_head, head_ref="int-n", created_at=self.ORPHAN_N_OPENED),
+                 batch_pull(21, h2, head_ref="on-int", created_at=self.ORPHAN_HEAD_OPENED)]
+        host = CommentHost(self.co, self.other, comments=comments, branch="on-int", created=self.ORPHAN_HEAD_OPENED, pulls=pulls)
+        rc, out = self.run_merge("21", "--confirm", host=host)
+        return rc, out, host
+
     def integration(self, name, lanes):
         """Branch `name` on origin: origin/main with each lane's head merged in order, as an integration branch holds them. -> its head sha."""
         o = self.other
@@ -15149,12 +15302,16 @@ class BatchDropRed(BuildEnv):
         sh(o, "git", "push", "-q", "-f", "origin", name)
         return sh(o, "git", "rev-parse", "HEAD")
 
-    def red_host(self, pulls, done, int_sha, jobs):
+    def red_host(self, pulls, done, int_sha, jobs, main=None):
         """A PullsHost over `pulls`, each of `done` ((number, head) pairs) with its done record. The integration head `int_sha` has one completed
-        run, `checks`, whose jobs are `jobs` ((name, conclusion) pairs), as `gh run list --commit` and the jobs read give them."""
+        run, `checks`, whose jobs are `jobs` ((name, conclusion) pairs), as `gh run list --commit` and the jobs read give them. `main`
+        ((conclusion, jobs) pair) gives main one run, BASE_RUN, the newest run of the base as the red-main check reads it; None gives main none."""
         runs = {int_sha: [{"name": "checks", "status": "completed", "conclusion": "failure", "workflowDatabaseId": 1, "databaseId": RUN_ID}]}
         records = [c for n, sha in done for c in self.done(n, sha)]
-        return PullsHost(pulls, {}, comments=records, workflow_runs=runs, jobs={RUN_ID: [main_job(name, conclusion) for name, conclusion in jobs]})
+        base_runs = [main_run(self.BASE_RUN, main[0], path=CHECKS_PATH)] if main else []
+        base_jobs = {self.BASE_RUN: [main_job(name, conclusion) for name, conclusion in main[1]]} if main else {}
+        return PullsHost(pulls, {}, comments=records, workflow_runs=runs, main_runs=base_runs,
+                         jobs={RUN_ID: [main_job(name, conclusion) for name, conclusion in jobs], **base_jobs})
 
     def red_jobs(self):
         """The jobs of a red run: the red job, the aggregate that fails with it, and a job that passed."""
@@ -15279,6 +15436,93 @@ class BatchDropRed(BuildEnv):
         self.assertNotEqual(rc, 0, "the integration merge went through past the Batch: red line on its hit lane:\n" + out)
         self.assertIn(merge.BATCH_RED_WORD, out, "the refusal does not name the Batch: red line:\n" + out)
         self.assertFalse(getattr(merge_host, "merged", False), "the integration head was merged past its hit lane's Batch: red line:\n" + out)
+
+    def test_a_red_job_drops_no_lane_whose_files_only_another_jobs_suite_reads(self):
+        h7, h9, hi, host = self.suite_lanes()
+        for head in (h7, h9):  # scope: read over every suite job, each lane is hit, so only the red job's own suite can tell them apart
+            self.assertTrue(self.real_hits_at(hi, self.lane_paths_of(head)), f"scope: no suite reads the files of {head[:9]}, so the case proves nothing")
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        self.assertNotIn(7, [n for n, _ in host.posts], "a red job dropped #7, whose files reach only the other job's suite:\n" + out + err)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7[:9]}"], "the rebuild did not keep #7:\n" + out + err)
+
+    def test_control_a_red_job_drops_the_lane_whose_files_its_own_suite_reads(self):
+        h7, h9, hi, host = self.suite_lanes()
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        self.assertEqual([t.splitlines()[0] for n, t in host.posts if n == 9], [f"Batch: red {h9} {self.SUITE_RED_JOB}"],
+                         "the lane whose files the red job's own suite reads was not dropped with that job:\n" + out + err)
+
+    def test_a_drop_without_push_posts_nothing_and_prints_each_line_it_would_post(self):
+        h7, h9, hi, host = self.hit_lane_host()
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR))  # no --push
+        self.assertIn("left out: #7 feat7: ", out + err, "scope: the drop did not run, so no line was due:\n" + out + err)
+        self.assertEqual(host.posts, [], "a drop without --push posted lines:\n" + out + err)
+        for n, head in ((7, h7), (INT_PR, hi)):
+            self.assertIn(f"Batch: red {head} {RED_JOB}", out + err, f"the drop without --push does not print the line it would post on #{n}:\n" + out + err)
+
+    def test_control_with_push_the_same_drop_posts_one_line_on_each_dropped_pull_request(self):
+        h7, h9, hi, host = self.hit_lane_host()
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        self.assertEqual(sorted(n for n, _ in host.posts), sorted([7, INT_PR]), "the drop with --push did not post one line on each dropped pull request:\n" + out + err)
+
+    def test_the_integration_pull_requests_line_does_not_tell_its_reader_to_fix_it_in_its_own_lane(self):
+        h7, h9, hi, host = self.hit_lane_host()
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        texts = [t for n, t in host.posts if n == INT_PR]
+        self.assertEqual(len(texts), 1, "scope: the integration pull request got no line:\n" + out + err)
+        self.assertNotIn("own lane", texts[0], "the integration pull request's line tells its reader to fix it in its own lane:\n" + texts[0])
+
+    def test_a_second_drop_run_posts_no_line_again(self):
+        h7, h9, hi, host = self.hit_lane_host()
+        self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        posted = [n for n, _ in host.posts]
+        self.assertEqual(sorted(posted), sorted([7, INT_PR]), "scope: the first run did not post its lines")
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int-2")  # a new branch, so the run gets past the push name
+        self.assertIn("left out: #7 feat7: ", out + err, "scope: the second run did not drop #7 again, so no line was due:\n" + out + err)
+        self.assertEqual([n for n, _ in host.posts], posted, "a second drop run posted a line again:\n" + out + err)
+
+    def test_a_batch_built_on_a_split_batch_is_refused_when_the_split_batch_head_carries_its_line(self):
+        self.lane(7)
+        h8 = self.lane(8)
+        n_head = self.integration("int-n", ["feat7"])  # batch N, split: its drop wrote the line on its own head, and #7 has no open pull request
+        line = batch_red_line(950, INT_PR, n_head, created=self.ORPHAN_LINE)
+        rc, out, err = self.build(self.done_host({8: h8}), "--on", "int-n", "--push", "on-int")
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #8 feat8 {h8[:9]}"], "scope: the batch built on N did not join #8:\n" + out + err)
+        h2 = self.head("on-int")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "merge-base", "--is-ancestor", n_head, h2)  # scope: the batch holds batch N's head as an ancestor
+        rc, out, host = self.merge_on_int(n_head, h2, [line])
+        self.assertNotEqual(rc, 0, "the batch built on a split batch was merged past the Batch: red line on the split batch's head, which it holds:\n" + out)
+        self.assertFalse(getattr(host, "merged", False), "the batch built on a split batch was merged past the Batch: red line on its ancestor:\n" + out)
+
+    def test_control_a_batch_built_on_a_split_batch_is_refused_by_a_line_on_a_lane_head_it_holds(self):
+        h7, h8 = self.lane(7), self.lane(8)
+        n_head = self.integration("int-n", ["feat7"])
+        rc, out, err = self.build(self.done_host({8: h8}), "--on", "int-n", "--push", "on-int")
+        self.assert_ran(rc, out, err, 1)
+        h2 = self.head("on-int")
+        rc, out, host = self.merge_on_int(n_head, h2, [batch_red_line(950, 7, h7, created=self.ORPHAN_LINE)])
+        self.assertNotEqual(rc, 0, "a Batch: red line on a lane head the batch holds did not refuse its merge:\n" + out)
+        self.assertIn(merge.BATCH_RED_WORD, out, "the refusal does not name the Batch: red line:\n" + out)
+        self.assertFalse(getattr(host, "merged", False), "the batch was merged past a Batch: red line on a lane head it holds:\n" + out)
+
+    def test_a_drop_drops_nothing_for_a_job_the_base_has_red_and_names_the_base(self):
+        h7, h9, hi, host = self.suite_lanes(main=("failure", [(self.SUITE_RED_JOB, "failure"), ("all-jobs-passed", "skipped")]))
+        verdict, detail = self.base_read(host)
+        self.assertEqual(verdict, "red", "scope: main's newest run does not read red, so the case proves nothing: " + detail)
+        self.assertIn(self.SUITE_RED_JOB, detail, "scope: main's red does not name the suite job:\n" + detail)
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        self.assertEqual(host.posts, [], "a drop posted lines for a job main has red too:\n" + out + err)
+        text = out + err
+        self.assertIn(self.SUITE_RED_JOB, text, "the drop does not name the job it does not drop for:\n" + text)
+        self.assertRegex(text, r"red[^\n]*\b(main|base)\b|\b(main|base)\b[^\n]*red", "the drop does not name the base as red:\n" + text)
+
+    def test_control_a_drop_for_a_job_main_has_green_drops_the_lane(self):
+        h7, h9, hi, host = self.suite_lanes(main=("success", [(self.SUITE_RED_JOB, "success"), ("all-jobs-passed", "skipped")]))
+        verdict, detail = self.base_read(host)
+        self.assertEqual(verdict, "green", "scope: main's newest run does not read green, so the control proves nothing: " + detail)
+        rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
+        self.assertIn(9, [n for n, _ in host.posts], "the lane whose files the red job's suite reads was not dropped while main is green:\n" + out + err)
 
 
 if __name__ == "__main__":
