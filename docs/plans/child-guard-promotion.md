@@ -99,7 +99,7 @@ gloss here. The reader did not return the titles.
 | 2 | guard-shell.py: clause_tree_bash, clause_tree_write. Stops a write outside this checkout. | D179 | 2026-09-06 about 1,500 lines written into the main checkout | DUPLICATE | cs hooks/guard.py rule other-checkout. Double fire live in Claude Code |
 | 3 | guard-shell.py: clause_wait. Stops a sleep or poll loop, and a waiter that matches itself in pgrep. | D179, D173 | 2026-09-12 pgrep waiter; 119-round merge loop | DUPLICATE | cs hooks/guard_stream.py:waiter_verdict. Double fire live |
 | 4 | guard-shell.py: clause_narrate (NARRATORS). Stops make merge piped into tail. | D235, D179 | 2026-09-20 | PROMOTE (--confirm spelling); DUPLICATE (rest) | cs hooks/guard_stream.py:narrated_tail_hit misses make merge with --confirm piped into tail (probed). Promote that spelling (not placed). The rest double fires live |
-| 5 | guard-shell.py: clause_push. Stops git push <remote> HEAD when the upstream has another name. | D179 | 2026-09-12 stray branch on origin | PROMOTE | cs hooks/guard_push_delete.py, beside push_verdict. Lane push-head-upstream-name |
+| 5 | guard-shell.py: clause_push. Stops git push <remote> HEAD when the upstream has another name. | D179 | 2026-09-12 stray branch on origin | DUPLICATE | cs hooks/guard_push_delete.py:push_ask_hit (rule push-stray-branch, ruling 206 a) asks on it; measured 2026-11-08. The agent-worktree form asks by rule push-agent-branch |
 | 6 | guard-shell.py: clause_owner_only, _hatches_set, and the hatch audit rows. Stops an agent that sets a BANCHI_* hatch (an environment switch that turns a guard off). | D179 | none found | STAYS ? | Repo fact: BANCHI_* hatches. cs uses hooks/override.py. Goes if the hatches go |
 | 7 | silent-write-guard.py, with its selftest. Stops a git write whose output is discarded. | D171 | 2026-09-12 nine in 24 hours | PROMOTE (file and bash-c clauses); DUPLICATE (rest) | cs hooks/guard.py:silent_write_hit allows an unread-file sink and a bash -c git write. Banchi's Claude-side copy runs only those two clauses (BANCHI_SILENT_WRITE_ONLY=file,bash-c). Promote them (not placed). The rest runs in Codex only. Waits on owner question 1 |
 | 8 | reap.py: hook; reap_mark.py, with selftest. Stops a kill by name, or of another session's pid. | D127 | 2026-09-09 and 09-10 pkill -f hit :8000; 2026-09-27 | DUPLICATE ? | cs hooks/guard_kill.py:foreign_pid_kill, pid_is_session_job. Codex only, so no cs runner. Waits on owner question 1 |
@@ -369,14 +369,13 @@ copy, so no CI gap.
   2026-08-29 a symlink lost a 133 MB mirror.
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
 
-### 8. push-head-upstream-name (?)
+### 8. push-head-upstream-name
 
-- **cs files:** hooks/guard_push_delete.py. push_verdict allows a push that is not forced. An
-  explicit HEAD takes the checkout's current name (_push_dest). So a HEAD push to a name other
-  than the upstream passes. The lane judges that push. Tests: new cases in hooks/test_guard.py.
-- **Gap:** read from the code. Not run. Confirm the stray-branch case before the lane starts.
-- **Done check:** new cases in hooks/test_guard.py: git push origin HEAD, on a branch whose upstream
-  has another name, is asked. Red on the current code, green after.
+- **Status:** done on main before the lane started. Rule push-stray-branch
+  (hooks/guard_push_delete.py `push_ask_hit`, ruling 206 a) asks on a HEAD push from a branch
+  whose upstream has another name. Measured 2026-11-08, quoted HEAD too. The lane retired the
+  debt push-head-mismatch-trap and added rule push-agent-branch, which asks on a push to an
+  agent-worktree branch name.
 - **Child removals:** banchi row 5 (clause_push). Incident: 2026-09-12 a stray branch on origin.
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
 

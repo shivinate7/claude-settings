@@ -9,6 +9,7 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 |---|---|---|
 | A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all`, `--branches`) | ask | `push-main` |
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote | ask | `push-stray-branch` |
+| A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | ask | `push-agent-branch` |
 | Any other plain push | allow | |
 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
@@ -47,6 +48,10 @@ A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. `record_p
 
 - Banchi, 2026-09-12: `git push origin HEAD` landed on a stray branch, not the upstream.
 - Banchi: five plain pushes to main, outside a pull request.
+- q_max lane #1102, 2026-11-08: a test-author pushed its own agent-worktree branch
+  `claude/agent-a22bb0ed47825117b`, with no upstream, not the lane branch. `push-stray-branch`
+  is silent with no upstream, so `push-agent-branch` asks. Coordinator, 01:10 CST: a fix under
+  ruling 206 a. A lane branch with no upstream stays silent.
 
 Risk: incident (banchi, 2026-09-12).
 
