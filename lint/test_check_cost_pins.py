@@ -540,6 +540,19 @@ class CostPinTests(unittest.TestCase):
         text = self.decide("one-per.md", "- **Cost:** one `simctl list` read and two writes per call.\n")
         self.assert_found([count_row("one-per.md", text, "- **Cost:**")], counts=True)
 
+    def test_span_wrapped_over_a_line_break_holds_its_count(self):
+        # The span runs over the line break, so its 2 is inside code and is not counted.
+        text = self.decide("wrapped-span.md", "- **Cost:** it runs `read\n  2 files` per call.\n" + CONTROL)
+        self.assert_found([count_row("wrapped-span.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_apostrophe_and_comment_openers_in_a_span_do_not_hide_a_count(self):
+        # A lone apostrophe and a comment opener inside a span must not end the sentence or hide the count.
+        text = self.decide("scan-marks.md",
+                           "- **Cost:** it's read twice by the `//` pass.\n"
+                           "- **Cost:** it's read by the `#` pass, once a run.\n")
+        self.assert_found([count_row("scan-marks.md", text, "it's read twice"),
+                           count_row("scan-marks.md", text, "once a run.")], counts=True)
+
 
 class CorpusTests(unittest.TestCase):
     """The corpus case: this repo's own records, with no --root. It may stay red until the records that name
