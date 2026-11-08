@@ -2062,10 +2062,12 @@ def changed_paths(root: str, old: str, new=None, modes=None, top: str = ""):
     and its untracked files when `new` is None; None when git failed. With a dict `modes`, the same one
     diff is read in raw form, and `modes` gets each tracked path's `(old mode, new mode)`: '000000' is
     absent and '160000' a gitlink. The working tree's mode is git's own, so `core.fileMode` holds.
-    Every path is relative to the checkout's top. `git diff` prints that from any folder, but
-    `git ls-files --others` lists only the folder it runs in, relative to it, so it runs in `top`
-    (the checkout's top, which `diff_violation` already read; it defaults to `root`)."""
-    form = ("--name-only",) if modes is None else ("--raw", "--no-abbrev")
+    Every path is relative to the checkout's top. `git diff` prints that from any folder, but only
+    with `--no-relative`: under `diff.relative=true` it names paths relative to the run folder, and
+    `bytes_at` and `text_at` would read the wrong file. `git ls-files --others` lists only the folder it
+    runs in, relative to it, so it runs in `top` (the checkout's top, which `diff_violation` already
+    read; it defaults to `root`)."""
+    form = ("--no-relative",) + (("--name-only",) if modes is None else ("--raw", "--no-abbrev"))
     if new is not None:
         return raw_names(git_names(root, "diff", *form, "-z", "--no-renames", old, new), modes)
     tracked = raw_names(git_names(root, "diff", *form, "-z", "--no-renames", old), modes)
@@ -2154,8 +2156,8 @@ def upstream_kept(root: str, orig: str, onto: str):
         return None
     if held.returncode:
         return []
-    replayed = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto + "..." + orig)
-    moved = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto)
+    replayed = git_names(root, "diff", "--no-relative", "--name-only", "-z", "--no-renames", onto + "..." + orig)
+    moved = git_names(root, "diff", "--no-relative", "--name-only", "-z", "--no-renames", onto)
     if replayed is None or moved is None:
         return None
     return [p for p in replayed if p not in set(moved)]
@@ -2215,8 +2217,8 @@ def own_changes(root: str, unread=None, top: str = ""):
             return None
         modes = {} if len(parents) == 2 else None
         paths = (changed_paths(root, old, sha, modes) if old else
-                 git_names(root, "diff-tree", "--root", "-r", "--name-only", "--no-commit-id", "-z",
-                           "--no-renames", sha))
+                 git_names(root, "diff-tree", "--no-relative", "--root", "-r", "--name-only",
+                           "--no-commit-id", "-z", "--no-renames", sha))
         if paths is None:
             return None
         if modes is not None:
@@ -2385,8 +2387,9 @@ def builder_diff_reason() -> str:
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
     """Judge a role's own change at commit or push. A builder's test change is refused (rule `builder-diff`,
-    with the undo route). A builder's logged change, any other role's offence, and a change that could
-    not be read are logged for the reviewer: a refusal on an unread change would be a false alarm."""
+    with the undo route). A builder's logged change, any other role's offence, and a change git could not
+    answer for are logged for the reviewer, never refused. A merge path whose bytes could not be read is
+    logged as unread and still judged: a builder's test path in it is refused."""
     unread = []
     found, noted = diff_violation(root, role, unread)
     for rel in unread:
