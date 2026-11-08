@@ -727,7 +727,7 @@
       "mechanism": {
         "kind": "check",
         "ref": "lint/report_guard.py",
-        "test": "lint/test_report_guard.py::MistakeNamesGuardTests.test_mg_red_inbox_admission_blocks"
+        "test": "lint/test_report_guard.py::MistakeNamesGuardTests.test_mg_red_guard_line_incident_habit_blocks"
       }
     },
     "building-guard-needs-incident": {

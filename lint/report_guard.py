@@ -940,7 +940,9 @@ def departs_problem(text):
 # admits only when a first-person word comes before its fault word, so "The test was wrong so I re-pointed it"
 # passes. A negator clears it only when at most MISTAKE_NEGATOR_GAP words sit between it and the fault word,
 # so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
-# `step:<slug>` is checked for form only.
+# `step:<slug>` is checked for form only. A guard line ("Guard: ..." or "guard — ...", in any section) must hold a
+# ref, a step or a debt between its label and the end of its line, whether or not an admission was found. A debt
+# counts only in a clause with no negator, so "a debt is not needed" names none.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
 # "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
 # parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
@@ -961,9 +963,16 @@ MISTAKE_URL_RE = re.compile(r"https?://\S+")
 MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
 MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
 MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
+# The label is "guard" then a colon, a dash or a spaced hyphen. A word that merely holds it (`guard_merge.py`,
+# `push-guard`, `guard.py`) is no label.
+MISTAKE_GUARD_LABEL_RE = re.compile(r"(?<![\w./-])guard(?:\s*:|\s*[\u2014\u2013]|\s+-\s)", re.I)
+MISTAKE_BACKTICKED_STEP_RE = re.compile(r"`(step:[a-z0-9][a-z0-9-]*)`")
 MISTAKE_REASON = owner_line(
     "Mistake guard (rule building-mistake-names-its-guard)",
     "Deviations admits a mistake, %s, and names no guard or check that would have stopped it")
+GUARD_LINE_REASON = owner_line(
+    "Mistake guard (rule building-mistake-names-its-guard)",
+    "a guard line, %s, names no PR, commit, step or debt, and a habit or a line in a brief is no guard")
 
 
 def _admitted_clause(deviations):
@@ -984,18 +993,36 @@ def _sentences(text):
     return [BULLET_RE.sub("", s.strip()) for s in MISTAKE_SENTENCE_SPLIT_RE.split(text)]
 
 
+def _debt_named(text):
+    """True when a clause of `text` mentions a debt and holds no negator."""
+    return any(MISTAKE_DEBT_RE.search(clause) and not MISTAKE_NEGATOR_RE.search(clause)
+               for sentence in _sentences(text) for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence))
+
+
+def _bare_guard_line(report):
+    """The first guard line of the report block that holds no ref, step or debt, else ''. Quoted text and fences
+    are blanked, a URL keeps only its refs, and a backticked `step:<slug>` still counts."""
+    plain = MISTAKE_URL_RE.sub(lambda m: " " + " ".join(DONE_REF_RE.findall(m.group())) + " ", FENCE_RE.sub(" ", report))
+    plain = QUOTED_RE.sub(" ", MISTAKE_BACKTICKED_STEP_RE.sub(r" \1 ", plain))
+    for line in plain.splitlines():
+        for label in MISTAKE_GUARD_LABEL_RE.finditer(line):
+            tail = line[label.end():]
+            if not (DONE_REF_RE.search(tail) or MISTAKE_STEP_RE.search(tail) or _debt_named(tail)):
+                return line[label.start():].strip()
+    return ""
+
+
 def mistake_problem(text):
     """The refusal text when Deviations admits a mistake and names no guard (rule
     `building-mistake-names-its-guard`), else ''."""
     deviations = report_section(text, "Deviations")
     clause = _admitted_clause(deviations)
-    if not clause:
-        return ""
     # A guard word and its ref must share a sentence, so a stray ref elsewhere does not clear the admission.
-    if (MISTAKE_STEP_RE.search(deviations) or MISTAKE_DEBT_RE.search(deviations)
-            or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
-        return ""
-    return MISTAKE_REASON % repr(clause[:80])
+    if clause and not (MISTAKE_STEP_RE.search(deviations) or _debt_named(deviations)
+                       or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
+        return MISTAKE_REASON % repr(clause[:80])
+    bare = _bare_guard_line(block_text(text, keep_indent=True))
+    return GUARD_LINE_REASON % repr(bare[:80]) if bare else ""
 
 
 def _own_lane_read(path, own_id):
