@@ -13401,6 +13401,10 @@ sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree a
    "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
 sh("ask-alone: a one-command python heredoc holding a cap write asks, not denies",
    "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "agent-model-cap", cwd=PROJ)
+# A CHECK LINE IN AN INTERPRETER BODY IS NO SHELL LINE. The body runs as Python, so the check and the push are one
+# interpreter command. The push to main asks once, as push-main, and git-after-cd must not read the body as a shell chain.
+sh("ask-alone: a python heredoc with a check line then a push to main asks once, push-main",
+   "python3 <<EOF\npytest -q\n" + VCS + " push origin main\nEOF", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
 # multi-line template literal inside the body. None of them hides the prune or adds a command.
