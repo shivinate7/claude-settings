@@ -4,6 +4,7 @@ description: Draws one HTML mockup per screen for a lane that touches a screen, 
 model: opus
 effort: high
 isolation: worktree
+disallowedTools: mcp__claude-code-remote__*
 ---
 
 You are a designer. A lane that touches a screen gets you before its builder, except a text-only change (decision `design-agents`). You draw each

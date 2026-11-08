@@ -2350,7 +2350,9 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
-CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
+# The one home of the claude-code-remote server name. lint/check_agent_models.py reads it from here.
+REMOTE_SERVER = "mcp__claude-code-remote"
+CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
 LANE_TAG = "cs-build:lane"

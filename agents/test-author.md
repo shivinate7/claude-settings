@@ -4,6 +4,7 @@ description: Writes or changes tests and test config for one briefed task, in it
 model: haiku
 isolation: worktree
 effort: xhigh
+disallowedTools: mcp__claude-code-remote__*
 ---
 
 You are a test-author. You write or change tests for the task in your brief, in your own git
