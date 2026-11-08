@@ -14244,6 +14244,88 @@ class ReviewStampSince(unittest.TestCase):
                 review_fn(self, "review_stamp_since")(clone, "fixture")
         self.assertIn("git fetch --unshallow origin", str(cm.exception), "the Stop does not name `git fetch --unshallow origin`:\n" + str(cm.exception))
 
+    def assert_shallow_boundary(self, clone, boundary):
+        """The scope each cutover-read case below starts from: the clone is shallow, `boundary` holds the salt line, and its parent is cut."""
+        self.assertEqual(sh(clone, "git", "rev-parse", "--is-shallow-repository"), "true", "the clone is not shallow")
+        self.assertIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", boundary + ":merge/merge.py"), f"{boundary} is not the salt commit")
+        self.assertNotEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", boundary + "~1^{commit}"], capture_output=True).returncode, 0,
+                            f"the clone holds the parent of {boundary}")
+
+    def cutover_read(self, clone, fetch=None, race=False):
+        """review_stamp_since(clone, "fixture") with the default branch answered as "fixture". -> (got, stop, logs, fetches, raced): `got` is the
+        cutover or None, `stop` the Stop's text or None, `logs` the git log argvs, `fetches` the deepen fetches as (branch, deepen) pairs, and
+        `raced` whether the race ran. `fetch` is a (code, out) answer that stands in for fetch_branch; None keeps the real fetch. `race` runs one
+        real `git fetch --unshallow origin` in the clone just after the first git log returns, as another process deepening it would, so the
+        boundary read that follows sees a whole clone."""
+        logs, fetches, raced = [], [], []
+        real_sh, real_fetch = merge.sh, merge.fetch_branch
+
+        def counting(args, *a, **k):  # every git call goes through sh, the one seam
+            result = real_sh(args, *a, **k)
+            if args[3:4] == ["log"]:
+                logs.append(args)
+                if race and not raced:
+                    raced.append(True)
+                    sh(clone, "git", "fetch", "-q", "--unshallow", "origin")
+            return result
+
+        def recording(root, name, deepen=None):
+            fetches.append((name, deepen))
+            return fetch if fetch is not None else real_fetch(root, name, deepen=deepen)
+
+        got = stop = None
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), \
+                unittest.mock.patch.object(merge, "sh", counting), \
+                unittest.mock.patch.object(merge, "fetch_branch", recording):
+            try:
+                got = review_fn(self, "review_stamp_since")(clone, "fixture")
+            except merge.Stop as e:
+                stop = str(e)
+        return got, stop, logs, fetches, bool(raced)
+
+    def test_a_deepen_that_never_reaches_past_the_salt_stops_after_three_deepens_naming_the_unshallow_fetch(self):
+        # The cost the decision states, pinned. A deepen that adds nothing leaves the salt commit the boundary, so the read runs git log four
+        # times, fetches three times, and stops naming `git fetch --unshallow origin`. A read that stops earlier, or breaks out, costs otherwise.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=2)
+        self.assert_shallow_boundary(clone, "HEAD~1")
+        got, stop, logs, fetches, _ = self.cutover_read(clone, fetch=(0, ""))
+        self.assertIsNotNone(stop, "the read returned %r instead of stopping at the deepen limit" % (got,))
+        self.assertIn("git fetch --unshallow origin", stop, "the Stop does not name `git fetch --unshallow origin`:\n" + stop)
+        self.assertEqual(len(logs), 4, "the read ran git log %d times, not 4" % len(logs))
+        self.assertEqual(fetches, [("fixture", 100)] * 3, "the read made deepen fetches %r, not 3 of 100 commits" % (fetches,))
+
+    def test_a_failed_deepen_fetch_stops_after_one_fetch_and_names_the_fetch_and_git_reason(self):
+        # The pin for the fetch result. A deepen fetch that fails stops the read at once, with no second fetch. The Stop says the fetch failed
+        # and carries git's reason. Its wording is free, so the builder may change it.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=2)
+        self.assert_shallow_boundary(clone, "HEAD~1")
+        got, stop, _, fetches, _ = self.cutover_read(clone, fetch=(128, "fatal: the remote refused the deepen, reason ZQ7"))
+        self.assertIsNotNone(stop, "the read returned %r after a failed deepen fetch instead of stopping" % (got,))
+        self.assertEqual(len(fetches), 1, "the read fetched %d times after a failed fetch, not once" % len(fetches))
+        self.assertIn("fetch", stop, "the Stop does not say the fetch failed:\n" + stop)
+        self.assertIn("ZQ7", stop, "the Stop does not carry git's failure reason:\n" + stop)
+
+    def test_a_deepen_by_another_process_after_the_log_never_returns_the_old_boundary_as_the_cutover(self):
+        # Depth 1 holds only commit 3, the boundary. The first salt commit is commit 2, at 2026-10-21. Commit 3's time, 2026-10-22, is the old
+        # boundary's. Another process deepens the clone after git log and before the boundary read. The read must read again and give commit 2's
+        # time, or stop. Giving commit 3's time is the bug.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=1)
+        self.assert_shallow_boundary(clone, "HEAD")
+        got, stop, _, _, raced = self.cutover_read(clone, race=True)
+        self.assertTrue(raced, "the race did not run, so the read never reached its boundary read after git log and this case proves nothing")
+        if stop is None:
+            self.assertEqual(got, "2026-10-21T15:04:05Z",
+                             "the read gave %r after another process deepened the clone: that is the old boundary's time, not the true cutover" % (got,))
+
+    def test_a_depth_one_clone_with_no_race_deepens_itself_and_gives_the_true_cutover(self):
+        # The control for the race above, with no other process. The read deepens the clone itself and gives commit 2's committer time.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=1)
+        self.assert_shallow_boundary(clone, "HEAD")
+        got, stop, _, _, raced = self.cutover_read(clone)
+        self.assertFalse(raced, "the control ran a race")
+        self.assertIsNone(stop, "the read stopped on a clone that git fetch --deepen reaches:\n" + str(stop))
+        self.assertEqual(got, "2026-10-21T15:04:05Z", "the control gave %r, not commit 2's committer time" % (got,))
+
     def git_at(self, root, date, *args):
         """Run git in the temp repo with its author and committer times set to `date`."""
         env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
