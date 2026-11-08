@@ -3083,10 +3083,10 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = (*REVIEW_VERDICTS[:2], "WIDE")  # a fix check is PASS, FAIL or WIDE, never PARTIAL (decision hold-unsafe-after-round-3)
-ROUND3_PARTIAL_HOLDS = True  # owner page item 362 b, 2026-11-07 14:41 CST: a round-3 PARTIAL line holds, like a FAIL. False: it reads by the done rules
-FIX_PASS_CLEARS_ROUND3_HOLD = True  # owner page item 363 b, 2026-11-07 14:41 CST: a fix check PASS after a round-3 FAIL follows the round-3 done rules. False: the hold stays
-ROUND3_DESIGN_FAIL_HOLDS = True  # coordinator pick a (page item 356 q5), 2026-11-07 14:15 CST: a design-reviewer FAIL in round 3 holds. False: only a reviewer FAIL holds
-FIX_FAIL_AFTER_ROUND3_HOLDS = True  # the lane's reading, agreed by the coordinator 2026-11-07 14:15 CST: a fix FAIL after round 3 holds. False: it reads open with the fix-failed why
+ROUND3_PARTIAL_HOLDS = True  # owner page item 362 b: a final-round PARTIAL line holds, like a FAIL. False: it reads by the done rules
+FIX_PASS_CLEARS_ROUND3_HOLD = True  # owner page item 363 b: a fix check PASS after a final-round FAIL follows the final-round done rules. False: the hold stays
+ROUND3_DESIGN_FAIL_HOLDS = True  # coordinator pick a on page item 356: a design-reviewer FAIL in the final round holds. False: only a reviewer FAIL holds
+FIX_FAIL_AFTER_ROUND3_HOLDS = True  # the coordinator's pick (decision pr-review-record): a fix FAIL after the final round holds. False: it reads open with the fix-failed why
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
@@ -3145,10 +3145,10 @@ def review_state(rec, head):
     passing, and the last design-reviewer line (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
     final allowed round whatever the verdict, and owes the later rounds when the first fails unless a fix check PASS follows, even if it only deletes. Net value negative holds the change.
-    A round-3 line holds the change before the net-value and guard rules. Four module constants set which lines hold: a FAIL always holds; a PARTIAL holds
-    when ROUND3_PARTIAL_HOLDS; a design-reviewer line holds only when ROUND3_DESIGN_FAIL_HOLDS; a fix check PASS lifts a reviewer's round-3 line hold when
-    FIX_PASS_CLEARS_ROUND3_HOLD, so the final-round done rules decide, but never a design reviewer's: that hold stays, and its why names the design reviewer;
-    a fix check FAIL after round 3 holds when FIX_FAIL_AFTER_ROUND3_HOLDS, else it reads open.
+    A final-round line holds the change before the net-value and guard rules. Four module constants set which lines hold: a FAIL always holds; a PARTIAL holds
+    when the PARTIAL switch is on; a design-reviewer line holds only when the design switch is on; a fix check PASS lifts a reviewer's final-round hold when
+    the fix-PASS switch is on, so the final-round done rules decide, but never a design reviewer's: that hold stays, and its why names the design reviewer;
+    a fix check FAIL after the final round holds when the fix-FAIL switch is on, else it reads open.
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is read after the held rule. A FAIL is open, whatever the rounds say, and counts
     as the next round (after the last recorded one). A WIDE is open, counts no round and
@@ -3165,8 +3165,8 @@ def review_state(rec, head):
     top = max((i for i, *_ in rounds), default=0)
     fix = rec.get("fix")
     # a failed final round, or a failed fix check after it, holds the change; the finding becomes a new lane
-    # a final-round line holds when it is a FAIL, or a PARTIAL under ROUND3_PARTIAL_HOLDS; a design-reviewer line only under ROUND3_DESIGN_FAIL_HOLDS.
-    # A fix check PASS clears a reviewer's hold under FIX_PASS_CLEARS_ROUND3_HOLD, so the final-round done rules below decide. The fix check
+    # a final-round line holds when it is a FAIL, or a PARTIAL under the PARTIAL switch; a design-reviewer line only under the design switch.
+    # A fix check PASS clears a reviewer's hold under the fix-PASS switch, so the final-round done rules below decide. The fix check
     # reviews the code reviewer's finding, so it never clears a design reviewer's hold
     holding = {"FAIL", "PARTIAL"} if ROUND3_PARTIAL_HOLDS else {"FAIL"}
     cleared = FIX_PASS_CLEARS_ROUND3_HOLD and fix and fix[3] == "PASS"
@@ -3217,7 +3217,7 @@ def round_floor(earlier, rec):
     record below the floor reads open. A counted FAIL slot is filled only by a FAIL line: a record whose round N+1 has none reads open. A WIDE or PASS
     fix check floors at the record's own last round and counts no slot. A failed round stays failed: an earlier record's last round N is uncleared when
     it has a FAIL or PARTIAL line, or the record's fix check is FAIL or WIDE. That record, or one after it, clears it by reaching a round above N or by
-    carrying a fix check PASS; at round 3 only the PASS can. A fix check PASS never clears a design reviewer's FAIL or PARTIAL. An uncleared round reads
+    carrying a fix check PASS; at the final round only the PASS can. A fix check PASS never clears a design reviewer's FAIL or PARTIAL. An uncleared round reads
     open, and the why names the earliest record at the highest such round. The floor comes from the bodies the listing already holds."""
     last = max((i for i, *_ in rec["rounds"]), default=0)
     best = None  # (floor, failed, record): the earliest record at the highest floor, a failed fix check first
