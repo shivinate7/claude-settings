@@ -861,4 +861,37 @@ rc, out = run("all", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="true")
 check("tree-cites on, scope all: the step checks the whole tree",
       rc == 1 and "docs/old.md:3: STALE003 " in out, out)
 
+# The pin reader. A pin is found in any YAML shape the old line reader found it in: a flow-style step, and a steps
+# list indented four spaces. Each is a pin that drifts (exit 3), as on main.
+def pin_shape_case(shape, pin="A", before=""):
+    """Run the scratch clone's command in a child whose CI pins ste-lint at `pin` in one shape: `flow`, a step written
+    as a flow mapping, `indent4`, a steps list indented four spaces, or `dash`, a step whose first line is its `uses:`.
+    `before` is the text of the steps above the pin. Returns (rc, output, {label: sha})."""
+    with scratch("shape") as d:
+        cs = os.path.join(d, "claude-settings")
+        shas = scratch_clone(cs)
+        item = {"flow": "      - {uses: o/claude-settings/actions/ste-lint@%s}\n",
+                "indent4": "    - uses: o/claude-settings/actions/ste-lint@%s # main\n",
+                "dash": "      - uses: o/claude-settings/actions/ste-lint@%s # main\n"}[shape]
+        wf = "on: pull_request\njobs:\n  l:\n    steps:\n" + before + item % shas[pin]
+        rc, out = run_ste_changed(os.path.join(cs, "bin", "ste-changed"),
+                                  make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, lambda work: None))
+        return rc, out, shas
+
+
+for shape in ("flow", "indent4"):
+    rc, out, shas = pin_shape_case(shape)
+    check("pin shape %s: an older ste-lint pin in this shape is found and drifts, exit 3" % shape,
+          rc == 3 and "CI pins ste-lint at %s" % shas["A"][:7] in out, out)
+
+# A pin on the first line of the step after a `run:` block. The blank line after the block is no part of the block, so
+# the pin's own line is read. A reader that counts that blank line as the block's body skips the pin and exits 0.
+for header in ("|", ">"):
+    rc, out, shas = pin_shape_case("dash", before="      - name: build\n        run: %s\n          make\n\n" % header)
+    check("pin after a `run: %s` block: the pin on the step's first line is found and drifts, exit 3" % header,
+          rc == 3 and "CI pins ste-lint at %s" % shas["A"][:7] in out and ".github/workflows/ci.yml:9" in out, out)
+rc, out, shas = pin_shape_case("dash", before="      - name: build\n        run: make\n\n")  # control: a one-line run
+check("pin after a one-line run: the same pin is found and drifts at ci.yml:8, exit 3 (control)",
+      rc == 3 and "CI pins ste-lint at %s" % shas["A"][:7] in out and ".github/workflows/ci.yml:8" in out, out)
+
 sys.exit(1 if failed else 0)

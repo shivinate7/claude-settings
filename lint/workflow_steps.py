@@ -6,6 +6,10 @@ bin/ci-job runs a job's steps locally with it. It reads the layout checks.yml ke
 """
 import re
 
+# A `uses:` of one of this repo's own actions at a ref: `<owner>/claude-settings/actions/<name>@<ref>`.
+SETTINGS_ACTION = re.compile(r"[\w.-]+/claude-settings/actions/([\w-]+)@([\w.+/-]+)")
+COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
 
@@ -27,6 +31,23 @@ def step_key(step, key):
     return m.group(1) if m else None
 
 
+def step_lines(step):
+    """A step's real lines. A step from step_blocks ends in a newline, and a plain split would add an empty line after it,
+    which a block scalar counts as its own: a `run: |` body would then run one line into the next step."""
+    lines = step.split("\n")
+    return lines[:-1] if len(lines) > 1 and not lines[-1] else lines
+
+
+def block_lines(lines, floor):
+    """The leading lines of `lines` that a block scalar owns: the blank lines and the lines indented `floor` spaces or deeper."""
+    body = []
+    for ln in lines:
+        if ln.strip() and len(ln) - len(ln.lstrip(" ")) < floor:
+            break
+        body.append(ln)
+    return body
+
+
 def block_scalar(style, lines, floor):
     """The text of a block scalar whose header is `style` (`|` or `>`, with an optional `-` or `+`) and whose body is
     `lines`, the lines after the header. The body is the blank lines and the lines indented `floor` spaces or deeper;
@@ -37,11 +58,7 @@ def block_scalar(style, lines, floor):
     kind = re.fullmatch(r"([|>])([+-]?)", style)
     if not kind:
         return None
-    body = []
-    for ln in lines:
-        if ln.strip() and len(ln) - len(ln.lstrip(" ")) < floor:
-            break
-        body.append(ln)
+    body = block_lines(lines, floor)
     first = next((ln for ln in body if ln.strip()), None)
     if first is None:
         return ""
@@ -70,7 +87,7 @@ def block_scalar(style, lines, floor):
 
 def run_body(step):
     """A step's `run:` text: the one line, or a block scalar with its 10-space indent removed. None if absent."""
-    lines = step.split("\n")
+    lines = step_lines(step)
     for i, line in enumerate(lines):
         m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
         if not m:
@@ -106,7 +123,7 @@ def step_map(step, key):
     """A step's own `key:` block (`env:` or `with:`) as {name: value}, or {} when it has none. A `|` or `>` value reads
     as its lines (block_scalar, indented past the 10-space keys); other values lose an inline comment."""
     found, inside = {}, False
-    lines = step.split("\n")
+    lines = step_lines(step)
     for i, line in enumerate(lines):
         if re.match(rf"^(?:      - |        ){re.escape(key)}:[ \t]*$", line):
             inside = True
@@ -127,3 +144,30 @@ def step_env(step):
 def step_with(step):
     """A step's own `with:` block as {name: raw value}, or {} when it has none."""
     return step_map(step, "with")
+
+
+def settings_pins(text):
+    """[(action, ref, line)] for each `<owner>/claude-settings/actions/<name>@<ref>` in a workflow, in file order, `line` being
+    its 1-based line. It reads every line, so a pin in a flow-style step (`- {uses: ...}`) or a steps list at another indent is
+    found; a line loses its comment (a `#` at the start or after a space, so `# v1` and `# - uses:` are no pin) and a step's
+    `run:` text is skipped, since it is a script and not a `uses:`. A pin-like token the parser cannot place as a step key is
+    still reported, never dropped. The ref is the characters after `@` up to a space, quote, comma or brace: a caller that
+    needs a commit checks it against COMMIT_SHA."""
+    lines = text.split("\n")
+    skip, at = set(), 0
+    for st in step_blocks(text):
+        at = text.index(st, at)  # the blocks are slices of `text` in order, so each search starts at the last
+        first = text.count("\n", 0, at)
+        body = step_lines(st)
+        for i, ln in enumerate(body):
+            m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", ln)
+            if m:
+                skip.update(range(first + i, first + i + 1 + (len(block_lines(body[i + 1:], 10)) if re.fullmatch(
+                    r"[|>][+-]?", m.group(1)) else 0)))
+                break
+    found = []
+    for n, ln in enumerate(lines):
+        if n not in skip:
+            for m in SETTINGS_ACTION.finditer(re.sub(r"(^|\s)#.*", "", ln)):
+                found.append((m.group(1), m.group(2), n + 1))
+    return found
