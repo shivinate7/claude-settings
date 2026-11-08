@@ -7843,9 +7843,9 @@ nm_case("linked-nm: npm ci with a repeated --prefix whose last value is linked, 
 nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, from a linked folder, is allowed",
         "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
 
-# THE SHORT PREFIX FLAG. npm reads `-C` as its prefix config (`--prefix`), and reads `-C=<dir>` the same way.
-# The guard reads only `--prefix`, so each `-C` case is judged in the wrong folder. `-Csub`, glued with no `=`,
-# is not read by npm (its prefix stays the working folder), so it has no case.
+# THE SHORT PREFIX FLAG. npm reads `-C` and `-C=<dir>` as its prefix config (`--prefix`), so the folder they name
+# is the one judged, relative or absolute. `-Csub`, glued with no `=`, is not read by npm (its prefix stays the
+# working folder), so it has no case.
 nm_case("linked-nm: npm -C <linked folder> ci, run from a real folder, is refused",
         "npm -C " + slash(NMLINKED) + " ci", "deny", NMREAL)
 nm_case("linked-nm: npm -C=<linked folder> ci, run from a real folder, is refused",
@@ -7947,9 +7947,9 @@ nm_case("linked-nm: npm ci --location project --location global (Bash) in a link
         "the last value is global",
         "npm ci --location project --location global", "allow", NMLINKED)
 
-# THE VALUE FLAGS THE GUARD DOES NOT KNOW. --depth, --package, --location and its short -L take a value, so the
-# word after them is not the subcommand. The guard refuses each today. The controls put the same flag after the
-# subcommand, or use the spelling the guard already reads (`--location=global`), and the guard allows each.
+# THE VALUE FLAGS. --depth, --package, --location and its short -L take a value, so the value word after each is not
+# read as the subcommand, and the command after it is judged. The controls put the same flag after the subcommand,
+# or use `--location=global`, and the guard allows each.
 nm_case("linked-nm: npm --depth 0 ls (Bash) in a linked folder is allowed",
         "npm --depth 0 ls", "allow", NMLINKED)
 nm_case("linked-nm: npm --package yo exec yo (Bash) in a linked folder is allowed",
