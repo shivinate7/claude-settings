@@ -117,7 +117,8 @@ SECRET_SHAPES = (
     # as in "token budget: 200000". A second branch takes a value with no digit: 12 or more of [A-Za-z_-] that end the
     # value (end of line, a closing quote, `,`, `;` or `}`) and have no camelCase hump (3 lower-case letters then a capital;
     # a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`, `localStorage.getItem(` and prose such as
-    # "Token: Authorization needed" pass. A letters-only value that reads as words (letters_are_words) passes too.
+    # "Token: Authorization needed" pass. A letters-only value set with `:` that reads as words (letters_are_words)
+    # passes too.
     ("credential-name", re.compile(
         r"[A-Za-z0-9_-]*(?:secret|token|key|cookie)[A-Za-z0-9_-]*[\"']?[ \t]*(?P<sep>[=:])[ \t]*[\"']?(?:"
         r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}"
@@ -217,23 +218,31 @@ def email_is_no_person(found):
 
 
 WORD_SEGMENT = re.compile(r"[a-z]+|[A-Z]+|[A-Z][a-z]+")  # one word in lower case, upper case or capitalised
-LOWER_WORD = re.compile(r"[a-z]+")  # a hyphen part in lower case only
-CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)  # the words here have at most three consonants in a row; `y` counts as one
+LOWER_WORD = re.compile(r"[a-z]+")  # a separated part in lower case only
+# Four or more consonants in a row; `y` counts as a consonant here. It finds `nstr` in `monstrous`.
+CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)
+LOWER_RUN = re.compile(r"[b-df-hj-np-tv-z]{5,}", re.I)  # five or more consonants in a row, `y` among them
+HAS_VOWEL = re.compile(r"[aeiouy]", re.I)  # one vowel, `y` among them, so `lynx` and `sync` hold one
 
 
 def letters_are_words(value):
-    """True when a letters-only value reads as words: each `_` or `-` part is one word in one case form and no run of
-    four or more consonants. A value with a hyphen whose parts are all lower case (`tight-compact`) is checked for the
-    run in each part alone; any other value also needs a third or more of its letters to be vowels, and its run is
-    checked across the joined letters. `REPLACE_WITH_YOUR_KEY` and `infrastructure` pass. Random letters in a mixed
-    case or with few vowels do not. Random lower-case letters with enough vowels still pass."""
+    """True when a letters-only value reads as words. Every part split on `-` or `_` (empty parts dropped) must be one
+    word in one case form (lower case, upper case or capitalised), or the value is refused. Then one of two checks runs.
+    Separated form: the value splits on `-` or `_` into two or more parts, none empty, all lower case
+    (`tight-compact`, `page_length_limit`). It passes when every part of four or more letters holds a vowel
+    (`a e i o u y`) and no part holds five or more consonants in a row (`y` counts as a consonant in the run). A part of
+    one to three letters needs no vowel, so `db-connection-pool` and `btn-primary-hover` pass. It skips the vowel share.
+    `kqzv_bxjw_tmrl` is refused. Any other value (one part, a mixed case, or an empty part as in `tight--compact`): at
+    least 30% of its letters are vowels (`a e i o u`) and no run of four or more consonants across the joined letters.
+    `REPLACE_WITH_YOUR_KEY` and `infrastructure` pass. Random single-part lower-case letters with enough vowels still pass."""
     parts = [p for p in re.split(r"[_-]", value) if p]
     letters = "".join(parts)
     if not (letters and all(WORD_SEGMENT.fullmatch(p) for p in parts)):
         return False
-    hyphen_parts = value.split("-")
-    if len(hyphen_parts) > 1 and all(LOWER_WORD.fullmatch(p) for p in hyphen_parts):
-        return not any(CONSONANT_RUN.search(p) for p in hyphen_parts)
+    separated = re.split(r"[_-]", value)
+    if len(separated) > 1 and all(LOWER_WORD.fullmatch(p) for p in separated):
+        # A part of 1-3 letters (`db`, `pr`, `btn`) needs no vowel.
+        return all((len(p) <= 3 or HAS_VOWEL.search(p)) and not LOWER_RUN.search(p) for p in separated)
     return (sum(c in "aeiouAEIOU" for c in letters) * 10 >= len(letters) * 3
             and not CONSONANT_RUN.search(letters))
 
