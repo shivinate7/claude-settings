@@ -9,32 +9,35 @@ Run from the repository root:
 
     python3 hooks/test_checks_never_raise.py
 
-Standard library only. The check list is read from the dispatch: the names that `judge_shell` and
-`judge` call in hooks/guard.py, resolved to the guard modules (guard.py, guard_core.py and the
-`_FAMILY_MODULES` tuple). A callee that the test neither fuzzes nor declares in OUTSIDE, with a
-reason, fails the run. No check is skipped without a line saying so.
+Standard library only. The checks are read from the dispatch in hooks/guard.py: each call that
+`judge_shell` and `judge` make, and each hook-module function that those callees call through an
+attribute (`question_form.page_item_hit`, for one). A call that resolves to no hook function fails
+the run. The tools are the names that `judge` and the functions it reaches compare a tool against.
 
-Each check gets COUNT seeded random command strings (one stream per check name, seed SEED), built
-from shell and PowerShell characters and fragments, plus fixed edge inputs. Each direct check's other
-parameters come from the real producers (`split_segments`, `segment_tokens`) or fixed harness values.
-`judge` is fed whole Bash and PowerShell payloads. A refusal is `SystemExit`, because `refuse()` exits
-by design; it is not a raise.
+Each check gets COUNT seeded random command strings (one stream per check, seed SEED), built from
+shell and PowerShell characters and fragments, plus fixed edge inputs. Each input carries one tool:
+two of every three are Bash or PowerShell, the others go round the rest. A payload carries the keys
+of every tool's shape, filled with random strings, with typed values where a string reaches
+nothing. `judge` gets whole payloads. A refusal is a SystemExit after refuse() prints a
+permissionDecision on stdout. Any other exit, and any raise, is a failure.
 
-Isolation: CLAUDE_CONFIG_DIR is a run folder, so guard.log and the override state stay out of the real
-config. PATH is an empty folder, so git and gh are absent and every read fails as on a machine without
-them. The parsers of git and gh output are not fuzzed here.
+Isolation: CLAUDE_CONFIG_DIR is a run folder, so guard.log and the override state stay out of the
+real config. PATH is an empty folder, so git and gh are absent and every read fails as on a machine
+without them. The parsers of git and gh output are not fuzzed here.
 
-The self-test feeds a check that raises, and one that refuses, through the same harness. The raising
-check must be reported and the refusing one must not. A sweep case proves the shared run-folder sweep
-(lint/_test_temp.py) removes an old sibling and keeps a new one.
+The self-test feeds a raising check, a silent exit and a real refusal through the same harness. A
+sweep case proves the shared run-folder sweep (lint/_test_temp.py) removes an old sibling and keeps
+a new one.
 """
 
 import ast
 import builtins
 import contextlib
 import glob
+import importlib
 import inspect
 import io
+import json
 import os
 import random
 import shutil
@@ -49,7 +52,20 @@ import _test_temp  # noqa: E402  the one home of the run folder (decision test-t
 
 SEED = "checks-never-raise"
 COUNT = 2000   # random inputs per check, on top of the fixed edge inputs below
-DISPATCH = ("judge_shell", "judge")
+GUARD = "guard"
+DISPATCH = ("judge_shell", "judge")      # the two entry points the guard's PreToolUse hook runs
+TOOL_VARIABLES = ("tool", "tool_name")   # the names judge's branches compare a tool by
+UNLISTED_TOOL = "mcp__fuzz__unlisted_tool"   # a name no branch lists: the default shape
+REQUIRED_CHECKS = ("judge_shell", "git_env_command_hit", "kill_hit", "rm_var_hits", "opus_spawn_hit",
+                   "page_item_hit", "is_worktree", "data_tool_judge")
+REQUIRED_TOOLS = ("Agent", "Task", "Workflow", "Bash", "PowerShell", "Edit", "Write", "ArtifactData",
+                  "Artifact", "mcp__github__merge_pull_request")
+# Hook functions reached by a call but not fuzzed directly, each with the reason. The rest are fuzzed.
+OUTSIDE = {
+    ("own_session", "own_session_read"): "raises OSError on a transcript that is missing, by design; every caller in "
+                                         "guard.py and guard_merge.py reads it inside a try that fails closed, and the "
+                                         "direct callers are fuzzed, so a caller that lets the error out is still found",
+}
 
 RUN = _test_temp.run_folder()
 CONFIG = os.path.join(RUN, "config")        # guard.log and override state land here, not in the real config
@@ -68,14 +84,10 @@ os.environ["PATH"] = NO_TOOLS
 
 import guard  # noqa: E402  the global PreToolUse guard (hooks/guard.py)
 import guard_core  # noqa: E402  the shared code the guard and its families import
+import question_form  # noqa: E402  the ArtifactData item shape (hooks/question_form.py)
+import shared_names  # noqa: E402  the one home of the markers a spawn shape carries
 
-GUARD_MODULES = frozenset(("guard", "guard_core") + tuple(guard._FAMILY_MODULES))
-
-# Dispatch callees the test does not fuzz, each with the reason and where it is reached.
-OUTSIDE = {
-    "is_worktree": "defined in hooks/git_reads.py, outside the files this test covers; judge_shell reaches it",
-    "unread_handoff": "imported inside judge from hooks/reread_check.py, outside the files this test covers; judge reaches it",
-}
+HOOK_MODULES = frozenset(os.path.splitext(name)[0] for name in os.listdir(HERE) if name.endswith(".py"))
 
 CHARS = "${}()[]=;'\"`|&<> \n$-*?"
 FRAGMENTS = (
@@ -91,7 +103,16 @@ EDGE = ["", "${", "$(", "'", '"', "`", "<<EOF", "git ", "env:GIT_DIR", "rm -rf $
 SUBCOMMANDS = ("commit", "push", "stash", "checkout", "restore", "reset", "clean", "worktree", "branch",
                "rm", "add", "merge", "rebase", "fetch", "pull", "reflog", "status", "log", "show", "tag")
 ROLES = ("", guard_core.BUILDER_ROLE, guard_core.AUTHOR_ROLE, guard_core.WRITER_ROLE, guard_core.DESIGNER_ROLE)
-TOOLS = ("Bash", "Bash", "Bash", "PowerShell")
+SPAWN_ROLES = ROLES + ("Explore", "Plan", "design-reviewer", "general-purpose")
+SPAWN_MODELS = ("opus", "sonnet", "haiku", "claude-opus-5-5")
+GENERIC_ACTIONS = ("publish", "read", "list", "get", "query", "delete", "launch", "set", "update",
+                   "str_replace", "batch")
+WORKFLOW_SCRIPTS = (   # `@@` takes the random text: an agent call with a model and a role, or the text alone
+    'agent("@@", { model: "opus", agentType: "builder" });',
+    'agent(`@@`, { model: "sonnet", agentType: "reviewer" });',
+    "@@",
+)
+SHELL_TOOLS = guard_core.SHELL_TOOLS
 BOOL_NAMES = {"background", "agent", "subs_only", "heredoc", "bodies_kept", "failed_cd_stays",
               "shells_only", "legacy", "env_set", "has_agent", "command_position", "follow_cd",
               "predicate_command", "powershell"}
@@ -130,20 +151,42 @@ def draw_text(rng):
 class Env:
     """The per-call context that is not the command string: tool, folders, session, transcript, role."""
 
-    def __init__(self, rng):
-        self.tool = rng.choice(TOOLS)
+    def __init__(self, rng, tool):
+        self.tool = tool
         self.cwd = rng.choice((RUN, CHECKOUT, CHECKOUT))
         self.session = rng.choice(("", "sess-1"))
         self.transcript = rng.choice((TRANSCRIPT, EMPTY_TRANSCRIPT, MISSING_TRANSCRIPT, ""))
         self.role = rng.choice(ROLES)
 
 
+def tool_input_for(tool, rng, text, env):
+    """The tool_input of one call. It holds the keys every tool's shape reads, each a random string, and the typed
+    values a check needs to reach its body: an action, a count, a flag, a list. A tool's own values go on top."""
+    tool_input = {
+        "command": text, "description": text, "file_path": text, "path": text, "notebook_path": text,
+        "content": text, "old_string": text, "new_string": text, "prompt": text, "name": text, "url": text,
+        "skill": text, "args": text, "session_id": text, "message": text, "doc_id": text, "device": text,
+        "udid": text, "owner": text, "repo": text, "model": text, "collection": text,
+        "subagent_type": env.role or "builder", "data": {"question": text, "options": [text]},
+        "action": rng.choice(GENERIC_ACTIONS), "script": rng.choice(WORKFLOW_SCRIPTS).replace("@@", text),
+        "run_in_background": rng.random() < 0.5, "asset": rng.random() < 0.3, "draft": rng.random() < 0.5,
+        "pullNumber": rng.randint(0, 3),
+        "writes": [{"op": rng.choice(question_form.ITEM_OPS), "collection": question_form.WAITING_ITEMS,
+                    "doc_id": text, "data": {"question": text}}],
+    }
+    if tool == guard.DATA_TOOL:
+        tool_input["action"] = rng.choice(question_form.ITEM_OPS + ("batch",))
+        tool_input["collection"] = question_form.WAITING_ITEMS if rng.random() < 0.8 else text
+    if tool in guard.SPAWN_TOOLS:
+        tool_input["model"] = rng.choice(SPAWN_MODELS + (text,))
+        tool_input["subagent_type"] = rng.choice(SPAWN_ROLES + (text,))
+        tool_input["prompt"] = rng.choice((text, shared_names.EXPLORE_AUDIT_MARKER + "\n" + text))
+    return tool_input
+
+
 def make_payload(rng, env, text, event="PreToolUse"):
-    tool_input = {"command": text, "description": text, "file_path": text, "path": text, "content": text,
-                  "new_string": text, "old_string": text, "prompt": text, "subagent_type": env.role or "builder",
-                  "model": text, "name": text, "run_in_background": rng.random() < 0.5}
-    return {"hook_event_name": event, "tool_name": env.tool, "tool_input": tool_input, "cwd": env.cwd,
-            "session_id": env.session, "agent_id": rng.choice(("", "agent-1")),
+    return {"hook_event_name": event, "tool_name": env.tool, "tool_input": tool_input_for(env.tool, rng, text, env),
+            "cwd": env.cwd, "session_id": env.session, "agent_id": rng.choice(("", "agent-1")),
             "agent_transcript_path": env.transcript, "transcript_path": env.transcript}
 
 
@@ -244,20 +287,46 @@ def describe(exc):
     return "%s: %s%s" % (type(exc).__name__, exc, where)
 
 
-def run_checks(checks, count):
-    """Feed each check its edge inputs and `count` seeded random inputs. Return one row per raising check.
+def refusal_printed(stdout):
+    """True when stdout holds a refusal: a JSON line whose hookSpecificOutput carries permissionDecision,
+    which refuse() prints (hooks/guard_core.py)."""
+    for line in stdout.splitlines():
+        try:
+            found = json.loads(line)
+        except ValueError:
+            continue
+        hook = found.get("hookSpecificOutput") if isinstance(found, dict) else None
+        if isinstance(hook, dict) and "permissionDecision" in hook:
+            return True
+    return False
 
-    `checks` is a list of (name, function, mode). Mode "direct" calls the function with keyword
-    arguments from build_kwargs; mode "judge" calls guard.judge with a whole payload.
+
+def tool_for(index, shells, others):
+    """The tool an input carries. Two of every three inputs carry a shell tool, the incident class; the third goes
+    round the other tools, so each of them still gets inputs in every check."""
+    if index % 3 != 2:
+        return shells[index % len(shells)]
+    return others[(index // 3) % len(others)]
+
+
+def run_checks(checks, count, tools):
+    """Feed each check its edge inputs and `count` seeded random inputs. Return one row per failing check.
+
+    `checks` is a list of (label, function, mode). Mode "direct" calls the function with keyword arguments from
+    build_kwargs; mode "judge" calls guard.judge with a whole payload. A row is (label, failed, total, tools
+    that failed, (first input, its tool, its error)).
     """
+    shells = [tool for tool in tools if tool in SHELL_TOOLS]
+    others = [tool for tool in tools if tool not in SHELL_TOOLS]
     failures = []
-    for name, fn, mode in checks:
-        rng = random.Random("%s:%s" % (SEED, name))
+    for label, fn, mode in checks:
+        rng = random.Random("%s:%s" % (SEED, label))
         inputs = EDGE + [draw_text(rng) for _ in range(count)]
         bad = []
-        for text in inputs:
-            env = Env(rng)
-            guard_core.POWERSHELL_CALL[0] = env.tool == "PowerShell"
+        for index, text in enumerate(inputs):
+            tool = tool_for(index, shells, others)
+            env = Env(rng, tool)
+            guard_core.POWERSHELL_CALL[0] = tool == "PowerShell"
             try:
                 if mode == "judge":
                     call = (guard.judge, (make_payload(rng, env, text, rng.choice(
@@ -265,40 +334,47 @@ def run_checks(checks, count):
                 else:
                     call = (fn, (), build_kwargs(fn, rng, text, env))
             except Exception as exc:  # a harness defect, reported as such: never a silent pass
-                bad.append((text, "input builder raised " + describe(exc)))
+                bad.append((text, tool, "input builder raised " + describe(exc)))
                 continue
+            out = io.StringIO()
             try:
-                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
                     call[0](*call[1], **call[2])
-            except SystemExit:
-                pass  # a refusal: refuse() exits by design
+            except SystemExit as exc:
+                if not refusal_printed(out.getvalue()):
+                    bad.append((text, tool, "exit %r with no refusal on stdout" % (exc.code,)))
             except Exception as exc:
-                bad.append((text, describe(exc)))
+                bad.append((text, tool, describe(exc)))
         if bad:
-            failures.append((name, len(bad), len(inputs), bad[0][0], bad[0][1]))
+            failures.append((label, len(bad), len(inputs), sorted({row[1] for row in bad}), bad[0]))
     return failures
 
 
 def report(failures):
-    for name, hits, total, first, error in failures:
-        print("FAIL %s: %d of %d inputs raised. First input %r raised %s"
-              % (name, hits, total, first, error))
+    for label, hits, total, tools, (first, first_tool, error) in failures:
+        print("FAIL %s: %d of %d inputs failed, tools %s. First input %r with tool %s: %s"
+              % (label, hits, total, ", ".join(tools), first[:80], first_tool, error))
 
 
 def self_test():
-    """A check that raises must be reported; a check that refuses must not. Return True when both hold."""
+    """A raising check and a silent exit must be reported; a real refusal must not. Return True when all hold."""
     def raises(text):
         raise ValueError("self-test: a check that raises")
 
+    def exits_silently(text):
+        sys.exit(0)
+
     def refuses(text):
-        sys.exit(0)   # the refuse() exit: a refusal, not a raise
+        guard_core.refuse("Bash", "deny", "self-test", "a refusal the self-test makes", "self-test")
 
     found = {row[0] for row in run_checks([("self-test raises", raises, "direct"),
-                                           ("self-test refuses", refuses, "direct")], 20)}
-    ok = found == {"self-test raises"}
-    print("self-test: %s (a raising check %s, a refusing check %s)"
+                                           ("self-test exits silently", exits_silently, "direct"),
+                                           ("self-test refuses", refuses, "direct")], 20, ["Bash", "Agent"])}
+    ok = found == {"self-test raises", "self-test exits silently"}
+    print("self-test: %s (a raising check %s, a silent exit %s, a real refusal %s)"
           % ("ok" if ok else "FAILED", "reported" if "self-test raises" in found else "NOT reported",
-             "not reported" if "self-test refuses" not in found else "REPORTED"))
+             "reported" if "self-test exits silently" in found else "NOT reported",
+             "reported" if "self-test refuses" in found else "not reported"))
     return ok
 
 
@@ -324,46 +400,193 @@ def sweep_proof():
     return ok
 
 
-def dispatch_callees():
-    """The names judge_shell and judge call, read from hooks/guard.py."""
-    with open(os.path.join(HERE, "guard.py"), encoding="utf-8") as handle:
-        tree = ast.parse(handle.read(), filename="guard.py")
-    bodies = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in DISPATCH}
-    if set(bodies) != set(DISPATCH):
-        raise SystemExit("hooks/guard.py has no %s: the dispatch moved, so update DISPATCH"
-                         % ", ".join(sorted(set(DISPATCH) - set(bodies))))
-    names = set()
-    for node in bodies.values():
-        for call in ast.walk(node):
-            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
-                names.add(call.func.id)
-    return names
+# ------------------------------------------------------------------ the dispatch, read from the AST
+
+_TREES, _SYMBOLS = {}, {}
 
 
-def guard_function(name):
-    """The function a name resolves to, when it is defined in one of the guard modules."""
-    try:
-        obj = getattr(guard, name)
-    except AttributeError:
-        return None
-    if inspect.isfunction(obj) and obj.__module__ in GUARD_MODULES:
-        return obj
+def _tree(module):
+    if module not in _TREES:
+        with open(os.path.join(HERE, module + ".py"), encoding="utf-8") as handle:
+            _TREES[module] = ast.parse(handle.read(), filename=module + ".py")
+    return _TREES[module]
+
+
+def _top_level(statements):
+    """Each statement that runs at module level. The body of an if, try, while or with counts; a def or class does not."""
+    for statement in statements:
+        yield statement
+        if isinstance(statement, (ast.FunctionDef, ast.ClassDef)):
+            continue
+        for field in ("body", "orelse", "finalbody"):
+            yield from _top_level(getattr(statement, field, None) or [])
+        for handler in getattr(statement, "handlers", None) or []:
+            yield from _top_level(handler.body)
+
+
+def _symbols(module):
+    """(defined, imported) for a hook module. `defined` maps each module-level def or assigned name to its node.
+    `imported` maps each name a hook-module import binds to (module, name), or (module, None) for a module.
+    Imports inside a function count too, as the dispatch reads the whole file."""
+    if module not in _SYMBOLS:
+        tree = _tree(module)
+        defined, imported = {}, {}
+        for node in _top_level(tree.body):
+            if isinstance(node, ast.FunctionDef):
+                defined[node.name] = node
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        defined[target.id] = node
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                defined[node.target.id] = node
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module in HOOK_MODULES:
+                for alias in node.names:
+                    imported[alias.asname or alias.name] = (node.module, alias.name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in HOOK_MODULES:
+                        imported[alias.asname or alias.name] = (alias.name, None)
+        _SYMBOLS[module] = (defined, imported)
+    return _SYMBOLS[module]
+
+
+def _locate(module, name, depth=0):
+    """(module, name) where a hook module defines `name`, following imports between hook modules. None when it defines none."""
+    defined, imported = _symbols(module)
+    if name in defined:
+        return module, name
+    if name in imported and imported[name][1] is not None and depth < 8:
+        source, source_name = imported[name]
+        return _locate(source, source_name, depth + 1)
     return None
 
 
-def discover():
-    """Return (direct checks by name, names declared outside, undeclared callees)."""
-    direct, outside, undeclared = {}, [], []
-    for name in sorted(dispatch_callees()):
-        if name in OUTSIDE:
-            outside.append(name)
+def _function_node(module, name):
+    """The FunctionDef a hook module defines under `name`, or None."""
+    node = _symbols(module)[0].get(name)
+    return node if isinstance(node, ast.FunctionDef) else None
+
+
+def _resolved(module, name):
+    """(module, name) of the hook function `name` names in `module`, or None."""
+    hit = _locate(module, name)
+    return hit if hit and _function_node(*hit) is not None else None
+
+
+def _edges(module, node, attributes_only=False):
+    """(found, missing): the hook functions a body calls, as (module, name), and the calls that resolve to none.
+
+    A Name call resolves through the module's defs and imports. It is skipped when it is a builtin or a def the body
+    nests. An attribute call resolves only when its base is an imported hook module. `attributes_only` keeps the
+    Name calls out."""
+    imported = _symbols(module)[1]
+    nested = {n.name for n in ast.walk(node) if isinstance(n, ast.FunctionDef) and n is not node}
+    found, missing = [], []
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
             continue
-        fn = guard_function(name)
-        if fn is not None:
-            direct[name] = fn
-        elif not hasattr(builtins, name):
-            undeclared.append(name)
-    return direct, outside, undeclared
+        func = call.func
+        if isinstance(func, ast.Name) and not attributes_only:
+            if func.id in nested or hasattr(builtins, func.id):
+                continue
+            hit = _resolved(module, func.id)
+            if hit:
+                found.append(hit)
+            else:
+                missing.append(func.id)
+        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            source = imported.get(func.value.id, (None, None))
+            if source[0] is not None and source[1] is None:
+                hit = _resolved(source[0], func.attr)
+                if hit:
+                    found.append(hit)
+                else:
+                    missing.append(source[0] + "." + func.attr)
+    return found, missing
+
+
+def dispatch():
+    """(direct, reads, missing, outside), read from hooks/guard.py.
+
+    direct: the (module, name) keys the fuzz runs directly. They are judge_shell, each call judge and judge_shell
+    make, and each hook-module function those callees call through an attribute. judge itself is the end-to-end check.
+    reads: every hook function judge and judge_shell reach, read only, for the tool names.
+    missing: each call in direct or in the reads that resolves to nothing hook-side.
+    outside: the direct keys OUTSIDE declares, with the reason.
+    """
+    judge_key, shell_key = (GUARD, "judge"), (GUARD, "judge_shell")
+    direct, missing = {shell_key: _function_node(*shell_key)}, []
+    for key in (judge_key, shell_key):
+        found, gone = _edges(key[0], _function_node(*key))
+        missing.extend(gone)
+        for callee in found:
+            direct.setdefault(callee, _function_node(*callee))
+    for key in list(direct):
+        found, gone = _edges(key[0], direct[key], attributes_only=True)
+        missing.extend(gone)
+        for hook in found:
+            direct.setdefault(hook, _function_node(*hook))
+    direct.pop(judge_key, None)
+    outside = {key: OUTSIDE[key] for key in OUTSIDE if key in direct}
+    for key in outside:
+        del direct[key]
+    reads, queue = set(), [judge_key, shell_key]
+    while queue:
+        key = queue.pop()
+        if key not in reads:
+            reads.add(key)
+            queue.extend(_edges(key[0], _function_node(*key))[0])
+    return set(direct), reads, missing, outside
+
+
+def _callable(key):
+    module, name = key
+    return getattr(importlib.import_module(module), name)
+
+
+def _strings_of(value):
+    if isinstance(value, str):
+        return {value} if value else set()
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return {item for item in value if isinstance(item, str) and item}
+    return set()
+
+
+def _tool_strings(module, node):
+    """The tool names one side of a comparison names: a string literal, a tuple of them, or a constant that holds them."""
+    if isinstance(node, ast.Constant):
+        return _strings_of(node.value)
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        names = set()
+        for element in node.elts:
+            names |= _tool_strings(module, element)
+        return names
+    if isinstance(node, ast.Name) and node.id not in TOOL_VARIABLES:
+        hit = _locate(module, node.id)
+        if hit:
+            return _strings_of(getattr(importlib.import_module(hit[0]), hit[1], None))
+    return set()
+
+
+def _is_tool_name(name):
+    """Claude Code tool names are capitalized (Bash, ArtifactData) or mcp__ names. A lowercase word that a comparison
+    to a tool variable names is a shell program or a stream verb (npm, tail), not a tool."""
+    return name[:1].isupper() or name.startswith("mcp__")
+
+
+def tool_names(reads):
+    """Every tool name a comparison against a tool variable names, in the functions judge reaches."""
+    names = set()
+    for module, name in reads:
+        for node in ast.walk(_function_node(module, name)):
+            if isinstance(node, ast.Compare):
+                sides = [node.left, *node.comparators]
+                if any(isinstance(side, ast.Name) and side.id in TOOL_VARIABLES for side in sides):
+                    for side in sides:
+                        names |= {tool for tool in _tool_strings(module, side) if _is_tool_name(tool)}
+    return names
 
 
 def family_list_is_whole():
@@ -380,24 +603,32 @@ def main():
         if not family_list_is_whole():
             print("FAIL the guard_*.py files and guard._FAMILY_MODULES differ: a family module is not fuzzed")
             return 1
-        direct, outside, undeclared = discover()
-        if undeclared:
-            for name in undeclared:
-                print("FAIL undeclared dispatch callee %s: fuzz it or declare it in OUTSIDE with a reason" % name)
+        direct, reads, missing, outside = dispatch()
+        for name in missing:
+            print("FAIL undeclared dispatch callee %s: it resolves to no hook function. Fix the dispatch reading or the "
+                  "hook it names." % name)
+        if missing:
             return 1
-        for required in ("judge_shell", "git_env_command_hit", "kill_hit", "rm_var_hits"):
-            if required not in direct:
+        names = {name for _, name in direct}
+        for required in REQUIRED_CHECKS:
+            if required not in names:
                 print("FAIL %s is not among the discovered checks: the dispatch reading is broken" % required)
                 return 1
-        checks = [(name, direct[name], "direct") for name in sorted(direct)]
+        tools = sorted(tool_names(reads) | {UNLISTED_TOOL})
+        for required in REQUIRED_TOOLS:
+            if required not in tools:
+                print("FAIL tool %s is not among the discovered tools: the branch reading is broken" % required)
+                return 1
+        checks = [("%s.%s" % key, _callable(key), "direct") for key in sorted(direct)]
         checks.append(("judge (end to end)", guard.judge, "judge"))
-        failures = run_checks(checks, COUNT)
+        failures = run_checks(checks, COUNT, tools)
         report(failures)
         elapsed = time.monotonic() - started
-        print("checks-never-raise: %d direct checks and judge, %d inputs each (%d random + %d edge), "
-              "%d raising, %.1f s"
-              % (len(direct), COUNT + len(EDGE), COUNT, len(EDGE), len(failures), elapsed))
-        print("not fuzzed directly: %s" % ", ".join("%s (%s)" % (name, OUTSIDE[name]) for name in outside))
+        print("checks-never-raise: %d direct checks and judge, %d tools, %d inputs each (%d random + %d edge), "
+              "%d failing, %.1f s"
+              % (len(direct), len(tools), COUNT + len(EDGE), COUNT, len(EDGE), len(failures), elapsed))
+        print("not fuzzed directly: %s" % ", ".join("%s.%s (%s)" % (key[0], key[1], why)
+                                                  for key, why in sorted(outside.items())))
         return 1 if failures else 0
     finally:
         shutil.rmtree(RUN, ignore_errors=True)
