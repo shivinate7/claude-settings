@@ -3294,7 +3294,8 @@ def idle_lanes(live):
     unread = bool(entries) and not lanes and not holds  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
         held = f", {len(holds)} held" if holds else ""
-        entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. Run get_session on each alone, then archive it."]
+        tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds else "Run get_session on each alone, then archive it."
+        entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
     say(*entries)
     return 1 if unread else 0
 
