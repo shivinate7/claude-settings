@@ -3,7 +3,7 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
 """
-import ast, json, os, re, shutil, subprocess, sys, unittest
+import ast, json, os, re, shutil, sys, unittest
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
