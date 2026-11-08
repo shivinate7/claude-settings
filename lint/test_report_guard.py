@@ -2679,6 +2679,51 @@ class SentenceSplitBoldTests(unittest.TestCase):
         self.assertIn("STE001", codes)
 
 
+class DoubleBacktickMaskTests(unittest.TestCase):
+    """A two-backtick code span is one span (MASK_PATTERNS in lint/ste_lint.py).
+
+    The mask pairs each backtick with the next one. A backtick inside a double-backtick span leaves
+    a stray one, which pairs with a later code span and hides the words between them. A double-
+    backtick span with no backtick inside pairs as two empty spans, so its text reads as prose.
+    """
+
+    LONG_TAIL = ("The reviewer reads every changed line of the test file before the branch is pushed, "
+                 "then checks each new case against the old commit and records the failing run in the trailer")
+
+    def codes(self, text):
+        linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
+        return [f.code for f in linter.check_text("t.md", text)]
+
+    def test_backtick_inside_double_backtick_span_does_not_hide_the_next_sentence(self):
+        single = "Write the span as `a b` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
+        self.assertIn("STE001", self.codes(single), "fixture sentence is not over budget")
+        double = "Write the span as ``a ` b`` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
+        self.assertIn("STE001", self.codes(double),
+                      "a backtick inside a double-backtick span hides the sentence after it")
+
+    def test_double_backtick_span_content_is_not_linted(self):
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run ``" + words + "`` now.\n"),
+                         "text inside a double-backtick span is linted as prose")
+
+    def test_double_backtick_span_without_inner_backtick_adds_no_finding(self):
+        self.assertNotIn("STE001", self.codes("Set the flag ``a b`` and then stop the pump now.\n"),
+                         "a double-backtick span with no backtick inside adds a finding")
+
+    def test_single_backtick_span_content_is_not_linted(self):
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run `" + words + "` now.\n"),
+                         "text inside a single-backtick span is linted as prose")
+
+    def test_single_backtick_span_budget_is_thirty_words(self):
+        base = ("Set the flag `a b` and then the reviewer checks every changed line in the test file "
+                "before the branch is pushed to the shared remote today for the crew now")
+        self.assertIn("STE001", self.codes(base + " again.\n"), "fixture: a 31-word sentence is not over budget")
+        self.assertNotIn("STE001", self.codes(base + ".\n"), "a 30-word sentence with one span is over budget")
+
+
 class DecisionGlossCollapseTests(unittest.TestCase):
     """STE001 must not count the words a gloss tool inserts after a citation
     (lint/ste_lint.py build_gloss_pattern). A hermetic fixture folder stands
