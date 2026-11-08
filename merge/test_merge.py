@@ -933,6 +933,7 @@ class CloudProxy(Env):
         self.now += 601
         self.assertTrue(self.lock.acquire("main", 600))
 
+    # Every session takes GitLock, whatever CLAUDE_CODE_REMOTE holds (decision merge-lock, Backend: GitLock on every host).
     def test_every_session_picks_the_git_lock(self):
         for remote in ("true", "", None):  # None: CLAUDE_CODE_REMOTE unset
             with unittest.mock.patch.dict(os.environ):
@@ -1239,6 +1240,60 @@ class LockRetake(Env):
         self.assertEqual(rc, 1, out)
         self.assertIsNone(lock.sha, "the lost take is still recorded on the lock, so the release would act on another run's lock")
         self.assertNotIn("not this run's any more", out, "the release reports the lock this run lost as removed by someone")
+
+class GitLockListing(Env):
+    """GitLock.listed and GitLock.read take the lock sha from ls-remote's stdout alone (decision merge-lock). A listing with no ref is no lock,
+    even when git writes a stderr line. A stdout token that is no 40-hex sha stops the run: a lock that cannot be read is never read as no lock."""
+
+    def test_a_stderr_line_with_no_listed_ref_is_no_lock(self):
+        ref = merge.lock_ref("main")
+        traced = dict(os.environ, GIT_TRACE="1")  # git writes its trace lines to stderr: a stderr line on a listing that has no ref
+        r = subprocess.run(["git", "-C", self.co, "ls-remote", "origin", ref], capture_output=True, text=True, env=traced)
+        self.assertEqual((r.returncode, r.stdout), (0, ""), "scope: the origin lists a ref, so the case proves nothing")
+        self.assertTrue(r.stderr.strip(), "scope: ls-remote wrote no stderr line, so the case proves nothing")
+        with unittest.mock.patch.dict(os.environ, {"GIT_TRACE": "1"}):
+            self.assertIsNone(self.lock.listed(ref), "a stderr line with no listed ref read as the lock sha")
+            try:
+                got = self.lock.read("main")
+            except merge.Stop as e:
+                self.fail(f"read stopped on a stderr line with no listed ref: {e}")
+        self.assertIsNone(got, "read takes a stderr line with no listed ref for a lock")
+
+    def test_a_listed_first_token_that_is_no_sha_is_a_stop(self):
+        ref = merge.lock_ref("main")
+        real, seen = merge.sh, []
+        def sh_with_garbled_listing(args, *a, **kw):
+            if "ls-remote" in args:
+                seen.append(args)
+                return 0, "not-a-sha\t" + ref  # stdout's first token is no 40-hex sha
+            return real(args, *a, **kw)
+        with unittest.mock.patch.object(merge, "sh", sh_with_garbled_listing):
+            with self.assertRaises(merge.Stop, msg="listed read a stdout token that is no sha as the lock sha, not a Stop"):
+                self.lock.listed(ref)
+        self.assertTrue(seen, "scope: ls-remote never ran through the faked call, so the case proves nothing")
+
+    def test_a_failed_listing_keeps_its_stderr_for_is_net(self):
+        """A failed ls-remote keeps its stderr: is_net reads the network line there, and the lock read stops as a network stop."""
+        ref = merge.lock_ref("main")
+        real, seen = merge._nowindow.run, []
+        def run_with_dropped_listing(args, *a, **kw):
+            if args[1:2] == ["-C"] and args[3:4] == ["ls-remote"]:
+                seen.append(args)
+                return subprocess.CompletedProcess(args, 128, stdout="", stderr=LockRetake.NET_DROP)
+            return real(args, *a, **kw)
+        with unittest.mock.patch.object(merge._nowindow, "run", run_with_dropped_listing):
+            self.assertTrue(merge.is_net(128, LockRetake.NET_DROP), "scope: the faked listing's stderr is no network error line")
+            rc, out = merge.sh(["git", "-C", self.co, "ls-remote", "origin", ref])
+            self.assertTrue(seen, "scope: ls-remote never reached the faked run, so the case proves nothing")
+            self.assertIn(LockRetake.NET_DROP, out, "a failed listing lost its stderr, so is_net has no network line to read")
+            self.assertTrue(merge.is_net(rc, out), "a failed listing with its stderr kept is not read as a network error")
+            try:
+                self.lock.listed(ref)
+            except merge.Stop as e:
+                stopped = e
+            else:
+                self.fail("listed read a dropped listing as no stop at all")
+        self.assertIsInstance(stopped, merge.NetStop, "listed stopped a dropped listing as a plain Stop, not as a network stop")
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
