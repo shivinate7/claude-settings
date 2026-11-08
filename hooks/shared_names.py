@@ -32,12 +32,15 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
+# A reviewer may run Sonnet, above its Haiku row, on a fix check: its brief's first non-blank line starts with this marker, since a fix check has no review round to mark it.
+FIX_CHECK_MARKER = "Fix check"
 
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
 # marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
 # brief text, no I/O, no process, no file. Its position decides where the row reads:
 #   "line-start": every line of the brief that starts with the marker, case-insensitive, leading blanks allowed.
-#   "first-line": the brief's first non-blank line only, case-sensitive, with any text ahead of the marker.
+#   "first-line": the brief's first non-blank line only, case-sensitive; a row says whether text may stand ahead of the marker
+#     (the round and audit rows allow it, the fix check row does not).
 # The two positions differ because the owner ruled them apart: a role word or markup ahead of `Round N of 3` on the
 # first line still counts, but lowercase prose must not. A group 1 in a row is the marker's number n; a row with none
 # has no n.
@@ -54,6 +57,8 @@ BRIEF_MARKERS = (
     ("round", r"^(?![ \t]*(?i:(?:round|try)[ \t]+\d[ \t]+of[ \t]+3\b))(?:(?!\b" + _ANY_ROUND_SHAPE + r").)*?\bRound" + _N_OF_3,
      "first-line"),
     ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
+    # The fix check marker must open the first line (blanks allowed): text ahead of it, as in "New lane after Fix check FAIL", does not count.
+    ("fixcheck", r"^[ \t]*" + re.escape(FIX_CHECK_MARKER) + r"\b", "first-line"),
 )
 
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
