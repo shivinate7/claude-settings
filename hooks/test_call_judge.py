@@ -162,6 +162,20 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
     return repo
 
 
+# The waiting page's repo with a GitHub origin. PAGE_REPO above has no origin, so lint/layout.py repo_name reads it
+# as unknown. The cross-repo rule (question-checked-with-repo) judges a decision's repo against this origin's repo,
+# so its cases judge the write with cwd set here.
+PAGE_ORIGIN_URL = "https://github.com/shivinate7/claude-settings.git"
+
+
+def origin_page_repo():
+    """The waiting-page repo whose origin is PAGE_ORIGIN_URL. make_repo caches it by name, so one repo per run."""
+    repo = make_repo("page-origin", page=PAGE_URL)
+    if not git(repo, "remote").stdout.strip():
+        git(repo, "remote", "add", "origin", PAGE_ORIGIN_URL)
+    return repo
+
+
 try:
     import override
 except ImportError:
