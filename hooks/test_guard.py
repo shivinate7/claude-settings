@@ -9455,6 +9455,8 @@ ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
 ARCH_INC_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS, "cs-repo:" + ARCH_REPO_QMAX]
 ARCH_QMAX_SOURCE = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX}}
 ARCH_QMAX_SOURCE_GIT = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX + ".git"}}
+ARCH_QMAX_SOURCE_WWW = {"git_repository": {"url": "https://www.github.com/" + ARCH_REPO_QMAX}}
+ARCH_QMAX_SOURCE_UPPER = {"git_repository": {"url": "https://GitHub.com/" + ARCH_REPO_QMAX}}
 
 
 def arch_record(tags, branches=None, sources=None, session=ROLE_OTHER, title="a lane session"):
@@ -9600,6 +9602,14 @@ ROLE_LINES = {
     "archive-inc-source-git": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
         [ARCH_QMAX_SOURCE_GIT]))),
+    # The same lane, its source URL on www.github.com: that host is github.com, so q_max is the repo it names.
+    "archive-inc-source-www": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE_WWW]))),
+    # The same lane, its source URL with the host in capitals: GitHub.com is github.com, so q_max is the repo it names.
+    "archive-inc-source-upper": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
+        ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS], {"": ARCH_BRANCH},
+        [ARCH_QMAX_SOURCE_UPPER]))),
     # Shape drift: current_branches is a list, then a string, where the read takes a map of branch names.
     "archive-inc-list": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ARCH_INC_TAGS, [ARCH_BRANCH], [ARCH_QMAX_SOURCE]))),
@@ -10235,6 +10245,12 @@ archive_refuse("a branch whose compare in q_max is diverged, on no pull request:
 # A source URL ending in .git names the same repo: its branch, ahead there on no pull request, refuses as it does without it.
 archive_refuse("a source URL ending in .git names its repo: a branch ahead there on no pull request is refused",
                role_path("archive-inc-source-git"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A source URL on www.github.com names the same repo: its branch, ahead there on no pull request, refuses.
+archive_refuse("a source URL on www.github.com names its repo: a branch ahead there on no pull request is refused",
+               role_path("archive-inc-source-www"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# A source URL with the host in capitals, GitHub.com, names the same repo: refused as it is for github.com.
+archive_refuse("a source URL on GitHub.com in capitals names its repo: a branch ahead there on no pull request is refused",
+               role_path("archive-inc-source-upper"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
 # A repo named only by a source whose own read answers 404 is unreadable, not skipped: the archive refuses as unreadable.
 archive_refuse("a sources-only repo whose own read answers 404 is refused, and the reason says the read failed",
                role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_READ_PIN,
@@ -14218,8 +14234,8 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 
 
 def archive_branch_reads_case():
-    """A lane whose record names a branch in each of its two repos reads, in one archive: one open list per repo, one
-    repo read per repo, one compare per repo x branch, and one pulls read for the branch that is ahead. The branch is
+    """A lane whose record names one branch, checked in each of its two repos, reads in one archive: one open list per
+    repo, one repo read per repo, one compare per repo x branch, and one pulls read for the branch that is ahead. The branch is
     ahead in q_max on an open pull request, so the archive is allowed, on 2 + 2 + 2 + 1 = 7 gh calls."""
     folder = archive_counted_gh(repos=arch_pair(qmax={"others": [arch_row(ARCH_BRANCH, 24)]}), name="archcount-branch")
     gh_calls_taken(folder)
