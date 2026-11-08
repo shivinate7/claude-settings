@@ -1459,7 +1459,7 @@
 - one-home-two-fence-regexes: lint/compliance_probes.py and lint/stale_cites.py each keep a FENCE regex (any indent) beside lint/word_runs.py FENCE (3 spaces). A shared any-indent FENCE would end it. Decision: one-home-check
 - one-home-long-gloss-hides: a parenthesised gloss of 8 or more words after a backticked id is not read for copies, so a rule sentence pasted as a gloss passes. Decision: one-home-check
 - stale006-rename-and-reword: a rule renamed and reworded in one change finds no head sentence under its old id, so STALE006 lists its old runs. Owner edits only. Decision: one-home-check
-- stale006-exception-words: NEGATORS omits unless, except and without, so a growth that adds an exception skips the reword check. Owner edits only. Decision: one-home-check
+- stale006-exception-words: NEGATORS holds unless and except, and omits without by a lane pick, so a growth that adds "without" skips the reword check. Owner edits only. Decision: one-home-check
 - conflict-markers-untracked-cap: the untracked-file read stops at 100 files, so a triplet in a file past the cap passes a whole-tree add (hooks/guard_merge.py `_untracked_findings`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-unresolved-add: an add path the guard cannot resolve counts as a whole-tree add, so an unrelated uncommitted triplet file refuses the commit (hooks/guard_merge.py `_unresolved`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-push-var-branch: `git push origin "$OTHER"` reads HEAD's range, so it misses a triplet on the other branch or refuses for HEAD's (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
