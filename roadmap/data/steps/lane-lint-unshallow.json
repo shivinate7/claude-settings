@@ -1,11 +1,11 @@
 {
   "title": "merge --lane-lint fetches full history before the silent-undo step, or reports unknown, not FAIL",
   "why": "On a shallow cloud clone the silent-undo step reads 'history is shallow' UNKNOWN, and --strict turns it into FAIL. Seen on #1585 at 96f4fcc4f; `git fetch --unshallow origin` then passes (lane notes-fix-large-3, 23:51 CST Nov 7).",
-  "note": "A false FAIL any cloud lane can hit. Related to done step ste-changed-shallow-clone (same shape in ste-changed). Held under the item 384 hold unless the coordinator calls it a queue fix. Title from the lane's suggestion. Filed 23:54 CST Nov 7.",
+  "note": "A false FAIL any cloud lane can hit. Related to done step ste-changed-shallow-clone (same shape in ste-changed). A queue fix, so the item 384 hold does not apply (coordinator, 23:53 CST Nov 7: a false FAIL blocks hand-offs). Title from the lane's suggestion. Filed 23:54 CST Nov 7. Lane session_013NEJKzk1MsAcMP53yRaVu1 started 23:53 CST Nov 7.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 541,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-07T23:52:00-06:00"
+  "lane": "session_013NEJKzk1MsAcMP53yRaVu1",
+  "updatedAt": "2026-11-07T23:53:00-06:00"
 }
