@@ -391,9 +391,12 @@ STALE_TREE_REASON = (
 UNSTAGED_NAMES_SHOWN = 10
 
 
-def _name_list(where, *args):
-    """The paths one `git diff --name-only` listing prints in `where`, or None when it failed."""
-    answer = _git(where, "-c", "core.quotepath=off", *args)
+def _name_list(where, *args, renames=True):
+    """The paths one `git diff --name-only` listing prints in `where`, or None when it failed. With
+    `renames=False` the read turns rename detection off by config, so a moved path lists both names and the
+    command text still ends in `--name-only`."""
+    off = () if renames else ("-c", "diff.renames=false")
+    answer = _git(where, "-c", "core.quotepath=off", *off, *args)
     if answer is None or answer.returncode != 0:
         return None
     return [line for line in answer.stdout.split("\n") if line]
@@ -409,7 +412,7 @@ def unstaged_edit_hit(where, args, added=(), later=()) -> str:
     every, include, paths, only, _dry = commit_scope(args)
     if every or include or only or paths:
         return ""
-    staged = _name_list(where, "diff", "--cached", "--name-only")
+    staged = _name_list(where, "diff", "--cached", "--name-only", renames=False)
     if staged is None:
         return ""
     staged = staged + [name for name in added if name not in staged]
@@ -418,7 +421,7 @@ def unstaged_edit_hit(where, args, added=(), later=()) -> str:
     left = _name_list(where, "diff", "--name-only")
     if not left:
         return ""
-    left = [name for name in left if name not in added and name not in later]
+    left = [name for name in left if name not in staged and name not in later]
     folders = {os.path.dirname(name) for name in staged}
     beside = [name for name in left if os.path.dirname(name) in folders]
     if not beside:
