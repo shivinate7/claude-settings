@@ -4,7 +4,7 @@
 
 Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. A dirty tree is never reaped.
 
-Four routes remove a worktree. One is the unattended `--confirm` run. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
+Five routes remove a worktree. One is the unattended `--confirm` run. One is a test-author's `git worktree remove` of its own red-run checkout, once that checkout is clean and detached at a pushed commit; the guard refuses the remove of a dirty one. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
 
 ### Idle limits, side by side
 
@@ -62,7 +62,7 @@ A worktree is removed only when all of these hold. A read that cannot tell keeps
 - It is pushed and unlocked.
 - No live session uses it (read 2 of the reaper, `agent-end-reap-stops-what-a-finished-agent-left`), and no process has a cwd inside it.
 
-Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder and test-author agent definitions say so.
+Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder agent definition says so. The test-author commits and pushes its own branch, and cleans and removes its red-run checkout itself.
 
 ### Session-end sweep, agent rule
 
