@@ -2679,9 +2679,11 @@ BRIEF_BLIND_VERDICT = re.compile(
     re.M)
 # A short label may come first (`Done: FAIL, round N`, `Prior review: verdict: FAIL`, `Round N: reviewer verdict: FAIL`): one to
 # four plain words, marks and a colon. brief_blind_verdict_text adds, below such a line, a copy of what follows the label, so
-# BRIEF_BLIND_VERDICT reads that copy at its own line start. It adds the copy only when two cheap tests pass, so a long
-# labelled line costs no more than the same line without a label: the text has a colon followed by a verdict word, or it
-# opens with a leading verdict (`FAIL, round N`). The label regex is anchored and bounded, and runs once per line.
+# BRIEF_BLIND_VERDICT reads that copy at its own line start. It adds the copy only when one of three cheap tests passes, so a long
+# labelled line costs no more than the same line without a label. The tests are:
+# the label is a report label and a bare verdict word ends its clause right after it (the copy is `Verdict: <word>`); or the
+# text has a colon followed by a verdict word; or it opens with a leading verdict (`FAIL, round N`). The label regex is
+# anchored and bounded, and runs once per line.
 BRIEF_BLIND_LABEL = re.compile(
     BRIEF_BLIND_OPEN + r"([A-Za-z][A-Za-z0-9]*(?:[ \t]+[A-Za-z0-9]+){0,3})[*_]*[ \t]*:[ \t]*([^\n]*)", re.M)
 _BRIEF_BLIND_AFTER_COLON = re.compile(r"[ \t]*[*_`\"'(]*(?:%s)\b" % BRIEF_BLIND_VERDICT_WORDS)
