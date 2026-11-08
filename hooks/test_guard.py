@@ -98,6 +98,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
+    "pr-body": "pull request bodies: pr-body-placeholder and pr-body-shrink on an MCP update and on gh pr edit",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
@@ -473,6 +474,7 @@ GHPAGE2 = os.path.join(ROOT, "ghpage2")        # the failed check run is on the 
 CURREPO = os.path.join(ROOT, "currepo")        # a checkout on the branch `feat`, the head of the one pull request the fake gh lists
 CTXREPO = os.path.join(ROOT, "ctxrepo")      # a checkout on main with one merged branch, `done`
 MSG_BAD = os.path.join(ROOT, "msg_bad.txt")  # a message file that cites a record by path
+PR_BODY_FILE = os.path.join(ROOT, "pr_body_placeholder.txt")  # a message file whose whole body is PLACEHOLDER
 MSG_OK = os.path.join(ROOT, "msg_ok.txt")    # a message file that cites a record by id
 MSG_LANE = os.path.join(ROOT, "msg_lane.txt")  # a message file that names a lane by session number
 MSG_FENCE = os.path.join(ROOT, "msg_fence.txt")  # a message file that names a lane only in a fence
@@ -1067,11 +1069,13 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, body=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `body` is the pull request's body as the read answers it. None is a pull request with no body.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -1117,7 +1121,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     # checks of its head, `run list` the workflow runs. No argument at all answers the base alone, which is
     # what _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
     state = {
-        "pr": {"state": "open", "merged": False, "draft": False, "body": None, "mergeable": True, "mergeable_state": "clean",
+        "pr": {"state": "open", "merged": False, "draft": False, "body": body, "mergeable": True, "mergeable_state": "clean",
                "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234"}, "base": {"ref": base}},
         "number": 12,
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
@@ -1274,6 +1278,7 @@ def build_fixtures():
     write(os.path.join(CLONE, "merge", "install_from_main.sh"), "# install\n")
     make_fake_gh(GHMAIN, "main")
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
+    write(PR_BODY_FILE, "PLACEHOLDER\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
     write(MSG_LANE, "title\n\nLane N20 lands the guard.\n")
     write(MSG_FENCE, "title\n\n```\nLane N20 lands the guard.\n```\n")
@@ -9949,6 +9954,171 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
             role_path("lane"))
 
 
+# =========================================================================== 5f-2. pull request bodies
+#
+# `pr-body-placeholder` and `pr-body-shrink`. A body update that would leave a placeholder is refused: a
+# stripped body that is empty, or one token of at most 40 characters (`PLACEHOLDER`, `TODO`, `x`). A
+# placeholder wipes the review records and the Merge-after lines that the lane lint reads. `pr-body-shrink`
+# asks when the live body is at least 400 characters and the new body is under one third of it. The live
+# body is read once, and a read that fails passes the shrink rule. Only an update is judged: a first body on
+# a new pull request is not, so a create is not judged here. The acts are the merge tool's update
+# (`mcp__github__update_pull_request` with a `body` key) and `gh pr edit` (`--body`, `-b`, `--body-file`, a
+# heredoc body). `gh api -X PATCH` is not judged.
+FAMILY = "pr-body"
+
+PR_UPDATE = "mcp__github__update_pull_request"
+PR_PLACEHOLDER = "pr-body-placeholder"
+PR_SHRINK = "pr-body-shrink"
+PRBODY_1700 = os.path.join(ROOT, "prbody1700")       # a pull request whose live body is 1700 characters
+PRBODY_400 = os.path.join(ROOT, "prbody400")         # a live body of 400 characters: the shrink rule's floor
+PRBODY_399 = os.path.join(ROOT, "prbody399")         # a live body of 399 characters: just under the floor
+PRBODY_300 = os.path.join(ROOT, "prbody300")         # a live body of 300 characters
+PRBODY_BROKEN = os.path.join(ROOT, "prbodybroken")   # answers every call with text that is not JSON
+PR_BODY_FILLER = "The review round checked each record against its decision. "
+PR_BODY_HEAD = ("## Summary\n\nThe lane lands the pull request body check.\n\n"
+                "## Review records\n\n- Review record: round 2 read.\n- Merge-after: #1824\n\n")
+
+
+def pr_body_of(n):
+    """A body of exactly n characters: real words with spaces, no trailing space, never one token."""
+    text = (PR_BODY_FILLER * (n // len(PR_BODY_FILLER) + 1))[:n]
+    return text[:-1] + "." if text.endswith(" ") else text
+
+
+def pr_live_body(n):
+    """A live body of exactly n characters, shaped like a lane body: its summary, review records and Merge-after line."""
+    return (PR_BODY_HEAD + PR_BODY_FILLER * (n // len(PR_BODY_FILLER) + 2))[:n]
+
+
+def build_pr_body_fakes():
+    """The fake pull requests the shrink rule reads a live body from. Each is built when a case first names it."""
+    for folder, size in ((PRBODY_1700, 1700), (PRBODY_400, 400), (PRBODY_399, 399), (PRBODY_300, 300)):
+        make_fake_gh(folder, "main", body=pr_live_body(size))
+    make_fake_gh(PRBODY_BROKEN, "main", broken=True)
+
+
+lazy_fixture([PRBODY_1700, PRBODY_400, PRBODY_399, PRBODY_300, PRBODY_BROKEN], build_pr_body_fakes)
+
+
+def pr_update(name, expected, rule=None, body=None, live=PRBODY_1700, carries=(), lacks=(), **fields):
+    """One update of pull request 12 in repo x through the merge tool. A body is set only when given, so a
+    title-only update carries no body key. `live` is the fake gh whose pull request has the live body."""
+    if body is not None:
+        fields["body"] = body
+    add(name, expected, rule=rule, tool=PR_UPDATE, cwd=NOGIT, env_path=live + os.pathsep + PY_PATH,
+        config=MERGECFG, carries=carries, lacks=lacks, owner="y", repo="x", pullNumber=12, **fields)
+
+
+def pr_edit(name, expected, command, rule=None, live=PRBODY_1700):
+    """One `gh pr edit 5` call, judged with the fake gh `live` on PATH."""
+    sh(name, command, expected, rule, cwd=NOGIT, env_path=live + os.pathsep + PY_PATH)
+
+
+# A placeholder is refused whatever the live body holds, so each deny runs with a live body of 1700 characters on
+# PATH. A builder that reads the live body first is then judged in the same state.
+pr_update("pr-body-placeholder: an MCP update whose body is PLACEHOLDER is denied", "deny", PR_PLACEHOLDER,
+          body="PLACEHOLDER")
+pr_update("pr-body-placeholder: an MCP update whose body is empty is denied", "deny", PR_PLACEHOLDER, body="")
+pr_update("pr-body-placeholder: an MCP update whose body is only whitespace is denied", "deny", PR_PLACEHOLDER,
+          body=" \n\t ")
+pr_update("pr-body-placeholder: an MCP update whose body is x is denied", "deny", PR_PLACEHOLDER, body="x")
+pr_update("pr-body-placeholder: an MCP update whose body is one 40-character token is denied", "deny",
+          PR_PLACEHOLDER, body="A" * 40)
+# The boundary and the scope of the placeholder rule, green today. With no live body on PATH the shrink rule has
+# nothing to compare, so only the placeholder rule can decide.
+pr_update("pr-body-placeholder: an MCP update whose body is one 41-character token is allowed", "allow",
+          body="A" * 41, live=GHMAIN)
+pr_update("pr-body-placeholder: an MCP update whose body is two words is allowed", "allow",
+          body="TODO later", live=GHMAIN)
+pr_update("pr-body-placeholder: an MCP update with a quote and a hash in a real sentence is allowed", "allow",
+          body="Don't merge yet: the Merge-after line for #1824 is below.", live=GHMAIN)
+pr_edit("pr-body-placeholder: gh pr edit --body PLACEHOLDER is denied", "deny",
+        "gh pr edit 5 --body PLACEHOLDER", PR_PLACEHOLDER)
+pr_edit("pr-body-placeholder: gh pr edit -b PLACEHOLDER is denied", "deny",
+        "gh pr edit 5 -b PLACEHOLDER", PR_PLACEHOLDER)
+pr_edit("pr-body-placeholder: gh pr edit --body with an empty value is denied", "deny",
+        'gh pr edit 5 --body ""', PR_PLACEHOLDER)
+pr_edit("pr-body-placeholder: gh pr edit --body-file of a PLACEHOLDER file is denied", "deny",
+        "gh pr edit 5 --body-file " + slash(PR_BODY_FILE), PR_PLACEHOLDER)
+pr_edit("pr-body-placeholder: gh pr edit --body-file - with a PLACEHOLDER heredoc is denied", "deny",
+        "gh pr edit 5 --body-file - <<'EOF'\nPLACEHOLDER\nEOF", PR_PLACEHOLDER)
+pr_edit("pr-body-placeholder: gh pr edit with a quoted real body is allowed", "allow",
+        'gh pr edit 5 --body "Don\'t merge yet: the Merge-after line for #1824 is below."', live=GHMAIN)
+pr_edit("pr-body-placeholder: gh pr edit with a quoted body over two lines is allowed", "allow",
+        'gh pr edit 5 --body "Summary\n\nMerge-after: #1824"', live=GHMAIN)
+pr_update("pr-body-placeholder: an MCP update whose body is PLACEHOLDER is denied when the live read fails", "deny",
+          PR_PLACEHOLDER, body="PLACEHOLDER", live=PRBODY_BROKEN)
+
+# The shrink rule: at least 400 live characters, and a new body under one third of them. 566 is under a third of
+# 1700 and 567 is not, so each side of that line has a case.
+pr_update("pr-body-shrink: an MCP update of 120 characters over a live body of 1700 asks", "ask", PR_SHRINK,
+          body=pr_body_of(120))
+pr_update("pr-body-shrink: an MCP update of 566 characters over a live body of 1700 asks", "ask", PR_SHRINK,
+          body=pr_body_of(566))
+pr_update("pr-body-shrink: an MCP update of 100 characters over a live body of 400 asks", "ask", PR_SHRINK,
+          body=pr_body_of(100), live=PRBODY_400)
+pr_edit("pr-body-shrink: gh pr edit --body of 120 characters over a live body of 1700 asks", "ask",
+        'gh pr edit 5 --body "' + pr_body_of(120) + '"', PR_SHRINK)
+pr_update("pr-body-shrink: an MCP update of 900 characters, about half of 1700, is allowed", "allow",
+          body=pr_body_of(900))
+pr_update("pr-body-shrink: an MCP update of 567 characters, just over one third of 1700, is allowed", "allow",
+          body=pr_body_of(567))
+pr_update("pr-body-shrink: an MCP update of 60 characters over a live body of 300 is allowed", "allow",
+          body=pr_body_of(60), live=PRBODY_300)
+pr_update("pr-body-shrink: an MCP update of 100 characters over a live body of 399, under the floor, is allowed",
+          "allow", body=pr_body_of(100), live=PRBODY_399)
+pr_update("pr-body-shrink: an MCP update of 120 characters is allowed when the live read fails", "allow",
+          body=pr_body_of(120), live=PRBODY_BROKEN)
+
+# A create is not an update, so the rules do not judge it. A draft create with a real body is allowed.
+sh("pr-body-placeholder: gh pr create --draft with a real body is allowed",
+   'gh pr create --draft --title "Adds the body check" --body "The body check reads each update."', "allow",
+   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
+add("pr-body-placeholder: an MCP create with draft true and a PLACEHOLDER body is not judged", "allow",
+    tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main", repo="x", owner="y",
+    draft=True, body="PLACEHOLDER", env_path=GHMAIN + os.pathsep + PY_PATH)
+
+
+# The cost of the two rules, pinned: a title-only, state-only or draft-only update makes no gh call, and a body
+# update makes one. Each check builds its own counted fake, and proves the counter works with one probe call first.
+def pr_body_judged(tool_input, folder):
+    """The guard's (decision, reason) for one update of pull request 12, with the counted fake `folder` on PATH."""
+    return decide({
+        "raw": None, "tool": PR_UPDATE, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
+        "env_path": folder + os.pathsep + PY_PATH, "config": MERGECFG, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": None, "transcript": None,
+        "tool_input": dict(owner="y", repo="x", pullNumber=12, **tool_input),
+    })
+
+
+def pr_body_calls_case(tool_input, want_decision, want_calls):
+    """A check that one update is judged `want_decision` and makes `want_calls` gh calls."""
+    def case():
+        folder = os.path.join(ROOT, "prbodycount")
+        make_fake_gh(folder, "main", body=pr_live_body(1700), count_file=os.path.join(folder, ARCHIVE_CALLS))
+        gh_calls_taken(folder)
+        program = shutil.which("gh", path=folder + os.pathsep + PY_PATH)
+        if not program or os.path.dirname(program) != folder:
+            return False, "the counted gh did not resolve in its own folder: %r" % (program,)
+        subprocess.run([program, "api", "repos/y/x/pulls/12"], capture_output=True, text=True, timeout=60)
+        if len(gh_calls_taken(folder)) != 1:
+            return False, "the counted gh did not log one probe call, so its count proves nothing"
+        decision, reason = pr_body_judged(tool_input, folder)
+        calls = gh_calls_taken(folder)
+        if decision != want_decision or reason:
+            return False, "wanted %s with no reason, got %s: %r" % (want_decision, decision, reason[:90])
+        if len(calls) != want_calls:
+            return False, "%d gh call(s) wanted for the update, %d seen: %r" % (want_calls, len(calls), calls)
+        return True, "%s, %d gh call(s)" % (want_decision, want_calls)
+    return case
+
+
+def pr_body_count_check(label, tool_input, want_decision, want_calls):
+    check = pr_body_calls_case(tool_input, want_decision, want_calls)
+    FIXTURELESS_CHECKS.add(check)
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
 # =========================================================================== 5g. archive of a lane
 FAMILY = "lane-closes-after-records"
 #
@@ -14112,6 +14282,18 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no
                          archive_non_lane_no_read_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
                          archive_writes_nothing_case))
+
+
+# The cost of the pr-body rules, pinned: see pr_body_calls_case. Registered here, because LOG_CHECKS_EXTRA is
+# defined above this line and the family is set for these checks only.
+FAMILY = "pr-body"
+pr_body_count_check("pr-body-shrink: a title-only update makes no gh call", {"title": "Adds the body check"},
+                    "allow", 0)
+pr_body_count_check("pr-body-shrink: a state-only update makes no gh call", {"state": "closed"}, "allow", 0)
+pr_body_count_check("pr-body-shrink: a draft-only update makes no gh call", {"draft": True}, "allow", 0)
+pr_body_count_check("pr-body-shrink: a body update reads the live body in exactly one gh call",
+                    {"body": pr_body_of(900)}, "allow", 1)
+FAMILY = "lane-closes-after-records"
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
