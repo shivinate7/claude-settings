@@ -21260,6 +21260,60 @@ add("brief-claim: test-author brief where the guard refuses an input in capitals
 add("brief-claim: test-author brief where the guard refuses an input today, and main refuses a second, is denied",
     "deny", BRIEF_PROBE, tool="Agent", prompt="The guard refuses `a` today, and main refuses `b`.",
     subagent_type="test-author", carries=("`a`",))
+# The reverse order: main's claim leads and the guard's refusal follows. Only main's input is claimed, so the guard's
+# input is not named.
+add("brief-claim: test-author brief where main lets an input today, and the guard refuses another today through, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Main lets `x` today, and the guard refuses `y` today through.",
+    subagent_type="test-author", carries=("`x`",), lacks=("`y`",))
+# The same two claims in two sentences: each is read, so the unprobed one is denied.
+add("brief-claim: test-author brief where main passes a probed input, and in the next sentence refuses an unprobed one, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="main passes `port: 0`. Main refuses `user: root`.\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
+    subagent_type="test-author", carries=("user: root",))
+# A claimed list stays open across a blank line and a fence marker. Only a non-blank text line that is not bulleted
+# closes it, so a bullet after a blank line or a fence is a claimed input.
+add("brief-claim: builder brief where a blank line before the first listed input keeps the list open, so the unprobed input is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Main refuses these:\n\n- `port: 0`",
+    subagent_type="builder", model="sonnet", carries=("port: 0",))
+add("brief-claim: builder brief where a blank line between listed inputs keeps the list open, so an unprobed bullet after it is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Main refuses these:\n- `port: 0`\n\n- `user: root`\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
+    subagent_type="builder", model="sonnet", carries=("user: root",))
+add("brief-claim: builder brief where a fence marker between listed inputs keeps the list open, so an unprobed bullet after it is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Main refuses these:\n```\n- `port: 0`\n```\n- `user: root`\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
+    subagent_type="builder", model="sonnet", carries=("user: root",))
+
+# The subject-first search in the claim scan stops at the sentence's last "today". A long sentence then costs no
+# more than its today window. The spy records each search's endpos, which must be the end of that last today.
+def brief_claim_bound_case():
+    """The subject-first search in _claim_active stops at the last "today": each search's endpos must be the end of
+    that last today, never the sentence's end. The check reads no clock."""
+    guard = _load_guard_module()
+    real = guard.BRIEF_CLAIM_ACTIVE
+    ends = []
+
+    class Spy:
+        def search(self, text, pos=0, endpos=None):
+            ends.append(endpos)
+            return real.search(text, pos, endpos)
+
+    sentence = "The guard refuses it today, and " + "it refuses it " * 200 + "the end."
+    want = sentence.index("today") + len("today")
+    guard.BRIEF_CLAIM_ACTIVE = Spy()
+    try:
+        guard.brief_claim_gaps(sentence)
+    finally:
+        guard.BRIEF_CLAIM_ACTIVE = real
+    if not ends:
+        return False, "the subject-first search never ran, so its bound is not read"
+    if any(end != want for end in ends):
+        return False, "the subject-first search reads to %s, past the last today at %d" % (sorted(set(ends)), want)
+    return True, "the subject-first search stops at the last today, character %d of %d" % (want, len(sentence))
+
+
+LOG_CHECKS_EXTRA.append(("brief-claim: the subject-first search stops at the last today, reading no further",
+                         brief_claim_bound_case))
 
 
 def _flow(model, role=None):
