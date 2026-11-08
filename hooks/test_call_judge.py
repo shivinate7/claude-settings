@@ -2365,6 +2365,79 @@ def case_run_of_the_named_test_file_backs_its_forecast():
               detail(r))
 
 
+# (claim file, command): each command runs the claimed file, so each clears the claim. The unittest, discover and shell
+# `-e` forms are the ones the run reader does not count yet.
+RUN_FORM_ROWS = (
+    ("skills/waiting-page/test_page_grant.py", "python3 -m unittest skills/waiting-page/test_page_grant.py"),
+    ("skills/waiting-page/test_page_grant.py",
+     "python3 -m unittest discover -s skills/waiting-page -p test_page_grant.py"),
+    ("hooks/guard.py", "out=$(python3 hooks/guard.py < in 2>&1)"),
+    ("hooks/guard.py", "(python3 hooks/guard.py)"),
+    ("hooks/guard.py", "for f in a b; do python3 hooks/guard.py < $f; done"),
+    ("hooks/guard.py", "if python3 hooks/guard.py; then echo ok; fi"),
+    ("hooks/guard.py", "! python3 hooks/guard.py"),
+    ("hooks/x.sh", "bash -e hooks/x.sh"),
+    ("hooks/x.sh", "sh -e hooks/x.sh"),
+)
+# (claim file, command): each command checks the claimed file and runs nothing from it, so each leaves the claim refused.
+# The last row is a control, refused today: a `-e` string runs no file, and the file is only its argument.
+CHECK_ONLY_ROWS = (
+    ("hooks/x.js", "node --check hooks/x.js"),
+    ("hooks/test_guard.py", "python3 -m pytest --collect-only hooks/test_guard.py"),
+    ("hooks/test_guard.py", "python3 -m pytest --co hooks/test_guard.py"),
+    ("hooks/x.js", 'node -e "console.log(1)" hooks/x.js'),
+)
+
+
+def claim_on(path):
+    """The verdict claim on `path`, worded like CLAIM: a subject word, a forecast word and a verdict word."""
+    return "The check " + path + " will refuse it."
+
+
+def is_verdict_claim(sentence):
+    """True when the sentence holds a forecast word, a verdict word and a subject word (the claim scope, P7)."""
+    return (has_word(sentence, VERDICT_FORECAST_WORDS) and has_word(sentence, VERDICT_WORDS)
+            and has_word(sentence, VERDICT_SUBJECT_WORDS))
+
+
+def names_file(command, path):
+    """True when `command` names `path`, or a unittest discover start dir (-s) and pattern (-p) that select it."""
+    if path in command:
+        return True
+    folder, name = path.rsplit("/", 1)
+    return ("-s " + folder) in command and ("-p " + name) in command
+
+
+def case_unittest_discover_and_shell_e_runs_clear_the_claim():
+    # Each row is the turn's only Bash call, a run of its claimed file. The claim is judged on that call alone.
+    for index, (path, command) in enumerate(RUN_FORM_ROWS):
+        claim = claim_on(path)
+        transcript = write_transcript("claim-form-run-%d" % index, commands=[command])
+        check("run claim scope (%s): the sentence holds a forecast, a verdict and a subject word" % path,
+              is_verdict_claim(claim), claim)
+        check("run scope (%r): the turn's only Bash call runs the claimed file %s" % (command, path),
+              turn_commands(transcript) == [command] and names_file(command, path), turn_commands(transcript))
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, claim, transcript=transcript), answer=ALLOW)
+            check("run of the claimed file (%r), via %s: the send is not refused" % (command, tool),
+                  r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_collect_only_and_check_forms_keep_the_claim_refused():
+    # Each row is the turn's only Bash call, a check that runs nothing from its claimed file. The refusal names the rule.
+    for index, (path, command) in enumerate(CHECK_ONLY_ROWS):
+        claim = claim_on(path)
+        transcript = write_transcript("claim-form-check-%d" % index, commands=[command])
+        check("check-only scope (%r): the turn's only Bash call names the claimed file %s" % (command, path),
+              turn_commands(transcript) == [command] and names_file(command, path), turn_commands(transcript))
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, claim, transcript=transcript), answer=ALLOW)
+            d = r.deny() or {}
+            check("check-only (%r), via %s: the send is refused by the verdict claim rule" % (command, tool),
+                  r.code == 0 and d.get("permissionDecision") == "deny" and VERDICT_CLAIM_RULE in d.get(
+                      "permissionDecisionReason", ""), detail(r))
+
+
 def case_verdict_claim_cited_to_an_existing_file_passes():
     # Case 3. The same sentence with a (test path::name) cite to a file committed at head: not refused.
     import stale_cites  # the one home of the cite parser (lint/stale_cites.py)
@@ -2885,6 +2958,8 @@ def main():
                  case_read_of_the_claimed_file_does_not_back_a_forecast,
                  case_run_of_the_claimed_file_backs_a_forecast,
                  case_run_of_the_named_test_file_backs_its_forecast,
+                 case_unittest_discover_and_shell_e_runs_clear_the_claim,
+                 case_collect_only_and_check_forms_keep_the_claim_refused,
                  case_quoted_claim_in_a_code_fence_passes,
                  case_send_with_no_verdict_word_reads_no_transcript_and_calls_no_model,
                  case_forecast_without_a_verdict_word_passes,
