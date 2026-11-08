@@ -2373,18 +2373,28 @@ def matrix_cap(lines, key):
             if not (m := re.match(rf"-\s+({MATRIX_NUMBER})\s*(?:#.*)?$", text)):
                 return None
             numbers.append(int(m.group(1).strip("'\"")))
-        elif section == "include" and re.match(rf"(?:-\s+)?{re.escape(key)}:", text):
-            if not (m := re.match(rf"(?:-\s+)?{re.escape(key)}:\s*({MATRIX_NUMBER})\s*(?:#.*)?$", text)):
-                return None
-            numbers.append(int(m.group(1).strip("'\"")))
+        elif section == "include":
+            qkey = rf"[\"']?{re.escape(key)}[\"']?"  # an include key may be quoted, which YAML reads as the same key
+            if re.match(r"-\s+\{", text):  # a flow-map item: its cap, if it names one, must be a literal number
+                if not (m := re.match(r"-\s+\{(.*)\}\s*(?:#.*)?$", text)):
+                    return None
+                if hit := re.search(rf"(?:^|,)\s*{qkey}\s*:", m.group(1)):
+                    if not (v := re.match(rf"\s*({MATRIX_NUMBER})\s*(?:,|$)", m.group(1)[hit.end():])):
+                        return None
+                    numbers.append(int(v.group(1).strip("'\"")))
+            elif re.match(rf"(?:-\s+)?{qkey}\s*:", text):
+                if not (m := re.match(rf"(?:-\s+)?{qkey}\s*:\s*({MATRIX_NUMBER})\s*(?:#.*)?$", text)):
+                    return None
+                numbers.append(int(m.group(1).strip("'\"")))
     return max(numbers, default=None)
 
 def scan_job_caps(texts):
     """-> ({job id or job name: timeout-minutes}, the ids of jobs whose cap is an unknown expression) from workflow file texts. The one reader of caps.
     A line scan, since the repo has no YAML reader: only a job's own keys count, at four spaces under a two-space job id under `jobs:`.
     A step's cap, a comment, a block scalar and a quoted string are deeper or start with another character. A quoted number counts.
-    A bare `${{ matrix.<key> }}` is the largest literal number `matrix_cap` finds for <key> in the job's own matrix. Any other expression
-    (an operator, `fromJSON`, a missing key, a non-number) is unknown: the job has no cap and its id is in the second value."""
+    A bare `${{ matrix.<key> }}`, quoted or not, is the largest literal number `matrix_cap` finds for <key> in the job's own matrix,
+    include items in block or flow-map form included. Any other expression (an operator, `fromJSON`, a missing key, a non-number, an include
+    item whose <key> is not a literal number) is unknown: the job has no cap and its id is in the second value."""
     caps, unknown = {}, []
     for text in texts:
         in_jobs, job, jobs = False, None, []
@@ -2398,8 +2408,8 @@ def scan_job_caps(texts):
                 job["ids"].append(m.group(1).strip("'\""))
             elif job and (m := re.match(r"^ {4}timeout-minutes:\s*['\"]?(\d+)['\"]?\s*(?:#.*)?$", line)):
                 job["cap"] = int(m.group(1))
-            elif job and (m := re.match(r"^ {4}timeout-minutes:\s*\$\{\{\s*matrix\.([\w-]+)\s*\}\}\s*(?:#.*)?$", line)):
-                job["expr"], job["key"] = True, m.group(1)
+            elif job and (m := re.match(r"^ {4}timeout-minutes:\s*(['\"]?)\$\{\{\s*matrix\.([\w-]+)\s*\}\}\1\s*(?:#.*)?$", line)):
+                job["expr"], job["key"] = True, m.group(2)
             elif job and re.match(r"^ {4}timeout-minutes:\s*['\"]?\$\{\{", line):
                 job["expr"] = True
             if job:
@@ -2469,8 +2479,8 @@ def load_config(root, base, path):
         raise Stop(f"{path} on {ref}: merge.deadlineMinutes must be a whole number from 1 to 360, not {dm!r}.")
     caps, unknown_caps = base_job_caps(root, ref)
     if unknown_caps and not deadline_set:  # an unknown cap sets no floor, so only the repo's own deadline can outlast it
-        say(f"merge: job {', '.join(sorted(set(unknown_caps)))} has a timeout-minutes the merge tool cannot read, so it sets no floor. "
-            f"Set merge.deadlineMinutes in {path} to at least that job's real cap + 5.")
+        say(f"merge: no wait floor for {', '.join(sorted(set(unknown_caps)))}: each timeout-minutes is an expression the merge tool cannot read. "
+            f"Set merge.deadlineMinutes in {path} to at least the real cap + 5 of the slowest of these jobs.")
     floor = min(max(caps.values(), default=0) + 5, 360)  # clamped: 360 is the most a deadline may be
     if caps and dm < floor:  # the wait must outlast the slowest job's cap, or a job still within its cap reads as a deadline miss
         # Wait the floor, never stop: a stop here would block the very PR that raises the deadline.
