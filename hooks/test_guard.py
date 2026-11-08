@@ -5744,6 +5744,19 @@ for _label, _trigger, _rule, _lacks in (
 ):
     add("wait-pid: the remedy of %s names the helper" % _label, "deny", _rule, cwd=NOGIT,
         carries=(WAIT_PID,), lacks=_lacks, command=_trigger)
+# A bare `wait-pid` is not on PATH in an agent worktree, so each remedy names the helper by its bin path.
+for _label, _trigger, _rule in (
+        ("a followed stream", "tail -f app.log", "live-stream"),
+        ("a pause", "sleep 30", "waiter"),
+        ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done", "waiter"),
+):
+    sh("wait-pid: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
+       cwd=NOGIT, carries=("bin/wait-pid",))
+# The path forms a remedy may name are allowed, in the foreground and under run_in_background.
+for _command in ("~/.claude/bin/wait-pid 12345", "bin/wait-pid 12345"):
+    sh("wait-pid: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
+    add("wait-pid: %s is allowed under run_in_background" % _command, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
 
 # Reads stay allowed, in the foreground and under run_in_background. `gh pr checks <n>` without
 # `--watch` is allowed on main, and stays so.
@@ -7111,6 +7124,16 @@ sh("false alarm: --force in a heredoc body",
    "cat <<'EOF'\n" + VCS + " push --force\nEOF", "allow", cwd=PUSHFEAT)
 sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-if-includes origin HEAD:main-fix",
    "allow", cwd=PUSHMAIN)
+# A `git push` inside a python3 -c argument whose quotes are escaped. The `+1` is printed, not pushed, but
+# the push reader takes it as a `+` refspec. The two controls pin the plain push and a real force in the same shape.
+sh("false alarm: a python -c that prints +1 after a plain push allows, escaped quotes",
+   r'python3 -c "import os; os.system(\"' + VCS + r' push origin HEAD:x\"); print(\"+1\")"',
+   "allow", cwd=PUSHFEAT)
+sh("python -c escaped plain push allows (control)",
+   r'python3 -c "import os; os.system(\"' + VCS + r' push origin HEAD:x\")"', "allow", cwd=PUSHFEAT)
+sh("python -c escaped forced push still denies (control)",
+   r'python3 -c "import os; os.system(\"' + VCS + r' push -f origin x\")"', "deny", "force-push",
+   cwd=PUSHFEAT, carries=REMEDY)
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
