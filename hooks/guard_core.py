@@ -164,12 +164,21 @@ SMART_DOUBLE = "\u201c\u201d\u201e"
 SMART_QUOTES = frozenset(SMART_SINGLE + SMART_DOUBLE)
 
 
+def closes_quote(char: str, quote: str, powershell: bool) -> bool:
+    """True when `char` ends a string opened by the straight mark `quote`. In PowerShell a smart mark
+    of the same kind ends it too."""
+    return char == quote or powershell and char in (SMART_SINGLE if quote == "'" else SMART_DOUBLE)
+
+
 def smart_quote_span(text: str, index: int) -> int:
     """In PowerShell text, the index just past the string that the smart quote at `index` opens, or
-    0 when no mark of its kind follows (a straight `'` or `"` closes it too): a lone smart apostrophe in prose opens nothing, so it must
-    not hide the words after it. Not in PowerShell text, always 0."""
+    0 when it opens none. A mark of its kind ends the string, smart or straight. A lone smart
+    apostrophe, and one inside a word (`it’s`), open nothing, so neither hides the words after it.
+    Not in PowerShell text, always 0."""
     char = text[index]
     if char not in SMART_QUOTES or not is_powershell(text):
+        return 0
+    if char in SMART_SINGLE and not token_start(text, index):
         return 0
     marks = SMART_SINGLE + "'" if char in SMART_SINGLE else SMART_DOUBLE + '"'
     for end in range(index + 1, len(text)):
@@ -193,7 +202,7 @@ def quote_advance(text: str, index: int, quote: str):
             return (len(closer), "") if text.startswith(closer, index) else (1, quote)
         if (char == "`" and quote == '"') or (char == quote and text[index + 1:index + 2] == quote):
             return 2, quote
-        return 1, ("" if char == quote else quote)
+        return 1, ("" if closes_quote(char, quote, True) else quote)
     if quote:
         if char == "\\" and quote != "'":
             return 2, quote
@@ -1750,6 +1759,8 @@ REDIRECT = re.compile(r"(\d?>>?)")
 # A search command's pattern is a regex, never a path: a lone dot-star pattern reads no
 # environment file.
 ENV_PATTERN_COMMANDS = ("grep", "egrep", "fgrep", "rg", "ag", "ack")
+# The PowerShell search cmdlet and its alias, lower case. Its pattern is a regex, and it reads files.
+POWERSHELL_PATTERN_COMMANDS = ("select-string", "sls")
 
 
 PLAYWRIGHT_PS_SHELLS = ("pwsh", "powershell", "pwsh.exe", "powershell.exe")

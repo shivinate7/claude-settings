@@ -7,8 +7,8 @@ import fnmatch
 import re
 
 from guard_core import (
-    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    SMART_QUOTES, SMART_SINGLE, smart_quote_span,
+    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, POWERSHELL_PATTERN_COMMANDS,
+    REDIRECT, SHELL_HEREDOC, SMART_QUOTES, SMART_SINGLE, closes_quote, smart_quote_span, token_start,
     TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
     is_powershell, norm, split_segments,
 )
@@ -68,15 +68,21 @@ ENV_PATH_PREFIX = re.compile(r"^(\.{1,2}|~|[A-Za-z]:|\S*(/|\\(?![.\\]))\S*)$")
 ENV_QUOTED_ROOT = re.compile(r"^([A-Za-z]:[\\/]|\\\\|~[\\/]|\.{1,2}[\\/]|/)")
 ENV_QUOTED_SPAN = re.compile(r"\"[^\"]*\"|'[^']*'")
 
-# In PowerShell text an argument is a path unless it is one of these. A path's backslash is a
-# separator. A pattern's is a regex escape, and a text command's arguments are text. A second list
-# beside ENV_PATTERN_COMMANDS and ENV_TEXT_COMMANDS, since PowerShell names its pattern flag
-# `-Pattern`, which `_pattern_words` would misread as the short flag `-e`, and its print cmdlets
-# are not `echo` or `printf`. Lower case.
-ENV_POWERSHELL_PATTERN_COMMANDS = ("select-string", "sls")
+# In PowerShell text an argument is a path unless it is a pattern or text. A path's backslash is a
+# separator. A pattern's is a regex escape, and a text command's arguments are text. The pattern
+# commands are POWERSHELL_PATTERN_COMMANDS, apart from ENV_PATTERN_COMMANDS, since PowerShell names
+# its pattern flag `-Pattern`, which `_pattern_words` would misread as the short flag `-e`. Its
+# print cmdlets and `throw` are not `echo` or `printf`. Lower case.
 ENV_POWERSHELL_TEXT_COMMANDS = (
     "write-host", "write-output", "write-error", "write-warning", "write-verbose", "write-debug",
-    "write-information")
+    "write-information", "throw")
+# A quoted word that holds a space is text, such as an Add-Content value, unless it is the command's
+# path argument: its first plain word, or the value of a `-Path`, `-LiteralPath` or `-FilePath`
+# flag. So `Get-Content "My Dir\.env"` reads a path, and `Add-Content log "see C:\app\.env"` writes
+# text. A rooted quoted path (`"C:\My Dir\.env"`) stays a path anywhere (ENV_QUOTED_ROOT).
+ENV_PATH_FLAG = re.compile(r"-\w*path", re.IGNORECASE)
+# A .NET regex call: every word from it to the segment end is a regex argument.
+ENV_REGEX_CALL = re.compile(r"\[(?:system\.text\.regularexpressions\.)?regex\]::", re.IGNORECASE)
 # `-Path` and the like take a value that is never the pattern.
 ENV_SELECT_STRING_VALUES = (
     "-path", "-literalpath", "-include", "-exclude", "-encoding", "-context", "-inputobject")
@@ -149,10 +155,12 @@ ENV_FOLDER_COMMANDS = ("mkdir",)
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
 # are read, so an env name in prose reads no contents. A substitution in the value is cut out
 # and judged as a command first, by `_substitutions`.
-ENV_MESSAGE_COMMAND = re.compile(r"\s*(git\s+commit|gh\s+pr\s+create)\b")
+# The flag may close a short cluster (`-am`, `-sm`), and the value may be a PowerShell here-string.
+ENV_MESSAGE_COMMAND = re.compile(r"\s*(git\s+(commit|tag)|gh\s+pr\s+create)\b")
+ENV_MESSAGE_FLAG = r"(?<![\w-])(?:-[A-Za-z]*m|--message|--title|--body)(?:=|\s+)"
 ENV_MESSAGE_ARG = re.compile(
-    r"""(?P<flag>(?:-m|--message|--title|--body)(?:=|\s+))"""
-    r"""(?P<value>"(?:[^"\\]|\\.)*"|'[^']*')""")
+    r"(?P<flag>" + ENV_MESSAGE_FLAG + r")"
+    r"""(?P<value>@(?P<here>["'])\r?\n[\s\S]*?\n(?P=here)@|"(?:[^"\\]|\\.)*"|'[^']*')""")
 
 
 def _blank_messages(segment: str) -> str:
@@ -237,7 +245,8 @@ ENV_MAX_DEPTH = 64
 ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
 
-def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False):
+def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False,
+                   groups: bool = False):
     """Return ([(text, in a message)], too_deep). The last text is the command itself.
 
     One pass, no recursion. Each command substitution `$(...)`, backtick pair or process
@@ -251,6 +260,8 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
     `powershell` reads PowerShell's escape: a backtick escapes the next character, as a backslash
     does in bash, and opens no substitution. A backslash is then a plain character. `heredoc`
     reads an unquoted heredoc body: there a quote mark is text, until a substitution opens.
+    `groups` reads a PowerShell `( ... )` or `@( ... )` at a token start as a substitution too: it
+    runs a command of its own, and its output is an argument of the command around it.
     """
     escape = "`" if powershell else "\\"
     if depth > ENV_MAX_DEPTH:
@@ -267,7 +278,7 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
 
     def opens_message(pieces):
         """True when a `"` opened now is the value of a message flag of a commit or a PR."""
-        if not re.search(r"(?:-m|--message|--title|--body)(?:=|\s+)$", "".join(pieces[-12:])):
+        if not re.search(ENV_MESSAGE_FLAG + "$", "".join(pieces[-12:])):
             return False
         tail = []
         for piece in reversed(pieces):
@@ -304,13 +315,14 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
             pieces.append("`x`")
             i = j + 1
             continue
-        elif cmd[i:i + 2] == "$(" or (quote == "" and cmd[i:i + 2] in ("<(", ">(")):
+        elif cmd[i:i + 2] == "$(" or (quote == "" and cmd[i:i + 2] in ("<(", ">(")) or (
+                groups and quote == "" and char == "(" and (token_start(cmd, i) or cmd[i - 1] == "@")):
             if len(stack) + depth > ENV_MAX_DEPTH:
                 return [], True
             message = quote == '"' and frame[4]
             pieces.append("x")
             stack.append([[], "", 0, message, False])
-            i += 2
+            i += 1 if char == "(" else 2
             continue
         elif quote == "" and len(stack) > 1 and char == "(":
             frame[2] += 1
@@ -374,7 +386,7 @@ def env_reference(word: str, path_arg: bool = False) -> str:
     """Return the environment file that one shell word names as a path, else ''.
 
     `path_arg` is set for a PowerShell argument that is a path: any one but a pattern or text (see
-    ENV_POWERSHELL_PATTERN_COMMANDS). There a backslash is always a separator and a quoted word is
+    ENV_POWERSHELL_TEXT_COMMANDS). There a backslash is always a separator and a quoted word is
     one path, so `sub\\.env` and `"My Dir\\.env"` name the file. In a pattern a backslash may be a
     regex escape.
 
@@ -393,6 +405,11 @@ def env_reference(word: str, path_arg: bool = False) -> str:
             continue
         if separator == "\\" and not path_arg and not ENV_PATH_PREFIX.match(head):
             break  # `process\.env` is an escaped dot, not a Windows separator
+        # A file inside an env folder (`.envs/x`, `.envs\x`) is a read of that folder.
+        folders = re.split(r"[\\/]" if path_arg or separator == "\\" else "/", head)
+        folder = next((part for part in folders if names_env_file(part.replace("\0", " "))), "")
+        if folder:
+            return folder.replace("\0", " ")
         word = tail
         break
     word = re.sub(r"\\(?!\.)", "", word.replace("\0", " "))
@@ -437,7 +454,8 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     around them, for the body of a heredoc.
     """
     cmd = _plain_escaped_quotes(cmd)
-    texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
+    texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc,
+                                     groups=is_powershell(cmd))
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
@@ -555,13 +573,27 @@ def _pattern_words(words, position: int, command: str):
 
 def _powershell_regex_words(words, position: int, command: str):
     """The indexes of the words in a PowerShell segment that are a regex and no path: the word
-    after a `-match`, `-replace` or `-split` operator, a `git grep` pattern, and a Select-String
-    pattern (`-Pattern x`, `-Pattern:x`, or the first plain word when no flag gives it)."""
+    after a `-match`, `-replace` or `-split` operator, each word from a `[regex]::` call on, a
+    `git grep` pattern, a `git log --grep` value, the first plain word of `findstr`, and a
+    Select-String pattern (`-Pattern x`, `-Pattern:x`, or the first plain word when no flag gives
+    it)."""
     found = {i for i in range(1, len(words)) if ENV_REGEX_OPERATOR.fullmatch(words[i - 1])}
+    call = next((i for i, word in enumerate(words) if ENV_REGEX_CALL.search(word)), len(words))
+    found |= set(range(call, len(words)))
     name = command.lower()
-    if name == "git" and words[position + 1:position + 2] == ["grep"]:
+    subcommand = words[position + 1:position + 2]
+    if name == "git" and subcommand == ["grep"]:
         found |= _pattern_words(words, position + 1, "grep")[0]
-    elif name in ENV_POWERSHELL_PATTERN_COMMANDS:
+    elif name == "git" and subcommand == ["log"]:
+        for i in range(position + 2, len(words)):
+            flag, glued, _ = words[i].partition("=")
+            if flag == "--grep":
+                found.add(i if glued else i + 1)
+    elif name == "findstr":   # its flags start with `/`, and its first plain word is the pattern
+        found |= set(next(([i] for i in range(position + 1, len(words))
+                           if not words[i].startswith("/") and not REDIRECT.fullmatch(words[i])
+                           and not REDIRECT.fullmatch(words[i - 1])), []))
+    elif name in POWERSHELL_PATTERN_COMMANDS:
         plain, explicit, i = [], False, position + 1
         while i < len(words):
             word = words[i]
@@ -586,6 +618,23 @@ def _powershell_regex_words(words, position: int, command: str):
         if not explicit and plain:
             found.add(plain[0])
     return found
+
+
+def _powershell_text_words(words, position: int, text_command: bool):
+    """The indexes of the quoted words in a PowerShell segment that hold a space and are text, not
+    the command's path argument (ENV_PATH_FLAG). A text command has no path argument. A redirect's
+    target is never text."""
+    slot = set()
+    if not text_command:
+        plain = [i for i in range(position + 1, len(words))
+                 if not words[i].startswith("-") and not REDIRECT.fullmatch(words[i])
+                 and not REDIRECT.fullmatch(words[i - 1])]
+        slot = set(plain[:1]) | {i for i in range(position + 1, len(words))
+                                 if ENV_PATH_FLAG.fullmatch(words[i - 1])}
+    return {i for i in range(position + 1, len(words))
+            if i not in slot and not REDIRECT.fullmatch(words[i - 1]) and " " in words[i]
+            and (words[i][:2] in ('@"', "@'") or len(words[i]) > 1 and words[i][0] in "\"'"
+                 and words[i][-1] == words[i][0])}
 
 
 def _assignment_end(words, position: int) -> int:
@@ -636,12 +685,13 @@ def _quoted_words(segment: str):
             i = span_end
             continue
         if char in "'\"":
+            powershell = is_powershell(segment)
             j = i + 1
-            while j < n and segment[j] != char:
-                j += 2 if char == '"' and segment[j] == "\\" else 1
-            if j < n:
+            while j < n and not closes_quote(segment[j], char, powershell):
+                j += 2 if char == '"' and segment[j] == "\\" and not powershell else 1
+            if j < n:   # a smart close becomes the straight mark that opened the string
                 flush()
-                chunks.append(re.sub(r"\s", "\0", segment[i:j + 1]))
+                chunks.append(re.sub(r"\s", "\0", char + segment[i + 1:j] + char))
                 i = j + 1
                 continue
         plain.append(char)
@@ -764,10 +814,16 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
+            # In PowerShell a text command's words are text unless it pipes onward, and then a word
+            # with no space may be a path the next command reads.
             powershell = is_powershell(segment)
-            not_paths = _powershell_regex_words(words, position, command) if powershell else set()
-            if command.lower() in ENV_TEXT_COMMANDS + ENV_POWERSHELL_TEXT_COMMANDS:
-                not_paths = set(range(len(words)))
+            text_command = command.lower() in ENV_TEXT_COMMANDS + ENV_POWERSHELL_TEXT_COMMANDS
+            not_paths = set()
+            if powershell and text_command and not piped:
+                not_paths = {i for i in range(len(words)) if not (i and REDIRECT.fullmatch(words[i - 1]))}
+            elif powershell:
+                not_paths = (_powershell_regex_words(words, position, command)
+                             | _powershell_text_words(words, position, text_command))
             patterns, glued = (_pattern_words(words, position, command)
                                if command in (ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
                                               + ENV_PROGRAM_COMMANDS)

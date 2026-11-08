@@ -20,7 +20,7 @@ except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pi
 
 from guard_core import (
     QUOTE_MARKS,
-    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
+    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS, POWERSHELL_PATTERN_COMMANDS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
@@ -659,8 +659,6 @@ PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
 ASSIGNING_BUILTINS = ("export", "declare", "typeset", "readonly", "local", "set")
 
 
-# Search tools. Local here, not in the shared ENV_PATTERN_COMMANDS.
-PLAYWRIGHT_PS_READERS = ("select-string", "sls")
 PLAYWRIGHT_PS_SET = re.compile(
     r"\$\{?env:" + PLAYWRIGHT_VAR + r"\}?\s*[-+*/]?=(?!=)"
     r"|^\s*(?:set-item|si|new-item|ni|set-content|sc)\b[^;|]*\benv:\\?" + PLAYWRIGHT_VAR + r"\b"
@@ -899,7 +897,7 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
     # A pwsh launch with a script is judged through that script (ps_inner), statement by statement.
     outer_ps = word in PLAYWRIGHT_PS_SHELLS and not _pwsh_script(tokens)
     if (POWERSHELL_CALL[0] or outer_ps or ps_inner) and word not in (
-            ENV_PATTERN_COMMANDS + PLAYWRIGHT_PS_READERS):
+            ENV_PATTERN_COMMANDS + POWERSHELL_PATTERN_COMMANDS):
         if watch is not PLAYWRIGHT_WATCH:
             hit = _ps_env_set(tokens, watch)
             if hit:
