@@ -6991,6 +6991,16 @@ class UnknownOverride(Env):
             raise undo.Unknown("git is older than 2.38")
         return unittest.mock.patch.object(undo, "check", first_then_boom)
 
+    def unknown_with_findings(self, problems, notes=()):
+        """undo.check raises an Unknown that carries what its reads found: check() does this when one read fails and another finds."""
+        sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+        import check_silent_undo as undo
+        def boom(*a, **k):
+            e = undo.Unknown("git is older than 2.38")
+            e.problems, e.notes = list(problems), list(notes)
+            raise e
+        return unittest.mock.patch.object(undo, "check", boom)
+
     def test_unknown_refuses_and_names_the_flag(self):
         before = self.refs()
         with self.unreadable():
@@ -7050,6 +7060,33 @@ class UnknownOverride(Env):
         self.assertIn("--undo-check-unknown-ok", out)
         self.assertNotIn("No override lifts this refusal", out)
         self.assertFalse(self.lock_ref())
+
+    def test_undo_unknown_with_findings_refuses_even_with_the_reason_flag(self):
+        # the flag lifts a history that cannot be read; it never lifts a finding that the reads did make
+        finding = "9f8e7d6c5b drops lib/keep.txt from main"
+        out = io.StringIO()
+        with self.unknown_with_findings([finding]), contextlib.redirect_stdout(out):
+            with self.assertRaises(merge.Stop) as cm:
+                merge.undo_check(self.co, "origin/main", "octopus merge; history read by hand")
+        self.assertIsInstance(cm.exception, merge.Dropped, f"raised {type(cm.exception).__name__}: {cm.exception}")
+        self.assertIn(finding, str(cm.exception), "the refusal names the finding")
+        self.assertIn("UNKNOWN", str(cm.exception), "the refusal names the read that was also UNKNOWN")
+        self.assertNotIn("--undo-check-unknown-ok, reason:", out.getvalue(), "the flag lifted nothing")
+
+    def test_undo_unknown_with_findings_refuses_without_the_reason_flag(self):
+        finding = "9f8e7d6c5b drops lib/keep.txt from main"
+        with self.unknown_with_findings([finding]), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(merge.Stop) as cm:
+                merge.undo_check(self.co, "origin/main")
+        self.assertIsInstance(cm.exception, merge.Dropped, f"raised {type(cm.exception).__name__}: {cm.exception}")
+        self.assertIn(finding, str(cm.exception), "the refusal names the finding")
+
+    def test_undo_unknown_without_findings_goes_on_with_the_reason_flag_and_logs_it(self):
+        out = io.StringIO()
+        with self.unknown_with_findings([]), contextlib.redirect_stdout(out):
+            got = merge.undo_check(self.co, "origin/main", "octopus merge; history read by hand")
+        self.assertEqual(got, "octopus merge; history read by hand", "the flag lifts an unknown with no findings")
+        self.assertIn("--undo-check-unknown-ok, reason: octopus merge; history read by hand", out.getvalue(), "the lift is logged")
 
 class Identity(Env):
     def test_claim_commit_falls_back_when_only_the_email_is_set(self):
