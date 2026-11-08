@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import guard  # noqa: E402
 import sweep  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 VCS = "g" + "it"  # assembled so this file cannot itself look like the command it tests
 IDENT = ["-c", "user.email=janitor-cases@example.invalid", "-c", "user.name=janitor-cases"]
@@ -4080,6 +4081,66 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         with open(os.path.join(state, "agent-end-payloads.jsonl"), encoding="utf-8") as handle:
             runs = [json.loads(line).get("run") for line in handle.read().splitlines()]
         self.assertEqual(runs, seeds, "the hook lost rows that were not its own: %s" % runs)
+
+
+class AgentEndLogReadTests(unittest.TestCase):
+    """janitor/agent_end_reap.py log(), the read before the rewrite. The log is read under its lock and
+    rewritten with the new row, so a read that is refused must not become the loss of every prior row.
+    The refusal is a stand-in `open` on the log path only: the lock file and the temp write run for real."""
+
+    @classmethod
+    def setUpClass(cls):
+        import agent_end_reap
+        cls.reap = agent_end_reap
+
+    def scoped_log_path(self):
+        """A run folder, and the payload log path that CLAUDE_CONFIG_DIR gives under it. The path is
+        checked to sit inside the folder before any test probes it."""
+        folder = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, folder, True)
+        env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": folder})
+        env.start()
+        self.addCleanup(env.stop)
+        path = self.reap.log_path()
+        self.assertEqual(os.path.commonpath([os.path.normcase(path), os.path.normcase(folder)]),
+                         os.path.normcase(folder), "the payload log path %r is outside the run folder" % path)
+        return path
+
+    def test_a_refused_read_of_the_payload_log_keeps_its_rows(self):
+        """A read of the payload log that raises PermissionError must not make log() rewrite the log without
+        the rows it could not read. The seeded log is the largest one that a rewrite with the new row keeps
+        whole (MAX_LOG_LINES - 1 prior rows), so the row cap cannot drop a seed by itself."""
+        path = self.scoped_log_path()
+        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps({"raw": "{}", "run": run, "state": "done"}) + "\n" for run in seeded)
+        real_open = io.open
+        refused = []
+
+        def refuse_log_read(file, mode="r", *args, **kwargs):
+            if file == path and not set(mode) & set("wax+"):
+                refused.append(file)
+                raise PermissionError(13, "payload log held by another process (stand-in)", file)
+            return real_open(file, mode, *args, **kwargs)
+
+        with mock.patch.object(self.reap, "open", new=refuse_log_read, create=True):
+            self.reap.log({"raw": "{}", "run": "new-run", "state": "done"})
+        with io.open(path, encoding="utf-8") as handle:
+            kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        missing = [run for run in seeded if run not in kept]
+        self.assertEqual(len(missing), 0, "a refused read of the payload log dropped %d of %d prior rows"
+                         % (len(missing), len(seeded)))
+
+    def test_a_missing_payload_log_starts_with_only_the_new_row(self):
+        """The control: a missing log is not a failed read. log() starts a new log that holds just the new row."""
+        path = self.scoped_log_path()
+        self.assertFalse(os.path.exists(path), "the payload log exists before its first write")
+        self.reap.log({"raw": "{}", "run": "first-run", "state": "done"})
+        with io.open(path, encoding="utf-8") as handle:
+            kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
+        self.assertEqual(kept, ["first-run"], "a missing payload log did not start with just the new row")
 
 
 class AgentEndReapBatchTests(unittest.TestCase):
