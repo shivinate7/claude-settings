@@ -19,6 +19,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the transcript helpers, the guard path and the run isolation (one home)
 
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import guard_merge  # noqa: E402  MERGE_TOOLS and CREATE_PR_TOOL, the guard's own names (one home)
+import report_guard  # noqa: E402  LANDING_TOOLS, the report's read of the landing names
+import shared_names  # noqa: E402  the one home of the landing tool names (hooks/shared_names.py)
+
 RUN_FOLDER = trg.RUN_FOLDER  # this run's one folder (test-temp-standard); every case takes its folder from it
 SHA = "1a2b3c4"
 LANDING_REPLY = "Landed it."  # a reply with no report, on a turn that lands
@@ -208,6 +213,24 @@ class LandingToolTests(unittest.TestCase):
         for command in commands:
             with self.subTest(command=command):
                 self.assert_quiet([("Bash", {"command": command})], command)
+
+
+class LandingToolHomeTests(unittest.TestCase):
+    # The landing tool names have one home, hooks/shared_names.py (CLAUDE.md building-one-home-per-capability).
+    # These cases read the constants, never a copied list (building-allow-list-is-the-constant).
+
+    def test_lh_red_landing_tools_are_the_shared_names_constant(self):
+        # Catches: report_guard keeps its own literal LANDING_TOOLS, so a landing tool named in shared_names is missed here.
+        self.assertTrue(hasattr(shared_names, "LANDING_TOOLS"),
+                        "LANDING_TOOLS has no home in hooks/shared_names.py, so report_guard keeps its own set")
+        self.assertIs(report_guard.LANDING_TOOLS, shared_names.LANDING_TOOLS,
+                      "report_guard.LANDING_TOOLS is a copy, not the shared_names constant")
+
+    def test_lh_green_guard_merge_and_create_names_are_landing_tools(self):
+        # Allow control: every name the guard merges through, or opens a pull request through, is a landing tool.
+        for name in tuple(guard_merge.MERGE_TOOLS) + (guard_merge.CREATE_PR_TOOL,):
+            with self.subTest(tool=name):
+                self.assertIn(name, report_guard.LANDING_TOOLS)
 
 
 if __name__ == "__main__":

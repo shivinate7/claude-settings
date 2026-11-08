@@ -1931,6 +1931,44 @@ def case_unread_zone_less_line_reads_as_local_under_cst():
                           local_turn="2026-11-01T12:00:00-06:00")
 
 
+# --------------------------------------------------------------------------- the merge tools
+# The merge notice counts a merge into main by the merge tools it names. The set it reads is the guard's
+# one home (hooks/guard_merge.py MERGE_TOOLS, CLAUDE.md building-one-home-per-capability), read here by
+# name, never copied into this file.
+
+def _mcp_pr_record(name, pull_number):
+    """One assistant turn that calls the GitHub MCP tool `name` on pull request `pull_number`."""
+    tool_use = {"type": "tool_use", "id": "tu_" + name.rsplit("__", 1)[-1], "name": name,
+                "input": {"owner": "o", "repo": "r", "pullNumber": pull_number}}
+    return assistant_record(tool_use=tool_use)
+
+
+def case_merge_tools_is_the_guard_merge_object():
+    # Catches: decision_watch keeps its own copy of the merge tools, which lacks a name the guard merges through.
+    import guard_merge
+    missing = [name for name in guard_merge.MERGE_TOOLS if name not in dw.MERGE_TOOLS]
+    check("merge notice: decision_watch.MERGE_TOOLS is guard_merge.MERGE_TOOLS",
+          dw.MERGE_TOOLS is guard_merge.MERGE_TOOLS,
+          "decision_watch holds its own copy; names the guard merges through that it lacks: %s"
+          % (", ".join(missing) or "none"))
+
+
+def case_collect_merges_counts_enable_auto_merge():
+    # enable_pr_auto_merge merges the head once its checks pass, so a turn that enables it has merged into main.
+    # Catches: a merge through enable_pr_auto_merge is left out of the turn's merge notice.
+    got = dw.collect_merges([_mcp_pr_record("mcp__github__enable_pr_auto_merge", 12)])
+    check("merge notice: an enable_pr_auto_merge call counts as a merge into main",
+          got == ["#12"], "collect_merges gave %r, want ['#12']" % (got,))
+
+
+def case_collect_merges_control_merge_and_read_tools():
+    # Allow control: merge_pull_request still counts once, and a read of a pull request is no merge.
+    got = dw.collect_merges([_mcp_pr_record("mcp__github__merge_pull_request", 7),
+                             _mcp_pr_record("mcp__github__pull_request_read", 9)])
+    check("merge notice: merge_pull_request counts, and pull_request_read does not",
+          got == ["#7"], "collect_merges gave %r, want ['#7']" % (got,))
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -2001,6 +2039,9 @@ def main():
         case_unread_fallback_dst_forward_line_is_collected_under_utc,
         case_unread_fallback_dst_reverse_line_stays_out_under_utc,
         case_unread_zone_less_line_reads_as_local_under_cst,
+        case_merge_tools_is_the_guard_merge_object,
+        case_collect_merges_counts_enable_auto_merge,
+        case_collect_merges_control_merge_and_read_tools,
     ):
         run_case(case)
 

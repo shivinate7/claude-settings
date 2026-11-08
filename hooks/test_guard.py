@@ -10478,6 +10478,27 @@ for _name, _command in (
 ):
     sh("cite-by-id: %s is no message" % _name, _command, "allow", silent=True, cwd=NOGIT, config=MERGECFG)
 
+# ---- the MCP create tool reads its title and body as a PR title and body. The guard's
+# `mcp__github__create_pull_request` call carries no command text, so its `body` and `title` fields take the
+# same scans as the `gh pr create` cases above, and each case reuses that shell case's text. The draft field
+# is set, so draft-pr passes and only the cite and lane rules can decide. Red today: the guard reads no MCP body.
+MCP_DRAFT = dict(tool="mcp__github__create_pull_request", cwd=NOGIT, config=MERGECFG, title="t", head="h",
+                 base="main", repo="x", owner="y", draft=True)
+add("cite-by-id: MCP create with a draft body that cites a record path denies", "deny", rule="cite-by-id",
+    body="cites " + CITE, **MCP_DRAFT)
+add("cite-by-id: MCP create with a draft body that cites a layout-path record denies", "deny", rule="cite-by-id",
+    body="cites docs/" + CITE, **MCP_DRAFT)
+add("lane-by-slug: MCP create with a draft body that names a lane by session number denies", "deny",
+    rule="lane-by-slug", body="lands N16", **MCP_DRAFT)
+add("lane-by-slug: MCP create with a draft title that names a lane by session number denies", "deny",
+    rule="lane-by-slug", **dict(MCP_DRAFT, title="lane N20"))
+add("cite-by-id: MCP create with a clean draft body is allowed", "allow", body="fix guard parsing", **MCP_DRAFT)
+add("cite-by-id: MCP create with a draft body that holds an id is allowed", "allow",
+    body="per D12, short titles for records", **MCP_DRAFT)
+add("lane-by-slug: MCP create with a lane number in a code span is allowed", "allow",
+    body="see `N16` lands", **MCP_DRAFT)
+
+
 # ---- two readings of a lone quote. Bash
 # reads `echo it's` as an open single quote, and the line holding only a quote closes it. The
 # commit after them is a real command, and its heredoc body is data. own_heredoc_bodies reads the
