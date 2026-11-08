@@ -47,22 +47,6 @@ def read(rel):
         return handle.read()
 
 
-FILE_KINDS = ("debt-notes", "todo")  # record files that are not a listed folder
-
-
-def record_paths(data):
-    """Every layout, legacy and legacy-repos path of a kind marked record or listed, or in FILE_KINDS."""
-    paths = set()
-    legacy = data.get("legacy", {})
-    for name, kind in data["kinds"].items():
-        if kind.get("record") or kind.get("listed") or name in FILE_KINDS:
-            paths.add(kind["path"].strip("/"))
-            if kind["path"] in legacy:
-                paths.add(legacy[kind["path"]].strip("/"))
-            paths.update(entry[name].strip("/") for entry in data.get("legacy-repos", {}).values() if name in entry)
-    return paths
-
-
 def path_literal(value, paths):
     """True when a string constant names a record path rather than a kind."""
     value = value.replace("\\", "/")
@@ -114,7 +98,7 @@ def problems():
     spec.loader.exec_module(layout)  # the module under check, from ROOT, never the one beside this file
     data = json.loads(read(layout.LAYOUT_FILE))
     layout.legacy_repos()  # LayoutError on an entry with an unknown kind or a path outside the repo
-    paths = record_paths(data)
+    paths = layout.record_paths(data)
     found = []
 
     guard_tree = ast.parse(read(GUARD))
