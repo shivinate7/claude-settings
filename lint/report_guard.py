@@ -1520,8 +1520,8 @@ def hand_off_problem(hook, text):
 # The cannot-claim check (rule output-never-hand-off-doable-step). A reply sentence that says this session cannot do a table
 # act is a claim, so the turn must show a failed try of that act, or the sentence must carry a hand-off cite, and it must
 # name its check. A notice (a connect-failure attachment, say) is no try: only a tool call with a failed result is.
-# Incident, 2026-11-07 21:47 CST: a reply said a PR could not be opened after one connect-failure notice; the GitHub MCP
-# create-PR tool then worked on its first call. Record: decision claims-carry-backing.
+# Why: a notice alone can make a reply hand the owner an act the session can do, such as a PR that the GitHub MCP
+# create-PR tool opens on its first call. Record: decision claims-carry-backing.
 _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
 CANNOT_RE = re.compile(
     _NOT_NAME + r"(?:%s|can not|could(?:n['’]t| not)|no way (?:to|I can|we can)|not able to|wasn['’]t able to"
