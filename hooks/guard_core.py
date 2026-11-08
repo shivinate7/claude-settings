@@ -263,23 +263,28 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     quote, so a call bash runs is always in a segment. When that reading ends inside a quote, bash
     runs nothing past the open mark, yet `echo don't; wsl --shutdown` must still show its call: a
     second reading takes each contraction-shaped `'` (CONTRACTION) as text, and its segments are
-    judged too. Two linear passes; no `'` reads the rest of the command again."""
+    judged too. Two linear passes; no `'` reads the rest of the command again.
+
+    PowerShell reads a smart quote as its ASCII twin (PS_STRAIGHT_QUOTES), so `view` makes each
+    decision on the straightened text: an ASCII `'` inside `“...”` is text and cuts no
+    statement in two. The segments keep the text as written, smart quotes and all."""
     segments = []
     current = []
     quote = ""
     shaped = False
     powershell = is_powershell(cmd)
+    view = PowerShellScript(cmd.translate(PS_STRAIGHT_QUOTES)) if powershell else cmd
     index = 0
     length = len(cmd)
     while index < length:
-        char = cmd[index]
+        char = view[index]
         if quote == BLIND:   # PowerShell text the walk cannot read: no quote, escape or comment
             if char in ("'", '"', "`", "#", "<", "@"):
-                current.append(char)
+                current.append(cmd[index])
                 index += 1
                 continue
         elif quote:
-            width, after = quote_advance(cmd, index, quote)
+            width, after = quote_advance(view, index, quote)
             if quote != "<#":
                 current.append(cmd[index:index + width])
             elif not after:
@@ -294,19 +299,19 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
         if char == "\\" and cmd[index + 1:index + 2] == "\n" and not powershell:
             index += 2   # a POSIX backslash-newline is a continuation; in PowerShell it ends a path
             continue
-        if char == "'" and CONTRACTION.match(cmd, index):
+        if char == "'" and CONTRACTION.match(view, index):
             shaped = True
             if contractions_are_text:
-                current.append(char)   # `don't` as text: it must not hide the rest of the command
+                current.append(cmd[index])   # `don't` as text: it must not hide the rest of the command
                 index += 1
                 continue
         # The quote walk owns every escape, `$'`, and each PowerShell span, so `\;` and `` `; `` are
         # text and cut no segment.
         if char in ("'", '"') or (not powershell and (
                 char == "\\" or cmd[index:index + 2] == "$'")) or (
-                powershell and (char == "`" or token_start(cmd, index) and (
-                    cmd.startswith("<#", index) or HERE_OPEN.match(cmd, index)))):
-            width, quote = quote_advance(cmd, index, "")
+                powershell and (char == "`" or token_start(view, index) and (
+                    view.startswith("<#", index) or HERE_OPEN.match(view, index)))):
+            width, quote = quote_advance(view, index, "")
             if quote != "<#":
                 current.append(cmd[index:index + width])
             index += width
@@ -326,7 +331,7 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
             index += 2
             continue
         if char == "|" and cmd[index - 1:index] == ">":
-            current.append(char)   # `>|` overrides noclobber: a redirect, no pipe
+            current.append(cmd[index])   # `>|` overrides noclobber: a redirect, no pipe
             index += 1
             continue
         if char == "|":
@@ -342,7 +347,7 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
             current = []
             index += 1
             continue
-        current.append(char)
+        current.append(cmd[index])
         index += 1
     segments.append("".join(current))
     ends is None or ends.append("")

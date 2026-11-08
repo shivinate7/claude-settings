@@ -216,7 +216,7 @@ def is_project_config(path: str, cwd: str) -> bool:
 MUTATING_COMMAND = (
     r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
-    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren|sc|ac|cpi)\b"
+    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren|sc|ac|cpi|ni)\b"
 )
 
 
@@ -362,6 +362,7 @@ _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
 # PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
 _SMART_QUOTES = frozenset(PS_DOUBLE_QUOTES + PS_SINGLE_QUOTES)
 _GROUP_MARK = re.compile(r"[&(){}]")
+_STATEMENT_END = re.compile(r"[;|\n]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
 # A command that can run stored text, or rename what a printer is, makes no text data (review r2
@@ -564,8 +565,9 @@ def _only_read(operands, words, target, predicate, cwd, is_folder=False):
 
 def _ps_reads(name, raw, words, start, predicate, cwd, plain):
     """`_copy_reads` for a PowerShell `Copy-Item` (its sources) or `Add-Content` / `Set-Content` (the
-    quoted text after the path): the indexes of the words that are only read or only text."""
-    if _GROUP_MARK.search(_FD_DUP.sub("", plain)):
+    quoted text after the path): the indexes of the words that are only read or only text. A `;`, `|` or
+    newline outside quotes means the segment holds a second statement the split missed: none is read."""
+    if _GROUP_MARK.search(_FD_DUP.sub("", plain)) or _STATEMENT_END.search(plain):
         return set()
     operands = []
     for index in range(start + 1, len(words)):
