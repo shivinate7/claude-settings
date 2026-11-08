@@ -1383,56 +1383,7 @@ UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT = 800, 30, 10
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
-# The one home of a ruling by the owner: text that names him as its source. Only text holding one is a ruling the
-# judge may cite (decision question-form): a step note that holds an incident, or a recommended pick the owner has
-# not answered, names him in passing and gives no ruling. Two parts, one home:
-# OWNER_MARK_RE, the match: `Owner, <date>`, `owner Nov 1`, `Owner 17:02 CST:`, `the owner's 12:27 CST ruling`,
-# `(shiv, page item 9, a)`, `(shiv; recorded ...)`, `Owner, page item 150`, `Owner item 401 a`, `owner picked a`,
-# `Owner go`, `the owner's go`, `Owner grant Nov 2`, `Owner answer on page item 257`, `shiv ruling, item 330 b`,
-# `shiv ruling in chat, Nov 2`, `Owner chat Nov 3`, `Owner, Queue item 161 b`, `The owner keeps (a)`, `shiv's ruling
-# on c95`, `shiv's grant:`, `shiv approved`, `Your ruling(s) Oct 21`, a bare `Ruling(s) <date>` that no advisor gave,
-# and a `Rulings:` label that opens a list. "owner" right after "no", "not a", "not an", "waits on" or "waits on the"
-# is no mark. Nor is `(owner note ...)`, `(shiv's caution ...)`, `(owner grant needed ...)`, "the owner's review", "the
-# owner's grant names it", "the owner has not answered", "Owner item 437 (slug) is open" or "co-owner".
-# NON_RULING_LEAD, the exclude: Incident, Gripe, Deferred, Defect, Risk, Note or Caution as the label that opens a
-# clause: at the clause start (after bullet or emphasis marks, with at most two words before it, as in "Second
-# incident"), then a colon, a comma or " (". A lead word inside a hyphenated or dotted word (`notes-fix-large-1`,
-# `notes.md`) or mid-clause is no label. The label bars the sentence's first clause, and the mark's own clause. A
-# clause ends at a colon or semicolon, but not at the colon of a clock time. Such a sentence names the owner as the
-# source of a report, not of an answer.
-# OWNER_RULING_RE joins them. NON_RULING_OPENING_RE is the first-clause test alone, for a unit's tail sentence.
-_WHO = r"(?:owner|shiv)\b"
-_MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
-_CLOCK = r"\d{1,2}:\d{2}"
-_DATE = r"(?:" + _MONTH + r"\s+\d|\d{4}-\d{2}-\d{2})"
-_BARE_WHO = r"(?<![\w'-])(?<!\bno )(?<!\bnot a )(?<!\bnot an )(?<!\bwaits on )(?<!\bwaits on the )" + _WHO
-_ITEM = r"(?:(?:page|queue)\s+)?item\s+\d"
-# Each form opens with "(", "owner", "shiv", "your" or "ruling": the first-letter lookahead skips other positions
-# fast, which keeps the scan of every step sentence near its old cost.
-_OWNER_MARK = (
-    r"(?=[(osyr])(?:\(\s*" + _WHO + r"(?:'s)?(?=[\s,:;)])(?!\s+(?:note|caution|(?:go|grant|answer|ruling)\s+needed)\b)"
-    r"|" + _BARE_WHO + r"(?:\s*,\s*(?:\d|chat\b|" + _ITEM + r")|\s*,?\s*" + _MONTH + r"\s+\d)"
-    r"|" + _BARE_WHO + r"(?:\s+rulings?\s+in)?\s+chat\s*,?\s*" + _MONTH + r"\s+\d"
-    r"|" + _BARE_WHO + r"(?:'s)?\s+(?:page\s+)?item\s+\d+\s*,?\s*(?:\(\s*(?:page\s+answer|\d|" + _MONTH + r")"
-    r"|\"?(?:[a-e]|pick|picked|done|none|neither)\b)"
-    r"|" + _BARE_WHO + r"(?:'s)?\s+" + _CLOCK +
-    r"|" + _BARE_WHO + r"\s+(?:picked|pick|chose|ruled|answered|decided|go|pressed|approved|granted|said)\b"
-    r"|" + _BARE_WHO + r"(?:'s)?\s+(?:rulings?|grant|answer)(?:\s*[:(]|\s*,?\s*(?:\d|" + _MONTH + r"\s+\d)"
-    r"|\s+(?:on|of|to)\s+\S*\d|\s+(?:on|to)\s+" + _ITEM + r"|\s*,\s*" + _ITEM + r")"
-    r"|" + _BARE_WHO + r"'s\s+go\b"
-    r"|" + _BARE_WHO + r"\s+(?:keeps?|kept)\s+(?:\([a-e]\)|[a-e](?=\s*[.,;:)]|\s*$))"
-    r"|(?<![\w'-])your\s+rulings?\b"
-    r"|(?<![\w'-])(?<!advisor )rulings?\s*,?\s+" + _DATE + r"(?![^:]{0,30}\(\s*advisor\b)"
-    r"|(?<![^\s*_>#+-])(?<![\w,.]\s)rulings?\s*:)")
-NON_RULING_LEAD = (r"[\s*_>#+-]*(?:[\w'-]+\s+){0,2}(?:incident|gripe|deferred|defect|risk|note|caution)s?"
-                   r"(?=[*_]*(?:[:,]|\s+\())")
-_CLAUSE_CHAR = r"(?:\d:\d|[^:;])"
-_OPENS_WITH_REPORT = r"\A" + NON_RULING_LEAD
-OWNER_MARK_RE = re.compile(_OWNER_MARK, re.I)
-NON_RULING_OPENING_RE = re.compile(_OPENS_WITH_REPORT, re.I | re.S)
-OWNER_RULING_RE = re.compile(
-    r"\A(?!" + NON_RULING_LEAD + r")(?:.*?(?:;|:(?!\d)))??(?!" + NON_RULING_LEAD + r")"
-    + _CLAUSE_CHAR + r"*?" + _OWNER_MARK, re.I | re.S)
+RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WORD = re.compile(r"[a-z]{4,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
@@ -1469,9 +1420,8 @@ def _ruling_text(body) -> str:
 
 
 def _record_index(root, folder, unknown, label, seen):
-    """(folder exists, index lines `<folder>/<stem>: <ruling>`) for the records of root/docs/<folder>. A record or
-    folder that cannot be read adds an unreadable source to `unknown`. No owner-marker test here: a decision or debt record is a ruling by its kind, whether or not its text names the
-    owner. Only a step note needs a marker (_step_rulings)."""
+    """(folder exists, index lines `<folder>/<stem>: <ruling>`) for the records of root/docs/<folder>. A record
+    or folder that cannot be read adds an unreadable source to `unknown`."""
     path = os.path.join(root, "docs", folder)
     if not os.path.isdir(path):
         return False, []
@@ -1578,17 +1528,15 @@ def _read_steps(root):
 
 def _step_rulings(steps, words):
     """The top STEP_TOP ruling units of the step notes by word overlap with `words`, as `<step id>: <text>`
-    lines. A unit is a sentence that OWNER_RULING_RE reads as the owner's, plus the sentence after it when that one
-    is detail: it holds no owner mark and its first clause holds no lead word (NON_RULING_OPENING_RE). A sentence with
-    no ruling is no unit: an incident or an unanswered recommendation is no ruling. Overlap 0 never counts."""
+    lines. A unit is a sentence holding Ruling, owner or shiv, plus the sentence after it (a ruling's detail
+    often sits there). Overlap 0 never counts."""
     scored = []
     for step_id, fields in sorted(steps.items()):
         sentences = [s for f in fields if isinstance(f, str) for s in SENTENCE_SPLIT.split(f.strip()) if s]
         for i, sentence in enumerate(sentences):
-            if not OWNER_RULING_RE.search(sentence):
+            if not RULING_WORDS.search(sentence):
                 continue
-            nxt = sentences[i + 1] if i + 1 < len(sentences) else ""
-            tail = "" if OWNER_MARK_RE.search(nxt) or NON_RULING_OPENING_RE.search(nxt) else nxt
+            tail = sentences[i + 1] if i + 1 < len(sentences) and not RULING_WORDS.search(sentences[i + 1]) else ""
             unit = (sentence + " " + tail).strip()
             overlap = len(_words(unit) & words)
             if overlap:
@@ -1597,8 +1545,8 @@ def _step_rulings(steps, words):
 
 
 def past_rulings(question_text, repo_root):
-    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the
-    owner-marked step rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the step
+    rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
     "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
     candidates, unknown, seen = [], [], set()
