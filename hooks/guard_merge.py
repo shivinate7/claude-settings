@@ -837,6 +837,8 @@ def merge_args_of(segment: str, cd=None):
     A merge.py or launch.py counts when its folder is named `merge`. A script named with no folder or with `.`
     (`merge.py`, `./merge.py`) runs from the folder of `cd`, the last cd target of the segments before this one (see
     merge_calls): after `cd merge`, `merge.py`, `./merge.py` and `python3 [./]merge.py` all count, launch.py the same.
+    The arguments end where the command does (`_command_words`): a `)` or `&` glued to the last one ends it, so it
+    never hides a flag.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -847,15 +849,15 @@ def merge_args_of(segment: str, cd=None):
     word = basename(tokens[index])
     rest = tokens[index + 1:]
     if word in ("merge.py", "launch.py"):
-        return rest if basename(_script_folder(tokens[index], cd)) == "merge" else None
+        return _command_words(rest) if basename(_script_folder(tokens[index], cd)) == "merge" else None
     if word.startswith("python") or word == "py":
         script, after = _python_script(rest)
         if script is None:
             return None
         if basename(script) not in ("merge.py", "launch.py") or basename(_script_folder(script, cd)) != "merge":
             return None
-        return rest[after:]
-    return rest if word == "merge" else None
+        return _command_words(rest[after:])
+    return _command_words(rest) if word == "merge" else None
 
 
 def merge_calls(stripped: str, cd=None):
@@ -1057,7 +1059,8 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
 
 
 def _command_words(args):
-    """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
+    """`args` up to the end of their command (a push's, and a merge call's in merge_args_of). The segment
+    splitter cuts at `&&`, `||`, `;`, `|` and a
     newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
     sits in, and a glued `&` sends it to the background: either ends that word and the command."""
     words = []
