@@ -95,9 +95,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. A delete, a mirror and a dry run pass.
   push-unbriefed-branch ask. A non-forced push by a builder or test-author whose spawn brief does not
-                       name every branch the push writes. Cost: one bounded read of the agent's
-                       transcript head, only on such a push; none otherwise. A brief that cannot be
-                       read passes.
+                       name every branch the push writes (a `refs/heads/` or configured-remote prefix
+                       counts as naming it). Cost, only on such a push: one bounded read of the
+                       agent's transcript head, the 1-3 git reads a HEAD or bare push needs, and one
+                       `git remote` read when the brief puts a `/` before the name; none otherwise.
+                       A brief that cannot be read passes.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.

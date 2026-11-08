@@ -412,14 +412,22 @@ def _agent_brief(transcript: str, agent_id: str):
     return None
 
 
-def _brief_names(brief: str, name: str) -> bool:
-    """True when `name` stands in `brief` as a whole branch name: the char before it is no name character,
-    and the char after it is the end, no name character, or a `.` or `/` that ends a sentence (the end, or
-    a char that cannot continue a name)."""
+def _configured_remotes(cwd: str):
+    """The remote names of the checkout at `cwd` (one `git remote` spawn); empty when git cannot answer."""
+    answer = guard_core._git(cwd, "remote") if cwd else None
+    return answer.stdout.split() if answer is not None and answer.returncode == 0 else []
+
+
+def _brief_names(brief: str, name: str, remotes=lambda: ()) -> bool:
+    """True when `name` stands in `brief` as a whole branch name. The char before it is no name character,
+    or what stands before it is `refs/heads/` or `<remote>/` for a configured remote, itself starting at no
+    name character. The char after it is the end, no name character, or a `.` or `/` that ends a sentence
+    (the end, or a char that cannot continue a name). `remotes` is called at most once, only when a `/`
+    stands before `name` and `refs/heads/` does not."""
     start = brief.find(name)
     while start != -1:
         end = start + len(name)
-        if not (start and brief[start - 1] in _NAME_CHARS):
+        if _starts_a_name(brief, start, remotes):
             after = brief[end:end + 2]
             if not after or after[0] not in _NAME_CHARS:
                 return True
@@ -429,12 +437,37 @@ def _brief_names(brief: str, name: str) -> bool:
     return False
 
 
+def _starts_a_name(brief: str, start: int, remotes) -> bool:
+    if not start or brief[start - 1] not in _NAME_CHARS:
+        return True
+    if brief[start - 1] != "/":
+        return False
+    head = brief[:start]
+    prefixes = ["refs/heads/"]
+    if not _prefixed(head, prefixes):
+        prefixes = [remote + "/" for remote in remotes()]
+    return _prefixed(head, prefixes)
+
+
+def _prefixed(head: str, prefixes) -> bool:
+    """True when `head` ends with one of `prefixes`, which itself starts at no name character."""
+    for prefix in prefixes:
+        if head.endswith(prefix):
+            before = head[:-len(prefix)]
+            if not before or before[-1] not in _NAME_CHARS:
+                return True
+    return False
+
+
 def push_unbriefed_hit(args, cwd: str, overrides, transcript: str, agent_id: str, agent_type: str) -> bool:
     """True for a push by a builder or test-author whose brief does not name every branch the push writes
-    (rule push-unbriefed-branch). A forced, deleting, mirror or tags-only push, a push by another agent
-    type or by the orchestrator, a brief or agent id that cannot be read, and a destination that cannot be
-    resolved are all False; the caller sends a forced or dry-run push elsewhere. Cost: one bounded read of
-    the agent's transcript head, only for a builder or test-author push; none otherwise."""
+    (rule push-unbriefed-branch). A deleting, mirror or tags-only push, a push by another agent type or by
+    the orchestrator, a brief or agent id that cannot be read, and a destination that cannot be resolved
+    are all False. The caller sends a forced push that `push_verdict` judges, and a dry run, elsewhere; a
+    forced push that verdict lets through (a lease that names its sha) is judged here like any other.
+    Cost, only for a builder or test-author push: one bounded read of the agent's transcript head, the 1-3
+    git reads `push_destinations` needs for a HEAD or bare push, and one `git remote` read when the brief
+    puts a `/` before a branch name; none otherwise."""
     role = agent_type.rpartition(":")[2].strip().lower() if isinstance(agent_type, str) else ""
     if role not in BRIEFED_ROLES or not transcript or not agent_id or push_refspecs(args) is None:
         return False
@@ -444,7 +477,14 @@ def push_unbriefed_hit(args, cwd: str, overrides, transcript: str, agent_id: str
     destinations = push_destinations(args, cwd, overrides)
     if any(not dest for dest in destinations):
         return False
-    return any(not _brief_names(brief, dest) for dest in destinations)
+    found = []
+
+    def remotes():
+        if not found:
+            found.append(_configured_remotes(cwd))
+        return found[0]
+
+    return any(not _brief_names(brief, dest, remotes) for dest in destinations)
 
 
 # ------------------------------------------------------------------ a rewrite and a wide delete
@@ -928,7 +968,7 @@ PUSH_AGENT_REASON = (
 )
 PUSH_UNBRIEFED_REASON = (
     "Rule (Git): the brief this agent was spawned with names no branch this push writes. "
-    "The orchestrator pushes the lane's branch, or re-brief this agent with the branch it may push. "
+    "The orchestrator pushes the lane's branch, or spawns a fresh agent whose brief names the branch. "
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ASK_REASON = (
