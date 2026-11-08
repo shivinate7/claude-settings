@@ -856,7 +856,13 @@ _LISTERS = frozenset(("ls", "dir", "gci", "get-childitem"))
 _LIST_FILTERS = frozenset(("where-object", "where", "?", "select-object", "select", "sort-object", "sort"))
 # `$_` or `$PSItem` as a path word: bare, with a member (`$_.FullName`), in parentheses, in a `$(...)`, or bound
 # to a parameter by a colon (`-Path:$_`).
-_PIPE_VARIABLE = re.compile(r"(?:-\w+:)?\(*(?:\$\(+)?\$(?:_|psitem)(?:\.\w+)*\)*", re.IGNORECASE)
+# A member may be called (`$_.FullName.ToString()`), and the variable may be braced (`${_}`).
+_PIPE_VARIABLE = re.compile(
+    r"(?:-\w+:)?\(*(?:\$\(+)?(?:\$(?:_|psitem)|\$\{(?:_|psitem)\})(?:\.\w+(?:\([^()]*\))?)*\)*", re.IGNORECASE)
+# The common parameters that take a value, with their aliases. The word after one is its value, never a path.
+_PS_COMMON_VALUE_FLAGS = ("erroraction", "warningaction", "informationaction", "errorvariable", "warningvariable",
+                          "informationvariable", "outvariable", "outbuffer", "pipelinevariable",
+                          "ea", "wa", "infa", "ev", "wv", "iv", "ov", "ob", "pv")
 # What a `Get-ChildItem` parameter takes: a value that is the listed folder, a value that only filters it, or
 # nothing. Matching is by prefix, as PowerShell does.
 _LIST_PATH_FLAGS = ("path", "literalpath")
@@ -900,7 +906,7 @@ def _listed_path(rest) -> str:
                     return value
                 if index + 1 < len(rest):
                     return rest[index + 1]
-            elif not colon and _flag_is(name, _LIST_FILTER_FLAGS, 2):
+            elif not colon and _flag_is(name, _LIST_FILTER_FLAGS + _PS_COMMON_VALUE_FLAGS, 2):
                 index += 1   # its value filters the listing; it is no folder
         index += 1
     return plain or "."
@@ -910,9 +916,11 @@ def _listed_path(rest) -> str:
 # of a copy), the path a copy reads, a value that is neither a path nor written (a filter, text), or nothing.
 _PS_TARGET_FLAGS = ("path", "literalpath", "destination", "name", "newname", "target", "filepath", "pspath")
 _PS_VALUE_FLAGS = ("include", "exclude", "filter", "inputobject", "value", "itemtype", "encoding", "stream",
-                   "credential", "width", "depth", "attributes")
-# These take a path in their first plain word only; the words after it are text or a type.
-_FIRST_WORD_ONLY = _PS_CONTENT | {"out-file", "new-item", "ni", "remove-item"}
+                   "credential", "width", "depth", "attributes") + _PS_COMMON_VALUE_FLAGS
+# How many plain words these take as paths. The words after them are text or a type: a content command's value,
+# `Out-File`'s encoding, `New-Item`'s type or value (its second word is the Name, so it is a path). A command
+# not listed takes every plain word as a path (`Remove-Item`).
+_PATH_POSITIONS = {**dict.fromkeys(_PS_CONTENT | {"out-file"}, 1), "new-item": 2, "ni": 2}
 
 
 def _ps_argument_slots(command, rest):
@@ -922,6 +930,11 @@ def _ps_argument_slots(command, rest):
     position, the command's own order decides it. An unknown parameter is read as a switch, so the word after
     it still counts as a path."""
     copies = command in _PS_COPY
+    # A path parameter given by name takes the place of a positional path, so the plain words that are left
+    # are values (`Add-Content -Path docs/list.txt $_.Name` writes `$_.Name` into the file).
+    named = sum(1 for word in rest if word.startswith("-") and len(word) > 1
+                and _flag_is(word[1:].partition(":")[0].lower(), _PS_TARGET_FLAGS))
+    limit = _PATH_POSITIONS.get(command)
     slots, positional, index = [], 0, 0
     while index < len(rest):
         word = rest[index]
@@ -941,7 +954,7 @@ def _ps_argument_slots(command, rest):
                     role = "write"
                 slots.append((role, value))
         else:
-            if command in _FIRST_WORD_ONLY and positional >= 1:
+            if limit is not None and positional + named >= limit:
                 pass
             elif copies:
                 taken = {role for role, _word in slots}
