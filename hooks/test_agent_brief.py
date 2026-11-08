@@ -655,19 +655,39 @@ def agent_list_check():
     return None
 
 
-def copies_check():
-    """No agent file carries its own copy of the staged-diff step."""
-    copies = []
+def agent_files_with(holds):
+    """The agents/*.md files with one line that `holds` accepts, as (names, None), or (None, problem) when the
+    folder cannot be read. The one walk of agents/ that the copies checks share."""
+    names = []
     try:
         for name in sorted(os.listdir(AGENTS_DIR)):
             if name.endswith(".md"):
                 with open(os.path.join(AGENTS_DIR, name), encoding="utf-8") as handle:
-                    if STAGED_KEY in handle.read():
-                        copies.append("agents/" + name)
+                    if any(holds(line) for line in handle.read().split("\n")):
+                        names.append("agents/" + name)
     except OSError as exc:
-        return "agents/ cannot be read: %s" % exc
+        return None, "agents/ cannot be read: %s" % exc
+    return names, None
+
+
+def copies_check():
+    """No agent file carries its own copy of the staged-diff step."""
+    copies, problem = agent_files_with(lambda line: STAGED_KEY in line)
+    if problem:
+        return problem
     if copies:
         return "own copy of %r in %s; the one home is agent_brief's COMMON" % (STAGED_KEY, ", ".join(copies))
+    return None
+
+
+def refusal_copies_check():
+    """No agent file carries its own copy of the refusal line: one line holding refus and base64. The one home is
+    agent_brief's COMMON, so a brief and an agent file cannot disagree about the refusal rule."""
+    copies, problem = agent_files_with(lambda line: "refus" in line.lower() and "base64" in line.lower())
+    if problem:
+        return problem
+    if copies:
+        return "own copy of the refusal line in %s; the one home is agent_brief's COMMON" % ", ".join(copies)
     return None
 
 
@@ -677,6 +697,7 @@ for _name, _writes in AGENT_ENTRIES:
     add("staged-diff step, agent %s: one line if it commits, none if it is read-only" % _name,
         "custom", fn=staged_check(_name, _writes))
 add("staged-diff step: no agents/*.md file carries its own copy of it", "custom", fn=copies_check)
+add("refusal line: no agents/*.md file carries its own copy of it", "custom", fn=refusal_copies_check)
 
 
 def staged_once_check(agent_type):
