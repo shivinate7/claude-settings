@@ -1636,6 +1636,28 @@ def case_page_read_back_proves_the_filing():
         expect_silent("page filing: n 98 proved by %s, with its send" % label, p)
 
 
+# Owner item 440: a Mac get, list or query of the items collection is the cloud read, so it proves the filing too.
+# Each Mac read is built from the cloud read of the case above, by mac_of_cloud, so the two carry the same data.
+def case_mac_page_read_back_proves_the_filing():
+    repo = record_repo("unfiled-mac", copy_files(UNFILED))
+    reads = (
+        ("a get of items/disk-cleanup", tool_input("get", collection="items", doc_id="disk-cleanup"),
+         [ITEM_98], "string"),
+        ("a list of items, with n 97 and n 99 beside n 98", tool_input("list", collection="items", doc_id=None),
+         [("near-97", {"id": "near-97", "n": 97}), ITEM_98, ("sweep-notes", {"id": "sweep-notes", "n": 99})],
+         "blocks"),
+        ("a query of items where n is 98",
+         tool_input("query", collection="items", doc_id=None, query={"where": [["n", "==", 98]]}),
+         [ITEM_98], "nested"),
+    )
+    for label, inp, docs, form in reads:
+        name, mac_inp = mac_of_cloud("ArtifactData", inp)
+        p = page_run(new_cfg(), "page-readback-mac", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT), used_rec(name, mac_inp, tool_id="rb1"),
+                      result_rec("rb1", response_of(docs, form=form))], cwd=repo)
+        expect_silent("page filing Mac: n 98 proved by the Mac %s, with its send" % label, p)
+
+
 def case_page_read_back_that_misses_n_does_not_prove_the_filing():
     """A read proves the filing only as an ArtifactData get, list or query of the waiting page's items
     collection, with no out_dir, no error, a result that returns item 98, and a send after the owner's message.
@@ -3700,6 +3722,7 @@ CASES = (
     case_page_stale_origin_ref_names_the_fetch,
     case_page_stood_down_send_does_not_check_the_filing,
     case_page_read_back_proves_the_filing,
+    case_mac_page_read_back_proves_the_filing,
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
     case_page_unfiled_remedy_offers_the_read_back,
     case_repo_send_naming_the_repo_passes,

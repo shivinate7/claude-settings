@@ -34,6 +34,7 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
+from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 # The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
@@ -1963,6 +1964,17 @@ import itertools
 _CALL_IDS = itertools.count(1)
 
 
+def as_mac(records):
+    """The records of one cloud ArtifactData call, rewritten to the Mac name and shape of owner item 440. mac_of_cloud
+    turns each call's cloud input, so the Mac call carries the same data as the cloud call it twins. Results pass."""
+    for rec in records:
+        content = rec["message"]["content"]
+        for block in content if isinstance(content, list) else ():
+            if block.get("type") == "tool_use":
+                block["name"], block["input"] = mac_of_cloud("ArtifactData", block["input"])
+    return records
+
+
 class SameTurnWriter:
     """The same-turn send a question needs: an ArtifactData get of the page's meta, whose result names the
     writer, then a send to that writer id. A TestCase mixes it in and sets PAGE to the waiting page its repo
@@ -2171,6 +2183,39 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             with self.subTest(write=label):
                 out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
                 self.assert_blocked(out, "Pick guard")
+
+    # Owner item 440: each Mac call is the cloud call of its twin, rewritten by as_mac, so the verdicts must match.
+    def test_mac_qm_green_items_write_in_the_turn_passes(self):
+        # Catches: the Mac db_write of an item (set, update) not read as the writer's own write, as the cloud one is.
+        for label, write in (("set", self.items_write("set")), ("update", self.items_write("update"))):
+            with self.subTest(write=label):
+                cloud = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(cloud, "the cloud control blocks: the twin has nothing to match")
+                out = self.stop([human("decide"), *as_mac(self.items_write(label)), assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
+    def test_mac_qm_green_writer_read_names_the_writer(self):
+        # Catches: a Mac db_get of meta/page not naming the writer, so the send to the writer id does not count.
+        def run(reads):
+            return self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
+                              assistant_text(self.reply(self.PICK))])
+        self.assertIsNone(run(self.writer_read(self.WRITER)), "the cloud control blocks: nothing to match")
+        self.assertIsNone(run(as_mac(self.writer_read(self.WRITER))))
+
+    def test_mac_qm_red_items_read_or_other_collection_does_not_count(self):
+        # Catches: a Mac read of items, or a Mac write to another collection, passing as the send.
+        for label, write in (("get", self.items_write("get")), ("notes", self.items_write("set", "notes"))):
+            with self.subTest(write=label):
+                out = self.stop([human("decide"), *as_mac(write), assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_mac_page_writer_id_reads_the_writer(self):
+        # Catches: lint/_transcript.py page_writer_id reading no writer from a Mac db_get of meta/page.
+        import _transcript
+        self.assertEqual(_transcript.page_writer_id(self.writer_read(self.WRITER)), self.WRITER,
+                         "the cloud control reads no writer")
+        self.assertEqual(_transcript.page_writer_id(as_mac(self.writer_read(self.WRITER))), self.WRITER,
+                         "page_writer_id reads no writer from the Mac db_get of meta/page")
 
     def test_qm_red_act_in_an_earlier_turn_does_not_count(self):
         # Catches: a send, a box or an items write from an earlier turn passing for this turn's question.

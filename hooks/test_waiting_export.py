@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, HERE)
+from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 
 ROOT = _test_temp.run_folder()
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
@@ -224,6 +225,22 @@ def with_writer(records, writer=SESSION):
     if writer is None or records is None:
         return records
     return writer_get(at(18, 30), writer) + records
+
+
+# Owner item 440: the Mac tool names the same call. mac_page_write is page_write, rewritten to the Mac name and
+# shape of its cloud call (mac_of_cloud builds both), so the two carry the same data.
+def mac_page_write(when, tid="w1", action="set", collection="items", doc_id="fb-1", url=PAGE_URL):
+    records = page_write(when, tid=tid, action=action, url=url, collection=collection, doc_id=doc_id)
+    block = records[0]["message"]["content"][0]
+    block["name"], block["input"] = mac_of_cloud("ArtifactData", block["input"])
+    return records
+
+
+def mac_writer_get(when, writer, tid="m1"):
+    """The writer's meta/page get, named by the Mac tool, whose result names the writer: writer_get's twin."""
+    name, shape = mac_of_cloud("ArtifactData", {"action": "get", "url": PAGE_URL, "collection": "meta",
+                                                "doc_id": "page"})
+    return [call(when, tid, name, shape), result(when + 1, tid, json.dumps({"writer": writer}))]
 
 
 def transcript(folder, records):
@@ -536,6 +553,26 @@ def case_s16_full_size_transcript_blocks():
 
 # --------------------------------------------------------------------------- writer, collection and verdict cases
 
+# Owner item 440: the Mac twins of the page-write cases above. Each carries its cloud case's verdict.
+def case_m1_mac_writer_read_names_the_writer_of_a_mac_write():
+    """The writer's meta/page get, named by the Mac tool, names the writer, so the writer's Mac set of an item
+    blocks as the cloud set does (case_s1). The writer is named only by the Mac get here."""
+    records = mac_writer_get(at(18, 30), SESSION) + [owner(at(18, 50))] + mac_page_write(at(19))
+    expect_block("M1", run_stop("mac1", base_repo("mac1"), records, writer=None), (SCRIPT, SECTION))
+
+
+def case_m2_mac_update_of_an_item_blocks():
+    """The Mac db_write update of an item is the cloud update, which blocks (case_s13b)."""
+    records = [owner(at(18, 50))] + mac_page_write(at(19), action="update")
+    expect_block("M2", run_stop("mac2", base_repo("mac2"), records), (SCRIPT,))
+
+
+def case_m3_mac_write_to_receipts_passes():
+    """The Mac db_write of receipts is no export, so it passes as the cloud set of receipts does (case_n15)."""
+    records = [owner(at(18, 50))] + mac_page_write(at(19), collection="receipts", doc_id="r1")
+    expect_pass("M3", run_stop("mac3", base_repo("mac3"), records))
+
+
 def queue_repo(name):
     """A repo whose waiting page is QUEUE_ID, with its copy one commit at 17:00 and a later commit elsewhere."""
     root = roadmap_repo(name, [(at(17), item(FOLDER, 1)), (at(21), {"roadmap/data/steps/x.json": "{}\n"})],
@@ -747,6 +784,9 @@ CASES.extend((
     case_n15_writer_set_of_receipts_passes,
     case_n16_writer_write_by_path_to_receipts_passes,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_m1_mac_writer_read_names_the_writer_of_a_mac_write,
+    case_m2_mac_update_of_an_item_blocks,
+    case_m3_mac_write_to_receipts_passes,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))

@@ -72,4 +72,7 @@ def mac_of_cloud(tool, cloud_input, op=None):
         return mac_tool("db_get"), {"slug": slug, "path": path}
     if action == "list":
         return mac_tool("db_list"), {"slug": slug, "collection": collection}
+    if action == "query":  # the cloud query's `where` clauses are the Mac call's `where`
+        return mac_tool("db_query"), {"slug": slug, "collection": collection,
+                                      "where": cloud_input.get("query", {}).get("where")}
     raise ValueError("no Mac shape for the cloud action %r" % action)

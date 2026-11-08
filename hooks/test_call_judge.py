@@ -78,7 +78,7 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
-from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
+from test_mac_artifact_shapes import mac_of_cloud, mac_tool  # noqa: E402  the Mac input shapes of owner item 440
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
 RUNS = [0]
@@ -1251,8 +1251,10 @@ def case_settings_row():
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
+    # The lane widened this matcher on purpose (owner item 440): the Mac item writes join the three chat and page names.
+    widened = {"Agent", "AskUserQuestion", "ArtifactData", mac_tool("db_write"), mac_tool("db_str_replace")}
+    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the two Mac item writes",
+          matcher == widened, entry.get("matcher"))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
