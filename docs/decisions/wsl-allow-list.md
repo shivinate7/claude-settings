@@ -11,7 +11,7 @@ The guard allows a WSL command only when every condition holds:
 - Its test path is relative. It has no `..`, no dot-led glob and no absolute path.
 - It can run as `python bin/verdict wsl -e ...`.
 
-The plain node, `pwsh -File` and `python3` forms take one literal path, because the runner reads only its first file argument and a glob would give a false green. Any other plain node script, or an eval flag, stays refused.
+The plain node, `pwsh -File` and `python3` forms take one literal path, because the guard cannot tell which file or files a glob names, so it refuses any glob outside `node --test`. Any other plain node script, or an eval flag, stays refused.
 
 Every other WSL form is refused:
 
