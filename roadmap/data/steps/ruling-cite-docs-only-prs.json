@@ -1,11 +1,11 @@
 {
   "title": "In each child repo, the code-check step runs ungated, so the ruling cite rule judges a docs-only PR",
   "why": "The code-check step is gated by ci-scope.sh, so a docs-only PR skips it and the ruling cite rule never judges its commits (joyous checks.yml:78-79, ci-scope.sh:29).",
-  "note": "Filed 09:59 CST Nov 8 from lane ruling-cite-child-repos (session_013NEJL4B7Z8T1QiJsywtHYt, #2107), for debt ruling-cite-docs-only-prs, whose Fix line points here. Fix: an ungated step in each child repo, or move the ruling check out of the gated step. Child-repo work; runner 9 batches it. No owner question. Re-pointed 10:01 CST Nov 8 (coordinator, 10:00 CST): in each child repo's workflow, remove `if: needs.scope.outputs.code != 'false'` from the actions/code-check step only; keep it on the Install and Astro sync steps (joyous checks.yml:78-79 is the measured case). Lane ruling-cite-child-repos measured that #2107's code_check.py runs safely ungated on a docs-only repo with no install. Runner 9 does one edit per child repo after #2107 merges, joined to debt code-check-pin-drift's pin move. The claude-settings side is a test that pins the ungated behaviour, a follow-up on #2107.",
+  "note": "Filed 09:59 CST Nov 8 from lane ruling-cite-child-repos (session_013NEJL4B7Z8T1QiJsywtHYt, #2107), for debt ruling-cite-docs-only-prs, whose Fix line points here. Fix: an ungated step in each child repo, or move the ruling check out of the gated step. Child-repo work; runner 9 batches it. No owner question. Re-pointed 10:01 CST Nov 8 (coordinator, 10:00 CST): in each child repo's workflow, remove `if: needs.scope.outputs.code != 'false'` from the actions/code-check step only; keep it on the Install and Astro sync steps (joyous checks.yml:78-79 is the measured case). Lane ruling-cite-child-repos measured that #2107's code_check.py runs safely ungated on a docs-only repo with no install. Runner 9 does one edit per child repo after #2107 merges, joined to debt code-check-pin-drift's pin move. The claude-settings side is a test that pins the ungated behaviour, a follow-up on #2107. Order changed 10:14 CST Nov 8 (coordinator 10:11 CST): a claude-settings part comes first. Lane ruling-cite-in-commit (session_013NEJL4B7Z8T1QiJsywtHYt) makes code_check skip its code layers on a docs-only diff, stacked after #2107. Then runner 9 (session_013NEJKymmzw37seAr3Qq5nv) drops the child `if:` at the pin move.",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "session_013NEJKymmzw37seAr3Qq5nv",
+  "lane": "session_013NEJL4B7Z8T1QiJsywtHYt",
   "status": "todo",
   "order": 714,
-  "updatedAt": "2026-11-08T10:01:00-06:00"
+  "updatedAt": "2026-11-08T10:14:00-06:00"
 }

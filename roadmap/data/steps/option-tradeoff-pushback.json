@@ -1,11 +1,11 @@
 {
   "title": "When a question's options carry a large tradeoff, the option judge pushes back and asks for a better option",
   "why": "Owner ask ask-mw80xweioa (10:05 CST Nov 8): \"when question options present large tradeoffs between its choices can that be a trigger for an option judge to push back asking for a better options based solution?\"",
-  "note": "Filed 10:06 CST Nov 8 by triage from the owner's ask on the waiting page. One home: extend the model review that judges every chat and page question (step page-question-judge, hooks/call_judge.py, decision question-form), not a second judge. The judge reads each option's gain and lose; when every option loses something large, it refuses or asks the writer for an option that keeps the gains, before the question reaches the owner. Related: step challenger-page-against (a blind best case against the pick). Open for the building lane: how the judge sizes a large tradeoff, with red cases from past page items. A judge that cries wolf is spent (rule verification-cry-wolf-guard-is-spent), so measure its false alarms on past items first.",
+  "note": "Filed 10:06 CST Nov 8 by triage from the owner's ask on the waiting page. One home: extend the model review that judges every chat and page question (step page-question-judge, hooks/call_judge.py, decision question-form), not a second judge. The judge reads each option's gain and lose; when every option loses something large, it refuses or asks the writer for an option that keeps the gains, before the question reaches the owner. Related: step challenger-page-against (a blind best case against the pick). Open for the building lane: how the judge sizes a large tradeoff, with red cases from past page items. A judge that cries wolf is spent (rule verification-cry-wolf-guard-is-spent), so measure its false alarms on past items first. Doing 10:14 CST Nov 8 under owner item 387 a (coordinator 10:11 CST). First act: count the false alarms the judge would raise on past page questions.",
   "phase": "cleanup",
   "owner": "coordinator",
-  "lane": "",
-  "status": "todo",
+  "lane": "session_013NEJL38w4WDs3n4aTNNHkB",
+  "status": "doing",
   "order": 721,
-  "updatedAt": "2026-11-08T10:06:00-06:00"
+  "updatedAt": "2026-11-08T10:14:00-06:00"
 }

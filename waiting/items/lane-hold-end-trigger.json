@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-08T16:20:00Z",
+  "context": "Goal: reviewed PRs merge, and planned work starts again once the queue drains.\nProblem (rule): your hold on new lanes names no end, so planned steps wait with nothing that restarts them.\nBased on (notes): 400 or more PRs are open, and one batch took 27 lanes in 43 h (coordinator, 10:11 CST Nov 8; no tool has counted it).\nBased on (ruling): record lane-inflow-hold (PR #1768) says \"Ends: the ruling names no end\"; on item 384 you picked none of its limits (50 or 20 reviewed PRs) and held with no limit.\nDeparts from: main, where the coordinator starts every ready step at once (rule parallelism-keep-going) \u2014 new lanes wait until the end you set here.\nMeanwhile: the hold stands; only your asks and gap fixes start lanes (items 387 a and 410 a).",
+  "home": "lane-inflow-hold",
+  "id": "lane-hold-end-trigger",
+  "kind": "decision",
+  "n": 424,
+  "options": [
+    {
+      "gain": "Planned work restarts by itself once half the queue has merged.",
+      "how": "The coordinator lifts the hold on its own once fewer than 200 PRs are open, and the record says so.",
+      "key": "a",
+      "label": "End it when open PRs fall under 200",
+      "lose": "Planned steps keep waiting until then, for a time nobody has measured."
+    },
+    {
+      "gain": "All planned work starts today.",
+      "how": "The coordinator starts every ready step again now.",
+      "key": "b",
+      "label": "Lift it now",
+      "lose": "More lanes finish into a queue of 400 PRs that batches already merge slower than lanes fill it."
+    },
+    {
+      "gain": "No new lane adds to the queue.",
+      "how": "The hold stays until you lift it in your own words.",
+      "key": "c",
+      "label": "Keep it, with no end",
+      "lose": "Planned work waits until you remember to lift it."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "record lane-inflow-hold (PR #1768); page items 384, 387, 410",
+  "short": "Lane hold: when it ends",
+  "status": "open",
+  "title": "When should the hold on new lanes end?"
+}

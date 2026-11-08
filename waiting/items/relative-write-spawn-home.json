@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-08T16:20:00Z",
+  "context": "Goal: an agent's relative `../` write never lands outside its own checkout.\nProblem (rule): the guard keeps no home for an agent that shares its caller's checkout, so it lets every write from such an agent through. One of the two incident agents was like that, and your decision allows it.\nBased on (read): the SubagentStart hook payload carries `cwd` and `agent_type` (hooks/agent_brief.py lines 75-80), so a home could be recorded at spawn.\nBased on (assumed): at SubagentStart, an isolated agent's `cwd` may be its parent's folder, not its worktree. Unmeasured.\nDeparts from: main, where an agent with no recorded home may write anywhere \u2014 each option narrows that in its own way.\nMeanwhile: #1984 holds, and the lane works on the guard-quoted-args-data fix check.",
+  "home": "guard-relative-write-escape",
+  "id": "relative-write-spawn-home",
+  "kind": "decision",
+  "n": 425,
+  "options": [
+    {
+      "gain": "One rule for every agent, and the reviewer case is covered.",
+      "how": "SubagentStart records each agent's spawn checkout as its home; an isolated agent's first call in its own worktree overwrites it.",
+      "key": "a",
+      "label": "Record a home for every agent at spawn",
+      "lose": "The full home rule then hits agents that share a checkout: a reviewer's cd to a scratchpad or /tmp is refused with no override, a likely false alarm. It needs a new lane with up to 3 review rounds, and a wrong home if the assumption above is wrong."
+    },
+    {
+      "gain": "Covers the incident form only; absolute writes, cd, reads and scratchpad work are untouched. Already built and reviewed.",
+      "how": "Refuse only a shared-checkout agent's relative write that lands outside the checkout holding its working folder.",
+      "key": "b",
+      "label": "Narrow check, as built in #1984",
+      "lose": "A deliberate relative ../x write by such an agent is refused (none seen), and your decision's no-record sentence changes."
+    },
+    {
+      "gain": "The worktree-agent fix (the test-author incident) lands today, and the reviewer case gets a measured design.",
+      "how": "#1984 merges now without the shared-checkout part. Option a becomes a step whose first act measures SubagentStart's cwd.",
+      "key": "c",
+      "label": "Merge #1984 without that part; measure first",
+      "lose": "The reviewer form of the incident stays open until that step lands."
+    }
+  ],
+  "owner": "lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn)",
+  "pick": "c",
+  "ref": "PR #1984; replaces item 416; step guard-relative-write-escape",
+  "short": "Stray ../ write: agents with no home",
+  "status": "open",
+  "title": "How should the guard stop a stray ../ write by an agent that shares its caller's checkout?"
+}
