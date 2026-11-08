@@ -263,10 +263,11 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
     are not counted, so only archived lanes, or no live lane rows, read an empty row;
   - main or its git log cannot be read;
+  - the record branch has no steps;
   - the repo's GitHub name cannot be read.
 
-  `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
-  a summary line. It exits 1, with no summary line, when every entry is unknown;
+  `merge --idle-lanes --live FILE` prints the same list for the batch runner: lane lines and hold lines, then
+  a summary line that gives the held count when there are holds. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step.
 
 ## Cost
