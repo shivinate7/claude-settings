@@ -9936,6 +9936,7 @@ FAMILY = "review-record"
 # one gh read per marked post. A post with no marker makes no read. The bodies come from the form's one home
 # (merge/merge.py review_body), so a case cannot drift from the form the merge tool parses.
 REVIEW_RULE = "pr-review-record"
+REVIEW_NOT_CHECKED = "review-record: not checked"   # the stderr line a guard prints when it could not check a body (decision pr-review-record)
 MCP_COMMENT = "mcp__github__add_issue_comment"
 MCP_UPDATE = "mcp__github__update_issue_comment"
 REVIEW_PR = 12
@@ -10393,15 +10394,17 @@ def review_counter_works():
     return True, "the counter logs a direct call"
 
 
-def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=()):
+def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=(), note=None):
     """A checker for one post: the guard says `want`, and the post makes `reads` gh calls, the one live-head read. `cwd` is the
     folder the post runs in. `path_dirs` are folders the guard's PATH adds after the fake gh's, such as git's for a post with no number.
-    `folder` is the counted fake the post runs against, with the comment `bodies` it names. `carries` are fragments the reason must hold."""
+    `folder` is the counted fake the post runs against, with the comment `bodies` it names. `carries` are fragments the reason must hold.
+    `note`, when given, says whether the run's stderr must carry the not-checked line (True) or must not (False). It is judged after
+    the decision and the reads, so a run that never reached the read is not read for its stderr."""
     def check():
         if reads == 0:
-            ok, note = review_counter_works()
+            ok, counted = review_counter_works()
             if not ok:
-                return False, note
+                return False, counted
         review_counted_fake(folder, bodies)
         env_path = os.pathsep.join((folder,) + tuple(path_dirs) + (PY_PATH,))
         decision, reason = decide(review_case(tool, tool_input, env_path, cwd))
@@ -10413,6 +10416,11 @@ def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=
             return False, "refused, but the reason lacks %s: %s" % (missing, reason[:90])
         if len(calls) != reads:
             return False, "%d gh call(s) wanted for the live head, %d seen: %r" % (reads, len(calls), calls)
+        if note is not None:
+            printed = REVIEW_NOT_CHECKED in LAST_RUN.get("stderr", "")
+            if printed != note:
+                return False, "stderr %s the not-checked line, want it %s: %r" % (
+                    "carries" if printed else "lacks", "printed" if note else "absent", LAST_RUN.get("stderr", "").strip()[:120])
         return True, "%s, with %d gh call(s)" % (want, reads)
     FIXTURELESS_CHECKS.add(check)
     return check
@@ -10735,6 +10743,16 @@ for _label, _target in VARIABLE_TARGET_ROUTES:
     bash_post("review-record: an unmarked edit whose endpoint is a substitution is refused as a read that could not run, %s" % _label,
               "gh api -X PATCH %s -f 'body=%s'" % (_target, UNMARKED_BODY), "deny", rule=REVIEW_RULE, carries=("could not run",))
 
+# Decision pr-review-record, the variable route: an endpoint that is a substitution, with no PATCH or PUT, is a post. An unmarked body is
+# allowed with no read, since a post with no marker makes none. A marked body is refused with no read, since the endpoint names no pull
+# request the guard can read.
+for _label, _target in VARIABLE_TARGET_ROUTES:
+    REVIEW_LOG_CHECKS.append(("review-record:an unmarked post whose endpoint is a substitution is allowed with no gh read, %s" % _label,
+                             review_reads("Bash", {"command": "gh api %s -f 'body=%s'" % (_target, UNMARKED_BODY)}, "allow", 0)))
+    REVIEW_LOG_CHECKS.append(("review-record:a marked post whose endpoint is a substitution is refused with no gh read, %s" % _label,
+                             review_reads("Bash", {"command": "gh api %s -f 'body=%s'" % (_target, review_record())}, "deny", 0,
+                                          carries=(REVIEW_RULE,))))
+
 # THE REMEDY NAMES WHAT IS A VARIABLE. A post to a literal number in a variable repo is told to name the repo, not to write the PR number
 # literally, which is the remedy for a variable number. A variable number keeps its remedy: write the number literally.
 bash_post("review-record: a marked post to issues/$N/comments names the number literally in its remedy, gh api post",
@@ -10777,6 +10795,13 @@ REVIEW_LOG_CHECKS.append(("review-record:an edit whose new body the guard cannot
                          review_reads("Bash", {"command": "%s --input %s" % (API_EDIT_CMD, UNMARKED_INPUT)}, "allow", 1,
                                       folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED)))
 
+# Decision pr-review-record, the edit-read cost: an edit whose new body comes from stdin is judged on its old body alone. Over an unmarked
+# comment it is allowed on its one read, and the guard still prints the not-checked line, since the new body was never read. The line is
+# judged after the read, so it is read from a run that reached the old body.
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose stdin body the guard cannot see is allowed over an unmarked comment after one gh read, and prints the not-checked line, gh api -X PATCH -F body=@-",
+                         review_reads("Bash", {"command": "%s -F body=@-" % API_EDIT_CMD}, "allow", 1,
+                                      folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED, note=True)))
+
 # The `=` form of --input is the same unseen body as the bare token. The method may be `-X PATCH` or `--method=PATCH`; the edit
 # route judges both alike. Decision pr-review-record, the edit-read cost: each form reads the old body once.
 API_METHOD_EQ_EDIT_CMD = "gh api --method=PATCH repos/y/x/issues/comments/%d" % REVIEW_COMMENT_ID
@@ -10791,26 +10816,37 @@ REVIEW_LOG_CHECKS.append(("review-record:an edit whose --input=FILE body the gua
                                       folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED)))
 
 
-def review_refused_quietly(tool, tool_input, carries):
-    """A checker for one edit the guard must refuse over the stamped record that GHRECORDOLD holds for comment 4417. `decide` keeps the
-    stderr of its run in LAST_RUN. Decision pr-review-record: a post fails open and prints the not-checked note; an edit fails closed,
-    so a refused edit must not print that note."""
+def review_refused_quietly(tool, tool_input, carries, env_path=GHRECORDOLD + os.pathsep + PY_PATH):
+    """A checker for one edit the guard must refuse. By default the fake is the stamped record that GHRECORDOLD holds for comment
+    4417; `env_path` names another fake. `decide` keeps the stderr of its run in LAST_RUN. Decision pr-review-record: a post fails
+    open and prints the not-checked note; an edit fails closed, so a refused edit must not print that note."""
     def check():
-        decision, reason = decide(review_case(tool, tool_input, GHRECORDOLD + os.pathsep + PY_PATH))
-        note = LAST_RUN.get("stderr", "")
+        decision, reason = decide(review_case(tool, tool_input, env_path))
+        printed = LAST_RUN.get("stderr", "")
         if decision != "deny":
             return False, "want deny, got %s: %s" % (decision, reason[:90])
         missing = [fragment for fragment in carries if fragment not in reason]
         if missing:
             return False, "refused, but the reason lacks %s: %s" % (missing, reason[:90])
-        if "review-record: not checked" in note:
-            return False, "refused, but stderr carries the not-checked note: %r" % note.strip()[:120]
-        return True, "refused, with no not-checked note on stderr"
+        if REVIEW_NOT_CHECKED in printed:
+            return False, "refused, but stderr carries the not-checked line: %r" % printed.strip()[:120]
+        return True, "refused, with no not-checked line on stderr"
     return check
 
 
 REVIEW_LOG_CHECKS.append(("review-record:a refused edit whose body file cannot be read prints no not-checked note on stderr, gh api -F body=@",
                          review_refused_quietly("Bash", {"command": "%s -F body=@no-such-body.md" % API_EDIT_CMD}, carries=("could not run",))))
+# Decision pr-review-record: a refused edit prints no not-checked line, even when its new body is unseen. Here the old body cannot be read.
+REVIEW_LOG_CHECKS.append(("review-record:a refused edit whose stdin body the guard cannot see prints no not-checked note on stderr, gh api -X PATCH -F body=@-",
+                         review_refused_quietly("Bash", {"command": "%s -F body=@-" % API_EDIT_CMD}, carries=("could not run",),
+                                                env_path=GHRECORDBROKEN + os.pathsep + PY_PATH)))
+
+# Decision pr-review-record, the edit-read cost: `--edit-last` reads the newest comment of the pull request its number names. A number held
+# in a shell variable cannot be read, so the comment is never reached. The refusal is a read that could not run, and its remedy writes the
+# PR number literally rather than advising a retry.
+bash_post("review-record: an unmarked --edit-last under a variable pull request number is refused as a read that could not run, and its remedy writes the PR number literally, gh pr comment $PR --edit-last",
+          "gh pr comment $PR --edit-last --body x", "deny", rule=REVIEW_RULE, carries=("could not run", "PR number"),
+          lacks=("can read the comment",))
 
 # A bare edit names no pull request. This pins the count the code makes today, not a ruling: the open-PR list, then the comment listing.
 REVIEW_LOG_CHECKS.append(("review-record:a bare edit with no pull request number makes two gh reads today, the open-PR list and the listing, gh pr comment --edit-last",
