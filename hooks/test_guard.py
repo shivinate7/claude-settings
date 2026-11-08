@@ -5588,7 +5588,11 @@ sh("check-tail: uv run --with-editable then python runs the script piped to tail
 # pipeline that ends the command, are allowed. The rule runs in
 # the foreground and in the background. check-tail exempts verdict, so this is its own rule id.
 # The background case names an until note, so background-end decides none of them.
+# The same refusal covers a lint command run without verdict: ste_lint, ste-changed, ci-job with
+# --lint, and merge --lane-lint. check-tail runs first and refuses a check piped to tail or head,
+# so a merge --lane-lint pipe to tail is pinned to check-tail, and the grep forms reach this rule.
 VERDICT_PIPE = "verdict-pipe-exit"
+CHECK_TAIL = "check-tail"
 
 sh("verdict-pipe-exit: verdict piped to tail, then && commit, is refused",
    "verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x", "deny", VERDICT_PIPE,
@@ -5642,6 +5646,53 @@ sh("verdict-pipe-exit: verdict inside quotes is not a call",
    "echo 'verdict a | tail -1 && b'", "allow", cwd=NOGIT)
 sh("verdict-pipe-exit: verdict piped to grep as the last command is allowed",
    "verdict make check | grep FAIL", "allow", cwd=NOGIT)
+
+# A lint command run without verdict: its exit status is hidden by a later stage too.
+sh("verdict-pipe-exit: ste_lint piped to tail, then && commit and push, is refused",
+   "python3 lint/ste_lint.py docs/x.md 2>&1 | tail -3 && git commit -qam x && git push",
+   "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: ste_lint through python3 piped to grep -c, then || echo, is refused",
+   "python3 ~/.claude/lint/ste_lint.py docs/x.md | grep -c STE0 || echo clean",
+   "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: ste-changed piped to tail, then && push, is refused",
+   "~/.claude/bin/ste-changed origin/main 2>&1 | tail -5 && git push", "deny", VERDICT_PIPE,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: ci-job checks --lint piped to tail, then && push, is refused",
+   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -5 && git push", "deny",
+   VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: merge --lane-lint piped to tail, then && push, is pinned to check-tail",
+   "~/.claude/bin/merge --lane-lint 7 2>&1 | tail -3 && git push", "deny", CHECK_TAIL,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: merge --lane-lint piped to grep -c, then && push, is refused",
+   "~/.claude/bin/merge --lane-lint 7 2>&1 | grep -c FAIL && git push", "deny", VERDICT_PIPE,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: a quoted # does not hide a lint pipe after it, then && push, is refused",
+   'echo "# ok"; python3 lint/ste_lint.py docs/x.md | tail -3 && git push', "deny", VERDICT_PIPE,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: a lone apostrophe in quotes does not hide a lint pipe, then && push, is refused",
+   "echo \"don't\"; python3 lint/ste_lint.py docs/x.md | tail -3 && git push", "deny", VERDICT_PIPE,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: a lint pipe after a multi-line quote, then && push, is refused",
+   'echo "one\ntwo"\npython3 lint/ste_lint.py docs/x.md | tail -3 && git push', "deny", VERDICT_PIPE,
+   cwd=NOGIT)
+sh("verdict-pipe-exit: ste_lint piped to tail with pipefail set first is allowed",
+   "set -o pipefail; python3 lint/ste_lint.py docs/x.md | tail -3 && git push", "allow",
+   cwd=NOGIT)
+sh("verdict-pipe-exit: ste_lint then && commit, with no pipe, is allowed",
+   "python3 lint/ste_lint.py docs/x.md && git commit -qam x", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: ste_lint piped to tail as the last pipeline is allowed",
+   "python3 lint/ste_lint.py docs/x.md | tail -3", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: ste_lint piped to tail then ; git status is allowed",
+   "python3 lint/ste_lint.py docs/x.md | tail -3; git status", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: grep naming the lint script, piped to tail, then && echo is allowed",
+   "grep -n ste_lint.py docs/x.md | tail -3 && echo ok", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: ci-job checks with no --lint piped to tail, then && echo is allowed",
+   "~/.claude/bin/ci-job checks 2>&1 | tail -5 && echo ok", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: a lint command inside quotes is text, not a call",
+   'echo "python3 lint/ste_lint.py docs/x.md | tail -3 && git push"', "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: a lint name inside a multi-line quote is text, not a call",
+   'echo "start\npython3 lint/ste_lint.py docs/x.md | tail -3 && git push\nend"', "allow",
+   cwd=NOGIT)
 
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
