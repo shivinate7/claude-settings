@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T07:22:00Z",
+  "context": "Goal: the shell comment check gets its red tests, so a history comment in a shell script is caught.\nProblem (rule): the test-author role runs Haiku. Four Haiku runs on this task ended with no edit and reported commit hashes that do not exist (8c1f0e2a7, 5b7d10a42, e7c35b1d0, 3d2a91f4c; git cat-file fails on each). The guard refused a Sonnet test-author, and only your word lifts that for one spawn.\nBased on (ruling): decisions/agent-model-cap (owner, waiting item 59, pick a): keep today's model table, test-author on Haiku. Asked again because four Haiku tries failed on this task.\nBased on (measured): about 25k output tokens per Haiku run, with no edit (lane, via coordinator 01:29 CST Nov 8).\nDeparts from: decision agent-model-cap, test-author runs Haiku \u2014 one Sonnet test-author spawn for this lane only.\nMeanwhile: the lane's builder (Sonnet) builds the reader. Step agent-report-shas-resolve, filed now, makes a report with a missing hash refuse.",
+  "home": "comment-check-scans-shell",
+  "id": "comment-shell-sonnet-test-author",
+  "kind": "decision",
+  "n": 406,
+  "options": [
+    {
+      "gain": "The red tests land, so the check can be built and proved.",
+      "how": "The grant text goes to the lane's session for this one spawn. The model table stays as it is.",
+      "key": "a",
+      "label": "Grant one Sonnet test-author for this lane",
+      "lose": "Sonnet cost for one agent."
+    },
+    {
+      "gain": "No grant, and the table holds.",
+      "how": "The lane splits the case list into small edits and runs Haiku a fifth time.",
+      "key": "b",
+      "label": "One more Haiku try, in small edits",
+      "lose": "A fifth run with no edit and a false report is likely."
+    }
+  ],
+  "owner": "lane comment-check-scans-shell (session_013NEJL37UFXTQuAcox7s8fD)",
+  "pick": "a",
+  "ref": "decision agent-model-cap (test-author row: haiku; item 59 pick a); guard agent-role-model; coordinator 01:29 CST Nov 8",
+  "short": "One Sonnet test-author",
+  "status": "open",
+  "title": "May lane comment-check-scans-shell run one Sonnet test-author?"
+}
