@@ -367,7 +367,7 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. The page and each
    text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
-   branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
+   branch. A `refused` artifact wrote nothing, so its folder is as it was. An `unknown` one wrote nothing too, except `checks unknown: collections lack <name>`, which writes the copy. Say each such line in
    the reply, and fix the cause first.
 
 Cost: one list call per page of each collection of each entry, one python process, and one commit when something
@@ -767,8 +767,9 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    block. The carry refuses, with nothing written and the verdict `unknown`. It refuses when the template
    lacks either block, when the live page has no `designData` block, or when either file has a
    broken or doubled block. Before the republish, check the pictures of the open items against `<new page>`, never the live page:
-   `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <folder> --page <new page>` (`<folder>` is the
-   fetch of "Keep a copy in the repo", step 2). It writes nothing. Hold the republish on any exit but 0, as in the other two
+   `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <folder> --page <new page>`. `<folder>` holds
+   the `items` and `answers` of that page's own artifact, fetched as "Keep a copy in the repo" step 2 does (`ArtifactData list`
+   on that page's `url`, `.complete` after each last page), never this repo's copy. It writes nothing. Hold the republish on any exit but 0, as in the other two
    republish routes (exit 4 a held item, exit 3 `checks unknown`, exit 2 no page file). Republish `<new page>` to the same URL
    with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
    republish of plain `page.html` drops the open items' designs and the Status tab.

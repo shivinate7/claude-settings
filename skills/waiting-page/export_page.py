@@ -518,7 +518,7 @@ def export_all(root, fetched, worktree, allow_empty):
 def check_only(fetched, page):
     """--check: the export's picture checks on the fetched items and the page file; nothing is written. The exit code."""
     read_page(page)  # a page that is not one readable file is unknown, as in an export
-    held, unknown = picture_checks(page, fetched_docs(fetched, ("items", "answers")))
+    held, unknown = picture_checks(page, fetched_docs(fetched, CHECK_COLLECTIONS))
     for line in held:
         print(line)
     if unknown:
@@ -620,7 +620,7 @@ def main(argv):
     except Exception as err:  # a crash is unknown, never a silent pass or a traceback the reader scrolls past
         print("unknown - the run crashed (%s)" % type(err).__name__)
         return CRASH
-    if unknown:  # before the verdict, so the verdict stays the last line (hooks/feedback_guard.py reads `same` there)
+    if unknown:  # before the verdict, so the verdict stays the last line (hooks/feedback_guard.py reads `same` on any line)
         print(unknown)
     print(verdict)
     for line in held:

@@ -81,6 +81,23 @@ def pictured_items(items):
     return pictured, None
 
 
+def run_within_budget(entries, budget, run_one, stop_on_miss=False):
+    """([(entry, code, text)], left) from `run_one(entry)` over `entries` in order. The one deadline loop of the picture
+    check: the clock is read before each entry, and no entry starts once `budget` seconds are spent; `left` counts the
+    entries not started. With `stop_on_miss`, the run ends after the first miss (code 1) and `left` is 0, since the
+    verdict is already made. A run that began is never cut short here: its own cap is `run_one`'s."""
+    results = []
+    start = time.monotonic()
+    for index, entry in enumerate(entries):
+        if time.monotonic() - start >= budget:
+            return results, len(entries) - index
+        code, text = run_one(entry)
+        results.append((entry, code, text))
+        if stop_on_miss and code == 1:
+            break
+    return results, 0
+
+
 def check_items(page_file, items, answers, budget=CHECK_BUDGET):
     """([(n, sentence)], why) for the fetched `items` and `answers` ({doc id: doc}) against `page_file`. Each pictured item
     (pictured_items) is run, with `answers`: the checker skips an item the page draws as answered, by the page's own
@@ -89,19 +106,21 @@ def check_items(page_file, items, answers, budget=CHECK_BUDGET):
     item always runs, and a run that began is never cut short. One item's unknown never hides another's hold."""
     pictured, why = pictured_items(items)
     held = []
-    start = time.monotonic()
-    for index, item in enumerate(pictured):
-        if time.monotonic() - start >= budget:
-            left = "time budget spent, %d item(s) not checked" % (len(pictured) - index)
-            why = why + "; " + left if why else left
-            break
+
+    def run_one(item):
         try:
-            code, text = run_check_designs(page_file, item, CHECK_DESIGNS_CAP, answers)
+            return run_check_designs(page_file, item, CHECK_DESIGNS_CAP, answers)
         except Exception as err:
-            code, text = 3, type(err).__name__ + ": " + str(err)
+            return 3, type(err).__name__ + ": " + str(err)
+
+    results, left = run_within_budget(pictured, budget, run_one)
+    for item, code, text in results:
         if code == 1:
             n = item.get("n") if isinstance(item.get("n"), int) else item["id"]
             held.append((n, " ".join(text.split())))
         elif code != 0:
             why = why or " ".join(text.split())[:200]
+    if left:
+        left = "time budget spent, %d item(s) not checked" % left
+        why = why + "; " + left if why else left
     return held, why
