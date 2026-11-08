@@ -30,6 +30,12 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
 - A listed job shows its note: the text after `until:` in the description of the Bash call that
   started it, to the end of that line. The note sits on the job's own line, and the message asks
   whether it is met. A job whose call holds no `until:` text is still listed, with no note.
+- A background agent (an Agent call started with run_in_background) is a job too. Its id is the
+  agentId in the launch's toolUseResult, and its transcript is `<stem>/subagents/agent-<id>.jsonl`
+  beside the session file. It is listed when that transcript has not changed for the quiet age and
+  its last assistant record holds a tool_use with no result (one long call is not a stall). A
+  completed notice or a TaskStop result closes it, as for a shell. A missing transcript is listed
+  as unknown, once.
 - When guard_stream cannot be imported, --stop still lists each stale job, with no note.
 - Any error prints nothing and exits 0.
 
@@ -43,6 +49,10 @@ silent everywhere cannot pass it.
 """
 
 import atexit
+import builtins
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import re
@@ -191,12 +201,23 @@ def assistant_text(text):
         {"type": "text", "text": text}]}}
 
 
-def transcript(items):
-    """Write a session transcript. A dict is one JSON record; bytes are written as they are."""
-    path = os.path.join(new_dir(), "session.jsonl")
+def transcript(items, agents=(), folder=None):
+    """Write a session transcript, and each agent's transcript beside it. A dict is one JSON record;
+    bytes are written as they are. agents is a list of (agent id, records, idle) tuples: each agent
+    transcript is written at agent_path() with its mtime idle seconds before NOW. folder, when given,
+    holds the session file."""
+    folder = folder or new_dir()
+    path = os.path.join(folder, "session.jsonl")
     with open(path, "wb") as f:
         for item in items:
             f.write(item if isinstance(item, bytes) else json.dumps(item).encode("utf-8") + b"\n")
+    for aid, records, idle in agents:
+        out = agent_path(folder, aid)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "wb") as f:
+            for rec in records:
+                f.write(json.dumps(rec).encode("utf-8") + b"\n")
+        os.utime(out, (NOW - idle, NOW - idle))
     return path
 
 
@@ -296,9 +317,13 @@ def system_message(out, problems):
     return msg
 
 
-def listed_once(msg, job_id):
-    """Each job prints its output path once, so its file name appears once."""
-    n = msg.count(job_id + ".output")
+def listed_once(msg, job_id, by_line=False):
+    """Each job prints its output path once, so its file name appears once. An agent row (by_line)
+    names the agent id, so the lines that name the id are counted instead."""
+    if by_line:
+        n = sum(job_id in line for line in msg.splitlines())
+    else:
+        n = msg.count(job_id + ".output")
     return expect(n == 1, f"job {job_id} listed {n} times, want 1: {msg!r}")
 
 
@@ -1361,6 +1386,348 @@ def C5_newest_summary_with_a_bad_timestamp_fails_open():
                at(prompt("next"), 500), at(assistant_text("ok"), 450)])
     problems, msg = stop_listing(recs, base)
     return problems + listed_once(msg, "bbad")
+
+
+# Background agents. An Agent call started with run_in_background returns an async launch whose
+# toolUseResult names the agent id and the outputFile. The agent's own transcript sits beside the
+# session file, at <stem>/subagents/agent-<id>.jsonl. Each case builds that layout with transcript(agents=).
+
+
+def agent_id(n):
+    """A 17-character agent id. Every id has the same length, so no id is a part of another."""
+    return "a%016x" % (0x51a7e0000 + n)
+
+
+def agent_path(folder, aid):
+    """Where a background agent's transcript sits beside the session file in folder: the folder named
+    after the file's stem, then subagents/agent-<id>.jsonl."""
+    return os.path.join(folder, "session", "subagents", "agent-%s.jsonl" % aid)
+
+
+def agent_launch(aid, output, desc="review the diff"):
+    """A background agent's launch: its Agent tool_use, then the async result. The result's toolUseResult
+    names the agent id and the outputFile."""
+    cid = "toolu_" + aid
+    use = {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": cid, "name": "Agent",
+         "input": {"description": desc, "prompt": "review", "run_in_background": True}}]}}
+    result = {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": cid,
+         "content": "Async agent launched successfully. agentId: %s." % aid}]},
+        "toolUseResult": {"isAsync": True, "status": "async_launched", "agentId": aid,
+                          "description": desc, "outputFile": output}}
+    return [use, result]
+
+
+def background_agent(folder, aid, records, idle, output=None):
+    """A background agent of the session in folder. Return (launch, spec): the launch records for the
+    session's items, and the spec for transcript(agents=). The launch names output when given, else the
+    agent's own transcript."""
+    return agent_launch(aid, output or agent_path(folder, aid)), (aid, records, idle)
+
+
+def agent_step(tag, text="done\n"):
+    """Agent transcript records that end on a tool_result: the agent's last step has finished."""
+    return [call("toolu_" + tag, "ls"), bash_result("toolu_" + tag, text)]
+
+
+def agent_long_call():
+    """Agent transcript records that end on a tool_use with no result: one long call in progress."""
+    return [assistant_text("checking the build"), call("toolu_long", "sleep 900")]
+
+
+def stop_in_process(transcript_path):
+    """Run the Stop check in this process at NOW, with the default quiet age and no output base. Return
+    (rc, stdout, the paths os.stat was called with, the paths open was called with). The wrappers count
+    every path the check stats or opens, so a case counts the calls that name one agent."""
+    spec = importlib.util.spec_from_file_location("stall_watch_in_process", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    stats, opens = [], []
+    real_stat, real_os_open, real_open, real_io_open = os.stat, os.open, builtins.open, io.open
+
+    def counted_stat(path, *args, **kwargs):
+        stats.append(str(path))
+        return real_stat(path, *args, **kwargs)
+
+    def counted_open(file, *args, **kwargs):
+        opens.append(str(file))
+        return real_open(file, *args, **kwargs)
+
+    def counted_os_open(path, *args, **kwargs):
+        opens.append(str(path))
+        return real_os_open(path, *args, **kwargs)
+
+    keys = ("STALL_WATCH_NOW", "STALL_WATCH_OUTPUT_BASE", "STALL_WATCH_QUIET")
+    saved = {k: os.environ.get(k) for k in keys}
+    payload = {"session_id": "test-stall-watch-stop", "hook_event_name": "Stop", "cwd": SCRATCH,
+               "transcript_path": transcript_path, "stop_hook_active": False}
+    old_stdin = sys.stdin
+    try:
+        os.environ["STALL_WATCH_NOW"] = str(NOW)
+        os.environ.pop("STALL_WATCH_OUTPUT_BASE", None)
+        os.environ.pop("STALL_WATCH_QUIET", None)
+        sys.stdin = io.StringIO(json.dumps(payload))
+        os.stat, os.open, builtins.open, io.open = counted_stat, counted_os_open, counted_open, counted_open
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            rc = mod.stop()
+        return rc, buf.getvalue(), stats, opens
+    finally:
+        os.stat, os.open, builtins.open, io.open = real_stat, real_os_open, real_open, real_io_open
+        sys.stdin = old_stdin
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+@case
+def A1_quiet_agent_is_listed_once_with_its_remedy():
+    """A1. a background agent whose transcript has not changed for 600 s, after 300 earlier steps, its last
+    record a tool_result: listed once, by its id, with the remedy: resume it by name, or send a fresh
+    reviewer the prior report"""
+    folder = new_dir()
+    many = []
+    for i in range(300):
+        many += agent_step("s%d" % i)
+    launch, spec = background_agent(folder, agent_id(1), many + agent_step("last"), 600)
+    path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(1), by_line=True)
+    if problems:  # the remedy is read from a listing: with no listing, there is no remedy to check
+        return problems
+    low = msg.lower()
+    for word in ("resume", "by name", "fresh reviewer", "prior report"):
+        problems += expect(word in low, f"the remedy has no {word!r}: {msg!r}")
+    return problems
+
+
+@case
+def A1b_quiet_agent_whose_result_quotes_a_tool_use_is_listed():
+    """A1b. a quiet agent whose last record is a tool_result whose text quotes a tool_use record: listed once.
+    A check that reads the text for a tool_use takes it for one long call and does not list the agent"""
+    folder = new_dir()
+    quoted = '{"type":"tool_use","id":"toolu_zz","name":"Bash","input":{"command":"sleep 900"}}'
+    launch, spec = background_agent(folder, agent_id(2), agent_step("q1", quoted), 600)
+    path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(2), by_line=True)
+    return problems
+
+
+@case
+def A1c_quiet_agent_with_a_huge_last_record_is_listed():
+    """A1c. a quiet agent whose last record is a 300 KB tool_result: listed once. A tail read that gives up
+    on a long last line never reaches the record, so the agent is not listed"""
+    folder = new_dir()
+    launch, spec = background_agent(folder, agent_id(3), agent_step("big", "x" * 300000), 600)
+    path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(3), by_line=True)
+    return problems
+
+
+@case
+def A2_fresh_agent_is_not_listed():
+    """A2. an agent whose transcript changed 10 s ago is not listed. Control: a quiet agent beside it is listed,
+    so the check ran"""
+    folder = new_dir()
+    lf, fresh = background_agent(folder, agent_id(4), agent_step("f1"), 10)
+    lc, ctl = background_agent(folder, agent_id(5), agent_step("c1"), 600)
+    path = transcript(stamped(lf + lc, 900), agents=[fresh, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(5), by_line=True)
+    problems += expect(agent_id(4) not in msg, f"fresh agent {agent_id(4)} is listed: {msg!r}")
+    return problems
+
+
+@case
+def A3a_completed_notice_drops_the_agent():
+    """A3a. a completed notice, as a queued_command attachment, drops its agent. Control: a quiet agent
+    with no notice is listed"""
+    folder = new_dir()
+    ld, done = background_agent(folder, agent_id(6), agent_step("d1"), 600)
+    lc, ctl = background_agent(folder, agent_id(7), agent_step("c1"), 600)
+    recs = (stamped(ld + lc, 900)
+            + [attachment_notice(agent_id(6), "completed", summary='Agent "review the diff" completed')])
+    path = transcript(recs, agents=[done, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(7), by_line=True)
+    problems += expect(agent_id(6) not in msg, f"agent {agent_id(6)} has a completed notice but is listed: {msg!r}")
+    return problems
+
+
+@case
+def A3b_task_stop_result_drops_the_agent():
+    """A3b. a TaskStop result that says 'Successfully stopped task: <id>' drops its agent. Control: a quiet
+    agent with no stop is listed"""
+    folder = new_dir()
+    ls_, stopped = background_agent(folder, agent_id(8), agent_step("s1"), 600)
+    lc, ctl = background_agent(folder, agent_id(9), agent_step("c1"), 600)
+    recs = (stamped(ls_ + lc, 900)
+            + [stop_call("toolu_ts1", agent_id(8)),
+               stop_result("toolu_ts1", agent_id(8), command="review the diff")])
+    path = transcript(recs, agents=[stopped, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(9), by_line=True)
+    problems += expect(agent_id(8) not in msg, f"agent {agent_id(8)} was stopped but is listed: {msg!r}")
+    return problems
+
+
+@case
+def A4_quiet_agent_in_one_long_call_is_not_listed():
+    """A4. a quiet agent whose last record is a tool_use with no result, one long call in progress: not listed.
+    Control: a quiet agent whose last record is a tool_result is listed"""
+    folder = new_dir()
+    lw, wait = background_agent(folder, agent_id(10), agent_long_call(), 600)
+    lc, ctl = background_agent(folder, agent_id(11), agent_step("c1"), 600)
+    path = transcript(stamped(lw + lc, 900), agents=[wait, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(11), by_line=True)
+    problems += expect(agent_id(10) not in msg, f"agent {agent_id(10)} in one long call is listed: {msg!r}")
+    return problems
+
+
+@case
+def A5_dead_windows_output_file_still_finds_the_agent_beside_the_session():
+    """A5. a quiet agent whose launch names a Windows outputFile that does not exist here: the agent is found
+    beside the session file and listed, not as unknown"""
+    folder = new_dir()
+    launch, spec = background_agent(folder, agent_id(12), agent_step("w1"), 600, output=win_path(agent_id(12)))
+    path = transcript(stamped(launch, 900), agents=[spec], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(12), by_line=True)
+    problems += expect("unknown" not in line_of(msg, agent_id(12)),
+                       f"agent {agent_id(12)} is listed as unknown: {msg!r}")
+    return problems
+
+
+@case
+def A6_agent_with_no_transcript_is_unknown_at_the_first_stop_only():
+    """A6. a background agent whose transcript is missing both at its outputFile and beside the session:
+    listed as unknown at the first Stop after its launch, and not at the next. Control: an agent launched
+    after that Stop is listed as unknown at the next one"""
+    turn0 = [at(prompt("first"), 1500), at(assistant_text("first answer"), 1300), stop_summary(1300)]
+    lu = agent_launch(agent_id(13), win_path(agent_id(13)))
+    turn1 = [at(prompt("start"), 1200)] + stamped(lu, 1000) + [at(assistant_text("started"), 600)]
+    rc1, out1, err1 = run_stop(transcript(turn0 + turn1), now=NOW - 600)
+    problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
+    msg1 = system_message(out1, problems)
+    problems += listed_once(msg1, agent_id(13), by_line=True)
+    problems += expect("unknown" in line_of(msg1, agent_id(13)),
+                       f"agent {agent_id(13)} is not listed as unknown: {msg1!r}")
+    lc = agent_launch(agent_id(14), win_path(agent_id(14)))
+    turn2 = [stop_summary(600), at(prompt("next"), 550)] + stamped(lc, 500) + [at(assistant_text("ok"), 400)]
+    rc2, out2, err2 = run_stop(transcript(turn0 + turn1 + turn2))
+    problems += expect(rc2 == 0, f"second Stop exit {rc2}, want 0: {err2.strip()[:200]}")
+    msg2 = system_message(out2, problems)
+    problems += listed_once(msg2, agent_id(14), by_line=True)
+    problems += expect("unknown" in line_of(msg2, agent_id(14)),
+                       f"agent {agent_id(14)} is not listed as unknown at the second Stop: {msg2!r}")
+    problems += expect(agent_id(13) not in msg2,
+                       f"unknown agent {agent_id(13)} is listed again at the second Stop: {msg2!r}")
+    return problems
+
+
+@case
+def A7_quiet_agent_is_listed_once_per_crossing():
+    """A7. a quiet agent whose stall crossed after the previous Stop is listed at the next Stop, and not again
+    at the one after, as for a shell job. Control: an agent that goes quiet after that Stop is listed at the
+    second one"""
+    folder = new_dir()
+    lx, x = background_agent(folder, agent_id(15), agent_step("x1"), 1400)  # quiet since 1400 s before NOW
+    turn0 = ([at(prompt("first"), 1500)] + stamped(lx, 1490)
+             + [at(assistant_text("first answer"), 1200), stop_summary(1200)])
+    turn1 = [at(prompt("start"), 1000), at(assistant_text("started"), 900)]
+    rc1, out1, err1 = run_stop(transcript(turn0 + turn1, agents=[x], folder=folder), now=NOW - 900)
+    problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
+    msg1 = system_message(out1, problems)
+    problems += listed_once(msg1, agent_id(15), by_line=True)
+    lc, ctl = background_agent(folder, agent_id(16), agent_step("c1"), 600)  # quiet since 600 s before NOW
+    turn2 = [stop_summary(900), at(prompt("next"), 800)] + stamped(lc, 800) + [at(assistant_text("ok"), 700)]
+    rc2, out2, err2 = run_stop(transcript(turn0 + turn1 + turn2, agents=[ctl], folder=folder))
+    problems += expect(rc2 == 0, f"second Stop exit {rc2}, want 0: {err2.strip()[:200]}")
+    msg2 = system_message(out2, problems)
+    problems += listed_once(msg2, agent_id(16), by_line=True)
+    problems += expect(agent_id(15) not in msg2, f"agent {agent_id(15)} is listed again at the second Stop: {msg2!r}")
+    return problems
+
+
+@case
+def A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet():
+    """A8. the cost of the agent check, run in this process: each running agent is stat'ed once per Stop, a
+    fresh agent is not opened, and a quiet agent is read. Scope first: the session file was opened and the
+    quiet agent was read, so the counts below come from the agent check"""
+    folder = new_dir()
+    lf, fresh = background_agent(folder, agent_id(17), agent_step("f1"), 10)
+    lq, quiet = background_agent(folder, agent_id(18), agent_step("q1"), 600)
+    path = transcript(stamped(lf + lq, 900), agents=[fresh, quiet], folder=folder)
+    rc, out, stats, opens = stop_in_process(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0")
+    problems += expect(any(os.path.basename(p) == "session.jsonl" for p in opens),
+                       f"stop() did not open the session transcript, so nothing was scanned: opens {opens}")
+    problems += expect(any(agent_id(18) in p for p in opens),
+                       f"the quiet agent {agent_id(18)} was not read (scope): opens {opens}")
+    fresh_stats = sum(agent_id(17) in p for p in stats)
+    problems += expect(fresh_stats == 1, f"fresh agent {agent_id(17)} stat count {fresh_stats}, want 1: {stats}")
+    problems += expect(sum(agent_id(17) in p for p in opens) == 0,
+                       f"fresh agent {agent_id(17)} was opened: {opens}")
+    quiet_stats = sum(agent_id(18) in p for p in stats)
+    problems += expect(quiet_stats == 1, f"quiet agent {agent_id(18)} stat count {quiet_stats}, want 1: {stats}")
+    return problems
+
+
+@case
+def A9_shell_job_and_agent_share_one_message():
+    """A9. a quiet shell job and a quiet agent in one transcript: both are listed in one systemMessage. The
+    shell row is green on main, so it is the control for the agent row"""
+    base, folder = new_dir(), new_dir()
+    output_file(base, "bmix600", 600)
+    launch, spec = background_agent(folder, agent_id(19), agent_step("m1"), 600)
+    path = transcript(moved("bmix600") + stamped(launch, 900), agents=[spec], folder=folder)
+    rc, out, err = run_stop(path, base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bmix600")
+    problems += listed_once(msg, agent_id(19), by_line=True)
+    return problems
+
+
+@case
+def A10_full_size_each_quiet_agent_is_listed_once():
+    """A10. thirty quiet agents at once: each is listed once, by its own id"""
+    folder = new_dir()
+    launches, specs, ids = [], [], []
+    for n in range(30):
+        aid = agent_id(100 + n)
+        ids.append(aid)
+        launch, spec = background_agent(folder, aid, agent_step("t%d" % n), 600)
+        launches += launch
+        specs.append(spec)
+    path = transcript(stamped(launches, 900), agents=specs, folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    for aid in ids:
+        problems += listed_once(msg, aid, by_line=True)
+    return problems
 
 
 if __name__ == "__main__":
