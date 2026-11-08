@@ -1,0 +1,11 @@
+{
+  "title": "A lane posts a review round's record before any push to its PR branch, a base merge included",
+  "why": "A lane pushed a base merge before it printed a review round's record, so the record could not name the reviewed head (coordinator, 04:26 CST Nov 8). Step record-before-fix-push covers a fix push after a passing round only.",
+  "note": "Fix: the push guard asks on any push to a PR branch whose newest review round has no posted record, a base-merge push included. Red case first: a base-merge push before the record passes today; control: a push after the record is posted passes. Related steps record-before-fix-push (#1538) and record-after-each-round. Lane session_013NEJL1Umc5vUUPV286bXnV. Queue fix. Filed 04:30 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 595,
+  "owner": "triage",
+  "lane": "session_013NEJL1Umc5vUUPV286bXnV",
+  "updatedAt": "2026-11-08T04:27:00-06:00"
+}

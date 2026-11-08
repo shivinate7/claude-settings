@@ -1,0 +1,11 @@
+{
+  "title": "The mutation sweep's anchor match (first-match) follow-up",
+  "why": "Named by the coordinator for lane session_013NEJKzzx35nAWSwPacHRXt (coordinator, 04:26 CST Nov 8); related to step lane-lint-mutant-anchors (an anchor matched twice on #1820). The gap sentence is asked of the lane.",
+  "note": "Title and Fix line wait for the lane's one-sentence gap. Related: step lane-lint-mutant-anchors and done-or-ready step mutate-sweep-control. Queue fix. Filed 04:30 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 596,
+  "owner": "triage",
+  "lane": "session_013NEJKzzx35nAWSwPacHRXt",
+  "updatedAt": "2026-11-08T04:27:00-06:00"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "#1838 follow-up: the git-after-cd guard's `&&` block and `if` false alarms, and its `_exits_on_failure` mutants",
+  "why": "Follow-up of #1838 in lane session_013NEJL1Eaa8LA5StpPbWgvA (step git-write-after-failed-cd): the guard gives false alarms on `&&` blocks and `if` forms, and `_exits_on_failure` has surviving mutants (coordinator, 04:26 CST Nov 8).",
+  "note": "Fix: the guard reads a cd inside an `&&` block or an `if` test as one that stops the chain on failure, and tests kill the `_exits_on_failure` mutants. Red cases first: each false-alarm form is refused today; control: a git write joined by ';' after a cd still refuses. The lane gives the exact forms in its PR. Lane session_013NEJL1Eaa8LA5StpPbWgvA. Queue fix. Filed 04:30 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 597,
+  "owner": "triage",
+  "lane": "session_013NEJL1Eaa8LA5StpPbWgvA",
+  "updatedAt": "2026-11-08T04:27:00-06:00"
+}
