@@ -14,7 +14,8 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
   The old roadmap page gets no more publishes (skill roadmap, main).
 - Once per clone, run `sh roadmap/hooks/install.sh` (never set core.hooksPath): its pre-commit refuses a
   commit that adds or grows an open step's note past 250 words in a roadmap checkout (build.py
-  `--check-staged`, step c138), and is a no-op elsewhere. It leaves other hooks (main-ref) in place and
+  `--check-staged`, step c138), and is a no-op elsewhere. It also refuses an open step that has no `gap`
+  key, or whose `gap` key another open step holds. It leaves other hooks (main-ref) in place and
   chains a pre-commit already there.
 - Other threads file here too. Pull right before each write. If roadmap.html conflicts on a pull,
   run build.py again rather than merging it by hand.

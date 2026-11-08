@@ -2,7 +2,7 @@
 
 data/ holds one JSON file per document: data/steps/<id>.json, data/topics/<id>.json and
 data/meta/{advisor,cull,phases}.json. Each file is the document's fields (title, status, phase,
-order, why, note, ask, updatedAt). It moved here from the claude.ai page's database on Oct 22.
+order, why, note, ask, gap, updatedAt). It moved here from the claude.ai page's database on Oct 22.
 
 page/index.html is the viewer. build.py bakes data/ into roadmap.html, which opens from disk and
 shows in the waiting page's Status tab (title '<repo> Queue') as a spliced roadmap block (this is the roadmap branch of claude-settings): https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx. The old roadmap page gets no more publishes. Only the triage

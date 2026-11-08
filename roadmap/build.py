@@ -21,6 +21,12 @@ SCANNED, and writes no page. Cost: one more git process and one read of each sca
 working tree, and refuses the commit when it adds or grows an open step's note past NOTE_WORDS words, or
 stages a symlink as a step file. A long note the commit leaves alone or trims passes, so one writer's
 note never blocks another's commit. It writes no page.
+
+The same check refuses a commit that adds or changes an open step whose "gap" key (stripped, lowercased) is
+held by another open step in the index, unless one base held both open with that key, or that has no key
+when no base holds its file. Done steps never block. Cost, on top of the note check: when the commit stages
+an open step file, one `git ls-files -s -z` and one more `git cat-file --batch` for the index files not yet
+read, plus one `git show` per base per staged open step; no file written, and it runs only inside the pre-commit hook.
 """
 import datetime
 import json
@@ -111,73 +117,177 @@ def over_cap(steps):
 STEPS_PATH = "roadmap/data/steps"
 
 
-def staged_notes_over_cap(repo):
-    """(over_cap pairs, refusal lines) for the step files the staged commit adds or changes, read from the index.
+def gap_key(d):
+    """A step's gap key as compared: stripped and lowercased; "" when absent, empty or not a string."""
+    g = d.get("gap")
+    return g.strip().lower() if isinstance(g, str) else ""
 
-    Only files directly in STEPS_PATH count, as in load(). An open note over the cap passes only when some
-    base (HEAD, or a MERGE_HEAD while a merge is committed) held the same step open with at least as many
-    words: a commit may keep or trim a long note, never add or grow one. A staged symlink there is refused,
-    since load() would follow it. A staged file that is not valid JSON is skipped: it has no note to count,
-    and the next build fails loudly on it.
+
+def shown(path):
+    return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+
+
+class Staged:
+    """What the staged commit changes under STEPS_PATH, and the bases it is committed onto.
+
+    Only files directly in STEPS_PATH count, as in load(). Bases are HEAD, plus each MERGE_HEAD while a
+    merge is committed. Blobs are read through one `git cat-file --batch` per call to blobs(), and a blob
+    is read once per commit.
     """
-    def git(*args):
-        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+
+    def __init__(self, repo):
+        self.repo = repo
+        self.cache = {}  # blob -> parsed dict, or None when it is not JSON or not an object
+        self.bases = ["HEAD"] if self.git("rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
+        merge_head = pathlib.Path(repo, self.git("rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
+        if merge_head.is_file():
+            self.bases += merge_head.read_text().split()
+        self.entries = []  # (mode, blob, path) of each staged add, change or type change
+        if self.bases:
+            fields = self.git("diff", "--cached", "--raw", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
+                              STEPS_PATH).stdout.split("\0")
+            for meta, path in zip(fields[0::2], fields[1::2]):
+                _, mode, _, blob, _ = meta.split(" ", 4)
+                self.entries.append((mode, blob, path))
+        else:
+            self.entries = self.listing()
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True,
                               encoding="utf-8", errors="surrogateescape")
 
-    def shown(path):
-        return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+    def listing(self):
+        """(mode, blob, path) of every file in the index under STEPS_PATH."""
+        out = []
+        for line in filter(None, self.git("ls-files", "-s", "-z", "--", STEPS_PATH).stdout.split("\0")):
+            meta, path = line.split("\t", 1)
+            mode, blob, _ = meta.split(" ")
+            out.append((mode, blob, path))
+        return out
 
-    def step_at(rev, path):
-        r = git("show", f"{rev}:{path}")
+    def blobs(self, shas):
+        """Parse each blob not read yet, all in one git process."""
+        todo = sorted(set(shas) - self.cache.keys())
+        if not todo:
+            return
+        data = subprocess.run(["git", "-C", str(self.repo), "cat-file", "--batch"],
+                              input="".join(f"{b}\n" for b in todo).encode(), capture_output=True).stdout
+        pos = 0
+        for blob in todo:
+            end = data.index(b"\n", pos)
+            head = data[pos:end].split()
+            pos = end + 1
+            if head[1] == b"missing":
+                self.cache[blob] = None
+                continue
+            size = int(head[2])
+            try:
+                d = json.loads(data[pos:pos + size])
+            except ValueError:
+                d = None
+            self.cache[blob] = d if isinstance(d, dict) else None
+            pos += size + 1
+
+    def step_at(self, rev, path):
+        r = self.git("show", f"{rev}:{path}")
         try:
             d = json.loads(r.stdout) if r.returncode == 0 else None
         except ValueError:
             return None
         return d if isinstance(d, dict) else None
 
-    bases = ["HEAD"] if git("rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
-    merge_head = pathlib.Path(repo, git("rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
-    if merge_head.is_file():
-        bases += merge_head.read_text().split()
-    entries = []  # (mode, blob, path)
-    if bases:
-        fields = git("diff", "--cached", "--raw", "-z", "--no-renames", "--diff-filter=AMT", "HEAD", "--",
-                     STEPS_PATH).stdout.split("\0")
-        for meta, path in zip(fields[0::2], fields[1::2]):
-            _, mode, _, blob, _ = meta.split(" ", 4)
-            entries.append((mode, blob, path))
-    else:
-        for line in filter(None, git("ls-files", "-s", "-z", "--", STEPS_PATH).stdout.split("\0")):
-            meta, path = line.split("\t", 1)
-            mode, blob, _ = meta.split(" ")
-            entries.append((mode, blob, path))
-    steps, refused = {}, []
-    for mode, blob, path in entries:
+    @staticmethod
+    def is_step_file(path):
         p = pathlib.PurePosixPath(path)
-        if str(p.parent) != STEPS_PATH or not p.name.endswith(".json"):
-            continue
-        if mode == "120000":
-            refused.append(f"{shown(path)} is a symlink; build.py would follow it. Commit the file itself.")
-            continue
-        try:
-            d = json.loads(git("cat-file", "blob", blob).stdout)
-        except ValueError:
-            print(f"pre-commit: {shown(path)} is not valid JSON; its note was not counted", file=sys.stderr)
-            continue
-        if not isinstance(d, dict):
-            continue
-        olds = [step_at(b, path) for b in bases]
+        return str(p.parent) == STEPS_PATH and p.name.endswith(".json")
+
+    def changed(self):
+        """(steps, refusal lines, invalid paths) for the staged step files.
+
+        steps is (path, parsed step). A staged symlink is refused, since load() would follow it. A file
+        that is not JSON, or not an object, has no fields to check; the next build fails loudly on it.
+        """
+        files = [e for e in self.entries if self.is_step_file(e[2])]
+        self.blobs(b for m, b, _ in files if m != "120000")
+        steps, refused, invalid = [], [], []
+        for mode, blob, path in files:
+            if mode == "120000":
+                refused.append(f"{shown(path)} is a symlink; build.py would follow it. Commit the file itself.")
+            elif self.cache[blob] is None:
+                invalid.append(path)
+            else:
+                steps.append((path, self.cache[blob]))
+        return steps, refused, invalid
+
+    def index_steps(self):
+        """(path, parsed step) of each step file in the index."""
+        files = [e for e in self.listing() if self.is_step_file(e[2]) and e[0] != "120000"]
+        self.blobs(b for _, b, _ in files)
+        return [(path, self.cache[blob]) for _, blob, path in files if self.cache[blob] is not None]
+
+
+def staged_notes_over_cap(staged):
+    """(over_cap pairs, refusal lines) for the step files the staged commit adds or changes, read from the index.
+
+    An open note over the cap passes only when some base held the same step open with at least as many
+    words: a commit may keep or trim a long note, never add or grow one. A staged file that is not valid
+    JSON is skipped: it has no note to count.
+    """
+    changed, refused, invalid = staged.changed()
+    for path in invalid:
+        print(f"pre-commit: {shown(path)} is not valid JSON; its note was not counted", file=sys.stderr)
+    steps = {}
+    for path, d in changed:
+        olds = [staged.step_at(b, path) for b in staged.bases]
         if any(o and o.get("status") != "done" and note_words(o) >= note_words(d) for o in olds):
             continue
-        steps[shown(p.stem)] = d
+        steps[shown(pathlib.PurePosixPath(path).stem)] = d
     return over_cap(steps), refused
+
+
+def staged_gap_refusals(staged):
+    """Refusal lines for the open steps the staged commit adds or changes whose gap key is missing or shared.
+
+    An open step on key K is refused when another open step in the index holds K, unless one single base
+    held both open with K: a commit may keep a pair that already shared a key, never make one. A step with
+    no key is refused only when no base holds its file, so a step filed before gap keys can still be edited.
+    Done steps are never checked and never block. The index is read only when a staged open step needs it.
+    """
+    def stem(path):
+        return shown(pathlib.PurePosixPath(path).stem)
+
+    def held(rev, path, key):
+        d = staged.step_at(rev, path)
+        return d is not None and d.get("status") != "done" and gap_key(d) == key
+
+    open_changed = sorted((path, d) for path, d in staged.changed()[0] if d.get("status") != "done")
+    if not open_changed:
+        return []
+    holders = {}
+    for path, d in staged.index_steps():
+        if d.get("status") != "done" and gap_key(d):
+            holders.setdefault(gap_key(d), []).append(path)
+    refused = []
+    for path, d in open_changed:
+        key = gap_key(d)
+        if not key:
+            if all(staged.step_at(b, path) is None for b in staged.bases):
+                refused.append(f'{stem(path)} has no gap. Add a "gap" field: a slug naming the one gap it closes.')
+            continue
+        for other in sorted(holders.get(key, [])):
+            if other != path and not any(held(b, path, key) and held(b, other, key) for b in staged.bases):
+                refused.append(f'{stem(other)} holds the gap "{key}", and {stem(path)} takes it too. '
+                               f"Close {stem(other)}, or give {stem(path)} its own gap.")
+    return refused
 
 
 def check_staged():
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
                          encoding="utf-8", errors="surrogateescape")
     repo = top.stdout.strip() if top.returncode == 0 else str(ROOT.parent)
-    hits, refused = staged_notes_over_cap(repo)
+    staged = Staged(repo)
+    hits, refused = staged_notes_over_cap(staged)
+    refused += staged_gap_refusals(staged)
     if hits:
         print(f"Commit refused: these notes are over {NOTE_WORDS} words. Cut them, stage, and commit again:",
               file=sys.stderr)
