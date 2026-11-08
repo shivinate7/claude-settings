@@ -1669,6 +1669,51 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
                 self.assert_passes(out, "a merge claim whose blocker is CI failing")
 
+    def test_cc_red_a_lead_in_word_or_clause_before_the_phrase_is_no_reason(self):
+        # Catches: a reason read from text before the phrase or from a clause that holds it, so a line with no check named
+        # after a failed try passed. A reason is read only from the text after the phrase.
+        for prompt, act, line in (
+                ("push the branch", "git push origin HEAD", "Unfortunately, I cannot push."),
+                ("merge PR 12", "gh pr merge 12", "Sorry, I could not merge PR 12."),
+                ("push the branch", "git push origin HEAD", "However, I could not push."),
+                ("push the branch", "git push origin HEAD", "I tried; I cannot push."),
+                ("push the branch", "git push origin HEAD", "I cannot push, but I can open a PR.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), *failed_bash(act, "tu_f"), landed_reply(line)])
+                self.assert_blocks(out, line)
+
+    def test_cc_red_emphasis_marks_around_the_phrase_still_claim(self):
+        # Catches: bold, italic and underscore marks inside the phrase read past the phrase search, so the claim passed as no
+        # claim. Each line has no try and must block.
+        for prompt, line in (("merge PR 12", "I am **unable** to merge PR 12."),
+                             ("push the branch", "I could **not** push."),
+                             ("push the branch", "I am **not** able to push."),
+                             ("push the branch", "I was **unable** to push."),
+                             ("push the branch", "I am not **allowed** to push."),
+                             ("push the branch", "I _cannot_ push."),
+                             ("push the branch", "I __cannot__ push.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_status_after_a_comma_semicolon_or_dash_names_the_check(self):
+        # Catches: a status set off by a comma, a semicolon or a dash, or after answered, read as naming no check, so a refused
+        # merge whose status was named blocked.
+        for line in ("I cannot merge PR 12, 403 Forbidden.", "I cannot merge PR 12; 403 Forbidden.",
+                     "I cannot merge PR 12 — 403 Forbidden.", "I cannot merge PR 12 - 403.",
+                     "I cannot merge PR 12; the server answered 403 Forbidden."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_passes(out, "a refused merge whose status is named after a comma, semicolon, dash or answered")
+
+    def test_cc_red_a_prior_code_span_of_another_route_names_no_check(self):
+        # Catches: a code span that names a command of another route read as naming the check of this merge claim, so a
+        # refused merge passed as named. A prior span names a check only when it names a route of this act.
+        line = "I cannot merge PR 12."
+        reply = "`ls` printed a list. " + line
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(reply)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
 
 if __name__ == "__main__":
     unittest.main()
