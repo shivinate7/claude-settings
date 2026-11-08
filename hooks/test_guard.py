@@ -22844,6 +22844,62 @@ LOG_CHECKS_EXTRA.append(("session-home: the record and the refusal add no git sp
                          "with no session", session_home_spawn_cost_case))
 
 
+def sh_lost_primary(name):
+    """The state session-home refuses a write in: a primary checkout whose session's linked worktree
+    is gone, with the session's record still naming that worktree. Returns (primary, lane, session,
+    problems); a problem means the fixture did not reach that state."""
+    primary = sh_new_primary(name)
+    lane, branch = sh_add_lane(primary, "lane-" + name)
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    return primary, lane, session, problems
+
+
+def sh_read_row(what, expect, template):
+    """One row of the read-into-the-primary block, as its own case, so a failure names one cause. The
+    session stands in the primary checkout with its worktree gone, as in the incident. `template` is
+    the shell command, with %s where the primary's path goes. `expect` is allow or deny; a deny must
+    name session-home and EnterWorktree, and no path (sh_refusal_problems). Why: session_home_hit
+    calls _shell_write_hit with no predicate_command, the call that the other-checkout read fix
+    (701aae810, hooks/guard_frozen.py) changed to read a mutating word only in command position."""
+    def case():
+        primary, lane, session, problems = sh_lost_primary("read" + uuid.uuid4().hex[:12])
+        write(os.path.join(primary, "docs", "decisions", "x.md"), "line 1\n")
+        write(os.path.join(primary, "install.sh"), "echo 1\n")
+        command = template % slash(primary)
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if expect == "allow" and got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (what, got, reason[:160]))
+        elif expect == "deny":
+            problems += sh_refusal_problems(what, got, reason, primary, lane)
+        if problems:
+            return False, "; ".join(problems)
+        return True, what
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a read-only grep -n install of a file in the primary "
+                         "checkout passes",
+                         sh_read_row("a read-only grep -n install of a file in the primary checkout", "allow",
+                                     "grep -n install %s/docs/decisions/x.md")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a quoted sed -n read of install.sh in the primary "
+                         "checkout passes",
+                         sh_read_row("a quoted sed -n read of install.sh in the primary checkout", "allow",
+                                     'sed -n 1,2p "%s/install.sh"')))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, a sed -i into a file in the primary checkout is refused, "
+                         "naming session-home and EnterWorktree",
+                         sh_read_row("a sed -i into a file in the primary checkout", "deny",
+                                     "sed -i 's/line/LINE/' %s/docs/decisions/x.md")))
+LOG_CHECKS_EXTRA.append(("session-home: while lost, an echo redirect into the primary checkout is refused, "
+                         "naming session-home and EnterWorktree",
+                         sh_read_row("an echo redirect into the primary checkout", "deny",
+                                     "echo x > %s/docs/decisions/x.md")))
+
+
 # =========================================================================== mask_script lexemes
 FAMILY = "mask-script"
 
