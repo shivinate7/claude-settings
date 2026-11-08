@@ -11140,6 +11140,27 @@ records_refusal("maybe-skipped cd after ||: cd lane || cd main, then a generator
 # is for another repo and writes none of the lane's page, so the commit, judged in the lane, is allowed.
 records_allow("a cd after && runs: cd lane && a generator run for another repo, then commit -am, from NOGIT",
               "cd " + LANE + " && " + GEN + " --root " + OTHER_REPO + " && " + COMMIT_AM, NOGIT)
+# A `cd` after `false &&` never runs, so the commit stays in the lane, where the generator run has rewritten the
+# page. The commit is judged in the `cd`'s folder, which is not the lane, so the guard must refuse. The skipped `cd`
+# target is no repository here. The chain starts in the lane, so no other-checkout rule reads the skipped `cd`.
+records_refusal("skipped cd into no repository: a generator run, then false && cd, then add -A and commit",
+                GEN + " --records-only ; false && cd " + NOGIT + " ; " + ADD_A + " && " + COMMIT_X, LANE)
+# The same chain with the `false &&` dropped: the `cd` really runs, so the commit is judged in that folder, which is
+# no repository, and git cannot commit there. Allowed, as today.
+records_allow("control, cd runs into no repository: a generator run, then cd, then add -A and commit",
+              GEN + " --records-only ; cd " + NOGIT + " ; " + ADD_A + " && " + COMMIT_X, LANE)
+# A skipped `cd` into another repo with no generated base page. The chain starts in NOGIT, as the judged-folder
+# cases above do: from a cwd inside a checkout, other-checkout refuses a `cd` into REC_NOPAGE before records-page
+# reads the chain. The commit is judged in REC_NOPAGE, which has no base page, so the guard finds no hit, though
+# the commit runs in the lane.
+records_refusal("skipped cd into a repo with no base page: cd lane, a generator run, false && cd, then add -A and commit",
+                "cd " + LANE + " ; " + GEN + " --records-only ; false && cd " + REC_NOPAGE + " ; "
+                + ADD_A + " && " + COMMIT_X, NOGIT)
+# The same chain with the `false &&` dropped: the `cd` really runs into REC_NOPAGE, which has no base page, so the
+# commit is judged there and allowed, as today.
+records_allow("control, cd runs into a repo with no base page: cd lane, a generator run, cd, then add -A and commit",
+              "cd " + LANE + " ; " + GEN + " --records-only ; cd " + REC_NOPAGE + " ; " + ADD_A + " && " + COMMIT_X,
+              NOGIT)
 
 # =========================================================================== 5d. conflict markers
 #
