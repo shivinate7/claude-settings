@@ -1,0 +1,11 @@
+{
+  "title": "env-smart-quote-path (step named by lane notes-fix-large-1)",
+  "why": "Lane notes-fix-large-1 reports this step in flight as PR #1793, round 2 building (00:10 CST Nov 8). It was not on the roadmap.",
+  "note": "Title is the lane's slug; no source wording beyond it. The lane also carries the #1458 fix for the cd-into-env-folder gap. Filed 00:17 CST Nov 8.",
+  "phase": "now",
+  "status": "doing",
+  "order": 547,
+  "owner": "triage",
+  "lane": "notes-fix-large-1",
+  "updatedAt": "2026-11-08T00:15:00-06:00"
+}
