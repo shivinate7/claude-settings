@@ -992,7 +992,7 @@ def _name_filters(words) -> tuple:
     for a value that holds `$` or a backtick, a brace sequence (`{a..b}`, which `_brace_split` reads as text),
     a backslash left after one unescape pass (`\\\\`), or a brace list of `_BRACE_LIMIT` words or more. A value's
     brace list is several filters (`_brace_words`), and a backslash escape reads as its literal character (a quoted
-    `\\*`, `\\?` or `\\[` as a one-character class, `_quoted_glob_escapes`), so a walk counts a file that any of them matches. A `find` stops at its first `-exec`."""
+    `\\*`, `\\?` or `\\[` as a one-character class outside a bracket expression and the bare character inside one, `_quoted_glob_escapes`), so a walk counts a file that any of them matches. A `find` stops at its first `-exec`."""
     index = resolve_command(tuple(words))
     if index is None:
         return ()
