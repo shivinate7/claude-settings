@@ -4,6 +4,8 @@ guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
 import fnmatch
+import glob
+import itertools
 import os
 import re
 
@@ -525,7 +527,8 @@ def _cp_start(raw, keywords=False, names=("cp",)):
     start = 0
     while start < len(raw) and (_ASSIGNMENT.match(raw[start]) or keywords and raw[start] in LOOP_KEYWORDS):
         start += 1
-    return start if _name(raw[start] if start < len(raw) else "") in names else None
+    word = raw[start].lstrip("(") if start < len(raw) else ""   # a subshell paren glued to the command: `(cp a b)`
+    return start if _name(word) in names else None
 
 
 def _copy_parts(raw, keywords=False, names=("cp",)):
@@ -573,7 +576,9 @@ def _copy_parts(raw, keywords=False, names=("cp",)):
 def _copy_target(word) -> str:
     """The directory a `_copy_parts` target word names: a glued `-tDIR` or `--target-directory=DIR` gives DIR."""
     glued = _glued_cp_target(word)
-    return glued[1] if glued else _unquoted(word)
+    value = glued[1] if glued else _unquoted(word)
+    # An unquoted `)` or backtick glued to the word (`(cp a docs/)`) ends the subshell, not the path.
+    return value if word.endswith(("'", '"')) else value.rstrip(")`") or value
 
 
 def _copy_reads(raw, predicate, cwd, keywords=False):
@@ -620,12 +625,97 @@ _TOO_LARGE_FILTERED_NOTE = " (the folder is too large to check for a test even t
 _TOO_LARGE_NOTES = {_TOO_LARGE: _TOO_LARGE_NOTE, _TOO_LARGE_FILTERED: _TOO_LARGE_FILTERED_NOTE}
 
 
+def _brace_words(word):
+    """The words bash makes of `word` by brace expansion, lazily: `{a,b}` by its commas, `{1..3}` and
+    `{a..c}` by their range. A brace in quotes, after `$`, or with neither a comma nor a range is text.
+    A range with a step, or one that is not a whole number or one letter, is left as text."""
+    depth, quote, start, commas = 0, "", -1, []
+    for at, char in enumerate(word):
+        if quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "{" and not (depth == 0 and word[at - 1:at] == "$"):
+            if depth == 0:
+                start, commas = at, []
+            depth += 1
+        elif char == "," and depth == 1:
+            commas.append(at)
+        elif char == "}" and depth:
+            depth -= 1
+            if depth:
+                continue
+            inner = word[start + 1:at]
+            if commas:
+                cuts = [start] + commas + [at]
+                parts = [word[cuts[n] + 1:cuts[n + 1]] for n in range(len(cuts) - 1)]
+            else:
+                parts = _brace_range(inner)
+            if parts is not None:
+                for part in parts:
+                    yield from _brace_words(word[:start] + part + word[at + 1:])
+                return
+    yield word
+
+
+def _brace_range(inner):
+    """The words of a brace range `1..3` or `a..e` (down as well as up), else None."""
+    found = re.fullmatch(r"(-?\d+)\.\.(-?\d+)|([A-Za-z])\.\.([A-Za-z])", inner)
+    if not found:
+        return None
+    if found.group(1) is not None:
+        low, high, shape = int(found.group(1)), int(found.group(2)), str
+    else:
+        low, high, shape = ord(found.group(3)), ord(found.group(4)), chr
+    step = 1 if high >= low else -1
+    if abs(high - low) > _WALK_LIMIT:
+        return None
+    return [shape(number) for number in range(low, high + step, step)]
+
+
+def _glob_pattern(word):
+    """(pattern, has a glob) of a raw word: its quoted `*`, `?` and `[` are text, so they are bracketed."""
+    out, quote, magic = [], "", False
+    for at, char in enumerate(word):
+        if char == quote:
+            quote = ""
+        elif not quote and char in "'\"":
+            quote = char
+        elif not quote and char == "$" and word[at + 1:at + 2] in ("'", '"'):
+            continue
+        elif char in "*?[":
+            out.append("[%s]" % char if quote else char)
+            magic = magic or not quote
+        else:
+            out.append(char)
+    return "".join(out), magic
+
+
+def _written_sources(word, cwd):
+    """(paths, capped) the source word `word` of a `cp` names once the shell has expanded its braces and
+    globs against `cwd`. A glob that matches nothing stays its text, as in the shell. `capped` is True when
+    the expansion passed `_WALK_LIMIT` paths: the rest are not listed."""
+    paths = []
+    for each in _brace_words(word):
+        pattern, magic = _glob_pattern(each)
+        if magic:
+            paths.extend(itertools.islice(glob.iglob(_expanded(pattern, cwd)), _WALK_LIMIT + 1 - len(paths)))
+        else:
+            paths.append(_unquoted(each))
+        if len(paths) > _WALK_LIMIT:
+            return paths[:_WALK_LIMIT], True
+    return paths, False
+
+
 def _copy_written_hit(raw, cwd, predicate, fed, filters) -> str:
-    """The path a `cp` segment writes that `predicate(path, cwd)` accepts, else ''. A copy writes
-    `DEST/<basename of each source>`, so a test-named source copied into any folder writes a test there; this
-    judges that written path, for the direct form and the fed form alike. A fed source that is a folder is a
-    find root (`_fed_segments`): it is walked, as `filters` narrows it, and each file under it is judged.
-    A DEST that holds a glob or a variable is not judged (it stays a root, which fails closed)."""
+    """The path a `cp` segment writes that `predicate(path, cwd)` accepts, else ''. The sources are the
+    words with their braces and globs expanded against `cwd`. DEST is a folder when it ends in a slash,
+    is an existing folder, is `-t`'s word, is fed, or there is more than one source: the copy then writes
+    `DEST/<basename of each source>`, so a test-named source copied into any folder writes a test there.
+    Otherwise it writes DEST itself. A source folder is walked (`cp -r SRC DEST/` writes
+    `DEST/<SRC name>/<path under SRC>` for each file) as far as the caps allow; a fed source that is a folder is a
+    find root (`_fed_segments`): it is walked, as `filters` narrows it, and each file under it is judged
+    as `DEST/<its name>`. A DEST that holds a glob or a variable is not judged (it stays a root, which fails closed)."""
     parts = _copy_parts(raw, fed)
     if parts is None:
         return ""
@@ -633,15 +723,29 @@ def _copy_written_hit(raw, cwd, predicate, fed, filters) -> str:
     dest = _copy_target(raw[at])
     if not operands or not dest or _CP_DEST_UNSAFE.search(dest):
         return ""
+    sources, capped = [], False
     for index in operands:
-        source = _unquoted(raw[index])
+        found, more = _written_sources(raw[index], cwd)
+        sources.extend((raw[index], path) for path in found)
+        capped = capped or more
+    flagged = _glued_cp_target(raw[at]) is not None or at > 0 and _CP_TARGET.fullmatch(_unquoted(raw[at - 1]))
+    into = bool(fed or flagged or dest.endswith(("/", "\\")) or len(sources) > 1
+                or os.path.isdir(_expanded(dest, cwd)))
+    if capped and _may_hold_a_test(dest, cwd, predicate):
+        return _unquoted(raw[operands[0]]) + _TOO_LARGE_NOTE
+    for word, source in sources:
         base = re.split(r"[/\\]", source.rstrip("/\\"))[-1]
-        if base and predicate(os.path.join(dest, base), cwd):
-            return os.path.join(dest, base)
+        written = os.path.join(dest, base) if into else dest
+        if base and predicate(written, cwd):
+            return written
         if fed and _may_hold_a_test(dest, cwd, predicate):
             walked = _first_test_under(source, cwd, predicate, (filters or {}).get(source), dest)
-            if walked:
-                return source + _TOO_LARGE_NOTES[walked] if walked in _TOO_LARGE_NOTES else walked
+        elif not fed and base and os.path.isdir(_expanded(source, cwd)) and _may_hold_a_test(dest, cwd, predicate):
+            walked = _first_test_under(source, cwd, predicate, None, written, True)
+        else:
+            continue
+        if walked:
+            return source + _TOO_LARGE_NOTES[walked] if walked in _TOO_LARGE_NOTES else walked
     return ""
 
 
@@ -666,7 +770,7 @@ def _may_hold_a_test(top: str, cwd: str, predicate) -> bool:
         return True
 
 
-def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None) -> str:
+def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None, tree=False) -> str:
     """The first path under the folder `path`, at any depth, that `predicate` accepts, else ''. A
     folder that `predicate` accepts as `DIR/_` counts. `.git`, `node_modules` and the virtualenv and
     bytecode folders are not entered. An empty path names no folder.
@@ -680,6 +784,8 @@ def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None) -> 
     '' there instead: nothing past the cap is a test.
     `dest` is the folder a copy writes into: each file is then judged as `dest/<its name>`, the path the copy
     writes, and that path is the answer. A folder entry is not judged.
+    `tree` (with `dest`, and no `names`) makes `dest` the folder that `path` itself becomes, as in `cp -r`:
+    each file is then judged as `dest/<its path under path>`.
     ponytail: a checkout nested in a tree outside every checkout, past the cap, is not read.
     ponytail: the walk costs one pass over the tree, once per fed writer word that is a folder."""
     if not _unquoted(path).strip():
@@ -708,7 +814,8 @@ def _first_test_under(path: str, cwd: str, predicate, names=None, dest=None) -> 
                     if whole:
                         return _TOO_LARGE_FILTERED if whole == _TOO_LARGE else whole
         for found in found_in:
-            written = os.path.join(dest, os.path.basename(found)) if dest else found
+            written = os.path.join(dest, os.path.relpath(found, top) if tree else os.path.basename(found)) \
+                if dest else found
             if predicate(written, cwd):
                 return written
         judged += len(folders) + len(found_in)
