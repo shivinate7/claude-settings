@@ -178,7 +178,7 @@ LABEL_FORMS = (
     ("Red-run: 1) mutant x -> 1 failed on SHA", "refused", "#1728 open"),
     ("Red-run: {mutant} x -> 1 failed on SHA", "refused", "#1728 open"),
     ("Red-run: <mutant> x -> 1 failed on SHA", "refused", "#1728 open"),
-    # #1745 round 1: a list marker inside a leading underscore, which the strip misses.
+    # A list marker inside a leading underscore, which the strip misses.
     ("Red-run: _-mutant A (x) -> 1 failed on SHA", "refused", "#1745 round 1"),
     ("Red-run: _+mutant A -> 1 failed on SHA", "refused", "#1745 round 1"),
     ("Red-run: _- mutant A -> 1 failed on SHA", "refused", "#1745 round 1"),
@@ -207,7 +207,7 @@ LABEL_FORMS = (
     ("Red-run: NONE=1 python3 lint/test_x.py -> 1 failed on SHA", "valid", "must-pass"),
     ("Red-run: lint_mode=on: python3 lint/test_x.py -> 1 failed on SHA", "valid", "must-pass"),
     ("Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA", "valid", "must-pass"),
-    # #1745 round 2: an upper-case assignment behind a list marker, number or wrapper. The raw first word missed it.
+    # An upper-case assignment behind a list marker, a number or a wrapper is a real command's prefix, so it passes.
     ("Red-run: - MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
     ("Red-run: `MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
     ("Red-run: (MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
@@ -244,7 +244,7 @@ LABEL_WORDS = (
     ("Red-run: _mutant_ x -> 1 failed on SHA", "mutant", False),
     ("Red-run: _mutant A_ x -> 1 failed on SHA", "mutant", False),
     ("Red-run: _mutnat_ x -> 1 failed on SHA", "mutnat", False),
-    # #1745 round 1: a list marker inside a leading underscore strips to the word.
+    # A list marker inside a leading underscore strips to the word.
     ("Red-run: _-mutant A (x) -> 1 failed on SHA", "mutant", False),
     ("Red-run: _+mutant A -> 1 failed on SHA", "mutant", False),
     ("Red-run: _- mutant A -> 1 failed on SHA", "mutant", False),
@@ -273,7 +273,7 @@ LABEL_WORDS = (
     ("Red-run: ./mutant x -> 1 failed on SHA", "./mutant", False),
     ("Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA", "python3", False),
     ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "mutant", False),
-    # #1745 round 2: an upper-case assignment behind a list marker, a number or a wrapper reads as its word.
+    # An upper-case assignment behind a list marker, a number or a wrapper reads as its word.
     ("Red-run: - MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
     ("Red-run: `MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
     ("Red-run: (MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
@@ -968,8 +968,8 @@ class LabelForms(unittest.TestCase):
                                  "label_word(%r) must carry upper_env %r as its third field" % (line, upper_env))
 
     def test_label_word_returns_word_colon_and_upper_env(self):
-        """label_word's one read is the triple (word, ended_in_colon, upper_env). Round 2 F1 of #1745 and the lane pick
-        of 2026-11-07 20:57 CST name it: the upper-case NAME= exemption reads the same stripped token as the word."""
+        """label_word's one read is the triple (word, ended_in_colon, upper_env). Finding F1 of #1745 and the lane pick
+        make it the one reader: the upper-case NAME= exemption reads the same stripped token as the word."""
         fn = getattr(self.check, "label_word", None)
         self.assertIsNotNone(fn, "label_word absent: the red-run label has no one normaliser yet")
         for line, triple in (("Red-run:", ("", False, False)),
