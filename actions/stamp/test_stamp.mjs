@@ -1954,7 +1954,10 @@ for (const kind of ["hold", "orphan"]) {
 // An escape: a process the suite started, detached with no pipe, outlives the suite. Nothing waits on
 // it, so the suite and the watchdog both finish, and the watchdog must still name it, kill it and fail.
 // The helper runs the watchdog with piped stdio and reads its 'close' against a deadline of its own:
-// spawnSync returns at the direct child's exit on Windows, so it cannot see a pipe a grandchild holds.
+// spawnSync returns when its pipes close, not at the child's exit, so a pipe a grandchild holds
+// keeps it waiting. The helper reads 'close' so its output is whole, and its own deadline covers
+// a holder that keeps a pipe open: past it, the report reads closed:false and the watchdog is killed.
+// The call returns when that holder exits, or throws a timeout if it lives 15 s past that deadline.
 // Values reach the helper through env, so no temp path sits in its command line.
 const ESCAPE_CAP_S = 5;
 const WATCH_HELPER = `
