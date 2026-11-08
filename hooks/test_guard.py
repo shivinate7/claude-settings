@@ -6972,23 +6972,29 @@ def retry_form_template_check():
     return True, "the push the retry form builds is the sha lease push"
 
 
+# The sha sentence is pinned whole, so a weaker sentence that only names the push still fails.
+SHA_SENTENCE = (
+    "Read the sha your own last push left with `git log -g --grep-reflog='update by push' -1 "
+    "--format=%H refs/remotes/<remote>/<branch>`; never a tip read after a fetch, which would make the "
+    "lease always pass.")
+
+
 def sha_sentence_check():
-    """The sentence before the Remedy line names the tip your own last push left, not a ref a fetch refreshes."""
+    """The last sentence before the Remedy line is the sha sentence, string for string."""
     text, marker, _ = push_module().PUSH_REASON.partition("Remedy:")
     if not marker:
         return False, "PUSH_REASON has no Remedy: line to end the sha sentence before"
-    if "remote-tracking" in text:
-        return False, "the sha sentence reads the sha from the remote-tracking ref, which a fetch refreshes"
-    if "your own last push" not in text:
-        return False, "the sha sentence does not name the tip your own last push left"
-    return True, "the sha sentence names the tip your own last push left"
+    sentence = text.strip().rsplit(". ", 1)[-1]
+    if sentence != SHA_SENTENCE:
+        return False, "the sentence before the Remedy line is not the sha sentence, verbatim: %r" % sentence
+    return True, "the sentence before the Remedy line is the sha sentence, verbatim"
 
 
 PUSH_REMEDY_CHECKS.extend([
     ("push: the retry form the refusal prints is a lease naming <branch>:<sha>", retry_form_lease_check),
     ("push: the retry form the refusal prints carries no --force-if-includes", retry_form_no_includes_check),
     ("push: the push the retry form builds is the sha lease push", retry_form_template_check),
-    ("push: the sha sentence names your own last push's tip, not a remote-tracking ref", sha_sentence_check),
+    ("push: the sentence before the Remedy line is the sha sentence, verbatim", sha_sentence_check),
 ])
 
 
