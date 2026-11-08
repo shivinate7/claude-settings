@@ -2100,8 +2100,7 @@ def _python_prefix_paths(tree, parents, scopes):
     stays text only in code that hands no variable to a file call: no call argument that is not a
     string literal and gets a read, write or unknown mode, and no read or write method on a receiver
     other than a literal `Path`. One exception: a bare name opened inside the body of
-    `not name.startswith(lit)` cannot name a file that starts with `lit`, so it does not count
-    against `lit`."""
+    `not name.startswith('.env')` cannot name an env file, so it does not count against `.env`."""
     prefixes = [call for call in ast.walk(tree) if isinstance(call, ast.Call)
                 and isinstance(call.func, ast.Attribute) and call.func.attr in PY_PREFIX_TESTS]
     literals = {node.value for call in prefixes for arg in call.args for node in ast.walk(arg)
@@ -2152,18 +2151,22 @@ def _python_positive_tests(test):
 
 
 def _python_negated_prefix_tests(test):
-    """[(name, [string literals])] for `not name.startswith(lit)` (or endswith, or a tuple of literals),
-    each also as a conjunct of an `and`: where it is true, `name` starts with none of the literals."""
+    """[(name, [string literals])] for `not name.startswith(lit)` (or a tuple of literals), each also as
+    a conjunct of an `and`: where it is true, `name` does not start with the literal. Only the env-file
+    base name (`.env`, ENV_PREFIX) is kept, because every env name starts with it, so the test rules the
+    file out. A longer prefix (`.env.local`, `.envrc`) leaves other env names through, and an `endswith`
+    says nothing about how a name starts, so neither excuses a read."""
     if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
         return [found for value in test.values for found in _python_negated_prefix_tests(value)]
     if not (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)):
         return []
     call = test.operand
-    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr in PY_PREFIX_TESTS
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == "startswith"
             and isinstance(call.func.value, ast.Name) and call.args):
         return []
+    from guard_env import ENV_PREFIX   # imported late: guard_env imports this file
     literals = [node.value for node in ast.walk(call.args[0])
-                if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+                if isinstance(node, ast.Constant) and node.value == ENV_PREFIX]
     return [(call.func.value.id, literals)] if literals else []
 
 
@@ -2407,9 +2410,11 @@ def _js_scan(code: str):
     # A prefix test finds names that a later line can open by another name (`.filter(...).forEach(...)`,
     # a `continue` on its negation), and this scan does not follow data flow. So its literal stays text
     # only when no variable reaches a file call. One exception: a bare name read inside the body of
-    # `!name.startsWith(lit)` cannot name a file that starts with `lit`.
+    # a plain `!name.startsWith('.env')` cannot name an env file. A longer prefix, an endsWith, a test
+    # under `||` or inside `!( ... )` can all be true for an env name, so none of them excuses a read.
     if prefixes and opened:
-        excusers = list(_js_scopes(code, mask, [test for test in prefixes if test[0]], True))
+        excusers = list(_js_scopes(code, mask, [test for test in prefixes if _js_rules_out_env(code, mask, test)],
+                                   True))
         for _, literal, _, _ in prefixes:
             if any(not (whole and any(by == name and lit == literal and first <= at < last
                                       for by, lit, first, last in excusers))
@@ -2480,6 +2485,26 @@ def _js_extent(code: str, mask, start: int, stop: str = "") -> int:
         seen = seen or (mask[at] != 2 and not char.isspace())
         at += 1
     return size
+
+
+def _js_rules_out_env(code: str, mask, test) -> bool:
+    """True when a prefix test `(name, literal, start, end)` is a plain `!name.startsWith('.env')`: the
+    env-file base name, one `!` and no more, and no `||` next to it or anywhere in its `if` condition
+    (`!f.startsWith('.env') || x` is true for an env name)."""
+    from guard_env import ENV_PREFIX   # imported late: guard_env imports this file
+    name, literal, start, end = test
+    before = code[:start].rstrip()
+    if not (name and literal == ENV_PREFIX and code[start:].startswith(name + ".startsWith")
+            and before.endswith("!") and not before[:-1].rstrip().endswith(("!", "||"))
+            and not code[end:].lstrip().startswith("||")):
+        return False
+    opened = [m for m in JS_IF_OPEN.finditer(code, 0, start) if mask[m.start()] == 1]
+    if opened:
+        first = opened[-1].end()
+        close = _js_close(code, mask, first - 1)
+        if close >= end and any(mask[at] == 1 and code.startswith("||", at) for at in range(first, close)):
+            return False
+    return True
 
 
 def _js_scopes(code: str, mask, tests, negated: bool):
