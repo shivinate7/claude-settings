@@ -22104,6 +22104,10 @@ def _relesc_fixture():
         if not problems:
             os.makedirs(os.path.join(home, "sub"), exist_ok=True)
             write(os.path.join(home, "t.py"), "print(1)\n")
+            # On-disk script sources for the heredoc replay rows: one reads and prints, one runs its argument
+            # in a shell. Each sits in its own folder, so no row's judge.py collides with another row's.
+            write(os.path.join(home, "judges", "read", "judge.py"), RELESC_JUDGE_READ)
+            write(os.path.join(home, "judges", "run", "judge.py"), RELESC_JUDGE_RUN)
             sh_add_lane(primary, "agent-" + RELESC_AGENT + "-red")
         free = os.path.join(ROOT, "wthomew_free_primary")
         make_repo(free, {"src/app.py": "print(1)\n"})
@@ -22157,8 +22161,9 @@ def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, 
 # and expects allow. The first writes a python script with a heredoc and runs it as the script, so python
 # executes the body and main's scan of it holds: it expects deny. The third writes a file that python
 # reads as a data argument (judge.py's listing), not as its script, and expects allow. The controls isolate
-# the trigger: the second call's quoted arguments with no heredoc before them, a heredoc with no file redirect
-# before its marker, and the same file-redirected heredoc with its target outside the clone.
+# the trigger: a heredoc with no file redirect before its marker, and the same file-redirected heredoc with its
+# target outside the clone. The second call's quoted arguments with no heredoc before them, and no script on
+# disk, are refused: a script with no visible source keeps main's verdict (ruling of 08:43 CST).
 RELESC_REPLAY_1 = r"""SP=/tmp/claude-0/-home-user-claude-settings/788c10d3-3c3c-55c6-b5bc-31af1756bcc3/scratchpad && rm -rf "$SP/probe" && mkdir -p "$SP/probe/P" && cd "$SP/probe/P" && git init -q && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m init && git worktree add -q "$SP/probe/P/.claude/worktrees/agent-zz" -b wt-zz && cat > "$SP/probe/run.py" <<'EOF'
 import json, subprocess, sys
 sp, guard = sys.argv[1], sys.argv[2]
@@ -22210,8 +22215,9 @@ _relesc_add("other-checkout: heredoc replay: the second refused call, its quoted
             "allow", RELESC_REPLAY_2, "home")
 _relesc_add("other-checkout: heredoc replay: the third refused call, a file-redirected heredoc of cd .. and > ../f, is allowed",
             "allow", RELESC_REPLAY_3, "home")
-_relesc_add("other-checkout: heredoc replay control: the second call's quoted arguments with no heredoc before them are allowed",
-            "allow", 'python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581/hooks/guard.py /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581 ab8bdbda8fd686581 "cd .. && mkdir tmp" "echo x > ../f" "touch ../f" "mkdir ../tmp"', "home")
+# Ruling of 08:43 CST: a script with no visible source keeps main's verdict, so its quoted write is refused.
+_relesc_add("other-checkout: heredoc replay control: the second call's quoted arguments with no heredoc before them, and no script on disk, are refused",
+            "deny", 'python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581/hooks/guard.py /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581 ab8bdbda8fd686581 "cd .. && mkdir tmp" "echo x > ../f" "touch ../f" "mkdir ../tmp"', "home", rule="other-checkout")
 _relesc_add("other-checkout: heredoc replay control: a heredoc with no file redirect before its marker is allowed",
             "allow", "cat <<'EOF'\ncd .. && mkdir tmp\necho x > ../f\nEOF", "home")
 _relesc_add("other-checkout: heredoc replay control: the same file-redirected heredoc, to a path outside the clone, is allowed",
@@ -22221,10 +22227,11 @@ _relesc_add("other-checkout: heredoc replay bisect: echo of a quoted cd .. && mk
             "allow", 'echo "cd .. && mkdir tmp"', "home")
 _relesc_add("other-checkout: heredoc replay bisect: echo of a quoted echo x > ../f is allowed",
             "allow", 'echo "echo x > ../f"', "home")
-_relesc_add("other-checkout: heredoc replay bisect: quoted cd .. and > ../f as python arguments are allowed",
-            "allow", 'python3 judge.py "cd .. && mkdir tmp" "echo x > ../f"', "home")
-_relesc_add("other-checkout: heredoc replay bisect: a file-redirected heredoc to an absolute target, then a listing read, is allowed",
-            "allow", "cat > %(abs_outside)s/cmds.txt <<'EOF'\ncd .. && mkdir tmp\necho x > ../f\nEOF\npython3 judge.py %(abs_outside)s/cmds.txt", "home")
+# Ruling of 08:43 CST: with no visible script source, these quoted or listed arguments are shell text (main's verdict).
+_relesc_add("other-checkout: heredoc replay bisect: quoted cd .. and > ../f as python arguments, with no script on disk, are refused",
+            "deny", 'python3 judge.py "cd .. && mkdir tmp" "echo x > ../f"', "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay bisect: a file-redirected heredoc to an absolute target, then a listing read of it with no script on disk, is refused",
+            "deny", "cat > %(abs_outside)s/cmds.txt <<'EOF'\ncd .. && mkdir tmp\necho x > ../f\nEOF\npython3 judge.py %(abs_outside)s/cmds.txt", "home", rule="other-checkout")
 _relesc_add("other-checkout: heredoc replay bisect: a file-redirected heredoc to a $SP target is allowed",
             "allow", 'cat > "$SP/probe/cmds.txt" <<\'EOF\'\ncd .. && mkdir tmp\necho x > ../f\nEOF', "home")
 _relesc_add("other-checkout: heredoc replay bisect2: a file-redirected heredoc of cd .. then echo done is allowed",
@@ -22233,14 +22240,15 @@ _relesc_add("other-checkout: heredoc replay bisect2: python3 judge.py with an ab
             "allow", "python3 judge.py %(abs_outside)s/cmds.txt", "home")
 _relesc_add("other-checkout: heredoc replay bisect2: python3 judge.py with cd .. && mkdir tmp as its one argument is allowed",
             "allow", 'python3 judge.py "cd .. && mkdir tmp"', "home")
-_relesc_add("other-checkout: heredoc replay bisect3: python3 judge.py with a quoted echo x > ../f as its one argument is allowed",
-            "allow", 'python3 judge.py "echo x > ../f"', "home")
+_relesc_add("other-checkout: heredoc replay bisect3: python3 judge.py with a quoted echo x > ../f as its one argument, with no script on disk, is refused",
+            "deny", 'python3 judge.py "echo x > ../f"', "home", rule="other-checkout")
 _relesc_add("other-checkout: heredoc replay bisect3: python3 judge.py with a real redirect to ../f is refused",
             "deny", "python3 judge.py x > ../f", "home", rule="other-checkout")
 # A Python program that runs `cd ..` or `> ../f` in its code is scanned, however python reaches it: a glued
 # -c argument, a heredoc fed to python, or a heredoc written to a file that python runs as its script. A file
 # that python only reads as data is not scanned. The split pair holds that line: the same heredoc is data for
-# judge.py, and code for `python3 cmds.txt`. The spaced -c row is a control that main already refuses.
+# a judge.py written in the same command that only prints, and code for `python3 cmds.txt`. The spaced -c row
+# is a control that main already refuses.
 _relesc_add("other-checkout: heredoc replay F1: python3 -c with its code glued to the flag, echo x > ../f "
             "in the code, is refused", "deny", r'''python3 -c"import os; os.system('echo x > ../f')"''',
             "home", rule="other-checkout")
@@ -22257,9 +22265,22 @@ _relesc_add("other-checkout: heredoc replay F2: a heredoc written to run.py, the
             "is os.system('echo x > ../f'), is refused",
             "deny", "cat > run.py <<'EOF'\nimport os\nos.system('echo x > ../f')\nEOF\npython3 run.py",
             "home", rule="other-checkout")
+# Ruling of 08:43 CST: with no script on disk and none written here, judge.py's argument is shell text (main's verdict).
 _relesc_add("other-checkout: heredoc replay split: a heredoc written to cmds.txt, body echo x > ../f, then "
-            "python3 judge.py cmds.txt, is allowed",
-            "allow", "cat > cmds.txt <<'EOF'\necho x > ../f\nEOF\npython3 judge.py cmds.txt", "home")
+            "python3 judge.py cmds.txt with no judge.py on disk, is refused",
+            "deny", "cat > cmds.txt <<'EOF'\necho x > ../f\nEOF\npython3 judge.py cmds.txt", "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay split: a heredoc judge.py that only prints, then python3 judge.py cmds.txt "
+            "whose body is echo x > ../f, is allowed",
+            "allow", "\n".join([
+                "cat > judge.py <<'EOF'",
+                "import sys",
+                "print(sys.argv[1:])",
+                "EOF",
+                "cat > cmds.txt <<'EOF'",
+                "echo x > ../f",
+                "EOF",
+                "python3 judge.py cmds.txt",
+            ]), "home")
 _relesc_add("other-checkout: heredoc replay split: the same heredoc written to cmds.txt, then python3 cmds.txt, "
             "which runs it as the script, is refused",
             "deny", "cat > cmds.txt <<'EOF'\necho x > ../f\nEOF\npython3 cmds.txt", "home", rule="other-checkout")
@@ -22270,10 +22291,10 @@ _relesc_add("other-checkout: heredoc replay read: grep of a quoted rm ../ patter
             "allow", 'grep "rm ../" f', "home")
 _relesc_add("other-checkout: heredoc replay read: rg of a quoted echo x > ../f pattern is allowed",
             "allow", "rg 'echo x > ../f' .", "home")
-_relesc_add("other-checkout: heredoc replay data: perl x.pl with a quoted echo x > ../f argument is allowed",
-            "allow", 'perl x.pl "echo x > ../f"', "home")
-_relesc_add("other-checkout: heredoc replay data: ruby x.rb with a quoted echo x > ../f argument is allowed",
-            "allow", 'ruby x.rb "echo x > ../f"', "home")
+_relesc_add("other-checkout: heredoc replay data: perl x.pl with no x.pl on disk and a quoted echo x > ../f argument is refused",
+            "deny", 'perl x.pl "echo x > ../f"', "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay data: ruby x.rb with no x.rb on disk and a quoted echo x > ../f argument is refused",
+            "deny", 'ruby x.rb "echo x > ../f"', "home", rule="other-checkout")
 _relesc_add("other-checkout: heredoc replay data: a git commit whose message holds echo x > ../f is allowed",
             "allow", 'git commit -m "note: echo x > ../f"', "home")
 # Deny controls: a real redirect into ../f is still refused, whatever the command.
@@ -22285,6 +22306,105 @@ _relesc_add("other-checkout: heredoc replay control: ruby -e with a system call 
             "deny", r'''ruby -e "system('echo x > ../f')"''', "home", rule="other-checkout")
 _relesc_add("other-checkout: heredoc replay control: git commit with a stdout redirect to ../f is refused",
             "deny", "git commit -m x > ../f", "home", rule="other-checkout")
+
+
+# Heredoc replay, script sources. A script's source is visible when a heredoc in the same command writes it, or when
+# it is a readable file on disk. A quoted argument of a script file is data only when that source runs no
+# shell. Each row below is one form of the lane's ruling: a judge that runs its argument in a shell is a deny;
+# a judge that only reads and prints is an allow; a runner whose file argument cannot be resolved keeps every
+# body in view; a written file that is only read is data. Each judge body is written in the same command as the
+# call that runs it, except the two on-disk judges, which the fixture writes. A script with no visible source
+# (neither of those) keeps main's verdict, so its quoted argument is shell text (ruling of 08:43 CST).
+RELESC_JUDGE_READ = "import sys\nprint('judge read:', sys.argv[1:])\n"
+RELESC_JUDGE_RUN = "import os, sys\nos.system(sys.argv[1])\n"
+RELESC_JUDGE_SHELL = "\n".join([
+    "cat > judge.py <<'EOF'",
+    "import subprocess,sys",
+    "subprocess.run(sys.argv[1], shell=True)",
+    "EOF",
+    'python3 judge.py "echo x > ../other/f"',
+])
+RELESC_JUDGE_OS = "\n".join([
+    "cat > judge.py <<'EOF'",
+    "import os,sys",
+    "os.system(sys.argv[1])",
+    "EOF",
+    'python3 judge.py "echo x > ../other/f"',
+])
+RELESC_JUDGE_QUOTE = "\n".join([
+    "cat > judge.py <<'EOF'",
+    "import subprocess,sys",
+    r'print("say \"hi\"")',
+    "subprocess.run(sys.argv[1], shell=True)",
+    "EOF",
+    'python3 judge.py "echo x > ../other/f"',
+])
+RELESC_JUDGE_ARGV_FILE = "\n".join([
+    "cat > judge.py <<'EOF'",
+    "import subprocess,sys",
+    "subprocess.run(['sh', sys.argv[1]])",
+    "EOF",
+    "cat > cmds.txt <<'EOF'",
+    "echo x > ../other/f",
+    "EOF",
+    "python3 judge.py cmds.txt",
+])
+RELESC_FIXTURE_READ = 'python3 judges/read/judge.py "echo x > ../f"'
+RELESC_FIXTURE_RUN = 'python3 judges/run/judge.py "echo x > ../f"'
+RELESC_RESPELLED = "\n".join([
+    "cat > xa <<'EOF'",
+    "echo x > ../other/f",
+    "EOF",
+    "cat > ya <<'EOF'",
+    "echo y",
+    "EOF",
+    'sh ya; bash "$PWD/xa"',
+])
+RELESC_NOTES_WRITE = ["cat > notes.sh <<'EOF'", "echo x > ../other/f", "EOF"]
+RELESC_NOTES_READ = "\n".join(RELESC_NOTES_WRITE + ["cat notes.sh | wc -c"])
+RELESC_NOTES_RUN = "\n".join(RELESC_NOTES_WRITE + ["sh notes.sh"])
+RELESC_CFG_JSON = "\n".join([
+    "cat > cfg.txt <<'EOF'",
+    "echo x > ../other/f",
+    "EOF",
+    "python3 -m json.tool cfg.txt",
+])
+
+_relesc_add("other-checkout: heredoc replay judge: a heredoc judge.py that runs its argument with shell=True, "
+            "then python3 judge.py with a quoted echo x > ../other/f, is refused",
+            "deny", RELESC_JUDGE_SHELL, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay judge: a heredoc judge.py that runs its argument with os.system, "
+            "then python3 judge.py with a quoted echo x > ../other/f, is refused",
+            "deny", RELESC_JUDGE_OS, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay judge: a heredoc judge.py whose body holds an escaped quote and "
+            "runs its argument with shell=True, then the same call, is refused",
+            "deny", RELESC_JUDGE_QUOTE, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay argv: a heredoc judge.py that runs sh on a file argument, then "
+            "python3 judge.py cmds.txt whose body is echo x > ../other/f, is refused",
+            "deny", RELESC_JUDGE_ARGV_FILE, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay fixture: an on-disk judge.py that only reads and prints, given a "
+            "quoted echo x > ../f, is allowed",
+            "allow", RELESC_FIXTURE_READ, "home")
+_relesc_add("other-checkout: heredoc replay fixture: an on-disk judge.py that calls os.system, given a quoted "
+            "echo x > ../f, is refused",
+            "deny", RELESC_FIXTURE_RUN, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay respelled: sh ya, then bash on a quoted $PWD path to xa, whose body "
+            "is echo x > ../other/f, is refused",
+            "deny", RELESC_RESPELLED, "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay notes: a heredoc notes.sh with a body of echo x > ../other/f, then "
+            "cat notes.sh | wc -c, is allowed",
+            "allow", RELESC_NOTES_READ, "home")
+_relesc_add("other-checkout: heredoc replay notes: the same heredoc notes.sh, then sh notes.sh, is refused",
+            "deny", RELESC_NOTES_RUN, "home", rule="other-checkout")
+# Pinned to origin/main's verdict: main refuses this call. The module is not a script file this guard can read.
+_relesc_add("other-checkout: heredoc replay cfg: python3 -m json.tool on a heredoc cfg.txt whose body is "
+            "echo x > ../other/f, is refused as main refuses it",
+            "deny", RELESC_CFG_JSON, "home", rule="other-checkout")
+# Ruling of 08:43 CST: a script whose source is not visible (no heredoc in this command, no readable file)
+# keeps main's verdict. Its quoted argument is read as shell text, so a write elsewhere in it is refused.
+_relesc_add("other-checkout: heredoc replay missing: python3 missing_judge.py with a quoted echo x > ../other/f, "
+            "a script that is neither on disk nor written here, is refused",
+            "deny", 'python3 missing_judge.py "echo x > ../other/f"', "home", rule="other-checkout")
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a

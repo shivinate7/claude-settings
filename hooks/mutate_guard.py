@@ -1437,11 +1437,11 @@ MUTATIONS = [
     ("other-checkout: a python, node, perl or ruby script file's quoted arguments are read as shell words",
      '        start = 1 if kind == "reader" else guard_core.interpreter_script([_unquoted(w) for w in words]) + 1',
      '        start = len(words)',
-     "guard", "heredoc replay bisect3: python3 judge.py with a quoted echo x > ../f as its one argument is allowed"),
+     "guard", "heredoc replay fixture: an on-disk judge.py that only reads and prints, given a quoted echo x > ../f, is allowed"),
     ("other-checkout: a file that an interpreter gets as a later data argument reads as its script",
      '                    scripts.add(words[at + script])   # a later argument of that interpreter is data',
      '                    scripts.update(words[at + 1:])   # a later argument of that interpreter is data',
-     "guard", "heredoc replay split: a heredoc written to cmds.txt, body echo x > ../f, then python3 judge.py cmds.txt, is allowed"),
+     "guard", "heredoc replay split: a heredoc judge.py that only prints, then python3 judge.py cmds.txt whose body is echo x > ../f, is allowed"),
     # The write act's exemption: `worktree_home_red_write_case`.
     ("other-checkout: a write into the agent's own red-run folder is refused",
      '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
