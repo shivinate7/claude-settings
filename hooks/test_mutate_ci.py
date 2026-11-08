@@ -1473,6 +1473,7 @@ CHAIN_MID_LOADS = {  # hooks/entry.py, the intermediate module, loads merge/targ
             "spec = importlib.util.spec_from_file_location(\"target\", TARGET)\n",
     "open": CHAIN_HEAD + "TARGET = os.path.join(HERE, \"..\", \"merge\", \"target.py\")\n"
             "with open(TARGET, encoding='utf-8') as handle:\n    handle.read()\n"}
+CHAIN_CI_JOB_PATH = 'CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")\n'  # a path expression that names bin/ci-job, and loads nothing
 CHAIN_LOOP_OPENS = (CHAIN_HEAD + "for name in (\"leaf.py\", \"other.py\"):\n"  # the suite opens each file in a loop
                     "    with open(os.path.join(HERE, name), encoding='utf-8') as handle:\n        handle.read()\n")
 CHAIN_LOOP_COPIES = (CHAIN_HEAD + "import shutil\n\nfor name in (\"leaf.py\", \"other.py\"):\n"  # or copies each one
@@ -1567,7 +1568,9 @@ class LintSuitesChainTests(unittest.TestCase):
     format() is, and a name is read only in the function that binds it. A loop name split into path parts, read from a
     dict's items() or values(), zipped, or passed through basename() or replace() is followed; each of these forms has a
     control with a literal in place of the loop name. A module-level def named like a file call (`run`) is a helper, so a
-    call of it with a path is no load, and a dict's key or a zip's first name is not the name a suite opens (the pins)."""
+    call of it with a path is no load, and a dict's key or a zip's first name is not the name a suite opens (the pins). A
+    non-.py path that a middle module names in a path expression, and loads nothing, picks no suite; the suite's own naming
+    of that path picks it (the pair)."""
 
     def picked(self, repo):
         code, out, err = run_cli(["--lint-suites", "main"], cwd=repo)
@@ -1849,6 +1852,23 @@ class LintSuitesChainTests(unittest.TestCase):
         self.assertIn(CHAIN_SUITE, self.picked(repo),
                       "--lint-suites must pick %s for a diff that deletes merge/target.py: entry.py, unchanged, opens it by a "
                       "path constant, and the suite imports entry.py" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_bin_ci_job_does_not_pick_a_suite_that_reaches_a_module_naming_it_in_a_path(self):
+        repo = chain_repo(CHAIN_HEAD + CHAIN_CI_JOB_PATH, {"bin/ci-job": "#!/bin/sh\necho 2\n"}, suite="import entry\n",
+                          base={"bin/ci-job": "#!/bin/sh\necho 1\n"})
+        self.assertEqual(self.changed(repo), ["bin/ci-job"], "the scope: the diff holds only bin/ci-job")
+        self.assertNotIn(CHAIN_SUITE, self.picked(repo),
+                         "--lint-suites must not pick %s for a diff of only bin/ci-job: entry.py, which the suite imports, names "
+                         "bin/ci-job in a path expression and loads nothing, and a non-.py path that only a middle module names "
+                         "is no load of the file" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_bin_ci_job_picks_the_suite_that_names_it_in_a_path_itself(self):  # the control
+        repo = chain_repo(CHAIN_HEAD + CHAIN_CI_JOB_PATH, {"bin/ci-job": "#!/bin/sh\necho 2\n"},
+                          suite=CHAIN_HEAD + "import entry\n\n" + CHAIN_CI_JOB_PATH, base={"bin/ci-job": "#!/bin/sh\necho 1\n"})
+        self.assertEqual(self.changed(repo), ["bin/ci-job"], "the scope: the diff holds only bin/ci-job")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only bin/ci-job: the suite names bin/ci-job in a path expression "
+                      "itself" % CHAIN_SUITE)
 
 
 if __name__ == "__main__":
