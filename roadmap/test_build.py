@@ -516,11 +516,22 @@ exit 0
         self.stage("c2")
         self.assert_passed(self.commit())
 
+    def test_gap_new_done_step_with_no_key_passes(self):
+        self.step("c1", 10, "done", gap=NO_KEY)
+        self.stage("c1")
+        self.assert_passed(self.commit())
+
     def test_gap_done_to_open_flip_onto_an_open_key_is_refused(self):
         self.seed(("c1", 10, "open", "shared-key"), ("c2", 10, "done", "shared-key"))
         self.step("c2", 10, "open", gap="shared-key")
         self.stage("c2")
         self.assert_refused(self.commit(), "c1", "c2", why="a done step flipped open onto a held key was committed")
+
+    def test_gap_open_step_changed_onto_another_open_key_is_refused(self):
+        self.seed(("c1", 10, "open", "key-a"), ("c2", 10, "open", "key-b"))
+        self.step("c2", 10, gap="key-a")
+        self.stage("c2")
+        self.assert_refused(self.commit(), "c1", "c2", why="an open step was changed onto a key another open step holds")
 
     def test_gap_two_new_steps_on_one_key_in_one_commit_are_refused(self):
         self.step("c1", 10, gap="shared-key")
@@ -533,14 +544,23 @@ exit 0
         self.stage("c1")
         self.assert_refused(self.commit(), "c1", "gap", why="a new open step with no gap field was committed")
 
-    def test_gap_empty_blank_null_or_non_string_key_counts_as_no_key(self):
-        self.write("c1", dict(STEP, note=words(10), gap=""))
-        self.write("c2", dict(STEP, note=words(10), gap="   "))
-        self.write("c3", dict(STEP, note=words(10), gap=7))
-        self.write("c4", dict(STEP, note=words(10), gap=None))
-        self.stage("c1", "c2", "c3", "c4")
-        self.assert_refused(self.commit(), "c1", "c2", "c3", "c4", "gap",
-                            why="a new open step whose gap is blank, null or not a string was committed")
+    def assert_keyless_refused(self, gap, why):
+        """A new open step whose gap is gap counts as having no key: refused, and named as lacking gap."""
+        self.write("c1", dict(STEP, note=words(10), gap=gap))
+        self.stage("c1")
+        self.assert_refused(self.commit(), "c1", "gap", why=why)
+
+    def test_gap_empty_key_counts_as_no_key(self):
+        self.assert_keyless_refused("", why="a new open step with an empty gap was committed")
+
+    def test_gap_blank_key_counts_as_no_key(self):
+        self.assert_keyless_refused("   ", why="a new open step with a blank gap was committed")
+
+    def test_gap_null_key_counts_as_no_key(self):
+        self.assert_keyless_refused(None, why="a new open step with a null gap was committed")
+
+    def test_gap_non_string_key_counts_as_no_key(self):
+        self.assert_keyless_refused(7, why="a new open step with a non-string gap was committed")
 
     def test_gap_edit_of_a_keyless_step_passes(self):
         self.seed(("c1", 10, "open", NO_KEY))
