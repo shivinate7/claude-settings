@@ -363,6 +363,10 @@ def file_loads(rel, source, files):
         elif isinstance(node, ast.ImportFrom):
             if node.level == 0 and node.module:
                 out |= package_loads(node.module, rel, node, files, by_name)
+                # `from merge import records` names merge/records.py. A name that is no submodule file is an attribute of the module,
+                # which package_loads already reads.
+                if "." not in node.module and node.module in LOAD_ROOTS:
+                    out |= {f"{node.module}/{a.name}.py" for a in node.names if f"{node.module}/{a.name}.py" in files}
             elif node.level:  # a sibling of this file
                 for name in ([node.module] if node.module else [a.name for a in node.names]):
                     out.add(posixpath.normpath(posixpath.join(here, name.replace(".", "/") + ".py")))
@@ -638,6 +642,12 @@ class UnresolvedLoads(unittest.TestCase):
     def test_a_dotted_import_of_a_folder_named_like_a_module_reads_the_submodule(self):
         self.assertEqual(file_loads("hooks/mid.py", "from merge.records import X\n", {"merge/merge.py", "merge/records.py"}),
                          {"merge/records.py"}, "the dotted import of merge.records drops merge/records.py")
+
+    # Fix 3: a name imported from such a folder reads the submodule of that name. Named failure: `from merge import records` reads only
+    # merge/merge.py, and drops merge/records.py.
+    def test_a_from_import_of_a_submodule_of_a_folder_named_like_a_module_reads_the_submodule(self):
+        got = file_loads("hooks/mid.py", "from merge import records\n", {"merge/merge.py", "merge/records.py"})
+        self.assertIn("merge/records.py", got, "the from-import of merge's records drops merge/records.py")
 
     # Fix 3: a missing submodule of such a folder fails loud. Named failure: the reader falls back to merge/merge.py and passes.
     def test_a_dotted_import_of_a_missing_submodule_of_such_a_folder_fails_loud(self):
