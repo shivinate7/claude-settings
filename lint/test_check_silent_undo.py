@@ -2399,5 +2399,109 @@ class RetireCite(unittest.TestCase):
         self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
 
 
+class RevivedNote(unittest.TestCase):
+    """A note the branch deleted must not come back when a merge brings the base in. The notes file merges by union (the
+    real `.gitattributes` line), so a merge that conflicts at the file's end keeps the base's copy with no clash. Each case
+    runs twice: with that line, and with no `.gitattributes`, where the same merge conflicts and is resolved by hand."""
+
+    ATTRIBUTES = os.path.join(os.path.dirname(HERE), ".gitattributes")  # the real file: its union line is what is under test
+    NOTES = "docs/debts/notes.md"
+    HEADING = "# Notes: findings too unlikely to hit to be debts"
+    UNTOUCHED = "- untouched-note: a finding the branch never touches (lint/check_untouched.py)"
+    RETIRED = "- retired-note: a finding the branch retires (lint/check_retired.py)"
+    OWN = "- branch-note: a finding the branch adds (lint/check_branch.py)"
+    MAIN = "- main-note: a finding main adds after the cut (lint/check_main.py)"
+
+    def text(self, *lines):
+        return "".join(line + "\n" for line in (self.HEADING,) + lines)
+
+    def notes_at(self, rev):
+        return self.r.sh("show", "%s:%s" % (rev, self.NOTES)).splitlines()
+
+    def start(self, union, retire=True):
+        """A base whose notes end in retired-note, then an unrelated main commit, so the fork point is that commit and not the
+        one that added the notes. The branch deletes retired-note, or with retire False appends a line of its own. Main then
+        appends main-note after retired-note, so the two edits meet at the end of the file. The layout file makes the notes
+        path docs/debts/notes.md, as RetireCite does."""
+        r = self.r = Repo()
+        self.union = union
+        r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
+        if union:
+            shutil.copyfile(self.ATTRIBUTES, os.path.join(r.dir, ".gitattributes"))
+        r.commit("notes", docs__debts__notes_md=self.text(self.UNTOUCHED, self.RETIRED))
+        r.commit("unrelated main commit", other_txt="other v1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        self.assertEqual(r.sh("check-attr", "merge", "--", self.NOTES).rsplit(": ", 1)[-1], "union" if union else "unspecified",
+                         "premise: this variant's driver for the notes file")
+        self.retire = None
+        if retire:
+            self.retire = r.commit("retire the note", docs__debts__notes_md=self.text(self.UNTOUCHED))
+        else:
+            r.commit("append a line of the branch's own", docs__debts__notes_md=self.text(self.UNTOUCHED, self.RETIRED, self.OWN))
+        r.sh("checkout", "-q", "main")
+        r.commit("main appends", docs__debts__notes_md=self.text(self.UNTOUCHED, self.RETIRED, self.MAIN))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+
+    def merge_main(self, final=None):
+        """Merges main into the branch and commits the result. self.merged is the file git wrote before any resolution. `final`,
+        when given, is the text the merge commit holds instead. -> the head sha."""
+        r = self.r
+        r.sh("merge", "--no-commit", "--no-ff", "main", ok=False)  # a conflict is resolved below, never left open
+        with open(os.path.join(r.dir, *self.NOTES.split("/")), encoding="utf-8") as f:
+            self.merged = f.read()
+        self.assertEqual("<<<<<<<" in self.merged, not self.union, "premise: the merge conflicts only without the union line")
+        if final is not None:
+            r.put(self.NOTES, final)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main into the branch")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", head).split()), 3, "premise: the head is a merge commit")
+        return head
+
+    def assert_refused(self, got):
+        """One problem line names retired-note and the commit that deleted it."""
+        named = [p for p in got if "retired-note" in p and self.retire[:7] in p]
+        self.assertTrue(named, "retired-note came back through the merge, and no problem names it with %s: %r" % (self.retire[:7], got))
+
+    def test_union_merge_that_brings_back_a_deleted_note_is_refused(self):
+        self.start(union=True)
+        head = self.merge_main()
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the union merge brought retired-note back")
+        self.assert_refused(self.r.verdict())
+
+    def test_plain_merge_that_brings_back_a_deleted_note_is_refused(self):
+        self.start(union=False)
+        head = self.merge_main(final=self.text(self.UNTOUCHED, self.RETIRED, self.MAIN))
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the resolved plain merge brought retired-note back")
+        self.assert_refused(self.r.verdict())
+
+    def test_union_merge_that_leaves_the_deleted_note_out_passes(self):
+        self.start(union=True)
+        head = self.merge_main(final=self.text(self.UNTOUCHED, self.MAIN))
+        self.assertIn(self.RETIRED, self.merged, "premise: the union merge had brought retired-note back before the merge commit dropped it")
+        self.assertNotIn(self.RETIRED, self.notes_at(head), "premise: the merge commit leaves retired-note out")
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_plain_merge_that_leaves_the_deleted_note_out_passes(self):
+        self.start(union=False)
+        head = self.merge_main(final=self.text(self.UNTOUCHED, self.MAIN))
+        self.assertNotIn(self.RETIRED, self.notes_at(head), "premise: the resolved plain merge leaves retired-note out")
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_a_note_the_branch_never_touched_passes_with_union(self):
+        self.start(union=True, retire=False)
+        head = self.merge_main()
+        self.assertIn(self.UNTOUCHED, self.notes_at(head), "premise: untouched-note is in the head")
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_a_note_the_branch_never_touched_passes_plain(self):
+        self.start(union=False, retire=False)
+        head = self.merge_main(final=self.text(self.UNTOUCHED, self.RETIRED, self.OWN, self.MAIN))
+        self.assertIn(self.UNTOUCHED, self.notes_at(head), "premise: untouched-note is in the head")
+        self.assertEqual(self.r.verdict(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
