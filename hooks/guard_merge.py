@@ -480,9 +480,13 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 # A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form), name
 # the pull request it is posted on, and name that pull request's live head. A hand-typed head is how a record goes stale the
 # moment it is posted. The remedy is the render, which fills the live head itself.
-# Cost: one pull request read per marked post (`Host.pr`), none for a post with no marker. A read that fails allows the post
+# Cost: one pull request read per marked post (`Host.pr`), none for a post with no marker; a marked update adds one comment read. A read that fails allows the post
 # with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
 REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
+# The update tool's input names a comment, not a pull request: the pull request comes from one read of the comment.
+UPDATE_COMMENT_TOOL = "mcp__github__update_issue_comment"
+# The host's file-write tools each push a commit to the `branch` they name, as `git push` does.
+FILE_WRITE_TOOLS = ("mcp__github__push_files", "mcp__github__create_or_update_file", "mcp__github__delete_file")
 REVIEW_RENDER = "merge %s --review-record --head %s --kind <%s> --guard <%s> --round <N:ROLE:MODEL:VERDICT>"
 REVIEW_REASON = (
     "Rule (pr-review-record): %s. A review record is rendered by the merge tool for the live head, never typed by hand. "
@@ -496,11 +500,25 @@ def review_note(why: str) -> None:
     sys.stderr.write("review-record: not checked, " + why + "\n")
 
 
+def comment_pull_request(comment_id):
+    """A selector for review_record_hit: the pull request number a conversation comment sits on, from one read of the comment."""
+    def read(host):
+        code, out = host.api("issues/comments/%d" % comment_id)
+        if code:
+            raise RuntimeError("reading the comment failed")
+        found = re.search(r"/issues/(\d+)$", str(json.loads(out).get("issue_url", "")))
+        if not found:
+            raise RuntimeError("the comment names no issue")
+        return found.group(1)
+    return read
+
+
 def review_record_hit(bodies, repo: str, selector, where: str):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
-    or '' for the current branch's), `repo` is OWNER/NAME or ''. No body holding the marker: None, and no read."""
+    or '' for the current branch's), `repo` is OWNER/NAME or ''. A callable `selector` takes the Host and returns that name,
+    so its read happens only once the body parses. No body holding the marker: None, and no read."""
     texts = [b for b in bodies if isinstance(b, str) and b]
     if not any("review-record" in b for b in texts):
         return None   # the cheap test: no marker is possible, so the merge tool is not even loaded
@@ -515,7 +533,7 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     def render_for(number, head):
         return REVIEW_RENDER % (number, head, "|".join(module.REVIEW_KINDS), "|".join(module.REVIEW_GUARDS))
 
-    named = str(selector).strip()
+    named = "" if callable(selector) else str(selector).strip()
     for body in marked:
         if module.parse_review(body) is None:
             render = render_for(named if named.isdigit() else "<pr>", "<live head>")
@@ -524,7 +542,7 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)
-            number = host.pr_number(selector)
+            number = host.pr_number(selector(host) if callable(selector) else selector)
             live = str(host.pr(number)["head"])
     except (Exception, SystemExit) as e:
         review_note("the live head could not be read (" + cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80) + ")")

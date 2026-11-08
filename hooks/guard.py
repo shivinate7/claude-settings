@@ -128,7 +128,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        network remote: `main` alone, and `main` with a lane-named branch. An
                        agent-named destination in the same push is push-agent-branch's, which refuses.
                        A remote the shell has not expanded counts as one. The remote's HEAD is not
-                       read. A dry run passes.
+                       read. A dry run passes. The MCP push_files, create_or_update_file and delete_file tools
+                       ask when their `branch` is main or master.
   push-stray-branch    ask. An implied push (bare, `HEAD`, `@`, or a colon-less refspec naming the
                        current branch) that writes a name other than the branch's upstream. It is silent
                        when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
@@ -150,6 +151,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too, and the MCP
                        merge_pull_request and enable_pr_auto_merge tools.
+                       The same two MCP tools ask (bare-merge) on a green head in a repo that uses the merge tool.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
@@ -225,6 +227,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        command without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
                        Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
+  pr-review-record     deny. A marked review record posted with a wrong or hand-typed head or number, as a comment
+                       or as an MCP add_issue_comment or update_issue_comment (the update finds its pull request from the comment).
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD passes: MERGE_HEAD is on the base's first-parent
                        line, or the lane is stacked on a base that main has not merged.
@@ -574,7 +578,7 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
+            DEFAULT_BRANCH_FALLBACK, DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
             cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
             rm_delete_hit, SUBST_OPEN, _in_group,
@@ -587,6 +591,7 @@ while True:
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target,
+            FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -7038,6 +7043,16 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+        # As `gh pr merge` does: a green merge in a repo that uses the merge tool asks. A deny above wins.
+        if uses_merge_tool(cwd):
+            refuse(tool, "ask", "bare-merge", BARE_MERGE_REASON, "merge tool bare merge")
+
+    # A file write through the host's tools pushes a commit to the branch it names. Every one of them requires `branch`
+    # in its schema, so a call with none fails at the host and is not judged here.
+    if tool in FILE_WRITE_TOOLS:
+        branch = tool_input.get("branch")
+        if isinstance(branch, str) and branch.strip() in DEFAULT_BRANCH_FALLBACK:
+            refuse(tool, "ask", "push-main", PUSH_MAIN_REASON, tool + " to " + branch.strip())
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
     if tool == "mcp__github__update_pull_request":
@@ -7063,6 +7078,17 @@ def judge(payload) -> None:
                 refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
+
+    # The update tool names a comment, not a pull request. Its one comment read runs only once a marked body parses.
+    if tool == UPDATE_COMMENT_TOOL:
+        owner, name, comment_id = (tool_input.get(k) for k in ("owner", "repo", "comment_id"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        if isinstance(comment_id, int) and not isinstance(comment_id, bool):
+            hit = review_record_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
+            if hit:
+                refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
+            review_note("the call names no comment id")
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
     stamped = stamp_hit(tool, tool_input)
