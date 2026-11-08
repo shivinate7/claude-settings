@@ -1,0 +1,11 @@
+{
+  "title": "The review-record guard judges an MCP issue-comment edit or create on a review record",
+  "phase": "now",
+  "status": "doing",
+  "order": 60.01,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
+  "why": "A review record edited or posted through the GitHub MCP tool skips the guard today, so a record can change with no check.",
+  "note": "Stacked on #1707; merges after #1687. Retires debt review-record-mcp-edit-unjudged. Filed from the coordinator, 19:29 CST Nov 7.",
+  "updatedAt": "2026-11-07T19:29:00-06:00"
+}
