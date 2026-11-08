@@ -8553,6 +8553,8 @@ FLAG_FALSE_ALARM_ALLOW = (
     "rg -t py " + ENV,
     "mkdir " + ENV + "s",
     "cd " + ENV + "s",
+    "pushd " + ENV + "s",
+    "cd " + ENV + ".d",
     "jq " + ENV + "ironment f.json",
     "jq " + ENV + "From f.json",
     "jq " + ENV + " f.json",
@@ -8596,6 +8598,22 @@ for _cmd in FLAG_FALSE_ALARM_ALLOW:
     sh("env: flag-false-alarm: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
 for _cmd in FLAG_FALSE_ALARM_REFUSE:
     sh("env: flag-false-alarm: still refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+
+# ---- a folder move into an env-prefixed name, then a read in the same call. Decision env-file-stays-unread.
+# `cd` and `pushd` read no contents, so `cd .envs` alone stays allowed (FLAG_FALSE_ALARM_ALLOW). The move
+# changes the folder the next word reads from, so a read after it in the same call names that folder's contents.
+# Set-Location is the PowerShell cd.
+sh("env: folder move: cd into .envs, then cat a file in it", "cd " + ENV + "s && cat config.json",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: pushd into .envs, then cat a file in it", "pushd " + ENV + "s && cat config.json",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: cd into .env.d, then cat a file in it", "cd " + ENV + ".d && cat x",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: folder move: PowerShell Set-Location into .envs, then Get-Content a file in it",
+   "Set-Location " + ENV + "s; Get-Content config.json", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+# ag reads the files its -G glob names. -G takes a value, so the `.env` after `-fG` is that glob, and it is read.
+sh("env: flag-false-alarm: ag -fG takes .env as its -G glob, and the glob reads it",
+   "ag -fG " + ENV + " K", "deny", "env-file", cwd=NOGIT)
 
 
 def incident_write_strip_case():
