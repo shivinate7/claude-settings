@@ -1104,6 +1104,15 @@ def _settings_place(path: str, cwd: str) -> bool:
         root = _checkout_root_by_stat(os.path.realpath(_expanded(cwd, "")))
         if root:
             here.add(os.path.normcase(root))
+        # A folder holding `install.ps1` is an install source: a local install links ~/.claude/settings.json to its settings.json.
+        up = os.path.realpath(_expanded(cwd, ""))
+        while up:
+            if os.path.exists(os.path.join(up, "install.ps1")):
+                here.add(os.path.normcase(up))
+                break
+            if os.path.dirname(up) == up:
+                break
+            up = os.path.dirname(up)
     return os.path.normcase(os.path.realpath(folder)) in here
 
 
