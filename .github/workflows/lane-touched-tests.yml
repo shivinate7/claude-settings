@@ -128,7 +128,7 @@ jobs:
             # No stdin from the loop: a test that reads it would eat the rest of the list.
             if run_one "$f" "$c" < /dev/null; then rc=0; else rc=$?; fi
             echo "::endgroup::"
-            if [ "$rc" -eq 0 ]; then echo "PASS $f"; elif [ "$rc" -eq 77 ]; then echo "SKIP $f (runs in the PowerShell step)"; else echo "FAIL $f (exit $rc)"; failed=1; fi
+            if [ "$rc" -eq 0 ]; then echo "PASS $f"; elif [ "$rc" -eq 77 ] && [ "${f%.test.ps1}" != "$f" ]; then echo "SKIP $f (runs in the PowerShell step)"; else echo "FAIL $f (exit $rc)"; failed=1; fi
           done <<< "$list"
           exit "$failed"
 
@@ -144,7 +144,9 @@ jobs:
           $allowed = @('powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')
           $commands = $env:COMMANDS | ConvertFrom-Json
           $failed = $false
-          foreach ($path in @($env:FILES | ConvertFrom-Json)) {
+          # Windows PowerShell 5.1 puts a whole JSON array on the pipeline as one object, so assign it before the loop.
+          $files = $env:FILES | ConvertFrom-Json
+          foreach ($path in @($files)) {
             if (-not $path.EndsWith('.test.ps1')) { continue }
             $property = $commands.PSObject.Properties[$path]
             $words = @(if ($property) { $property.Value -split ' ' | Where-Object { $_ } })
