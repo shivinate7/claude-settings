@@ -19716,6 +19716,50 @@ add("brief-destructive-git: the brief's own allow paragraphs, as a test-author b
     tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
 add("brief-destructive-git: an empty brief is allowed", "allow",
     tool="Agent", prompt="", subagent_type="builder", model="sonnet")
+# Brief-scan cases for these causes: a negation word the scan does not read, a Never heading over bullets, a read-only
+# role, a branch or worktree act, a scratch segment joined to a reset, and an inline triple-backtick span.
+add("brief-destructive-git: builder brief that says `git reset --hard` must not run is allowed", "allow",
+    tool="Agent", prompt="You must not run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says `git reset --hard` should not run is allowed", "allow",
+    tool="Agent", prompt="You should not run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says to avoid `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Avoid `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says you cannot run `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="You cannot run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that says to work without `git reset --hard` is allowed", "allow",
+    tool="Agent", prompt="Work without `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: bullets under a `Never run:` heading that name `git reset --hard` and `git stash` are allowed",
+    "allow", tool="Agent", prompt="Never run:\n- `git reset --hard`\n- `git stash`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: reviewer brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="reviewer", model="sonnet")
+add("brief-destructive-git: Explore brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="Explore")
+add("brief-destructive-git: Plan brief that says `git reset --hard origin/main` is refused is allowed", "allow",
+    tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.", subagent_type="Plan")
+add("brief-destructive-git: builder brief that orders `git branch -D old-lane` is allowed", "allow",
+    tool="Agent", prompt="Delete it locally: `git branch -D old-lane`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git worktree prune` is allowed", "allow",
+    tool="Agent", prompt="Then run `git worktree prune`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: builder brief that orders `git worktree remove x` is allowed", "allow",
+    tool="Agent", prompt="Then run `git worktree remove x`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Compare: `git -C " + SCRATCH_REPO + " status && git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a reset under an inline ``` span line that is not a fence is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="```git status```\nRun `git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+# Controls: a clause break before an order keeps it an order, a negation covers a span after an earlier span, and a
+# builder's refusal text still orders a reset.
+add("brief-destructive-git: control, a semicolon before the order keeps it an order and is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Don't skip tests; run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, a never over an earlier span still covers the reset after it is allowed", "allow",
+    tool="Agent", prompt="Never run `a` or `git reset --hard`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: control, builder brief that says `git reset --hard origin/main` is refused is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
+    subagent_type="builder", model="sonnet")
 
 
 # The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override
