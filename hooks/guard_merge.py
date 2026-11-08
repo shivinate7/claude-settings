@@ -229,7 +229,7 @@ def merge_call_of(segment: str):
         return pr_call_target(args, MERGE_VALUE_FLAGS)
     if rest[:1] == ["api"] and _api_method(rest[1:]) == "PUT":
         for arg in rest[1:]:
-            found = MERGE_ROUTE.fullmatch(arg)
+            found = MERGE_ROUTE.fullmatch(arg.rstrip(")"))   # `(cd d && gh api -X PUT .../merge)` ends its last word with the subshell's ")"
             if found:
                 repo = found.group(1)
                 return found.group(2), "" if "{" in repo else repo   # a placeholder names the folder's own repo
