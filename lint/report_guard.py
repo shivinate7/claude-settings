@@ -1574,6 +1574,9 @@ CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
 # The past-ruling guard's own remedy says why its check could not run. A line or a sentence that starts with its label is
 # that form; the guard lets the label follow a question on the same line.
 CANNOT_UNVETTED_RE = re.compile(r"^(?:[-*+]|\d+[.)])?\s*(?:\*\*)?Unvetted:", re.I)
+# A phrase in the past tense reports a failure: could not, wasn't able, or any phrase right after was or were ("was unable to").
+CANNOT_PAST_RE = re.compile(r"^(?:could|wasn['’]t)", re.I)
+CANNOT_WAS_RE = re.compile(r"\b(?:was|were)(?:\s+(?:still|also|just|really|now))?\s*$", re.I)
 CANNOT_WINDOW = 6  # words after the phrase, in its clause, that may name the act
 CANNOT_ADVERB_RE = re.compile(r"^(?:(?:even|yet|currently|actually|really|still|also|just|now|directly)\s+)+", re.I)
 _PR = r"(?:PRs?|pull[- ]requests?)"
@@ -1635,6 +1638,9 @@ CANNOT_CHECK_RE = re.compile(
     r"`[^`\n]+`|\bmcp__\w+|\b(?:tried|ran|returned|refused|denied|failed|errored"
     r"|returns|refuses|denies|rejects|fails|errors)\b|\b[45]\d\d\b|\bexit(?: code)? [1-9]",
     re.I)
+# With a failed try of the act in the turn, the line may name its check as a reason instead: three words or more in
+# parentheses, after a colon, or after because. A bare claim has none of these.
+CANNOT_REASON_RE = re.compile(r"\([^()\s]+(?:\s+[^()\s]+){2,}\)|:\s+\S+(?:\s+\S+){2,}|\bbecause\s+\S+(?:\s+\S+){2,}", re.I)
 CANNOT_HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
 CANNOT_NO_TRY = (
     CANNOT_HEAD + "this turn shows no failed try of it. A notice is no try. Remedy: run the act on one route; if it "
@@ -1668,7 +1674,7 @@ def _window_act(window, clause):
 
 
 def _claim(body, mask, hit, floor):
-    """(act, window) when the phrase `hit` claims this session cannot do a table act, else None. `body` and `mask` are one
+    """(act, window, past) when the phrase `hit` claims this session cannot do a table act, else None. `body` and `mask` are one
     sentence; `floor` is where the previous phrase of the sentence ended, so words that condition it do not condition this
     one. Not a claim: a conditional or a negator just before the phrase (since the last comma, but or clause break), a
     subject that is not the writer's own (CANNOT_SUBJECT_RE), a verb of telling or waiting after it, a dependency (until,
@@ -1706,7 +1712,7 @@ def _claim(body, mask, hit, floor):
     act = _window_act(window, before + " " + after)
     if not act or _names_rule_id(after):
         return None
-    return act, window
+    return act, window, bool(CANNOT_PAST_RE.match(hit.group()) or CANNOT_WAS_RE.search(before))
 
 
 def _joined_blocker(lead, before, after, tail):
@@ -1764,7 +1770,7 @@ def _report_label_end(body):
 
 
 def cannot_lines(text):
-    """(sentence, act, window) for each phrase of the reply's prose that claims a table act cannot be done. The text is
+    """(sentence, act, window, past) for each phrase of the reply's prose that claims a table act cannot be done. The text is
     read a sentence at a time: a sentence that ends in `?` asks and claims nothing, one that starts with Unvetted: (the
     past-ruling guard's form) is not read, and neither is a line that starts with it or a Why yours line (the hand-off
     guard's). Every phrase of a sentence is judged."""
@@ -1790,7 +1796,7 @@ def cannot_lines(text):
                 claim = _claim(piece, shadow, hit, floor)
                 floor = hit.end()
                 if claim:
-                    found.append((sentence, claim[0], claim[1]))
+                    found.append((sentence, claim[0], claim[1], claim[2]))
     return found
 
 
@@ -1901,12 +1907,12 @@ def _call_tries(use, text):
     return {(act, (name, target)) for act in _tool_acts(name)}
 
 
-def failed_tries(records, refused=()):
+def failed_tries(records, refused=(), recovered=None):
     """{act: {key, ...}} for each failed tool try in `records`, sidechains skipped. A call failed when its result has
     is_error, an exit code above zero as a shell result reports it, or an HTTP 4xx or 5xx (CANNOT_FAIL_RE). A later call
     that did not fail cancels the earlier failures of the same act and key (the same program, verb and target); a relay's
     text is no call of its own, so it cancels nothing. A tool in `refused` (the classifier's refusals file) counts as a
-    failed try."""
+    failed try. When `recovered` is a set, each act whose failure a later call cancelled is added to it."""
     uses, tries = {}, {}
     for rec in records:
         if rec.get("isSidechain"):
@@ -1925,6 +1931,8 @@ def failed_tries(records, refused=()):
                     tries.setdefault(act, set()).add(key)
             elif not _is_relay(use):
                 for act, key in found:
+                    if key in tries.get(act, ()) and recovered is not None:
+                        recovered.add(act)
                     tries.get(act, set()).discard(key)
     for tool in refused:
         for act in _tool_acts(tool):
@@ -1955,8 +1963,10 @@ def _cited(line, refused):
 def cannot_problem(records, text, refused=()):
     """The refusal for reply sentences that claim a table act cannot be done, else ''. `records` are those after the last
     human message. A sentence passes when a failed try of its act sits in them (failed_tries) or it carries a cite
-    (_cited), and it names its check (CANNOT_CHECK_RE). A sentence with no try is listed under the no-try reason, one with
-    a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target)."""
+    (_cited), and it names its check (CANNOT_CHECK_RE, or a reason when a failed try sits in the turn: CANNOT_REASON_RE). A
+    sentence in the past tense (could not) whose failed try a later call of the same act and target cancelled reports a past
+    failure and is let pass; a present claim (cannot) after that later success still blocks.
+    A sentence with no try is listed under the no-try reason, one with a try and no check under the no-check reason. The remedy names no act (git-remedy-never-names-target)."""
     claims = cannot_lines(text)
     if not claims:
         return ""
@@ -1966,13 +1976,17 @@ def cannot_problem(records, text, refused=()):
         print("cannot-claim guard: UNKNOWN, the transcript parser did not load, so the claims went unchecked.",
               file=sys.stderr)
         return ""
-    tries = failed_tries(records, refused)
+    recovered = set()
+    tries = failed_tries(records, refused, recovered)
     no_try, no_check = [], []
-    for sentence, act, _ in claims:
+    for sentence, act, _, past in claims:
+        if past and not tries.get(act) and act in recovered:  # the try failed once and a later call of it worked
+            continue
         if not tries.get(act) and not _cited(sentence, refused):
             if sentence not in no_try:
                 no_try.append(sentence)
-        elif not CANNOT_CHECK_RE.search(sentence) and sentence not in no_check:
+        elif not (CANNOT_CHECK_RE.search(sentence) or tries.get(act) and CANNOT_REASON_RE.search(sentence)) \
+                and sentence not in no_check:
             no_check.append(sentence)
     return " ".join(head + "".join("\n- " + line for line in lines)
                     for head, lines in ((CANNOT_NO_TRY, no_try), (CANNOT_NO_CHECK, no_check)) if lines)

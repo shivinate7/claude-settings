@@ -710,6 +710,73 @@ class CannotClaimTests(unittest.TestCase):
                          *ok_bash("gh pr merge 12", "tu_m2"), landed_reply(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
+    # ---- a reason in the line names the check; a later success makes a past failure no claim
+
+    def test_cc_red_a_reason_in_parentheses_names_the_check_after_a_failed_merge(self):
+        # Catches: the check reads only backticks, tool names and error words as naming the check, so a failed merge
+        # with its reason in parentheses blocked as naming no check.
+        line = "I cannot merge PR 12 (the PR is not mergeable)."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_passes(out, "a failed merge, with its reason in parentheses")
+
+    def test_cc_red_a_reason_after_a_colon_names_the_check_after_a_failed_push(self):
+        # Catches: the remote's rejection after the colon read as no check, so a failed push blocked its own claim.
+        line = "I couldn't push: the remote rejected the ref."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"),
+                         landed_reply(line)])
+        self.assert_passes(out, "a failed push, with the remote's reason after a colon")
+
+    def test_cc_red_a_later_push_success_makes_a_past_failure_no_claim(self):
+        # Catches: a push that failed and was then pushed again read as a present claim that the push cannot be done.
+        # The later success of the same push makes the failed one a past failure, so the line is no claim.
+        line = "I could not push at first; I rebased and pushed."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p1"),
+                         *ok_bash("git push origin HEAD", "tu_p2"), landed_reply(line)])
+        self.assert_passes(out, "a failed push, a later successful push, and the past failure named")
+
+    def test_cc_red_a_later_merge_success_makes_a_past_failure_no_claim(self):
+        # Catches: a merge that failed through the GitHub MCP tool and merged on a retry read as a present claim.
+        line = "I couldn't merge PR 12 on the first try; the retry merged it."
+        merge = {"owner": "o", "repo": "r", "pullNumber": 12}
+        out = self.stop([trg.human("merge PR 12"),
+                         use("mcp__github__merge_pull_request", merge, "tu_m1"),
+                         done("tu_m1", "Pull request is not mergeable", error=True),
+                         use("mcp__github__merge_pull_request", merge, "tu_m2"), done("tu_m2", "merged"),
+                         landed_reply(line)])
+        self.assert_passes(out, "a failed merge tool call, a later successful retry, and the past failure named")
+
+    def test_cc_green_a_bare_claim_after_a_failed_merge_still_blocks(self):
+        # Control: the same failed try, and a claim with no reason. The line names no check, so it blocks.
+        line = "I cannot merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_a_success_of_another_act_does_not_rescue_a_notice_only_claim(self):
+        # Control: a successful push is a success of another act. It does not back a claim that the PR cannot be opened
+        # when the only thing the turn holds is a connect-failure notice, so the line still blocks as having no try.
+        line = "I could not open the PR."
+        out = self.stop([trg.human("open a PR"), notice("github: failed to connect"),
+                         *ok_bash("git push origin HEAD", "tu_p"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_past_unable_to_push_recovered_by_a_later_push_is_no_claim(self):
+        # Catches: "was unable to" and "was not able to" read as a present claim that the push cannot be done, although a
+        # later push of the same target succeeded. A phrase after was or were is a past failure, so the line is no claim.
+        for line in ("I was unable to push at first; I rebased and pushed.",
+                     "I was not able to push at first; I rebased and pushed."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p1"),
+                                 *ok_bash("git push origin HEAD", "tu_p2"), landed_reply(line)])
+                self.assert_passes(out, "a past failure of a push that a later push recovered")
+
+    def test_cc_green_a_present_unable_to_push_after_a_recovered_push_still_blocks(self):
+        # Control: "I am unable to push." is a present claim. The later push cancels the failure, so the line blocks as
+        # having no try.
+        line = "I am unable to push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p1"),
+                         *ok_bash("git push origin HEAD", "tu_p2"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
     def test_cc_red_r4_rule_forms_and_the_cannot_suite_pass(self):
         # A sentence that names a rule or a decision is the rule's text, not the session's claim. "Cannot" directly
         # before a noun used as a modifier (the cannot suite, the cannot cases) is no claim.
