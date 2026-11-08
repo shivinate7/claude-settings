@@ -14141,7 +14141,8 @@ rpush_case("reviewed-head-push: a delete by --delete allows, with no gh read",
 
 # The remote a push goes to, and the head it writes. A bare push goes to the remote its branch names, else to
 # remote.pushDefault. A push to a fork never lands on origin's pull request, so it neither asks nor reads gh. A push
-# whose source is the head the pull request already holds sends nothing, so it does not ask.
+# whose source is the head the pull request already holds sends nothing, so it does not ask. It reads the pull request
+# list only: the comment read would cost a call the verdict cannot use.
 RPUSH_FORK = "https://example.invalid/fork.git"  # a remote the guard names and never contacts
 RPUSH_LANE = "branch.%s." % RPUSH_BRANCH  # the config prefix of the lane branch
 
@@ -14189,8 +14190,8 @@ rpush_case("reviewed-head-push: a bare push with remote.pushDefault set to fork 
 rpush_case("reviewed-head-push: a bare push from a branch whose remote is origin asks, after both reads",
            "ask", RPUSH_BOTH, repo=rpush_origin_branch_repo, command=VCS + " push",
            comments=rpush_record_comments({"fix": RPUSH_FIX}))
-rpush_case("reviewed-head-push: a push of the head the pull request holds allows, after both reads",
-           "allow", RPUSH_BOTH, repo=rpush_up_to_date_repo,
+rpush_case("reviewed-head-push: a push of the head the pull request holds allows, after the list read only",
+           "allow", (RPUSH_PULLS,), repo=rpush_up_to_date_repo,
            others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_up_to_date_repo))],
            comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_up_to_date_repo), fix=RPUSH_FIX))])
 rpush_case("reviewed-head-push: a -u push of a newer local commit onto the lane asks, after both reads",
