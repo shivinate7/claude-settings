@@ -119,8 +119,8 @@ Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
 - The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1349-1367).
-- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:2139-2170; read lint/report_guard.py:2660-2670).
-- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1485-1494; read lint/report_guard.py:2605).
+- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:2184-2215; read lint/report_guard.py:2705-2715).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1485-1494; read lint/report_guard.py:2650).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:759-764).
 - The merge's model judge, report-only (see Model judge at merge).
