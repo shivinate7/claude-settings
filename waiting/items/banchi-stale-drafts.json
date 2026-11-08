@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T03:45:00Z",
+  "context": "Goal: no PR sits idle with no owner.\nProblem (goal): banchi #961 (glossary) and #944 (dry-run reads photos at half size) are drafts with no lane since about Nov 2. Keep or close is your call.\nBased on (read): runner 9's list of idle PRs, 21:43 CST.\nDeparts from: main, where both stay open with no next act \u2014 each closes as parked with its branch kept, or gets a lane.\nMeanwhile: both stay open.",
+  "home": "banchi-revive-944-961",
+  "id": "banchi-stale-drafts",
+  "kind": "decision",
+  "n": 385,
+  "options": [
+    {
+      "gain": "The open list shows only live work.",
+      "how": "Runner 9 closes #961 and #944 and keeps each branch. A later lane reopens them.",
+      "key": "a",
+      "label": "Close both as parked, keep the branches (recommended)",
+      "lose": "The fixes wait until someone reopens them."
+    },
+    {
+      "gain": "The photo fix in #944 lands sooner.",
+      "how": "The coordinator starts one banchi lane for both PRs.",
+      "key": "b",
+      "label": "Keep both and start a lane now",
+      "lose": "One more lane starts while your hold on new lanes stands."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "banchi #961 and #944; step banchi-revive-944-961",
+  "short": "Two idle banchi drafts",
+  "status": "open",
+  "title": "Close banchi drafts #961 and #944 as parked, or start a lane for them?",
+  "why": "The coordinator recommends a: your hold on new lanes (item 384) stands, and a closed PR with its branch kept loses nothing."
+}
