@@ -2469,6 +2469,155 @@ class PollLoopTest(FinderCase):
                          "a file whose only findings are poll-loop hang guards exits %d, not 0" % proc.returncode)
         assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=3))
 
+    # A raise or a fail in an if caps the loop. It does not end the wait, so the loop has no condition.
+
+    def test_for_range_with_an_if_that_raises_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            raise RuntimeError('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_while_deadline_with_an_if_that_raises_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            raise RuntimeError('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    def test_for_range_with_an_if_that_self_fails_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "import unittest",
+            "",
+            "class Child(unittest.TestCase):",
+            "    def wait_for_ready(self, proc, ready):",
+            "        for _ in range(3):",
+            "            time.sleep(1)",
+            "            if proc.poll() is not None:",
+            "                self.fail('the child exited')",
+            "        self.assertTrue(ready())",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_while_deadline_with_an_if_that_calls_fail_is_a_cap_not_a_condition(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            fail('the child exited')",
+            "    return ready()",
+        )
+        self.assert_sleep(text, "time.sleep(0.2)")
+
+    # The controls for the raise and fail cases: the same loops with a break or a return stay wait-cap.
+
+    def test_control_for_range_with_an_if_that_breaks_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            break",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_for_range_with_an_if_that_returns_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if proc.poll() is not None:",
+            "            return None",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_control_while_deadline_with_an_if_that_breaks_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def wait_for_ready(proc, ready):",
+            "    deadline = time.monotonic() + 10",
+            "    while time.monotonic() < deadline:",
+            "        time.sleep(0.2)",
+            "        if proc.poll() is not None:",
+            "            break",
+            "    return ready()",
+        )
+        self.assert_wait_cap(text, "time.sleep(0.2)")
+
+    # A break in an inner loop leaves that loop, not the outer one. A fixed window that decides the verdict
+    # is a sleep too.
+
+    def test_a_break_in_an_inner_loop_does_not_end_the_outer_wait(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(flags, xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if flags.on:",
+            "            for x in xs:",
+            "                break",
+            "    return True",
+        )
+        self.assert_sleep(text, "time.sleep(1)")
+
+    def test_control_a_break_in_the_if_itself_stays_wait_cap(self):
+        text = src(
+            "import time",
+            "",
+            "def settle(flags, xs):",
+            "    for _ in range(3):",
+            "        time.sleep(1)",
+            "        if flags.on:",
+            "            break",
+            "    return True",
+        )
+        self.assert_wait_cap(text, "time.sleep(1)")
+
+    def test_a_fixed_window_that_decides_the_verdict_stays_sleep(self):
+        # janitor/test_session_end_sweep.py, assert_heartbeat_stops: the 1 s window is the verdict
+        text = src(
+            "import time",
+            "",
+            "def assert_heartbeat_stops(case, read_beat, path):",
+            "    last = read_beat(path)",
+            "    deadline = time.time() + 10",
+            "    while True:",
+            "        time.sleep(1.0)",
+            "        now = read_beat(path)",
+            "        if now == last:",
+            "            return",
+            "        if time.time() > deadline:",
+            "            case.fail('the heartbeat still moves')",
+            "        last = now",
+        )
+        self.assert_sleep(text, "time.sleep(1.0)")
+
 
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
 
