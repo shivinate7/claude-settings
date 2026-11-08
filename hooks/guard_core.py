@@ -1914,6 +1914,9 @@ PY_TEXT_CALLS = frozenset({"print", "pprint", "write", "writelines", "write_text
                            "dumps", "dump", "startswith", "endswith"})
 PY_TEXT_COMPARES = (ast.In, ast.NotIn, ast.Eq, ast.NotEq)
 PY_PREFIX_TESTS = frozenset({"startswith", "endswith"})
+# Methods that open the file their receiver names (`p.read_text()`, `p.unlink()`). `replace` and `remove`
+# are left out: on a string or a list they are no file call, and a `Path.replace` target is an argument.
+PY_RECEIVER_FILE_METHODS = PY_READ_METHODS | (PY_WRITE_CALLS - {"replace", "remove"}) | {"open"}
 # Nodes that carry a string on to the call around them: a list, a dict, an f-string, a sum.
 PY_CARRIERS = (ast.Dict, ast.List, ast.Tuple, ast.Set, ast.JoinedStr, ast.FormattedValue, ast.BinOp,
                ast.Starred, ast.keyword, ast.IfExp, ast.BoolOp)
@@ -1937,7 +1940,9 @@ JS_COMPARE_AFTER = re.compile(r"\s*[!=]==?")
 # The bare name on the other side of a compare with a string literal: `f === 'x'`, `'x' !== f`.
 JS_NAME_BEFORE = re.compile(r"(?<![\w$.])([\w$]+)\s*(!==?|===?)\s*$")
 JS_NAME_AFTER = re.compile(r"\s*(!==?|===?)\s*([\w$]+)(?![\w$.(\[])")
+JS_PREFIX_CALLS = frozenset({"startsWith", "endsWith"})
 JS_PREFIX_CALLEE = re.compile(r"([\w$]+)\.(?:startsWith|endsWith)")
+JS_FILE_CALLS = JS_READ_CALLS | JS_WRITE_CALLS | JS_COPY_CALLS | JS_MOVE_CALLS
 JS_IF_OPEN = re.compile(r"\bif\s*\(")
 # A word before `(` that opens no call: its parenthesis holds a condition or a parameter list.
 JS_NOT_CALLS = frozenset({"", "if", "while", "for", "switch", "catch", "function", "return", "typeof"})
@@ -2069,25 +2074,69 @@ def _python_paths(code: str):
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     found = [(node.value, _python_mode(node, parents)) for node in ast.walk(tree)
              if isinstance(node, ast.Constant) and isinstance(node.value, str)]
-    # A literal that a name is tested against (`f == '.env'`, `f in ('.env', 'x')`, `f.startswith('.env')`)
-    # is text where it stands, but the name picks that file out. So a call that takes the name inside
-    # the test's positive branch opens the file. The name is read by its spelling alone (no scope); a
-    # `!=` test, an `else` branch and the code after an `if` body that ends in `continue` pick nothing.
-    for tests, scope in _python_positive_scopes(tree):
-        for name, literals in tests:
+    # A literal that a name is tested against (`f == '.env'`, `f in ('.env', 'x')`) is text where it
+    # stands, but the name picks that file out. So a call that takes the name inside the test's positive
+    # branch opens the file. The name is read by its spelling alone (no scope); a `!=` test, an `else`
+    # branch and the code after an `if` body that ends in `continue` pick nothing.
+    scopes = list(_python_positive_scopes(tree))
+    for test, scope in scopes:
+        for name, literals in _python_positive_tests(test):
             for root in scope:
                 for node in ast.walk(root):
                     if isinstance(node, ast.Name) and node.id == name:
                         mode = _python_mode(node, parents, calls_only=True)
                         if mode not in ("", "text", "exists"):
                             found.extend((literal, mode) for literal in literals)
+    found.extend(_python_prefix_paths(tree, parents, scopes))
     return found
+
+
+def _python_prefix_paths(tree, parents, scopes):
+    """[(literal, "unknown")] for each prefix-test literal (`f.startswith('.env')`) that code may open.
+    A prefix test finds names that a later line can open by another name (`found = f`, a list bound to
+    a name, a `continue` on its negation), and this reader does not follow data flow. So the literal
+    stays text only in code that hands no variable to a file call: no call argument that is not a
+    string literal and gets a read, write or unknown mode, and no read or write method on a receiver
+    other than a literal `Path`. One exception: a bare name opened inside the body of
+    `not name.startswith(lit)` cannot name a file that starts with `lit`, so it does not count
+    against `lit`."""
+    prefixes = [call for call in ast.walk(tree) if isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute) and call.func.attr in PY_PREFIX_TESTS]
+    literals = {node.value for call in prefixes for arg in call.args for node in ast.walk(arg)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+    if not literals:
+        return []
+    excused = {}   # a name node -> the literals whose negated test holds it
+    for test, scope in scopes:
+        for name, tested in _python_negated_prefix_tests(test):
+            for root in scope:
+                for node in ast.walk(root):
+                    if isinstance(node, ast.Name) and node.id == name:
+                        excused.setdefault(node, set()).update(tested)
+    opened = []    # for each variable file call, the literals that excuse it
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        for arg in call.args + [keyword.value for keyword in call.keywords]:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                continue
+            if _python_mode(arg, parents) in ("read", "write", "unknown"):
+                opened.append(excused.get(arg, set()))
+        func = call.func
+        if (isinstance(func, ast.Attribute) and func.attr in PY_RECEIVER_FILE_METHODS
+                and not (isinstance(func.value, ast.Name) and func.value.id in ("os", "shutil", "io", "path"))
+                and not (isinstance(func.value, ast.Call) and _call_name(func.value).endswith("Path")
+                         and all(isinstance(arg, ast.Constant) for arg in func.value.args))):
+            opened.append(set())
+    return [(literal, "unknown") for literal in sorted(literals)
+            if any(literal not in excusers for excusers in opened)]
 
 
 def _python_positive_tests(test):
     """[(name, [string literals])] for the names a test picks out when it is true: `f == 'x'`,
-    `f in ('x', 'y')`, `f.startswith('x')`, each also as a conjunct of an `and`. A `!=`, a `not in`, a
-    `not` and an `or` pick none."""
+    `f in ('x', 'y')`, each also as a conjunct of an `and`. An `in` picks only a name on its left:
+    `'x' in line` asks about the text of `line`, not its name. A `!=`, a `not in`, a `not` and an
+    `or` pick none. A prefix test is judged apart (`_python_prefix_paths`)."""
     if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
         return [found for value in test.values for found in _python_positive_tests(value)]
     if isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], (ast.Eq, ast.In)):
@@ -2095,31 +2144,44 @@ def _python_positive_tests(test):
         literals = [part.value for operand in operands
                     for part in (operand.elts if isinstance(operand, (ast.Tuple, ast.List, ast.Set)) else [operand])
                     if isinstance(part, ast.Constant) and isinstance(part.value, str)]
-        return [(operand.id, literals) for operand in operands if isinstance(operand, ast.Name)] if literals else []
-    if (isinstance(test, ast.Call) and isinstance(test.func, ast.Attribute) and test.func.attr in PY_PREFIX_TESTS
-            and isinstance(test.func.value, ast.Name) and test.args and isinstance(test.args[0], ast.Constant)
-            and isinstance(test.args[0].value, str)):
-        return [(test.func.value.id, [test.args[0].value])]
+        pickers = operands if isinstance(test.ops[0], ast.Eq) else [test.left]
+        return [(operand.id, literals) for operand in pickers if isinstance(operand, ast.Name)] if literals else []
     return []
 
 
+def _python_negated_prefix_tests(test):
+    """[(name, [string literals])] for `not name.startswith(lit)` (or endswith, or a tuple of literals),
+    each also as a conjunct of an `and`: where it is true, `name` starts with none of the literals."""
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+        return [found for value in test.values for found in _python_negated_prefix_tests(value)]
+    if not (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)):
+        return []
+    call = test.operand
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr in PY_PREFIX_TESTS
+            and isinstance(call.func.value, ast.Name) and call.args):
+        return []
+    literals = [node.value for node in ast.walk(call.args[0])
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+    return [(call.func.value.id, literals)] if literals else []
+
+
 def _python_positive_scopes(tree):
-    """(tests, nodes) for each place that runs only when the tests are true: the body of an `if`, the
+    """(test, nodes) for each place that runs only when the test is true: the body of an `if`, the
     body of a conditional expression, the right of an `and`, and the element and later conditions of
     a comprehension after its own `if`."""
     for node in ast.walk(tree):
         if isinstance(node, ast.If):
-            yield _python_positive_tests(node.test), node.body
+            yield node.test, node.body
         elif isinstance(node, ast.IfExp):
-            yield _python_positive_tests(node.test), [node.body]
+            yield node.test, [node.body]
         elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
             for at, value in enumerate(node.values[:-1]):
-                yield _python_positive_tests(value), node.values[at + 1:]
+                yield value, node.values[at + 1:]
         elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
             tail = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
             for generator in node.generators:
                 for at, test in enumerate(generator.ifs):
-                    yield _python_positive_tests(test), tail + generator.ifs[at + 1:]
+                    yield test, tail + generator.ifs[at + 1:]
 
 
 def _python_token_strings(code: str):
@@ -2193,13 +2255,23 @@ def _js_scan(code: str):
     found, stack, frames, prev = [], [], [], ""
     i, n = 0, len(code)
     broken = False
-    # A name that a literal is tested against (`f === '.env'`, `f.startsWith('.env')`) picks that file
-    # out: a file call that takes the name as its whole argument (`readFileSync(f)`), inside the
-    # test's positive branch (`_js_positive_scopes`), then opens the literal. `tests` holds each such
-    # test as (name, literal, start, end of the test text). `uses` holds each whole argument that is a
-    # bare name, as (name, the mode its call gives it, its position). The name is read by its spelling
-    # (no scope).
-    tests, uses = [], []
+    # `mask` marks each index as code (1), the text of a string, template or regex literal (0), or a
+    # comment (2). The scope walks (`_js_close`, `_js_extent`) read brackets only where it is 1, so a
+    # quote or a brace in a comment or a regex never moves a scope's end.
+    mask = bytearray(b"\x01") * n
+
+    def blank(first: int, last: int, value: int = 0):
+        mask[first:last] = bytes([value]) * len(mask[first:last])
+
+    # A name that a literal is compared with (`f === '.env'`) picks that file out: a file call that takes
+    # the name as its whole argument (`readFileSync(f)`), inside the test's positive branch
+    # (`_js_scopes`), then opens the literal. `tests` holds each such test as (name, literal, start, end
+    # of the test text), and `uses` each whole argument that is a bare name, as (name, the mode its call
+    # gives it, its position). A prefix test (`f.startsWith('.env')`) is judged apart: `prefixes` holds
+    # each one the same way, with "" for a receiver that is no bare name, and `opened` each name that a
+    # file call takes in its argument, or that another call takes whole, with a read, write or unknown
+    # mode, as (name, position, whole). The name is read by its spelling (no scope).
+    tests, prefixes, uses, opened = [], [], [], []
 
     def note_compared(text: str, start: int, end: int):
         before = JS_NAME_BEFORE.search(code[max(0, start - 80):start])
@@ -2208,9 +2280,13 @@ def _js_scan(code: str):
             tests.append((before.group(1), text, max(0, start - 80) + before.start(1), end))
         if after and after.group(1) in ("==", "==="):
             tests.append((after.group(2), text, start, after.end(2)))
-        prefix = JS_PREFIX_CALLEE.fullmatch(frames[-1][1]) if frames and frames[-1][0] == "(" else None
-        if prefix and whole_arg(start, end) and frames[-1][2] == 0:
-            tests.append((prefix.group(1), text, code.rfind(frames[-1][1], 0, start), code.find(")", end) + 1))
+        callee = frames[-1][1] if frames and frames[-1][0] == "(" else ""
+        if callee.rsplit(".", 1)[-1] in JS_PREFIX_CALLS:
+            receiver = JS_PREFIX_CALLEE.fullmatch(callee)
+            named = receiver and whole_arg(start, end) and frames[-1][2] == 0
+            closed = code.find(")", end)
+            prefixes.append((receiver.group(1) if named else "", text, code.rfind(callee, 0, start),
+                             n if closed < 0 else closed + 1))
 
     def whole_arg(start: int, end: int) -> bool:
         before = code[:start].rstrip()[-1:]
@@ -2237,6 +2313,7 @@ def _js_scan(code: str):
                 part.append(code[j:j + step])
                 j += step
             closed = j < n and code[j] == "`"
+            blank(i, j + 1)   # the text, and the closing backtick or the `$` of a `${`
             whole = first and closed and whole_arg(i - 1, j + 1)
             found.append(("".join(part), _js_mode(frames, code, i - 1 if first else i, j + closed, whole)))
             note_compared("".join(part), i - 1 if first else i, j + closed)
@@ -2253,21 +2330,26 @@ def _js_scan(code: str):
         char = code[i]
         if code.startswith("//", i):
             end = code.find("\n", i)
-            i = n if end < 0 else end
+            end = n if end < 0 else end
+            blank(i, end, 2)
+            i = end
         elif code.startswith("/*", i):
             end = code.find("*/", i + 2)
             broken = broken or end < 0
+            blank(i, n if end < 0 else end + 2, 2)
             i = n if end < 0 else end + 2
         elif char in "'\"":
             j = i + 1
             while j < n and code[j] != char and code[j] != "\n":
                 j += 2 if code[j] == "\\" else 1
             broken = broken or j >= n or code[j] != char
+            blank(i, j + 1)
             found.append((code[i + 1:j], _js_mode(frames, code, i, j + 1, whole_arg(i, j + 1))))
             note_compared(code[i + 1:j], i, j + 1)
             prev, i = "a", j + 1
         elif char == "`":
             stack.append("`")
+            blank(i, i + 1)
             i += 1
         elif char == "/" and (not prev or prev in JS_REGEX_AFTER or prev == "kw"):
             j, in_class = i + 1, False
@@ -2277,6 +2359,7 @@ def _js_scan(code: str):
                 elif code[j] == "]":
                     in_class = False
                 j += 2 if code[j] == "\\" else 1
+            blank(i, j + 1)
             prev, i = "a", j + 1
         elif char in "{}":
             if char == "{":
@@ -2302,84 +2385,105 @@ def _js_scan(code: str):
             j = i
             while j < n and (code[j].isalnum() or code[j] in "_$"):
                 j += 1
-            if tests and whole_arg(i, j) and frames[-1][1] not in JS_NOT_CALLS:
-                uses.append((code[i:j], _js_frames_mode(frames, True), i))
+            whole = whole_arg(i, j) and frames[-1][1] not in JS_NOT_CALLS
+            mode = _js_frames_mode(frames, whole_arg(i, j)) if frames else ""
+            if whole:
+                uses.append((code[i:j], mode, i))
+            if mode in ("read", "write", "unknown") and (whole or _js_file_frame(frames)):
+                opened.append((code[i:j], i, whole))
             prev, i = ("kw" if code[i:j] in JS_REGEX_WORDS else "a"), j
         else:
             if not char.isspace():
                 prev = char
             i += 1
-    for name, literal, first, last in _js_positive_scopes(code, tests) if uses else ():
+    for name, literal, first, last in _js_scopes(code, mask, tests, False) if uses else ():
         found.extend((literal, mode) for used, mode, at in uses
                      if used == name and first <= at < last and mode not in ("text", "exists"))
+    # A prefix test finds names that a later line can open by another name (`.filter(...).forEach(...)`,
+    # a `continue` on its negation), and this scan does not follow data flow. So its literal stays text
+    # only when no variable reaches a file call. One exception: a bare name read inside the body of
+    # `!name.startsWith(lit)` cannot name a file that starts with `lit`.
+    if prefixes and opened:
+        excusers = list(_js_scopes(code, mask, [test for test in prefixes if test[0]], True))
+        for _, literal, _, _ in prefixes:
+            if any(not (whole and any(by == name and lit == literal and first <= at < last
+                                      for by, lit, first, last in excusers))
+                   for name, at, whole in opened):
+                found.append((literal, "unknown"))
     return found, not (broken or stack or frames)
 
 
-def _js_close(code: str, opened: int) -> int:
-    """The index of the bracket that closes the one at code[opened], skipping string contents; len(code)
-    when it never closes."""
+def _js_file_frame(frames) -> bool:
+    """True when the nearest call around a token, past any join, is a file call (`readFileSync(...)`)."""
+    for kind, callee, _ in reversed(frames):
+        if kind != "(":
+            continue
+        base = callee.rsplit(".", 1)[-1]
+        if base not in JS_JOIN_CALLS:
+            return base in JS_FILE_CALLS
+    return False
+
+
+def _js_close(code: str, mask, opened: int) -> int:
+    """The index of the bracket that closes the one at code[opened], counting only the brackets `mask`
+    marks as code; len(code) when it never closes."""
     depth, at, size = 0, opened, len(code)
     while at < size:
-        char = code[at]
-        if char in "'\"`":
-            at += 1
-            while at < size and code[at] != char:
-                at += 2 if code[at] == "\\" else 1
-        elif char in "([{":
-            depth += 1
-        elif char in ")]}":
-            depth -= 1
-            if depth <= 0:
-                return at
+        if mask[at] == 1:
+            char = code[at]
+            if char in "([{":
+                depth += 1
+            elif char in ")]}":
+                depth -= 1
+                if depth <= 0:
+                    return at
         at += 1
     return size
 
 
-def _js_extent(code: str, start: int, stop: str = "") -> int:
-    """The end of the statement or expression that begins at `start`: the match of a `{` block, or the
-    first `;`, `,`, `stop` character or line break at depth 0, or a bracket that closes the enclosing one."""
+def _js_extent(code: str, mask, start: int, stop: str = "") -> int:
+    """The end of the statement or expression that begins at `start`, past blanks and comments: the
+    match of a `{` block, or the first `;`, `,`, `stop` character or line break at depth 0, or a bracket
+    that closes the enclosing one. Only what `mask` marks as code counts."""
     at, size, depth, seen = start, len(code), 0, False
-    while at < size and code[at] in " \t\r\n":
+    while at < size and (code[at] in " \t\r\n" or mask[at] == 2):
         at += 1
     if at < size and code[at] == "{":
-        return _js_close(code, at) + 1
+        return _js_close(code, mask, at) + 1
     while at < size:
         char = code[at]
-        if char in "'\"`":
-            at += 1
-            while at < size and code[at] != char:
-                at += 2 if code[at] == "\\" else 1
-        elif char in "([{":
-            depth += 1
-        elif char in ")]}":
-            if depth == 0:
+        if mask[at] == 1:
+            if char in "([{":
+                depth += 1
+            elif char in ")]}":
+                if depth == 0:
+                    return at
+                depth -= 1
+            elif depth == 0 and (char in ";," or char in stop or (char == "\n" and seen)):
                 return at
-            depth -= 1
-        elif depth == 0 and (char in ";," or char in stop or (char == "\n" and seen)):
-            return at
-        seen = seen or not char.isspace()
+        seen = seen or (mask[at] != 2 and not char.isspace())
         at += 1
     return size
 
 
-def _js_positive_scopes(code: str, tests):
+def _js_scopes(code: str, mask, tests, negated: bool):
     """(name, literal, first, last) for each place that runs only when a test is true: the body of the
     `if` whose condition holds the test, the right of an `&&` after it, and the `?` branch of a
-    conditional. A test under `!` picks nothing."""
+    conditional. `negated` picks the tests under a `!` (where the test is false), else the rest."""
     for name, literal, start, end in tests:
-        if code[:start].rstrip().endswith(("!", "!(")):
+        if code[:start].rstrip().endswith(("!", "!(")) != negated:
             continue
         after = code[end:].lstrip()
         base = len(code) - len(after)
         if after.startswith("&&"):
-            yield name, literal, base + 2, _js_extent(code, base + 2)
+            yield name, literal, base + 2, _js_extent(code, mask, base + 2)
         elif after.startswith("?") and not after.startswith(("?.", "??")):
-            yield name, literal, base + 1, _js_extent(code, base + 1, ":")
-        opened = [m for m in JS_IF_OPEN.finditer(code, 0, start)]
+            yield name, literal, base + 1, _js_extent(code, mask, base + 1, ":")
+        opened = [m for m in JS_IF_OPEN.finditer(code, 0, start) if mask[m.start()] == 1]
         if opened:
-            close = _js_close(code, opened[-1].end() - 1)
+            close = _js_close(code, mask, opened[-1].end() - 1)
             if close >= end:
-                yield name, literal, close + 1, _js_extent(code, close + 1)
+                yield name, literal, close + 1, _js_extent(code, mask, close + 1)
 
 
 def code_paths(code: str, language: str):
