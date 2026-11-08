@@ -2051,8 +2051,7 @@ test("watchdog: a detached child that exits inside the 3 s grace is no leftover,
 
 // Windows only: the Job Object is the kill guarantee there. On CI a run without one must fail by name,
 // not pass on the tree walk alone. STAMP_SUITE_NO_JOB=1 makes the job assignment fail: the builder must
-// honour it. GITHUB_ACTIONS=true is the CI flag the watchdog reads. Windows red: unmeasured. On Linux
-// this case returns at once, so its ok line is no evidence of anything.
+// honour it. GITHUB_ACTIONS=true is the CI flag the watchdog reads. On Linux this case returns at once.
 test("watchdog, CI on Windows: no Job Object fails the run with a line starting FAIL - no job object", () => {
   if (POSIX) return;
   withTempDir((dir) => {
@@ -2068,6 +2067,60 @@ test("watchdog, CI on Windows: no Job Object fails the run with a line starting 
     }
     assert.equal(r.status, 1, r.out);
     assert.match(r.out, /^FAIL - no job object/m, r.out);
+  });
+});
+
+// The sweep seam. STAMP_SUITE_SWEEP_FAULT makes the sweep report a fault the clean fixture cannot
+// produce, so only the knob can make the run red. Each case runs the real watchdog.
+function faultedCleanRun(extra, dir) {
+  const pidFile = join(dir, "pids");
+  const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "clean", ...extra };
+  delete env[CHILD];
+  let r, found;
+  try {
+    r = watchdogRun(env, dir);
+  } finally {
+    found = leftovers(pidFile);
+  }
+  return { r, found };
+}
+
+test("watchdog: a sweep that reports a pid still alive after its kill fails the run (STAMP_SUITE_SWEEP_FAULT=alive)", () =>
+  withTempDir((dir) => {
+    const { r, found } = faultedCleanRun({ STAMP_SUITE_SWEEP_FAULT: "alive" }, dir);
+    assert.equal(found.pids.length, 2, r.out); // scope: the clean fixture ran
+    assert.match(r.out, /ok - hang fixture \(clean\)/, r.out);
+    assert.equal(r.status, 1, r.out);
+  }));
+
+test("watchdog, CI: a sweep that cannot read fails the run by name (STAMP_SUITE_SWEEP_FAULT=unknown)", () =>
+  withTempDir((dir) => {
+    const { r, found } = faultedCleanRun({ GITHUB_ACTIONS: "true", STAMP_SUITE_SWEEP_FAULT: "unknown" }, dir);
+    assert.equal(found.pids.length, 2, r.out); // scope: the clean fixture ran
+    assert.match(r.out, /ok - hang fixture \(clean\)/, r.out);
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /^unknown - leftover sweep could not read/m, r.out);
+  }));
+
+// Windows only: the go file is written on the Job Object path, which Linux lacks, so the knob means
+// nothing there. STAMP_SUITE_GO_FAIL=1 makes the write fail. A write that fails fails the run before
+// any test, on CI and off it. On CI the child never runs a test outside the job. Off CI with no job,
+// the fallback releases the child anyway, with a printed note.
+test("watchdog, Windows: a go file that cannot be written fails the run before any test (STAMP_SUITE_GO_FAIL=1)", () => {
+  if (POSIX) return;
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "60", [HANG]: pidFile, [HANG_KIND]: "clean", STAMP_SUITE_GO_FAIL: "1" };
+    delete env[CHILD];
+    let r;
+    try {
+      r = watchdogRun(env, dir);
+    } finally {
+      leftovers(pidFile); // reaps anything the run left, so nothing outlives the test
+    }
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /^FAIL - go file/m, r.out);
+    assert.doesNotMatch(r.out, /^ok - /m, r.out); // no test ran
   });
 });
 
