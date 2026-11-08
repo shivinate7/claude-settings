@@ -5,7 +5,8 @@
 
 The merge check refuses stale prose. A tracked Markdown line that names a repo path the range deleted
 or renamed is STALE001. A `<file.py> <name>` pair on one line is STALE002 when the name was bound at module
-level in that file at base (a def, class, assignment or import) and is not bound there at head. Each finding
+level in that file at base (a def, class, assignment or import) and is not bound there at head. A `--flag` in one
+code span with its script path is STALE007 when the range removed that flag from that script. Each finding
 is one line, `path:line: CODE message`.
 A clean run prints `stale-cites: PASS` and exits 0.
 The report (decision stale-cites-at-merge) prints after the findings and never changes the exit code. It names
@@ -54,6 +55,10 @@ atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
 
 NOTES = "docs/debts/notes.md"
 MOVED = "mods/session-board/hooks/lib.mjs"
+REPORT, OTHER, MERGE_PY, PUSH = "tools/report.py", "tools/other.py", "merge/merge.py", "hooks/push.sh"
+COMMON = "tools/common_args.py"  # a shared parent parser that a script can take its flags from
+PAGES = "tools/stale_pages.py"  # the script that the bare basename `stale_pages.py` names
+SAME_NAME = "hooks/report.py"  # a second report.py, in another folder than REPORT
 LIB = "export const refusals = [\n  'a',\n  'b',\n  'c',\n  'd',\n];\n"  # long enough that git pairs a move as a rename
 GUARD = "def _process_start_ms(path):\n    return 0\n\n\ndef keep():\n    return 1\n"
 CODE = {
@@ -63,7 +68,7 @@ CODE = {
     "lint/x.py": "def check():\n    return 3\n",
 }
 Range = collections.namedtuple("Range", "case repo base head")
-FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-4]) (?P<text>.*)$")
+FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-47]) (?P<text>.*)$")
 
 
 def base_files(notes="# Notes\n", extra=None):
@@ -220,6 +225,33 @@ def binding_kind(source, name):
 def unknown_lines(out):
     """Each line the check printed as unknown."""
     return [line for line in out.splitlines() if line.startswith("stale-cites: unknown, ")]
+
+
+def parser_script(flags, parents=()):
+    """A Python script that declares each of `flags` with add_argument, as a CLI does. Each name in `parents` is a
+    parent parser that COMMON defines: the script imports it and takes it as `parents=[name()]`. Never run."""
+    module = os.path.splitext(os.path.basename(COMMON))[0]
+    imports = "".join("from %s import %s\n" % (module, name) for name in parents)
+    takes = "parents=[%s]" % ", ".join(name + "()" for name in parents) if parents else ""
+    return "import argparse\n" + imports + "\nparser = argparse.ArgumentParser(%s)\n" % takes + "".join(
+        'parser.add_argument("%s")\n' % flag for flag in flags)
+
+
+def shared_parser(flags):
+    """COMMON's source: `window_parser()`, a parent parser that declares each of `flags`."""
+    return ("import argparse\n\n\ndef window_parser():\n    parser = argparse.ArgumentParser(add_help=False)\n"
+            + "".join('    parser.add_argument("%s")\n' % flag for flag in flags) + "    return parser\n")
+
+
+def argument_flags(source):
+    """The string literals passed to add_argument in a Python source, read with ast. A flag that only appears in
+    a docstring or a comment is not declared."""
+    found = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument":
+            found.update(arg.value for arg in node.args
+                         if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value.startswith("-"))
+    return found
 
 
 class StaleCase(unittest.TestCase):
@@ -710,6 +742,322 @@ class SymbolTests(StaleCase):
         self.assert_flags(rng, [(NOTES, 3, "STALE002")])
 
 
+class FlagTests(StaleCase):
+    """STALE007: a `script --flag` pair in one code span, where the range removed that flag from that script. A flag is
+    an add_argument literal in a Python script (read with ast) and a whole-word token in any other script."""
+
+    def test_removed_py_flag_cited_in_one_code_span_is_flagged(self):
+        base_src, head_src = parser_script(["--between"]), parser_script([])
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base declares --between
+        self.assertEqual(argument_flags(head_src), set())  # scope: head declares no flag
+        notes = "# Notes\n\n- report: `tools/report.py --between START END`\n"
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        found = self.assert_flags(self.make_range(base_files(notes, extra={REPORT: base_src}), change),
+                                  [(NOTES, 3, "STALE007")])
+        self.assertIn("--between", found[0][3])
+
+    def test_a_flag_still_named_in_a_docstring_or_comment_is_removed_once_its_call_goes(self):
+        base_src = parser_script(["--between"])
+        head_src = ('"""Use --between to pick a window."""\n' + parser_script([])
+                    + '# parser.add_argument("--between")\n')
+        self.assertIn("--between", head_src)  # scope: head still names --between in its text
+        self.assertEqual(argument_flags(head_src), set())  # scope: head declares no flag
+        notes = "# Notes\n\n- report: `tools/report.py --between START END`\n"
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(notes, extra={REPORT: base_src}), change),
+                          [(NOTES, 3, "STALE007")])
+
+    def test_removed_shell_flag_cited_in_one_code_span_is_flagged(self):
+        base_sh, head_sh = "#!/bin/sh\ngit push --force origin HEAD\n", "#!/bin/sh\ngit push origin HEAD\n"
+        self.assertIn("--force", base_sh)  # scope: base has the token
+        self.assertNotIn("--force", head_sh)  # scope: head has no token
+        notes = "# Notes\n\n- push: `hooks/push.sh --force origin`\n"
+
+        def change(repo):
+            write(repo, PUSH, head_sh)
+            commit(repo)
+        found = self.assert_flags(self.make_range(base_files(notes, extra={PUSH: base_sh}), change),
+                                  [(NOTES, 3, "STALE007")])
+        self.assertIn("--force", found[0][3])
+
+    def test_a_shell_flag_counts_as_removed_only_when_its_whole_word_goes(self):
+        base_sh = "#!/bin/sh\nreport --between A\nreport --between-x B\n"
+        head_sh = "#!/bin/sh\nreport --between-x B\n"
+        self.assertIn("--between ", base_sh)  # scope: base has --between as a whole word
+        self.assertNotIn("--between ", head_sh)  # scope: head keeps only --between-x, a longer token
+        notes = "# Notes\n\n- run: `hooks/report.sh --between A`\n"
+
+        def change(repo):
+            write(repo, "hooks/report.sh", head_sh)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(notes, extra={"hooks/report.sh": base_sh}), change),
+                          [(NOTES, 3, "STALE007")])
+
+    def test_one_span_fires_past_comment_openers_and_a_lone_quote_and_a_split_cite_does_not(self):
+        rows = [
+            ("# Flags: `tools/report.py --between`", True),  # a heading opens with `#`
+            ("Use `#` to start a comment: `tools/report.py --between`.", True),
+            ("Open a comment with `<!--`: `tools/report.py --between`.", True),
+            ("Don't run `tools/report.py --between` by hand.", True),  # a lone quote in text
+            ("```", False),
+            ("/* open comment: `tools/report.py --between`", True),  # a fenced block counts as prose
+            ("```", False),
+            ("tools/report.py --between START END", False),  # no code span, so no cite
+            ("- report: `tools/report.py`", False),
+            ("  `--between START END`", False),  # the path and the flag sit on two lines
+            ("- report: `tools/report.py` and `--between START END`", False),  # two spans on one line
+            ("- report: `tools/report.py --between START END`", True),
+        ]
+        text, lines = rows_text(rows)
+        base_src = parser_script(["--between"])
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base declares --between
+
+        def change(repo):
+            write(repo, REPORT, parser_script([]))
+            write(repo, NOTES, text)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files("", extra={REPORT: base_src}), change),
+                          [(NOTES, n, "STALE007") for n in lines])
+
+    def test_a_flag_the_script_still_declares_is_not_flagged_in_a_full_size_script(self):
+        kept = ["--flag-%02d" % i for i in range(40)]
+        base_src, head_src = parser_script(kept + ["--between"]), parser_script(kept)
+        removed = argument_flags(base_src) - argument_flags(head_src)
+        self.assertEqual(removed, {"--between"})  # scope: only --between goes
+        notes = "# Notes\n\n- report: `tools/report.py --flag-07 5`\n"
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={REPORT: base_src}), change))
+
+    def test_git_push_force_names_no_script_so_it_is_not_flagged(self):
+        base_sh, head_sh = "#!/bin/sh\ngit push --force origin HEAD\n", "#!/bin/sh\ngit push origin HEAD\n"
+        self.assertIn("--force", base_sh)  # scope: the base script has --force
+        self.assertNotIn("--force", head_sh)  # scope: the range removes --force from it
+        notes = "# Notes\n\n- never force: `git push --force`\n"
+
+        def change(repo):
+            write(repo, PUSH, head_sh)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={PUSH: base_sh}), change))
+
+    def test_a_flag_cited_on_another_scripts_span_is_not_flagged(self):
+        base_src, head_src = parser_script(["--between"]), parser_script([])
+        other_src = parser_script(["--between"])
+        self.assertEqual(argument_flags(other_src), {"--between"})  # scope: OTHER keeps --between
+        notes = "# Notes\n\n- rerun: `tools/other.py --between START END`\n"
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={REPORT: base_src, OTHER: other_src}), change))
+
+    def test_a_shim_path_is_not_flagged_for_a_flag_its_target_removes(self):
+        shim = ('#!/usr/bin/env python3\n# Shim for the merge tool. Starts merge/merge.py; no merge logic lives here.\n'
+                'import subprocess, sys\nsubprocess.run([sys.executable, "merge/merge.py", *sys.argv[1:]])\n')
+        base_merge, head_merge = parser_script(["--base", "--dry-run"]), parser_script(["--dry-run"])
+        self.assertNotIn("--base", shim)  # scope: the shim declares no --base
+        removed = argument_flags(base_merge) - argument_flags(head_merge)
+        self.assertEqual(removed, {"--base"})  # scope: merge.py removes --base
+        notes = "# Notes\n\n- merge: `bin/merge --base origin/main`\n"
+
+        def change(repo):
+            write(repo, "bin/merge", shim.replace("no merge logic", "no merge code"))  # the range touches the shim
+            write(repo, MERGE_PY, head_merge)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={"bin/merge": shim, MERGE_PY: base_merge}), change))
+
+    def test_a_flag_named_only_in_a_docstring_at_base_was_never_declared(self):
+        base_src = '"""Use --between to pick a window."""\n' + parser_script(["--old"])
+        head_src = parser_script([])
+        self.assertEqual(argument_flags(base_src), {"--old"})  # scope: --between is only in the docstring
+        self.assertEqual(argument_flags(head_src), set())  # scope: the range removes --old
+        notes = "# Notes\n\n- report: `tools/report.py --between START END`\n"
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={REPORT: base_src}), change))
+
+    def test_a_shell_flag_is_not_removed_by_a_longer_flag_going(self):
+        base_sh, head_sh = "#!/bin/sh\ngit push --force-with-lease origin HEAD\n", "#!/bin/sh\ngit push origin HEAD\n"
+        self.assertNotIn("--force ", base_sh)  # scope: base has no whole-word --force
+        self.assertIn("--force-with-lease", base_sh)  # scope: the range removes --force-with-lease
+        notes = "# Notes\n\n- push: `hooks/push.sh --force origin`\n"
+
+        def change(repo):
+            write(repo, PUSH, head_sh)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={PUSH: base_sh}), change))
+
+    def test_a_claude_home_cite_resolves_to_the_repo_path_and_fires(self):
+        base_src, head_src = parser_script(["--between"]), parser_script([])
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base declares --between
+        self.assertEqual(argument_flags(head_src), set())  # scope: head declares no flag
+        notes = "# Notes\n\n- report: `python3 ~/.claude/lint/x.py --between START END`\n"
+
+        def change(repo):
+            write(repo, "lint/x.py", head_src)
+            commit(repo)
+        found = self.assert_flags(self.make_range(base_files(notes, extra={"lint/x.py": base_src}), change),
+                                  [(NOTES, 3, "STALE007")])
+        self.assertIn("--between", found[0][3])
+
+    def assert_moved_flag_passes(self, cite, base_extra, change):
+        """No STALE007 for `cite` when `change` moves its flag to a file the range touches."""
+        self.assert_passes(self.make_range(base_files("# Notes\n\n- run: `%s`\n" % cite, extra=base_extra), change))
+
+    def test_a_flag_moved_to_a_py_file_the_range_adds_is_not_flagged(self):
+        base_src, head_src = parser_script(["--between"]), parser_script([])
+        shared_src = parser_script(["--between"])  # a shared parent parser takes the flag, in a file added here
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base report declares --between
+        self.assertEqual(argument_flags(head_src), set())  # scope: head report declares no flag
+        self.assertEqual(argument_flags(shared_src), {"--between"})  # scope: the touched file declares --between
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            write(repo, COMMON, shared_src)
+            commit(repo)
+        self.assert_moved_flag_passes("tools/report.py --between START END", {REPORT: base_src}, change)
+
+    def test_a_flag_moved_to_a_py_file_the_range_modifies_is_not_flagged(self):
+        base_src, head_src = parser_script(["--between"]), parser_script([])
+        base_common, head_common = parser_script(["--other"]), parser_script(["--other", "--between"])
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base report declares --between
+        self.assertEqual(argument_flags(head_src), set())  # scope: head report declares no flag
+        self.assertEqual(argument_flags(base_common), {"--other"})  # scope: base common does not declare --between
+        self.assertEqual(argument_flags(head_common), {"--other", "--between"})  # scope: head common declares it
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            write(repo, COMMON, head_common)
+            commit(repo)
+        self.assert_moved_flag_passes("tools/report.py --between START END",
+                                      {REPORT: base_src, COMMON: base_common}, change)
+
+    def test_a_shell_flag_moved_to_a_sh_file_the_range_adds_is_not_flagged(self):
+        base_sh, head_sh = "#!/bin/sh\nreport --between A\n", "#!/bin/sh\nreport A\n"
+        shared_sh = '#!/bin/sh\nparse_window --between "$@"\n'  # a shared helper takes the flag, in a file added here
+        self.assertIn("--between ", base_sh)  # scope: base script has --between as a whole word
+        self.assertNotIn("--between", head_sh)  # scope: head script has no --between
+        self.assertIn("--between ", shared_sh)  # scope: the touched shell file has --between as a whole word
+
+        def change(repo):
+            write(repo, "hooks/report.sh", head_sh)
+            write(repo, "hooks/common.sh", shared_sh)
+            commit(repo)
+        self.assert_moved_flag_passes("hooks/report.sh --between A", {"hooks/report.sh": base_sh}, change)
+
+    def test_a_shell_flag_moved_to_a_sh_file_the_range_modifies_is_not_flagged(self):
+        base_sh, head_sh = "#!/bin/sh\nreport --between A\n", "#!/bin/sh\nreport A\n"
+        base_common = '#!/bin/sh\nparse_window --other "$@"\n'
+        head_common = '#!/bin/sh\nparse_window --other --between "$@"\n'
+        self.assertIn("--between ", base_sh)  # scope: base script has --between as a whole word
+        self.assertNotIn("--between", head_sh)  # scope: head script has no --between
+        self.assertNotIn("--between", base_common)  # scope: base shared file does not have --between
+        self.assertIn("--between ", head_common)  # scope: head shared file has --between as a whole word
+
+        def change(repo):
+            write(repo, "hooks/report.sh", head_sh)
+            write(repo, "hooks/common.sh", head_common)
+            commit(repo)
+        self.assert_moved_flag_passes("hooks/report.sh --between A",
+                                      {"hooks/report.sh": base_sh, "hooks/common.sh": base_common}, change)
+
+    def test_a_flag_removed_with_no_new_home_still_fires_beside_a_touched_file(self):
+        base_src, head_src = parser_script(["--between"]), parser_script([])
+        other_src = parser_script(["--other"])  # a file the range touches, with no --between in it
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base report declares --between
+        self.assertEqual(argument_flags(head_src), set())  # scope: head report declares no flag
+        self.assertNotIn("--between", argument_flags(other_src))  # scope: the range gives --between no new home
+        notes = "# Notes\n\n- report: `tools/report.py --between START END`\n"
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            write(repo, COMMON, other_src)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(notes, extra={REPORT: base_src}), change),
+                          [(NOTES, 3, "STALE007")])
+
+    def test_ste_disable_line_names_stale007_and_no_other(self):
+        rows = [
+            ("- report: `tools/report.py --between START END` <!-- ste-disable-line STALE007 -->", False),
+            ("- report: `tools/report.py --between START END` <!-- ste-disable-line STALE001 -->", True),
+            ("- report: `tools/report.py --between START END`", True),
+        ]
+        text, lines = rows_text(rows)
+        base_src = parser_script(["--between"])
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base declares --between
+
+        def change(repo):
+            write(repo, REPORT, parser_script([]))
+            write(repo, NOTES, text)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files("", extra={REPORT: base_src}), change),
+                          [(NOTES, n, "STALE007") for n in lines])
+
+    def test_removed_py_flag_cited_by_bare_basename_is_flagged_beside_its_full_path_cite(self):
+        base_src, head_src = parser_script(["--items"]), parser_script([])
+        self.assertEqual(argument_flags(base_src), {"--items"})  # scope: base declares --items
+        self.assertEqual(argument_flags(head_src), set())  # scope: head declares no flag
+        notes = "# Notes\n\n- pages: `tools/stale_pages.py --items START`\n- pages: `stale_pages.py --items`\n"
+
+        def change(repo):
+            write(repo, PAGES, head_src)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(notes, extra={PAGES: base_src}), change),
+                          [(NOTES, 3, "STALE007"), (NOTES, 4, "STALE007")])
+
+    def test_removed_shell_flag_cited_by_dot_slash_path_is_flagged_beside_its_bare_cite(self):
+        base_sh, head_sh = "#!/bin/sh\nsetup --cloud \"$@\"\n", "#!/bin/sh\nsetup \"$@\"\n"
+        self.assertIn("--cloud ", base_sh)  # scope: base has --cloud as a whole word
+        self.assertNotIn("--cloud", head_sh)  # scope: head has no --cloud
+        notes = "# Notes\n\n- install: `install.sh --cloud`\n- install: `./install.sh --cloud`\n"
+
+        def change(repo):
+            write(repo, "install.sh", head_sh)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(notes, extra={"install.sh": base_sh}), change),
+                          [(NOTES, 3, "STALE007"), (NOTES, 4, "STALE007")])
+
+    def test_bare_basename_naming_two_scripts_is_not_flagged_while_its_full_path_cite_is(self):
+        base_src, head_src = parser_script(["--between"]), parser_script([])
+        same_src = parser_script(["--between"])  # the other report.py keeps --between, and the range does not touch it
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base REPORT declares --between
+        self.assertEqual(argument_flags(head_src), set())  # scope: head REPORT declares no flag
+        self.assertEqual(argument_flags(same_src), {"--between"})  # scope: SAME_NAME keeps --between
+        notes = ("# Notes\n\n- report: `tools/report.py --between START END`\n"
+                 "- report: `report.py --between START END`\n")
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(notes, extra={REPORT: base_src, SAME_NAME: same_src}), change),
+                          [(NOTES, 3, "STALE007")])
+
+    def test_flag_taken_from_an_untouched_shared_parent_is_not_flagged(self):
+        base_src = parser_script(["--between"])
+        head_src = parser_script([], parents=("window_parser",))
+        shared_src = shared_parser(["--between"])  # COMMON declares --between at base, and the range leaves it alone
+        self.assertEqual(argument_flags(base_src), {"--between"})  # scope: base REPORT declares --between itself
+        self.assertEqual(argument_flags(head_src), set())  # scope: head REPORT declares no flag of its own
+        self.assertIn("parents=[window_parser()]", head_src)  # scope: head REPORT takes its parser from COMMON
+        self.assertEqual(argument_flags(shared_src), {"--between"})  # scope: the shared parent declares --between
+        notes = "# Notes\n\n- report: `tools/report.py --between START END`\n"
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={REPORT: base_src, COMMON: shared_src}), change))
+
+
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
         def change(repo):
@@ -884,6 +1232,27 @@ class CostTests(StaleCase):
         self.assertTrue(listing, commands)
         self.assertIn("docs/decisions", listing[0], commands)
 
+    def test_a_touched_sh_that_removes_no_flag_starts_one_cat_file_and_reads_no_markdown(self):
+        base_sh = "#!/bin/sh\nreport --between A\n"
+        head_sh = base_sh + "echo done\n"
+        self.assertIn("--between ", head_sh)  # scope: the range keeps the script's flag, so it removes none
+        self.assertEqual(head_sh.replace("echo done\n", ""), base_sh)  # scope: the only change is one added line
+
+        def change(repo):
+            write(repo, "hooks/report.sh", head_sh)
+            commit(repo)
+        notes = "# Notes\n\n- refusal list in `hooks/lib.mjs`\n"
+        rng = self.make_range(base_files(notes, extra={"hooks/report.sh": base_sh}), change)
+        rc, out, commands = self.run_traced_commands(rng)
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "ls-tree", "merge-base", "rev-parse"], subs)
+        # The one ls-tree is the report's, of the decisions folder: no ls-tree of the whole tree, so no .md is read.
+        # The one cat-file reads the script.
+        listing = [command for command in commands if command.startswith("ls-tree")]
+        self.assertTrue(listing, commands)
+        self.assertIn("docs/decisions", listing[0], commands)
+
     def test_a_lone_touched_mjs_starts_four_git_processes_with_the_reports_ls_tree_and_prints_no_unknown_line(self):
         """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
         ls-tree and cat-file), so this range starts no git process beyond the pinned four. The exact pin stays."""
@@ -954,6 +1323,18 @@ class CostTests(StaleCase):
         # The removed path makes the check read the Markdown at head (one ls-tree, one cat-file). The candidate line
         # reads its backing from that same cat-file, so the count is five and no more.
         self.assertEqual(len(subs), 5, subs)
+
+    def test_a_range_that_removes_a_flag_starts_at_most_five_git_processes(self):
+        def change(repo):
+            write(repo, REPORT, parser_script([]))
+            commit(repo)
+        notes = "# Notes\n\n- report: `tools/report.py --between START END`\n"
+        rng = self.make_range(base_files(notes, extra={REPORT: parser_script(["--between"])}), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertIn(rc, (0, 1), out)
+        self.assertNotIn("Traceback", out)
+        self.assertLessEqual(len(subs), 5, subs)
+        self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff", "cat-file", "ls-tree"}, subs)
 
     def test_a_run_writes_no_file_in_the_repo_or_next_to_the_script(self):
         def change(repo):
