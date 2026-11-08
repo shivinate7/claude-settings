@@ -8021,6 +8021,14 @@ sh("env: a smart-double-quoted path with a sub-folder and a space, still denies"
 sh("env: a smart-double-quoted example file with a space, allowed",
    "Get-Content " + SMART_DQ + "C:\\My Dir\\" + ENV + ".example" + SMART_DQ_END, "allow",
    tool="PowerShell", cwd=NOGIT)
+# The example file is exempt by name. A smart close quote left on the tail makes the name `.env.example`
+# plus a quote mark, which the exemption misses, so these denied while no space was in the path.
+sh("env: a smart-double-quoted example file with no space, allowed",
+   "Get-Content " + SMART_DQ + "C:\\MyDir\\" + ENV + ".example" + SMART_DQ_END, "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("env: a smart-single-quoted example file with no space, allowed",
+   "Get-Content " + SMART_SQ + "C:\\MyDir\\" + ENV + ".example" + SMART_SQ_END, "allow",
+   tool="PowerShell", cwd=NOGIT)
 sh("env: a smart apostrophe in text does not hide a later env read, denies",
    "Write-Host it" + SMART_SQ_END + "s; Get-Content C:\\MyDir\\" + ENV, "deny", "env-file",
    tool="PowerShell", cwd=NOGIT)
