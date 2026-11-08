@@ -49,7 +49,7 @@ catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id 
 `--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile. A suite tests a file
 when it sits beside it, imports or loads its module, or names its basename in a path expression it copies, opens or runs
 (read from the `ast` tree, so a docstring or comment never counts).
-`--lint-suites BASE` prints the suites that test any file of the diff BASE...HEAD: the one selector `bin/ci-job --lint` asks
+`--lint-suites BASE` prints the suites that test any file of the diff BASE...HEAD, and each tracked suite the diff changes: the one selector `bin/ci-job --lint` asks
 for the hooks/ and merge/ suite steps it runs. Cost: once per lane lint, one process, one `git diff`, and (when the diff holds
 a file) one `git ls-files` and one parse of each tracked `test_*.py`, once for the whole diff, never once per touched file.
 """
@@ -2947,7 +2947,12 @@ def lint_suites_main(argv) -> int:
         if tracked is None:
             print("ERROR %s" % reason)
             return 2
-    for name in sorted(suites_for_paths(changed, tracked, union=True)):
+    names = suites_for_paths(changed, tracked, union=True)
+    # A changed suite is picked itself: an edit that breaks its own suite is caught by that suite.
+    on_disk = set(tracked)
+    names.update(item for item in changed if item in on_disk
+                 and os.path.basename(item).startswith("test_") and item.endswith(".py"))
+    for name in sorted(names):
         print(name)
     return 0
 
