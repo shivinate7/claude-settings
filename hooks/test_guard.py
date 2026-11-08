@@ -13248,6 +13248,53 @@ add("test-author: Write of a new workflow with on and jobs lines is refused", "d
     tool="Write", file_path=".github/workflows/nightly.yml", content=NEW_WORKFLOW,
     carries=("builder", "Report"), **A)
 
+# ---- conflict markers in a workflow. A test-author resolves a merge conflict between whole test-run steps. The marker
+# lines on the old side are not content and may go. Every side between them, kept or dropped, must still be whole
+# test-run steps. Markers added on the new side stay refused. The marker literals reuse CM_START and CM_MID above;
+# CF_BASE and CF_END are built from parts for the same reason, so this file cannot trip its own conflict-markers check.
+WORD_RUNS = "      - name: Word-run fence fixture suite\n        run: python3 lint/test_word_runs.py\n"
+ROUTE_JUDGE = "      - name: Route judge measure fixture suite\n        run: python3 lint/test_prove_route_judge.py\n"
+WORD_RUNS_OLD = "      - name: Word-run fence fixture suite\n        run: python3 lint/test_word_runs_old.py\n"
+PARTIAL_RUN = "        run: python3 lint/other_lint.py\n"
+CF_BASE = "|" * 7 + " base\n"
+CF_END = ">" * 7 + " d2061780c\n"
+
+
+def conflict(ours, theirs, base=None, opener=CM_START):
+    """One merge conflict as git writes it: `ours`, then `theirs`, with a diff3 `base` section when given."""
+    text = opener + ours
+    if base is not None:
+        text += CF_BASE + base
+    return text + CM_MID + theirs + CF_END
+
+
+# Allow: each one is red on main, which refuses every marker line as content that is no test-run step.
+add("test-author: a conflict between two whole test steps, both kept, is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE), new_string=WORD_RUNS + "\n" + ROUTE_JUDGE, **A)
+add("test-author: a conflict between two whole test steps, one side kept, is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE), new_string=WORD_RUNS, **A)
+add("test-author: a diff3 conflict whose base is a whole test step, both sides kept, is allowed", "allow",
+    tool="Edit", file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE, base=WORD_RUNS_OLD),
+    new_string=WORD_RUNS + "\n" + ROUTE_JUDGE, **A)
+
+# Deny: each one is green on main and must stay green. A fix that only strips the marker lines would wrongly allow
+# the first case: once the markers go, its kept CLEAN lines are unchanged, so no changed chunk reaches the step check.
+add("test-author: a conflict with a non-test step on one side, both kept, is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=conflict(WORD_RUNS, CLEAN), new_string=WORD_RUNS + CLEAN,
+    carries=("builder", "Report"), **A)
+add("test-author: a conflict with a partial step on one side, both kept, is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=conflict(PARTIAL_RUN, ROUTE_JUDGE), new_string=PARTIAL_RUN + ROUTE_JUDGE,
+    carries=("builder", "Report"), **A)
+add("test-author: conflict markers added on the new side are refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=WORD_RUNS + ROUTE_JUDGE, new_string=conflict(WORD_RUNS, ROUTE_JUDGE),
+    carries=("builder", "Report"), **A)
+add("test-author: an indented conflict opener is content, not a marker, and is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE, opener="  " + CM_START),
+    new_string=WORD_RUNS + "\n" + ROUTE_JUDGE, carries=("builder", "Report"), **A)
+add("test-author: a six-character conflict opener is content, not a marker, and is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE, opener="<" * 6 + " HEAD\n"),
+    new_string=WORD_RUNS + "\n" + ROUTE_JUDGE, carries=("builder", "Report"), **A)
+
 # Builder: an edit to a workflow stays allowed unless its added lines disable tests in a test-runner line.
 for _name, _old, _new in (
     ("a lint step's run is changed", LINT, LINT_RUN_CHANGED),
