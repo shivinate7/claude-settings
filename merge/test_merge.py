@@ -13048,11 +13048,14 @@ class ReviewChainFixture(ReviewEnv):
         return (review_comment(1, 7, record_text(head=self.EARLIER, rounds=REVIEW_PASS)),
                 review_comment(2, 7, record_text(head=self.NEWEST, rounds=rounds, guard=guard, kind=kind, fix=fix, net=net)))
 
-    def run_chain(self, base, comments=(), diffs=None, verdict="PASS", net="not owed", guard="no", kind="normal"):
-        """The record for the live head, with one round, and --fix-check `base` at `verdict`, on the repo's `comments` and the compares `diffs`.
-        `net`, `guard` and `kind` are the new record's fields. -> (rc, out, err, host)."""
-        host = self.record_host(*comments, diffs=diffs or {})
-        argv = ["7", "--review-record", "--kind", kind, "--guard", guard, "--head", self.LIVE, "--round", "1:reviewer:sonnet:PASS",
+    def run_chain(self, base, comments=(), diffs=None, verdict="PASS", net="not owed", guard="no", kind="normal",
+                  rounds=("1:reviewer:sonnet:PASS",), live=None):
+        """The record for the live head (`live`, LIVE by default), with the `rounds` given (N:ROLE:MODEL:VERDICT each; none makes a record
+        with no round lines), and --fix-check `base` at `verdict`, on the repo's `comments` and the compares `diffs`. `net`, `guard` and `kind`
+        are the new record's fields. -> (rc, out, err, host)."""
+        live = live or self.LIVE
+        host = self.record_host(*comments, head=live, diffs=diffs or {})
+        argv = ["7", "--review-record", "--kind", kind, "--guard", guard, "--head", live, *(a for r in rounds for a in ("--round", r)),
                 "--fix-check", f"{base}:reviewer:haiku:{verdict}", "--net-value", net]
         rc, out, err = self.run_args(*argv, host=host)
         return rc, out, err, host
@@ -13160,10 +13163,21 @@ class ReviewFixPassChain(ReviewChainFixture):
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
 
 class ReviewFixNetFreeze(ReviewChainFixture):
-    """A fix check that follows a record whose last round is 3 (decision hold-unsafe-after-round-3): its --net-value, --guard and --kind must equal
-    that record's. Otherwise it is refused with exit 2 and no record, and the refusal names the field and both values. This holds for a first fix
-    check, a chained one, and the record a --fix-base-record stands in for (ReviewFixBaseRecord holds that case). Before the final round the three may
+    """A fix check that follows a record whose final round is the last allowed one (decision hold-unsafe-after-round-3): its --net-value, --guard
+    and --kind must equal that record's. Otherwise it is refused with exit 2 and no record, and the refusal names the field and both values. This
+    holds for a first fix check, a chained one, a chain whose newest record is short (fewer round lines than the final round), and the record a
+    --fix-base-record stands in for (ReviewFixBaseRecord holds that case). A record with fewer round lines than the final round is refused where
+    it is written, by the round floor; a chain that still reads one reads the final round's record behind it. Before the final round the three may
     change. A case that passes on the old code is a control, or a pin of the chain's net clause; the rest are red there."""
+
+    ALL_PASS_ARGS = ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:PASS", "3:reviewer:opus:PASS")  # the final round passes, as --round values
+    ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # the same lines as a record prints them
+
+    def held_chain(self):
+        """The earlier record at NEWEST, with every round passed, Guard or check yes and Net value negative, so it reads held. -> the comments."""
+        comments = self.pair(None, rounds=self.ALL_PASS, net="negative", guard="yes")
+        self.assertEqual(record_state(self, comments[-1]["body"], self.NEWEST), "held", "scope: the final-round record does not read held")
+        return comments
 
     def test_a_first_fix_check_after_a_held_round_3_may_not_change_its_net_value(self):
         comments = self.pair(None, rounds=REVIEW_FAILED_THREE, net="negative", guard="yes")
@@ -13235,27 +13249,96 @@ class ReviewFixNetFreeze(ReviewChainFixture):
                 rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="not owed", guard=guard, kind=kind)
                 self.assertEqual(rc, 0, f"a fix check after round 2 with guard {guard} and kind {kind} was refused:\n" + out + err)
 
+    def test_a_record_with_fewer_round_lines_than_the_final_round_is_refused_at_the_write_step(self):
+        # the round floor of the newest earlier record applies to a fix check's own record, so a short one is refused where it is written
+        comments = self.held_chain()
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="negative", guard="yes", rounds=self.ALL_PASS_ARGS)
+        self.assertEqual(rc, 0, "control: a fix check that copies every round line of the final round was refused:\n" + out + err)
+        earlier = [parse_text(self, c["body"]) for c in comments]
+        for lines in range(3):
+            with self.subTest(round_lines=lines):
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="negative", guard="yes", rounds=self.ALL_PASS_ARGS[:lines])
+                self.assert_refused(rc, out, err)
+                short = parse_text(self, record_text(head=self.LIVE, rounds=self.ALL_PASS[:lines], net="negative", guard="yes"))
+                why = review_fn(self, "round_floor")(earlier, short)
+                self.assertIsNotNone(why, "scope: round_floor does not hold the short record")
+                self.assertIn(why, err, "the refusal does not name the round floor:\n" + err)
+
+    def test_a_chain_after_a_short_record_may_not_move_the_final_round_net_value_or_guard(self):
+        # a chain reads the final round behind a short record, which is the newest one here, as the old code would have posted it
+        diffs = {(self.LIVE, self.OTHER): compare_of("ahead", self.CODE)}
+        for lines in range(2):
+            with self.subTest(round_lines=lines):
+                comments = self.held_chain()
+                short = record_text(head=self.LIVE, rounds=self.ALL_PASS[:lines], net="negative", guard="yes",
+                                    fix=(fix_check_line(verdict="PASS", head=self.NEWEST),))
+                comments += (review_comment(3, 7, short),)
+                moved = record_text(head=self.OTHER, rounds=self.ALL_PASS, net="positive", guard="yes", fix=(fix_check_line(verdict="PASS", head=self.LIVE),))
+                self.assertEqual(record_state(self, moved, self.OTHER), "done", "scope: the record that moves net value does not read done on its own rules")
+                rc, out, err, _ = self.run_chain(self.LIVE, comments, diffs=diffs, live=self.OTHER, rounds=self.ALL_PASS_ARGS, net="negative", guard="yes")
+                self.assertEqual(rc, 0, "control: a chain after the short record that keeps every field was refused:\n" + out + err)
+                rc, out, err, _ = self.run_chain(self.LIVE, comments, diffs=diffs, live=self.OTHER, rounds=self.ALL_PASS_ARGS, net="positive", guard="yes")
+                with self.subTest(field="net"):
+                    self.assert_refused_naming(rc, out, err, "net", "negative", "positive")
+                rc, out, err, _ = self.run_chain(self.LIVE, comments, diffs=diffs, live=self.OTHER, rounds=self.ALL_PASS_ARGS, net="negative", guard="no")
+                with self.subTest(field="guard"):
+                    self.assert_refused_naming(rc, out, err, "guard", "yes", "no")
+
+    def test_a_chain_after_a_fix_check_that_copies_the_final_round_keeps_its_net_value(self):
+        # control, green on the old code: a fix check that copies the final round and keeps its net value is written, and the chain after it may not move net value
+        comments = self.held_chain()
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="negative", guard="yes", rounds=self.ALL_PASS_ARGS)
+        self.assertEqual(rc, 0, "control: a fix check copying the final round and keeping its net value was refused:\n" + out + err)
+        comments += (review_comment(3, 7, posted_body(self, out)),)
+        diffs = {(self.LIVE, self.OTHER): compare_of("ahead", self.CODE)}
+        rc, out, err, _ = self.run_chain(self.LIVE, comments, diffs=diffs, live=self.OTHER, rounds=self.ALL_PASS_ARGS, net="positive", guard="yes")
+        self.assert_refused_naming(rc, out, err, "net", "negative", "positive")
+
 class ReviewFixCountsRound(ReviewEnv):
-    """A failed fix check counts as the next round of review, inside the cap (rule roles-review-cap-three, decision pr-review-record). Each case
-    writes the new record with `merge <pr> --review-record` on the live head, then reads it against the newest earlier record. The new record
-    can read done on its own rules: round_floor holds it below the counted round, and only a FAIL line fills that round. The cases pin that
-    reading, and each is paired with a control that a FAIL line passes."""
+    """A failed fix check counts as the next round of review, inside the cap (rule roles-review-cap-three, decision pr-review-record). A record
+    written on the live head after it must hold the counted round: `merge <pr> --review-record` refuses it at the write step when its last round is
+    below the count, or when the counted round is not a FAIL line, and the refusal names the round. Each case puts the earlier record on pull
+    request 7 as a comment, writes the new record, and pairs the refusal with a control that a FAIL line on the counted round is written."""
 
     EARLIER_HEAD = "1e" * 20  # the head of the newest earlier record, whose fix check FAILed
     FIX_BASE = "2e" * 20  # the head the failed fix check's fix diff started from
 
-    def earlier_record(self, rounds):
-        """The newest earlier record: the round lines given, then a fix check FAIL on its head."""
-        fix = (fix_check_line(verdict="FAIL", head=self.FIX_BASE),)
-        return parse_text(self, record_text(head=self.EARLIER_HEAD, rounds=rounds, fix=fix))
+    def earlier_body(self, rounds):
+        """The newest earlier record's text: the round lines given, then a fix check FAIL on its head."""
+        return record_text(head=self.EARLIER_HEAD, rounds=rounds, fix=(fix_check_line(verdict="FAIL", head=self.FIX_BASE),))
 
-    def write_record(self, *rounds):
-        """`merge 7 --review-record` on the live head with the round values given. -> (rc, out, err, the printed record, parsed)."""
+    def earlier_comments(self, rounds):
+        """The pull request's comments: the one earlier record, as a comment."""
+        return (review_comment(1, 7, self.earlier_body(rounds)),)
+
+    def earlier_record(self, rounds):
+        """The newest earlier record, parsed: the round lines given, then a fix check FAIL on its head."""
+        return parse_text(self, self.earlier_body(rounds))
+
+    def write_record(self, *rounds, comments=()):
+        """`merge 7 --review-record` on the live head with the round values given, and the pull request's `comments` before it.
+        -> (rc, out, err, the printed record, parsed)."""
         argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", REVIEW_HEAD]
         for value in rounds:
             argv += ["--round", value]
-        rc, out, err = self.run_args(*argv, host=self.record_host())
+        rc, out, err = self.run_args(*argv, host=self.record_host(*comments))
         return rc, out, err, (parse_text(self, posted_body(self, out)) if rc == 0 else None)
+
+    def assert_write_refused(self, rc, out, err, why):
+        """The write step refused the record: rc 2, no record printed, no traceback, and the reason on stderr names `why`."""
+        self.assertEqual(rc, 2, "the write step accepted a record that the counted round refuses:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused record still printed")
+        self.assertNotIn("Traceback", err)
+        self.assertIn(why, err, "the refusal does not name the counted round:\n" + err)
+
+    def own_state_of(self, rounds):
+        """The state of a record with these round lines on its own rules, with no earlier record read."""
+        return self.own_state(parse_text(self, record_text(rounds=rounds)))
+
+    def fill_why(self, counted):
+        """The round floor's why when the counted round has no FAIL line: the failed fix check counts as round `counted`, and only a FAIL fills it."""
+        return (f"a failed fix check on head {self.EARLIER_HEAD[:9]} counts as round {counted}, and only a FAIL line fills it, "
+                f"but this record's round {counted} has none")
 
     def own_state(self, rec):
         """The record's state on its own rules, with no earlier record read."""
@@ -13269,35 +13352,42 @@ class ReviewFixCountsRound(ReviewEnv):
         """The round floor's why when the failed fix check counts as round `counted` and the new record's last round is `last`."""
         return f"a failed fix check on head {self.EARLIER_HEAD[:9]} counts as round {counted}, but this record's last round is {last}"
 
-    def test_a_pass_on_the_counted_round_does_not_fill_its_fail_slot(self):
-        earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL",))
-        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS")
-        self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
-        self.assertEqual(self.own_state(rec), "done", "scope: the record on its own rules does not read done")
-        self.assertEqual(self.floor_of(earlier, rec), f"a failed fix check on head {self.EARLIER_HEAD[:9]} counts as round 2, and only a FAIL line "
-                         "fills it, but this record's round 2 has none", "round_floor did not hold a PASS on the counted round")
+    def test_a_pass_on_the_counted_round_is_refused_at_the_write_step(self):
+        comments = self.earlier_comments(("Round 1: reviewer, sonnet, FAIL",))
+        self.assertEqual(self.own_state_of(("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")), "done",
+                         "scope: the record on its own rules does not read done")
+        rc, out, err, _ = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS", comments=comments)
+        self.assert_write_refused(rc, out, err, self.fill_why(2))
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", comments=comments)
+        self.assertEqual(rc, 0, "control: a FAIL on the counted round was refused:\n" + out + err)
+        self.assertIsNone(self.floor_of(self.earlier_record(("Round 1: reviewer, sonnet, FAIL",)), rec), "control: round_floor held a FAIL on the counted round")
 
-    def test_a_record_with_only_round_one_is_held_below_the_counted_round(self):
-        earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL",))
-        rc, out, err, rec = self.write_record("1:reviewer:sonnet:PASS")
-        self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
-        self.assertEqual(self.own_state(rec), "done", "scope: the record on its own rules does not read done")
-        self.assertEqual(self.floor_of(earlier, rec), self.held_why(2, 1), "round_floor does not name round 2 for a record that stops at round 1")
+    def test_a_record_with_only_round_one_is_refused_at_the_write_step_below_the_counted_round(self):
+        comments = self.earlier_comments(("Round 1: reviewer, sonnet, FAIL",))
+        self.assertEqual(self.own_state_of(("Round 1: reviewer, sonnet, PASS",)), "done", "scope: the record on its own rules does not read done")
+        rc, out, err, _ = self.write_record("1:reviewer:sonnet:PASS", comments=comments)
+        self.assert_write_refused(rc, out, err, self.held_why(2, 1))
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", comments=comments)
+        self.assertEqual(rc, 0, "control: a FAIL on the counted round was refused:\n" + out + err)
+        self.assertIsNone(self.floor_of(self.earlier_record(("Round 1: reviewer, sonnet, FAIL",)), rec), "control: round_floor held a FAIL on the counted round")
 
-    def test_after_two_failed_rounds_the_failed_fix_check_counts_the_final_round_not_round_one(self):
-        earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
-        rc, out, err, rec = self.write_record("1:reviewer:sonnet:PASS")
-        self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
-        self.assertEqual(self.own_state(rec), "done", "scope: the record on its own rules does not read done")
-        self.assertEqual(self.floor_of(earlier, rec), self.held_why(3, 1), "round_floor does not name the final round for a record that stops at round 1")
+    def test_after_two_failed_rounds_a_short_record_is_refused_for_the_final_round_not_round_one(self):
+        earlier_rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")
+        comments = self.earlier_comments(earlier_rounds)
+        self.assertEqual(self.own_state_of(("Round 1: reviewer, sonnet, PASS",)), "done", "scope: the record on its own rules does not read done")
+        rc, out, err, _ = self.write_record("1:reviewer:sonnet:PASS", comments=comments)
+        self.assert_write_refused(rc, out, err, self.held_why(3, 1))
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL", comments=comments)
+        self.assertEqual(rc, 0, "control: a FAIL on each counted round was refused:\n" + out + err)
+        self.assertIsNone(self.floor_of(self.earlier_record(earlier_rounds), rec), "control: round_floor held a record whose counted round is a FAIL line")
 
     def test_a_fail_on_the_counted_round_is_not_floored(self):
-        # control: a FAIL line fills the counted round, so the floor lets the record through and its own rules decide
-        earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL",))
-        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS")
+        # control: a FAIL line fills the counted round, so the write lets the record through and its own rules decide
+        comments = self.earlier_comments(("Round 1: reviewer, sonnet, FAIL",))
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS", comments=comments)
         self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
         self.assertEqual(self.own_state(rec), "done", "scope: the record that fills the counted round and passes the final round does not read done")
-        self.assertIsNone(self.floor_of(earlier, rec), "round_floor held a record whose counted round is a FAIL line")
+        self.assertIsNone(self.floor_of(self.earlier_record(("Round 1: reviewer, sonnet, FAIL",)), rec), "round_floor held a record whose counted round is a FAIL line")
 
 class ReviewFixBaseRecord(ReviewEnv):
     """`--fix-base-record URL` goes with --review-record and --fix-check. URL is a GitHub issue-comment link to an earlier review record, on this
