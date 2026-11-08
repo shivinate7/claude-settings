@@ -380,7 +380,7 @@ while True:
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
-            SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -4845,7 +4845,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
 # by path shape and a stat walk, never by git, so the rule adds no git spawn beyond what the call
 # already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
-# The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
+# The git verbs that change the primary's files or branch. A `stash` that only reads (STASH_READ_ACTIONS)
 # and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
                           "stash", "cherry-pick", "revert", "am", "apply", "clean")
@@ -4957,7 +4957,7 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
         if not folder:
             continue
         for verb, args in verbs:
-            if verb == "stash" and args[:1] in (["list"], ["show"]):
+            if verb == "stash" and stash_action(args) in STASH_READ_ACTIONS:
                 continue
             if verb == "clean" and not clean_deletes_files(args):
                 continue

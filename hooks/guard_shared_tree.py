@@ -147,7 +147,8 @@ def stash_takes_the_stack(args) -> bool:
     """True when a `git stash` call takes an entry OFF the shared stack.
 
     The predicate is the DIRECTION of the act, not a list of action words. A call reads the
-    stack, puts work onto it, or takes an entry off it. `list`, `show` and `create` read. `push`, `save`
+    stack, puts work onto it, or takes an entry off it. `list` and `show` read the stack; `create`
+    reads the tree and index and writes an unreachable commit, with no entry. `push`, `save`
     and a bare `git stash` put work on. Every other action takes an entry off: `pop` and
     `branch` consume the entry they use, `drop` and `clear` destroy entries outright, and
     `apply` reads another session's work into this tree without that session's word. `store`,
@@ -165,7 +166,8 @@ def stash_takes_the_stack(args) -> bool:
 def stash_discards(args) -> bool:
     """True when a `git stash` call can lose work.
 
-    `list`, `show` and `create` read the stash and change nothing, so they pass. Every other action can
+    `list` and `show` read the stack and change nothing. `create` reads the tree and index and writes
+    an unreachable commit with no stash entry, so it loses nothing either. They pass. Every other action can
     lose work, and the SUBJECT READ below decides whether this call would lose any.
 
     `apply` and `pop` count: the thing at risk is not this tree but the shared stack. The entry
