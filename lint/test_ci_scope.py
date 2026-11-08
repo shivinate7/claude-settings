@@ -112,8 +112,9 @@ EXPORT_SUITE = "skills/waiting-page/test_export_page.py"
 # The four folders the suite's modules put on sys.path. A bare module name resolves to a file in one of them, and any other
 # name (a stdlib module, a function) resolves to nothing, so the walk counts repo files only.
 EXPORT_SUITE_DIRS = ("skills/waiting-page", "lint", "hooks", "janitor")
-# Run or read by the suite, never imported, so the walk cannot reach them.
-EXPORT_SUITE_FILES = ("skills/waiting-page/check_designs.mjs", "skills/waiting-page/page.html")
+# Run or read by the suite, never imported, so the walk cannot reach them. lint/layout.json is read at run time by
+# lint/layout.py artifacts(), which the export calls.
+EXPORT_SUITE_FILES = ("skills/waiting-page/check_designs.mjs", "skills/waiting-page/page.html", "lint/layout.json")
 
 
 def imported_names(tree):
