@@ -10722,15 +10722,25 @@ def ll_open(*numbers):
 _LL_FORM = []
 
 
-def ll_review(n, head):
-    """The review record of pull request n at `head`, in merge.py's own form (review_body, decision pr-review-record)."""
+def ll_merge():
+    """The merge tool's module, loaded once from merge/merge.py: its review form and its lint marker folder."""
     if not _LL_FORM:
         import importlib.util
         spec = importlib.util.spec_from_file_location("ll_merge_form", os.path.join(REPO, "merge", "merge.py"))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         _LL_FORM.append(module)
-    return _LL_FORM[0].review_body(n, head, "normal", "no", [(1, "reviewer", "sonnet", "PASS")], "not owed")
+    return _LL_FORM[0]
+
+
+def ll_review(n, head):
+    """The review record of pull request n at `head`, in merge.py's own form (review_body, decision pr-review-record)."""
+    return ll_merge().review_body(n, head, "normal", "no", [(1, "reviewer", "sonnet", "PASS")], "not owed")
+
+
+def ll_marker(cfg, head):
+    """The lint marker of `head` under the config folder `cfg`: the path `merge --lane-lint` writes, from the merge tool's own folder."""
+    return os.path.join(cfg, *ll_merge().LANE_LINT_MARKER_DIR, head)
 
 
 def ll_records(*numbers):
@@ -10771,6 +10781,28 @@ def build_ll_checkout():
 
 lazy_fixture([LL_CHECKOUT], build_ll_checkout)
 
+# Two config folders for the send cases. LL_CFG_MARKED holds the lint marker of each head a record case names; LL_CFG_BARE
+# holds none. A record with no marker is refused in the second and passes in the first.
+LL_CFG_MARKED = os.path.join(ROOT, "ll-cfg-marked")
+LL_CFG_BARE = os.path.join(ROOT, "ll-cfg-bare")
+LL_MARKED = (43, 51, 52, 53, 54)  # the pull requests whose records a send case names with a marker
+
+
+def build_ll_markers():
+    """One empty lint marker per head in LL_MARKED, as a passing `merge --lane-lint` writes it."""
+    for n in LL_MARKED:
+        os.makedirs(os.path.dirname(ll_marker(LL_CFG_MARKED, ll_head(n))), exist_ok=True)
+        open(ll_marker(LL_CFG_MARKED, ll_head(n)), "w", encoding="utf-8").close()
+
+
+def build_ll_bare():
+    """The config folder with no lint marker in it."""
+    os.makedirs(LL_CFG_BARE, exist_ok=True)
+
+
+lazy_fixture([LL_CFG_MARKED], build_ll_markers)
+lazy_fixture([LL_CFG_BARE], build_ll_bare)
+
 
 def ll_gh(name, prs=None, issues=(), comments=(), **kw):
     """The fake pull request tool of one send case, built before the case runs. -> the PATH the guard run gets."""
@@ -10779,16 +10811,16 @@ def ll_gh(name, prs=None, issues=(), comments=(), **kw):
     return fake_gh_path(folder)
 
 
-def ll_refuse(name, transcript, message, env_path, target=LL_RUNNER, cwd=LL_CHECKOUT, carries=()):
-    """A send_message the guard refuses. The reason names its rule."""
+def ll_refuse(name, transcript, message, env_path, target=LL_RUNNER, cwd=LL_CHECKOUT, carries=(), config=None):
+    """A send_message the guard refuses. The reason names its rule. `config` is the CLAUDE_CONFIG_DIR the run reads its markers from."""
     add("lane-lint-send: " + name, "deny", rule=LANE_SEND_RULE, tool=SEND_MESSAGE, cwd=cwd, transcript=transcript,
-        env=ROLE_ENV, env_path=env_path, session_id=target, message=message, carries=carries)
+        env=ROLE_ENV, env_path=env_path, session_id=target, message=message, carries=carries, config=config)
 
 
-def ll_allow(name, transcript, message, env_path, target=LL_RUNNER, cwd=LL_CHECKOUT):
-    """A send_message the guard lets through silently."""
+def ll_allow(name, transcript, message, env_path, target=LL_RUNNER, cwd=LL_CHECKOUT, config=None):
+    """A send_message the guard lets through silently. `config` is the CLAUDE_CONFIG_DIR the run reads its markers from."""
     add("lane-lint-send: " + name, "allow", tool=SEND_MESSAGE, cwd=cwd, silent=True, transcript=transcript,
-        env=ROLE_ENV, env_path=env_path, session_id=target, message=message)
+        env=ROLE_ENV, env_path=env_path, session_id=target, message=message, config=config)
 
 
 # Refused: an open pull request with no review record at its live head. The reason names the pull request.
@@ -10811,7 +10843,8 @@ ll_refuse("a closed pull request beside an open one with no record: the open one
 # Refused, the full-size state: five pull requests are judged, and the fifth, with no record, refuses.
 ll_refuse("five pull requests named, the fifth with no record: the fifth refuses the hand-off",
           role_path("ll-runner"), "Hand-off: PRs #51, #52, #53, #54 and #55 are ready for batch 3.",
-          ll_gh("five", prs=ll_open(51, 52, 53, 54, 55), comments=ll_records(51, 52, 53, 54)), carries=("55",))
+          ll_gh("five", prs=ll_open(51, 52, 53, 54, 55), comments=ll_records(51, 52, 53, 54)), carries=("55",),
+          config=LL_CFG_MARKED)
 # Refused: the runner's record came from create_session, or from a list_sessions row, not from get_session.
 ll_refuse("a runner that create_session started is judged on its record: the hand-off is refused",
           role_path("ll-create"), LL_MSG, ll_gh("create", prs=ll_open(41)), carries=("41",))
@@ -10827,9 +10860,16 @@ ll_allow("a merged pull request is skipped: a hand-off that names only it passes
 # Allowed: an issue number is skipped.
 ll_allow("an issue number is skipped: a hand-off that names only an issue passes",
          role_path("ll-runner"), "Status: issue #77 is ready to file.", ll_gh("issue", issues=[77]))
-# Allowed: a review record at the live head clears the hand-off.
+# Refused: a review record at the live head with no lint marker for that head. The marker is the proof of a passing lint,
+# so the refusal names `merge --lane-lint`, the remedy.
+ll_refuse("a review record at the live head with no lint marker is refused, and the refusal names merge --lane-lint",
+          role_path("ll-runner"), "Hand-off: PR #44 is ready for batch 3.",
+          ll_gh("record-no-marker", prs=ll_open(44), comments=ll_records(44)), config=LL_CFG_BARE,
+          carries=("#44", "merge --lane-lint"))
+# Allowed: a review record at the live head, with its lint marker, clears the hand-off.
 ll_allow("a review record at the live head clears the hand-off",
-         role_path("ll-runner"), "Hand-off: PR #43 is ready for batch 3.", ll_gh("at-head", prs=ll_open(43), comments=ll_records(43)))
+         role_path("ll-runner"), "Hand-off: PR #43 is ready for batch 3.", ll_gh("at-head", prs=ll_open(43), comments=ll_records(43)),
+         config=LL_CFG_MARKED)
 # Allowed: a target that is no runner (the coordinator) is not judged, though the message names an unlinted pull request.
 ll_allow("a target that is no runner (the coordinator) is not judged",
          role_path("ll-coord"), LL_MSG, ll_gh("coord", prs=ll_open(41)), target=LL_COORD)
@@ -10839,6 +10879,25 @@ ll_allow("item 431 with no # names no pull request, so it is not judged",
 # Allowed: a message with no pull request reads none.
 ll_allow("a message with no pull request is allowed",
          role_path("ll-runner"), "Status: batch 3 is green.", ll_gh("none"))
+# Refused: the pull request reference forms the guard judges. `PR#1463` names the number after a PR prefix. The two URL
+# forms name their repo, and `need` makes the fake tool answer only for o/n: a repo read from the runner's tag instead
+# finds nothing, the read is unknown, and the hand-off passes, which fails the case.
+ll_refuse("PR#1463 is judged: a hand-off naming it with no record is refused",
+          role_path("ll-runner"), "Hand-off: PR#1463 is ready for batch 3.", ll_gh("pr-hash", prs=ll_open(1463)),
+          carries=("#1463",))
+ll_refuse("github.com/o/n/pull/1463 with no scheme is judged: refused, and its repo is o/n",
+          role_path("ll-runner"), "Hand-off: github.com/o/n/pull/1463 is ready for batch 3.",
+          ll_gh("url-no-scheme", prs=ll_open(1463), need=["o/n"]), carries=("o/n#1463",))
+ll_refuse("https://www.github.com/o/n/pull/1463 is judged: refused, and its repo is o/n",
+          role_path("ll-runner"), "Hand-off: https://www.github.com/o/n/pull/1463 is ready for batch 3.",
+          ll_gh("url-www", prs=ll_open(1463), need=["o/n"]), carries=("o/n#1463",))
+# The control for the pin below: a bare #1463 to the same runner is refused, so the number itself is judged.
+ll_refuse("the control: a bare #1463 to the same runner is refused",
+          role_path("ll-runner"), "Hand-off: #1463 is ready for batch 3.", ll_gh("bare-1463", prs=ll_open(1463)),
+          carries=("#1463",))
+# Allowed, pinned: claude-settings#1463 names a bare repo, with no owner, so the guard reads no repo for it and does not judge it.
+ll_allow("a bare repo name, claude-settings#1463, is not judged: the hand-off passes",
+         role_path("ll-runner"), "Hand-off: claude-settings#1463 is ready for batch 3.", ll_gh("bare-repo-name", prs=ll_open(1463)))
 # Refused: the target's tags were set after its newest record, so the record is stale. The steer re-reads the record
 # with get_session. It never tells the sender to start a new lane, for a topic lane or a lane with no topic.
 step_refuse("a brief for topic icons, after set_session_tags on a topic lane, is refused: re-read the record with get_session",
@@ -15243,6 +15302,52 @@ LOG_CHECKS_EXTRA.append(("lane-lint-send: a send to a target that is no runner m
                          ll_cost_pin_check()))
 LOG_CHECKS_EXTRA.append(("lane-lint-send: a send to the runner naming an open pull request makes a read (the counter's control)",
                          ll_cost_control_check()))
+
+# The send-sequence checks. A hand-off to a target with no record is refused once, and the guard's own refusal goes in the
+# transcript. Each check adds one follow-up send, so a failure names one cause. Only an exact retry of the refused send passes.
+LL_FIRST = "Hand-off: #7 and #8 are ready for batch 3."
+
+
+def ll_history(name, first, retry=False):
+    """Run `first`, a hand-off to a target with no record, through the guard. -> (transcript, problems). The transcript holds that
+    send and the guard's own refusal, and with `retry` an identical retry that passed. Shared by each sequence check."""
+    path = ll_fake_now("hist-" + name, prs=ll_open(7, 8, 1513))
+    decision, reason, _rows, _err = ll_run("hist-" + name, role_path("ll-none"), first, env_path=path, session=LL_OWNER)
+    problems = []
+    if decision != "deny" or LANE_SEND_RULE not in reason:
+        problems.append("the first hand-off to a target with no record: want deny naming %s, got %s: %s"
+                        % (LANE_SEND_RULE, decision, reason[:90]))
+    with open(role_path("ll-none"), encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+    lines += [role_use("s1", SEND_MESSAGE, {"session_id": LL_RUNNER, "message": first}), role_result("s1", reason)]
+    if retry:
+        lines += [role_use("s2", SEND_MESSAGE, {"session_id": LL_RUNNER, "message": first}), role_result("s2", "Message sent.")]
+    transcript = os.path.join(ROOT, "ll-hist-%s.jsonl" % name)
+    with open(transcript, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    return transcript, problems
+
+
+def ll_sequence_check(name, first, follow, expect, retry=False):
+    """A send after a refused hand-off to a target with no record: `follow` must get `expect`. A deny names the rule."""
+    def check():
+        transcript, problems = ll_history(name, first, retry=retry)
+        decision, reason, _rows, _err = ll_run(name, transcript, follow, env_path=ll_fake_now(name, prs=ll_open(7, 8, 1513)),
+                                               session=LL_OWNER)
+        if decision != expect:
+            problems.append("the follow-up %r: want %s, got %s: %s" % (follow, expect, decision, reason[:90]))
+        elif expect == "deny" and LANE_SEND_RULE not in reason:
+            problems.append("the refusal does not name %s: %s" % (LANE_SEND_RULE, reason[:90]))
+        return not problems, "; ".join(problems) or "%s, as the sequence wants" % expect
+    return check
+
+
+LOG_CHECKS_EXTRA.append(("lane-lint-send: the identical retry of a refused hand-off to a target with no record passes",
+                         ll_sequence_check("seq-identical", LL_FIRST, LL_FIRST, "allow")))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: after that identical retry passed, a different hand-off naming #1513 to the same target is refused",
+                         ll_sequence_check("seq-other-pr", LL_FIRST, "Hand-off: #1513 is ready for batch 3.", "deny", retry=True)))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: a retry of a refused hand-off with different text is refused",
+                         ll_sequence_check("seq-other-text", LL_FIRST, LL_FIRST + " Notes attached.", "deny")))
 FAMILY = _LL_FAMILY_BEFORE
 # The red-run probe of the lint-less copy is appended here for the same reason: LOG_CHECKS_EXTRA is defined above.
 # Its family is red-run, set by hand. GUARD_FAMILY=red-run runs it.
