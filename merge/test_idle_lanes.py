@@ -3,10 +3,12 @@
 
 Run: python3 merge/test_idle_lanes.py
 
-WHAT IT PROVES. The command prints one line per lane to archive, one `hold (...)` line per lane it cannot yet archive, then
-one summary line that counts both. A held lane is never an `unknown (` line: that form is for a read the whole list cannot
-make, and only that form exits 1. It takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and no merge role in a cloud
-session. A missing --live file exits 1 and prints no summary, so an unread list never reads as an empty one.
+WHAT IT PROVES. The command prints one line per lane to archive, then one `hold (...)` line per lane that can never be
+judged, then one summary line that counts both. A hold line is a lane with no cs-step tag, or an absent step with no Step
+trailer on main; it is never archived. A waiting lane prints no line. A whole-read failure prints one `unknown (` line and
+exits 1. It takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other
+flag, and no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never
+reads as an empty one.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
@@ -127,6 +129,17 @@ class IdleLanesCli(unittest.TestCase):
         self.assertIn("session_a (c1; topic -)", lines, out)
         self.assertEqual(sum(line.startswith("hold (") for line in lines), 1, out)
         self.assertEqual(lines[-1:], [MIXED], out)
+
+    def test_empty_record_exits_1_with_one_unknown_line_and_no_summary(self):
+        # No step file on the record branch means no lane can be judged. The list reads unknown and exits 1, so a caller
+        # never reads it as an empty list.
+        roadmap.git(self.repo, "rm", "-rq", "roadmap/data/steps")
+        roadmap.git(self.repo, "commit", "-q", "-m", "drop every step")
+        self.publish([lane("session_x", "x")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(out.splitlines(), ["unknown (the record branch has no steps)"], "out: %r, err: %r" % (out, err))
+        self.assertEqual(code, 1, "an empty record exits %d, so a caller reads the list as read: %s" % (code, err))
+        self.assertNotRegex(out, SUMMARY_LINE)
 
     def test_stale_live_file_prints_one_unknown_line_and_no_empty_summary(self):
         self.publish([lane("session_a", "c1")], read_at=roadmap.iso_ago(120))
