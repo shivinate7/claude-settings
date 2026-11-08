@@ -2507,7 +2507,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", info=None, review_reco
         make_tree = lambda: add_worktree(root, head)
     state, lines, log, liftable = lint_run(root, base, make_tree, skip_no_job=review_record)
     short = head[:9]
-    if state == "skip":  # main's behaviour in a repo with no checks job: the record prints, unlinted, and stderr says so once
+    if state == "skip":  # ci-job lints only the checks job, so a head without it prints its record unlinted, and stderr says so once
         print(f"merge: no lint ran on {short}: {lines[0]}. The record prints unlinted.", file=sys.stderr)
         return 0
     if state == "pass":
