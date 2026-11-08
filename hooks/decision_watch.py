@@ -661,6 +661,18 @@ def _judge_isolation():
 
 
 VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
+MODEL_TIMEOUT_ERROR = "model subprocess timed out"  # the error text of a timeout: callers that tell a timeout from another failure compare to this
+REPLY_OUTPUT_ERROR = "model output"  # the start of each error for a reply that is not the claude envelope
+REPLY_RESULT_ERROR = "model result"  # the start of each error for a result text that is not the verdict asked for
+REPLY_ERROR_PREFIXES = (REPLY_OUTPUT_ERROR, REPLY_RESULT_ERROR)  # every reply-parse error starts with one of these; callers that tell an unreadable reply from a failed call test for them
+
+
+class EachOf(tuple):
+    """A shape's values for a reply that judges many items: its key holds a list, and each entry is an object with an
+    integer `line` and a `verdict` that is one of these values. The merge's prose judge asks in this shape."""
+
+
+LINE_VERDICTS = {"verdicts": EachOf(("holds", "stale", "unbacked"))}
 
 
 def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE, effort="xhigh"):
@@ -696,7 +708,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
             timeout=timeout, cwd=root, env=env,
         )
     except subprocess.TimeoutExpired:
-        return None, "model subprocess timed out"  # fixed text: never put str(exc) in the report
+        return None, MODEL_TIMEOUT_ERROR  # fixed text: never put str(exc) in the report
     except Exception as exc:
         return None, scrub("model subprocess failed to start: %s" % exc)
     finally:
@@ -712,26 +724,35 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     try:
         envelope = json.loads(stdout)
     except Exception:
-        return None, "model output was not JSON"
+        return None, REPLY_OUTPUT_ERROR + " was not JSON"
     text = envelope.get("result") if isinstance(envelope, dict) else None
     if not isinstance(text, str):
-        return None, "model output carried no result text"
-    return parse_verdict(text, shape)
+        return None, REPLY_OUTPUT_ERROR + " carried no result text"
+    return parse_verdict(text, shape, scrub)
 
 
-def parse_verdict(text, shape=VERDICT_SHAPE):
+def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
     """Return (verdict_dict, error) from the model's reply text. The one home of this parse:
-    `invoke_model` and the `--model-text` entry below both call it."""
+    `invoke_model` and the `--model-text` entry below both call it. `scrub`, when given, cleans the reply
+    text of the no-JSON error before its 120-character cut, as invoke_model does for stderr."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
-        return None, "model result carried no JSON verdict"
+        return None, REPLY_RESULT_ERROR + " carried no JSON verdict: " + (scrub(text) if scrub else text)[:120]
     try:
         verdict = json.loads(match.group(0))
     except Exception:
-        return None, "model result's JSON verdict did not parse"
+        return None, REPLY_RESULT_ERROR + "'s JSON verdict did not parse"
+    if not isinstance(verdict, dict):
+        return None, REPLY_RESULT_ERROR + "'s JSON verdict was not an object"
     (key, values), = shape.items()
+    if isinstance(values, EachOf):
+        entries = verdict.get(key)
+        if not isinstance(entries, list) or not all(
+                isinstance(e, dict) and type(e.get("line")) is int and e.get("verdict") in values for e in entries):
+            return None, "%s's %s was not a list of {line, verdict} with a verdict of %s" % (REPLY_RESULT_ERROR, key, " or ".join(values))
+        return verdict, None
     if verdict.get(key) not in values:
-        return None, "model result named neither %s" % " nor ".join(map(str, values))
+        return None, "%s named neither %s" % (REPLY_RESULT_ERROR, " nor ".join(map(str, values)))
     return verdict, None
 
 
@@ -935,6 +956,7 @@ def collect_paths(records, cwd):
                 cmd = inp.get("command") or ""
                 if not isinstance(cmd, str) or not cmd.strip():
                     continue
+                guard.POWERSHELL_CALL[0] = name == "PowerShell"
                 try:
                     matched = guard.project_config_shell_hit(cmd, cwd)
                 except Exception:
