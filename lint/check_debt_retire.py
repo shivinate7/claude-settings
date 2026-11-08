@@ -131,62 +131,99 @@ def judge_run(wt, head, url, run_state):
     return "unknown", "the cited run %s is on %s, which this checkout does not hold" % (url, str(sha)[:9])
 
 
+SKIP = object()  # a rename inside the debts folder with its Retire unchanged: not a close
+
+
+def closes(wt, base_ref, head):
+    """(debt, closed, head sha, merge base, tracked files) for the debts `head` closes against `base_ref`, or None when it closes none. Raises Unknown."""
+    try:
+        debt = records.debt_file(wt)
+    except layout.LayoutError as e:
+        raise Unknown("the debts folder is not known: %s" % e)
+    # A rename inside the folder is a close only when its Retire changed (decided in judge_close, once the texts are read).
+    closed = [(old, new) for status, old, new in records.changes(wt, base_ref, head)[1]
+              if debt(old) and (status == "D" or (status == "R" and (not debt(new) or new != old)))]
+    if not closed:
+        return None
+    head = records.git_names(wt, "rev-parse", head + "^{commit}")[0].strip()
+    mb = records.git_names(wt, "merge-base", base_ref, head)[0].strip()
+    tracked = set(records.git_names(wt, "ls-tree", "-r", "-z", "--name-only", head))
+    return debt, closed, head, mb, tracked
+
+
+def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout):
+    """The one judgment of a closed debt: a Finding, None when its Retire holds, or SKIP when the rename is no close."""
+    slug = os.path.basename(old)[:-3]
+    try:
+        lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
+    except Unknown:
+        lines = records.show(wt, mb, old)  # the base tip no longer holds the file: the fork point's
+    text = retire_text(lines)
+    if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
+        return SKIP
+    todo = spans(text, tracked)
+    if todo:
+        got = None
+        for span in todo:
+            with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
+                one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
+            if one and one[0] == "red":
+                got = one
+                break
+            got = got or one  # an unknown sticks: only a red outranks it, whatever the order
+        if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
+            if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
+                return None
+            got = cite
+        if got:
+            return Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text))
+        return None
+    got = judge_run(wt, head, cited[slug], run_state) if slug in cited else ("prose", None)
+    if got is None:
+        return None
+    if got[0] == "prose":
+        got = "prose", ("debt %s closes with a Retire that names no runnable check. Retire: %s\n"
+                        "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`."
+                        % (slug, text or "(no Retire line)", CITE, slug))
+    else:
+        got = got[0], "debt %s: %s" % (slug, got[1])
+    return Finding(slug, *got)
+
+
 def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False):
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
     run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
     isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt`;
     off, a test runs in `wt` itself."""
-    try:
-        debt = records.debt_file(wt)
-    except layout.LayoutError as e:
-        raise Unknown("the debts folder is not known: %s" % e)
-    # A rename inside the folder is a close only when its Retire changed (decided below, once the texts are read).
-    closed = [(old, new) for status, old, new in records.changes(wt, base_ref, head)[1]
-              if debt(old) and (status == "D" or (status == "R" and (not debt(new) or new != old)))]
-    if not closed:
+    got = closes(wt, base_ref, head)
+    if not got:
         return []
-    head = records.git_names(wt, "rev-parse", head + "^{commit}")[0].strip()
-    mb = records.git_names(wt, "merge-base", base_ref, head)[0].strip()
-    tracked = set(records.git_names(wt, "ls-tree", "-r", "-z", "--name-only", head))
+    debt, closed, head, mb, tracked = got
     cited = cites(pr_body)
     found = []
     for old, new in closed:
-        slug = os.path.basename(old)[:-3]
-        try:
-            lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
-        except Unknown:
-            lines = records.show(wt, mb, old)  # the base tip no longer holds the file: the fork point's
-        text = retire_text(lines)
-        if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
-            continue  # a rename inside the folder with its Retire unchanged
-        todo = spans(text, tracked)
-        if todo:
-            got = None
-            for span in todo:
-                with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
-                    one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
-                if one and one[0] == "red":
-                    got = one
-                    break
-                got = got or one  # an unknown sticks: only a red outranks it, whatever the order
-            if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
-                if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
-                    continue
-                got = cite
-            if got:
-                found.append(Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text)))
-            continue
-        got = judge_run(wt, head, cited[slug], run_state) if slug in cited else ("prose", None)
-        if got is None:
-            continue
-        if got[0] == "prose":
-            got = "prose", ("debt %s closes with a Retire that names no runnable check. Retire: %s\n"
-                            "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`."
-                            % (slug, text or "(no Retire line)", CITE, slug))
-        else:
-            got = got[0], "debt %s: %s" % (slug, got[1])
-        found.append(Finding(slug, *got))
+        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout)
+        if isinstance(one, Finding):
+            found.append(one)
     return found
+
+
+def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None):
+    """{debt path at base: reason} for each deleted debt whose slug the PR body cites and whose judgment gives no Finding (the
+    silent-undo check excuses that path's delete). A rename out of the folder is no delete: the file's lines live on at the new
+    path. paths, when given, limits the judged closes: an unflagged or uncited close is never judged, so its run is never read.
+    Raises Unknown."""
+    cited = cites(pr_body)
+    got = closes(wt, base_ref, head) if cited else None
+    if not got:
+        return {}
+    debt, closed, head, mb, tracked = got
+    res = {}
+    for old, new in closed:
+        slug = os.path.basename(old)[:-3]
+        if new == old and slug in cited and (paths is None or old in paths) and judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout) is None:
+            res[old] = "%s: %s -- %s, the debt-close check holds" % (CITE, slug, cited[slug])
+    return res
 
 
 def say(line):

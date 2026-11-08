@@ -8,10 +8,13 @@ The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
-PinnedSettings: --step runs each named step in the claude-settings tree the workflow pins (one distinct 40-hex sha on its
-`<owner>/claude-settings/actions/<name>@<ref>` uses: lines); two pins, a ref that is no sha, or an unfetchable sha is unknown.
+PinnedSettings: --step runs each remote action step in a worktree of the claude-settings commit it pins (one per distinct
+40-hex sha on its `<owner>/claude-settings/actions/<name>@<ref>` uses: line); a ref that is no sha or an unfetchable sha is unknown
+for the steps that need it, and a plain step under two pins is unknown.
 A blocked named step stops only itself; under two pins CLAUDE_SETTINGS_DIR is the caller's; one pin builds one tree.
 SettingsPins: settings_pins reads a `#` inside quotes, and a lone quote, as text; a run: block is script, never a pin.
+Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
+unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -430,6 +433,14 @@ class LintBase(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
         self.assertNotIn("default", out)
 
+    def test_a_pull_request_lint_step_with_no_base_and_no_origin_main_reads_unknown_not_skipped(self):
+        self.lane_adds_narration(origin=False)
+        _, lines, out = plan_lint(self.root, workflow(self.NARRATION), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), ["Comment narration check"], out)  # the scope: a pull-request run would run this lint step
+        rc, lines, out = self.run_job(self.NARRATION, args=("--lint",))
+        self.assertEqual(by_step(lines).get("Comment narration check"), "unknown", out)  # the exit code is no proof: the no-base line gives 2 too
+        self.assertEqual(rc, 2, out)
+
 
 class GithubBaseRef(Job):
     """A pull-request run sets GITHUB_BASE_REF in each step's env, as the Actions runner does: the base without its
@@ -571,7 +582,7 @@ class StepMaps(unittest.TestCase):
 class SettingsPins(unittest.TestCase):
     """settings_pins, the one pin reader (lint/workflow_steps.py), read as text. A `#` inside quotes is text, so the pin
     after it is read. A lone quote in text opens no quote. A `#` after a space and outside quotes starts a comment. A
-    run: block's lines are script, never a pin, whatever quotes or comment openers they hold."""
+    run: block is script, never a pin, whatever its quotes, comment openers or header comment."""
 
     HEAD = "name: t\non: push\njobs:\n  lane:\n    runs-on: ubuntu-latest\n    steps:\n"  # the step after it is line 7
     SHA = "a" * 40
@@ -596,6 +607,24 @@ class SettingsPins(unittest.TestCase):
         found = settings_pins(self.HEAD + body)
         self.assertEqual(found, [("ste-lint", self.SHA, 11)],
                          "a run: block's text was read as a pin, or the pin after the block was lost")
+
+    def test_a_run_block_with_a_comment_after_its_literal_header_is_script_and_no_pin(self):
+        step = "      - run: | # note\n          echo %s\n" % self.USES
+        self.assertEqual(run_body(step), "echo %s\n" % self.USES,
+                         "precondition: run_body did not read run: | # note as a block")
+        self.assertEqual(settings_pins(self.HEAD + step), [],
+                         "run: | # note: the header comment hid the block, so its script line was read as a pin")
+
+    def test_a_run_block_with_a_comment_after_its_folded_header_is_script_and_no_pin(self):
+        step = "      - run: > # note\n          echo %s\n" % self.USES
+        self.assertEqual(run_body(step), "echo %s\n" % self.USES,
+                         "precondition: run_body did not read run: > # note as a block")
+        self.assertEqual(settings_pins(self.HEAD + step), [],
+                         "run: > # note: the header comment hid the block, so its script line was read as a pin")
+
+    def test_a_plain_literal_run_block_with_the_same_script_line_is_no_pin(self):  # P2 green control
+        step = "      - run: |\n          echo %s\n" % self.USES
+        self.assertEqual(settings_pins(self.HEAD + step), [], "a run: | block's script line was read as a pin")
 
 
 class ScalarOneHome(unittest.TestCase):
@@ -692,6 +721,46 @@ def run_as_yaml_reads_it(step):
             body.pop()
         return "literal", "\n".join(body) + "\n"
     return None, None
+
+
+class RunHeaderComments(Job):
+    """A comment after a run: block header (`run: | # why`) is no part of the script. run_body reads the body, and
+    bin/ci-job runs that body, so the step passes or fails on its own lines. A `#` inside a body is script text."""
+
+    def raw_step(self, header, *body):
+        return "      - name: hdr\n        run: %s\n" % header + "".join("          %s\n" % ln for ln in body) + "\n"
+
+    def test_run_body_drops_the_comment_after_a_literal_header(self):
+        self.assertEqual(run_body(self.raw_step("| # why", "true")), "true\n",
+                         "run: | # why: the comment after the header was read as the script")
+
+    def test_a_literal_header_comment_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # why: the step's body is a passing command, but the header comment failed it\n" + out)
+
+    def test_a_folded_header_comment_does_not_pass_a_failing_body(self):
+        # On main the comment makes the shell read `>- # why` as a redirect: no body runs, and the step PASSes.
+        rc, lines, out = self.run_job(self.raw_step(">- # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: >- # why: the header comment hid a body that exits 3, so the step did not FAIL\n" + out)
+
+    def test_a_lone_quote_in_a_header_comment_is_text_and_the_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # don't stop", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # don't stop: a lone quote in the header comment failed the step\n" + out)
+
+    # Controls: each passes on main and must still hold.
+    def test_a_failing_body_under_a_header_comment_still_fails(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: | # why: a body that exits 3 must still FAIL under a header comment\n" + out)
+
+    def test_a_hash_inside_a_block_body_is_script_text(self):
+        rc, lines, out = self.run_job(self.raw_step("|", "echo '# kept' > kept.txt",
+                                                    "test \"$(cat kept.txt)\" = '# kept'"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: |: a # inside a body line was cut as a comment\n" + out)
 
 
 class RunBodiesOfWorkflows(unittest.TestCase):
@@ -929,7 +998,7 @@ class InstallSteps(Job):
             step("Install deps", "npm ci"),
             step("Lint check", self.LINT, **{"if": "${{ github.event_name == 'pull_request' }}"}),
             args=("--lint",), env=env)
-        self.assertEqual(by_step(lines).get("Lint check"), "skipped", out)
+        self.assertEqual(by_step(lines).get("Lint check"), "unknown", out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "installed.marker")),
                          "the install ran though no lint step after it runs\n" + out)
 
@@ -978,6 +1047,21 @@ class NotRunLines(Job):
                                       step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
         self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
                                                     "Python lint": "FAIL"}), out)
+
+    NO_LINT = (DEGEN[0], DEGEN[1], DEGEN[3], DEGEN[4])  # DEGEN without its one lint step
+
+    def test_a_lint_run_that_picks_no_lint_step_is_unknown_and_exits_two(self):
+        _, lines, out = plan_lint(self.root, workflow(*self.NO_LINT), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), [], out)  # the scope: the job holds no lint step for --lint to pick
+        rc, lines, out = self.run_job(*self.NO_LINT, args=("--lint", "--base", "origin/main"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertEqual(rc, 2, out)
+
+    def test_a_lint_step_that_runs_only_off_a_pull_request_reads_skipped_and_the_run_exits_zero(self):  # the control
+        push_only = step("Push-only lint", "python3 lint/check_clean.py", **{"if": "${{ github.event_name != 'pull_request' }}"})
+        rc, lines, out = self.run_job(push_only, step("Python lint", "python3 lint/check_clean.py"),
+                                      args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, by_step(lines)), (0, {"Push-only lint": "skipped", "Python lint": "PASS"}), out)
 
 
 class Progress(Job):
