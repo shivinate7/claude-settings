@@ -21615,7 +21615,8 @@ def worktree_home_cwd_config_case():
 
 def worktree_home_cwd_cap_case():
     """Pins the agent cap rule (is_settings_file) for a `/c/` cwd: a settings write that sets the
-    cap asks. The basename decides this one, so the case pins the verdict, not the cwd read."""
+    cap asks. The folder decides this one, not the basename, so the case pins the verdict a `/c/`
+    folder gets through the drive read."""
     if os.name != "nt":
         return SKIP, C_FORM_OFF_WINDOWS
     primary = _c_form_fixture("cap")
@@ -21662,6 +21663,57 @@ def _slash_c_builder_hit(name, target):
         guard._expanded = real_expanded
 
 
+def worktree_home_cwd_nt_gate_case():
+    """Pins the drive read in `_settings_place` (guard.py) off Windows. The folder is read through
+    `_expanded` only when os.name is "nt", so a `/c/` folder names the checkout there. This fakes
+    Windows as `_slash_c_builder_hit` does, and checks the scope first: the fake drive map must reach
+    the checkout. A same-named file in a scratch folder is no settings place, and the cap write from
+    the checkout's `/c/` cwd asks through the full judge."""
+    primary = _c_form_fixture("cap-gate")
+    name = os.path.basename(primary)
+    cwd = "/c/" + name
+    guard = _load_guard_module()
+    real_expanded, real_name = guard._expanded, os.name
+    cfg = os.path.join(ROOT, "cap-gate-cfg")   # the judge's config folder, this case's own
+    os.makedirs(cfg, exist_ok=True)
+    saved_cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    guard._expanded = _slash_c_expanded(real_expanded, ROOT)
+    os.name = "nt"
+    os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    try:
+        mapped = guard._expanded(cwd, "")
+        if mapped != primary:   # scope before subject: the fake drive map must reach the checkout
+            return False, "the fake drive map reads %s as %s, not the checkout %s" % (
+                cwd, mapped, primary)
+        if not guard.is_settings_file("settings.json", cwd):
+            return False, "is_settings_file('settings.json', %r) is False, but that folder maps " \
+                          "to the checkout" % cwd
+        scratch = "/c/%s/scratch/settings.json" % name
+        if guard.is_settings_file(scratch, cwd):
+            return False, "is_settings_file(%r) is True, but a same-named file in a scratch folder " \
+                          "is no settings place" % scratch
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            try:
+                guard.judge({"tool_name": "Write", "cwd": cwd,
+                             "tool_input": {"file_path": "settings.json", "content": CAP_LINE}})
+            except SystemExit:
+                pass
+        got, reason = read_decision(printed.getvalue())
+        if got != "ask" or "agent-model-cap" not in reason:
+            return False, "cap write from the checkout's /c/ cwd: expected ask agent-model-cap, " \
+                          "got %s (%s)" % (got, reason[:120])
+    finally:
+        os.name = real_name
+        guard._expanded = real_expanded
+        if saved_cfg is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved_cfg
+    return True, "a /c/ folder that maps to the checkout is a settings place off Windows, and the cap " \
+                 "write from it asks"
+
+
 def worktree_home_cwd_builder_refuse_case():
     """A builder's write to a test file, from a `/c/` cwd in a repository, is refused. The probe and
     the target both read the cwd in drive form. Read raw, the target counts as outside every
@@ -21699,7 +21751,7 @@ def worktree_home_cwd_builder_scratch_case():
 # Each builds its own repository and calls no lazy fixture, so a filtered run skips that build.
 FIXTURELESS_CHECKS.update((
     worktree_home_cwd_builder_refuse_case, worktree_home_cwd_builder_src_case,
-    worktree_home_cwd_builder_scratch_case))
+    worktree_home_cwd_builder_scratch_case, worktree_home_cwd_nt_gate_case))
 
 
 # ------------------------------------------------------------------ other-checkout: a separate clone
@@ -22184,6 +22236,8 @@ LOG_CHECKS = (
     ("worktree-home: the config-edit rule reads a /c/ cwd as main does",
      worktree_home_cwd_config_case),
     ("worktree-home: the agent cap rule reads a /c/ cwd as main does", worktree_home_cwd_cap_case),
+    ("worktree-home: the settings-place drive read counts a /c/ folder that maps to the checkout, "
+     "off Windows", worktree_home_cwd_nt_gate_case),
     ("worktree-home: a builder write to a test file from a /c/ cwd in a repository is refused "
      "off Windows", worktree_home_cwd_builder_refuse_case),
     ("worktree-home: a builder write to product code from a /c/ cwd in a repository is allowed "
@@ -29380,6 +29434,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: the frozen-path rule reads", "worktree-home"),
     ("worktree-home: the config-edit rule reads", "worktree-home"),
     ("worktree-home: the agent cap rule reads", "worktree-home"),
+    ("worktree-home: the settings-place drive read", "worktree-home"),
     ("worktree-home: a builder write to a test file from a /c/ cwd", "worktree-home"),
     ("worktree-home: a builder write to product code from a /c/ cwd", "worktree-home"),
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),

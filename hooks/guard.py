@@ -1113,7 +1113,10 @@ def _settings_place(path: str, cwd: str) -> bool:
             if os.path.dirname(up) == up:
                 break
             up = os.path.dirname(up)
-    return os.path.normcase(os.path.realpath(folder)) in here
+    # `here` reads the cwd through `_expanded` on every OS. `where` is read that way on Windows only, so a
+    # Git-Bash `/c/` folder becomes `C:`. Elsewhere `where` stays raw, as `/c/` is a plain folder.
+    where = _expanded(folder, "") if os.name == "nt" else folder
+    return os.path.normcase(os.path.realpath(where)) in here
 
 
 def is_settings_file(path: str, cwd: str = "") -> bool:
