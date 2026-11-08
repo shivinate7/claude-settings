@@ -1077,10 +1077,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so. If an earlier `mkdir`, `md` or `New-Item` of the
-    same command may have made the missing folder, even `failed_cd_stays` reads it as unknown (None)."""
+    fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
-    prev, stack, made = None, [], False
+    prev, stack = None, []
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
@@ -1100,9 +1099,6 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
-        if tokens and move is None:
-            word = resolve_command(tokens)
-            made = made or (word is not None and basename(tokens[word]).lower() in ("mkdir", "md", "new-item"))
         if tokens is None:
             where = None
         elif move is not None:
@@ -1117,7 +1113,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 target = shell_abs(move or "~", where)
                 if target and os.path.isdir(target):
                     where = target
-                elif target and failed_cd_stays and not made:   # an earlier `mkdir` may have made it: unknown
+                elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
