@@ -55,7 +55,7 @@
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
-- fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test on 2026-10-17 (hooks/local_time.py)
+- fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test by 2026-10-14 (hooks/local_time.py)
 - guard-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (guard wrappers)
 - guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
@@ -370,7 +370,7 @@
 - session-board-limits: git-read cost per turn and claude agents --json cost on large lists unmeasured; tests use a fake host, not the desktop app. Decision: session-board-mod-limits
 - plain-diff-limits: false positives hide ordinary source (about 1% of this repo's history, 0.7% of Python stdlib, not re-measured); note quality unmeasured; docs/mockup.html notes are hand-typed. Decision: plain-diff-mod-limits
 - guard-log-no-outcome: guard.log holds matched text, not the outcome, so it cannot say whether a refusal was right; a hand-graded sample is the next measurement and none exists. Decision: guard-log-read-weekly
-- daily-note-no-volume-check: the daily note has no volume check; a count jump over a 7-day baseline fired on 6 of 14 real days from growth in use alone on 2026-10-17 (hooks/daily_note.py). Decision: guard-log-read-weekly
+- daily-note-no-volume-check: the daily note has no volume check; a count jump over a 7-day baseline fired on 6 of 14 real days from growth in use alone by 2026-10-14 (hooks/daily_note.py). Decision: guard-log-read-weekly
 - guard-log-one-machine: guard.log is one machine per log; a count is a lower bound (verdicts, not harm or false alarms). Decision: guard-log-read-weekly
 - guard-denies-unjudged: unjudged whether silent-write (git -q), test-author-scope and detached-launch earn their refusals. Decision: guard-log-read-weekly
 - daily-note-reads-failures-only: a rule that never fires, or fires for the wrong reason, shows only in the reader's tables, read by hand (hooks/daily_note.py). Decision: guard-log-read-weekly
@@ -1498,3 +1498,6 @@
 - notes-count-pass-sentence-wide: a note count passes on a bound, an exempt word or a date anywhere in its sentence, or a test-name span there that holds the nearest code span (lint/check_cost_pins.py `note_claim`). The Cost rule reads bounds and exempt words sentence-wide too; the date pass is for notes only. So an incidental "no test covers" or a date can pass an undated count. Decision: cost-line-pinned.
 - tmp-write-outside-scratchpad: an agent wrote a scratch file to `/tmp` once, outside its scratchpad, and no shell check refuses that. Decision: none.
 - mutant-folder-no-control: a hand-made mutant folder can lack the test files or mutate too broadly, so the mutant looks killed when it is not, and no unmutated control run is required (lint mutants, cost-pin check). Decision: none.
+- notes-count-misses-of-the: a note count written as a number, "of the" and a total, or a number, "out of" and a total, is not read, and nor is a total of one digit (lint/check_cost_pins.py `NOTE_CLAIM`). Decision: cost-line-pinned.
+- notes-count-position-false-alarm: a position word such as case, line, page or lane before a number, "of" and a total is flagged as a count; a date in the sentence clears it (lint/check_cost_pins.py `NOTE_CLAIM`). Decision: cost-line-pinned.
+- notes-count-hyphen-among: the word among before a hyphenated word such as one-line is read as a count (lint/check_cost_pins.py `NOTE_CLAIM`). Decision: cost-line-pinned.

@@ -41,13 +41,14 @@ these is one finding, on the line of its count word: `<record>:<line>: count in 
 
 A debt note is one list item of the debt notes file (kind `debt-notes` in lint/layout.json), with its continuation
 lines. A note is read sentence by sentence, with the same sentence split and code-span blanking as a Cost paragraph.
+A run of backticks that nothing closes is plain text in a note, so it makes no finding and the read goes on after it.
 A note's count claim is `among` and a count word (one to six, or digits), or digits, `of`, and a number of two or more
 digits (`406 of 8000`). A number may carry thousands separators (`1,406 of 8,000`). The first number of an `N of M`
-claim is not read after the word `Round` or `Try`, or as the tail of a decimal (`20.2 of 28`). Dates, times and ids are
+claim is not read after the word `Round` or `Try`, or in a decimal (`20.2 of 28`). Dates, times and ids are
 blanked first, as in a Cost sentence, so `item 3 of 40` and `step 2 of 12` make no claim. Words match in any case.
 A claim passes on the Cost rule's passes: a bound, an exempt word, or a test-name candidate that holds the nearest code
-span. It also passes when its sentence holds a date (YYYY-MM-DD) or `run` and digits. A count in a note is a dated past
-observation, not a standing fact. A sentence with a claim that passes none of these is one finding, on the line of its
+span. It also passes when its sentence holds a date (YYYY-MM-DD), or `run` and digits that `of` does not follow
+(`run 40 of 543` is a count). A count in a note is a dated past observation, not a standing fact. A sentence with a claim that passes none of these is one finding, on the line of its
 claim: `<notes path>:<line>: count in a debt note with no reader`. A note's cost-noun counts are not read. A Cost
 sentence in a decision record keeps the Cost rule alone.
 
@@ -102,12 +103,13 @@ NOT_COUNTS = [re.compile(r"[\w/.-]+\.[A-Za-z]+(?::\d+)+"), re.compile(r"\b\d{4}-
               re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
 # A number, with thousands separators (`1,406`) or without.
 NUMBER = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
-# A debt note's count claim: `among` and a count word, or `N of M` with M of two or more digits. The lookbehinds drop
-# a decimal tail (`20.2 of 28`) and a number after Round or Try.
+# A debt note's count claim: `among` and a count word, or `N of M` with M of two or more digits. The lookbehind drops
+# a number after Try. NOT_COUNTS blanks `Round N of M` and a decimal (`20.2 of 28`) before this reads the text.
 NOTE_CLAIM = re.compile(r"\bamong\s+(?:" + NUMBER + r"|one|two|three|four|five|six)\b"
-                        r"|(?<![\d.])(?<!\bround )(?<!\btry )\b" + NUMBER + r"\s+of\s+(?:\d{1,3}(?:,\d{3})+|\d{2,})(?!\d)",
+                        r"|(?<!\btry )\b" + NUMBER + r"\s+of\s+(?:\d{1,3}(?:,\d{3})+|\d{2,})(?!\d)",
                         re.IGNORECASE)
-NOTE_DATED = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\brun\s+\d+\b", re.IGNORECASE)
+# A date, or `run` and digits that `of` does not follow: `run 40 of 543` is a count, not a run id.
+NOTE_DATED = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\brun\s+\d+\b(?!\s+of\b)", re.IGNORECASE)
 # text, [(code span text, line)], line of the first character, text with code spans blanked, [(start, end)] of each span
 Sentence = collections.namedtuple("Sentence", "text spans line blanked holes")
 
@@ -180,15 +182,24 @@ def sentence_of(text, spans, line, holes):
     return Sentence("".join(text), spans, line, "".join(blanked), holes)
 
 
-def read_paragraph(paragraph):
+def read_paragraph(paragraph, lone_is_text=False):
     """(sentences, balanced) of one paragraph, from one pass over its backticks.
 
     A sentence is a `Sentence`: spans is [(code span text, line number)]. A backtick holds the sentence open,
-    so a stop inside a code span ends nothing, and each span lies wholly inside one sentence."""
+    so a stop inside a code span ends nothing, and each span lies wholly inside one sentence. With `lone_is_text`,
+    a run of backticks that nothing closes is plain text: the read goes back to just after it, and the paragraph
+    is balanced."""
     chars = [(number, c) for number, text in paragraph for c in text + "\n"]
     sentences, text, spans, holes, inside, opened, width, i = [], [], [], [], False, 0, 0, 0
     begin, hole = 0, 0
-    while i < len(chars):
+    while True:
+        if i == len(chars):
+            if not (inside and lone_is_text):
+                break
+            # while a span is open no sentence ends and no span closes, so only the text after the run is undone
+            del text[hole + width:]
+            inside, i = False, opened
+            continue
         if not text:
             begin = chars[i][0]
         c = chars[i][1]
@@ -365,10 +376,7 @@ def check_notes(root, texts):
     text = read(os.path.join(root, *home.split("/"))) if home else None
     findings = []
     for paragraph in note_paragraphs((text or "").splitlines()):
-        sentences, balanced = read_paragraph(paragraph)
-        if not balanced:
-            findings.append((home, paragraph[0][0], None, UNBALANCED.replace("a Cost paragraph", "a debt note")))
-            continue
+        sentences, _ = read_paragraph(paragraph, lone_is_text=True)
         for sentence in sentences:
             candidates = [t for t, _ in sentence.spans if is_test_name(t) and EXTENSION.search(basename(bare(t)))]
             start = note_claim(sentence, candidates, root, texts)
