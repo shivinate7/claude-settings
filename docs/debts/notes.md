@@ -98,6 +98,7 @@
 - guard-substitution-in-token: open item only. A `$( )` in a quoted interpreter heredoc body is judged as shell, a possible false alarm. Fix: read a quoted interpreter heredoc body as the interpreter's text, not shell (hooks/guard_env.py substitution_commands). guard_push_delete.SUBST_OPEN stays: it is the only reader of a substitution inside a single-quoted `bash -c` script, which substitution_commands does not cut.
 - substitution-nested-rm-false-alarm: after a `cd`, a delete whose target is a nested substitution inside a substitution reads the inner one as `x`, so `cd <nogit> && echo $(rm -rf "$(mktemp -d)")` refuses; the plain form allows (hooks/guard_rm_var.py rm_after_cd_hits)
 - substitution-nested-cd-root: rule 1 gives an inner text its own `cd` folder, but a backtick nested in that text reads the outer folder: `` out=$(cd <dirty> && echo `git reset --hard HEAD`) `` allows; the `$( )` nested form refuses (hooks/guard.py judge_shell)
+- substitution-cd-segments-slow: a command of 1000 `cd … && $( )` segments takes 62 s, past the hook's 60 s limit; 100 take 0.9 s (hooks/guard_rm_var.py rm_after_cd_hits)
 - guard-timing-case-flaky: the 2000-span rm-var case keeps a wall-clock bound that can fail on a busy runner; no check measures the 60 s hook timeout (hooks/test_guard.py)
 - guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json)
 - guard-wrapper-lists-closed: an unlisted wrapper such as stdbuf or chrt hides the real command word (guard_core COMMAND_WRAPPERS)
@@ -159,6 +160,7 @@
 - linked-nm-other-deletes: find -delete, Get-ChildItem | Remove-Item, cmd rmdir /s, rimraf, cd node_modules && rm -rf x and -Recurse:$true are not read as recursive deletes into a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - linked-nm-other-managers: pnpm, yarn, bun, npx and npm.exe are not judged against a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - linked-nm-shell-c-cd: an inner cd inside bash -c or sh -c is not tracked, so the working folder is the outer one (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
+- linked-nm-substitution-cd: an inner text of `$( )` is judged in the session folder, so `cd <elsewhere> && echo "$(npm ci)"` from a linked-node_modules session refuses, and `cd <linked> && echo "$(npm ci)"` from another folder passes (hooks/guard.py judge_shell). Decision: guard-linked-node-modules
 - live-pin-first-move-gap: the first pin move renames the live directory, so <clone>-live is absent for milliseconds and links dangle; no check proves the retry covers it (merge/install_from_main.sh)
 - liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/git_reads.py _process_start_ms)
 - local-time-hard-coded-dst: the US DST rule is coded in the hook; a US rule change needs an edit; zoneinfo upgrade not built (hooks/local_time.py)
@@ -680,7 +682,7 @@
 - gh-login-unquoted-backslash: a PowerShell `str_replace` new_str with an unquoted trailing backslash (`Set-Location C:\repo\`) reads as a bash line continuation, so the switch line after it is unseen and the block is refused. One retry quotes the path (hooks/question_form.py gh_login_hit). Decision: act-in-place
 - gh-login-str-replace-subfield: a `str_replace` on `command.mac` or `command.powershell`, if the tool accepts one, skips gh-login-switch (unmeasured) (hooks/question_form.py item_hit). Decision: act-in-place
 - gh-login-ps-block: in powershell, a gh command inside { } (foreach, try, ForEach-Object, & { }) with no switch passes. The reader does not see into PowerShell script blocks (hooks/question_form.py _gh_script_hit). Decision: act-in-place
-- gh-login-substitution: in mac, gh inside an assignment substitution (`n=$(gh pr list)`), backticks or `bash -c "gh ..."` with no switch passes (hooks/question_form.py _gh_script_hit). Decision: act-in-place
+- gh-login-substitution: in mac, gh inside `bash -c "gh ..."` with no switch passes; a `$( )` form refuses, and a backtick form is unmeasured (hooks/question_form.py _gh_script_hit). Decision: act-in-place
 - press-link-title-context: when the steps name no page, the task title is the page. A title that names a PR then makes "Press Copy" a press, refused until a link is added (hooks/question_form.py press_link_hit). Decision: act-in-place
 - press-link-unlabelled-link: the guard counts a link with a url and no label, which the page does not draw (hooks/question_form.py press_link_hit, skills/waiting-page/page.html isLink). Decision: act-in-place
 - press-link-links-not-list: `links` set to true or a number makes the guard fail open and log a crash line (hooks/question_form.py press_link_hit). Decision: act-in-place
