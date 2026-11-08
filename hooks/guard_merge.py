@@ -231,7 +231,7 @@ def merge_check_reason(verdict: str, detail: str) -> str:
 
 REVIEWED_HEAD_PUSH_REASON = (
     "Rule (Git, reviewed-head-push): this push lands on the head of an open pull request whose newest review record "
-    "has used its one fix check, whatever the record's state, so the merge tool can write no fix check for the new head (decision pr-review-record). "
+    "has used its one fix check or is held, so the change takes no more work on that head (decision pr-review-record). "
     "Remedy: stack the change on a new branch, and open its own pull request."
 )
 
@@ -254,7 +254,7 @@ def _is_fork(row) -> bool:
 
 def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> bool:
     """True when this push writes the head branch of an open pull request whose newest review record, on the live
-    head, already holds its fix check, whatever the record's state: done, open after a FAILed fix check, or held (rule
+    head, already holds its fix check, whatever the record's state, or is held with or without a fix check (rule
     reviewed-head-push). A stale record (another head) allows. A pull request whose head repo differs from its base repo is
     a fork and is skipped before the comment read; a row with no repo field counts as the same repo. Fails open, the opposite of merge_check: a tool that
     cannot load, a failed or unreadable read, or any other error is False, with exactly one stderr line naming the rule.
@@ -291,7 +291,8 @@ def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> boo
             n, sha = row["number"], row["head"]["sha"]
             records = found.get(n, [])
             rec = module.parse_review(records[-1]) if records else None
-            if rec and rec["n"] == n and rec["head"] == sha and rec["fix"] is not None:
+            if rec and rec["n"] == n and rec["head"] == sha and (
+                    rec["fix"] is not None or module.review_state(rec, sha)[0] == "held"):
                 return True
         return False
     except (Exception, SystemExit) as e:
