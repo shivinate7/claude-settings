@@ -1,14 +1,14 @@
 # Some normal note edits are refused as a lost sentence
 
-**What.** The lost-sentence check refuses some normal note edits until a `Drops-lines` trailer names the note's slug as `- <slug>`. The refusal says how: it prints this trailer form. Refused normal edits include a renumbered `file.py:NNN` cite, a corrected time or count, and a changed Decision id. Example: `Until: 2026-11-22.` changed to `2026-12-06.`. A Decision id change is refused: `(P5)` to `(P6)` is refused, since `P5` is a token with a digit. A label-only swap passes: `Decision:` changed to `Ruling:` with the id kept.
+**What.** The lost-sentence check refuses some normal note edits until a `Drops-lines` trailer names the note's slug as `- <slug>`. The refusal says how: it prints this trailer form. Refused normal edits include a renumbered `file.py:NNN` cite, a corrected time or count, and a changed Decision id. Example: `Until: 2026-11-22.` changed to `2026-12-06.`. A Decision id is refused when its digit token changes: `(P5)` to `(P6)` is refused. Without a digit token, the id's clause decides. It is refused when fewer than half of its content words survive. A clause under three content words joins the sentence before it. A label-only swap passes: `Decision:` changed to `Ruling:` with the id kept.
 
-A split passes when every clause of the old note is held. A clause is held when the note's new text, or one note line the commit adds, has half of the clause's content words (`HELD`, 0.5). It also holds every token with a digit (a number or an id such as `P5`). So `- split-old: A. B.` to `- split-old: A.` plus `- split-b: B.` passes. It is refused when `split-b` holds B at a third of its words. A split is read only when a part keeps the old slug, names it, or carries a clause of the old note at `PAIR_HELD` under a new slug (debt `lost-sentence-rename-unpaired`). Otherwise it is a plain retire.
+A split passes when every clause of the old note is held. A clause is held when the note's new text, or one note line the commit adds, has half of the clause's content words (`HELD`, 0.5). It also holds every token with a digit (a number or an id such as `P5`). For a line the commit adds, words that 10% or more of head's notes carry do not count (`generic_words`, when head has 20 or more notes). So `- split-old: A. B.` to `- split-old: A.` plus `- split-b: B.` passes. It is refused when `split-b` holds B at a third of its words. A split is read only when a part keeps the old slug, names it, or carries a clause of the old note at `PAIR_HELD` under a new slug (debt `lost-sentence-rename-unpaired`). Otherwise it is a plain retire.
 
 Refused by design, one trailer line each:
 - A retire beside a sibling note that keeps one long sentence verbatim and drops another. It has the shape of incident 6c8b057cb (a rename that lost a sentence). The check cannot tell them apart.
 - A retired slug re-added later with a sentence dropped. The re-add is judged as a rewrite.
 
-Likely in normal work: 41 of 1495 notes carry a file:line cite, and each such edit costs one trailer line naming the slug.
+Likely in normal work: 41 of 1495 notes carry a file:line cite. Each such edit needs its slug named as `- <slug>` in a Drops-lines reason. A decision-rename sweep is the same: commit c3c7e94fc renamed four notes, and three lost the sentence. One reason can name several slugs.
 
 **Where.** `lint/check_silent_undo.py`: `dropped_clauses` and `dropped_in_pair` (flag the edit), `held` (the clause test), `lost_sentence_problem` (the refusal text).
 
