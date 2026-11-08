@@ -15,7 +15,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "step qmax-browser-main-red; q_max #1104; item 40 qmax-browser-dispatch",
   "replied": "2026-11-08T05:00:00Z",
-  "reply": "Withdrawn, not yours (23:00 CST Nov 7): your ruling of 12:27 CST Nov 7 (step qmax-browser-shard) already lets a lane start q_max's browser.yml. The coordinator sent the dispatch to runner 9 at 22:58 CST. Step qmax-browser-main-red gets the result.",
+  "reply": "Withdrawn, not yours (23:00 CST Nov 7): your ruling of 12:27 CST Nov 7 (step qmax-browser-shard) already lets a lane start q_max's browser.yml. Lane session_013NEJL1uQvsdfwUSQvsjoD4 starts it (coordinator, 23:00 CST). Step qmax-browser-main-red gets the result.",
   "repo": "q_max",
   "short": "Run q_max's browser checks on main",
   "status": "closed",
