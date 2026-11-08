@@ -28,7 +28,7 @@
                           --fix-base-record names a record comment on another PR of this repo to stand in when this PR has none of its own.
                           A source record with a PASS Fix check stands in only when HEAD is its Head, the tree of HEAD equals the tree of
                           SHA, and its PR is closed or this PR's body says "replaces #N"; it counts toward the chain cap of 2.
-  merge --reviewed       one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
+  merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
