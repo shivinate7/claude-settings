@@ -2840,14 +2840,20 @@ class PrBase(unittest.TestCase):
         self.assertEqual([x for x in text.splitlines() if x.startswith("silent-undo: FAIL: ")], expected, "the default run's FAIL lines changed on a lane off main")
         self.assertEqual(rc, 1)
 
-    def test_merge_that_restores_a_line_main_deleted_still_fails_with_the_base_set(self):  # control: the ours merge undoes main
+    def test_merge_that_restores_a_line_main_deleted_is_read_against_the_base_only_with_the_base_set(self):  # control
         self.stack("ours")
         self.r.sh("config", "branch.lane.gh-merge-base", "pr-base")
         self.r.sh("merge-base", "--is-ancestor", "origin/pr-base", "HEAD")  # scope: pr-base is the lane's base
         self.assertTrue(any("main deletes line 1" in p for p in self.explicit("origin/main")), "scope: origin/main should FAIL on the restored line")
+        base_fails = ["silent-undo: FAIL: " + p for p in self.explicit("origin/pr-base")]
         rc, text = self.run_default()
-        self.assertIn("main deletes line 1", text, "the run with the base set printed no FAIL for a merge that undoes main's deletion")
-        self.assertEqual(rc, 1)
+        fails = [x for x in text.splitlines() if x.startswith("silent-undo: FAIL: ")]
+        self.assertEqual(fails, base_fails, "the default run with the base set printed FAIL lines other than the base's own run")
+        self.assertNotIn("main deletes line 1", text, "the default run with the base set read the lane against origin/main")
+        self.assertEqual(rc, 0, "the default run with the base set exited %d on a lane the base holds" % rc)
+        rc, text = self.run_main(["--repo", self.r.dir, "--upstream", "origin/main"], env=NO_BASE)
+        self.assertIn("main deletes line 1", text, "an explicit --upstream origin/main lost the FAIL for the restored line")
+        self.assertEqual(rc, 1, "an explicit --upstream origin/main exited %d, not 1" % rc)
 
 
 if __name__ == "__main__":
