@@ -10220,6 +10220,31 @@ PFR_LINES = {
     "fail-gh-pr-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD),
     "fail-gh-api-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                            + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD, form="api"),
+    # A command that only names `gh pr create` opens no PR. The real create is the control.
+    "gh-mention-grep": pfr_bash("toolu_g1", 'grep -rn "gh pr create" docs', "docs/review.md:12:gh pr create --draft")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-mention-echo": pfr_bash("toolu_g1", "echo 'run gh pr create later'", "run gh pr create later")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-mention-comment": pfr_bash("toolu_g1", "# gh pr create --draft --title t", "")
+                          + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-mention-heredoc": pfr_bash("toolu_g1", "cat <<'EOF'\ngh pr create --draft\nEOF", "gh pr create --draft")
+                          + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-real-create": pfr_bash("toolu_pr1", "cd x && gh pr create --draft --title t",
+                               "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                      + pfr_call("toolu_rev1", PFR_FAIL),
+    # An interpreter that runs a heredoc body opens the PR the body names.
+    "gh-heredoc-bash": pfr_bash("toolu_pr1", "bash <<'EOF'\ngh pr create --draft --title t\nEOF",
+                                "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-heredoc-sh": pfr_bash("toolu_pr1", "sh <<EOF\ngh pr create --draft --title t\nEOF",
+                              "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                     + pfr_call("toolu_rev1", PFR_FAIL),
+    # A verdict in backticks or with a bold verb word is still the Done verdict.
+    "fail-backtick": pfr_pr() + pfr_call("toolu_rev1", pfr_report("`%s`" % pfr_verdict("FAIL", 1, "claude-haiku-5-5"),
+                                                                  PFR_FINDING)),
+    "fail-bold-verb": pfr_pr() + pfr_call("toolu_rev1", pfr_report("**FAIL**, round 1 of 3, m", PFR_FINDING)),
+    "pass-backtick-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+        "`%s`" % pfr_verdict("PASS", 1, "claude-haiku-5-5"), PFR_FINDING)) + pfr_post("toolu_c1", PFR_PASS_RECORD),
     "empty": [],
 }
 # An agent's own file, `<session>/subagents/agent-<id>.jsonl`, keyed by the session name it sits under.
@@ -10338,6 +10363,27 @@ pfr_allow("a git commit whose message says push, beside a FAIL", VCS + ' commit 
           pfr_path("incident"))
 pfr_allow("a builder push: the parent holds no report, the agent's own file holds a FAIL", PFR_PUSH,
           pfr_path("builder-clean"), agent_id=PFR_AGENT_ID)
+# A command that only names `gh pr create` (a search, an echo, a comment, a quoted heredoc body) opens no PR.
+pfr_allow("a grep that names gh pr create, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-mention-grep"))
+pfr_allow("an echo that names gh pr create, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-mention-echo"))
+pfr_allow("a comment that names gh pr create, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-mention-comment"))
+pfr_allow("gh pr create inside a quoted heredoc body, then an unrecorded FAIL, then the push", PFR_PUSH,
+          pfr_path("gh-mention-heredoc"))
+# The control: a real create in a compound command opens the PR, so the same FAIL denies.
+pfr_refuse("a cd and a real gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("gh-real-create"))
+pfr_refuse("a bash heredoc whose body is a gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("gh-heredoc-bash"))
+pfr_refuse("an sh heredoc whose body is a gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("gh-heredoc-sh"))
+# A Done line in backticks, or with a bold verb word, reads as its verdict: a FAIL with no record denies.
+pfr_refuse("a FAIL Done line in backticks with no record, then the push", PFR_PUSH, pfr_path("fail-backtick"))
+pfr_refuse("a FAIL Done line with a bold verb word and no record, then the push", PFR_PUSH, pfr_path("fail-bold-verb"))
+pfr_allow("a PASS Done line in backticks, with its PASS record posted, then the push", PFR_PUSH,
+          pfr_path("pass-backtick-record"))
 
 
 def pfr_fix_refuse(name, command, transcript):
