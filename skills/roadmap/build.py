@@ -48,8 +48,8 @@ usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
 unlaned's: the branch equals a live session step exactly.
 
-The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
-that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
+The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed (a Step trailer, status done, or a landed pull, read from
+`closedPulls` and the open pulls) and that no open pull (on lane_head_refs, or whose body names the session) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
 not to archive now reads `hold (<reason>; lane <session id>)` and is left out of the row's count. The reason is no
 cs-step tag, a step unproven on main, or a step whose `lane` is the session and that is still doing or active and not
 landed; the last clears when the step moves or closes.
@@ -191,7 +191,7 @@ sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names and lane head refs, shared with the guard (hooks/shared_names.py)
-    BUILD_TAG, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names,
+    BUILD_TAG, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, body_names_session, lane_head_refs, repo_tag_names,
 )
 
 
@@ -575,13 +575,20 @@ def live_work(path, steps, slug=None):
     Two more optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
     enum name; missing reads as not completed) and a pulls row's `head` (the head commit sha). `laneSessions` holds the
     kept session rows, or None. Old files without them read as before.
+    "closedPulls" (optional, `[{"number", "branch", "head"?, "base"?, "merged"?, "body"?}]`) are the closed and merged pull
+    requests, kept apart from the open `pulls` so the open-pull rows never read a closed one as open; idle_lanes reads them
+    for the landed test. An open pull row may also carry `body`. A closed row with the wrong shape is counted in `skipped`.
+    `path` may also be the parsed live object (a dict), for `merge --idle-lanes --sessions`, which builds it without a file.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
-    try:
-        raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as err:
-        return {"read": "unknown (the live file could not be read: %s)" % err}
+    if isinstance(path, dict):
+        raw = path
+    else:
+        try:
+            raw = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as err:
+            return {"read": "unknown (the live file could not be read: %s)" % err}
     if not isinstance(raw, dict):
         return {"read": "unknown (the live file is not a JSON object)"}
     read = raw.get("readAt")
@@ -613,6 +620,8 @@ def live_work(path, steps, slug=None):
                  lambda r: type(r.get("number")) is int and text(r, "title")
                  and (r.get("branch") is None or isinstance(r["branch"], str)))
     pulls_skipped = len(skipped) - before_pulls
+    closed_pulls = keep("closed pull", raw.get("closedPulls", []), lambda r: type(r.get("number")) is int
+                        and (r.get("branch") is None or isinstance(r["branch"], str)))
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
     for row in threads:
         sid = row.get("step") or None
@@ -679,7 +688,7 @@ def live_work(path, steps, slug=None):
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
-            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions}
+            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions, "closedPulls": closed_pulls}
 
 
 def live_age_minutes(read):
@@ -1302,10 +1311,21 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
-    on main, or status done; a step off the record branch counts only by its trailer). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
-    that pull is a draft whose head sha is already in the default branch, and by an open waiting-page item whose
+    on main, or status done, or a landed pull; a step off the record branch counts only by its trailer or a landed pull).
+    A lane's pull set is the pulls on its steps' head refs (lane_head_refs) plus any pull, open or closed, whose body names
+    the session id as a whole token (body_names_session). A pull is landed when it merged with its base the default branch,
+    or its head sha is already in the default branch (`closedPulls` rows carry merged, base and head; open rows carry head).
+    A step with a landed pull on its own head refs, or a landed body-named pull of the lane (which names no step, so it
+    lands each step of the lane), is landed: it does not wait, and it clears the "still doing under this lane" hold, as a
+    trailer does. A lane is held back by an open pull in its set unless that pull is a draft whose head sha is already in
+    the default branch; a closed pull that did not land neither holds nor lands. It is also held back by an open waiting-page item whose
     `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
-    status `closed` releases an item. When no live
+    status `closed` releases an item.
+
+    Cost (rule outcomes-mechanize-rules): runs only on call; reads the live object it is given and the checkout's git: one
+    `git merge-base` per distinct pull head that no row merged into the default branch already settles, plus the record
+    branch and Step trailer reads. It writes no file and sets no timer. (`merge --idle-lanes --sessions` adds its own gh
+    REST pages: all open pulls, closed pulls to the bound it states.) When no live
     lane row of this repo carries a SESSION_BUCKETS name, the list reads unknown. `marks_why` is landed_marks' why:
     when main could not be read, no step can be shown landed, so the list reads unknown. `trailer_ids` is the set of
     step ids named by a Step trailer on main; left out, it is read from main when a lane's step is off the record branch."""
@@ -1323,14 +1343,24 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     ref = main_ref(repo, main_branch)
     landed_heads = {}
 
-    def head_landed(pull):
-        # Only a draft releases a lane (the archive guard's rule); a ready pull always holds it. A failed git read is not landed.
+    def in_main(pull):
+        # A failed git read, or a head that is no sha, is not in main.
         head = pull.get("head")
-        if pull.get("draft") is not True or not isinstance(head, str) or not re.fullmatch(r"[0-9a-fA-F]{7,64}", head) or not ref:
+        if not isinstance(head, str) or not re.fullmatch(r"[0-9a-fA-F]{7,64}", head) or not ref:
             return False
         if head not in landed_heads:
             landed_heads[head] = git(repo, "merge-base", "--is-ancestor", head, ref) is not None
         return landed_heads[head]
+
+    def landed(pull):
+        # The one home of the landed test: merged into the default branch (no git read), or its head already in it.
+        return (pull.get("merged") is True and pull.get("base") == main_branch) or in_main(pull)
+
+    def holds(pull):
+        # An open pull holds its lane. Only a draft whose head is in main releases it (the archive guard's rule); a ready pull always holds.
+        return not (pull.get("draft") is True and in_main(pull))
+
+    open_pulls, closed_pulls = work["pulls"], work.get("closedPulls") or []
 
     open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
     # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
@@ -1351,7 +1381,12 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
             # The archive guard (hooks/guard_merge.py) refuses a lane with no cs-step tag, so archiving is not the act.
             out.append("hold (no cs-step tag; lane %s)" % sid)
             continue
-        absent = [k for k in mine if k not in steps]
+        body_landed = any(landed(p) for p in (*open_pulls, *closed_pulls) if body_names_session(p.get("body"), sid))
+
+        def by_pull(k):
+            return body_landed or any(landed(p) for p in (*open_pulls, *closed_pulls) if p.get("branch") in lane_head_refs(k))
+
+        absent = [k for k in mine if k not in steps and not by_pull(k)]
         if absent and trailer_ids is None:
             found = step_trailers(repo, ref) if ref else None
             if found is None:
@@ -1363,15 +1398,15 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
             out.append("hold (step %s not on the record branch and no Step trailer on main%s; lane %s)" % (
                 " ".join(unproven), "; also tagged " + " ".join(others) if others else "", sid))
             continue
-        if any(k in steps and steps[k].get("status") != "done" and k not in marks for k in mine):
+        if any(k in steps and steps[k].get("status") != "done" and k not in marks and not by_pull(k) for k in mine):
             continue
         heads = {name for k in mine for name in lane_head_refs(k)}
-        if any(p.get("branch") in heads and not head_landed(p) for p in work["pulls"]):
+        if any((p.get("branch") in heads or body_names_session(p.get("body"), sid)) and holds(p) for p in open_pulls):
             continue
         if any(r.get("lane") in mine or r.get("owner") == sid for r in open_items):
             continue
         doing = sorted(k for k, d in steps.items()
-                       if d.get("lane") == sid and d.get("status") in RUNNING_STATUS and k not in marks)
+                       if d.get("lane") == sid and d.get("status") in RUNNING_STATUS and k not in marks and not by_pull(k))
         if doing:
             out.append("hold (step %s still doing under this lane; lane %s)" % (" ".join(doing), sid))
             continue

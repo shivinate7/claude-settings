@@ -74,7 +74,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
 
     {"readAt": "<ISO time of the reads>",
      "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}],
+     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "body"?, "url"?, "checks"?}],
+     "closedPulls"?: [{"number", "branch", "head"?, "base"?, "merged"?, "body"?}],
      "branches": [{"name", "updatedAt"?}],
      "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
      "items": [{"n", "status", "home", "lane"?}]}
@@ -84,7 +85,12 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
-  release a lane whose draft pull is already in the default branch. `branches`: lane branches with no open pull request.
+  release a lane whose draft pull is already in the default branch. `body` is the pull's description, also
+  optional: a pull whose body names a lane's session id as a whole token joins that lane's pull set. `branches`: lane branches with no open pull request.
+- `closedPulls`: optional. The closed and merged pull requests, newest update first, read as far back as the oldest
+  live lane session: `branch` is the head ref, `head` the head sha, `base` the base branch, `merged` true when GitHub
+  merged it. The open `pulls` key never holds them, so a closed pull never reads as open. A file without the key reads
+  as before. A row with the wrong shape is counted as skipped.
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
   `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
   it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
@@ -243,10 +249,14 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
     has no bucket is never listed;
   - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
-    `Step:` trailer is on main, or its status is `done`. A step off the record branch has landed only by its trailer;
-  - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
-    draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
-    releases the lane. A ready pull always holds it. A failed git read reads as not landed;
+    `Step:` trailer is on main, or its status is `done`, or a landed pull is on its head refs (the lane's
+    landed body-named pull lands each step of the lane). A pull is landed when it merged with its `base` the default
+    branch, or its `head` sha is already in the default branch (`git merge-base --is-ancestor`). A step off the record
+    branch has landed only by its trailer or a landed pull. A landed pull also clears the "still doing under this lane" hold;
+  - no open pull holds it. The lane's pull set is the pulls whose `branch` is a step slug or `lane/<slug>`, plus any
+    pull, open or closed, whose `body` names the session id as a whole token (the URL or the bare id). A
+    draft pull whose `head` sha is already in the default branch
+    releases the lane. A ready pull always holds it. A closed pull that did not land neither holds nor lands. A failed git read reads as not landed;
   - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
     its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
     The page writes `open` and `closed` only, so only `closed` releases a lane;
@@ -269,7 +279,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - the record branch has no steps;
   - the repo's GitHub name cannot be read.
 
-  `merge --idle-lanes --live FILE` prints the same list for the batch runner: lane lines and hold lines, then
+  `merge --idle-lanes --live FILE` prints the same list for the batch runner (or `--sessions FILE --items FILE`, the raw
+  list_sessions and waiting-page item files, with the pulls read from GitHub by the tool itself): lane lines and hold lines, then
   a summary line that gives the held count when there are holds. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step.
 

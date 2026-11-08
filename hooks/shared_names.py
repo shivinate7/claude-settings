@@ -79,6 +79,13 @@ def lane_head_refs(slug: str) -> tuple[str, str]:
     return (slug, "lane/" + slug)
 
 
+def body_names_session(body: object, sid: str) -> bool:
+    """True when the pull request text `body` holds the session id `sid` as a whole token: the session URL and the bare id
+    both count, and `session_ab` does not name `session_a`. A lane's pull on a head outside lane_head_refs (a follow-up
+    on `<slug>-r2`) joins the lane's pull set this way. The one home, read by the roadmap build."""
+    return isinstance(body, str) and bool(sid) and re.search(r"(?<!\w)%s(?!\w)" % re.escape(sid), body) is not None
+
+
 def repo_tag_names(tag: object, slug: str) -> bool:
     """True when `tag` is exactly REPO_TAG plus `slug` (owner/name), the slug compared without case. The one
     reading of a repo tag: no strip, the exact prefix, so a tag one reader accepts the other accepts."""
