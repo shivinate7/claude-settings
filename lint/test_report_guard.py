@@ -888,9 +888,10 @@ class DoneNamesModelsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)  # test-temp-standard: the run's folder, removed at teardown
 
-    def verdict(self, reply, spawns, denied=(), between=(), lead=None, tail=()):
+    def verdict(self, reply, spawns, denied=(), between=(), lead=None, tail=(), subagent_model="sonnet"):
         # `lead` replaces the owner's opening message (a lane's input is a peer brief); `tail` holds the records
-        # after the last spawn, before the landing commit.
+        # after the last spawn, before the landing commit. `subagent_model` None unsets CLAUDE_CODE_SUBAGENT_MODEL,
+        # so a spawn with no model field and no file pin runs an unknown model.
         records = [human("do the task")] if lead is None else list(lead)
         for i, spawn in enumerate(spawns):
             if i:  # `between` goes before every spawn after the first
@@ -907,7 +908,10 @@ class DoneNamesModelsTests(unittest.TestCase):
                     assistant_text(reply)]
         path = write_transcript(records, self.tmp)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)
+        if subagent_model:
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent_model
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
@@ -923,6 +927,14 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", [self.BUILDER])
         self.assertEqual(out["decision"], "block")
         self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_missing_role_refusal_names_the_no_agent_mark(self):
+        # Catches: the refusal for a spawned role that Done leaves unnamed gave no pointer to the "(no agent)" mark,
+        # so Claude could not find the item that owes no model.
+        out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", [self.BUILDER])
+        self.assertIsNotNone(out, "the report passed: a builder spawn that Done leaves unnamed was not blocked")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("(no agent)", out["reason"])
 
     def test_dm_red_one_of_two_roles_unnamed_blocks(self):
         out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none",
@@ -955,6 +967,18 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
                            [self.BUILDER], denied=[{"subagent_type": "builder", "model": "opus"}])
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_red_earlier_unknown_spawn_does_not_turn_off_the_mismatch_check(self):
+        # Catches: a builder spawned before the window with no model field, no file pin and no env var reads as ''
+        # (unknown). That '' turned off the mismatch check for the whole session, so the window's sonnet builder
+        # let "(builder opus)" pass.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
+            [{"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}],
+            lead=[human("do the task"), *self.run_of(self.BUILDER), human("Run round 2.")], subagent_model=None)
+        self.assertIsNotNone(out, "the report passed: an earlier unknown builder spawn turned off the builder model check")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("matches no builder spawn", out["reason"])
 
     def test_dm_false_alarm_denied_spawn_then_solo_passes(self):
         self.assertIsNone(self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", [],
@@ -1008,6 +1032,14 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "the report passed: a haiku name that no reviewer spawn in the session ran was not blocked")
         self.assertEqual(out["decision"], "block")
         self.assertIn("matches no reviewer spawn", out["reason"])
+
+    def test_dm_false_alarm_spawn_before_an_owner_message_backs_its_own_model_passes(self):
+        # Catches: the case above says an opus spawn before the owner message backs an opus name. This green control
+        # checks that claim, so the session-wide check cannot refuse the opus name it is meant to back.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer opus)\n> **Next** Unstarted: none",
+            [self.REVIEWER_OPUS, self.REVIEWER_R2], between=[human("also check the docs")])
+        self.assertIsNone(out, (out or {}).get("reason"))
 
     def test_dm_false_alarm_stop_hook_feedback_between_spawns_passes(self):
         # Catches: the Stop hook's feedback record, read as the owner's message, moves the window past the
