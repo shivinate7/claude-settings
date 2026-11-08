@@ -75,7 +75,7 @@ def run_body(step):
         m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
         if not m:
             continue
-        text = block_scalar(m.group(1), lines[i + 1:], 10)
+        text = block_scalar(drop_comment(m.group(1)), lines[i + 1:], 10)   # a comment after the header is no script
         return m.group(1) if text is None else text
     return None
 
