@@ -969,7 +969,8 @@ class SuiteSteps(Job):
     --tests-for`, picks that suite for a file in the diff base...HEAD: a suite beside the file, or one that loads it by an
     import or a path constant. A suite the diff does not pick prints `not run`. A selector that cannot run reads unknown
     and exits 2, never a pass with no suite run. A listed file (REPORT_TARGETS) still gets each suite that loads it.
-    Each fixture suite sits outside the folder of the file it opens, so only its path constant can pick it."""
+    Each fixture suite sits outside the folder of the file it opens, so only its path constant can pick it.
+    A picked suite outside hooks/ and merge/ (janitor/, skills/) prints one `not run` line that says it was picked and why."""
 
     MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
     LINT = ("--lint", "--base", "origin/main")
@@ -1255,6 +1256,48 @@ class SuiteSteps(Job):
         rc, lines, out = self.run_job(self.WIRING, job="checks", other=[step("Docs", "echo docs")], args=self.LINT)
         self.assertEqual((rc, by_step(lines).get("Wiring suite")), (0, "PASS"),
                          "--lint must run a picked suite whose step is in the job asked for\n" + out)
+
+    def picked(self):
+        """The suites `hooks/mutate_guard.py --lint-suites origin/main` picks for this fixture's diff: the one selector."""
+        done = subprocess.run([sys.executable, self.MUTATE_GUARD, "--lint-suites", "origin/main"], cwd=self.root,
+                              capture_output=True, text=True, env=ENV)
+        self.assertEqual(done.returncode, 0, "the fixture: the selector must run\n" + done.stdout + done.stderr)
+        return done.stdout.split()
+
+    def assert_picked_outside_scope(self, suite, step_name):
+        """A lane that changes `suite`, a test file outside hooks/ and merge/, under a CI step `python3 <suite>` beside a lint
+        step that runs and passes. The one line for that step says it was picked and why it did not run here."""
+        self.make_repo({suite: "print('ok')\n"}, {suite: "print('changed')\n"}, lint=True)
+        self.assertEqual(self.diff(), [suite], "the scope: the diff holds only the suite file")
+        self.assertEqual(self.picked(), [suite], "the scope: the selector picks the changed suite")
+        rc, lines, out = self.run_job(step(step_name, "python3 " + suite), self.LINT_STEP, args=self.LINT)
+        named = [ln for ln in lines if step_name in ln]
+        self.assertEqual(len(named), 1, "--lint must print one line for a picked suite outside its scope, not none or two\n" + out)
+        self.assertTrue(NOT_RUN.match(named[0]), "that line must start with `not run`\n" + out)
+        self.assertIn("picked", named[0], "that line must say the suite was picked\n" + out)
+        self.assertIn("outside lane lint's scope", named[0], "that line must give the reason: outside lane lint's scope\n" + out)
+        self.assertIn("batch CI runs it", named[0], "that line must say batch CI runs the suite\n" + out)
+        self.assertNotIn("neither a lint nor an install command", named[0], "that line must not call a picked suite neither\n" + out)
+        self.assertEqual(rc, 0, "a not-run line never moves the exit code\n" + out)
+
+    def test_a_picked_janitor_suite_outside_lane_lint_scope_gets_one_not_run_line_that_says_so(self):
+        self.assert_picked_outside_scope("janitor/test_sweep.py", "Sweep suite")
+
+    def test_a_picked_skills_suite_outside_lane_lint_scope_gets_one_not_run_line_that_says_so(self):
+        self.assert_picked_outside_scope("skills/test_loader.py", "Skills suite")
+
+    def test_a_janitor_suite_the_diff_does_not_pick_keeps_the_current_not_run_line(self):  # the control for the two cases above
+        self.make_repo({"janitor/test_sweep.py": "print('ok')\n", "docs/notes.md": "one\n"}, {"docs/notes.md": "two\n"}, lint=True)
+        self.assertEqual(self.diff(), ["docs/notes.md"], "the scope: the diff holds a file no suite opens")
+        self.assertEqual(self.picked(), [], "the scope: the selector picks no suite for this diff")
+        rc, lines, out = self.run_job(step("Sweep suite", "python3 janitor/test_sweep.py"), self.LINT_STEP, args=self.LINT)
+        named = [ln for ln in lines if "Sweep suite" in ln]
+        self.assertEqual(len(named), 1, "--lint must print one line for a suite the diff does not pick\n" + out)
+        self.assertTrue(NOT_RUN.match(named[0]), "that line must start with `not run`\n" + out)
+        self.assertEqual(named[0].split("Sweep suite: ", 1)[1],
+                         "--lint runs only lint and install steps; its run: is neither a lint nor an install command",
+                         "a suite outside lane lint's scope that the diff does not pick keeps its current line\n" + out)
+        self.assertEqual(rc, 0, "a not-run line never moves the exit code\n" + out)
 
 
 class Progress(Job):
