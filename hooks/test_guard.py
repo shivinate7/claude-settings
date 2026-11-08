@@ -8687,7 +8687,7 @@ FLAG_FALSE_ALARM_REFUSE = (
     "yq eval .x " + ENV,
     "grep --exclude-from " + ENV + " foo .",
     "ag -fp " + ENV + " K",
-    # -p names an ignore file that ag reads, so it is judged as --exclude-from is. Decision env-file-stays-unread.
+    # -p is --path-to-ignore: ag reads the named file as an ignore file, so `.env` is read.
     "ag -p " + ENV + " K",
     "cd " + ENV + "s",
     "pushd " + ENV + "s",
@@ -8713,9 +8713,6 @@ sh("env: folder move: cd into .envs, then ls in it", "cd " + ENV + "s && ls", "d
 sh("env: folder move: cd into .envs, then cd back out", "cd " + ENV + "s && cd ..", "deny", "env-file", cwd=NOGIT)
 sh("env: folder move: PowerShell Set-Location into .envs, alone", "Set-Location " + ENV + "s",
    "deny", "env-file", tool="PowerShell", cwd=NOGIT)
-# ag reads the files its -G glob names. -G takes a value, so the `.env` after `-fG` is that glob, and it is read.
-sh("env: flag-false-alarm: ag -fG takes .env as its -G glob, and the glob reads it",
-   "ag -fG " + ENV + " K", "deny", "env-file", cwd=NOGIT)
 # A hidden search reads a dotfile whose name matches its -G regex. `-G e` matches `.env`, and the search
 # reads that file while `.env` is the pattern.
 # The guard tries the regex on a few sample env file names. A suffix outside that sample (.production,
@@ -8747,8 +8744,9 @@ for _cmd in (
 for _cmd in ("ag --hidden -G '\\.py$' KEY", "ag -G e " + ENV):
     sh("env: ag hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
 # With no hidden flag, ag does not search dotfiles, so a -G or --file-search-regex that names `.env` reads
-# no env file. Decision env-file-stays-unread judges the file regex only with a hidden flag.
-for _cmd in ("ag -G " + ENV + " K", "ag --file-search-regex " + ENV + " K"):
+# no env file. -f is --follow, not a hidden flag. Decision env-file-stays-unread judges the file regex
+# only with a hidden flag.
+for _cmd in ("ag -G " + ENV + " K", "ag --file-search-regex " + ENV + " K", "ag -fG " + ENV + " K"):
     sh("env: ag no hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
 
 
