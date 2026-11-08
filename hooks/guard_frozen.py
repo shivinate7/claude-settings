@@ -1005,7 +1005,7 @@ def _py_literal(node) -> bool:
     return isinstance(node, (ast.List, ast.Tuple)) and all(_py_literal(each) for each in node.elts)
 
 
-def _py_bindings(tree):
+def _py_import_bindings(tree):
     """{name: dotted name} for each name an import binds to an acting module or a name of one: `import os.path`
     binds `os` to os, `import os.path as p` binds `p` to os.path, `from shutil import copy as c` binds `c` to
     shutil.copy. None for a `from` import of every name, which binds names that cannot be told."""
@@ -1036,7 +1036,7 @@ def py_spots(script: str):
     import textwrap
     source = textwrap.dedent(script)
     tree = ast.parse(source)
-    bound = _py_bindings(tree)
+    bound = _py_import_bindings(tree)
     if bound is None:
         return None
     calls, callee_names, parents = [], set(), {}
