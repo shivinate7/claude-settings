@@ -1501,3 +1501,6 @@
 - notes-count-misses-of-the: a note count written as a number, "of the" and a total, or a number, "out of" and a total, is not read, and nor is a total of one digit (lint/check_cost_pins.py `NOTE_CLAIM`). Decision: cost-line-pinned.
 - notes-count-position-false-alarm: a position word such as case, line, page or lane before a number, "of" and a total is flagged as a count; a date in the sentence clears it (lint/check_cost_pins.py `NOTE_CLAIM`). Decision: cost-line-pinned.
 - notes-count-hyphen-among: the word among before a hyphenated word such as one-line is read as a count (lint/check_cost_pins.py `NOTE_CLAIM`). Decision: cost-line-pinned.
+- cost-count-hollow-pin: the nearest span by position can be a plain word the test happens to hold. Decision: cost-line-pinned. Fix: none — a reviewer reads the pin. Until: 2026-11-21.
+- cost-count-units-gap: secs, hrs, KiB, days and weeks, "line N of", and "N percent" are flagged. Decision: cost-line-pinned. Fix: none — none seen in the corpus. Until: 2026-11-21.
+- cost-count-misses: the check misses seven to nine and twelve; fetch, stat, invocation, append and round trip as nouns; "two-process"; "up to date" or "at least" read as a bound; "a second time". Decision: cost-line-pinned. Fix: none — the corpus marks show no such form slipped through. Until: 2026-11-21.
