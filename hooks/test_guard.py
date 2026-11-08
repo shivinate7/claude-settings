@@ -5109,6 +5109,38 @@ sh("git-after-cd: set -e, a word done_x as a command in a brace group on the lef
    "set -e; { true; done_x; cd /tmp/w; %s push; } || true" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&", "-C"))
 
+# A FAILED TEST, THEN A SKIPPED CD. The && cd never runs when its test fails, so the push after ; runs in the folder
+# the first failed cd left the shell in. Under set -e the cd reads as a bare failure that ends the shell, so the walk
+# clears the stranding. bash does not exit there: the && list is not the last command, so errexit ignores it.
+# Each form is checked under bash with a stub git and missing folders: the push runs in the stranded folder.
+AFTER_CD_GONE = slash(os.path.join(ROOT, "after-cd-gone"))          # a folder no fixture makes
+AFTER_CD_GONE_TWO = slash(os.path.join(ROOT, "after-cd-gone-two"))  # a second folder no fixture makes
+sh("git-after-cd: set -e, a failed cd on the left of ||, then a failed && test and a && cd to a missing folder, then ; a git push is refused",
+   "set -e; cd %s || true; [ -d %s ] && cd %s; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# The green control: without set -e the stranding carries through the skipped cd, so the push is refused too.
+sh("git-after-cd: a failed cd on the left of ||, then a failed && test and a && cd to a missing folder, then ; a git push is refused",
+   "cd %s || true; [ -d %s ] && cd %s; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# `}2` is no closer in bash: it is a command word, so the brace group stays open to the last }. The cd and the push
+# then run inside a group on the left of ||, where errexit is ignored, and the push runs in the stranded folder.
+sh("git-after-cd: set -e, a brace group closed by a }2>x word that is no closer, then a failed cd, then ; a git push inside the group on the left of || is refused",
+   "set -e; { true; }2>x; cd %s; %s push; } || true" % (AFTER_CD_GONE, VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+# A CD THAT MAY NEVER RUN. After || or && a cd runs only when the left side lets it, so the walk must not read it as
+# the shell's exit, even under set -e: the right side may be skipped, and the push after ; then runs in the stranded
+# folder. Each form starts with a failed cd, so a stranding exists. Each is checked under bash with a stub git.
+sh("git-after-cd: set -e, a failed cd on the left of ||, then a failed && test and a && cd to a second missing folder, then ; a git push is refused",
+   "set -e; cd %s || true; [ -d %s ] && cd %s; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, a failed cd on the left of ||, then a true || cd to a missing folder that is skipped, then ; a git push is refused",
+   "set -e; cd %s || true; true || cd %s; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then a true || if ! cd to a missing folder then exit, whose body is skipped, then ; a git push is refused",
+   "cd %s; true || if ! cd %s; then exit 1; fi; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
 # THE WIDE READ. case, select and a function definition open a compound that errexit must see, so the cd in
 # their body is not bare. Each body is on the left of ||, so errexit is ignored there and the push runs. A select
 # body runs once its menu gets an answer, so it is judged as a body that may run.
@@ -5164,11 +5196,10 @@ CD_WALK_PLANTED = ("    try:\n        if failed_cd_stays:\n            raise Run
                    "        return _walk_segments(segments, number, shell_cwd, ends, failed_cd_stays)\n")
 
 
-def git_after_cd_crash_check():
-    folder = os.path.join(ROOT, "after-cd-crash")
-    shutil.rmtree(folder, ignore_errors=True)
-    landing = os.path.join(folder, "landing")
-    os.makedirs(landing)
+def planted_cd_walk_guards(folder):
+    """The shared step of the crash checks: an intact and a planted copy of the guard family under `folder`.
+    The planted copy raises at cd_walk's try on a read with failed_cd_stays, the one read a crash reads as
+    stranded. Returns (guards, "") or (None, the cause) when the try block does not occur once: no plant."""
     guards = {}
     for name in ("intact", "planted"):
         hooks = os.path.join(folder, name, "hooks")
@@ -5179,34 +5210,46 @@ def git_after_cd_crash_check():
     with open(core, encoding="utf-8") as handle:
         text = handle.read()
     if text.count(CD_WALK_TRY) != 1:
-        return False, "the cd_walk try block occurs %d times in guard_core.py, want once: no plant" % text.count(CD_WALK_TRY)
+        return None, "the cd_walk try block occurs %d times in guard_core.py, want once: no plant" % text.count(CD_WALK_TRY)
     write(core, text.replace(CD_WALK_TRY, CD_WALK_PLANTED, 1))
+    return guards, ""
+
+
+def planted_verdict(guards, folder, name, command, cwd):
+    """(decision, reason, log text) that the `name` copy gives one Bash command run from `cwd`."""
+    cfg = os.path.join(folder, name, "cfg")
+    env = dict(os.environ)
+    for var in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR",
+                "CLAUDE_CODE_REMOTE"):
+        env.pop(var, None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+    run = subprocess.run([sys.executable, guards[name]], input=json.dumps(payload), capture_output=True,
+                         text=True, env=env, timeout=120)
+    out = run.stdout.strip()
+    spec = json.loads(out).get("hookSpecificOutput", {}) if out else {}
+    log = os.path.join(cfg, "guard.log")
+    logged = ""
+    if os.path.exists(log):
+        with open(log, encoding="utf-8") as handle:
+            logged = handle.read()
+    return (spec.get("permissionDecision", "allow") if out else "allow",
+            spec.get("permissionDecisionReason", ""), logged)
+
+
+def git_after_cd_crash_check():
+    folder = os.path.join(ROOT, "after-cd-crash")
+    shutil.rmtree(folder, ignore_errors=True)
+    landing = os.path.join(folder, "landing")
+    os.makedirs(landing)
+    guards, cause = planted_cd_walk_guards(folder)
+    if guards is None:
+        return False, cause
     command = "cd %s; %s push" % (slash(landing), VCS)
-
-    def verdict(name):
-        cfg = os.path.join(folder, name, "cfg")
-        env = dict(os.environ)
-        for var in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR",
-                    "CLAUDE_CODE_REMOTE"):
-            env.pop(var, None)
-        env["CLAUDE_CONFIG_DIR"] = cfg
-        payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": landing}
-        run = subprocess.run([sys.executable, guards[name]], input=json.dumps(payload), capture_output=True,
-                             text=True, env=env, timeout=120)
-        out = run.stdout.strip()
-        spec = json.loads(out).get("hookSpecificOutput", {}) if out else {}
-        log = os.path.join(cfg, "guard.log")
-        logged = ""
-        if os.path.exists(log):
-            with open(log, encoding="utf-8") as handle:
-                logged = handle.read()
-        return (spec.get("permissionDecision", "allow") if out else "allow",
-                spec.get("permissionDecisionReason", ""), logged)
-
-    control, _reason, _log = verdict("intact")
+    control, _reason, _log = planted_verdict(guards, folder, "intact", command, landing)
     if control != "allow":
         return False, "control: the intact copy's verdict on the landing cd is %r, want allow" % control
-    decision, reason, logged = verdict("planted")
+    decision, reason, logged = planted_verdict(guards, folder, "planted", command, landing)
     if decision != "deny":
         return False, "the planted copy's verdict on the landing cd is %r, want deny" % decision
     if "git-after-cd" not in reason:
@@ -5214,6 +5257,35 @@ def git_after_cd_crash_check():
     if "guard-crash" not in logged or "planted walk fault" not in logged:
         return False, "the crash is not logged as a guard-crash line: the log ends %r" % logged[-120:]
     return True, "a crash in the cd walk refuses the push after a landing cd as git-after-cd, and is logged"
+
+
+# THE CRASH FALLBACK OF CONFLICT-MARKERS. A crash in the cd walk gives no folder, so conflict-markers judges the
+# commit in command_root's folder, the last cd. The commit runs from a folder that is no repository, so only that
+# fallback reaches the triplet repo. The intact copy is the control. Each failure names one cause.
+CMK_CRASH_LABEL = ("conflict-markers: a crash in the cd walk falls back to the last cd, so a commit after a cd into a "
+                   "triplet repo, run from a folder that is no repository, is refused, and the crash is logged")
+
+
+def conflict_markers_crash_check():
+    folder = os.path.join(ROOT, "cmk-crash")
+    shutil.rmtree(folder, ignore_errors=True)
+    nogit = os.path.join(folder, "nogit")
+    os.makedirs(nogit)
+    guards, cause = planted_cd_walk_guards(folder)
+    if guards is None:
+        return False, cause
+    command = "cd %s; %s commit -m x" % (slash(CMK_STAGED), VCS)
+    control, reason, _log = planted_verdict(guards, folder, "intact", command, nogit)
+    if control != "deny" or CMK_RULE not in reason:
+        return False, "control: the intact copy's verdict on the triplet commit is %r, want deny by %s" % (control, CMK_RULE)
+    decision, reason, logged = planted_verdict(guards, folder, "planted", command, nogit)
+    if "guard-crash" not in logged or "planted walk fault" not in logged:
+        return False, "the plant did not fire: no guard-crash line in the log, so the fallback was not read"
+    if decision != "deny":
+        return False, "the planted copy's verdict on the triplet commit is %r, want deny" % decision
+    if CMK_RULE not in reason:
+        return False, "the planted deny is not the conflict-markers rule: %r" % reason[:90]
+    return True, "a crash in the cd walk falls back to the last cd, and the triplet commit is refused by conflict-markers"
 
 
 FAMILY = "kill"  # the family the cases after this section have always run in
@@ -14158,6 +14230,9 @@ LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 LOG_CHECKS_EXTRA.append((GIT_AFTER_CD_CRASH_LABEL, git_after_cd_crash_check))
 LOG_FAMILY[GIT_AFTER_CD_CRASH_LABEL] = "git-after-cd"
 FIXTURELESS_CHECKS.add(git_after_cd_crash_check)
+# The conflict-markers crash check reads the triplet fixture CMK_STAGED, so it is not fixtureless: the run builds it.
+LOG_CHECKS_EXTRA.append((CMK_CRASH_LABEL, conflict_markers_crash_check))
+LOG_FAMILY[CMK_CRASH_LABEL] = "conflict-markers"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
