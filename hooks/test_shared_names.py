@@ -390,18 +390,33 @@ def _in_import_fallback(node, parents):
     return False
 
 
+def _names_home(scope, functions):
+    """True when `scope` names the .claude default, or calls a function of the module that names it, directly or
+    through another call: the default may sit in a helper the copy calls."""
+    todo, seen = [scope], set()
+    while todo:
+        cur = todo.pop()
+        if any(isinstance(inner, ast.Constant) and inner.value in HOME_DIRS for inner in ast.walk(cur)):
+            return True
+        for inner in ast.walk(cur):
+            callee = inner.func.id if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) else None
+            if callee in functions and callee not in seen:
+                seen.add(callee)
+                todo.append(functions[callee])
+    return False
+
+
 def _unguarded_copies(path):
     """The lines of `path` where a config dir copy sits outside the import fallback. A copy reads CLAUDE_CONFIG_DIR
-    in a scope that also names the .claude default, whatever the function is called."""
+    in a scope that names the .claude default, or calls a function that does, whatever the function is called."""
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
     parents = _parents(tree)
+    functions = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     lines = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and node.value == CONFIG_DIR_ENV:
-            scope = _scope(node, parents)
-            names_home = any(isinstance(inner, ast.Constant) and inner.value in HOME_DIRS for inner in ast.walk(scope))
-            if names_home and not _in_import_fallback(node, parents):
+            if _names_home(_scope(node, parents), functions) and not _in_import_fallback(node, parents):
                 lines.append(node.lineno)
     return sorted(lines)
 
