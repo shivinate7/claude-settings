@@ -1068,20 +1068,32 @@ def _head_word(segment: str) -> str:
 
 
 def _exits_on_failure(segments, ends, at: int) -> bool:
-    """True when the `||` after `segments[at]` runs `exit` as its first command, bare or as
-    the first `;`-joined step of a `{ ... }` group: the shell stops there when the command before the
-    `||` fails, so nothing later runs in the folder it stayed in. A top-level `return` does not stop
-    bash, so it is not read. An `exit` that follows an `&&` or `||` inside the group runs only
-    sometimes and is not read."""
-    grouped = False
+    """True when the `||` after `segments[at]` runs a bare `exit` as its first command, or as a
+    `;`-joined step of a `{ ... }` group that is not piped: the shell stops there when the command
+    before the `||` fails, so nothing later runs in the folder it stayed in. Not read: a top-level
+    `return`, which does not stop bash; `(exit 1)` or `( exit 1 )`, which ends only a subshell; an
+    `exit` in a pipe or a piped group, which runs in a subshell; and an `exit` behind an `&&` or `||`
+    inside the group, which runs only sometimes."""
+    def end_of(number):
+        return ends[number] if number < len(ends) else ""
+
+    grouped, found = False, False
     for number in range(at + 1, len(segments)):
         tokens = segment_tokens(segments[number]) or []
         if number == at + 1:
             grouped = tokens[:1] == ["{"]
+        if grouped and tokens[:1] == ["}"]:
+            return found and end_of(number) != "|"
+        if found:
+            continue
         index = resolve_command(tokens) if tokens else None
-        if index is not None and basename(tokens[index]) == "exit":
-            return True
-        if not grouped or tokens[:1] == ["}"] or (number < len(ends) and ends[number] not in (";", "\n")):
+        in_pipe = "|" in (end_of(number), end_of(number - 1))
+        opens = any(char == "(" and not quote for _, char, quote in walk_quotes(segments[number]))
+        if index is not None and tokens[index] == "exit" and not in_pipe and not opens:
+            if not grouped:
+                return True
+            found = True
+        elif not grouped or end_of(number) not in (";", "\n"):
             return False
     return False
 

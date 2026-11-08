@@ -21,7 +21,7 @@ A call whose argv names a read, such as `push --dry-run` or `push -n` (`read_ver
 Allowed forms:
 
 - `cd X && git push`: a failed cd stops the chain.
-- `cd X || exit 1; git push`: the shell exits when the cd fails. The `exit` is read as the first command after the `||`, bare or first in a `{ ... }` group. A top-level `return` does not stop bash, so `cd X || return 1; git push` is refused.
+- `cd X || exit 1; git push`: the shell exits when the cd fails. The `exit` is read as the first command after the `||`, bare or as a `;`-joined step of a `{ ... }` group. A top-level `return` does not stop bash, so `cd X || return 1; git push` is refused. So are `cd X || (exit 1); git push`, because a subshell's `exit` ends only the subshell, and an `exit` in a pipe, as `cd X || exit 1 | cat; git push` or `cd X || { exit 1; } | cat; git push`.
 - `if cd X; then git push; fi`: the `then` body runs only when the cd landed. An `else` body and the commands after `fi` run in the stranded folder and are refused.
 - `git -C /full/path push`, with or without a cd before it. A `-C` that holds a variable is unknown and passes.
 - A read: `status`, `log`, `branch -l`, `stash list`, `tag -l`, `config --get`.
@@ -40,7 +40,7 @@ Limits:
 - A segment the tokenizer cannot read, because a quote is cut in it, is unknown and passes. An interpreter's heredoc body is read this way.
 - A cd into a folder an earlier `;` segment creates is refused: `mkdir -p X; cd X; git commit` and `git worktree add ../x; cd ../x; git commit`. The folder is not there when the guard looks. The `&&` form passes.
 - A cd to a variable is not judged: `cd "$WT"; git push` passes. Failing closed would also refuse `cd "$REPO"; git status` in normal work. Debt `git-after-cd-variable-cd` holds the gap.
-- An `|| exit` is read only as the first command after the `||`, or the first `;`-joined step of a `{ ... }` group. An `exit` behind an `&&` inside the group, or in a function, is not read, so the write after it is refused.
+- An `|| exit` is read only as the first command after the `||`, or a `;`-joined step of a `{ ... }` group. An `exit` behind an `&&` inside the group, or in a function, is not read, so the write after it is refused. `cd M || { echo a && exit 1; }; git push` is refused though bash exits first. The rule fails closed, and the `&&` remedy passes.
 - An `if` is read only when the cd is the whole test and the next segment opens the `then`. `if cd X && Y; then`, `while cd X; do` and `elif` are not read, so the write in their body is refused.
 - A `tag` is a read when it holds a listing flag (`-l`, `--contains`, `--points-at`, `--merged`, `--sort`) or no word. A `config` is a write when it names a key and a value, or holds a write flag. A `worktree` verb other than `add` is not a write here: `worktree remove` and `prune` are judged by their own rules.
 - A quoted `>` in an `echo` is text, not a redirect (rule conflict-markers, `_chain_safe`). A backtick or `$(` inside it still counts as a step that may change the tree.
