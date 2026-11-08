@@ -357,9 +357,12 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     implied destination is the local name, which becomes the new upstream. A bare push under push.default
     simple writes the current branch only when the upstream carries its name, else git refuses it. A
     deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
-    cannot be read is allowed. Reads: none for a destination after `:`; one `symbolic-ref` for the current
+    cannot be read is allowed. A 'stray' is silent when the implied destination already exists as
+    `refs/remotes/<pushed remote>/<name>`: that push updates the branch's own ref. A failed ref read keeps
+    the ask. Reads: none for a destination after `:`; one `symbolic-ref` for the current
     branch for a bare push or a colon-less refspec; one `git config --get-regexp` when the upstream is
-    needed; one more `git config --get-regexp` on the main path only, for the remote's URL (none when the
+    needed; one `git rev-parse --verify -q` of the destination's remote-tracking ref, on the stray path only;
+    one more `git config --get-regexp` on the main path only, for the remote's URL (none when the
     remote argument is itself a URL or path).
     """
     force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain = _push_parse(args)
@@ -432,7 +435,12 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     if not merge or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:
         return ""
     # A -u push of the local name sets that name as the new upstream on purpose (a lane stacked on a lane).
-    return "stray" if merge != current() and not upstream else ""
+    if merge == current() or upstream:
+        return ""
+    # A destination already on the pushed remote is that branch's own ref, so the push is no stray. A read that
+    # fails (git unavailable, an error other than "no such ref") keeps the ask.
+    seen = guard_core._git(cwd, "rev-parse", "--verify", "-q", "refs/remotes/" + pushed + "/" + current())
+    return "" if seen is not None and seen.returncode == 0 else "stray"
 
 
 # ------------------------------------------------------------------ a rewrite and a wide delete
@@ -905,7 +913,8 @@ PUSH_MAIN_REASON = (
 )
 PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
-    "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
+    "so it may land on a stray branch, and no such branch exists on the remote yet (rule push-stray-branch, "
+    "decision plain-push-asks). Name the destination: `git push origin HEAD:<branch>`. "
     "Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_AGENT_REASON = (
