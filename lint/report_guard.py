@@ -691,7 +691,7 @@ def done_models_problem(text, spawned, every=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
     `spawned` is the turn's spawns and sets which roles Done must name. `every` is the whole
-    transcript's spawns: Done also reports a review round that ran before the turn's window.
+    transcript's spawns: Done also reports a spawn that ran before the turn's window.
     Only the models an earlier spawn resolved count; its unknown '' must not hide a window mismatch.
     """
     if not spawned:
