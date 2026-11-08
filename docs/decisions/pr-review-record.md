@@ -57,11 +57,11 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 ## The cost
 
-Counted as real `gh` calls, one call per list read however many pages it pages.
+Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
 
-- `merge --reviewed` reads the open PRs (one list) and the repo's issue comments since the oldest open PR (one list, all pages, not only review records). It reads one `issues/<n>/events` list per PR that reaches the hold rule. When a batch line exists, it reads the base's latest `actions/runs` run once (its jobs too, only when that run did not succeed). It reads no head and no check run. The comment list grows with the repo's comment traffic and with the age of the oldest open PR.
+- `merge --reviewed` reads the open PRs (one call per page) and the repo's issue comments since the oldest open PR (one call per page, every comment, not only review records). It reads one `issues/<n>/events` list per PR that reaches the hold rule. When a batch line exists, it reads the base's latest `actions/runs` run once (its jobs too, only when that run did not succeed). It reads no head and no check run. The comment list grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
-- One ready PR with a record (a batch line): three calls, the open PRs, the comments and the base's run. A held PR adds one events read.
+- One ready PR with a record (a batch line), each list on one page: three calls, the open PRs, the comments and the base's run. A held PR adds one events read.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList.test_one_ready_pr_with_a_record_costs_three_gh_calls` in `merge/test_merge.py` pins the three calls. `ReviewedLedger.test_reads_one_comment_list_no_head_and_at_most_one_event_list_per_held_pr` pins the list reads.
