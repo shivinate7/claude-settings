@@ -1,0 +1,11 @@
+{
+  "title": "A review-record comment that does not parse is flagged when it is posted and when the runner reads it",
+  "phase": "guards",
+  "status": "todo",
+  "order": 679,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "Lane notes-fix-guard-1 (session_013NEJL3G6vFtN2TjNZrMETW, 08:37 CST Nov 8) posted four review records with free text after the CI line (#1926, #1531, #2016, #1989). parse_review (merge/merge.py:3193) returned None, so the batch runner would see no record. Nothing warned until a --fix-check refusal on #1989; each was fixed by hand.",
+  "note": "Guard idea: when a PR comment opens with the review-record marker but parse_review returns None, flag it, in `merge --review-record` and in the runner's record read. The remedy text names the form that parses: free text goes below a `---` line after the CI line (lane notes-fix-large-3, 08:38 CST Nov 8). Not folded into review-record-post-parses: that step is built as #1706, past round 3. Done check: a red test where a marker comment with text right after the CI line is flagged, naming the `---` remedy. Build lane. Filed by triage 08:38 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:38:00-06:00"
+}
