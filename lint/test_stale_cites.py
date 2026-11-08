@@ -2936,6 +2936,15 @@ class NamedExcerptPhraseTests(unittest.TestCase):
         fragment = self.stale.named_excerpt((), text, phrases=("ble whose cells render",))
         self.assertIsNone(fragment, "a mid-word fragment of a quoted phrase shows rows: %r" % fragment)
 
+    def test_a_phrase_that_stops_inside_a_word_finds_no_row(self):
+        # The rule: a phrase is found only when a non-word character or the row edge is on both sides of it. "every table whose cell"
+        # stops inside "cells", so it finds no row; the whole phrase finds the row.
+        row = "every table whose cells render Thousands has exactly one money head"
+        whole = self.stale.named_excerpt((), row + "\n", phrases=("every table whose cells render",))
+        self.assertIsNotNone(whole, "scope: the whole phrase finds no row, so the right-edge case probes nothing")
+        fragment = self.stale.named_excerpt((), row + "\n", phrases=("every table whose cell",))
+        self.assertIsNone(fragment, "a phrase that stops inside a word finds a row: %r" % fragment)
+
     def test_a_row_holding_the_phrase_whole_ranks_above_a_row_that_only_contains_it_under_the_cap(self):
         # The rule: a row that holds the phrase as a whole string literal, a quote on both sides, ranks above a row that only contains
         # it, so the cap drops the containing row first.
@@ -2990,6 +2999,29 @@ class NamedExcerptPhraseTests(unittest.TestCase):
         # The rule: an apostrophe is no quote, and a single quote never quotes, so neither opens a phrase.
         self.assertEqual(self.stale.quoted_phrases("<p>Don't</p>"), [], "a lone apostrophe gives a phrase")
         self.assertEqual(self.stale.quoted_phrases("the 'money head' unit, and Don't stop"), [], "a single-quoted phrase gives a phrase")
+
+    def test_a_phrase_inside_a_code_span_is_no_quote(self):
+        # The rule: a code span is no quote, so a quote inside backticks gives no phrase; the same quote outside a code span does.
+        outside = 'the "every table whose cells" phrase'
+        self.assertEqual(self.stale.quoted_phrases(outside), ["every table whose cells"], "scope: the phrase outside a code span is not read")
+        inside = 'the code `"every table whose cells"` names no phrase'
+        self.assertEqual(self.stale.quoted_phrases(inside), [], "a quote inside a code span gives a phrase")
+
+    def test_curly_quotes_pair_into_a_phrase(self):
+        # The rule: a curly opening quote pairs with the curly closing quote after it, and the phrase is the text between them.
+        line = "the “every table whose cells render” title"
+        self.assertEqual(self.stale.quoted_phrases(line), ["every table whose cells render"], "the curly quotes do not pair into a phrase")
+
+    def test_a_single_word_is_no_phrase_and_two_words_are(self):
+        # The rule: a phrase is two or more words, so one quoted word is no phrase and two quoted words are one.
+        self.assertEqual(self.stale.quoted_phrases('the "Thousands" column'), [], "a one-word quote gives a phrase")
+        self.assertEqual(self.stale.quoted_phrases('the "two words" column'), ["two words"], "a two-word quote gives no phrase")
+
+    def test_a_phrase_quoted_twice_is_listed_once(self):
+        # The rule: a phrase that a line quotes twice is listed once, in the order of its first quote.
+        line = 'the "every table whose cells" rule and "every table whose cells" again'
+        self.assertEqual(line.count('"every table whose cells"'), 2, "scope: the line does not quote the phrase twice")
+        self.assertEqual(self.stale.quoted_phrases(line), ["every table whose cells"], "a repeated phrase is listed twice")
 
 
 class ValueCiteTests(StaleCase):
