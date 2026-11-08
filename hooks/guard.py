@@ -93,7 +93,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        upstream. Only with an upstream on the pushed remote that is not main or master.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
-                       ready PR on the base runs CI, or when the read could not run. `--auto` too.
+                       ready PR on the base runs CI, or when the read could not run. `--auto` too, and the MCP
+                       merge_pull_request and enable_pr_auto_merge tools.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
@@ -118,7 +119,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
-  draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  draft-pr             deny. A `gh pr create` without `--draft`, or an MCP create_pull_request without
+                       draft true. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
@@ -382,7 +384,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool, REVIEW_COMMENT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
+            undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -5003,7 +5005,7 @@ def judge(payload) -> None:
                    "merge tool " + verdict)
 
     # The MCP create tool carries its own `draft` field.
-    if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
+    if tool == CREATE_PR_TOOL and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
     # A review record posted through the MCP comment tool (rule pr-review-record). One pull request read per marked post.

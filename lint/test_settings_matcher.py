@@ -3,7 +3,11 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
 """
-import json, os, re, sys, unittest
+import ast, glob, importlib.util, json, os, re, shutil, sys, unittest
+
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+
+RUN_FOLDER = _test_temp.run_folder()
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -526,6 +530,216 @@ class JudgeModelRows(unittest.TestCase):
         judges = call_judge_judges()
         wrong = dict(judges, Agent=(judges["Agent"][0], "claude-haiku-9-9") + tuple(judges["Agent"][2:]))
         self.assertTrue(any(g.startswith("Agent: table model") for g in table_gaps(self.text, wrong)))
+
+
+# The guard's MCP tool names. Each full name a guard module holds must be fullmatched by a guard matcher, or the
+# guard never sees that call. A name built from pieces escapes that match, so a piece fails: the fix is a named
+# full-name constant. The scan reads the guard source, so the guard is the only list of names.
+GUARD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+TOOL_NAME = re.compile(r"mcp__[\w-]+__[\w-]+")
+
+
+def guard_sources():
+    return sorted(glob.glob(os.path.join(GUARD_DIR, "guard*.py")))
+
+
+def mcp_strings(source):
+    """(lineno, value, kind) for each string in the source that starts with mcp__. kind is 'name' for a whole tool
+    name, 'fragment' for a piece of one. Docstrings are skipped; a comment never reaches the tree."""
+    tree = ast.parse(source)
+    docstrings, pieces = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+                docstrings.add(id(first.value))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            pieces.update(id(side) for side in (node.left, node.right))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+            pieces.add(id(node.left))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+            pieces.add(id(node.func.value))
+        elif isinstance(node, ast.JoinedStr):
+            pieces.update(id(part) for part in node.values)
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith("mcp__") \
+                and id(node) not in docstrings:
+            fragment = id(node) in pieces or TOOL_NAME.fullmatch(node.value) is None
+            found.append((node.lineno, node.value, "fragment" if fragment else "name"))
+    return found
+
+
+class GuardToolNames(unittest.TestCase):
+    def scan(self):
+        found = []
+        for path in guard_sources():
+            with open(path, encoding="utf-8") as f:
+                for lineno, value, kind in mcp_strings(f.read()):
+                    found.append(("%s:%d" % (os.path.basename(path), lineno), value, kind))
+        return found
+
+    def test_the_scan_reads_the_guard_source(self):
+        # Scope first: an empty scan or an empty matcher list would pass every name below for nothing.
+        self.assertTrue(guard_sources(), "no hooks/guard*.py under %s" % GUARD_DIR)
+        self.assertTrue(guard_matchers(), "settings.json has no guard matcher")
+        names = {value for _, value, kind in self.scan() if kind == "name"}
+        sys.path.insert(0, GUARD_DIR)
+        import guard_merge
+        missed = sorted(set(guard_merge.MERGE_TOOLS) - names)
+        self.assertEqual(missed, [], "the scan misses guard_merge.MERGE_TOOLS: %s" % missed)
+
+    def test_every_guard_tool_name_is_matched(self):
+        matchers = guard_matchers()
+        for where, value, kind in self.scan():
+            if kind != "name":
+                continue
+            with self.subTest(tool=value, where=where):
+                self.assertTrue(any(re.fullmatch(m, value) for m in matchers),
+                                "%s names %s, and no guard matcher in settings.json covers it" % (where, value))
+
+    def test_no_guard_tool_name_is_built_from_pieces(self):
+        for where, value, kind in self.scan():
+            if kind != "fragment":
+                continue
+            with self.subTest(piece=value, where=where):
+                self.fail("%s builds a tool name from the piece %r; name the full tool name in a module "
+                          "constant and use that" % (where, value))
+
+
+# Scanner self-tests. Each case pins one way a string can hide from the scan or be misread. They are green by
+# design: they test the scanner, not settings.json.
+class GuardToolScan(unittest.TestCase):
+    def test_a_plain_literal_is_a_name(self):
+        self.assertEqual(mcp_strings('TOOL = "mcp__github__merge_pull_request"\n'),
+                         [(1, "mcp__github__merge_pull_request", "name")])
+
+    def test_a_plus_join_is_a_fragment(self):
+        self.assertEqual(mcp_strings('X = "mcp__github__" + name\n'), [(1, "mcp__github__", "fragment")])
+
+    def test_an_fstring_is_a_fragment(self):
+        self.assertEqual(mcp_strings('X = f"mcp__{name}"\n'), [(1, "mcp__", "fragment")])
+
+    def test_a_full_name_joined_to_a_suffix_is_a_fragment(self):
+        # The prefix has a whole tool name's shape, but a suffix is joined on, so it names no one tool.
+        self.assertEqual(mcp_strings('X = f"mcp__github__merge_pull_request{suffix}"\n'),
+                         [(1, "mcp__github__merge_pull_request", "fragment")])
+        self.assertEqual(mcp_strings('X = "mcp__github__merge_pull_request" + suffix\n'),
+                         [(1, "mcp__github__merge_pull_request", "fragment")])
+
+    def test_percent_and_format_templates_are_fragments(self):
+        for src in ('X = "mcp__github__%s" % name\n', 'X = "mcp__github__{}".format(name)\n'):
+            with self.subTest(src=src):
+                self.assertEqual([kind for _, _, kind in mcp_strings(src)], ["fragment"])
+
+    def test_a_comment_is_ignored(self):
+        self.assertEqual(mcp_strings('# mcp__github__merge_pull_request\nX = 1\n'), [])
+
+    def test_a_docstring_is_ignored_and_a_later_string_is_not(self):
+        src = ('"""mcp__github__merge_pull_request"""\n'
+               'class C:\n'
+               '    """mcp__github__create_pull_request"""\n'
+               'def f():\n'
+               '    """mcp__github__enable_pr_auto_merge"""\n'
+               '    s = "mcp__github__enable_pr_auto_merge"\n'
+               '    return s\n')
+        self.assertEqual(mcp_strings(src), [(6, "mcp__github__enable_pr_auto_merge", "name")])
+
+    def test_hash_and_slashes_inside_a_string_do_not_hide_a_name(self):
+        src = 'A = "/* // #"; B = "mcp__github__merge_pull_request"  # "tail"\n'
+        self.assertEqual(mcp_strings(src), [(1, "mcp__github__merge_pull_request", "name")])
+
+    def test_a_multiline_string_and_a_lone_quote_do_not_hide_a_name(self):
+        src = ('NOTE = """it\'s a # line\n'
+               '  "quoted" // and more\n'
+               '"""\n'
+               "LONE = \"don't\"\n"
+               '# don\'t use mcp__github__create_pull_request here\n'
+               'TOOL = "mcp__github__merge_pull_request"\n')
+        self.assertEqual(mcp_strings(src), [(6, "mcp__github__merge_pull_request", "name")])
+
+    def test_an_empty_source_has_no_strings(self):
+        self.assertEqual(mcp_strings(""), [])
+
+
+# The runtime walk. The source scan cannot see a name joined from parts in another module and imported by name, so the
+# check also reads the guard module's globals after it loads. A global counts when it holds a whole tool name, or holds
+# one in a tuple, list, set or frozenset. A prefix alone is no tool name and is skipped. GUARD_UNDER_TEST points the
+# walk at another copy of the guard, as SETTINGS_UNDER_TEST does.
+GUARD_UNDER_TEST = os.environ.get("GUARD_UNDER_TEST") or os.path.join(GUARD_DIR, "guard.py")
+
+
+def load_module(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def temp_module(source, name):
+    """Write `source` as a module in this run's folder and load it. The folder is removed at teardown."""
+    path = os.path.join(RUN_FOLDER, name + ".py")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(source)
+    return load_module(path, name)
+
+
+def guard_global_names(module):
+    """(global, tool name) for each whole tool name a module global holds, directly or as a container member."""
+    found = []
+    for attr, value in vars(module).items():
+        members = value if isinstance(value, (tuple, list, set, frozenset)) else (value,)
+        found.extend((attr, m) for m in members if isinstance(m, str) and TOOL_NAME.fullmatch(m))
+    return found
+
+
+def unmatched_global_names(module, matchers):
+    return [(attr, name) for attr, name in guard_global_names(module)
+            if not any(re.fullmatch(m, name) for m in matchers)]
+
+
+class GuardRuntimeNames(unittest.TestCase):
+    def test_the_walk_reads_the_guard_module(self):
+        # Scope first: a walk that finds no global would pass the coverage case below for nothing.
+        module = load_module(GUARD_UNDER_TEST, "guard_under_test")
+        self.assertTrue(guard_global_names(module), "the walk found no mcp__ global in %s" % GUARD_UNDER_TEST)
+
+    def test_every_guard_global_tool_name_is_matched(self):
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        module = load_module(GUARD_UNDER_TEST, "guard_under_test")
+        for attr, name in guard_global_names(module):
+            with self.subTest(attr=attr, tool=name):
+                self.assertTrue(any(re.fullmatch(m, name) for m in matchers),
+                                "guard global %s holds %s, and no guard matcher in settings.json covers it" % (attr, name))
+
+
+# Walk self-tests. Each case builds a module in the run folder and checks what the walk collects from it.
+class GuardRuntimeWalk(unittest.TestCase):
+    def test_a_global_built_by_a_join_is_collected(self):
+        module = temp_module("PREFIX = 'mcp__github__'\nMERGE = PREFIX + 'merge_pull_request'\n", "join_global")
+        self.assertEqual(guard_global_names(module), [("MERGE", "mcp__github__merge_pull_request")])
+
+    def test_members_of_a_container_are_collected(self):
+        module = temp_module(
+            "A = ('mcp__github__tuple_one', 'Bash')\n"
+            "B = ['mcp__github__list_one']\n"
+            "C = {'mcp__github__set_one'}\n"
+            "D = frozenset(['mcp__github__frozen_one', 3])\n"
+            "E = 'mcp__github__plain_one'\n"
+            "F = ('mcp__github__', 'Bash')\n", "containers")
+        self.assertEqual(sorted(name for _, name in guard_global_names(module)),
+                         ["mcp__github__frozen_one", "mcp__github__list_one", "mcp__github__plain_one",
+                          "mcp__github__set_one", "mcp__github__tuple_one"])
+
+    def test_a_joined_global_the_matcher_misses_fails(self):
+        module = temp_module("MISSED = 'mcp__github__' + 'no_such_tool'\n", "missed_global")
+        self.assertEqual(unmatched_global_names(module, guard_matchers()),
+                         [("MISSED", "mcp__github__no_such_tool")])
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 if __name__ == "__main__":

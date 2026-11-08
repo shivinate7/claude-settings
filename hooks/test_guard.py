@@ -8975,6 +8975,17 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
     carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+# The host's auto-merge tool merges the head once its checks pass, so it is refused on a pending or red head as the
+# merge tool is. The shell form `gh pr merge --auto` is judged already (merge-checks: --auto is guarded).
+add("merge-checks: enable auto-merge of the host denies on a pending head", "deny", "merge-checks",
+    carries="pending", tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: enable auto-merge of the host denies on a failed head", "deny", "merge-checks",
+    carries="settled: red", tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-checks: enable auto-merge of the host is allowed on a green head", "allow",
+    tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    silent=True, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 # The batch brake (roadmap step c195): a merge is refused while another ready pull request on the base has a required check
 # pending, by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
