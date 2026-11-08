@@ -13605,6 +13605,36 @@ sendto_refuse("a test path joined to a product path by and, to a builder, is ref
               SENDTO_BUILDER, "Edit hooks/a.py and tests/b.py.", T_SENDTO_BUILDER, "test-author", lacks=("tests/b.py",))
 sendto_refuse("a read of a test path, then Fix the case, is refused to a builder, naming test-author",
               SENDTO_BUILDER, "Read tests/x.py. Fix the case.", T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+# Allowed: a builder asked to fix the guard for a red test run, or to make red cases green, and a test-author asked to
+# add a red case for a guard, or to update tests after a guard change. A path there names a run, a spec or the source
+# of a bug, not an edit. A double-quoted example is data. The two refused controls keep a test edit to a builder refused.
+sendto_allow("a reviewer's report of a failing test line, then Fix the guard, is allowed to a builder",
+             SENDTO_BUILDER,
+             "Reviewer: hooks/test_guard.py:13480 expects deny but the guard returns allow. Fix the guard.",
+             T_SENDTO_BUILDER)
+sendto_allow("a CI red line on a test path, then Fix the guard, is allowed to a builder",
+             SENDTO_BUILDER, "CI is red on hooks/test_guard.py:13480. Fix the guard.", T_SENDTO_BUILDER)
+sendto_allow("a count of FAIL lines in a test file, then Fix the guard, is allowed to a builder",
+             SENDTO_BUILDER, "hooks/test_guard.py: 3 FAIL. Fix the guard.", T_SENDTO_BUILDER)
+sendto_allow("red cases in a test file, then Make them green, is allowed to a builder",
+             SENDTO_BUILDER, "Red cases are in hooks/test_guard.py. Make them green.", T_SENDTO_BUILDER)
+sendto_allow("a bug in guard.py, then Add a red case that shows it, is allowed to a test-author",
+             SENDTO_AUTHOR, "The bug is in hooks/guard.py. Add a red case that shows it.", T_SENDTO_AUTHOR)
+sendto_allow("guard.py changed, then Update tests to match, is allowed to a test-author",
+             SENDTO_AUTHOR, "hooks/guard.py changed. Update tests to match.", T_SENDTO_AUTHOR)
+sendto_allow("a double-quoted example of a product fix in a case for a test-author is data, so it is allowed",
+             SENDTO_AUTHOR,
+             'Add a case: "Fix guard.py to pass tests/test_guard.py." sent to a test-author is refused.',
+             T_SENDTO_AUTHOR)
+# Refused controls: a test edit sent to a builder stays refused, naming test-author.
+sendto_refuse("hooks/test_guard.py:683 holds for any input, then Replace it, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace it with an exact assert.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("the incident form with a backtick span, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER,
+              'merge/test_lane_lint.py ~683: `assertIn("unknown", ...)` holds for any Liftable. '
+              'Replace it with an assert on "no lint CI step ran".',
+              T_SENDTO_BUILDER, "test-author", lacks=("merge/test_lane_lint.py",))
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
