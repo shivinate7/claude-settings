@@ -10697,6 +10697,12 @@ sendmessage_allow("to @parent is allowed", to="@parent", message=SENDMESSAGE_BOD
 # mid-name is a near miss that pins the match to the start of the value.
 sendmessage_allow("to an empty string is allowed", to="", message=SENDMESSAGE_BODY)
 sendmessage_allow("to a name with session_ mid-name is allowed", to="my-session_1", message=SENDMESSAGE_BODY)
+# Allowed: a near miss to the prefix. Each pins the match to the exact `session_` at the start: a looser prefix such as
+# startswith("session") refuses session-abc, a case-insensitive match refuses Session_abc, and a match that drops a
+# leading @ refuses @session_abc.
+sendmessage_allow("to session-abc, a dash not an underscore, is allowed", to="session-abc", message=SENDMESSAGE_BODY)
+sendmessage_allow("to Session_abc, a capital S, is allowed", to="Session_abc", message=SENDMESSAGE_BODY)
+sendmessage_allow("to @session_abc, an @ before the id, is allowed", to="@session_abc", message=SENDMESSAGE_BODY)
 # Allowed: a missing `to`, and a `to` that is not a string.
 sendmessage_allow("a call with no to is allowed", message=SENDMESSAGE_BODY)
 sendmessage_allow("to a number is allowed", to=3, message=SENDMESSAGE_BODY)
