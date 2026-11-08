@@ -3915,13 +3915,19 @@ def window_holds(source, first, last, name):
 
 FAR = "lint/far.py"  # the .py the anchor cases cite
 FAR_TEXT = numbered_source(44, {1: "def check_it(lane):", 2: "    return lane", 33: "def other(lane):", 34: "    return lane"})
+TARGET_TEXT = numbered_source(60, {1: "def target(rng):", 2: "    return rng", 9: "def walker(rng):",
+                                   10: "    for node in ast.walk(rng):", 11: "        yield node",
+                                   33: "def other(lane):", 34: "    return lane"})  # target's def at the top, a walk at 10
 
 
 class AnchorNameTests(StaleCase):
     """STALE011, a finding. An ADDED line of governed Markdown that cites a line anchor (`file.py:N` or `file.py:N-M`, the
-    colon glued to the path) and names a symbol in the same sentence is flagged when the cited lines do not hold it: no def
-    or class span of the name overlaps N-3..M+3, and no line of N-3..M+3 holds it as a whole word. A name counts when the
-    .py at head binds it anywhere. `--tree` judges every line, and an anchor past the file's end is STALE004 only."""
+    colon glued to the path) and names a symbol in the same sentence is flagged when a cite fails. A backticked `name(args)`
+    names `name`. A name is PLACED when it holds at some anchored cite of its sentence: a def or class span of the name
+    overlaps N-3..M+3, or a line of N-3..M+3 holds it as a whole word. A cite fails when some name in its sentence is bound
+    by the cite's .py at head, no such name holds at this cite, and at least one such name is placed at no cite of the
+    sentence. A cite whose names all hold at other cites is not judged. `--tree` judges every line, and an anchor past the
+    file's end is STALE004 only."""
 
     def test_a_name_defined_far_from_its_anchor_is_flagged_and_the_finding_names_the_cite_and_the_definition(self):
         src = numbered_source(41, {40: "def check_it(lane):", 41: "    return lane"})
@@ -3988,15 +3994,14 @@ class AnchorNameTests(StaleCase):
         self.assertFalse(window_holds(src, 30, 30, "check_it"))
         self.assert_flags(rng, [(NOTES, 2, "STALE011"), (NOTES, 3, "STALE011")])
 
-    def test_two_cites_in_one_sentence_pair_the_name_with_the_nearest_and_the_farther_is_not_judged(self):
-        line = "The cite `lint/far.py:20` names `check_it`, and `lint/far.py:40` is also far."
-        rng, _ = self.route_range([(line, True)], extra={FAR: FAR_TEXT})
+    def test_two_cites_in_one_sentence_judge_a_name_only_when_no_cite_of_the_sentence_places_it(self):
+        line = ("The cite `lint/far.py:2` is one of several earlier lines, so the step named `check_it` is at "
+                "`lint/far.py:40`.")
+        rng, _ = self.route_range([(line, False)], extra={FAR: FAR_TEXT})
         self.assertEqual(def_spans(FAR_TEXT, "check_it"), [(1, 2)])  # scope: the def is at the top of the file
-        self.assertFalse(window_holds(FAR_TEXT, 20, 20, "check_it"))  # scope: the nearer cite is drifted
-        self.assertFalse(window_holds(FAR_TEXT, 40, 40, "check_it"))  # scope: the farther cite would be drifted too
-        found = self.assert_flags(rng, [(NOTES, 1, "STALE011")])
-        self.assertIn("lint/far.py:20", found[0][3])  # the nearest cite is the one judged
-        self.assertNotIn("lint/far.py:40", found[0][3])  # the farther cite is not
+        self.assertTrue(window_holds(FAR_TEXT, 2, 2, "check_it"))  # scope: the first cite places the name
+        self.assertFalse(window_holds(FAR_TEXT, 40, 40, "check_it"))  # scope: the second cite is drifted
+        self.assert_passes(rng)  # the second cite is not judged: its name holds at the first
 
     def test_a_name_and_a_cite_in_different_sentences_of_one_line_are_not_paired_and_one_sentence_is(self):
         rows = [
@@ -4126,6 +4131,85 @@ class AnchorNameTests(StaleCase):
         self.assertEqual(len(FAR_TEXT.split("\n")) - 1, 44)  # scope: the file has 44 lines, so :99 is past its end
         self.assertFalse(window_holds(FAR_TEXT, 30, 30, "check_it"))  # scope: the drifted cite is drifted
         self.assert_tree_flags(rng, [(NOTES, 3, "STALE011"), (NOTES, 4, "STALE004")])
+
+    def test_a_name_placed_at_another_cite_of_its_sentence_does_not_flag_the_walk_cite_beside_it(self):
+        line = "The walk `ast.walk` runs at `lint/far.py:10`, and `target` is at `lint/far.py:2`."
+        rng, _ = self.route_range([(line, False)], extra={FAR: TARGET_TEXT})
+        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "target"))  # scope: the second cite holds the name
+        self.assertFalse(window_holds(TARGET_TEXT, 10, 10, "target"))  # scope: the walk cite holds no target
+        self.assertTrue(holds_word(TARGET_TEXT.split("\n")[9], "walk"))  # scope: line 10 holds the walk
+        self.assertIsNone(binding_kind(TARGET_TEXT, "walk"))  # scope: the file binds no name walk
+        self.assert_passes(rng)
+
+    def test_a_name_placed_at_no_cite_of_its_sentence_still_flags_a_cite_beside_a_walk_cite(self):
+        line = "The walk `ast.walk` runs at `lint/far.py:10`, and `target` is at `lint/far.py:20`."
+        rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
+        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertFalse(window_holds(TARGET_TEXT, 10, 10, "target"))  # scope: the walk cite holds no target
+        self.assertFalse(window_holds(TARGET_TEXT, 20, 20, "target"))  # scope: the other cite holds no target
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+
+    def test_a_name_between_two_cites_that_holds_at_neither_flags_both_cites_in_one_finding(self):
+        line = "The `target` step sits between `lint/far.py:20` and `lint/far.py:50`."
+        rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
+        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertFalse(window_holds(TARGET_TEXT, 20, 20, "target"))  # scope: the first cite holds no target
+        self.assertFalse(window_holds(TARGET_TEXT, 50, 50, "target"))  # scope: the second cite holds no target
+        found = self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+        self.assertIn("lint/far.py:20", found[0][3])  # the finding names the first cite
+        self.assertIn("lint/far.py:50", found[0][3])  # and the second
+
+    def test_a_name_between_two_cites_that_holds_at_the_first_passes_for_both(self):
+        line = "The `target` step sits between `lint/far.py:2` and `lint/far.py:50`."
+        rng, _ = self.route_range([(line, False)], extra={FAR: TARGET_TEXT})
+        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "target"))  # scope: the first cite holds the name
+        self.assertFalse(window_holds(TARGET_TEXT, 50, 50, "target"))  # scope: the second cite holds no target
+        self.assert_passes(rng)
+
+    def test_a_lone_drifted_cite_of_a_name_that_no_cite_places_is_flagged(self):
+        line = "The step named `check_it` is at `lint/far.py:40`."
+        rng, _ = self.route_range([(line, True)], extra={FAR: FAR_TEXT})
+        self.assertEqual(def_spans(FAR_TEXT, "check_it"), [(1, 2)])  # scope: the def is at the top of the file
+        self.assertFalse(window_holds(FAR_TEXT, 40, 40, "check_it"))  # scope: the cite is drifted
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+
+    def test_a_call_with_arguments_names_the_function_so_its_drifted_cite_is_flagged_and_a_correct_one_passes(self):
+        rows = [
+            ("The call `target(rng)` runs at `lint/far.py:30`.", True),
+            ("The call `target(a, b)` runs at `lint/far.py:30`.", True),
+            ("The call `target(rng)` runs at `lint/far.py:2`.", False),
+            ("The call `target(a, b)` runs at `lint/far.py:2`.", False),
+        ]
+        rng, _ = self.route_range(rows, extra={FAR: TARGET_TEXT})
+        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertIsNone(binding_kind(TARGET_TEXT, "rng"))  # scope: the file binds no name rng, so only target can count
+        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "target"))  # scope: the drifted cite holds no target
+        self.assertTrue(window_holds(TARGET_TEXT, 2, 2, "target"))  # scope: the correct cite holds it
+        self.assert_flags(rng, [(NOTES, 1, "STALE011"), (NOTES, 2, "STALE011")])
+
+    def test_a_backticked_name_with_no_arguments_is_flagged_at_a_drifted_cite(self):
+        line = "The call `target` runs at `lint/far.py:30`."
+        rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
+        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "target"))  # scope: the cite is drifted
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+
+    def test_a_comment_opener_inside_a_code_span_hides_neither_the_cite_nor_the_name_on_its_line(self):
+        line = "The mark `<!--` and `target` at `lint/far.py:30` and `-->` end it."
+        rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
+        self.assertEqual(def_spans(TARGET_TEXT, "target"), [(1, 2)])  # scope: the def is at lines 1 and 2
+        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "target"))  # scope: the cite is drifted
+        self.assertIsNotNone(re.search(r"<!--.*?-->", line))  # scope: a comment pattern runs from the opener to the closer
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
+
+    def test_a_look_alike_of_a_comment_opener_in_a_code_span_leaves_the_cite_judged(self):
+        line = "The mark `<--` and `target` at `lint/far.py:30` and `-->` end it."
+        rng, _ = self.route_range([(line, True)], extra={FAR: TARGET_TEXT})
+        self.assertIsNone(re.search(r"<!--.*?-->", line))  # scope: no comment pattern in the line
+        self.assertFalse(window_holds(TARGET_TEXT, 30, 30, "target"))  # scope: the cite is drifted
+        self.assert_flags(rng, [(NOTES, 1, "STALE011")])
 
 
 if __name__ == "__main__":
