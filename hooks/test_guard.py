@@ -8091,6 +8091,69 @@ sh("env: PowerShell: a quoted relative backslash path to .env in a subfolder, de
 sh("env: PowerShell: a bare relative backslash path to .env in a subfolder, denies",
    "Get-Content sub\\" + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
 
+# A PowerShell argument is a path unless it is a message, a regex or a text argument. A commit or tag
+# message, a grep or findstr pattern, a .NET regex call, an Add-Content text and a throw message each
+# name `C:\app\.env` as text, so each allows. The `-m` commit is the green twin of the `-am` one.
+sh("env: PowerShell: git commit -m naming C:\\app\\.env in its message, allowed (the green twin)",
+   'git commit -m "fix C:\\app\\' + ENV + '"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: git commit -am naming C:\\app\\.env in its message, allowed",
+   'git commit -am "fix C:\\app\\' + ENV + '"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: git commit -sm naming C:\\app\\.env in its message, allowed",
+   'git commit -sm "fix C:\\app\\' + ENV + '"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: git tag -m naming C:\\app\\.env in its message, allowed",
+   'git tag -a v1 -m "see C:\\app\\' + ENV + '"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: git commit -m with a here-string naming C:\\app\\.env, allowed",
+   'git commit -m @"\nsee C:\\app\\' + ENV + '\n"@', "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: git log --grep with a pattern naming .env, allowed",
+   "git log --grep '\\" + ENV + "'", "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: findstr with a pattern naming .env, allowed",
+   'findstr "\\' + ENV + '$" f', "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: a .NET regex call naming .env, allowed",
+   "[regex]::IsMatch($n,'\\" + ENV + "')", "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: Add-Content text naming C:\\app\\.env, allowed",
+   'Add-Content log.txt "see C:\\app\\' + ENV + '"', "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: a throw message naming C:\\app\\.env, allowed",
+   'throw "missing C:\\app\\' + ENV + '"', "allow", tool="PowerShell", cwd=NOGIT)
+
+# A regex operand and a git grep pattern are regexes, not paths. Each case is the green control for one
+# arm of the guard: with that arm dropped, the `.env` in the pattern reads as a path and denies. The
+# phrase in each name selects the cases of one arm.
+sh("env: PowerShell regex operator -match names .env, allowed",
+   "$n -match '\\" + ENV + "$'", "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell regex operator -replace names .env, allowed",
+   "$n -replace '\\" + ENV + "',''", "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell regex operator -split names .env, allowed",
+   "$n -split '\\" + ENV + "'", "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell git grep pattern -e names .env, allowed",
+   "git grep -e '\\" + ENV + "' -- src", "allow", tool="PowerShell", cwd=NOGIT)
+
+# A read nested in a text command is a read. Text is text only where no word of the segment reads a file.
+sh("env: PowerShell: Get-Content nested in a Write-Host group, denies",
+   "Write-Host (Get-Content sub\\" + ENV + ")", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: gc with a quoted path nested in an echo group, denies",
+   'echo (gc "sub\\' + ENV + '")', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: a Write-Output path piped to Get-Content, denies",
+   "Write-Output sub\\" + ENV + " | Get-Content", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+
+# A backslash inside an env folder does not hide the file: the folder name is the env name.
+sh("env: PowerShell: Get-Content of a file in an .envs folder through a backslash, denies",
+   "Get-Content " + ENV + "s\\.local\\.django", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: Get-Content of a file in a .env folder through a backslash, denies",
+   "Get-Content " + ENV + "\\secret", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: Get-ChildItem of an .envs folder through a backslash glob, denies",
+   "Get-ChildItem " + ENV + "s\\*", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+
+# An ASCII open quote and a smart close quote bound one PowerShell string, so the `;` after it is a command.
+sh("env: PowerShell: an ASCII open and a smart close, then Get-Content .env, denies (the named limit)",
+   'Write-Host "a' + SMART_DQ_END + ' ; Get-Content ' + ENV + ' ; Write-Host "b"',
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+
+# Pinned, not verified: no pwsh runs on this host, so PowerShell's rule for a smart apostrophe cannot be
+# checked here. The deny stands, since a false alarm costs less than a hole.
+sh("env: PowerShell: pinned deny, a smart apostrophe in text before a later .env read",
+   "Write-Host it" + SMART_SQ_END + "s fine; Get-Content " + ENV + "; Write-Host don" + SMART_SQ_END + "t",
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+
 sh("env: ls reads no contents", "ls " + ENV, "allow", cwd=NOGIT)
 sh("env: test -f reads no contents", "test -f " + ENV, "allow", cwd=NOGIT)
 sh("env: a bracket existence test", "[ -f " + ENV + " ] && echo present", "allow", cwd=NOGIT)
