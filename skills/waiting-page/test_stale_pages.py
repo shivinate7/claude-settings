@@ -39,10 +39,24 @@ ROADMAP_BODY = ('\n<script>window.ROADMAP_DATA = {"steps": {"c1": {"note": "a \\
 ROADMAP_RE = re.compile(re.escape(OPEN) + r".*?" + re.escape(CLOSE), re.S)
 
 
-def with_both_blocks(page):
-    """`page` with its designData and its roadmap block filled, as a live page holds them."""
+# A roadmap block build.py wrote with no record branch: its data is null, so the block is not empty.
+NULL_BODY = '\n<script>window.ROADMAP_DATA = null; window.ROADMAP_BUILD = {"repo": "r"};</script>\n'
+# Bodies of a block no build has baked: none, a newline, and mixed white space.
+EMPTY_BODIES = ("", "\n", " \t\r\n ")
+
+
+def with_both_blocks(page, body=ROADMAP_BODY):
+    """`page` with its designData and its roadmap block filled (`body` is the block's text), as a live page holds them."""
     page = page.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1)
-    return ROADMAP_RE.sub(lambda m: OPEN + ROADMAP_BODY + CLOSE, page, count=1)
+    return ROADMAP_RE.sub(lambda m: OPEN + body + CLOSE, page, count=1)
+
+
+def empty_block_page(body):
+    """PAGE with its roadmap block holding only `body`, which must be white space: a page no build has baked."""
+    assert not body.strip(), "the body is not white space"
+    page = with_both_blocks(PAGE, body=body)
+    assert "ROADMAP_DATA" not in ROADMAP_RE.search(page).group(0), "the block holds data"
+    return page
 
 
 def setUpModule():
@@ -683,6 +697,63 @@ class Stale(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("behind: appended", out)
         self.assertNotIn("current: appended", out)
+
+    def empty_block_line(self, owner):
+        """The line batch and page mode print for a page whose roadmap block holds no data (`owner` is the page's owner)."""
+        return 'roadmap block: empty on %s page (bake it: skill waiting-page, "Update the roadmap block")' % owner
+
+    def roadmap_lines(self, out):
+        return [line for line in out.splitlines() if line.startswith("roadmap block: ")]
+
+    def test_unbaked_each_page_gets_its_own_line_and_the_run_exits_1(self):
+        roots = [self.repo("emptyone", "EM1"), self.repo("emptytwo", "EM2"), self.repo("baked", "OK1")]
+        self.fetch("EM1", empty_block_page("\n"))
+        self.fetch("EM2", empty_block_page(" \t\r\n "))
+        self.fetch("OK1", with_both_blocks(PAGE))
+        code, out = self.run_cmd(*roots)
+        self.assertCountEqual(self.roadmap_lines(out), [self.empty_block_line("emptyone"), self.empty_block_line("emptytwo")], out)
+        self.assertEqual(code, 1, out)
+        self.assertIn("current: emptyone", out)  # the verdict word stays what it was
+        self.assertIn("current: emptytwo", out)
+        self.assertIn("current: baked", out)
+        self.assertEqual(self.total_line(out), "waiting pages: 3 current, 0 behind, 0 unknown, 0 not-found")
+
+    def test_unbaked_every_white_space_body_is_flagged(self):
+        root = self.repo("bare", "EMP")
+        for body in EMPTY_BODIES:
+            with self.subTest(body=body):
+                self.fetch("EMP", empty_block_page(body))
+                code, out = self.run_cmd(root)
+                self.assertIn(self.empty_block_line("bare"), out.splitlines(), out)
+                self.assertEqual(code, 1, out)
+
+    def test_nulled_block_is_not_empty_in_batch_mode(self):
+        root = self.repo("nulled", "NUL")
+        live = with_both_blocks(PAGE, body=NULL_BODY)
+        self.assertIn("ROADMAP_DATA = null", live, "the fixture block does not hold the null data build.py bakes")
+        self.fetch("NUL", live)
+        code, out = self.run_cmd(root)
+        self.assertEqual(code, 0, out)
+        self.assertIn("current: nulled", out)
+        self.assertEqual(self.roadmap_lines(out), [], out)
+
+    def test_unbaked_block_in_page_mode_prints_its_line_and_exits_1(self):
+        page = write_text(os.path.join(self.fetched, "unbaked-single.html"), empty_block_page("\n"))
+        r = self.page_run(page, "--main", TEMPLATE)
+        lines = self.roadmap_lines(r.stdout)
+        self.assertEqual(len(lines), 1, r.stdout + r.stderr)
+        self.assertRegex(lines[0], r'^roadmap block: empty on \S+ page \(bake it: skill waiting-page, "Update the roadmap block"\)$')
+        self.assertEqual(self.verdict(r)[0], "current", r.stdout + r.stderr)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_nulled_block_is_current_in_page_mode(self):
+        live = with_both_blocks(PAGE, body=NULL_BODY)
+        self.assertIn("ROADMAP_DATA = null", live, "the fixture block does not hold the null data build.py bakes")
+        page = write_text(os.path.join(self.fetched, "nulled-single.html"), live)
+        r = self.page_run(page, "--main", TEMPLATE)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.verdict(r)[0], "current", r.stdout + r.stderr)
+        self.assertEqual(self.roadmap_lines(r.stdout), [], r.stdout)
 
     def test_write_to_an_unwritable_path_is_unknown_without_traceback(self):
         stale = write_text(os.path.join(self.fetched, "unwritable.html"), set_body(ALTERED, STALE_BODY))
