@@ -213,11 +213,17 @@ def is_project_config(path: str, cwd: str) -> bool:
 #
 # The list holds the PowerShell cmdlets (`Set-Content`, `Out-File`, `Add-Content`, `Remove-Item`) as
 # well as the POSIX commands. Matching folds case, as PowerShell does.
-MUTATING_COMMAND = (
-    r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
+# `sc`, `ac`, `cpi` and `ni` are PowerShell aliases that are also ordinary words (`grep -n ac`, `diff ni`), so
+# they count only as the segment's own command (`_ALIAS_COMMAND`), never as a word anywhere in it.
+_ALIAS_COMMAND = r"(?i:sc|ac|cpi|ni)"
+_MUTATING_ANYWHERE = (
+    r"(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
-    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren|sc|ac|cpi|ni)\b"
+    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)"
 )
+# The full list, for a command already in command position and for a quick hint.
+MUTATING_COMMAND = r"\b(?:" + _MUTATING_ANYWHERE + "|" + _ALIAS_COMMAND + r")\b"
+_MUTATING_ANYWHERE_RE = r"\b" + _MUTATING_ANYWHERE + r"\b"
 
 
 # A command that hands its arguments to another program, so a mutating word in them may run.
@@ -276,7 +282,11 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
         return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
-    if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
+    if re.search(_MUTATING_ANYWHERE_RE + r"[^\n;|&]*" + target, cmd):
+        return True
+    # No command given: an alias writes only when it is the segment's own command.
+    name = _segment_command(cmd.split())[0]
+    if re.fullmatch(_ALIAS_COMMAND, name) and re.search(r"\b" + _ALIAS_COMMAND + r"\b[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
@@ -572,6 +582,9 @@ def _ps_reads(name, raw, words, start, predicate, cwd, plain):
     operands = []
     for index in range(start + 1, len(words)):
         word = words[index]
+        # A comma list is one argument naming several paths: `a.md, 'b'` writes both, so no word is text.
+        if word.endswith(",") or (index > start + 1 and word.startswith(",")):
+            return set()
         if ">" in word or "<" in word or (word.startswith("-") and not _PS_SWITCH.fullmatch(word)):
             return set()
         if not _PS_SWITCH.fullmatch(word):
