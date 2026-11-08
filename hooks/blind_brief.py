@@ -403,7 +403,7 @@ def blind_designers_ok(text):
         if len(marked) != 1:
             return False
         value = marked[0]
-    if value.isdigit():
+    if value.isascii() and value.isdigit():
         return int(value) >= 1
     return bool(OWNER_NONE.match(value))
 
