@@ -79,7 +79,7 @@ demand; the current reply counts by its blockquote. A bare `Recovered:` takes th
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
 the current Recovered line (split on ";" outside parentheses) names a source, matched ignoring case: git,
 page or digest as whole words, `commit <hex>`, `commits <hex>` or `sha <hex>` (7-40 hex characters with a digit;
-a colon or a backtick pair may sit between), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
+a colon may follow the word, and one backtick may sit before the hex), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
 `issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
 whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
 has the report shape. Cost: a scan of the records main()
@@ -726,7 +726,7 @@ CARRY_FORMS = {
                     "or `Handoff gave: none`",
 }
 # A source word or form, matched ignoring case: git, page, digest, `commit <hex>`, `commits <hex>` or `sha <hex>` (a
-# colon or a backtick pair may sit between), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
+# colon may follow the word, and one backtick may sit before the hex), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
 # `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
 # a digit, so a word such as "commit defaced" names no source.
 SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
