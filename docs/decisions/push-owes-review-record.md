@@ -20,9 +20,11 @@ Coordinator brief, 2026-11-08 09:45 CST. Fix checks count, coordinator 09:54 CST
 
 - PR #1869: a base merge of main was pushed after the reviewer stopped, with no record posted (case R1).
 - PR #1914, lane `notes-fix-large-3`, 05:06 CST: a fix was pushed before the FAIL round's record was posted (case R2).
+- PR #1958, its review rounds: a fix was pushed before the failed round's record was posted, so the tool could not record the old head (case R2).
 - PR #1985, lane `notes-fix-other-2`, and PR #1699, lane `sim-lease-gaps`: the same mistake, a fix pushed before the FAIL record.
 - PR #2015 and PR #2025, lane `bg-tail-loses-verdict`: round 3 was not recorded at its head before fixes landed. `merge --review-record --fix-check` refused.
 - PR #2026 and PR #2068, lane `notes-fix-report`, 09:40 CST: a fresh chain of three rounds followed. PR #2026 is also a fix pushed after a FAIL with no record (case R2).
+- PR #2042, lane `env-file-shell-c`: fix commit 94775a094 was pushed after round 3 reviewed commit 7517223bb, before round 3's record. `merge --fix-check` refused until the record was posted by hand (11:08 CST Nov 8).
 - PR #2088: a fix-check reviewer stopped at fix head F with no record, then another fix was pushed (case R7).
 - Lane `builder-report-in-head`, 06:58 CST: the lane pushed after review passed and before the record was posted. `merge --review-record` records only the live head, so the record could not be written (case R3).
 
@@ -72,14 +74,14 @@ Found in the code:
 
 - A torn entry, an unreadable destination, directory or config asks only when an entry's head is a commit in the push's repo. Otherwise it passes.
 - A push that names no refspec range (`--all`, `--mirror`, a deletion, tags only) is not read.
-- Pruning runs at each reviewer stop. It removes any entry file older than 14 days by mtime, whether its PR is open or not. A push past that head then passes.
+- Pruning runs at each reviewer stop that finds a remote branch holding its head. It removes any entry file older than 14 days by mtime, whether its PR is open or not. A push past that head then passes.
 - A reviewer stop on a head that no remote branch contains writes no entry. A later push past that head passes.
 - A reviewer that never checks out the head writes no useful entry. The stop reads HEAD in its own directory.
 - A stop whose git read fails writes no entry and logs `owed-record-unwritten`. A later push passes.
 - Only the lowest-numbered open PR whose head branch is the destination is read. A second open PR on that branch, or a fork's branch of the same name, is not told apart.
 - Only open PRs are read. A closed or merged PR on the branch does not ask.
 - Only the shell `git push` and `update_pull_request_branch` are checked. The MCP tools `push_files` and `create_or_update_file` are not seen.
-- An entry stays live for 14 days, so each push to its branch in that time reads gh again (one open-PR list and one comments read, even after the record is posted).
+- An entry stays live at least 14 days, so each push to its branch in that time reads gh again (one open-PR list and one comments read, even after the record is posted).
 - A design-reviewer or a workflow agent writes no entry. The stop reads only agent type `reviewer`.
 
 ## The cost
@@ -94,7 +96,7 @@ Found in the code:
 
 Dated by: the head compare in `_records_hold` and the descent test in `_owed_scan` and the 14-day constant `OWED_KEEP_SECONDS`, all in `hooks/guard_merge.py`. A change to any of them rewrites this record.
 
-Risk: incident (PR #1869, PR #1914, PR #1985, PR #1699, PR #2015, PR #2025, PR #2026, PR #2068, PR #2088, lane `builder-report-in-head`).
+Risk: incident (PR #1869, PR #1914, PR #1958, PR #1985, PR #1699, PR #2015, PR #2025, PR #2026, PR #2042, PR #2068, PR #2088, lane `builder-report-in-head`).
 
 Kind: process
 Home: hooks/guard_merge.py
