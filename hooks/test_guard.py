@@ -19167,6 +19167,33 @@ add("brief-claim: test-author brief where the guard refuses an input in capitals
 add("brief-claim: test-author brief where the guard refuses an input today, and main refuses a second, is denied",
     "deny", BRIEF_PROBE, tool="Agent", prompt="The guard refuses `a` today, and main refuses `b`.",
     subagent_type="test-author", carries=("`a`",))
+# A goal in the base form is an instruction to the builder, not a claim about what main does.
+add("brief-claim: builder brief where a goal to make an input pass on main is allowed, as it is no claim",
+    "allow", None, tool="Agent", prompt="Make `user: root` pass on main.",
+    subagent_type="builder", model="sonnet")
+# The scan reads one claim per sentence, so the second claim here is not read and its input passes unprobed.
+add("brief-claim: test-author brief where main passes a probed input, and main refuses a second unprobed one, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="main passes `port: 0`, and main refuses `user: root`.\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
+    subagent_type="test-author", carries=("user: root",))
+# The same two claims in two sentences: each is read, so the unprobed one is denied.
+add("brief-claim: test-author brief where main passes a probed input, and in the next sentence refuses an unprobed one, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="main passes `port: 0`. Main refuses `user: root`.\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
+    subagent_type="test-author", carries=("user: root",))
+# A claimed list stays open across a blank line and a fence marker. Only a non-blank text line that is not bulleted
+# closes it, so a bullet after a blank line or a fence is a claimed input.
+add("brief-claim: builder brief where a blank line before the first listed input keeps the list open, so the unprobed input is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Main refuses these:\n\n- `port: 0`",
+    subagent_type="builder", model="sonnet", carries=("port: 0",))
+add("brief-claim: builder brief where a blank line between listed inputs keeps the list open, so an unprobed bullet after it is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Main refuses these:\n- `port: 0`\n\n- `user: root`\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
+    subagent_type="builder", model="sonnet", carries=("user: root",))
+add("brief-claim: builder brief where a fence marker between listed inputs keeps the list open, so an unprobed bullet after it is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Main refuses these:\n```\n- `port: 0`\n```\n- `user: root`\n$ python3 hooks/probe_main.py 'port: 0'\nrefused",
+    subagent_type="builder", model="sonnet", carries=("user: root",))
 
 
 def _flow(model, role=None):
