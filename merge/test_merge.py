@@ -13031,10 +13031,10 @@ class ReviewRoundCheckEnv(Env):
         self.assertEqual(self.claims(), 0, "a record number was claimed")
         self.assertFalse(getattr(host, "merged", False), "the pull request was merged")
 
-    def assert_refused(self, rc, out, host, before, pr_no):
+    def assert_refused(self, rc, out, host, before, pr_no, owed="a lane owes round 3"):
         """A refusal: exit 1, the lane's pull request named, a cite to a decision or rule, no net value named as the remedy (rule
-        git-remedy-never-names-target), and no claim or push."""
-        self.assertEqual(rc, 1, "the round-3 check let the batch through, though a lane owes round 3:\n" + out)
+        git-remedy-never-names-target), and no claim or push. `owed` is the cause the failure message names when the run goes through."""
+        self.assertEqual(rc, 1, f"the round-3 check let the batch through, though {owed}:\n" + out)
         self.assertIn(f"#{pr_no}", out, f"the refusal does not name pull request #{pr_no}:\n" + out)
         self.assertNotIn("Net value: zero", out, "the refusal names `Net value: zero` as a remedy")
         self.assertNotIn("Net value: positive", out, "the refusal names `Net value: positive` as a remedy")
@@ -13450,6 +13450,81 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
 
     def test_a_guard_no_record_for_the_same_older_head_is_not_refused(self):
         _tips, host, _a = self.backdated_lane_batch("no")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+class ReviewUnreviewedHead(ReviewRoundCheckEnv):
+    """`merge 7 --confirm` refuses a lane tip, and a lone pull request's own head, whose review record for that exact head is not done, whatever its
+    Guard or check value (owner pick a, merge-unreviewed-head, 2026-11-07 21:26 CST). An integration pull request's own head is never refused for having
+    no record. Cases 1, 2, 3 and 6 are red on the old code. Cases 4, 5 and 7 are green controls beside them, so a check that refuses every head fails too."""
+
+    UNREVIEWED = "its head has no done review record"
+    ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
+
+    def lone_scope(self, host):
+        """Scope before subject: feat holds no lane tip, and pull request 7 is the open pull request at feat's live head."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        lanes, _dropped = merge.read_lanes(self.co, "origin/main", self.head("feat"))
+        self.assertEqual(lanes, [], "feat holds a lane tip, so the case is not a lone lane")
+        self.assertEqual(host.open_heads().get("feat"), (self.head("feat"), "main"), "pull request 7 is not open at feat's live head")
+
+    def test_unreviewed_head_lane_tip_without_record_is_refused(self):  # case 1
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host(tips, [])
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_lane_tip_newest_fail_guard_no_is_refused(self):  # case 2
+        # a done record for the lane tip, then a newer round-1 FAIL for it with Guard or check no: the newest record for the head decides
+        tips = lane_batch(self, "agent/lane1")
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
+                    round_check_comment(2, 8, tips["agent/lane1"], guard="no", rounds=self.ROUND_ONE_FAIL)]
+        host = self.batch_host(tips, comments)
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_lane_tip_older_head_record_is_refused(self):  # case 3
+        # the only record is done, but it names an older head of the lane, so the tip itself has no record
+        tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
+        older = self.older_heads["agent/lane1"]
+        self.assertEqual(record_state(self, record_text(n=8, head=older, guard="no", rounds=REVIEW_PASS), head=older), "done",
+                         "the older head's record is not done, so a refusal would not be about the head")
+        host = self.batch_host(tips, [round_check_comment(1, 8, older, guard="no", rounds=REVIEW_PASS)])
+        self.scope(tips, host)
+        self.assertEqual(self.history_exit(older, tips["agent/lane1"]), 0, "the older head is not an ancestor of the lane tip")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_lane_tip_done_record_guard_no_passes(self):  # case 4, green control for cases 1 to 3
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        self.scope(tips, host)
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_integration_pr_reads_through_lanes_and_passes(self):  # case 5, green control
+        tips = lane_batch(self, "agent/lane1", "agent/lane2")
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
+                    round_check_comment(2, 9, tips["agent/lane2"], guard="no", rounds=REVIEW_PASS)]
+        host = self.batch_host(tips, comments)
+        self.scope(tips, host)
+        self.assertNotIn(self.head("feat"), "".join(c["body"] for c in comments), "a record names the integration head, so the case does not test a head with no record")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_lone_lane_without_record_is_refused(self):  # case 6
+        host = self.batch_host({}, [])
+        self.lone_scope(host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7, owed=self.UNREVIEWED)
+
+    def test_unreviewed_head_docs_only_record_no_round_passes(self):  # case 7, green control
+        text = record_text(n=7, head=self.head("feat"), kind="docs-only", guard="no", rounds=())
+        self.assertEqual(record_state(self, text, head=self.head("feat")), "done", "a docs-only record with no round is not done")
+        host = self.batch_host({}, [review_comment(1, 7, text)])
+        self.lone_scope(host)
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
