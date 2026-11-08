@@ -3458,6 +3458,27 @@ class NameCiteTests(StaleCase):
         self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
         self.assertEqual(whole_tree_listings(commands), [], commands)
 
+    def test_a_near_folder_cite_with_its_corrected_path_at_head_is_checked_at_head_and_starts_no_git_process_past_the_four(self):
+        """`lnt` is one edit from the tracked `lint`, and its corrected path `lint/x.py` is at head, so the cite is a likely
+        typo and is checked as a normal cite (decision record-cites-live-code). `lnt/x.py` is absent at head, so the cite
+        is a finding. The corrected path is read through `head_has`, from the one `cat-file` the run holds."""
+        rng, flagged = self.route_range([("- (lnt/x.py check)", True)])
+        self.assertIn("lint", top_folders(rng))  # scope: lint is a tracked top folder
+        self.assertNotIn("lnt", top_folders(rng))  # scope: lnt is no tracked top folder
+        tracked = git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split()
+        self.assertIn("lint/x.py", tracked)  # scope: the corrected path is at head
+        self.assertNotIn("lnt/x.py", tracked)  # scope: the typo's own path is absent at head
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the corrected path binds the name
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, flagged[0], "STALE010")],
+                         "the typo cite was not checked as a normal cite of lnt/x.py\n%s" % out)
+        subs = [command.split()[0] for command in commands]
+        # The four starts of a Markdown range that adds a folder .py cite: rev-parse, merge-base, diff and one cat-file.
+        # head_has reads lint/x.py through that cat-file, so a git process of its own would be a fifth start.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
     def test_a_cite_into_a_tracked_top_folder_with_a_missing_name_is_still_stale010_beside_the_untracked_ones(self):
         """The twin of the case above, in the same range: the two untracked cites are silent, and `lint` is a tracked
         top folder, so its cite of a name the file does not bind is still a finding, with exit 1."""
