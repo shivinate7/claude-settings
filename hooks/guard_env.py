@@ -346,8 +346,9 @@ def _plain_escaped_quotes(cmd: str) -> str:
 
     The body of a heredoc with a QUOTED delimiter is text for bash, as long as nothing runs the file
     it is written to (`_runs_written_file`, the test `strip_heredoc_bodies` uses). Its backticks are
-    plain characters, and its lines join into one, so a line that starts `bash -c` is no command.
-    An unquoted body keeps its backticks and its lines."""
+    plain characters. Each line keeps its newline, so a `#` comment ends at it, and starts with the
+    neutral word `_`, so no line is a command that hands a script on (`bash -c`, `eval`); every word
+    on it is still judged. An unquoted body keeps its backticks and its lines."""
     if "<<" not in cmd:
         return cmd
     bodies = _split_heredocs(cmd)[1]
@@ -361,7 +362,8 @@ def _plain_escaped_quotes(cmd: str) -> str:
                 runs_file = _runs_written_file(
                     _without_message_values(_drop_heredoc_bodies(cmd)), [h for _, _, h in bodies])
             if quote and not runs_file:
-                plain = plain.replace("`", "_").rstrip("\n").replace("\n", " ") + body[len(body.rstrip("\n")):]
+                plain = "\n".join("_ " + line if line.strip() else line
+                                  for line in plain.replace("`", "_").split("\n"))
             cmd = cmd.replace(body, plain, 1)
     return cmd
 
