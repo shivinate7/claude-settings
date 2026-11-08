@@ -13607,6 +13607,113 @@ class ReviewFixBaseRecord(ReviewEnv):
         self.assertNotIn(REVIEW_MARKER, out, "a failed read of the source comment still printed a record")
         self.assertNotIn("Traceback", err)
 
+class ReviewFixKeepsRounds(ReviewChainFixture):
+    """A fix check record keeps every Round line of the record it follows (rule roles-review-cap-three, decision pr-review-record). That record is the
+    newest earlier record on the pull request, or the source record a --fix-base-record names. A lane that copies its rounds and drops one reads as
+    done where the dropped line kept the earlier record open, so the fix check is refused: exit 2, no record printed. A line is the same when its
+    round number, role, model and verdict match, so a copied line that changes one of them counts as dropped. Extra lines are not refused by this
+    rule. Each refusal sits beside a control that keeps every line, which the old code already writes."""
+
+    DESIGN_FAIL = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")  # a design FAIL keeps the record it sits in open
+    LOWER_REVIEWER = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS")  # round 2 passes
+    SOURCE_PR, SOURCE_ID = 1541, 5  # the pull request and comment of the source record in the --fix-base-record cases
+    SOURCE_URL = f"https://github.com/o/r/pull/{SOURCE_PR}#issuecomment-{SOURCE_ID}"
+
+    def setUp(self):
+        super().setUp()
+        self.set_origin("o/r")  # the --fix-base-record link must name this repo, and the layout reads the repo's name from origin
+
+    def newest(self, rounds):
+        """The newest earlier record on pull request 7, at NEWEST, as its one comment, with `rounds` and no fix check line."""
+        return (review_comment(1, 7, record_text(head=self.NEWEST, rounds=rounds)),)
+
+    def assert_names(self, err, *parts):
+        """The refusal's stderr holds each part, so a failure names the one part it lacks."""
+        for part in parts:
+            self.assertIn(part, err, f"the refusal does not name {part!r}:\n" + err)
+
+    def test_a_fix_check_that_drops_the_design_reviewer_fail_line_is_refused(self):
+        comments = self.newest(self.DESIGN_FAIL)
+        # scope: the earlier record reads open for its design FAIL, and the copy without that line reads done on its own rules
+        self.assertEqual(record_state(self, comments[0]["body"], self.NEWEST), "open", "scope: the earlier record with its design FAIL does not read open")
+        copy = record_text(head=self.LIVE, rounds=("Round 1: reviewer, sonnet, PASS",), fix=(fix_check_line(verdict="PASS", head=self.NEWEST),))
+        self.assertEqual(record_state(self, copy, self.LIVE), "done", "scope: the copy without the design line does not read done")
+        # control, green on the old code: the fix check that keeps every line is written
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=("1:reviewer:sonnet:PASS",))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
+    def test_a_fix_check_that_drops_a_reviewer_line_of_a_lower_round_is_refused_while_the_top_round_is_kept(self):
+        comments = self.newest(self.LOWER_REVIEWER)
+        kept = round_args(self.LOWER_REVIEWER)
+        # control, green on the old code: every line, the top round included, is written
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept)
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept[1:])  # the round 1 reviewer line is the only one dropped
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "reviewer, sonnet, FAIL")
+
+    def test_a_fix_check_that_keeps_every_round_line_is_written(self):
+        comments = self.newest(self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))
+        self.assertEqual(rc, 0, "a fix check that keeps every round line was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+
+    def test_a_fix_check_that_adds_a_round_line_to_the_copied_lines_is_written(self):
+        # extra lines are not refused by this rule: the copied lines are all there, and a round 2 line follows them
+        comments = self.newest(self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=(*round_args(self.DESIGN_FAIL), "2:reviewer:sonnet:PASS"))
+        self.assertEqual(rc, 0, "a fix check with an extra round line was refused:\n" + out + err)
+
+    def stand_in(self, rounds, comments):
+        """The run of --fix-check on pull request 7 at REVIEW_HEAD, with `rounds` and --fix-base-record naming the source record, whose head is
+        the fix base. A parser that has never heard of the flag says so on stderr, which fails here by that name."""
+        host = self.record_host(*comments, head=REVIEW_HEAD)
+        argv = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no"]
+        argv += [a for r in rounds for a in ("--round", r)]
+        argv += ["--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS", "--fix-base-record", self.SOURCE_URL]
+        rc, out, err = self.run_args(*argv, host=host)
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err, "merge.py takes no --fix-base-record flag:\n" + err)
+        return rc, out, err
+
+    def test_a_fix_base_record_source_that_loses_a_round_line_is_refused(self):
+        source = (review_comment(self.SOURCE_ID, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=REVIEW_OLD_HEAD, rounds=self.DESIGN_FAIL)),)
+        # control, green on the old code: every line of the source record is copied, and the record is written
+        rc, out, err = self.stand_in(round_args(self.DESIGN_FAIL), source)
+        self.assertEqual(rc, 0, "control: a fix check through --fix-base-record that keeps every source line was refused:\n" + out + err)
+        rc, out, err = self.stand_in(("1:reviewer:sonnet:PASS",), source)
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
+    def test_a_chained_fix_check_that_drops_a_line_of_the_newest_record_is_refused(self):
+        # the newest earlier record carries a passed fix check, so the chain reads its Head and the live head's compare, as the chain cases do
+        diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
+        comments = self.pair("PASS", rounds=self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, diffs=diffs, rounds=round_args(self.DESIGN_FAIL))  # control: every line kept
+        self.assertEqual(rc, 0, "control: a chained fix check that keeps every round line of the newest record was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, diffs=diffs, rounds=("1:reviewer:sonnet:PASS",))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
+    def test_a_copied_line_whose_verdict_changed_is_refused(self):
+        comments = self.newest(self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))  # control, green on the old code
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=("1:reviewer:sonnet:PASS", "1:design-reviewer:opus:PASS"))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
+    def test_a_copied_line_whose_model_changed_is_refused(self):
+        comments = self.newest(self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))  # control, green on the old code
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=("1:reviewer:sonnet:PASS", "1:design-reviewer:sonnet:FAIL"))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
