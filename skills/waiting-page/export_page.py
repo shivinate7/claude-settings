@@ -29,7 +29,8 @@ shapes, except that a version pin such as `react@18.3.1` and a retina name such 
 Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP host too. A file that is not UTF-8 is
 read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
 words such as "token budget" or "password manager" pass. So do a password word with a placeholder, a mask or a plain
-word as its value and only blanks or plain prose (a function word, then letter words) after it on its line,
+word as its value and only blanks or plain prose after it on its line (a function word, then letter words, with no
+non-function word right after a `,` `;` or and/or/but/is/are),
 `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
@@ -102,8 +103,8 @@ VALUE_CHARS = r"[A-Za-z0-9+/_.~%=-]"  # the characters of a credential value
 VALUE_LOOKAHEAD_MAX = 256
 # It has no lookahead and no end condition: a value shorter than its bound fails within that many characters, and a
 # match takes the whole run, so finditer reads each run once. A key word inside the run starts no match of its own,
-# so its value is read only as part of this one: after `key=` + 260 letters, `token: ` + 300 digits passes, because
-# the run ends at the `:` and `token` lies inside the match.
+# so its value is read only as part of this one: after `key=` + 260 letters, `token: ` + 300 digits + `a` passes,
+# because the run ends at the `:` and `token` lies inside the match, so the digits and the `a` are never its value.
 LONG_CREDENTIAL_VALUE = re.compile(
     CREDENTIAL_NAME + r"(?P<value>" + VALUE_CHARS + r"{" + str(VALUE_LOOKAHEAD_MAX + 1) + r",})", re.I)
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
@@ -170,8 +171,8 @@ SECRET_SHAPES = (
 )
 # A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path,
 # after trailing `.,;`, a closing backtick, a `)` or `]` that closes a wrapper opened before the match, and one pair of
-# wrapping quotes or brackets are taken off (bare_value). Only blanks or plain prose (PROSE_REST)
-# may follow it on its line: another word there may be the secret (`none hunter2`). Anything else is refused.
+# wrapping quotes or brackets are taken off (bare_value). Only blanks or plain prose (PROSE_REST: a function word,
+# then letter words, and after a `,` `;` or and/or/but/is/are only function words) may follow it on its line: another word there may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
