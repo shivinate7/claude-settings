@@ -5125,9 +5125,9 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         self.assert_blocked("```\nkeep the log\n```\nThe failure is pre-existing.", "The failure is pre-existing.")
 
     def test_pe_red_failure_claims_with_no_run_are_refused(self):
-        # Ruling (coordinator, round 2): a failure claim names a run on the base branch's tip on the same line.
+        # A failure claim names a run on the base branch's tip on the same line.
         rows = [
-            # Catches: "already fails on main" with no run passes, since only "already red" is read.
+            # Catches: "already fails on main" with no run passes.
             "The lint check already fails on main.",
             # Catches: "as well" in place of "too" or "also" passes.
             "Lint fails on 32b5f8b8e as well, so it is not from this step.",
@@ -5150,12 +5150,40 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
                             "The failure is pre-existing.", "pre-existing-needs-main-run")
 
     def test_pe_red_bare_base_ref_is_no_run_and_is_refused(self):
-        # Ruling (coordinator, round 2): a bare "on origin/main" with no sha or run URL is not a run.
+        # A bare "on origin/main" with no sha or run URL is not a run.
         rows = [
             # Catches: a bare ref with no sha passes as proof the failure was already there.
             "The failure was already there, verified on origin/main.",
-            # Catches: a bare "on origin/main" passes as a run (the round-1 green row, re-pointed).
+            # Catches: a bare "on origin/main" passes as a run.
             "Pre-existing: the same lint check fails on origin/main.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_negator_does_not_reach_past_as_or_which(self):
+        # A negator in one clause does not exempt a claim in the clause after "as" or "which".
+        rows = [
+            # Catches: a negator before "as" exempts the claim after it.
+            "That failure is not from my change as it is pre-existing.",
+            # Catches: a negator before "which" exempts the claim after it.
+            "Lint failure is not mine which makes it pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_failure_on_several_places_with_no_run_is_refused(self):
+        # A failure on the PR, here, or a base, with no run on the same line, is a claim.
+        rows = [
+            # Catches: "on the PR and on <sha> too" passes as no claim.
+            "Lint fails on the PR and on 32b5f8b8e too.",
+            # Catches: "here and on main too" passes as no claim.
+            "Lint fails here and on main too.",
+            # Catches: "on master as well" passes as no claim.
+            "It fails on the branch and on master as well.",
+            # Catches: "here, on main too" passes as no claim.
+            "It fails here, on main too.",
         ]
         for line in rows:
             with self.subTest(line=line):
@@ -5261,6 +5289,35 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
             "already red on main, run https://github.com/o/r/actions/runs/123",
             # Catches: a run URL on a line that says "on master" is refused.
             "The failure is pre-existing on master, run https://github.com/o/r/actions/runs/123.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+
+    def test_pe_green_pre_existing_as_a_modifier_passes(self):
+        rows = [
+            # Catches: "a pre-existing test" (a noun modifier, not a failure claim) is read as a claim.
+            "A pre-existing test fails on the new code; I re-pointed it.",
+            # Catches: "the pre-existing guard" (a noun modifier) is read as a claim.
+            "I extended the pre-existing guard so a failing line is refused.",
+            # Catches: "the 12 pre-existing tests pass" is read as a claim.
+            "The 12 pre-existing tests pass, 0 failed.",
+            # Catches: "already red on the old code" is read as a claim on main.
+            "The new cases are already red on the old code.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_base_named_with_a_sha_passes(self):
+        rows = [
+            # Catches: "on main (<sha>)" is refused as no run on main.
+            "It fails on main (174b005c1) too.",
+            # Catches: "on main at commit <sha>" is refused as no run on main.
+            "It fails on main at commit 174b005c1 too.",
+            # Catches: "main@<sha>" is refused as no run on main.
+            "pre-existing: red on main@174b005c1",
         ]
         for line in rows:
             with self.subTest(line=line):
