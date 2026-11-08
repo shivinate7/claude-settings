@@ -1,11 +1,11 @@
 {
   "title": "A reviewer's background run and a probe that names git are not refused as a worktree breach",
   "why": "Lane fix-push-needs-fail-record saw \"the worktree guard\" refuse a reviewer's background run and a probe that named git (coordinator, 00:49 CST Nov 8). A possible false alarm.",
-  "note": "Triage read (00:52 CST Nov 8), source only, nothing run: hooks/guard_branch_worktree.py covers only branch delete and worktree remove and prune, and no refusal text in hooks/guard*.py names \"worktree guard\" or refuses a background run for its checkout. So the refuser is unknown: likely Claude Code's own worktree check, as with lane-lint-in-isolated-worktree. First step: get the exact refusal text from the lane's or the reviewer's report. If it is Claude Code's own check, this is covered by runner-repos-in-parallel's brief line and closes; if a repo guard, fix it with a red case first. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 00:52 CST Nov 8.",
+  "note": "Triage read (00:52 CST Nov 8), source only, nothing run: hooks/guard_branch_worktree.py covers only branch delete and worktree remove and prune, and no refusal text in hooks/guard*.py names \"worktree guard\" or refuses a background run for its checkout. So the refuser is unknown: likely Claude Code's own worktree check, as with lane-lint-in-isolated-worktree. First step: get the exact refusal text from the lane's or the reviewer's report. If it is Claude Code's own check, this is covered by runner-repos-in-parallel's brief line and closes; if a repo guard, fix it with a red case first. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 00:52 CST Nov 8. Lane fix-push-needs-fail-record (00:49 CST Nov 8): neither report quotes the refusal. The builder's says \"the worktree guard refused every run_in_background call\" (`merge --lane-lint 1801` in the background, from its isolated worktree); the reviewer's says \"the worktree-isolation guard refused a probe naming git\". A repo guard prints `PreToolUse:<Tool> hook error: <rule-id>: ...`. Triage asked the lane to resume both agents for the exact lines (00:55 CST).",
   "phase": "now",
   "status": "todo",
   "order": 552,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-08T00:49:00-06:00"
+  "updatedAt": "2026-11-08T00:50:00-06:00"
 }
