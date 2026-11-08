@@ -41,11 +41,7 @@ import shared_names  # noqa: E402  the one home of the Backlog item word and lab
 import test_report_guard as trg  # noqa: E402  the fixture, helpers and run folder (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the own-record, tag and tool-call helpers (one home)
 import build  # noqa: E402  the idle-lanes row label, IDLE_LANES_LINE (one home, skills/roadmap/build.py)
-from shared_names import BACKLOG_FIELDS  # noqa: E402  the Backlog field labels, one home beside the item word
-try:
-    from shared_names import BACKLOG_ITEM  # noqa: E402  the Backlog item word, one home beside BACKLOG_FIELDS
-except ImportError:  # not built yet: this stand-in keeps the module importable, and each case fails on its own defect
-    BACKLOG_ITEM = "Backlog"
+from shared_names import BACKLOG_FIELDS, BACKLOG_ITEM  # noqa: E402  the Backlog item word and field labels, one home each
 
 human = trg.human
 assistant_text = trg.assistant_text
@@ -277,28 +273,32 @@ class BacklogCountTests(BacklogFixture, unittest.TestCase):
 
     def test_bk_red_a_number_with_no_read_in_the_window_expects_unknown(self):
         # Catches: a number with no read behind it passes. The ruling says such a count reads `unknown`.
-        cases = ((backlog(past=2), "reviewed"), (backlog(none=1), "no next act"), (backlog(lanes=3), "lanes"))
+        cases = ((backlog(past=2), BACKLOG_FIELDS[0]), (backlog(none=1), BACKLOG_FIELDS[1]), (backlog(lanes=3), BACKLOG_FIELDS[2]))
         for line, field in cases:
             with self.subTest(field=field):
-                self.names_value(self.run_stop([human("wake"), coordinator(), assistant_text(report(line))]), "unknown")
+                self.names_unknown_for(self.run_stop([human("wake"), coordinator(), assistant_text(report(line))]), field)
 
     def test_bk_red_a_failed_idle_read_expects_unknown_for_lanes(self):
         # Catches: an idle-lanes run that did not read (an unknown row and no summary line) passes a lanes count of 0.
         records = [human("wake"), coordinator(), reviewed_read(past=0, none=0), failed_idle_read(),
                    assistant_text(report(backlog(past=0, none=0, lanes=0)))]
-        self.names_value(self.run_stop(records), "unknown")
+        self.names_unknown_for(self.run_stop(records), BACKLOG_FIELDS[2])
 
     def test_bk_red_a_failed_reviewed_read_expects_unknown_for_its_two_counts(self):
         # Catches: a merge --reviewed run that did not read (exit 2, no summary line) passes its two counts.
         records = [human("wake"), coordinator(), failed_reviewed_read(), idle_read(lanes=2),
                    assistant_text(report(backlog(past=0, none=0, lanes=2)))]
-        self.names_value(self.run_stop(records), "unknown")
+        out = self.run_stop(records)
+        self.names_unknown_for(out, BACKLOG_FIELDS[0])
+        self.names_unknown_for(out, BACKLOG_FIELDS[1])
 
     def test_bk_red_a_read_before_the_newest_compact_boundary_does_not_count(self):
         # Catches: a read from before the compaction still decides a count, so a number from a read the window no longer holds passes.
         records = [human("wake"), coordinator(), *reads(past=2, lanes=3), compact_boundary(), compact_summary(), coordinator(),
                    assistant_text(report(backlog(past=2, lanes=3), carry=True))]
-        self.names_value(self.run_stop(records), "unknown")
+        out = self.run_stop(records)
+        self.names_unknown_for(out, BACKLOG_FIELDS[0])
+        self.names_unknown_for(out, BACKLOG_FIELDS[2])
 
     def test_bk_red_the_newest_read_in_the_window_decides(self):
         # Catches: the first read in the window decides, so an older summary keeps its count against a newer run.
@@ -521,7 +521,7 @@ class VerdictRunTests(BacklogFixture, unittest.TestCase):
         # The idle read before it is older, so the PASS run is the newest read and its count is the one checked.
         records = [human("wake"), coordinator(), idle_read(lanes=3), verdict_pass(IDLE_CMD),
                    assistant_text(report(backlog(lanes=3)))]
-        self.names_value(self.run_stop(records), "unknown")
+        self.names_unknown_for(self.run_stop(records), BACKLOG_FIELDS[2])
 
 
 class VerdictReadCostTests(BacklogFixture, unittest.TestCase):
