@@ -16,7 +16,7 @@ Coordinator readings:
 - 2026-11-08 08:43 CST, coordinator reading, process-only: fix debt stale010-no-top-folder by reusing STALE003's top-folder test.
 - 2026-11-08 07:43 CST, coordinator reading, process-only: "go ahead with record-cites-live-code."
 
-Lane pick, 2026-11-08 04:16 CST, process-only, under the 04:03 reading: a dead cite has one home, STALE010 (a cite into a tracked top folder to a Python name missing at head). STALE009 (a report that never fails) covers only a code claim with no cite. A name the range removed stays STALE002 (a cite to a name the range removed from its file). A deleted or renamed path stays STALE001 (a line naming a path the range deleted or renamed).
+Lane pick, 2026-11-08 04:16 CST, process-only, under the 04:03 reading: a dead cite has one home, STALE010 (a cite into a tracked top folder to a Python name missing at head). STALE009 (a report that never fails) covers only a code claim with no cite. A name the range removed stays STALE002 (a cite to a name the range removed from its file). A deleted or renamed path stays STALE001 (a line naming a path the range deleted or renamed). The 04:03 reading says a missing name "is red". The lane reads that as red on added lines only. So a PR is never red on work it did not do.
 
 ## The mistakes and the harm
 
