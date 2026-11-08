@@ -1602,9 +1602,9 @@ def case_step_ruling_tail_stops_at_a_ruling_word():
 POOL_RE = re.compile(r"ruling|owner|shiv", re.I)
 LABEL_OPENER_RE = re.compile(r"\A[\s*_>#+-]*(?:\(\d+\)\s*)?(?:[\w'-]+\s+){0,2}(?:incident|gripe|deferred)s?\b", re.I)
 SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
-# Recall rows: sentences the pool keeps, none opening with a label. Each is verbatim from a step note (field note or
-# why) on origin/roadmap, the corpus docs/decisions/question-form.md counts. A step with one sentence gives one unit,
-# so the sentence is the unit.
+# Recall rows: sentences the pool keeps, none opening with a label. Each quotes a step note (field note or why) on
+# origin/roadmap, the corpus docs/decisions/question-form.md counts, with retired names replaced by their current
+# names. A step with one sentence gives one unit, so the sentence is the unit.
 STEP_POOL_RECALL = (
     ("o15", "Done: lane PR 632 (rulings and tasks from owner feedback need a tracked home) landed in batch PR 637, "
             "merged to main as 54be9f1 on Oct 26."),
