@@ -136,16 +136,25 @@ def too_long(files, dirs):
             and f.endswith(".md") and len(os.path.basename(f.replace("\\", "/"))[:-3]) > MAX]
 
 
-NOTE_ROW = re.compile(r"^- ([A-Za-z0-9][\w.-]*):", re.M)
+NOTE_ROW = re.compile(r"^- ([A-Za-z0-9][\w.-]*)[ \t]*:", re.M)
 
 
 def duplicate_note_slugs(text):
-    """The slugs that `text`, a notes file, writes as the start of two or more rows (`- <slug>:` at line start), in
-    first-seen order. A slug named inside a row's text is not a row."""
-    seen = {}
+    """The slugs that `text`, a notes file, writes as the start of two or more rows (`- <slug>:` at line start, spaces
+    before the colon allowed), in first-seen order, spelled as first written. Case does not tell slugs apart.
+    A slug named inside a row's text is not a row."""
+    first, seen = {}, {}
     for slug in NOTE_ROW.findall(text):
-        seen[slug] = seen.get(slug, 0) + 1
-    return [slug for slug, n in seen.items() if n > 1]
+        key = slug.lower()
+        first.setdefault(key, slug)
+        seen[key] = seen.get(key, 0) + 1
+    return [first[key] for key, n in seen.items() if n > 1]
+
+
+def report_duplicates(dup):
+    for slug in dup:
+        print("check_record_slugs: FAIL: notes slug written on more than one row: %s. Merge the rows into one, "
+              "or give each its own slug." % slug)
 
 
 def notes_text(root):
@@ -169,6 +178,11 @@ def main(args):
         print("check_record_slugs: FAIL: " + str(err))
         return 1
     try:
+        dup = duplicate_note_slugs(notes_text(ROOT))  # read first: an UNKNOWN below must not hide a duplicate
+    except layout.LayoutError as err:
+        print("check_record_slugs: FAIL: " + str(err))
+        return 1
+    try:
         if args:  # files given: git is not read, so the feel-fix check does not run
             files, feel = args, []
         else:
@@ -179,21 +193,15 @@ def main(args):
         return 1
     except Unknown as err:
         print("check_record_slugs: UNKNOWN, " + str(err))
-        return 1 if os.environ.get("CI") else 0  # CI exit code is a verdict: unknown is red there
+        report_duplicates(dup)
+        return 1 if os.environ.get("CI") or dup else 0  # CI exit code is a verdict: unknown is red there
     bad = too_long(files, dirs)
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
     for f, how in feel:
         print("check_record_slugs: FAIL: feel-fix debt %s with no device check: %s"
               % ("deleted" if how == "deleted" else "lost its Feel line", f))
-    try:
-        dup = duplicate_note_slugs(notes_text(ROOT))
-    except layout.LayoutError as err:
-        print("check_record_slugs: FAIL: " + str(err))
-        return 1
-    for slug in dup:
-        print("check_record_slugs: FAIL: notes slug written on more than one row: %s. Merge the rows into one, "
-              "or give each its own slug." % slug)
+    report_duplicates(dup)
     return 1 if bad or feel or dup else 0
 
 
