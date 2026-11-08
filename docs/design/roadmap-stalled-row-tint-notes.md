@@ -43,6 +43,8 @@ Today: `stepRow` writes `class="st ${s.status}"`. A stalled or paused step keeps
    Gain: a stalled step asks for triage, so it stays bold. A paused step waits, so it is not bold.
    Loss: none seen.
    Pick: Normal weight.
+   Departs from: `.st.active .ttl{font-weight:600}` in `skills/roadmap/page/index.html`, which makes
+   a paused title bold today. Not blocking: option Bold, as today keeps it.
 
 6. **Feed label.** No change. On 12e3ea1a1, `.kind.stalled{color:var(--bad)}` is there (the rule of
    the #1635 notes, item 1). `.kind.paused` has no rule, so it is `--muted` from `.kind`. That is the

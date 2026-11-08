@@ -43,6 +43,8 @@ class of its own, so it keeps the tint and the `--acc` edge of an in-progress ro
 5. **Paused title weight.** Option Normal weight sets 400. Option Bold, as today, keeps the 700 of
    `.rsteps .active .ttl`. A stalled title stays bold in both.
    Pick: Normal weight, as on the roadmap.
+   Departs from: `.rsteps .active .ttl { font-weight: 700; }` in `skills/waiting-page/page.html`,
+   which makes a paused title bold today. Not blocking: option Bold, as today keeps it.
 
 ## Builder changes, `skills/waiting-page/page.html` (the picks)
 
