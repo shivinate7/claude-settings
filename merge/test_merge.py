@@ -11885,7 +11885,7 @@ def body_with_fix(test, rounds, net, fix):
         test.fail("merge.review_body takes no fix argument")
     return fn(7, REVIEW_HEAD, "normal", "no", rounds, net, fix=fix)
 
-# The bad forms a lane posted (decision pr-review-record). Each is a record_text() with the text the incident had after its CI line.
+# Bad record bodies (decision pr-review-record): each is a record_text() with text after its CI line.
 # None parses: parse_review needs the CI line as the record's last line, so any text after it makes the body a bad record.
 SHAPE_A_TEXT = ("\nRound 3 net value: closes silent allows in about 430 functions the fuzz now runs. Open limits move to the follow-up PR #1989:\n"
                 "- no digits and no config-dir path in the fuzz alphabet;\n- waiting-page item data never gets past `_lines_hit`;\n"
@@ -11894,11 +11894,11 @@ SHAPE_B_TEXT = ("\nFinding: dropping the `install.ps1` marker opens a hole again
                 "installed export folder with no `.git`. Fix: keep main's behaviour.\n\n" + REVIEW_GENERATED)
 
 def shape_a(**kw):
-    """PR #1926's shape: prose and bullets after the CI line, the attribution line, then `---` and the footer. `kw` goes to record_text."""
+    """Prose and bullets after the CI line, the attribution line, then `---` and the footer. `kw` goes to record_text."""
     return record_text(**kw) + SHAPE_A_TEXT + REVIEW_FOOTER
 
 def shape_b(**kw):
-    """PR #2016's shape: one finding after the CI line, the attribution line, then `---` and the footer."""
+    """One finding after the CI line, the attribution line, then `---` and the footer."""
     return record_text(**kw) + SHAPE_B_TEXT + REVIEW_FOOTER
 
 def shape_c(**kw):
@@ -12738,7 +12738,7 @@ class ReviewedList(ReviewEnv):
         self.assertIn("nothing between the CI line and", line, "the bad line does not say nothing may sit between the CI line and the ---:\n" + line)
 
     def test_a_bad_record_with_a_footer_after_prose_names_the_rule_remedy(self):
-        # PR #1926's shape: prose and bullets after the CI line, then the attribution line, a `---` and the footer
+        # prose and bullets after the CI line, then the attribution line, a `---` and the footer
         self.assert_rule_remedy(self.bad_line(shape_a()))
 
     def test_a_full_size_bad_record_with_a_footer_after_prose_names_the_rule_remedy(self):
@@ -12746,7 +12746,7 @@ class ReviewedList(ReviewEnv):
         self.assert_rule_remedy(self.bad_line(shape_a(rounds=REVIEW_FAILED_THREE, fix=(fix_check_line(),), guard="yes", net="positive")))
 
     def test_a_bad_record_with_a_finding_before_its_footer_names_the_rule_remedy(self):
-        # PR #2016's shape: one finding after the CI line, then the attribution line, a `---` and the footer
+        # one finding after the CI line, then the attribution line, a `---` and the footer
         self.assert_rule_remedy(self.bad_line(shape_b()))
 
     def test_a_bad_record_with_prose_on_the_line_after_the_ci_line_names_the_rule_remedy(self):
