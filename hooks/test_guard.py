@@ -6906,10 +6906,11 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=()):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
     """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
-    force-push. `silent` marks an allow that must print nothing."""
-    sh("push: " + name, VCS + " push " + tail, expected,
+    force-push. `silent` marks an allow that must print nothing. `word` is the command word the call
+    names: the plain `git`, or a form of it that the shell reads as git."""
+    sh("push: " + name, word + " push " + tail, expected,
        rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
        carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
 
@@ -7089,6 +7090,23 @@ sh("push: lease with -c push.default=current ignores the repository's upstream",
    VCS + " -c push.default=current push " + LE.strip(), "allow", cwd=PUSHUP)
 sh("push: lease with -c push.default=matching asks",
    VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+
+# THE COMMAND WORD SPLIT OR QUOTED INTO PIECES. The guard reads such a word as `git`, as the shell does.
+# A shlex reader does that for the shell forms below, which already ask: green locks that keep it so.
+# Bash's ANSI-C quoting also expands to `git`, but the reader does not unquote `$'...'`, so the word reads
+# as `$git` and the act is allowed. Those are the red rows. Each form expects the plain word's verdict.
+SPLIT_FORCE = "--force origin main"
+SPLIT_PUSH_MAIN = "origin HEAD:main"
+SPLIT_ANSI_WORDS = ["$'g'it", "g$'i't", "$'\\147it'"]
+SPLIT_SHELL_WORDS = ["g'i't", 'gi""t', '"g"it', "\\git", 'g""it', "gi\\t", "env g'i't", "command g'i't"]
+for _word in SPLIT_ANSI_WORDS + SPLIT_SHELL_WORDS:
+    push_case("split word " + _word + " force-pushes main, asks", SPLIT_FORCE, "ask", word=_word)
+    push_case("split word " + _word + " pushes to main, asks", SPLIT_PUSH_MAIN, "ask",
+              rule=PUSH_MAIN_RULE, word=_word)
+# Controls: a plain word that only contains git is text, so it stays allowed.
+sh("split word control: digit, a word with git inside, allows", "digit", "allow")
+sh("split word control: gitk-free, a word with git inside, allows", "gitk-free", "allow")
+sh("split word control: echo git, git as text, allows", "echo git", "allow")
 
 # FALSE ALARMS: a guard that cries wolf is spent.
 # Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
