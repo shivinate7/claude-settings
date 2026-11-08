@@ -176,13 +176,15 @@ fi
 # there makes unreviewed work live everywhere, silently. Reported here, never fixed here: a
 # branch switch is a whole-tree act and another session may be working in it.
 # `.git` is a directory in a full clone and a file in a linked worktree (the pinned `<clone>-live`).
-# A checkout detached at local main's commit counts as on main; detached anywhere else is off main.
+# A checkout detached at local main's commit or at origin/main's tip counts as on main (the pointer lags local
+# main when a fetch moved origin/main first); detached anywhere else is off main.
 if [ -n "$d" ] && [ -e "$d/.git" ]; then
   pointer_branch=$(cd "$d" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null)
   if [ "$pointer_branch" = "HEAD" ]; then
     pin_head=$(cd "$d" 2>/dev/null && git rev-parse HEAD 2>/dev/null)
     main_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/heads/main 2>/dev/null)
-    if [ -n "$pin_head" ] && [ "$pin_head" = "$main_head" ]; then
+    origin_head=$(cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/main 2>/dev/null)
+    if [ -n "$pin_head" ] && { [ "$pin_head" = "$main_head" ] || [ "$pin_head" = "$origin_head" ]; }; then
       pointer_branch=main
     else
       pointer_branch="a detached HEAD"

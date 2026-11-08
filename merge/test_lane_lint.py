@@ -8,9 +8,10 @@ case reads what the tool ran, in which tree, at which head. The repo builder, th
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
+BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -18,6 +19,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint 
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
+from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(shutil.rmtree, RUN_FOLDER, True)
@@ -240,6 +242,16 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertIn("main", lines[0])
         self.assertIn("batch runner", lines[0])
 
+    def test_a_passing_lint_names_its_skipped_ci_steps_on_the_pass_line(self):
+        self.use_ci_job(PASSING + [("skipped", "Push-only lint A"), ("skipped", "Push-only lint B")], 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        lines = pass_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("Push-only lint A", lines[0], out)
+        self.assertIn("Push-only lint B", lines[0], out)
+        self.assertRegex(lines[0], r"\b2\b", out)
+
     def test_a_lane_lint_merges_nothing_takes_no_lock_and_waits_for_no_check(self):
         self.use_ci_job(PASSING, 0)
         before = self.refs()
@@ -461,6 +473,225 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+
+BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
+BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same batch with the Red-run trailer's script left out
+BASE = "main"  # the base the lint runs against: lane_lint's base, and the PR base the CI steps read
+BATCH_CI_STEPS = ("Silent undo check", "Comment narration check", "Red-run trailer", "STE lint")  # checks.yml's job `checks` CI steps this suite lints
+STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
+REPO = os.path.dirname(HERE)
+CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")  # read at test time; no expectation comes from a copy of it
+CALL_STUB = "import json, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n    print(json.dumps({'argv': sys.argv}), file=f)\n"  # logs its argv, exits 0
+BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_LINT_STEPS: no lint step at all
+NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
+                 ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
+BATCH_PUSH_ONLY = "batch-lint-flags-push-only"  # a batch whose checks job adds one lint step that runs only off a pull request
+PUSH_ONLY = "Push-only lint"
+PUSH_ONLY_STEP = (PUSH_ONLY, "      - name: Push-only lint\n        if: ${{ github.event_name != 'pull_request' }}\n"
+                             "        run: python3 lint/check_push_only.py\n")
+
+
+def real_ci_steps():
+    """(name, CI step text) of BATCH_CI_STEPS in checks.yml's checks job, in file order, read by the shared parser."""
+    with open(CHECKS_YML, encoding="utf-8") as f:
+        block = job_block(f.read(), "checks")
+    return [(step_key(st, "name"), st) for st in step_blocks(block) if step_key(st, "name") in BATCH_CI_STEPS]
+
+
+def workflow_text(found):
+    """A workflow of one job, `checks`, holding the given CI step texts in order."""
+    return "name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n" + "".join(text for _, text in found)
+
+
+def script_of(ci_step):
+    """The script a CI step's run: line names, read as its argv reads it, before any env is expanded."""
+    return shlex.split(run_body(ci_step).strip())[1]
+
+
+def github_text(raw, values):
+    """The value of one `${{ NAME }}` env value of checks.yml, from `values`: the PR's context as this suite sets it."""
+    m = re.fullmatch(r"\$\{\{\s*([\w.]+)\s*\}\}", raw.strip())
+    if not m:
+        raise AssertionError("checks.yml gives an env value this suite does not read: %r" % raw)
+    return values[m.group(1)]
+
+
+def expected_argv(ci_step, values):
+    """The argv checks.yml gives a CI step's run: line, its env: expanded for `values` and split as a shell splits it."""
+    env = {name: github_text(raw, values) for name, raw in step_env(ci_step).items()}
+    run = run_body(ci_step).strip()
+    if "${{" in run:
+        raise AssertionError("a run: line of checks.yml holds an expression this suite does not read: %r" % run)
+    return shlex.split(re.sub(r"\$(\w+)", lambda m: env[m.group(1)], run))
+
+
+def gh_eval(expr, inputs):
+    """The value of a `${{ }}` of checks.yml made of inputs.NAME, quoted strings, !, && and ||, as GitHub reads those operators."""
+    m = re.fullmatch(r"\$\{\{\s*(.*?)\s*\}\}", expr.strip())
+    if not m:
+        raise AssertionError("checks.yml gives an expression this suite does not read: %r" % expr)
+    py = re.sub(r"inputs\.([\w-]+)", lambda x: "INPUTS[%r]" % x.group(1), m.group(1))
+    py = re.sub(r"!(?!=)", "not ", py.replace("&&", " and ").replace("||", " or ")).strip()
+    tree = ast.parse(py, mode="eval")
+    allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast.Constant, ast.Subscript, ast.Name, ast.Load)
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed):
+            raise AssertionError("checks.yml gives an expression with %s, which this suite does not read: %r" % (type(node).__name__, expr))
+    return eval(compile(tree, "<checks.yml>", "eval"), {"__builtins__": {}}, {"INPUTS": inputs})
+
+
+def gh_text(value):
+    """A GitHub expression's value as the env of a CI step holds it: booleans are the words true and false."""
+    return "true" if value is True else "false" if value is False else str(value)
+
+
+def ste_changed_env(path):
+    """{name: constant} of the env dict bin/ste-changed builds for its run, read from its source: the file is parsed, never run. None if absent."""
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=path)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "dict" and any(k.arg == "SCOPE" for k in node.keywords):
+            return {k.arg: k.value.value for k in node.keywords if isinstance(k.value, ast.Constant)}
+    return None
+
+
+def link_or_copy(src, dst):
+    """A link at `dst` to `src`, or a copy where the system refuses links (Windows without the symlink right)."""
+    try:
+        os.symlink(src, dst, target_is_directory=os.path.isdir(src))
+    except OSError:
+        (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, dst)
+
+
+class BatchLintFlags(tm.Env):
+    """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
+
+    def setUp(self):
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
+            super().setUp()
+        self.found = real_ci_steps()
+        self.calls = os.path.join(self.t, "calls")
+        os.makedirs(self.calls)
+        self.ci_job = self.copy_ci_job()
+
+    def call_log(self, script):
+        return os.path.join(self.calls, os.path.basename(script) + ".jsonl")
+
+    def stub_calls(self, script):
+        """The logged calls of the stub of `script`, oldest first: empty when it never ran."""
+        if not os.path.exists(self.call_log(script)):
+            return []
+        with open(self.call_log(script), encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def copy_ci_job(self):
+        """A copy of bin/ci-job in <t>/ci/bin, with a logging ste-changed beside it: ci-job runs its STE CI step as the file beside its
+        own BIN, never the one in the fixture. ci-job imports hooks and lint from the folder above BIN, and runs verdict beside itself."""
+        bin_dir = os.path.join(self.t, "ci", "bin")
+        os.makedirs(bin_dir)
+        shutil.copy2(os.path.join(REPO, "bin", "ci-job"), bin_dir)
+        link_or_copy(os.path.join(REPO, "bin", "verdict"), os.path.join(bin_dir, "verdict"))
+        for name in ("hooks", "lint"):
+            link_or_copy(os.path.join(REPO, name), os.path.join(self.t, "ci", name))
+        self.ste_path = os.path.join(bin_dir, "ste-changed")
+        tm.put(self.ste_path, "#!/usr/bin/env python3\n" + CALL_STUB % self.call_log("ste-changed"))
+        os.chmod(self.ste_path, 0o755)
+        return os.path.join(bin_dir, "ci-job")
+
+    def push_batch(self, branch, skip=(), found=None):
+        """Push `branch` to origin: one commit on main holding checks.yml's checks job (`found`, else the four lint CI steps) and a
+        logging stub for each check script of the four, except the scripts in `skip`. -> the branch's head sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", branch, "origin/" + BASE)
+        tm.put(os.path.join(o, ".github", "workflows", "checks.yml"), workflow_text(self.found if found is None else found))
+        for name, ci_step in self.found:
+            if name != STE and script_of(ci_step) not in skip:
+                tm.put(os.path.join(o, script_of(ci_step)), CALL_STUB % self.call_log(script_of(ci_step)))
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", branch + ": the checks job's lint CI steps and their stubs")
+        tm.sh(o, "git", "push", "-q", "origin", branch)
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def lane_lint(self, target, out):
+        """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
+        env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
+                unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            return merge.lane_lint(self.co, target, self.host, base=BASE)
+
+    def test_lane_lint_runs_each_batch_check_once_with_the_argv_checks_yml_gives(self):
+        head = self.push_batch(BATCH)
+        self.assertEqual(sorted(name for name, _ in self.found), sorted(BATCH_CI_STEPS),
+                         "checks.yml's checks job does not hold exactly the four CI steps this suite lints")
+        out = io.StringIO()
+        rc = self.lane_lint(BATCH, out)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        values = {"github.base_ref": BASE, "github.event.pull_request.head.sha": head}
+        for name, ci_step in self.found:
+            if name == STE:
+                continue
+            with self.subTest(check=name):
+                want = expected_argv(ci_step, values)
+                self.assertEqual(want[0], "python3", "checks.yml's run: of %s is not a python3 line" % name)
+                calls = self.stub_calls(want[1])
+                self.assertEqual(len(calls), 1, "%s: its script ran %d times, want once: %s" % (name, len(calls), text))
+                self.assertEqual(calls[0]["argv"], want[1:], "%s: ran with %s, checks.yml gives %s" % (name, calls[0]["argv"], want[1:]))
+        with self.subTest(check=STE):
+            calls = self.stub_calls("ste-changed")
+            self.assertEqual(len(calls), 1, "STE lint: ste-changed ran %d times, want once: %s" % (len(calls), text))
+            argv = calls[0]["argv"]
+            self.assertEqual(os.path.realpath(argv[0]), os.path.realpath(self.ste_path),
+                             "STE lint ran a ste-changed other than the one beside ci-job")
+            self.assertEqual(argv[1:], ["origin/" + BASE], "STE lint: ste-changed got %s, want origin/%s" % (argv[1:], BASE))
+            with_ = step_with(dict(self.found)[STE])
+            self.assertEqual(sorted(with_), ["fail", "scope"], "checks.yml's STE lint CI step has other with: keys than scope and fail")
+            source = ste_changed_env(os.path.join(REPO, "bin", "ste-changed"))
+            self.assertIsNotNone(source, "bin/ste-changed builds no env dict with SCOPE")
+            inputs = {"full_ste_audit": ""}  # the PR run: the input is empty
+            self.assertEqual(source.get("SCOPE"), gh_eval(with_["scope"], inputs),
+                             "bin/ste-changed sets SCOPE to other than the PR-path scope of checks.yml")
+            self.assertEqual(source.get("FAIL"), gh_text(gh_eval(with_["fail"], inputs)),
+                             "bin/ste-changed sets FAIL to other than the PR-path fail of checks.yml")
+
+    def test_a_missing_check_script_refuses_and_never_passes(self):
+        red_run = dict(self.found)["Red-run trailer"]
+        self.push_batch(BATCH_MISSING, skip={script_of(red_run)})
+        out = io.StringIO()
+        with self.assertRaises(merge.Stop) as raised:
+            self.lane_lint(BATCH_MISSING, out)
+        self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing check script reads as unknown, not as a failed check: " + out.getvalue())
+        self.assertIn("FAILs:", str(raised.exception), "the refusal does not say the lint FAILs: " + out.getvalue())
+        self.assertIn("Red-run trailer", str(raised.exception), "the refusal does not name the CI step whose script is missing: " + out.getvalue())
+        self.assertEqual(pass_lines(out.getvalue()), [], "a lint with a check script missing read as a pass: " + out.getvalue())
+
+    def test_a_batch_whose_checks_job_runs_no_lint_step_refuses_as_unknown_and_never_passes(self):
+        self.push_batch(BATCH_NO_LINT, found=NO_LINT_STEPS)
+        root = tempfile.mkdtemp(prefix="lint-steps-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        tm.put(os.path.join(root, ".github", "workflows", "checks.yml"), workflow_text(NO_LINT_STEPS))
+        plan = subprocess.run([sys.executable, merge.CI_JOB, "checks", "--lint", "--plan", "--base", "origin/" + BASE],
+                              cwd=root, capture_output=True, text=True)  # the exit code is not read: a zero-step plan may exit 2
+        self.assertEqual([ln for ln in plan.stdout.splitlines() if ln.startswith("would run ")], [],
+                         "the checks job of the batch holds a lint step: " + plan.stdout)  # the scope
+        out = io.StringIO()
+        with self.assertRaises(merge.Liftable) as raised:
+            self.lane_lint(BATCH_NO_LINT, out)
+        self.assertIn("no lint CI step ran", str(raised.exception), out.getvalue())
+        self.assertEqual(pass_lines(out.getvalue()), [], "a lint run that picked no lint step read as a pass: " + out.getvalue())
+
+    def test_a_lint_step_that_runs_only_off_a_pull_request_is_named_on_the_pass_line(self):
+        self.push_batch(BATCH_PUSH_ONLY, found=self.found + [PUSH_ONLY_STEP])
+        out = io.StringIO()
+        rc = self.lane_lint(BATCH_PUSH_ONLY, out)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, text)
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertIn(PUSH_ONLY, lines[0], text)
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
