@@ -568,6 +568,32 @@ class DefaultBranchPage(GitTree):
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
                          "the page is read from origin, not from the checkout's own extras file")
 
+    def test_origin_head_names_the_default_branch(self):
+        self.record("refs/remotes/origin/trunk", {EXTRAS: self.registry(self.URL_TRUNK)})
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/trunk")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertEqual(self.git("symbolic-ref", "refs/remotes/origin/HEAD").strip(), "refs/remotes/origin/trunk",
+                         "scope: origin/HEAD does not name the trunk branch")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_TRUNK,
+                         "the checkout has no extras file, so the page reads as unknown, though origin/HEAD names a branch that holds it")
+
+    def test_no_origin_at_all_is_unknown_not_an_error(self):
+        self.scope_checkout()
+        self.assertEqual(self.git("remote").strip(), "", "scope: the fixture has a remote")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "a repo with no origin and no page reads as unknown")
+        self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL_MAIN))
+
+    def test_origin_without_main_is_unknown_not_an_error(self):
+        self.git("remote", "add", "origin", self.REMOTE)
+        self.record("refs/remotes/origin/dev", self.BRIEF)
+        self.scope_checkout()
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/HEAD"), "scope: the fixture has an origin/HEAD")
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "an origin with no default branch reads as unknown")
+
 
 class SetWaitingPage(Tree):
     """Triage makes a repo's waiting page when the repo has none (decision session-tiers). It writes
