@@ -541,6 +541,10 @@ class PrBody(Job):
         self.assertTrue(lines[0].startswith("unknown"), out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "body.txt")), "a step ran with an unreadable PR body")
 
+    def test_a_run_line_holding_the_pr_body_expression_reads_unknown(self):  # the body reaches a step only through an env: value
+        rc, lines, out = self.run_job(step("inline", "echo ${{ github.event.pull_request.body }}"))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+
 
 def mapped(parent, body):
     """One `      - ` step whose `parent:` block (`with` or `env`) holds `body`, raw, as YAML writes it."""
