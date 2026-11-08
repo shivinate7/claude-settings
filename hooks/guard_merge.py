@@ -1155,7 +1155,8 @@ _STAMP_HEADER = re.compile(
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
 STAMP_REASON = (
     "this message's header stamp is wrong for the clock: {why}. "
-    "The time is {now}: re-stamp your own header with that time, then send it again. If the first line quotes "
+    "The time is {now}: re-stamp your own header with that time, then send it again. Read the time with "
+    "`~/.claude/bin/now-central`, never from memory. If the first line quotes "
     "someone else's time in header form, open the message with your own label first. "
     "If the first line names a future time, such as a deadline or an ETA, move it off the first line. "
     "(decision local-time-central, sessions speak times in US Central)"
@@ -1231,6 +1232,7 @@ WRITTEN_ITEMS = "items"  # the ArtifactData collection whose `added` is judged
 WRITTEN_REASON = (
     "this written time ({what}) is {off} minutes ahead of the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
     "The time is {now}, which is {central} and {utc}: write that time, then run the call again. "
+    "Read the time with `~/.claude/bin/now-central --iso`, never from memory. "
     "(decision local-time-central, sessions speak times in US Central)"
 )
 
