@@ -162,8 +162,10 @@ NAMED = re.compile(r"(?:^|\s)-\s+([^\s:]+)")
 
 
 def named_slugs(reasons):
-    """The slugs the reasons of one path's trailers name, each as `- <slug>` after a space or at the start."""
-    return {m for r in reasons for m in NAMED.findall(r)}
+    """The slugs the reasons of one path's trailers name, each as `- <slug>` after a space or at the start. A slug is read
+    as the note form reads it (NOTE: no space, no colon), then trailing `,.;:` drops off, so `- slug,` and `- slug.` name `slug`.
+    The match against a note is exact: a prefix of a slug, or a longer slug, names another note."""
+    return {m.rstrip(",.;:") for r in reasons for m in NAMED.findall(r)} - {""}
 
 
 def misplaced(cwd, rng):
@@ -592,7 +594,10 @@ def note_counts(text):
     return collections.Counter(m.group(1) for m in map(NOTE.match, text.splitlines()) if m)
 
 
-def revived_notes(cwd, upstream, head, named=None):
+REVIVED_MARK = ": note `"  # a revival's problem line holds this after the path; the footer finds a revival by it
+
+
+def revived_notes(cwd, upstream, head, named=None, kept=None):
     """[(notes path, problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
     counted per slug. The branch's own non-merge commits (upstream..head) are replayed oldest first, each read from its file
     state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
@@ -601,7 +606,8 @@ def revived_notes(cwd, upstream, head, named=None):
     count, so it keeps nothing: a sweep edit, such as a mass `Until:` change, would otherwise keep every revived note. A
     note with no `- <slug>:` form has no slug, so the check does not see it. The texts are read one commit at a time, so
     at most two are held at once. `named` is {notes path: slugs its Drops-lines trailers name as `- <slug>`}: a revived slug in
-    it is left out, because the trailer excuses that note. The path's other revivals stay."""
+    it is left out, because the trailer excuses that note. The path's other revivals stay. `kept`, a list when given, gets
+    (path, slug) for each revival a trailer excused, so the caller can print its ALLOWED line."""
     named = named or {}
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import layout  # lazy, as retire_excuses loads check_debt_retire
@@ -635,11 +641,14 @@ def revived_notes(cwd, upstream, head, named=None):
             blobs.close()
         for slug in sorted(last):
             sha, left = last[slug]
-            if present[slug] > left and slug not in named.get(path, ()):
-                found.append((path, "%s: note `%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back, and "
+            if present[slug] > left and slug in named.get(path, ()):
+                if kept is not None:
+                    kept.append((path, slug))
+            elif present[slug] > left:
+                found.append((path, ("%s" + REVIVED_MARK + "%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back, and "
                               "an edit in place does not keep a note. Delete the extra %s to bring the count back to %d. To keep "
-                              "it on purpose, delete it in one commit and add it back in a later commit. To drop it on purpose, name it in a %s "
-                              "trailer for %s: put `- %s` in the trailer's reason."
+                              "it on purpose, delete it in one commit and add it back in a later commit, or keep the revived copy by naming its slug in a %s "
+                              "trailer for %s: put `- %s` in the trailer's reason.")
                               % (path, slug, present[slug], "y" if present[slug] == 1 else "ies", sha[:9], left,
                                  "line" if present[slug] - left == 1 else "lines", left, TRAILER, path, slug)))
     return found
@@ -723,7 +732,8 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
     # A trailer excuses a notes path's revival only for the slugs it names, so a revival on a trailer's path skips the path judge.
-    revived = revived_notes(cwd, upstream, h, {p: named_slugs(rs) for p, rs in reasons.items()})
+    kept = []
+    revived = revived_notes(cwd, upstream, h, {p: named_slugs(rs) for p, rs in reasons.items()}, kept)
     items += [x for x in revived if x[0] not in ok]
     forced = [x[1] for x in revived if x[0] in ok]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
@@ -748,6 +758,9 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
     bad = forced + bad
+    for path, slug in kept:  # a named revival is an excuse too: one ALLOWED line, with the reason that names the slug
+        why = next(r for r in reversed(reasons[path]) if slug in named_slugs([r]))
+        notes.append("ALLOWED %s: %s (keeps the revived note `%s`)" % (path, why, slug))
     return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 
 
@@ -770,6 +783,14 @@ def history(cwd, rev, window):
         found = reversals(cwd, c.parent, c.sha, files, line[i + 1:i + 1 + window] if window else line[i + 1:])
         out += ["%s %s" % (c.sha[:9], t) for t in judge([(x[0], fmt_rev(*x)) for x in found], ok_paths)[0]]
     return len(line), out
+
+
+def trailer_hint(problems):
+    """The footer's extra sentence for a refusal that holds a revived note, for the CLI and the merge tool alike: a path-only
+    trailer cannot keep a revived note, only a reason that names its slug can. Empty for any other refusal."""
+    if any(REVIVED_MARK in p for p in problems):
+        return "To keep a revived note, put `- <slug>` in the trailer's reason."
+    return ""
 
 
 def say(line):
@@ -803,7 +824,8 @@ def main(argv):
     for p in problems:
         say("silent-undo: FAIL: " + p)
     if problems:
-        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say(" ".join(["silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER,
+                      trailer_hint(problems)]).rstrip())
     return 1 if problems else 0
 
 
