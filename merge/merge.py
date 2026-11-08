@@ -3528,10 +3528,12 @@ def idle_lanes(live):
     say(*entries)
     return 1 if unread else 0
 
-def open_fail_on_ancestor(h, live, a):
+def open_fail_on_ancestor(h, live, a, base):
     """True when the record for --head `a.head` may be written although the pull request's `live` head differs: it has no fix check, every line of
     its highest round is FAIL, it reads open (a round-3 all-FAIL record reads held), and `a.head` is an ancestor of `live` (the compare is ahead
-    with no behind). The record then reads open, so it clears nothing, and the lane's next record names this head as its fix base. The cheap clauses run first, so a
+    with no behind). The head must also be one of the pull request's own commits: the one compare of `base` (its base branch) and `a.head` must answer ahead,
+    or the head is a base commit, such as the merge base, and a FAIL record plus a fix check PASS would turn the whole lane into one fix; that refusal raises Stop.
+    The record then reads open, so it clears nothing, and the lane's next record names this head as its fix base. The cheap clauses run first, so a
     record that cannot qualify reads no compare. Any other record keeps the equal-head rule (decision pr-review-record)."""
     if a.fix_check or not a.round:
         return False
@@ -3541,7 +3543,11 @@ def open_fail_on_ancestor(h, live, a):
     if review_state(parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value)), a.head)[0] != "open":
         return False
     found = h.compare_files(a.head, live)
-    return found["ahead_by"] > 0 and found["behind_by"] == 0
+    if not (found["ahead_by"] > 0 and found["behind_by"] == 0):
+        return False
+    if h.compare_files(base, a.head)["ahead_by"] <= 0:
+        raise Stop(f"the reviewed head {a.head[:9]} is not one of the PR's commits: it is a commit of the base branch {base}. Review a commit of the pull request, then write its record. " + REVIEW_CITE)
+    return True
 
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
@@ -3560,7 +3566,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
-    p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it, except that an open record whose newest round is all FAIL, with no --fix-check, may name an ancestor of the live head")
+    p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it, except that an open record whose newest round is all FAIL, with no --fix-check, may name an ancestor of the live head that is one of the pull request's own commits")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
@@ -3642,7 +3648,7 @@ def main(argv, host=None, lock=None):
         if a.review_record:
             if info["state"] != "OPEN":
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
-            if info["head"] != a.head and not open_fail_on_ancestor(h, info["head"], a):  # a push after the review must not relabel the old rounds as current; only an open all-FAIL record may name an ancestor, because it reads open and clears nothing
+            if info["head"] != a.head and not open_fail_on_ancestor(h, info["head"], a, info["base"]):  # a push after the review must not relabel the old rounds as current; only an open all-FAIL record may name an ancestor, because it reads open and clears nothing
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # a fix follows no FAIL or WIDE fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
                 recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
@@ -3698,6 +3704,8 @@ def main(argv, host=None, lock=None):
                     print(f"merge: --fix-check: {problem}. " + (remedy + " " if remedy else "") + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
+            if info["head"] != a.head:
+                print(f"merge: past round: head {a.head[:9]} is one of the PR's commits, not the live head {info['head'][:9]}; merge --reviewed reads this record stale.", file=sys.stderr)
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
         if not a.reviewed:
