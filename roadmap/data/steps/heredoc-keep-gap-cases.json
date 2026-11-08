@@ -1,11 +1,11 @@
 {
   "title": "The heredoc-keep reader in guard_core gets cases and mutants for its four known gaps",
   "why": "PR #1820 (lane draft-pr-guard-heredoc) files four notes in docs/debts/notes.md whose Fix is this step: heredoc-keep-list-pieces-untested, heredoc-keep-stdin-shell-untested, heredoc-keep-code-flag-scope-untested, heredoc-keep-redirect-read-alarm and heredoc-keep-new-reads-untested. The last covers cases for -execdir, -ok, -okdir and the + end; the keywords while, until, then, else, elif, ! and {; and the wrapper value flags (lane, 02:20 CST Nov 8). Topic guard-false-alarms.",
-  "note": "Fix: in hooks/guard_core.py, add cases and mutants for the `_list_pieces` quote reading, the `_stdin_shell` wrapper-value skip, the `_CODE_FLAGS` scope in `_data_positions`, and the `$(< f)` false alarm; fix the false alarm with a red case first. Starts after #1820 merges. Queue fix (owner 13:20 CST Nov 7). Slug from lane draft-pr-guard-heredoc (session_013NEJKzzx35nAWSwPacHRXt), 01:30 CST Nov 8. Filed 01:42 CST Nov 8.",
+  "note": "Fix: in hooks/guard_core.py, add cases and mutants for the `_list_pieces` quote reading, the `_stdin_shell` wrapper-value skip, the `_CODE_FLAGS` scope in `_data_positions`, and the `$(< f)` false alarm; fix the false alarm with a red case first. Built as a follow-up from #1820's head (7614410b1, with runner 8) in lane draft-pr-guard-heredoc (coordinator, 02:31 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Slug from lane draft-pr-guard-heredoc (session_013NEJKzzx35nAWSwPacHRXt), 01:30 CST Nov 8. Filed 01:42 CST Nov 8.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 561,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T02:18:00-06:00"
+  "lane": "session_013NEJKzzx35nAWSwPacHRXt",
+  "updatedAt": "2026-11-08T02:31:00-06:00"
 }
