@@ -15032,8 +15032,12 @@ FINDCP = os.path.join(ROOT, "findcp")
 
 def _build_find_cp():
     # hooks/test_x.py is a test-named file in hooks/, like hooks/test_guard.py. docs/ is the folder the copies
-    # below write into, and assets/ holds files with no test name.
+    # below write into, and assets/ holds files with no test name. The root test_x.py is the source of a copy into
+    # a folder that the same command makes. src/test_x.py feeds the compound-command cases. tests/notes.txt is a
+    # non-test file under a test folder, copied with --parents. dyn/ is absent on purpose: dyn/[id].test.tsx matches
+    # no file, so bash passes that text on as the source.
     make_repo(FINDCP, {"src/app.py": "x\n", "src/a.py": "x\n", "src/b.txt": "x\n", "src/test_a.py": "x\n",
+                       "src/test_x.py": "x\n", "test_x.py": "x\n", "tests/notes.txt": "x\n",
                        "pkg/keep.py": "x\n", "hooks/keep.py": "x\n", "hooks/test_x.py": "x\n",
                        "hooks/guard.py": "x\n", "hooks/notes.txt": "x\n", "docs/keep.txt": "x\n",
                        "assets/logo.css": "x\n"})
@@ -15063,7 +15067,7 @@ sh("builder-find: find src *.txt piped to xargs, cp of each into hooks/, writes 
    "find src -name '*.txt' | xargs -I{} cp {} hooks/", "allow", **dict(BR, cwd=FINDCP))
 sh("builder-find: for loop of cp of a and b into src/, writes no test, is allowed",
    "for f in a b; do cp $f src/; done", "allow", **dict(BR, cwd=FINDCP))
-# ---- round 2 of PR #2305: a cp judged on the path it writes. hooks/test_x.py is the test-named source.
+# ---- a cp judged on the path it writes. hooks/test_x.py is the test-named source.
 # A destination that is a file name writes that name, so no test is written and the copy is allowed.
 sh("builder-find: cp of hooks/test_x.py to docs/y.bak, a file name, writes docs/y.bak, no test, is allowed",
    "cp hooks/test_x.py docs/y.bak", "allow", **dict(BR, cwd=FINDCP))
@@ -15087,6 +15091,48 @@ sh("builder-find: cp of hooks/*.txt into docs/ writes docs/notes.txt, no test, i
    "cp hooks/*.txt docs/", "allow", **dict(BR, cwd=FINDCP))
 sh("builder-find: cp -r assets into docs/ writes docs/assets/logo.css, no test, is allowed",
    "cp -r assets docs/", "allow", **dict(BR, cwd=FINDCP))
+# ---- where a cp writes: a destination made in the same command, an unmatched glob, a quoted loop variable, and
+# the copy forms that bury the destination (a glued -t, --parents, an if, a brace group). Each red has a green
+# beside it.
+# A destination made earlier in the same command is a folder, so the copy writes newd/test_x.py. Without the mkdir,
+# newd is a file name, so the copy writes newd, which no test name matches.
+sh("builder-find: mkdir newd then cp of test_x.py into newd writes newd/test_x.py, is refused",
+   "mkdir newd && cp test_x.py newd", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cp of test_x.py to newd with no mkdir, a file name, writes newd, is allowed",
+   "cp test_x.py newd", "allow", **dict(BR, cwd=FINDCP))
+# An unmatched glob stays its text, as bash passes it. The text's basename is a test name, so the copy writes
+# docs/[id].test.tsx. The control names the same glob with a non-test basename.
+sh("builder-find: cp of unmatched glob dyn/[id].test.tsx into docs/ writes docs/[id].test.tsx, is refused",
+   "cp dyn/[id].test.tsx docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cp of unmatched glob dyn/[id].notes.txt into docs/ writes docs/[id].notes.txt, no test, is allowed",
+   "cp dyn/[id].notes.txt docs/", "allow", **dict(BR, cwd=FINDCP))
+# A quoted loop variable still takes the list its glob expands to. src/*.py holds test_a.py, so the loop writes
+# docs/test_a.py. The control loops over src/*.txt, which holds no test name.
+sh("builder-find: for loop of cp of quoted \"$f\" over src/*.py into docs/ writes docs/test_a.py, is refused",
+   'for f in src/*.py; do cp "$f" docs/; done', "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: for loop of cp of quoted \"$f\" over src/*.txt into docs/ writes docs/b.txt, is allowed",
+   'for f in src/*.txt; do cp "$f" docs/; done', "allow", **dict(BR, cwd=FINDCP))
+# A glued -t names the folder from the same word: -rtdocs is -r -t docs, so the copy writes docs/test_x.py.
+# This case is a pin, not a red: 094e7b3a8 already refuses it for that cause.
+sh("builder-find: cp -rtdocs of src/test_x.py writes docs/test_x.py, is refused",
+   "cp -rtdocs src/test_x.py", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cp -rtdocs of src/b.txt writes docs/b.txt, no test, is allowed",
+   "cp -rtdocs src/b.txt", "allow", **dict(BR, cwd=FINDCP))
+# --parents keeps the source's folders, so the copy writes docs/tests/notes.txt, a test under a test folder.
+sh("builder-find: cp --parents of tests/notes.txt into docs/ writes docs/tests/notes.txt, is refused",
+   "cp --parents tests/notes.txt docs/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cp --parents of src/b.txt into docs/ writes docs/src/b.txt, no test, is allowed",
+   "cp --parents src/b.txt docs/", "allow", **dict(BR, cwd=FINDCP))
+# A copy inside an if or a brace group is still a copy, so it writes docs/test_x.py. These two cases are pins, not
+# reds: 094e7b3a8 already refuses both for that cause.
+sh("builder-find: if-then cp of src/test_x.py into docs/ writes docs/test_x.py, is refused",
+   "if true; then cp src/test_x.py docs/; fi", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: if-then cp of src/b.txt into docs/ writes docs/b.txt, is allowed",
+   "if true; then cp src/b.txt docs/; fi", "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: brace-group cp of src/test_x.py into docs/ writes docs/test_x.py, is refused",
+   "{ cp src/test_x.py docs/; }", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: brace-group cp of src/b.txt into docs/ writes docs/b.txt, is allowed",
+   "{ cp src/b.txt docs/; }", "allow", **dict(BR, cwd=FINDCP))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
