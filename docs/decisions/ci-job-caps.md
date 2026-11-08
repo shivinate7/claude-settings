@@ -27,7 +27,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 | checks-macos-b (split off checks-macos; window of 2026-11-06) | macos | 30 | 18.5 | 21.5 | 60 (provisional) | 31 | 69 | 0 | yes |
 | checks-windows-guard (window of 2026-11-05) | windows | 32 | 8.4 | 19.7 | 20 | 20 | 99 | 0 | no |
 | checks-windows-guard-2 (window of 2026-11-05) | windows | 14 | 17.0 | 19.9 | 20 | 20 | 99 | 0 | no |
-| checks-windows-guard-3 (split off the 2-shard guard suite, 2026-11-07) | windows | 0 | unmeasured | unmeasured | none | 20 | unmeasured | unmeasured | unmeasured |
+| checks-windows-guard-3 (split off the 2-shard guard suite; `.github/workflows/checks.yml`, job `checks-windows-guard-3`: `runs-on` windows-latest, `timeout-minutes` 20) | windows | 0 | unmeasured | unmeasured | none | 20 | unmeasured | unmeasured | unmeasured |
 | checks-windows-merge (window of 2026-11-06, off pull_request) | windows | 24 | 11.8 | 13.6 | 15 | 22 | 62 | 0 | yes |
 | checks-windows-merge-2 to -5 (window of 2026-11-06) | windows | 23 to 25 | 10.8 to 13.5 | 12.2 to 14.5; at least 15.2 in the cap end | 15 | 22 | 55 to 66; 69 for the cap end | 1, run 42282722326 (checks-windows-merge-2), against the cap in force (15); 2 more after the window (checks-windows-merge-5) | yes |
 | pointer-windows | windows | 30 | 3.8 | 4.2 | 10 | 10 | 42 | 0 | yes |
