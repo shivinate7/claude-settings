@@ -173,7 +173,7 @@ PAGE_PROMPT = (
 NONE_DIRECTION_RULE = (
     "This call includes a re-ask: a write that gives an item new options and carries a `lastAnswer` note, so it asks "
     "the owner again after a \"none of these\" answer. A note that asks for other choices (cheaper, different, more) "
-    "is always allowed, even with other words. Otherwise, if the note already names an act a session can take with no "
+    "is always allowed by this rule, even with other words. Otherwise, if the note already names an act a session can take with no "
     "further pick from the owner, block it: the item should close and the note be filed as a step. "
     "The reason names no target."
 )
@@ -189,8 +189,8 @@ WIDENING_TEMPLATE = (
 
 
 # A question whose every option loses something large goes back to its writer for one more option (decision
-# question-form: the owner's ask that such a question not reach him as a forced loss). Appended after the `%`
-# formatting, after WIDENING_RULE on a page write, and on a box with a question of 2+ options. It has no `%`.
+# question-form). Appended after NONE_DIRECTION_RULE and widening_rule(), once, only for a pick of one: a page decision
+# with 2+ options and no `multi`, or a box question with 2+ options and no multiSelect. It has no `%`.
 TRADEOFF_RULE = (
     "This call sets options. Judge their tradeoff, and push back when every option loses something large, so the "
     "owner gives up a large gain whichever he picks. Read each option's lose on its own text: on the page its `lose` "
@@ -244,6 +244,16 @@ def sets_options(write):
     """True for a judged set or update whose data has non-empty `options`."""
     data = write.get("data") if write.get("op") in ("set", "update") else None
     return isinstance(data, dict) and bool(data.get("options"))
+
+
+def is_pick_of_one(write):
+    """True for a judged set or update whose data holds 2+ options the owner picks one of: no task (kind "task" or
+    `steps`) and no truthy `multi`."""
+    if not sets_options(write):
+        return False
+    data = write["data"]
+    return (isinstance(data["options"], list) and len(data["options"]) >= 2
+            and data.get("kind") != "task" and not data.get("steps") and not data.get("multi"))
 
 
 def is_reask(write):
@@ -389,7 +399,8 @@ def main():
             units = question_form.chat_units(args)
             qs = args.get("questions")
             sets_choice = isinstance(qs, list) and any(
-                isinstance(q, dict) and isinstance(q.get("options"), list) and len(q["options"]) >= 2 for q in qs)
+                isinstance(q, dict) and isinstance(q.get("options"), list) and len(q["options"]) >= 2
+                and q.get("multiSelect") is not True for q in qs)
         elif tool == DATA_TOOL:
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
@@ -402,6 +413,7 @@ def main():
             units = question_form.page_units(judged)
             reask = any(is_reask(w) for w in judged)
             widening = any(sets_options(w) for w in judged)
+            sets_choice = any(is_pick_of_one(w) for w in judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
@@ -414,7 +426,7 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
-        if widening or sets_choice:
+        if sets_choice:
             full += "\n" + TRADEOFF_RULE
         verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
