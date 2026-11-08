@@ -94,13 +94,13 @@
 - guard-split-ignores-backslash: no guard test refuses the \' and \" forms; background_commands counts echo \" & echo b as one command (guard_core, guard.py)
 - guard-split-mutant-needs-git: the root-scope mutant (_git drops -C) is killed only inside a git checkout; CI does (hooks/mutate_guard.py)
 - guard-split-sibling-mutant-case: PR2 needs a case in the in-process load that kills a sibling mutant (hooks/test_guard.py)
-- guard-substitution-in-token: a command inside a token, such as glued $(...), backticks or x=$(...), is not read as a command (guard_core command_indexes)
+- guard-substitution-in-token: a command inside a token, such as glued $(...), backticks or x=$(...), is not read as a command (guard_core command_indexes). Fix: step:substitution-in-token-callers
 - guard-timing-case-flaky: the 2000-span rm-var case keeps a wall-clock bound that can fail on a busy runner; no check measures the 60 s hook timeout (hooks/test_guard.py)
 - guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json)
-- guard-walk-quotes-heredoc-leak: walk_quotes reads an interpreter heredoc body as outer shell, so a lone ' in the body leaks past its delimiter line to a rule that reads walk_quotes (guard_core walk_quotes)
-- guard-heredoc-unclosed-skips-restores: one unclosed heredoc later in the command skips every delimiter restore, so an earlier body's lone ' still hides a later command (guard_core _heredoc_restores)
-- guard-heredoc-nested-lone-quote: a nested `bash <<'OUT'` whose body holds an inner heredoc with a lone ' hides a later command in OUT's body (guard_core _split_reading)
-- guard-heredoc-delimiter-trailing-space: a delimiter line with a trailing space closes the body early under strip(), so a cited line after it is lost (guard_core _walk_heredocs)
+- guard-walk-quotes-heredoc-leak: walk_quotes reads an interpreter heredoc body as outer shell, so a lone ' in the body leaks past its delimiter line to a rule that reads walk_quotes (guard_core walk_quotes). Fix: none — no verdict found; every walk_quotes reader gets one cut segment. Until: 2026-11-21
+- guard-heredoc-unclosed-skips-restores: one unclosed heredoc later in the command skips every delimiter restore, so an earlier body's lone ' still hides a later command (guard_core _heredoc_restores). Fix: none — main behaves the same, and an unclosed heredoc after a leaking body is rare. Until: 2026-11-21
+- guard-heredoc-nested-lone-quote: a nested `bash <<'OUT'` whose body holds an inner heredoc with a lone ' hides a later command in OUT's body (guard_core _split_reading). Fix: none — main behaves the same, and a nested heredoc with a lone quote is rare. Until: 2026-11-21
+- guard-heredoc-delimiter-trailing-space: a delimiter line with a trailing space closes the body early under strip(), so a cited line after it is lost (guard_core _walk_heredocs). Fix: none — main behaves the same, and a delimiter with a trailing space is rare. Until: 2026-11-21
 - guard-wrapper-lists-closed: an unlisted wrapper such as stdbuf or chrt hides the real command word (guard_core COMMAND_WRAPPERS)
 - haiku-counter-files-not-purged: nothing purges state/; one file of at most 70 bytes stays per session (Stop reply judge hook)
 - haiku-counter-lost-updates: heavy parallel calls of one session lose counter updates; the loss errs toward judging (Stop reply judge hook)
