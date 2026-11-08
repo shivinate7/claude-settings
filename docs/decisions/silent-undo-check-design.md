@@ -31,8 +31,9 @@ each Retire test in a temporary worktree, and at most one run read. A test prove
 an unflagged close gets no run read. It starts no long-lived process.
 
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
-  Claude Code attribution line, or a bare `https://claude.ai/code/session_<id>` line directly under it; no
-  other trailing URL is skipped. Read only the last paragraph left, with the trailer rules above.
+  Claude Code attribution line, or a bare `https://claude.ai/code/session_<id>` paragraph right after it;
+  no other trailing URL is skipped. Every lane PR body ends with that link, so without this skip no body
+  excuse counts. Read only the last paragraph left, with the trailer rules above.
 - **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
   line. A session in another repo that uses `bin/merge` asked for this. The CLI and CI read the body too,
   which widens a shared tool (owner ruling, Cockpit item 411 a, 2026-11-08 06:11 CST).
