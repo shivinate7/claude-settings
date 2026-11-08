@@ -1246,10 +1246,10 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(self.verdict(NAMED_REPORT % "reviewer sonnet", [REVIEWER_SONNET]))
 
     def test_dm_red_full_id_of_other_family_still_blocks(self):
-        # claude-haiku-5-5 is haiku, and the sonnet reviewer did not run haiku. The Done line must block.
-        # Today it blocks as unnamed; once full ids are read, it blocks as a mismatch. Either way it blocks.
-        assert_blocks(self, self.verdict(NAMED_REPORT % "reviewer claude-haiku-5-5", [REVIEWER_SONNET]),
-                      "Model-name guard")
+        # claude-haiku-5-5 is haiku; the sonnet reviewer did not run haiku, so the Done line blocks as a mismatch.
+        out = self.verdict(NAMED_REPORT % "reviewer claude-haiku-5-5", [REVIEWER_SONNET])
+        assert_blocks(self, out, "Model-name guard")
+        assert_blocks(self, out, "matches no reviewer spawn")
 
 
 class UnstartedItemsTests(unittest.TestCase):
