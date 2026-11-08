@@ -8,14 +8,17 @@ case reads what the tool ran, in which tree, at which head. The repo builder, th
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
+The shallow cases make the lane checkout a shallow clone (testing/shallow_clone.py). git's trace2 log (GIT_TRACE2_EVENT) lists the git calls a case makes.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import atexit, contextlib, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
+sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
+import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
 
@@ -32,7 +35,8 @@ def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached,
+                      "shallow": git("rev-parse", "--is-shallow-repository") == "true"}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -461,6 +465,80 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+    def make_shallow_lane(self):
+        """Make the lane checkout a shallow clone of origin (testing/shallow_clone.py): the history is cut at feat, as a cloud
+        clone's is. origin is not changed. The full clone stays on disk, unused. -> the head of feat."""
+        pin = self.head("feat")
+        dest = os.path.join(self.t, "shallow-lane")
+        error = shallow_clone.make(self.bare, dest, pin)
+        if error:
+            self.fail("the shallow lane checkout could not be built: " + error)
+        self.co, self.host.root = dest, dest  # the lane run and the host's head read name the checkout
+        return pin
+
+    def is_shallow_lane(self, pin):
+        return shallow_clone.facts(self.co, pin)["shallow"]
+
+    @contextlib.contextmanager
+    def traced_git(self):
+        """Every git process started in the block logs its argv to git's trace2 event log (GIT_TRACE2_EVENT), so a case reads the
+        calls merge made, whichever helper made them. -> the log's path, read with git_argvs."""
+        path = os.path.join(self.t, "git-trace2.jsonl")
+        with unittest.mock.patch.dict(os.environ, {"GIT_TRACE2_EVENT": path}):
+            yield path
+
+    def git_argvs(self, path):
+        """The argv of each git process a traced_git block started."""
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as f:
+            events = [json.loads(line) for line in f if line.strip()]
+        return [e["argv"] for e in events if e.get("event") == "start"]
+
+    def unshallow_fetches(self, argvs):
+        """The git calls that fetched with --unshallow."""
+        return [argv for argv in argvs if "fetch" in argv and "--unshallow" in argv]
+
+    def test_a_shallow_lane_checkout_is_unshallowed_before_the_lint_and_the_lint_passes(self):
+        pin = self.make_shallow_lane()
+        self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertFalse(self.is_shallow_lane(pin), "the lane checkout is still shallow after the lane lint: " + out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertFalse(self.lint_calls()[0]["shallow"], "the lint ran on a shallow clone, so its history checks read the cut history")
+
+    def test_a_shallow_lane_whose_unshallow_fetch_fails_ends_unknown_and_lints_nothing(self):
+        pin = self.make_shallow_lane()
+        self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
+        # The configured fetch names a branch origin lacks. `git fetch --unshallow origin` reads that refspec and fails. The lint's own
+        # fetches name their refs on the command line, so they still reach origin.
+        tm.sh(self.co, "git", "config", "remote.origin.fetch", "+refs/heads/gone:refs/remotes/origin/gone")
+        self.use_ci_job(PASSING, 0)
+        with self.traced_git() as trace:
+            rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "a lane whose unshallow fetch failed read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], "a PASS line printed after the unshallow fetch failed: " + out)
+        self.assertNotIn("Traceback", out, "the failed unshallow fetch raised instead of ending the lint: " + out)
+        self.assertTrue(self.unshallow_fetches(self.git_argvs(trace)), "the lint never tried `git fetch --unshallow origin`: " + out)
+        self.assertIn("unknown", out.lower(), "the refusal does not say the lint is unknown: " + out)
+        self.assertIn("git fetch --unshallow origin", out, "the refusal does not name the command to run: " + out)
+        self.assertIn("couldn't find remote ref", out, "the refusal does not name git's error: " + out)
+        self.assertEqual(self.lint_calls(), [], "ci-job ran after the unshallow fetch failed")
+
+    def test_a_full_lane_checkout_runs_no_unshallow_fetch_and_the_lint_passes(self):
+        pin = self.head("feat")
+        self.assertFalse(self.is_shallow_lane(pin), "precondition: the lane checkout is shallow, so the case proves nothing")
+        self.use_ci_job(PASSING, 0)
+        with self.traced_git() as trace:
+            rc, out = self.lint_run("--lane-lint", "7")
+        argvs = self.git_argvs(trace)
+        self.assertTrue(argvs, "the git trace logged no git process, so the no-unshallow check proves nothing")
+        self.assertEqual(self.unshallow_fetches(argvs), [], "a full lane checkout ran `git fetch --unshallow`")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
