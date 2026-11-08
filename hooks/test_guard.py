@@ -5527,6 +5527,60 @@ sh("waiter: a loop inside a heredoc body is allowed",
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
 
+# =========================================================================== lane lint in the foreground
+#
+# `merge --lane-lint` runs suites that outlast a foreground call: a control lint took 692 s, past the
+# cloud's foreground limit, so a foreground call never gets its verdict. Rule lane-lint-foreground
+# refuses the call unless run_in_background is true. Its remedy says to run the same command with
+# run_in_background and read the verdict from the completion notice. Each case judges the command
+# word and the flag, never the text the command only names.
+LANE_LINT_RULE = "lane-lint-foreground"
+LANE_LINT_REMEDY = ("run_in_background", "completion notice")
+LANE_LINT_FORMS = (
+    ("the bin shim by path", "~/.claude/bin/merge --lane-lint 1458", "Bash"),
+    ("merge on the PATH", "merge --lane-lint 1458", "Bash"),
+    ("merge.cmd in PowerShell", "merge.cmd --lane-lint 1458", "PowerShell"),
+    ("merge.py through python", "python3 merge/merge.py --lane-lint 1458", "Bash"),
+    ("merge piped to tail after a cd", "cd /x && merge --lane-lint 1458 2>&1 | tail -5", "Bash"),
+)
+for _label, _command, _tool in LANE_LINT_FORMS:
+    add("lane-lint-foreground: %s in the foreground is refused" % _label, "deny", LANE_LINT_RULE,
+        cwd=NOGIT, tool=_tool, command=_command, carries=LANE_LINT_REMEDY)
+    add("lane-lint-foreground: %s under run_in_background is allowed" % _label, "allow",
+        cwd=NOGIT, tool=_tool, command=_command, run_in_background=True)
+add("lane-lint-foreground: merge --lane-lint with run_in_background false is refused", "deny",
+    LANE_LINT_RULE, cwd=NOGIT, command="merge --lane-lint 1458", run_in_background=False,
+    carries=LANE_LINT_REMEDY)
+
+# Quoted and heredoc text is data, not a run. A comment opener or an apostrophe inside quotes must
+# not hide a real run after it, the same shapes the waiter block above pins.
+sh('lane-lint-foreground: a comment opener in quotes does not hide the run, refused',
+   'echo "# note"; merge --lane-lint 1458', "deny", LANE_LINT_RULE, cwd=NOGIT,
+   carries=LANE_LINT_REMEDY)
+sh('lane-lint-foreground: an apostrophe in double quotes does not hide the run, refused',
+   'echo "it\'s done"; merge --lane-lint 1458', "deny", LANE_LINT_RULE, cwd=NOGIT,
+   carries=LANE_LINT_REMEDY)
+sh("lane-lint-foreground: a heredoc body with a lone apostrophe that names it is text, allowed",
+   "cat <<'EOF'\nDon't run merge --lane-lint 1458 here\nEOF", "allow", cwd=NOGIT)
+sh("lane-lint-foreground: a multi-line quoted string that names it is text, allowed",
+   'echo "first line\nmerge --lane-lint 1458 later"', "allow", cwd=NOGIT)
+sh("lane-lint-foreground: a comment line that names it is text, allowed",
+   "# merge --lane-lint 1458", "allow", cwd=NOGIT)
+
+# The texts the rule must leave alone: an echo, a grep, a commit message, and the merge tool's other
+# forms in the foreground. Each is judged by its own rule or by none.
+sh("lane-lint-foreground: echo of the flag is text, allowed", "echo merge --lane-lint", "allow",
+   cwd=NOGIT)
+sh("lane-lint-foreground: grep for the flag in merge.py is text, allowed",
+   "grep -n lane-lint merge/merge.py", "allow", cwd=NOGIT)
+sh('lane-lint-foreground: a commit message that names the flag is text, allowed',
+   'git commit -m "merge --lane-lint fix"', "allow", cwd=NOGIT)
+sh("lane-lint-foreground: merge --review-record in the foreground is not this rule, allowed",
+   "merge 1458 --review-record --head 6003d9219057f5da0d10b225f694f2f32e66dc7d --kind normal --guard yes",
+   "allow", cwd=NOGIT)
+sh("lane-lint-foreground: a plain merge preview in the foreground is not this rule, allowed",
+   "merge 1458", "allow", cwd=NOGIT)
+
 # Each refused shape below waits by repeating or by a long
 # pause; each allowed shape is a false alarm the guard raised on a non-waiting command.
 # A bare `&` job is refused first by detached-launch (rule 2b), so the waiter rule is not reached
