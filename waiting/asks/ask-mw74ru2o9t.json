@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-08T01:05:25.248Z",
+  "id": "ask-mw74ru2o9t",
+  "re": "ask-mw6sd3zwp1",
+  "reply": "Understood: you mean the whole process, not one ledger. I filed that as its own step, process-held-end-to-end. It walks the path from a found gap to a merged fix (finding, step, lane start, review, hand-off, batch, merge, close), names the mechanism that holds each hand-over, and files each one that is missing. The PR ledger (pr-state-is-on-the-pr) becomes one part of it. The coordinator starts a lane on it. Triage, 19:16 CST.",
+  "status": "answered",
+  "text": "well i meant more outcomes wise this whole process sshd have bene mechanicslly held end to end"
+}

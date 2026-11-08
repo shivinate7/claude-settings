@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-08T01:04:51.054Z",
+  "id": "ask-mw74r3oubd",
+  "re": "ask-mw6sdbes7t",
+  "reply": "Yes. The limit is 15 s, at hooks/call_judge.py:127. I sent your note to the lane already on this check (step judge-timeout-retries-once): it raises the limit and adds one retry, and logs each timeout so the rate can be read. The new limit stays inside the Stop hook's own time limit, which is set in settings.json; if it needs more room there, that change needs your typed word in that lane's chat. Triage, 19:16 CST.",
+  "status": "answered",
+  "text": "increase the time maybe"
+}

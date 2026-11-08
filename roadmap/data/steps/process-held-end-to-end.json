@@ -1,0 +1,11 @@
+{
+  "title": "Every step of the build process is held by a mechanism, end to end",
+  "phase": "now",
+  "status": "todo",
+  "order": 30,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "Owner ask ask-mw74ru2o9t, 19:05 CST Nov 7: \"well i meant more outcomes wise this whole process sshd have bene mechanicslly held end to end\". At 13:25 CST, 14 now-steps had no lane and nothing started them; they started only because the owner asked.",
+  "note": "Scope: walk the process from a found gap to a merged fix (finding, step, lane start, review, hand-off, batch, merge, close) and name the mechanism that holds each hand-over, or file the missing one. Step pr-state-is-on-the-pr (the PR ledger, which also covers ready steps) is one part. Rule outcomes-mechanize-rules is the standing ruling.",
+  "updatedAt": "2026-11-07T19:06:00-06:00"
+}
